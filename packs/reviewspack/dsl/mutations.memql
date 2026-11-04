@@ -100,3 +100,66 @@ mutation reviewSettings setReviewDisplay {
     }
   }
 }
+
+// THE WRITES THE BUILTINS JUDGE (writer.go). A builtin computes and does not
+// write, so each judging builtin runs one of these. They are @serverOnly:
+// reached only from that builtin, which stamps internal origin for the one
+// call, never by a client -- a decision written around reviewsDecide would
+// skip what makes it a decision, above all that the cluster's own operators
+// never record one. The CALLER'S own actor still runs them, so the row gate
+// still decides whether this caller may write this row.
+
+/// Append one moderation decision. Reached only from reviewsDecide, which
+/// names the decider from the caller, copies the store, organization and
+/// owner off the review, and refuses an illegal decision before this runs.
+@serverOnly
+@actor
+mutation reviewDecision appendReviewDecision {
+  args {
+    decisionId   string!
+    ownerUserId  string!
+    reviewId     string!
+    storeId      string!
+    accountId    string
+    action       string!  @enum("publish", "decline", "askToFix", "escalate", "remove", "erase")
+    reason       string   @enum("spam_or_advertising", "profanity", "harassing_or_obscene", "discriminatory", "personal_information", "defamatory", "false_or_dangerous", "believed_fake", "unrelated", "confidential", "undisclosed_connection", "reviewer_request")
+    note         string   @maxLength(4000)
+    revision     int!
+    decidedBy    string!
+  }
+  insert {
+    accept { ownerUserId, reviewId, storeId, accountId, action, reason, note, revision, decidedBy }
+    stamp {
+      id: args.decisionId
+    }
+  }
+}
+
+/// Write one store's settings row, whole, at the store's derived id: a second
+/// write is a new VERSION of the one row. Reached only from
+/// reviewsUpdateSettings and reviewsSetPublicDisplay, which merge the current
+/// row and judge who may change what.
+@serverOnly
+@actor
+mutation reviewSettings putReviewSettings {
+  args {
+    settingsId             string!
+    ownerUserId            string!
+    storeId                string!
+    accountId              string
+    publicDisplay          bool!
+    criteriaText           string   @maxLength(4000)
+    linkLifetimeDays       int      @minimum(1) @maximum(365)
+    requestDelayDays       int      @minimum(0) @maximum(365)
+    requestsEnabled        bool
+    requestTemplateId      string   @maxLength(200)
+    notifyEmail            string   @maxLength(320)
+    removalApproverUserId  string   @maxLength(200)
+  }
+  insert {
+    accept { ownerUserId, storeId, accountId, publicDisplay, criteriaText, linkLifetimeDays, requestDelayDays, requestsEnabled, requestTemplateId, notifyEmail, removalApproverUserId }
+    stamp {
+      id: args.settingsId
+    }
+  }
+}

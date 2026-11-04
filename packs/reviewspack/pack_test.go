@@ -169,29 +169,9 @@ func TestPublicDisplayToggleIsData(t *testing.T) {
 	if _, err := handler(context.Background(), map[string]any{"publicDisplay": true}, 0); err == nil {
 		t.Fatal("a display toggle naming no store must be refused")
 	}
-	hidden, err := handler(context.Background(),
-		map[string]any{"storeId": "store-live", "publicDisplay": false}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	shown, err := handler(context.Background(),
-		map[string]any{"storeId": "store-live", "publicDisplay": true}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(hidden[0].Payload) == string(shown[0].Payload) {
-		t.Fatal("toggle did not change")
-	}
-	// Two stores are two rows, which is the whole point of the derived id.
-	other, err := handler(context.Background(),
-		map[string]any{"storeId": "store-dev", "publicDisplay": true}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if other[0].ID == shown[0].ID {
-		t.Fatalf("two stores share one settings row id (%s); a merchant could not "+
-			"show reviews live while hiding them under preview", other[0].ID)
-	}
+	// The per-store row, and the merge that keeps every other setting, are
+	// pinned where a reader can answer the current row: settings_test.go
+	// (TestTheDisplayToggleIsPerStore, TestTheDisplayToggleKeepsEveryOtherSetting).
 }
 
 func TestReviewsPackContractCompat(t *testing.T) {

@@ -693,7 +693,11 @@ packs worth reading as real worked examples:
   sections above describe: it is in the default build under `packState`, it
   ships disabled, it declares a shopper form and a shopper read, and every row
   it writes carries the store it was written against. A pack with no external
-  system behind it.
+  system behind it. It is also the worked example of "a builtin decides, a
+  mutation writes": a review is shown only once a person on the store's side
+  publishes it, its state is DERIVED from an append-only `reviewDecision` log
+  against the revision the review holds, and the judging builtins write
+  through `@serverOnly` mutations no client can call around them.
 - `examples/shopifypack` (memql#4138) -- the Shopify product feature (console
   views for shop, secrets, sync), layered on the `integrations/shopify`
   integration. The pair is the canonical worked example of the

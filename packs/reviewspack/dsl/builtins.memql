@@ -37,3 +37,39 @@ builtin reviewsPublishedForProduct {
   siteId         string  @description("The deployable the read arrived through. Provenance; the read is scoped by storeId.")
   limit          integer @description("Maximum reviews to return, newest first. Omitted means 50; the Go half clamps it, because a public read with no bound lets one request ask for every review a store has ever received.")
 }
+
+@executor("integration.reviews.decide")
+@args(profile="object")
+@description("Record one moderation decision on a review: publish, decline, askToFix, escalate or remove. The decider is the calling person (the cluster's operators are refused), the store and organization are read off the review, and the decision is refused when the review has changed since the revision named. Decline, askToFix and remove need a listed reason; remove belongs to the store's named owner. Erasing a writer's data is reviewsEraseReviewer.")
+builtin reviewsDecide {
+  reviewId  string   @required  @description("The review to decide.")
+  action    string   @required  @description("publish, decline, askToFix, escalate or remove.")
+  reason    string   @description("One of the listed reasons; required for decline, askToFix and remove (which also takes reviewer_request).")
+  note      string   @description("Optional note.")
+  revision  integer  @required  @description("The revision the person deciding was reading.")
+}
+
+@executor("integration.reviews.updateSettings")
+@args(profile="object")
+@description("Change one store's reviews settings and keep the rest: every write merges into the store's one settings row. A store with no settings is set up by the cluster's operators; the owner who approves removals is named by the current owner or an operator.")
+builtin reviewsUpdateSettings {
+  storeId                string   @required  @description("The store whose settings these are.")
+  publicDisplay          bool     @description("Show published reviews on the storefront.")
+  linkLifetimeDays       integer  @description("Days a buyer's review link stays open, 1 to 365.")
+  requestDelayDays       integer  @description("Days after an order its review request goes out, 0 to 365.")
+  requestsEnabled        bool     @description("Send review requests.")
+  requestTemplateId      string   @description("The template the request email is rendered from.")
+  notifyEmail            string   @description("Where 'a review is waiting' goes.")
+  removalApproverUserId  string   @description("The store's owner, who alone removes published reviews and erases writer data.")
+  criteriaText           string   @description("The store's own copy describing its criteria.")
+}
+
+@executor("integration.reviews.list")
+@args(profile="object")
+@description("The moderation list: one store's reviews with the state their decision log gives them and the last decision on each. state defaults to waiting, oldest first; every other state, and all, is newest first. Projects the writer's email, because a moderator may need to reply; never served to a storefront.")
+builtin reviewsList {
+  storeId  string   @required  @description("The store to list.")
+  state    string   @description("waiting (the default), published, declined, removed, erased or all.")
+  limit    integer  @description("Page size; 50 when omitted, at most 200.")
+  after    string   @description("The cursor the previous page answered as next.")
+}

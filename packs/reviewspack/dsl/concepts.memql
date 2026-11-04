@@ -25,10 +25,10 @@
 // pack keep this; deploypack and referencepack ship both, so it is a choice
 // the storefront packs made rather than a rule of the platform.
 
-@version("1.1.0")
-@description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs.")
+@version("1.2.0")
+@description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs. Whether it is shown is NOT a field: it is derived from the append-only reviewDecision log against the revision the row holds now.")
 @displayCard(primary="title", secondary="body", tertiary="productHandle")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept review {
   ownerUserId         string!   @description("v1:identity:user.id of the MERCHANT this review belongs to -- the owner of the deployable it was submitted through, NOT its author. A shopper is nobody to MemQL: they have no user row, no session and no actor, so a review's author is authorName and authorEmail below and nothing else (epic memql#5532, issue memql#5550). This is the single most important sentence in the pack. On the shopper path it is stamped from actor.userId under the site owner's BORROWED authority -- the campaigns precedent, where the drain worker runs everything owned under a userId copied off a row the starting caller had already read. On the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
   storeId             string!   @description("The v1:shopify:store this review was written against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it, which is what keeps a review written under preview out of the live storefront.")
@@ -42,6 +42,11 @@ concept review {
   authorEmail         string    @description("The shopper's email as they typed it. DATA, never an identity, and never verified -- it exists so a merchant can reply, and it is why the public read must not project it. A pack that later wants a verified buyer uses the Customer Account API principal recorded as the answer to Q2's second half, not this field.")
   imageAttachmentIds  []string  @description("v1:common:attachment ids for review images. Export resolves these to bytes, never to a remote URL as the payload.")
   createdAtClient     datetime  @description("Client-supplied authored-at watermark. The row intrinsic createdAt remains the version clock.")
+  accountId           string    @description("The v1:accounts:account organization the store's deployable belongs to, copied from the site the review arrived through. The account grant: the people of that organization read and moderate the store's reviews without owning them. Empty on a row written before organizations reached reviews, which stays its owner's and the operators'.")
+  requestId           string    @description("The v1:reviews:reviewRequest this review was written through -- the buyer's link. Empty on the authenticated path (an operator or an import), which no link vouches for.")
+  verifiedBuyer       bool      @description("True only when the review was written through a buyer's link minted from a paid order line. Stamped server-side, never accepted from a form. A storefront shows 'Verified Buyer' for exactly this.")
+  revision            int       @description("1 for the first submission through a link, one more for each edit through the same link while it is open. Each edit is a new VERSION of this row; a decision covers the revision it was made on and no other. Absent on older rows, which read as 1.")
+  erasedAt            datetime  @description("When the writer's data was erased on request: name, email, title and body blanked in every saved version. An erased review is never shown again.")
 }
 
 @version("1.1.0")
@@ -57,13 +62,36 @@ concept moderationAction {
   note        string   @description("Optional client-visible note. Not a criterion and not a sentiment score.")
 }
 
-@version("1.1.0")
+@version("1.0.0")
+@description("One moderation decision on one review, append-only: a new row is a new decision, there is no update and no undo-by-overwrite. A review's state (waiting, published, declined, removed, erased) is DERIVED from these rows against the revision the review holds now. decidedBy is a person on the store's side; the cluster's operators are refused on the write path.")
+@displayCard(primary="action", secondary="reviewId", tertiary="decidedBy")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept reviewDecision {
+  ownerUserId  string!  @description("v1:identity:user.id of the MERCHANT the review belongs to, copied off the review -- not the person who decided (that is decidedBy). OWNED BY THE MERCHANT ON PURPOSE: the public read runs under the site owner's borrowed authority, and a decision that only its author could read would hide or publish nothing (the legacy moderationAction, owned by decidedBy, had exactly that flaw).")
+  reviewId   string!  @description("v1:reviews:review.id this decision is about.")
+  storeId    string!  @description("The store the review belongs to (design D9), read off the review rather than supplied.")
+  accountId  string   @description("The review's organization, copied off the review, so the store's people read the log their colleagues wrote.")
+  action     enum("publish", "decline", "askToFix", "escalate", "remove", "erase")!  @description("publish shows the review and closes its link; decline withholds it for a listed reason; askToFix records that the writer was asked to change something and changes nothing; escalate records that a possible safety concern went to a person and changes nothing; remove takes a published review down (the store's named owner only); erase blanks the writer's data in every version (the store's named owner only). A closed set: there is no other.")
+  reason     enum("spam_or_advertising", "profanity", "harassing_or_obscene", "discriminatory", "personal_information", "defamatory", "false_or_dangerous", "believed_fake", "unrelated", "confidential", "undisclosed_connection", "reviewer_request")  @description("Required for decline, askToFix and remove; absent otherwise. The closed set tracks the reasons the FTC's rule on consumer reviews allows a business to withhold a review for, plus spam, profanity and an undisclosed connection; reviewer_request is for a removal only. A rating or a sentiment is never a reason.")
+  note       string   @description("Optional note from the person deciding: why, whom a safety concern went to, what the writer was asked to change.")
+  revision   int!     @description("The review revision this decision was made on. It covers that revision and no other.")
+  decidedBy  string!  @description("v1:identity:user.id of the person who decided, read from the caller, never an argument.")
+}
+
+@version("1.2.0")
 @description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="storeId")
-@rowAuthz(owner="ownerUserId", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept reviewSettings {
   ownerUserId    string!  @description("v1:identity:user.id of the Client that owns this storefront's review settings.")
   storeId        string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id v1:reviews:reviewSettings:<storeId>, because a merchant with a live store and a development store must be able to show reviews on one while they are still hidden on the other -- which is the whole of what previewing a storefront means.")
   publicDisplay  bool!    @description("When true, reviews render on the storefront. Flipped at runtime; not compiled into .memql. The public read consults this FIRST and answers an empty list when it is false, so turning reviews off is one write rather than a deploy.")
   criteriaText   string   @description("Optional client-authored copy describing the closed criteria. Data, not source.")
+  accountId      string   @description("The store's organization, so its people read and change these settings.")
+  linkLifetimeDays  int   @description("How many days a buyer's review link stays open. Absent means 14.")
+  requestDelayDays  int   @description("How many days after an order its review request goes out. Absent means 14.")
+  requestsEnabled   bool  @description("Whether this store's review requests go out at all. Absent means off.")
+  requestTemplateId string  @description("The v1:campaigns:template.id the review request email is rendered from: the store's own wording.")
+  notifyEmail       string  @description("Where 'a review is waiting' goes: one email per review revision, carrying no review text and no writer data.")
+  removalApproverUserId string  @description("v1:identity:user.id of the store's owner, the one person who can remove a published review or erase a writer's data. Named by the current owner or the cluster's operators, never by a moderator.")
 }

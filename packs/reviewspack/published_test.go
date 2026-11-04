@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -15,9 +16,10 @@ import (
 type fixtureReader struct {
 	settings   map[string][]map[string]any // storeId -> rows
 	reviews    map[string][]map[string]any // storeId|handle -> rows
-	moder      map[string][]map[string]any // storeId -> rows
+	moder      map[string][]map[string]any // storeId -> legacy moderationAction rows
+	decisions  map[string][]map[string]any // storeId -> reviewDecision rows
 	asked      []string
-	askedAbout []string
+	askedAbout map[string][]string // query -> the ids it was asked about
 }
 
 func (f *fixtureReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -31,13 +33,22 @@ func (f *fixtureReader) Rows(_ context.Context, query string, args map[string]st
 	return nil, nil
 }
 
-// RowsWithList records the ids the moderation read was ASKED ABOUT, which is
-// what makes "bounded by the caller's list" assertable rather than claimed.
+// RowsWithList records the ids each list-bounded read was ASKED ABOUT, which
+// is what makes "bounded by the caller's list" assertable rather than claimed.
 func (f *fixtureReader) RowsWithList(_ context.Context, query string, args map[string]string,
 	_ string, list []string) ([]map[string]any, error) {
 	f.asked = append(f.asked, query)
-	f.askedAbout = append(f.askedAbout, list...)
-	if query != "moderationActionsForReviews" {
+	if f.askedAbout == nil {
+		f.askedAbout = map[string][]string{}
+	}
+	f.askedAbout[query] = append(f.askedAbout[query], list...)
+	var source []map[string]any
+	switch query {
+	case "moderationActionsForReviews":
+		source = f.moder[args["storeId"]]
+	case "reviewDecisionsForReviews":
+		source = f.decisions[args["storeId"]]
+	default:
 		return nil, nil
 	}
 	var out []map[string]any
@@ -45,13 +56,31 @@ func (f *fixtureReader) RowsWithList(_ context.Context, query string, args map[s
 	for _, id := range list {
 		within[id] = struct{}{}
 	}
-	for _, row := range f.moder[args["storeId"]] {
+	for _, row := range source {
 		id, _ := row["reviewId"].(string)
 		if _, ok := within[id]; ok {
 			out = append(out, row)
 		}
 	}
 	return out, nil
+}
+
+// decisionRow is one reviewDecision row as the pack's query projects it.
+func decisionRow(reviewID, action string, revision, second int) map[string]any {
+	return map[string]any{
+		"id": "d-" + reviewID + "-" + action, "reviewId": reviewID, "action": action, "revision": revision,
+		"decidedBy": "moderator-1", "createdAt": t0.Add(time.Duration(second) * time.Second).Format(time.RFC3339Nano),
+	}
+}
+
+// published gives each id a publish decision on revision 1: what a person
+// records when they have read a review and let it go up.
+func published(ids ...string) []map[string]any {
+	out := make([]map[string]any, 0, len(ids))
+	for i, id := range ids {
+		out = append(out, decisionRow(id, ActionPublish, 1, i))
+	}
+	return out
 }
 
 func publishedFrom(t *testing.T, p *Provider, args map[string]any) map[string]any {
@@ -117,6 +146,9 @@ func TestAModeratedReviewIsExcluded(t *testing.T) {
 		settings: map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
 		reviews:  map[string][]map[string]any{"store-live|boot": reviewRows("r1", "r2", "r3")},
 		moder:    map[string][]map[string]any{"store-live": {{"reviewId": "r2", "criterion": "spam"}}},
+		// All three were published; r2 also carries a legacy moderation row,
+		// which still hides it.
+		decisions: map[string][]map[string]any{"store-live": published("r1", "r2", "r3")},
 	}}
 	out := publishedFrom(t, p, map[string]any{"storeId": "store-live", "productHandle": "boot"})
 	if out["count"].(float64) != 2 {
@@ -140,6 +172,7 @@ func TestAReviewUnderOneStoreIsInvisibleUnderAnother(t *testing.T) {
 		reviews: map[string][]map[string]any{
 			"store-dev|boot": reviewRows("written-under-preview"),
 		},
+		decisions: map[string][]map[string]any{"store-dev": published("written-under-preview")},
 	}
 	p := &Provider{reader: eng}
 
@@ -161,8 +194,9 @@ func TestAReviewUnderOneStoreIsInvisibleUnderAnother(t *testing.T) {
 // one read whose output reaches an unauthenticated browser.
 func TestThePublicReadNeverProjectsTheAuthorEmail(t *testing.T) {
 	p := &Provider{reader: &fixtureReader{
-		settings: map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
-		reviews:  map[string][]map[string]any{"store-live|boot": reviewRows("r1")},
+		settings:  map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
+		reviews:   map[string][]map[string]any{"store-live|boot": reviewRows("r1")},
+		decisions: map[string][]map[string]any{"store-live": published("r1")},
 	}}
 	nodes, err := p.publishedForProduct(context.Background(),
 		map[string]any{"storeId": "store-live", "productHandle": "boot"}, 0)
@@ -184,8 +218,9 @@ func TestThePublicReadIsBounded(t *testing.T) {
 		ids = append(ids, string(rune('a'+i%26))+strings.Repeat("x", i%7+1))
 	}
 	p := &Provider{reader: &fixtureReader{
-		settings: map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
-		reviews:  map[string][]map[string]any{"store-live|boot": reviewRows(ids...)},
+		settings:  map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
+		reviews:   map[string][]map[string]any{"store-live|boot": reviewRows(ids...)},
+		decisions: map[string][]map[string]any{"store-live": published(ids...)},
 	}}
 
 	def := publishedFrom(t, p, map[string]any{"storeId": "store-live", "productHandle": "boot"})
@@ -256,6 +291,7 @@ func TestTheModerationReadIsBoundedByTheReviewsInPlay(t *testing.T) {
 			{"reviewId": "r2", "criterion": "spam"},
 			{"reviewId": "elsewhere", "criterion": "spam"},
 		}},
+		decisions: map[string][]map[string]any{"store-live": published("r1", "r2", "elsewhere")},
 	}
 	out := publishedFrom(t, &Provider{reader: eng}, map[string]any{
 		"storeId": "store-live", "productHandle": "boot"})
@@ -263,9 +299,10 @@ func TestTheModerationReadIsBoundedByTheReviewsInPlay(t *testing.T) {
 	if out["count"].(float64) != 1 {
 		t.Fatalf("count = %v, want 1", out["count"])
 	}
-	if len(eng.askedAbout) != 2 {
-		t.Fatalf("the moderation read was asked about %v, want exactly the two reviews in play",
-			eng.askedAbout)
+	for _, q := range []string{"moderationActionsForReviews", "reviewDecisionsForReviews"} {
+		if len(eng.askedAbout[q]) != 2 {
+			t.Fatalf("%s was asked about %v, want exactly the two reviews in play", q, eng.askedAbout[q])
+		}
 	}
 }
 
@@ -278,8 +315,8 @@ func TestNoCandidatesCostsNoModerationRead(t *testing.T) {
 		"storeId": "store-live", "productHandle": "boot"})
 
 	for _, q := range eng.asked {
-		if q == "moderationActionsForReviews" {
-			t.Fatal("a product with no reviews must not ask about moderation")
+		if q == "moderationActionsForReviews" || q == "reviewDecisionsForReviews" {
+			t.Fatalf("a product with no reviews must not ask about moderation (%s)", q)
 		}
 	}
 }

@@ -5548,18 +5548,23 @@
       "concept": "v1:reviews:review",
       "file": "packs/reviewspack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "authorEmail",
         "authorName",
         "body",
         "createdAtClient",
+        "erasedAt",
         "imageAttachmentIds",
         "ownerUserId",
         "productHandle",
         "productId",
         "rating",
+        "requestId",
+        "revision",
         "siteId",
         "storeId",
-        "title"
+        "title",
+        "verifiedBuyer"
       ],
       "required": [
         "body",
@@ -5569,12 +5574,66 @@
       ]
     },
     {
+      "concept": "v1:reviews:reviewDecision",
+      "file": "packs/reviewspack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "action",
+        "decidedBy",
+        "note",
+        "ownerUserId",
+        "reason",
+        "reviewId",
+        "revision",
+        "storeId"
+      ],
+      "required": [
+        "action",
+        "decidedBy",
+        "ownerUserId",
+        "reviewId",
+        "revision",
+        "storeId"
+      ],
+      "enums": {
+        "action": [
+          "askToFix",
+          "decline",
+          "erase",
+          "escalate",
+          "publish",
+          "remove"
+        ],
+        "reason": [
+          "believed_fake",
+          "confidential",
+          "defamatory",
+          "discriminatory",
+          "false_or_dangerous",
+          "harassing_or_obscene",
+          "personal_information",
+          "profanity",
+          "reviewer_request",
+          "spam_or_advertising",
+          "undisclosed_connection",
+          "unrelated"
+        ]
+      }
+    },
+    {
       "concept": "v1:reviews:reviewSettings",
       "file": "packs/reviewspack/dsl/concepts.memql",
       "fields": [
+        "accountId",
         "criteriaText",
+        "linkLifetimeDays",
+        "notifyEmail",
         "ownerUserId",
         "publicDisplay",
+        "removalApproverUserId",
+        "requestDelayDays",
+        "requestTemplateId",
+        "requestsEnabled",
         "storeId"
       ],
       "required": [

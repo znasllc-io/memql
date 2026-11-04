@@ -70,6 +70,9 @@ type Provider struct {
 	// from engine above so the gate, the exclusion and the bound are
 	// testable as functions over rows rather than over an engine envelope.
 	reader rowReader
+	// writer runs the pack's own @serverOnly write mutations (writer.go):
+	// a builtin decides, a mutation writes.
+	writer rowWriter
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -104,6 +107,46 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"storeId":       "string (required) - the store this toggle is for",
 				"publicDisplay": "bool (required)",
+			},
+		},
+		{
+			Name: "decide",
+			Description: "Record one moderation decision (publish, decline, askToFix, escalate, remove) " +
+				"on the revision the person deciding read. Never the cluster's operators.",
+			Handler: p.decide,
+			ArgsSchema: map[string]string{
+				"reviewId": "string (required)",
+				"action":   "string (required) - publish|decline|askToFix|escalate|remove",
+				"reason":   "string (optional) - a listed reason",
+				"note":     "string (optional)",
+				"revision": "integer (required) - the revision read",
+			},
+		},
+		{
+			Name:        "updateSettings",
+			Description: "Change one store's reviews settings, merging into its one row.",
+			Handler:     p.updateSettings,
+			ArgsSchema: map[string]string{
+				"storeId":               "string (required)",
+				"publicDisplay":         "bool (optional)",
+				"linkLifetimeDays":      "integer (optional) - 1 to 365",
+				"requestDelayDays":      "integer (optional) - 0 to 365",
+				"requestsEnabled":       "bool (optional)",
+				"requestTemplateId":     "string (optional)",
+				"notifyEmail":           "string (optional)",
+				"removalApproverUserId": "string (optional)",
+				"criteriaText":          "string (optional)",
+			},
+		},
+		{
+			Name:        "list",
+			Description: "The moderation list: reviews with their derived state and last decision.",
+			Handler:     p.list,
+			ArgsSchema: map[string]string{
+				"storeId": "string (required)",
+				"state":   "string (optional) - waiting|published|declined|removed|erased|all",
+				"limit":   "integer (optional) - default 50",
+				"after":   "string (optional) - cursor",
 			},
 		},
 		{
@@ -213,7 +256,7 @@ func (p *Provider) exportReview(_ context.Context, args map[string]any, _ int) (
 	}}, nil
 }
 
-func (p *Provider) setPublicDisplay(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (p *Provider) setPublicDisplay(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	on, ok := args["publicDisplay"].(bool)
 	if !ok {
 		return nil, fmt.Errorf("reviews: publicDisplay must be a bool")
@@ -227,20 +270,9 @@ func (p *Provider) setPublicDisplay(_ context.Context, args map[string]any, _ in
 	if storeID == "" {
 		return nil, fmt.Errorf("reviews: storeId is required; a display toggle is per store")
 	}
-	payload, err := json.Marshal(map[string]any{
-		"storeId":       storeID,
-		"publicDisplay": on,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return []memorynodes.MemoryNode{{
-		ID:        SettingsRowID(storeID),
-		Concept:   "v1:reviews:reviewSettings",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
+	// MERGED (settings.go): the store's row carries more than this toggle,
+	// and a version holding only publicDisplay would clear the rest.
+	return p.writeSettings(ctx, storeID, map[string]any{"publicDisplay": on})
 }
 
 // SettingsRowID derives the one settings row id for a store.
@@ -248,8 +280,11 @@ func (p *Provider) setPublicDisplay(_ context.Context, args map[string]any, _ in
 // DERIVED RATHER THAN GENERATED, so the row is a singleton per store and a
 // second flip is a new VERSION of one logical row rather than a second row
 // the read would have to choose between.
+//
+// A BARE SLUG: the engine refuses a row id with a colon in it, and a store id
+// may itself be a v1:-prefixed row id.
 func SettingsRowID(storeID string) string {
-	return "reviews:settings:" + strings.TrimSpace(storeID)
+	return "settings-" + slugOf(storeID)
 }
 
 // storeOfReview reads the store a review belongs to, under the caller's own
@@ -338,7 +373,11 @@ func asString(v any) string {
 
 // NewProvider builds the pack IntegrationProvider.
 func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-	return &Provider{engine: pctx.Engine, reader: &engineRowReader{engine: pctx.Engine}}, nil
+	return &Provider{
+		engine: pctx.Engine,
+		reader: &engineRowReader{engine: pctx.Engine},
+		writer: &engineWriter{engine: pctx.Engine},
+	}, nil
 }
 
 // Register wires the pack into the engine registries.

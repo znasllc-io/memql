@@ -12,7 +12,7 @@
 // that belt-and-braces is deliberate -- the DSL half is what makes the
 // omission survive somebody later writing a second caller.
 
-use reviews.concepts.{ review, moderationAction, reviewSettings }
+use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision }
 
 @description("A review as its MERCHANT sees it, including the shopper's email so they can reply. Never served to a storefront.")
 @row
@@ -30,6 +30,11 @@ shape review reviewFull {
   authorEmail
   imageAttachmentIds
   createdAtClient
+  accountId
+  requestId
+  verifiedBuyer
+  revision
+  erasedAt
   row.createdAt
 }
 
@@ -44,6 +49,8 @@ shape review reviewPublic {
   rating
   authorName
   createdAtClient
+  verifiedBuyer
+  revision
   row.createdAt
 }
 
@@ -60,6 +67,22 @@ shape moderationAction moderationActionFull {
   row.createdAt
 }
 
+@description("A moderation decision, whole. Append-only, so a row is a decision and this is all of it.")
+@row
+shape reviewDecision reviewDecisionFull {
+  row.id
+  ownerUserId
+  reviewId
+  storeId
+  accountId
+  action
+  reason
+  note
+  revision
+  decidedBy
+  row.createdAt
+}
+
 @description("One store's reviews settings.")
 @row
 shape reviewSettings reviewSettingsFull {
@@ -68,5 +91,12 @@ shape reviewSettings reviewSettingsFull {
   storeId
   publicDisplay
   criteriaText
+  accountId
+  linkLifetimeDays
+  requestDelayDays
+  requestsEnabled
+  requestTemplateId
+  notifyEmail
+  removalApproverUserId
   row.createdAt
 }

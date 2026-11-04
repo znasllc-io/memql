@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -65,6 +66,43 @@ type PublishedReview struct {
 	AuthorName      string `json:"authorName,omitempty"`
 	CreatedAt       string `json:"createdAt,omitempty"`
 	CreatedAtClient string `json:"createdAtClient,omitempty"`
+	// VerifiedBuyer is sent only as true, and only for a review written
+	// through a buyer's link. Omitted otherwise: absence is "not verified".
+	VerifiedBuyer bool `json:"verifiedBuyer,omitempty"`
+}
+
+// Summary is a product's score over EVERY review the read would show, not
+// over the page it returns, so a product past the page size is still scored
+// on all of its reviews.
+type Summary struct {
+	// Average over the reviews that carry a rating, to two places.
+	Average float64 `json:"average"`
+	// RatingCount is how many shown reviews carry a rating.
+	RatingCount int `json:"ratingCount"`
+	// ReviewCount is how many reviews are shown, rated or not.
+	ReviewCount int `json:"reviewCount"`
+	// Stars counts each star, every key "1" to "5" present, zeros included.
+	Stars map[string]int `json:"stars"`
+}
+
+// summarize scores the shown reviews. Nil when none carries a rating: a
+// storefront must not draw a score from no ratings.
+func summarize(shown []PublishedReview) *Summary {
+	s := &Summary{ReviewCount: len(shown), Stars: map[string]int{"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}}
+	total := 0
+	for _, r := range shown {
+		if r.Rating < 1 || r.Rating > 5 {
+			continue
+		}
+		s.RatingCount++
+		total += r.Rating
+		s.Stars[fmt.Sprint(r.Rating)]++
+	}
+	if s.RatingCount == 0 {
+		return nil
+	}
+	s.Average = math.Round(float64(total)/float64(s.RatingCount)*100) / 100
+	return s
 }
 
 // publishedForProduct answers the public read.
@@ -82,7 +120,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 		return nil, err
 	}
 	if !on {
-		return p.publishedNode(storeID, handle, []PublishedReview{})
+		return p.publishedNode(storeID, handle, []PublishedReview{}, nil)
 	}
 
 	rows, err := p.rowsFor(ctx, "publishedReviewsForProduct",
@@ -106,9 +144,16 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 	if err != nil {
 		return nil, err
 	}
+	// A REVIEW IS SHOWN ONLY WHEN A PERSON PUBLISHED IT, and only while that
+	// publish covers the revision the row holds now (state.go). The decision
+	// read is bounded by the reviews in play for the same reason the legacy
+	// moderation read is: it must be complete for what it is asked about.
+	decisions, err := p.decisionsByReview(ctx, storeID, candidates)
+	if err != nil {
+		return nil, err
+	}
 
-	limit := clampLimit(args["limit"])
-	out := make([]PublishedReview, 0, len(rows))
+	shown := make([]PublishedReview, 0, len(rows))
 	for _, row := range rows {
 		id := strings.TrimSpace(asString(row["id"]))
 		if id == "" {
@@ -119,7 +164,11 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 		if _, isHidden := hidden[id]; isHidden {
 			continue
 		}
-		out = append(out, PublishedReview{
+		if StateOf(asInt(row["revision"]), decisions[id]) != StatePublished {
+			continue
+		}
+		verified, _ := row["verifiedBuyer"].(bool)
+		shown = append(shown, PublishedReview{
 			ID:              id,
 			ProductHandle:   asString(row["productHandle"]),
 			Title:           asString(row["title"]),
@@ -128,12 +177,68 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 			AuthorName:      asString(row["authorName"]),
 			CreatedAt:       asString(row["createdAt"]),
 			CreatedAtClient: asString(row["createdAtClient"]),
+			VerifiedBuyer:   verified,
 		})
-		if len(out) >= limit {
-			break
-		}
 	}
-	return p.publishedNode(storeID, handle, out)
+	// NEWEST FIRST, ordered here: the query answers the whole set unordered,
+	// because a sorted query carries the implicit row cap. createdAt is the
+	// version clock, so an edit that was published reads at its own time.
+	sort.SliceStable(shown, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339Nano, shown[i].CreatedAt)
+		tj, _ := time.Parse(time.RFC3339Nano, shown[j].CreatedAt)
+		return ti.After(tj)
+	})
+	// SCORED BEFORE THE PAGE IS CUT, so the summary is over every shown
+	// review and the list is the newest `limit` of them.
+	summary := summarize(shown)
+	if limit := clampLimit(args["limit"]); len(shown) > limit {
+		shown = shown[:limit]
+	}
+	return p.publishedNode(storeID, handle, shown, summary)
+}
+
+// decisionsByReview reads the decision log for the reviews in play, grouped by
+// review. No candidates, no read.
+func (p *Provider) decisionsByReview(ctx context.Context, storeID string, reviewIDs []string) (map[string][]Decision, error) {
+	out := map[string][]Decision{}
+	if len(reviewIDs) == 0 {
+		return out, nil
+	}
+	rows, err := p.reader.RowsWithList(ctx, "reviewDecisionsForReviews",
+		map[string]string{"storeId": storeID}, "reviewIds", reviewIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		d := decisionFromRow(row)
+		if d.ReviewID == "" {
+			continue
+		}
+		out[d.ReviewID] = append(out[d.ReviewID], d)
+	}
+	return out, nil
+}
+
+// decisionFromRow reads one reviewDecision row as the reviewDecisionFull shape
+// projects it.
+func decisionFromRow(row map[string]any) Decision {
+	at, _ := time.Parse(time.RFC3339Nano, asString(row["createdAt"]))
+	return Decision{
+		ID:        asString(row["id"]),
+		ReviewID:  strings.TrimSpace(asString(row["reviewId"])),
+		Action:    asString(row["action"]),
+		Reason:    asString(row["reason"]),
+		Note:      asString(row["note"]),
+		Revision:  asInt(row["revision"]),
+		DecidedBy: asString(row["decidedBy"]),
+		At:        at,
+	}
+}
+
+// asInt narrows a whole number read off a row. Anything unreadable is zero,
+// which every caller here reads as "absent".
+func asInt(v any) int {
+	return asRating(v)
 }
 
 // publicDisplayOn reads this store's toggle.
@@ -271,13 +376,20 @@ func (p *Provider) rowsFor(ctx context.Context, query string, args map[string]st
 }
 
 // publishedNode wraps the answer as the single node a builtin replies with.
-func (p *Provider) publishedNode(storeID, handle string, reviews []PublishedReview) ([]memorynodes.MemoryNode, error) {
-	payload, err := json.Marshal(map[string]any{
+func (p *Provider) publishedNode(storeID, handle string, reviews []PublishedReview, summary *Summary) ([]memorynodes.MemoryNode, error) {
+	body := map[string]any{
 		"storeId":       storeID,
 		"productHandle": handle,
 		"reviews":       reviews,
 		"count":         len(reviews),
-	})
+	}
+	// ABSENT, never empty, when nothing shown is rated: the storefront's
+	// check refuses a summary that does not add up, and no summary at all is
+	// the honest answer.
+	if summary != nil {
+		body["summary"] = summary
+	}
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("reviews: marshal published: %w", err)
 	}

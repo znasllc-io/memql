@@ -11,8 +11,8 @@
 // gate in every future caller instead is exactly the mistake that ships a
 // storefront rendering reviews a merchant had switched off.
 
-use reviews.concepts.{ review, moderationAction, reviewSettings }
-use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull }
+use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision }
+use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull, reviewDecisionFull }
 
 @description("Every review for one product on one store, newest first -- the merchant's own list, including reviews a moderation decision hides. The operator read behind a moderation screen; the public read is the reviewsPublishedForProduct builtin.")
 @actor
@@ -83,7 +83,8 @@ query reviewSettings reviewSettingsForStore {
   shape   reviewSettingsFull
 }
 
-@description("THE PUBLIC PROJECTION: this store's reviews for one product, newest first, WITHOUT the shopper's email. The reviewsPublishedForProduct builtin reads through this rather than through reviewsForProduct, so the address never reaches the code path whose output is served to an unauthenticated browser -- an omission in a Go struct is one refactor away from being undone, and a shape is not.")
+@description("THE PUBLIC PROJECTION: this store's reviews for one product, WITHOUT the shopper's email. The reviewsPublishedForProduct builtin reads through this rather than through reviewsForProduct, so the address never reaches the code path whose output is served to an unauthenticated browser -- an omission in a Go struct is one refactor away from being undone, and a shape is not. WHOLE AND UNSORTED: the builtin scores every shown review and returns the newest page of them, ordering in Go; a sorted query would carry the implicit row cap and score a product on its newest fifty.")
+@unbounded("one product's reviews on one store -- the public read scores every shown review and returns the newest page, ordered in Go")
 @actor
 query review publishedReviewsForProduct {
   args {
@@ -91,6 +92,51 @@ query review publishedReviewsForProduct {
     productHandle  string!
   }
   filter  row => row.storeId == args.storeId && row.productHandle == args.productHandle
-  sort    "row.createdAt", "desc"
   shape   reviewPublic
+}
+
+@description("Every review on one store, for the moderation list (the reviewsList builtin), which derives each one's state from the decision log and therefore needs all of them, not a page.")
+@unbounded("one store's reviews -- bounded by the store, and the moderation list must see every review to know which are waiting")
+@actor
+query review reviewsInStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  shape   reviewFull
+}
+
+@description("The decision log for these reviews. THE PUBLIC READ AND THE MODERATION LIST DERIVE STATE FROM THIS, so it must be COMPLETE for the reviews it is asked about: it is bounded by the caller's list, never by a page size.")
+@unbounded("decisions for a caller-supplied list of review ids -- bounded by that list, and a page size here could show a review nobody published")
+@actor
+query reviewDecision reviewDecisionsForReviews {
+  args {
+    storeId    string!
+    reviewIds  []string!
+  }
+  filter  row => row.storeId == args.storeId && row.reviewId in args.reviewIds
+  shape   reviewDecisionFull
+}
+
+@description("One review's whole decision log: what the review's own page shows, and what reviewsDecide judges a new decision against. Unsorted, because a sorted query carries the implicit row cap and this read must be whole; a caller orders it by createdAt.")
+@unbounded("one review's decisions -- bounded by the review")
+@actor
+query reviewDecision reviewDecisionsForReview {
+  args {
+    reviewId  string!
+  }
+  filter  row => row.reviewId == args.reviewId
+  shape   reviewDecisionFull
+}
+
+@description("This store's decision log, newest first: who decided what, when, for which reason and with which note.")
+@actor
+query reviewDecision reviewDecisionsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   reviewDecisionFull
 }

@@ -1,0 +1,246 @@
+package reviewspack
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+)
+
+// settings.go -- ONE STORE'S REVIEWS SETTINGS, MERGED ON EVERY WRITE.
+//
+// The settings are one row per store (SettingsRowID), and every write is a
+// new version of that row. A version is a whole payload, so a write that
+// carried only the field it changed would clear every other field. Every
+// writer here reads the current row and changes only what it was given.
+//
+// # Defaults live here, not on the row
+//
+// A field the row does not carry has its default (EffectiveSettings): links
+// last 14 days, a request goes out 14 days after the order, requests are off
+// and the reviews are not shown. Absent is never "zero days".
+
+// DefaultLinkLifetimeDays is how long a review link stays open when the store
+// has not said.
+const DefaultLinkLifetimeDays = 14
+
+// DefaultRequestDelayDays is how long after an order its review request goes
+// out when the store has not said.
+const DefaultRequestDelayDays = 14
+
+// Settings is one store's effective settings.
+type Settings struct {
+	PublicDisplay         bool
+	LinkLifetimeDays      int
+	RequestDelayDays      int
+	RequestsEnabled       bool
+	RequestTemplateID     string
+	NotifyEmail           string
+	RemovalApproverUserID string
+}
+
+// EffectiveSettings reads a settings row with every default applied.
+func EffectiveSettings(row map[string]any) Settings {
+	s := Settings{LinkLifetimeDays: DefaultLinkLifetimeDays, RequestDelayDays: DefaultRequestDelayDays}
+	if row == nil {
+		return s
+	}
+	s.PublicDisplay, _ = row["publicDisplay"].(bool)
+	s.RequestsEnabled, _ = row["requestsEnabled"].(bool)
+	if n := asInt(row["linkLifetimeDays"]); n > 0 {
+		s.LinkLifetimeDays = n
+	}
+	if _, set := row["requestDelayDays"]; set {
+		if n := asInt(row["requestDelayDays"]); n >= 0 {
+			s.RequestDelayDays = n
+		}
+	}
+	s.RequestTemplateID = strings.TrimSpace(asString(row["requestTemplateId"]))
+	s.NotifyEmail = strings.TrimSpace(asString(row["notifyEmail"]))
+	s.RemovalApproverUserID = strings.TrimSpace(asString(row["removalApproverUserId"]))
+	return s
+}
+
+var emailShape = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
+// settingFields normalizes and validates each field a caller may change.
+var settingFields = map[string]func(v any) (any, error){
+	"publicDisplay":   boolSetting,
+	"requestsEnabled": boolSetting,
+	"linkLifetimeDays": func(v any) (any, error) {
+		return intSetting(v, 1, 365, "a link's lifetime is 1 to 365 days")
+	},
+	"requestDelayDays": func(v any) (any, error) {
+		return intSetting(v, 0, 365, "the request goes out 0 to 365 days after the order")
+	},
+	"requestTemplateId":     stringSetting(200),
+	"removalApproverUserId": stringSetting(200),
+	"criteriaText":          stringSetting(4000),
+	"notifyEmail": func(v any) (any, error) {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("must be text")
+		}
+		s = strings.TrimSpace(s)
+		if s != "" && (len(s) > 320 || !emailShape.MatchString(s)) {
+			return nil, fmt.Errorf("%q is not an email address", s)
+		}
+		return s, nil
+	},
+}
+
+func boolSetting(v any) (any, error) {
+	b, ok := v.(bool)
+	if !ok {
+		return nil, fmt.Errorf("must be true or false")
+	}
+	return b, nil
+}
+
+func intSetting(v any, lo, hi int, rule string) (any, error) {
+	switch v.(type) {
+	case int, int64, float64, json.Number:
+	default:
+		return nil, fmt.Errorf("must be a whole number: %s", rule)
+	}
+	n := asInt(v)
+	if f, ok := v.(float64); ok && f != float64(n) {
+		return nil, fmt.Errorf("must be a whole number: %s", rule)
+	}
+	if n < lo || n > hi {
+		return nil, fmt.Errorf("%d is out of range: %s", n, rule)
+	}
+	return n, nil
+}
+
+func stringSetting(max int) func(v any) (any, error) {
+	return func(v any) (any, error) {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("must be text")
+		}
+		s = strings.TrimSpace(s)
+		if len(s) > max {
+			return nil, fmt.Errorf("is longer than %d characters", max)
+		}
+		return s, nil
+	}
+}
+
+// updateSettings changes the named settings of one store and keeps the rest.
+func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	storeID := strings.TrimSpace(asString(args["storeId"]))
+	if storeID == "" {
+		return nil, fmt.Errorf("reviews: storeId is required; settings are per store")
+	}
+	changes := map[string]any{}
+	names := make([]string, 0, len(args))
+	for k := range args {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		if k == "storeId" {
+			continue
+		}
+		check, known := settingFields[k]
+		if !known {
+			return nil, fmt.Errorf("reviews: %q is not a reviews setting", k)
+		}
+		v, err := check(args[k])
+		if err != nil {
+			return nil, fmt.Errorf("reviews: %s %v", k, err)
+		}
+		changes[k] = v
+	}
+	if len(changes) == 0 {
+		return nil, fmt.Errorf("reviews: name at least one setting to change")
+	}
+	return p.writeSettings(ctx, storeID, changes)
+}
+
+// writeSettings merges changes into the store's current settings row and
+// answers the new version.
+//
+// Two rules decide who may write. A store with no settings row yet is set up
+// by the cluster's operators; after that, whoever can read the row may change
+// it. And the owner who approves removals is named only by the current owner
+// or by an operator -- a moderator who could name themselves would remove
+// reviews nobody approved.
+func (p *Provider) writeSettings(ctx context.Context, storeID string, changes map[string]any) ([]memorynodes.MemoryNode, error) {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || strings.TrimSpace(ac.UserId) == "" {
+		return nil, fmt.Errorf("reviews: changing settings needs a signed-in person")
+	}
+	operator := auth.IsClusterOperator(ac.Role)
+	current, err := p.settingsFor(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	if len(current) == 0 && !operator {
+		return nil, fmt.Errorf("reviews: this store has no reviews settings yet; the cluster's operators set them up")
+	}
+	if next, naming := changes["removalApproverUserId"]; naming && next != asString(current["removalApproverUserId"]) {
+		now := strings.TrimSpace(asString(current["removalApproverUserId"]))
+		if !operator && (now == "" || now != strings.TrimSpace(ac.UserId)) {
+			return nil, fmt.Errorf("reviews: only the store's current owner, or the cluster's operators, can name who approves removals")
+		}
+	}
+
+	// THE WHOLE ROW, merged: a version is a whole payload.
+	merged := map[string]any{"settingsId": SettingsRowID(storeID), "storeId": storeID}
+	for _, k := range settingsRowFields {
+		if v, set := current[k]; set && v != nil {
+			merged[k] = normalizeSetting(k, v)
+		}
+	}
+	for k, v := range changes {
+		merged[k] = v
+	}
+	if strings.TrimSpace(asString(merged["ownerUserId"])) == "" {
+		merged["ownerUserId"] = strings.TrimSpace(ac.UserId)
+	}
+	if _, set := merged["publicDisplay"]; !set {
+		merged["publicDisplay"] = false
+	}
+	if err := p.writer.Write(ctx, "putReviewSettings", merged); err != nil {
+		return nil, err
+	}
+	return receipt("v1:reviews:settingsSaved", SettingsRowID(storeID), map[string]any{
+		"storeId": storeID, "changed": sortedKeys(changes),
+	})
+}
+
+// settingsRowFields are the settings row's own fields, in the order the write
+// mutation declares them. Row intrinsics (id, createdAt) are not among them.
+var settingsRowFields = []string{
+	"ownerUserId", "accountId", "publicDisplay", "criteriaText", "linkLifetimeDays", "requestDelayDays",
+	"requestsEnabled", "requestTemplateId", "notifyEmail", "removalApproverUserId",
+}
+
+// normalizeSetting turns a value read off a row into the type the write
+// mutation declares: a whole number may come back as a float.
+func normalizeSetting(field string, v any) any {
+	switch field {
+	case "linkLifetimeDays", "requestDelayDays":
+		return asInt(v)
+	case "publicDisplay", "requestsEnabled":
+		b, _ := v.(bool)
+		return b
+	}
+	return strings.TrimSpace(asString(v))
+}
+
+func sortedKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
