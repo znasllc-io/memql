@@ -160,3 +160,15 @@ func TestOnlyAnOperatorCreatesAStoresSettings(t *testing.T) {
 		t.Fatal("a non-operator created a store's settings row")
 	}
 }
+
+// A FIELD THE QUERY PROJECTS BUT THE ROW NEVER SET COMES BACK EMPTY, and empty
+// is not zero: a store that never chose a delay waits 14 days, not none.
+func TestAnUnsetSettingReadAsNullKeepsItsDefault(t *testing.T) {
+	s := EffectiveSettings(map[string]any{"requestDelayDays": nil, "linkLifetimeDays": nil, "requestsEnabled": true})
+	if s.RequestDelayDays != 14 || s.LinkLifetimeDays != 14 {
+		t.Fatalf("settings = %+v, want the 14-day defaults for fields the row never set", s)
+	}
+	if s = EffectiveSettings(map[string]any{"requestDelayDays": 0}); s.RequestDelayDays != 0 {
+		t.Fatalf("an explicit 0-day delay was not kept: %+v", s)
+	}
+}

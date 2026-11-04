@@ -84,6 +84,8 @@ type Provider struct {
 	redactor redactor
 	// osBase is the admin panel's address; nil derives it from MEMQL_DOMAIN.
 	osBase func() string
+	// mailer sends a message an order entitles (due.go).
+	mailer orderMailer
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -227,6 +229,14 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Handler:     p.notifyModerator,
 			ArgsSchema: map[string]string{
 				"reviewId": "string (required)",
+			},
+		},
+		{
+			Name:        "sendDueRequests",
+			Description: "The daily ask: issue and mail the review links paid orders have earned. Internal origin only.",
+			Handler:     p.sendDueRequests,
+			ArgsSchema: map[string]string{
+				"storeId": "string (optional) - one store only",
 			},
 		},
 		{
@@ -464,6 +474,7 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		reader:   &engineRowReader{engine: pctx.Engine},
 		writer:   &engineWriter{engine: pctx.Engine},
 		redactor: sqlRedactor{db: pctx.BunDB},
+		mailer:   &engineMailer{engine: pctx.Engine},
 	}, nil
 }
 

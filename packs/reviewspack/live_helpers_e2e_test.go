@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -25,6 +26,12 @@ func seedCtx() context.Context {
 // site every store-wide reviews act names, and the organization gate judges.
 func seedSite(t *testing.T, eng *memql.MemQLEngine, siteID, owner, storeID string) {
 	t.Helper()
+	seedSiteIn(t, eng, siteID, owner, storeID, "")
+}
+
+// seedSiteIn is seedSite for a site that belongs to an organization.
+func seedSiteIn(t *testing.T, eng *memql.MemQLEngine, siteID, owner, storeID, accountID string) {
+	t.Helper()
 	// The store first: a storefront may be bound only to a store row that
 	// exists and its writer can read.
 	store, _ := json.Marshal(map[string]any{"domain": storeID + ".myshopify.com"})
@@ -32,11 +39,15 @@ func seedSite(t *testing.T, eng *memql.MemQLEngine, siteID, owner, storeID strin
 		langparser.QuoteString("v1:shopify:store"), langparser.QuoteString(storeID), string(store))); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}
-	payload, _ := json.Marshal(map[string]any{
+	site := map[string]any{
 		"ownerUserId": owner, "title": siteID, "hostname": siteID + ".example.test",
 		"status": "live", "kind": "shopify_storefront", "bundleRef": "blob://sites/" + siteID + "/v1/",
 		"binding": map[string]any{"storeId": storeID},
-	})
+	}
+	if accountID != "" {
+		site["accountId"] = accountID
+	}
+	payload, _ := json.Marshal(site)
 	q := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`, langparser.QuoteString("v1:platform:site"),
 		langparser.QuoteString(siteID), string(payload))
 	if _, err := eng.Execute(seedCtx(), q); err != nil {
@@ -52,5 +63,19 @@ func grantReviewsPart(t *testing.T, eng *memql.MemQLEngine, userID string) {
 		`, verb: "execute", resourceType: "app:deployables/reviews", effect: "allow", grantedBy: "reviews-e2e-seeder")`
 	if _, err := eng.Execute(seedCtx(), call); err != nil {
 		t.Fatalf("grant the reviews part: %v", err)
+	}
+}
+
+// seedMirror writes one mirrored Shopify row the way the connector does:
+// Shopify owns these rows, so only the connector's actor writes them.
+func seedMirror(t *testing.T, eng *memql.MemQLEngine, concept, id string, payload map[string]any) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	payload["updatedAt"], payload["syncedAt"] = now, now
+	raw, _ := json.Marshal(payload)
+	ctx := auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify"))
+	if _, err := eng.Execute(ctx, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString(concept), langparser.QuoteString(id), string(raw))); err != nil {
+		t.Fatalf("seed %s: %v", concept, err)
 	}
 }

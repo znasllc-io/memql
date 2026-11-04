@@ -93,8 +93,10 @@ func TestEveryActingBuiltinDeclaresTheReviewsPartAndItsTarget(t *testing.T) {
 	}
 	// The moderator notice is the store's automation's, which holds no part
 	// and calls with internal origin; notify.go refuses anything else.
-	if b, ok := builtins["reviewsNotifyModerator"]; !ok || declaresReviewsPart(b) {
-		t.Error("reviewsNotifyModerator must be declared, and carry no part: its caller is an automation")
+	for _, name := range []string{"reviewsNotifyModerator", "reviewsSendDueRequests"} {
+		if b, ok := builtins[name]; !ok || declaresReviewsPart(b) {
+			t.Errorf("%s must be declared, and carry no part: its caller is an automation", name)
+		}
 	}
 }
 

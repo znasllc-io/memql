@@ -143,3 +143,10 @@ builtin reviewsExportStore {
 builtin reviewsNotifyModerator {
   reviewId  string  @required  @description("The review that arrived or changed.")
 }
+
+@executor("integration.reviews.sendDueRequests")
+@args(profile="object")
+@description("THE DAILY ASK: for every store whose requests are on (with a reviewed request template and its organization set), every paid order processed the store's delay ago earns one link per paid product, written as the store's merchant and mailed to that order's buyer through campaignSendOrderMessage. A line already asked is not asked again; a failed or deferred send is, with a new link. Run by the store's automation; refuses any call without internal origin.")
+builtin reviewsSendDueRequests {
+  storeId  string  @description("Run for this one store only. Omit to run for every store whose requests are on.")
+}

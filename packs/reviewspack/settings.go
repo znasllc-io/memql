@@ -55,8 +55,10 @@ func EffectiveSettings(row map[string]any) Settings {
 	if n := asInt(row["linkLifetimeDays"]); n > 0 {
 		s.LinkLifetimeDays = n
 	}
-	if _, set := row["requestDelayDays"]; set {
-		if n := asInt(row["requestDelayDays"]); n >= 0 {
+	// SET, NOT MERELY PRESENT: a query projects a field the row never wrote
+	// as an empty value, and empty is not a zero-day delay.
+	if v, set := row["requestDelayDays"]; set && v != nil {
+		if n := asInt(v); n >= 0 {
 			s.RequestDelayDays = n
 		}
 	}

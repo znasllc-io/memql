@@ -215,3 +215,46 @@ func TestLiveE2E_AWaitingReviewStagesOneEmailForTheModerator(t *testing.T) {
 		t.Fatalf("staged email to %q about %q", target, subject)
 	}
 }
+
+// THE DAILY ASK FINDS A DUE ORDER AND ISSUES ITS LINK, through the real
+// queries: the store's settings, the site that serves it, the orders the delay
+// reached, their lines and products. The order mail route is not linked into
+// this test engine, so the send fails -- and the request is recorded as failed,
+// written as the merchant, ready for the next run to ask again.
+func TestLiveE2E_TheDailyAskIssuesTheLinkADueOrderEarned(t *testing.T) {
+	eng := livePackEngine(t)
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	merchant := "user-reviews-ask-" + n
+	store := "store-reviews-ask-" + n
+	site := "site-reviews-ask-" + n
+	account := "acct-reviews-ask-" + n
+	seedSiteIn(t, eng, site, merchant, store, account)
+	if _, err := eng.Execute(asPerson(merchant, auth.RoleOwner),
+		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, requestsEnabled: true, requestTemplateId: "tmpl-ask")`); err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	orderGid := "gid://shopify/Order/" + n
+	processed := time.Now().UTC().Add(-14*24*time.Hour - time.Hour).Format(time.RFC3339)
+	money := map[string]any{"shopMoney": map[string]any{"amount": "24.00", "currencyCode": "USD"}}
+	seedMirror(t, eng, "v1:shopify:order", "order-"+n, map[string]any{"storeId": store, "gid": orderGid,
+		"email": "buyer@example.com", "name": "#1009", "displayFinancialStatus": "PAID", "totalPriceSet": money, "processedAt": processed})
+	seedMirror(t, eng, "v1:shopify:orderLineItem", "line-"+n, map[string]any{"storeId": store, "gid": "gid://shopify/LineItem/" + n,
+		"parentGid": orderGid, "productGid": "gid://shopify/Product/" + n, "priceAfterAllDiscountsBeforeTaxesSet": money, "title": "Floss Picks"})
+	seedMirror(t, eng, "v1:shopify:product", "product-"+n, map[string]any{"storeId": store, "gid": "gid://shopify/Product/" + n,
+		"handle": "floss-picks-" + n, "title": "Floss Picks"})
+
+	summary := payloadOf(t, eng, auth.ContextWithInternalOrigin(asMerchant(merchant)),
+		`builtin reviewsSendDueRequests(storeId: `+quote(store)+`)`)
+	if summary["considered"] != float64(1) {
+		t.Fatalf("summary = %v, want the one due line considered", summary)
+	}
+	var state, owner string
+	if err := liveDB.DB.QueryRowContext(context.Background(),
+		`SELECT coalesce(payload->>'sendState',''), coalesce(payload->>'ownerUserId','') FROM "MemoryNodes" WHERE concept = 'v1:reviews:reviewRequest' AND payload->>'orderGid' = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+		orderGid).Scan(&state, &owner); err != nil {
+		t.Fatalf("no request was issued: %v", err)
+	}
+	if state != "failed" || strings.TrimPrefix(owner, "v1:identity:user:") != merchant {
+		t.Fatalf("request: sendState %q owner %q, want failed (no mail route here) and written as the merchant", state, owner)
+	}
+}

@@ -13,6 +13,7 @@
 
 use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision, reviewRequest }
 use shopify.generated.orderLineItem.{ orderLineItem, orderLineItemMirror }
+use shopify.generated.order.{ order, orderMirror }
 use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull, reviewDecisionFull, reviewRequestFull }
 
 @description("Every review for one product on one store, newest first -- the merchant's own list, including reviews a moderation decision hides. The operator read behind a moderation screen; the public read is the reviewsPublishedForProduct builtin.")
@@ -186,4 +187,25 @@ query reviewRequest reviewRequestsForStore {
   }
   filter  row => row.storeId == args.storeId
   shape   reviewRequestFull
+}
+
+@description("Every store's reviews settings, for the daily ask, which runs for each store whose requests are on. Read under a system identity; a person reads a store's own row through reviewSettingsForStore.")
+@unbounded("one row per store -- bounded by the stores this cluster serves")
+@actor
+query reviewSettings reviewSettingsAll {
+  filter  row => row.storeId != ""
+  shape   reviewSettingsFull
+}
+
+@description("One store's mirrored orders processed in a window, for the daily ask: the orders that reached the store's request delay. processedAt is Shopify's own UTC timestamp text, which orders as it reads.")
+@unbounded("one store's orders over a few days -- bounded by the window")
+@actor
+query order reviewDueOrders {
+  args {
+    storeId  string!
+    from     string!
+    to       string!
+  }
+  filter  row => row.storeId == args.storeId && row.processedAt >= args.from && row.processedAt < args.to
+  shape   orderMirror
 }
