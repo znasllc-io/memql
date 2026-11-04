@@ -128,7 +128,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                 ))}
               </nav>
             ) : null}
-            <TrailRow fallback={activeSection?.name ?? current.name} />
+            <TrailRow fallback={activeSection?.name ?? current.name} history={current.browserHistory === true} />
             {gate.state === "unconfigured" ? (
               <SurfaceUnconfigured
                 surface={unmetIsSectionOnly ? (activeSection?.name ?? current.name) : current.name}

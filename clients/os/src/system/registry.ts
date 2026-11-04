@@ -176,6 +176,14 @@ export interface OsAppManifest {
    * menu offers no pin or unpin for it, because neither would do anything.
    */
   dockFixture?: boolean;
+  /**
+   * THE BROWSER'S BACK STEPS BACK INSIDE THIS APP'S WINDOWS (kit/browserHistory):
+   * each step the window's trail row can go back holds one entry of the
+   * browser's history, and the browser's Back does exactly what the row's Back
+   * does. Opt-in per app while it is proven on one; the row is unchanged either
+   * way.
+   */
+  browserHistory?: boolean;
   component: ComponentType<OsAppProps>;
 }
 

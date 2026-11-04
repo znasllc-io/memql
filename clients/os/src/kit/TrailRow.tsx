@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 
 import type { Breadcrumb } from "./Breadcrumbs";
+import { useBrowserHistory } from "./browserHistory";
 import { useWindowTrail, type PageTrail } from "./pageNavigation";
 import { PageHelpButton } from "./PageHelpButton";
 
@@ -51,9 +52,15 @@ function compute(trail: readonly Breadcrumb[], page: PageTrail | null, fallback:
   return { items, destination };
 }
 
-export function TrailRow({ fallback }: {
+export function TrailRow({ fallback, history = false }: {
   /** What to call the place when no heading has said: the section's own name. */
   fallback: string;
+  /**
+   * The browser's Back steps back too (kit/browserHistory): one browser history
+   * entry per step this row can go back, and the browser's Back does what this
+   * row's Back does at that moment -- nothing, while the page holds Back.
+   */
+  history?: boolean;
 }) {
   const nav = useWindowTrail();
   const scroller = useRef<HTMLElement>(null);
@@ -66,6 +73,10 @@ export function TrailRow({ fallback }: {
   const { items, destination } = read();
   const drawn = items.map(item => item.label).join("\u001f");
   const title = items.at(-1)?.label ?? fallback;
+  // ONE ENTRY PER STEP THE TRAIL HAS, held even while the page holds Back, so
+  // a browser Back pressed then lands on this row's inert Back rather than
+  // leaving the window.
+  useBrowserHistory(history && (nav?.active ?? true), Math.max(0, items.length - 1), () => read().destination?.onSelect?.());
 
   useLayoutEffect(() => {
     const element = scroller.current;

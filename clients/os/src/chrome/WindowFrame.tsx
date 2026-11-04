@@ -296,7 +296,7 @@ export function WindowFrame({
             {destinations.length > 2 ? <select data-os-scroll-navigation="reset" className="os-window-more-nav" aria-label={`More ${manifest.name} sections`} value={destinations.slice(2).some(s => s.id === (current?.parent ?? current?.id)) ? current?.parent ?? current?.id : ""} onChange={event => { if (event.target.value) actions.navigateSection(win.id, event.target.value); }}><option value="">More…</option>{destinations.slice(2).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select> : null}
           </nav>
         ) : null}
-        <TrailRow fallback={current?.name ?? manifest.name} />
+        <TrailRow fallback={current?.name ?? manifest.name} history={manifest.browserHistory === true} />
         <PageContent ref={content} className="os-window-content" data-os-window-content>
           {/* THE REFUSED SURFACE (epic memql#4832, D6).
               A window can be open on an app this actor's rank does not clear,

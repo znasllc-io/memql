@@ -31,6 +31,8 @@ interface WindowTrail {
   page: () => PageTrail | null;
   /** Changes only when what the row DRAWS changes -- labels, not closures. */
   signature: string;
+  /** False while the window is hidden: a hidden window holds no browser history. */
+  active: boolean;
 }
 
 const Context = createContext<PageNavigation | null>(null);
@@ -110,7 +112,7 @@ export function PageNavigationProvider({ trail, root, children, scope = "", acti
     return () => observer.disconnect();
   }, [host, root]);
   const navigation = useMemo(() => ({ trail, primary: state.primary, register: host.register, publish: host.publish }), [trail, state.primary, host]);
-  const windowTrail = useMemo(() => ({ trail, page: host.page, signature: state.signature }), [trail, host, state.signature]);
+  const windowTrail = useMemo(() => ({ trail, page: host.page, signature: state.signature, active }), [trail, host, state.signature, active]);
   return <Context.Provider value={navigation}><TrailContext.Provider value={windowTrail}><PageHelpProvider root={root}>{children}</PageHelpProvider></TrailContext.Provider></Context.Provider>;
 }
 
