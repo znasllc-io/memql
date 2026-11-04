@@ -130,3 +130,32 @@ func TestLiveE2E_AReviewIsShownOnlyOnceAStorePersonPublishesIt(t *testing.T) {
 		t.Fatalf("decision log = %v, want one publish owned by the merchant", log)
 	}
 }
+
+// THE WRITE MUTATIONS CANNOT BE CALLED AROUND THE BUILTINS THAT JUDGE THEM.
+// A signed-in client -- here the store's own owner, the person with the most
+// right to the rows -- calls each settings and decision writer directly. None
+// may write: settings change only through reviewsUpdateSettings and
+// reviewsSetPublicDisplay (which merge the row and judge who may change
+// what), and a decision is recorded only through reviewsDecide.
+func TestLiveE2E_NoClientWritesSettingsOrDecisionsDirectly(t *testing.T) {
+	eng := livePackEngine(t)
+	n := strconv.FormatInt(time.Now().UnixNano(), 36)
+	merchant := "user-reviews-direct-" + n
+	store := "store-reviews-direct-" + n
+	client := asPerson(merchant, auth.Role("user"))
+
+	_, _ = eng.Execute(client, `setReviewDisplay(settingsId: `+quote("settings-direct-"+n)+
+		`, storeId: `+quote(store)+`, publicDisplay: true)`)
+	_, _ = eng.Execute(client, `putReviewSettings(settingsId: `+quote("settings-direct2-"+n)+
+		`, ownerUserId: `+quote(merchant)+`, storeId: `+quote(store)+`, publicDisplay: true)`)
+	if rows := rowsOf(t, eng, client, `query reviewSettingsForStore(storeId: `+quote(store)+`)`); len(rows) != 0 {
+		t.Fatalf("a client wrote %d settings rows directly; settings change only through the merging builtins: %v", len(rows), rows)
+	}
+
+	_, _ = eng.Execute(client, `appendReviewDecision(decisionId: `+quote("decision-direct-"+n)+
+		`, ownerUserId: `+quote(merchant)+`, reviewId: "r-direct", storeId: `+quote(store)+
+		`, action: "publish", revision: 1, decidedBy: `+quote(merchant)+`)`)
+	if rows := rowsOf(t, eng, client, `query reviewDecisionsForReview(reviewId: "r-direct")`); len(rows) != 0 {
+		t.Fatalf("a client recorded a decision directly, around reviewsDecide: %v", rows)
+	}
+}

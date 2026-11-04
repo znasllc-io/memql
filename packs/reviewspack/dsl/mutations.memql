@@ -84,6 +84,15 @@ mutation review submitReview {
 /// exactly one row per store: a merchant must be able to show reviews on
 /// their live storefront while they are still hidden on the development
 /// store a candidate is being exercised against.
+///
+/// @serverOnly: A CLIENT CHANGES SETTINGS ONLY THROUGH THE BUILTINS. This
+/// writes a whole settings version from four fields, so a client call
+/// would clear the store's other settings and skip the rules that guard
+/// them -- a store's settings are created by the cluster's operators, and
+/// the owner who approves removals is named only by the current owner or
+/// an operator. reviewsUpdateSettings and reviewsSetPublicDisplay merge
+/// the row and judge the change (settings.go).
+@serverOnly
 @actor
 mutation reviewSettings setReviewDisplay {
   args {
