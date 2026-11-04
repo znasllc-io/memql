@@ -12,7 +12,7 @@
 // that belt-and-braces is deliberate -- the DSL half is what makes the
 // omission survive somebody later writing a second caller.
 
-use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision }
+use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision, reviewRequest }
 
 @description("A review as its MERCHANT sees it, including the shopper's email so they can reply. Never served to a storefront.")
 @row
@@ -98,5 +98,27 @@ shape reviewSettings reviewSettingsFull {
   requestTemplateId
   notifyEmail
   removalApproverUserId
+  row.createdAt
+}
+
+@description("A buyer's review link, as the pack reads it. Carries the token's HASH, never the token; never served to a storefront.")
+@row
+shape reviewRequest reviewRequestFull {
+  row.id
+  ownerUserId
+  storeId
+  accountId
+  siteId
+  orderGid
+  orderName
+  productHandle
+  productTitle
+  email
+  tokenHash
+  issuedAt
+  expiresAt
+  sentAt
+  sendState
+  sendNote
   row.createdAt
 }

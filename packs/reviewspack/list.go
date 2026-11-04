@@ -82,7 +82,7 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			reviewIDs = append(reviewIDs, id)
 		}
 	}
-	decisions, err := p.decisionsByReview(ctx, storeID, reviewIDs)
+	decisions, err := p.decisionsByReview(ctx, storeID, canonicalReviewIDs(reviewIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 		if id == "" {
 			continue
 		}
-		state := StateOf(asInt(row["revision"]), decisions[id])
+		state := StateOf(asInt(row["revision"]), decisions[canonicalReviewID(id)])
 		if want != "all" && string(state) != want {
 			continue
 		}
@@ -106,10 +106,10 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 			out[k] = v
 		}
 		out["state"] = string(state)
-		if last := lastDecision(decisions[id]); last != nil {
+		if last := lastDecision(decisions[canonicalReviewID(id)]); last != nil {
 			out["lastDecision"] = last
 		}
-		out["decisionCount"] = len(decisions[id])
+		out["decisionCount"] = len(decisions[canonicalReviewID(id)])
 		at, _ := time.Parse(time.RFC3339Nano, asString(row["createdAt"]))
 		matched = append(matched, entry{row: out, at: at})
 	}

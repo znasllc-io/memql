@@ -319,7 +319,14 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("shopper surface: the write was refused",
 			"component", "server", "pack", pack, "form", name,
 			"site", site.ID, "err", err)
-		h.redirect(w, r, form.RedirectError, shopperReasonFailed)
+		// A REFUSAL THE FORM DECLARED is told by name, so the merchant's page
+		// can say what happened ("this link has expired"); every other error
+		// is still "failed" and its text stays in the log.
+		reason := shopperReasonFailed
+		if code, declared := memql.ShopperRefusalCode(err, form.Refusals); declared {
+			reason = code
+		}
+		h.redirect(w, r, form.RedirectError, reason)
 		return
 	}
 
@@ -432,6 +439,12 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Warn("shopper surface: the read was refused",
 			"component", "server", "pack", pack, "read", name, "site", site.ID, "err", err)
+		// 422 for a refusal the read declared: the request was understood and
+		// the answer is a reason the caller can act on, not a fault.
+		if code, declared := memql.ShopperRefusalCode(err, read.Refusals); declared {
+			writeShopperJSONError(w, http.StatusUnprocessableEntity, code)
+			return
+		}
 		writeShopperJSONError(w, http.StatusBadGateway, shopperReasonFailed)
 		return
 	}

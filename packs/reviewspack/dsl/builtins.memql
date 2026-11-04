@@ -73,3 +73,39 @@ builtin reviewsList {
   limit    integer  @description("Page size; 50 when omitted, at most 200.")
   after    string   @description("The cursor the previous page answered as next.")
 }
+
+@executor("integration.reviews.submitFromLink")
+@args(profile="object")
+@description("THE SHOPPER FORM'S CONSTRUCT: a review written, or edited, through a buyer's link. Checks the link -- its store, its product, its expiry, and whether its review can still change -- and refuses by name: link_invalid, link_expired, link_used. A review through a link is verified; an edit is the next revision of the same row and waits again.")
+builtin reviewsSubmitFromLink {
+  requestToken   string   @required  @description("The link's token, from its t parameter.")
+  productHandle  string   @required  @description("The product the link names.")
+  body           string   @required  @description("The review text.")
+  title          string   @description("Optional headline.")
+  rating         integer  @description("Optional 1-5 rating.")
+  authorName     string   @description("What the writer calls themselves.")
+  authorEmail    string   @description("The writer's email, never published.")
+  storeId        string   @required  @description("Stamped by the bff from the binding the post arrived through.")
+  siteId         string   @description("Stamped by the bff.")
+  submissionId   string   @description("Stamped by the bff; unused, the row id is the link's.")
+}
+
+@executor("integration.reviews.draftForLink")
+@args(profile="object")
+@description("THE DRAFT READ: what the buyer wrote through their link, so reopening it pre-fills the form, and the same named refusals as the form so a closed link is caught before anyone types. Never carries an address or the token's hash.")
+builtin reviewsDraftForLink {
+  requestToken   string  @required  @description("The link's token.")
+  productHandle  string  @description("The product the link names, when the page has it.")
+  storeId        string  @required  @description("Stamped by the bff.")
+  siteId         string  @description("Stamped by the bff.")
+}
+
+@executor("integration.reviews.issueRequest")
+@args(profile="object")
+@description("Mint one buyer's review link by hand -- the cluster's operators only, for testing a store before it goes live or re-sending a link on the store's request. The order line must earn one (a paid line above $0 of a paid, uncancelled order). Answers the link once; only its hash is kept.")
+builtin reviewsIssueRequest {
+  storeId        string  @required  @description("The store the order was placed on.")
+  orderGid       string  @required  @description("The mirrored order.")
+  productHandle  string  @required  @description("The product of that order to review.")
+  siteId         string  @required  @description("The store's site the link points at.")
+}

@@ -3,6 +3,8 @@ package reviewspack
 import (
 	"context"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // fakeWriter records every write a capability makes. A refusal must happen
@@ -16,10 +18,15 @@ type fakeWriter struct {
 type writeCall struct {
 	mutation string
 	args     map[string]any
+	actor    string // the user the write runs as
 }
 
-func (f *fakeWriter) Write(_ context.Context, mutation string, args map[string]any) error {
-	f.calls = append(f.calls, writeCall{mutation: mutation, args: args})
+func (f *fakeWriter) Write(ctx context.Context, mutation string, args map[string]any) error {
+	actor := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		actor = ac.UserId
+	}
+	f.calls = append(f.calls, writeCall{mutation: mutation, args: args, actor: actor})
 	return nil
 }
 

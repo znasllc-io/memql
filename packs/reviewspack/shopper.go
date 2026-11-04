@@ -35,13 +35,22 @@ func registerShopperSurface() {
 	memql.RegisterShopperForm(memql.ShopperForm{
 		Pack:      Domain,
 		Name:      "review",
-		Construct: "submitReview",
-		Description: "A shopper submits a review of a product. Plain HTML form post, " +
-			"no JavaScript; answers 303.",
+		Construct: "reviewsSubmitFromLink",
+		// A BUILTIN, because a review now arrives through a buyer's link: the
+		// construct must find the link by its token, judge it, and write the
+		// first submission or the next revision of the same row -- reads a
+		// mutation body cannot make.
+		Kind: memql.ShopperReadKindBuiltin,
+		Description: "A buyer submits, or edits, a review through the link their " +
+			"review-request email carried. Plain HTML form post; answers 303.",
 		Fields: []memql.ShopperField{
 			{
+				Name: "requestToken", Required: true, MaxLength: 200,
+				Description: "The link's token, from its t parameter. Without one the review is refused as link_invalid.",
+			},
+			{
 				Name: "productHandle", Required: true, MaxLength: 200,
-				Description: "The storefront product handle being reviewed.",
+				Description: "The product the link names.",
 			},
 			{
 				Name: "body", Required: true, MaxLength: 4000,
@@ -52,11 +61,8 @@ func registerShopperSurface() {
 				Description: "An optional short title.",
 			},
 			{
-				// NUMERIC, so the mutation's @minimum/@maximum see a number
-				// rather than the string a form always sends. A rating that
-				// arrived as "5" would be refused by the concept's own type
-				// and the shopper would be told their review was invalid
-				// with nothing naming why.
+				// NUMERIC, so the builtin sees a number rather than the string
+				// a form always sends.
 				Name: "rating", Numeric: true, MaxLength: 2,
 				Description: "An optional 1-5 star rating.",
 			},
@@ -75,6 +81,29 @@ func registerShopperSurface() {
 		// happened, rather than in ours.
 		RedirectOK:    "/reviews/thank-you",
 		RedirectError: "/reviews/problem",
+		// The link's own refusals, by name, so the merchant's page can say
+		// "this link has expired" rather than "something went wrong".
+		Refusals: LinkRefusals,
+	})
+
+	memql.RegisterShopperRead(memql.ShopperRead{
+		Pack:      Domain,
+		Name:      "draft",
+		Construct: "reviewsDraftForLink",
+		Kind:      memql.ShopperReadKindBuiltin,
+		Description: "What the buyer wrote through their link, so reopening it pre-fills the form, " +
+			"or which of the link's refusals applies, before anyone types.",
+		Fields: []memql.ShopperField{
+			{
+				Name: "requestToken", Required: true, MaxLength: 200,
+				Description: "The link's token.",
+			},
+			{
+				Name: "productHandle", MaxLength: 200,
+				Description: "The product the link names.",
+			},
+		},
+		Refusals: LinkRefusals,
 	})
 
 	memql.RegisterShopperRead(memql.ShopperRead{

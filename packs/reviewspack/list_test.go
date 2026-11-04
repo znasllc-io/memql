@@ -37,11 +37,11 @@ func (l *listReader) RowsWithList(_ context.Context, query string, _ map[string]
 	}
 	within := map[string]bool{}
 	for _, id := range list {
-		within[id] = true
+		within[canonicalReviewID(id)] = true
 	}
 	var out []map[string]any
 	for _, d := range l.decisions {
-		if within[asString(d["reviewId"])] {
+		if within[canonicalReviewID(asString(d["reviewId"]))] {
 			out = append(out, d)
 		}
 	}

@@ -27,7 +27,7 @@ type decideReader struct {
 func (d *decideReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
 	switch query {
 	case "reviewById":
-		if d.review == nil || d.review["id"] != args["reviewId"] {
+		if d.review == nil || canonicalReviewID(asString(d.review["id"])) != canonicalReviewID(args["reviewId"]) {
 			return nil, nil
 		}
 		return []map[string]any{d.review}, nil
@@ -79,7 +79,7 @@ func TestAModeratorPublishesTheRevisionTheyRead(t *testing.T) {
 	}
 	// OWNED BY THE MERCHANT, decided by the moderator: the public read runs
 	// as the site owner and must be able to read every decision on its reviews.
-	for k, want := range map[string]any{"reviewId": "r1", "action": "publish", "storeId": "store-live",
+	for k, want := range map[string]any{"reviewId": "v1:reviews:review:r1", "action": "publish", "storeId": "store-live",
 		"accountId": "acct-shop", "decidedBy": "mod-1", "ownerUserId": "merchant-1"} {
 		if row[k] != want {
 			t.Fatalf("%s = %v, want %v (row %v)", k, row[k], want, row)
@@ -200,5 +200,18 @@ func TestAPublishSendsNoReasonOrNote(t *testing.T) {
 		if v, sent := row[k]; sent {
 			t.Fatalf("%s = %q was sent with a publish; an empty optional field must be omitted", k, v)
 		}
+	}
+}
+
+func TestADecisionRecordsTheFullReviewID(t *testing.T) {
+	r := aReview()
+	r["id"] = "v1:reviews:review:r1"
+	row, err := decide(t, moderatorCtx("mod-1"), &decideReader{review: r},
+		map[string]any{"reviewId": "r1", "action": "publish", "revision": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row["reviewId"] != "v1:reviews:review:r1" {
+		t.Fatalf("reviewId = %v, want the full id every query answers and every reader compares against", row["reviewId"])
 	}
 }

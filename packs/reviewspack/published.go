@@ -148,7 +148,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 	// publish covers the revision the row holds now (state.go). The decision
 	// read is bounded by the reviews in play for the same reason the legacy
 	// moderation read is: it must be complete for what it is asked about.
-	decisions, err := p.decisionsByReview(ctx, storeID, candidates)
+	decisions, err := p.decisionsByReview(ctx, storeID, canonicalReviewIDs(candidates))
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 		if _, isHidden := hidden[id]; isHidden {
 			continue
 		}
-		if StateOf(asInt(row["revision"]), decisions[id]) != StatePublished {
+		if StateOf(asInt(row["revision"]), decisions[canonicalReviewID(id)]) != StatePublished {
 			continue
 		}
 		verified, _ := row["verifiedBuyer"].(bool)
@@ -219,13 +219,22 @@ func (p *Provider) decisionsByReview(ctx context.Context, storeID string, review
 	return out, nil
 }
 
+// canonicalReviewIDs is ids in the one spelling decisions are stored in.
+func canonicalReviewIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, canonicalReviewID(id))
+	}
+	return out
+}
+
 // decisionFromRow reads one reviewDecision row as the reviewDecisionFull shape
 // projects it.
 func decisionFromRow(row map[string]any) Decision {
 	at, _ := time.Parse(time.RFC3339Nano, asString(row["createdAt"]))
 	return Decision{
 		ID:        asString(row["id"]),
-		ReviewID:  strings.TrimSpace(asString(row["reviewId"])),
+		ReviewID:  canonicalReviewID(asString(row["reviewId"])),
 		Action:    asString(row["action"]),
 		Reason:    asString(row["reason"]),
 		Note:      asString(row["note"]),

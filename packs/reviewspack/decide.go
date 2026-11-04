@@ -46,7 +46,7 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	reviewID := strings.TrimSpace(asString(args["reviewId"]))
+	reviewID := canonicalReviewID(asString(args["reviewId"]))
 	action := strings.TrimSpace(asString(args["action"]))
 	reason := strings.TrimSpace(asString(args["reason"]))
 	note := strings.TrimSpace(asString(args["note"]))
@@ -85,7 +85,7 @@ func (p *Provider) decide(ctx context.Context, args map[string]any, _ int) ([]me
 	}
 
 	now := time.Now().UTC()
-	decisionID := "decision-" + slugOf(reviewID) + "-" + strconv.FormatInt(now.UnixNano(), 36)
+	decisionID := "decision-" + slugOf(strings.TrimPrefix(reviewID, reviewIDPrefix)) + "-" + strconv.FormatInt(now.UnixNano(), 36)
 	write := map[string]any{
 		"decisionId":  decisionID,
 		"ownerUserId": owner,

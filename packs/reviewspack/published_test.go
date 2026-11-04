@@ -51,14 +51,21 @@ func (f *fixtureReader) RowsWithList(_ context.Context, query string, args map[s
 	default:
 		return nil, nil
 	}
+	// THE QUERY MATCHES THE STORED SPELLING. Decisions are stored at the
+	// full review id, so the fixture compares both sides in that form; the
+	// legacy moderation rows are compared as they come.
+	norm := func(id string) string { return id }
+	if query == "reviewDecisionsForReviews" {
+		norm = canonicalReviewID
+	}
 	var out []map[string]any
 	within := map[string]struct{}{}
 	for _, id := range list {
-		within[id] = struct{}{}
+		within[norm(id)] = struct{}{}
 	}
 	for _, row := range source {
 		id, _ := row["reviewId"].(string)
-		if _, ok := within[id]; ok {
+		if _, ok := within[norm(id)]; ok {
 			out = append(out, row)
 		}
 	}
@@ -244,26 +251,34 @@ func TestTheReadRefusesWithoutAStore(t *testing.T) {
 
 // The pack's declared shopper surface is what a member of the public can
 // reach, and it must not grow by accident.
-func TestTheDeclaredShopperSurfaceIsExactlyTwoRoutes(t *testing.T) {
+func TestTheDeclaredShopperSurfaceIsExactlyThreeRoutes(t *testing.T) {
 	t.Cleanup(memql.ResetShopperSurfaceForTest)
 	memql.ResetShopperSurfaceForTest()
 	registerShopperSurface()
 
 	surface := memql.ShopperSurface()
-	if len(surface) != 2 {
-		t.Fatalf("the reviews pack declares %d shopper routes, want exactly 2 "+
-			"(the review form and the published read): %+v", len(surface), surface)
+	if len(surface) != 3 {
+		t.Fatalf("the reviews pack declares %d shopper routes, want exactly 3 "+
+			"(the review form, the published read and the draft read): %+v", len(surface), surface)
 	}
-	if memql.ShopperFormFor(Domain, "review") == nil {
-		t.Fatal("the review form must be declared")
+	form := memql.ShopperFormFor(Domain, "review")
+	if form == nil || form.Construct != "reviewsSubmitFromLink" || form.Kind != memql.ShopperReadKindBuiltin {
+		t.Fatalf("the review form must be the link builtin: %+v", form)
+	}
+	if strings.Join(form.Refusals, ",") != "link_expired,link_used,link_invalid" {
+		t.Fatalf("the form declares refusals %v, want the link's three", form.Refusals)
 	}
 	if memql.ShopperReadFor(Domain, "published") == nil {
 		t.Fatal("the published read must be declared")
 	}
+	if draft := memql.ShopperReadFor(Domain, "draft"); draft == nil || draft.Construct != "reviewsDraftForLink" {
+		t.Fatal("the draft read must be declared")
+	}
 	// NOTHING ELSE. createReview, setReviewDisplay, the moderation
 	// capability and the merchant's own lists stay unreachable.
 	for _, name := range []string{"createReview", "setReviewDisplay", "recordModerationAction",
-		"reviewsForStore", "moderationActionsForStore"} {
+		"reviewsForStore", "moderationActionsForStore", "reviewsDecide", "reviewsList", "reviewsIssueRequest",
+		"putReview", "putReviewRequest", "appendReviewDecision", "submitReview"} {
 		if memql.ShopperFormFor(Domain, name) != nil || memql.ShopperReadFor(Domain, name) != nil {
 			t.Fatalf("%s is reachable by the public and must not be", name)
 		}

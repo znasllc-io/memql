@@ -78,6 +78,28 @@ concept reviewDecision {
   decidedBy  string!  @description("v1:identity:user.id of the person who decided, read from the caller, never an argument.")
 }
 
+@version("1.0.0")
+@description("One buyer's review link: a product line of a paid order, at an id derived from (store, order, product) so a line is one link. The link is /reviews/write?product=<handle>&t=<token> on the store's own site; the token is never stored, only its SHA-256. A review written through it is verified. The link closes when its review is published, removed or erased -- read off the review's state, so publishing writes nothing here -- and at expiresAt.")
+@displayCard(primary="productHandle", secondary="orderName", tertiary="expiresAt")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept reviewRequest {
+  ownerUserId    string!    @description("v1:identity:user.id of the MERCHANT -- the store's site owner, whose borrowed authority the shopper path reads this row under. Stamped by writing as that person.")
+  storeId        string!    @description("The store the order was placed on (design D9).")
+  accountId      string     @description("The store's organization, copied from the site, so its people read the requests.")
+  siteId         string     @description("The v1:platform:site the link points at.")
+  orderGid       string!    @description("The mirrored v1:shopify:order this line belongs to.")
+  orderName      string     @description("The order's own name, as the store shows it (e.g. #1009).")
+  productHandle  string!    @description("The product the link reviews; a review through the link is about this product and no other.")
+  productTitle   string     @description("The product's title when the link was made, for the request email.")
+  email          string!    @description("The checkout email the request goes to, copied from the order. Personal data: erased with the writer's data on request.")
+  tokenHash      string!    @description("SHA-256 (hex) of the link's token. The token itself is never stored, so no read of this row yields a working link.")
+  issuedAt       datetime!  @description("When the link was made.")
+  expiresAt      datetime!  @description("When the link stops working: issuedAt plus the store's linkLifetimeDays (14 when unset).")
+  sentAt         datetime   @description("When the request email went out.")
+  sendState      enum("pending", "sent", "skipped", "failed")  @description("Where the request email stands. skipped is a link made by hand, never mailed.")
+  sendNote       string     @description("Why it is skipped or failed, in the mail route's own words.")
+}
+
 @version("1.2.0")
 @description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="storeId")

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -239,6 +240,12 @@ type ShopperForm struct {
 	// origin.
 	RedirectOK    string
 	RedirectError string
+	// Refusals are the codes this form's construct may refuse with BY NAME
+	// (a ShopperRefusal), beyond the four the surface answers itself. The
+	// handler forwards a declared code on ?reason= and answers "failed" for
+	// anything else, so a pack cannot put an arbitrary error on the
+	// merchant's page -- only a code the merchant's page was written for.
+	Refusals []string
 	// Description is what the pack guide and the module inventory show.
 	Description string
 }
@@ -270,7 +277,10 @@ type ShopperRead struct {
 	Kind string
 	// Fields are the arguments the caller may supply. storeId is NOT among
 	// them and cannot be: it is stamped, exactly as on a form.
-	Fields      []ShopperField
+	Fields []ShopperField
+	// Refusals are the codes this read's construct may refuse with by name,
+	// answered as {"error": code}; see ShopperForm.Refusals.
+	Refusals    []string
 	Description string
 }
 
@@ -317,6 +327,9 @@ func RegisterShopperForm(form ShopperForm) {
 	if err := validateShopperRedirect("RedirectError", form.RedirectError); err != nil {
 		panic("memql.RegisterShopperForm: " + err.Error())
 	}
+	if err := validateShopperRefusals(form.Refusals); err != nil {
+		panic("memql.RegisterShopperForm: " + err.Error())
+	}
 	key := shopperKey(form.Pack, form.Name)
 	shopperMu.Lock()
 	defer shopperMu.Unlock()
@@ -345,6 +358,9 @@ func RegisterShopperRead(read ShopperRead) {
 	if read.Kind != ShopperReadKindBuiltin && read.Kind != ShopperReadKindQuery {
 		panic(fmt.Sprintf("memql.RegisterShopperRead: Kind %q is neither %q nor %q",
 			read.Kind, ShopperReadKindBuiltin, ShopperReadKindQuery))
+	}
+	if err := validateShopperRefusals(read.Refusals); err != nil {
+		panic("memql.RegisterShopperRead: " + err.Error())
 	}
 	key := shopperKey(read.Pack, read.Name)
 	shopperMu.Lock()
@@ -508,4 +524,76 @@ func ResetShopperSurfaceForTest() {
 	shopperForms = map[string]ShopperForm{}
 	shopperReads = map[string]ShopperRead{}
 	shopperExtensions = map[string]ShopperExtension{}
+}
+
+// ---------------------------------------------------------------------------
+// NAMED REFUSALS
+// ---------------------------------------------------------------------------
+//
+// A construct that knows WHY it refused -- a review link that expired, one
+// whose review was already published -- returns a ShopperRefusal, and the
+// form or read that reaches it declares the code. The handler forwards a
+// declared code and answers "failed" for every other error, so what a
+// shopper is told is always a code the merchant's page has copy for.
+
+// shopperRefusalPattern is a declared code's shape: it rides a query string
+// and keys a merchant's copy, so lower_snake and short.
+var shopperRefusalPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
+
+// shopperSurfaceReasons are the codes the surface answers itself
+// (component/server/shopper_handler.go). A pack may not declare one: it
+// would make a refusal from the construct indistinguishable from the
+// surface's own.
+var shopperSurfaceReasons = map[string]bool{"invalid": true, "too_large": true, "unavailable": true, "failed": true}
+
+func validateShopperRefusals(codes []string) error {
+	seen := map[string]bool{}
+	for _, code := range codes {
+		if !shopperRefusalPattern.MatchString(code) {
+			return fmt.Errorf("refusal %q is not a lower_snake code", code)
+		}
+		if shopperSurfaceReasons[code] {
+			return fmt.Errorf("refusal %q is one the surface answers itself", code)
+		}
+		if seen[code] {
+			return fmt.Errorf("refusal %q is declared twice", code)
+		}
+		seen[code] = true
+	}
+	return nil
+}
+
+// ShopperRefusal is a refusal a construct may tell a shopper about by name.
+// Code is what the shopper's page keys its copy on; Message is for the log.
+type ShopperRefusal struct {
+	Code    string
+	Message string
+}
+
+func (r *ShopperRefusal) Error() string {
+	if r.Message == "" {
+		return "refused: " + r.Code
+	}
+	return "refused (" + r.Code + "): " + r.Message
+}
+
+// NewShopperRefusal builds a named refusal. Wrap it with %w freely: the
+// handler finds it with errors.As.
+func NewShopperRefusal(code, message string) error {
+	return &ShopperRefusal{Code: code, Message: message}
+}
+
+// ShopperRefusalCode reports the refusal err carries when its code is one
+// of declared, and false for every other error.
+func ShopperRefusalCode(err error, declared []string) (string, bool) {
+	var refusal *ShopperRefusal
+	if !errors.As(err, &refusal) || refusal == nil {
+		return "", false
+	}
+	for _, code := range declared {
+		if code == refusal.Code {
+			return code, true
+		}
+	}
+	return "", false
 }

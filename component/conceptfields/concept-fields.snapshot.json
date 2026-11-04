@@ -5621,6 +5621,45 @@
       }
     },
     {
+      "concept": "v1:reviews:reviewRequest",
+      "file": "packs/reviewspack/dsl/concepts.memql",
+      "fields": [
+        "accountId",
+        "email",
+        "expiresAt",
+        "issuedAt",
+        "orderGid",
+        "orderName",
+        "ownerUserId",
+        "productHandle",
+        "productTitle",
+        "sendNote",
+        "sendState",
+        "sentAt",
+        "siteId",
+        "storeId",
+        "tokenHash"
+      ],
+      "required": [
+        "email",
+        "expiresAt",
+        "issuedAt",
+        "orderGid",
+        "ownerUserId",
+        "productHandle",
+        "storeId",
+        "tokenHash"
+      ],
+      "enums": {
+        "sendState": [
+          "failed",
+          "pending",
+          "sent",
+          "skipped"
+        ]
+      }
+    },
+    {
       "concept": "v1:reviews:reviewSettings",
       "file": "packs/reviewspack/dsl/concepts.memql",
       "fields": [

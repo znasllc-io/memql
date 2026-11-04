@@ -11,8 +11,9 @@
 // gate in every future caller instead is exactly the mistake that ships a
 // storefront rendering reviews a merchant had switched off.
 
-use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision }
-use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull, reviewDecisionFull }
+use reviews.concepts.{ review, moderationAction, reviewSettings, reviewDecision, reviewRequest }
+use shopify.generated.orderLineItem.{ orderLineItem, orderLineItemMirror }
+use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull, reviewDecisionFull, reviewRequestFull }
 
 @description("Every review for one product on one store, newest first -- the merchant's own list, including reviews a moderation decision hides. The operator read behind a moderation screen; the public read is the reviewsPublishedForProduct builtin.")
 @actor
@@ -139,4 +140,39 @@ query reviewDecision reviewDecisionsForStore {
   sort    "row.createdAt", "desc"
   paginate 50
   shape   reviewDecisionFull
+}
+
+@description("The request a link's token belongs to, on one store. The link path's only way in: a token for another store, or no token at all, finds nothing.")
+@unbounded("one request by its token hash -- a token hash is one link")
+@actor
+query reviewRequest reviewRequestByTokenHash {
+  args {
+    storeId    string!
+    tokenHash  string!
+  }
+  filter  row => row.storeId == args.storeId && row.tokenHash == args.tokenHash
+  shape   reviewRequestFull
+}
+
+@description("One request by id.")
+@unbounded("request by id -- bounded to a single row")
+@actor
+query reviewRequest reviewRequestById {
+  args {
+    requestId  string!
+  }
+  filter  row => row.id == args.requestId
+  shape   reviewRequestFull
+}
+
+@description("The lines of one mirrored order, for deciding which of its products earn a review link. Read by the cluster's operators and the request job; the order mirror is cluster-owner tier.")
+@unbounded("one order's lines -- bounded by the order")
+@actor
+query orderLineItem reviewOrderLines {
+  args {
+    storeId   string!
+    orderGid  string!
+  }
+  filter  row => row.storeId == args.storeId && row.parentGid == args.orderGid
+  shape   orderLineItemMirror
 }

@@ -171,3 +171,15 @@ func TestThePublicReadIsNewestFirstAndCutsTheOldest(t *testing.T) {
 		t.Fatalf("summary = %v, want it over all three", out["summary"])
 	}
 }
+
+// ONE SPELLING OF A REVIEW'S ID. A row comes back from a query at its full
+// engine id (v1:reviews:review:<id>) while a link names the bare id; a
+// decision's reviewId is a plain field, compared as text, so the two must
+// meet. A decision recorded against either spelling covers the review.
+func TestADecisionMeetsItsReviewWhicheverWayTheIDIsSpelled(t *testing.T) {
+	rows := reviewRows("v1:reviews:review:r9")
+	out := liveRead(t, liveReader(rows, []map[string]any{decisionRow("r9", ActionPublish, 1, 0)}), nil)
+	if out["count"] != float64(1) {
+		t.Fatalf("a publish recorded on the bare id did not cover the row read at its full id (count %v)", out["count"])
+	}
+}

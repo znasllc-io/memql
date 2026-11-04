@@ -172,3 +172,67 @@ mutation reviewSettings putReviewSettings {
     }
   }
 }
+
+/// Write a review through a buyer's link: the first submission, or the next
+/// revision of the same row. Reached only from reviewsSubmitFromLink, which
+/// checks the link (its store, its product, its expiry, whether its review
+/// can still change) before this runs. verifiedBuyer is set here and nowhere
+/// a form could reach.
+@serverOnly
+@actor
+mutation review putReview {
+  args {
+    reviewId       string!
+    storeId        string!
+    siteId         string
+    productHandle  string!  @maxLength(200)
+    body           string!  @maxLength(4000)
+    title          string   @maxLength(200)
+    rating         int      @minimum(1) @maximum(5)
+    authorName     string   @maxLength(120)
+    authorEmail    string   @maxLength(320)
+    accountId      string
+    requestId      string!
+    verifiedBuyer  bool!
+    revision       int!     @minimum(1)
+  }
+  insert {
+    accept { storeId, siteId, productHandle, body, title, rating, authorName, authorEmail, accountId, requestId, verifiedBuyer, revision }
+    stamp {
+      id: args.reviewId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write one buyer's review link, whole, at its derived id. Reached only from
+/// the builtins that issue links, which write it AS THE SITE OWNER so the
+/// shopper path -- that owner's borrowed authority -- can read it.
+@serverOnly
+@actor
+mutation reviewRequest putReviewRequest {
+  args {
+    requestId      string!
+    storeId        string!
+    accountId      string
+    siteId         string
+    orderGid       string!
+    orderName      string
+    productHandle  string!
+    productTitle   string
+    email          string!
+    tokenHash      string!
+    issuedAt       datetime!
+    expiresAt      datetime!
+    sentAt         datetime
+    sendState      string  @enum("pending", "sent", "skipped", "failed")
+    sendNote       string  @maxLength(1000)
+  }
+  insert {
+    accept { storeId, accountId, siteId, orderGid, orderName, productHandle, productTitle, email, tokenHash, issuedAt, expiresAt, sentAt, sendState, sendNote }
+    stamp {
+      id: args.requestId
+      ownerUserId: actor.userId
+    }
+  }
+}

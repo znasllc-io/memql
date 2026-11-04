@@ -221,3 +221,19 @@ func ValidateDecision(action, reason string, state State, approver bool) error {
 	}
 	return fmt.Errorf("reviews: %q is not a decision", action)
 }
+
+// reviewIDPrefix is a review row's canonical id prefix.
+const reviewIDPrefix = "v1:reviews:review:"
+
+// canonicalReviewID is the ONE spelling a review id is stored and compared
+// in: the full engine id, which is what every query answers a row at. A link
+// names the bare id, and a decision's reviewId is a plain field compared as
+// text (an id filter canonicalizes; a plain field does not), so every writer
+// stores, and every reader compares, the full form.
+func canonicalReviewID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	return reviewIDPrefix + strings.TrimPrefix(id, reviewIDPrefix)
+}

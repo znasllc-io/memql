@@ -73,6 +73,12 @@ type Provider struct {
 	// writer runs the pack's own @serverOnly write mutations (writer.go):
 	// a builtin decides, a mutation writes.
 	writer rowWriter
+	// now is the clock link expiry is judged against; nil is time.Now. A
+	// field so a test can stand at a moment rather than race one.
+	now func() time.Time
+	// orders reads one order, its lines and its products; nil is
+	// engineOrders (request.go). A field for the same reason as now.
+	orders orderReader
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -147,6 +153,45 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"state":   "string (optional) - waiting|published|declined|removed|erased|all",
 				"limit":   "integer (optional) - default 50",
 				"after":   "string (optional) - cursor",
+			},
+		},
+		{
+			Name:        "submitFromLink",
+			Description: "The shopper form's construct: a review written or edited through a buyer's link.",
+			Handler:     p.submitFromLink,
+			ArgsSchema: map[string]string{
+				"requestToken":  "string (required)",
+				"productHandle": "string (required)",
+				"body":          "string (required)",
+				"title":         "string (optional)",
+				"rating":        "integer (optional)",
+				"authorName":    "string (optional)",
+				"authorEmail":   "string (optional)",
+				"storeId":       "string (required) - stamped",
+				"siteId":        "string (optional) - stamped",
+				"submissionId":  "string (optional) - stamped, unused",
+			},
+		},
+		{
+			Name:        "draftForLink",
+			Description: "The draft read: what the buyer wrote through their link, or why the link is closed.",
+			Handler:     p.draftForLink,
+			ArgsSchema: map[string]string{
+				"requestToken":  "string (required)",
+				"productHandle": "string (optional)",
+				"storeId":       "string (required) - stamped",
+				"siteId":        "string (optional) - stamped",
+			},
+		},
+		{
+			Name:        "issueRequest",
+			Description: "Mint one buyer's review link by hand. The cluster's operators only.",
+			Handler:     p.issueRequest,
+			ArgsSchema: map[string]string{
+				"storeId":       "string (required)",
+				"orderGid":      "string (required)",
+				"productHandle": "string (required)",
+				"siteId":        "string (required)",
 			},
 		},
 		{
