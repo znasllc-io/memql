@@ -31,7 +31,7 @@ func sourceRecovery(t *testing.T, snippet string, env ...string) (string, int, s
 }
 
 func TestDroppedGitFetchIsRetriedBeforeOperatorTimeout(t *testing.T) {
-	for _, app := range []string{"cert-manager", "cnpg-operator"} {
+	for _, app := range []string{"cert-manager", "cnpg-operator", "kueue"} {
 		t.Run(app, func(t *testing.T) {
 			out, code, calls := sourceRecovery(t, `function sleep() { SECONDS=$((SECONDS + $1)); }
 TARGET_REVISION=0123456789abcdef
@@ -152,6 +152,49 @@ install_operator_stack
 	}
 	if strings.Contains(calls, "rollout status deployment/barman-cloud") {
 		t.Fatalf("rollout started after the shared deadline:\n%s", calls)
+	}
+}
+
+// Kueue is the stack's third operator (memql#6387): registered from its own
+// manifest after CloudNativePG, waited for in kueue-system, and given only what
+// is LEFT of the one stack deadline, as the second namespace is above. Six
+// rollouts of 20 seconds against 115: Kueue's controller gets the last 15.
+func TestKueueIsTheThirdOperatorOnTheSharedDeadline(t *testing.T) {
+	out, code, calls := sourceRecovery(t, `
+function _register_operator_app() { printf 'register %s\n' "$1" >> "$FAKE_KUBECTL_LOG"; }
+function kubectl() {
+    command kubectl "$@"
+    local result=$?
+    case "$*" in *"rollout status"*) SECONDS=$((SECONDS + 20));; esac
+    return "$result"
+}
+unset SECONDS
+SECONDS=0
+OPERATOR_STACK_TIMEOUT=115
+install_operator_stack
+echo "ready=${OPERATOR_STACK_READY}"
+`)
+	if code != 0 || !strings.Contains(out, "ready=true") {
+		t.Fatalf("the operator stack did not finish within its deadline: %d\n%s\n%s", code, out, calls)
+	}
+	order := []string{
+		"register deploy/argocd/apps/cert-manager.yaml",
+		"rollout status deployment/cert-manager-webhook -n cert-manager",
+		"register deploy/argocd/apps/cnpg-operator.yaml",
+		"rollout status deployment/barman-cloud -n cnpg-system",
+		"register deploy/kueue/application.yaml",
+		"rollout status deployment/kueue-controller-manager -n kueue-system --timeout=15s",
+	}
+	at := 0
+	for _, want := range order {
+		i := strings.Index(calls[at:], want)
+		if i < 0 {
+			t.Fatalf("%q missing, or out of order after %q:\n%s", want, calls[:at], calls)
+		}
+		at += i + len(want)
+	}
+	if n := strings.Count(calls, "rollout status"); n != 6 {
+		t.Fatalf("%d rollouts, want 6 (three cert-manager, two CNPG, one Kueue):\n%s", n, calls)
 	}
 }
 

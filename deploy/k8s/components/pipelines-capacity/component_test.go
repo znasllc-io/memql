@@ -32,7 +32,9 @@ type renderedObject struct {
 
 // renderComponent renders the component over one instance overlay, the way an
 // installation composes it: above the overlay, with whatever else it states in
-// that same layer (extra).
+// that same layer (extra). An overlay that composes the component itself (local,
+// since memql#6387) is rendered as it ships, with extra in a layer above it: a
+// second composition would add every object twice.
 func renderComponent(t *testing.T, target, extra string) []renderedObject {
 	t.Helper()
 	renderer, args := "kubectl", []string{"kustomize", "--load-restrictor", "LoadRestrictionsNone"}
@@ -59,7 +61,11 @@ func renderComponent(t *testing.T, target, extra string) []renderedObject {
 		}
 		return filepath.ToSlash(p)
 	}
-	source := fmt.Sprintf("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- %s\ncomponents:\n- %s\ntransformers:\n- %s\n%s", relative(overlay), relative(here), relative(filepath.Join(overlay, "namespace-transformer.yaml")), extra)
+	components := fmt.Sprintf("components:\n- %s\n", relative(here))
+	if composesComponent(t, overlay, here) {
+		components = ""
+	}
+	source := fmt.Sprintf("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- %s\n%stransformers:\n- %s\n%s", relative(overlay), components, relative(filepath.Join(overlay, "namespace-transformer.yaml")), extra)
 	if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +88,37 @@ func renderComponent(t *testing.T, target, extra string) []renderedObject {
 	}
 }
 
+// composesComponent says whether an overlay's own kustomization lists this
+// component, read from the file rather than kept in a list beside it.
+func composesComponent(t *testing.T, overlay, component string) bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(overlay, "kustomization.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var k struct {
+		Components []string `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &k); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range k.Components {
+		if filepath.Clean(filepath.Join(overlay, c)) == filepath.Clean(component) {
+			return true
+		}
+	}
+	return false
+}
+
+// podsBoundTargets keep step requests below their limits on purpose: the local
+// cluster's queue is bound by pods alone, with budgets no two step pods can
+// reach, so a reservation equal to the limit would only stop its large steps
+// from ever starting at Docker's minimum size (design record
+// 2026-10-30-local-kueue-queue-design.md, "Quotas and fit").
+// deploy/k8s/overlays/render_local_queue_test.go holds that the budgets cannot
+// bind there. Every other target reserves what it may use.
+var podsBoundTargets = map[string]bool{"local": true}
+
 func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 	for _, target := range []string{"local", "cloud", "cloud-entry"} {
 		t.Run(target, func(t *testing.T) {
@@ -102,6 +139,9 @@ func TestAdmissionComponentRendersSameBoundariesOnEveryTarget(t *testing.T) {
 					}
 					found[o.Kind] = true
 				case "LimitRange/memql-pipelines-limits":
+					if podsBoundTargets[target] {
+						break
+					}
 					for _, raw := range o.Spec["limits"].([]any) {
 						v := raw.(map[string]any)
 						if v["type"] != "Container" {
@@ -185,6 +225,33 @@ func promoterOf(t *testing.T, objects []renderedObject) promoterJob {
 	return promoterJob{}
 }
 
+// renderedWorkbenchImage is the workbench Deployment's engine image as rendered.
+func renderedWorkbenchImage(t *testing.T, objects []renderedObject) string {
+	t.Helper()
+	for _, o := range objects {
+		if o.Kind != "Deployment" || o.Metadata.Name != "workbench" {
+			continue
+		}
+		raw, err := yaml.Marshal(o.Spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct{ Image string }
+				}
+			}
+		}
+		if err := yaml.Unmarshal(raw, &spec); err != nil || len(spec.Template.Spec.Containers) == 0 {
+			t.Fatalf("the workbench Deployment has no container: %v", err)
+		}
+		return spec.Template.Spec.Containers[0].Image
+	}
+	t.Fatal("no workbench Deployment rendered")
+	return ""
+}
+
 // The promoter is one thing on every target: what a target varies is the overlay
 // above it, in the same layer as its images.
 func TestDeadlinePromoterRendersTheSameOnEveryTarget(t *testing.T) {
@@ -206,6 +273,18 @@ func TestDeadlinePromoterRendersTheSameOnEveryTarget(t *testing.T) {
 		t.Run(target, func(t *testing.T) {
 			objects := renderComponent(t, target, "")
 			job := promoterOf(t, objects)
+			// Where the overlay composes the component itself, its images: block
+			// has already retargeted the promoter with the workbench, so the two
+			// must match as rendered. Above an overlay, the base's is what an
+			// installation's images: entry for the workbench will retarget.
+			wantImage := workbenchImage
+			here, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if composesComponent(t, filepath.Join(here, "../../overlays", target), here) {
+				wantImage = renderedWorkbenchImage(t, objects)
+			}
 			if job.Schedule != "*/5 * * * *" || job.ConcurrencyPolicy != "Forbid" {
 				t.Errorf("schedule %q, concurrency %q", job.Schedule, job.ConcurrencyPolicy)
 			}
@@ -228,8 +307,8 @@ func TestDeadlinePromoterRendersTheSameOnEveryTarget(t *testing.T) {
 				t.Errorf("security context %+v; 65532 is the runtime image's nonroot user", pod.SecurityContext)
 			}
 			container := pod.Containers[0]
-			if container.Image != workbenchImage {
-				t.Errorf("image %q, want the base workbench's %q, so every images: entry that retargets the workbench retargets this", container.Image, workbenchImage)
+			if container.Image != wantImage {
+				t.Errorf("image %q, want the workbench's %q, so every images: entry that retargets the workbench retargets this", container.Image, wantImage)
 			}
 			if !reflect.DeepEqual(container.Command, []string{"/app/memql", "pipeline-deadline-priority"}) {
 				t.Errorf("command %v", container.Command)

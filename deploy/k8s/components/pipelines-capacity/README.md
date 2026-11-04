@@ -13,11 +13,25 @@ within the dedicated pool; the CPU budget is reserved processing capacity,
 not a cap on instantaneous utilization. This does not move ordinary Workbench
 commands out of their service pods.
 
-**No overlay in this repository composes this component.** An installation does,
-above its instance overlay. That includes the local overlay: a k3d cluster has no
-Kueue and no queue, and its steps wait for a slot under `count/jobs.batch` before a
-Job exists. `component_test.go` renders the component over all three overlays
-regardless, so what an installation composes is what the gates checked.
+**The local overlay composes this component; the cloud overlays do not.** A cloud
+installation composes it above its instance overlay, following the order below.
+`component_test.go` renders it over all three overlays, the local one as it ships, so
+what an installation composes is what the gates checked.
+
+**Local's sizing is its own** (memql#6387; design record
+`docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md`). `make up` registers
+the Kueue operator, and `deploy/argocd/local/project.yaml` allows this component's
+cluster-scoped kinds. The local overlay sets `stopPolicy: None`, two pods at once as
+the only binding budget, CPU, memory and disk budgets no two step pods can reach, and
+an operator ceiling equal to them (`overlays/local/pipelines-queue-values.yaml`). It
+keeps the step requests it had, so it departs from step 4's rule below on purpose:
+reserving each container's limit would stop the engine's 8 GiB steps from ever
+starting at Docker's minimum size, and a step over a budget blocks the strict queue's
+head. Its Job quota is 32, and the overlay rolls the workbench with the queue's name
+(`memql.io/pipeline-queue`), so the sync that adds the queue replaces every runner
+that predates it. On a cluster scaled to two workbenches the roll takes one pod at a
+time, so until the new pods are ready the old one can still create unlabelled Jobs
+under the raised quota. The design record says what was measured and what was not.
 
 ## Installation order
 

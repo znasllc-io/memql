@@ -15,7 +15,7 @@ Epic memql#5478, task memql#5492.
 | `Role` + `RoleBinding/memql-pipelines-runner` | `memql-pipelines` | The runner's grant, bound to `memql-engine-workbench` |
 | `ServiceAccount/memql-pipelines-step` | `memql-pipelines` | The step pod's identity: no token mounted, nothing bound |
 | `PersistentVolumeClaim/memql-pipelines-cache` | `memql-pipelines` | Go and npm caches shared across runs, mounted at `/cache` |
-| `ResourceQuota/memql-pipelines-ceiling` | `memql-pipelines` | How many steps run at once (`count/jobs.batch`) |
+| `ResourceQuota/memql-pipelines-ceiling` | `memql-pipelines` | How many step Jobs may exist at once (`count/jobs.batch`); on a cluster with the pipeline queue the queue's `pods` budget decides how many run |
 | `LimitRange/memql-pipelines-limits` | `memql-pipelines` | Every step container's default requests and limits |
 | `NetworkPolicy/memql-pipelines-isolate` | `memql-pipelines` | Nothing in; DNS and the public internet out |
 | `ConfigMap/memql-pipelines` | the mesh's | `MEMQL_PIPELINES_NAMESPACE`, `MEMQL_PIPELINES_CLONE_IMAGE`, `MEMQL_PIPELINES_WORKSPACE_LIMIT` |
@@ -142,10 +142,12 @@ can run.
   data or explicitly provision a replacement; changing a selector does not
   move a volume. The unset setting retains unconstrained Linux placement.
   Locally, `make up` creates the pool's node (`k3d-<cluster>-build-0`, capped
-  at two thirds of the Docker host by default) and the local overlay permits
-  two Jobs at once on it. All k3d nodes share the Docker host's resources;
-  CPU and memory caps do not isolate disk I/O. Raising the Job ceiling requires
-  cold-cache storage measurements alongside compute measurements. This setting
+  at two thirds of the Docker host by default) and the local overlay's
+  pipeline queue runs two steps at once on it (its `pods` budget,
+  `overlays/local/pipelines-queue-values.yaml`). All k3d nodes share the Docker
+  host's resources; CPU and memory caps do not isolate disk I/O. Raising that
+  number requires cold-cache storage measurements alongside compute
+  measurements. This setting
   neither provisions a node pool nor proves every node's network enforcement.
   The first credential-free isolation listener may wait up to ten minutes for
   a node to provision and pull its image. Holder readiness then has 90 seconds

@@ -136,7 +136,7 @@ test("the from-source lane still asks for no registry image", () => {
   const released = installPlan(options({ tag: "v9.9.9" }))(STEP("clusterUp", "k3d.up"));
   assert.equal(released.action, "run");
   if (released.action === "run") {
-    assert.equal(released.params["image-tag"], "9.9.9");
+    assert.equal(released.params["image-tag"], "v9.9.9");
     assert.equal(released.params["image-registry"], DEFAULT_IMAGE_REGISTRY);
   }
 });

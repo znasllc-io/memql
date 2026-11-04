@@ -47,6 +47,7 @@ only after a deploy.
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as the cloud) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
+| Pipeline queue | Kueue (`deploy/kueue`, registered by `make up`) and `pipelines-capacity` in the local overlay: two steps at once, today's step requests | the same controller and component, composed by an installation above its overlay with its own budgets | same controller, queue, strict order and promoter; only the budgets and step requests differ |
 | Database | CloudNativePG Cluster (`memql-db`), 1 instance, WAL + base backups to Azurite | CloudNativePG Cluster (`memql-db`), 3 instances across 3 zones, WAL + base backups to Azure Blob | config only -- **same operator + manifests since memql#3846**; only instances/sizes/backup destination differ |
 | Connection pooler | not present locally (single db-pool pod, direct) | not present -- both DSNs point at `memql-db-rw` directly; a PgBouncer `Pooler` ships ready but not enabled (`cnpg-db/optional/pooler`) | config only |
 | Blob storage | Azurite emulator | Azure Blob | config only |
@@ -234,10 +235,34 @@ capped at two thirds of the Docker host's CPUs and memory by default (at least
 2 CPUs and 4g), or what you pass.
 
 These caps do not isolate disk I/O: all k3d nodes still share the Docker host's
-storage. The local overlay allows two pipeline Jobs at once to limit concurrent
-writes. Before raising that ceiling, verify cold-cache builds while monitoring
+storage. The local pipeline queue admits two steps at once to limit concurrent
+writes (its `pods` budget, `deploy/k8s/overlays/local/pipelines-queue-values.yaml`).
+Before raising that number, verify cold-cache builds while monitoring
 the serving cluster's storage latency and node restarts; warm-cache passes alone
 do not establish that the host can sustain the larger workload.
+
+### The pipeline queue
+
+Steps reach the build node through production's queue: the Kueue controller,
+which `make up` registers with cert-manager and CloudNativePG, and the
+`pipelines-capacity` component, which the local overlay composes. Each step's Job is
+created suspended and admitted in class order, then age; the deadline promoter
+moves a waiting step forward as its run nears its ceiling. Kueue's webhooks fail
+open, so a controller restart costs a waiting step time, not a failure. To see the
+queue:
+
+```bash
+kubectl get clusterqueue memql-background
+```
+
+```bash
+kubectl -n memql-pipelines get workloads
+```
+
+A cluster brought up before the queue existed gets the controller and the AppProject
+it needs on its next `make up`. Until then, if its Application follows a revision
+that composes the queue, Argo CD fails that sync on the unknown kinds and the mesh
+keeps running what it had.
 
 ```bash
 make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # explicit caps

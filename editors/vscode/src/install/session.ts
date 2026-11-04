@@ -63,6 +63,7 @@ import {
   DEFAULT_REGISTRATION_MODE,
   DEFAULT_STACK_TAG,
   MAIN_BRANCH_CHOICE,
+  imageTagFor,
   imageTagForVersion,
   isMainBranchChoice,
 } from "./stackPin.js";
@@ -615,14 +616,23 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // by a new route. `recordedCheckout().fromSource` reads the lane back
           // off the receipt's own `buildImages` entry.
           //
-          // CONVERTED, not passed through: git tags carry the `v` and image
-          // tags do not. See imageTagFor.
+          // CONVERTED, not passed through: a release's images carry the tag
+          // its publication wrote, bare before v0.31.3 and the git tag from
+          // then on. See imageTagFor.
+          //
+          // A REPLAYED TAG GOES THROUGH THE SAME CONVERSION. It names the same
+          // release either way; what the conversion fixes is its spelling. An
+          // extension built before the `v` was understood recorded `0.31.12`
+          // for a v0.31.12 install, which no registry has, so a verbatim replay
+          // would fail the repair exactly as it failed the install. A release
+          // published bare (`0.17.1`) comes back unchanged, and a value that is
+          // not a release passes through.
           ...(imagesFromSource(opts)
             ? {}
             : {
                 "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
                 "image-tag":
-                  (opts.imageTag ?? "").trim() || imageTagForVersion(opts.tag ?? ""),
+                  imageTagFor((opts.imageTag ?? "").trim()) || imageTagForVersion(opts.tag ?? ""),
               }),
           // The FOURTH consumer of the typed domain (memql#3593). The other
           // three place it on the MACHINE -- the hosts block, the certificate,

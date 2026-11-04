@@ -53,7 +53,7 @@ this has to fit in it at once:
 
 | What | Memory | Where the figure comes from |
 |---|---|---|
-| The cluster in Docker | 8 GB | Docker Desktop's allocation. 4.8 GiB was in use across 37 pods at idle, measured |
+| The cluster in Docker | 8 GB | Docker Desktop's allocation. 4.8 GiB was in use across 37 pods at idle, measured before the pipeline queue, whose controller and its resource definitions add about 0.3 GiB more (271 MiB on an otherwise empty cluster, measured 2026-10-30) |
 | macOS, Cockpit and a browser | 8 GB | Allowance |
 | Chat and embeddings, minimum set | 11.4 GB | Catalog estimate at 32K chat and 8K embedding context ([by machine class](local-models.md#what-to-pull-by-machine-class)) |
 | Chat and embeddings, recommended set | 22.7 GB | The same estimate for `qwen3.8:27b` |

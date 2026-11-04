@@ -1,0 +1,91 @@
+# THE LOCAL CLUSTER'S AppProject (memql#6387): deploy/argocd/apps/project.yaml
+# plus the cluster-scoped kinds of the pipeline queue, and nothing else.
+# scripts/k3d/up.sh applies this by default; a downstream stack still passes its
+# own with --project-manifest.
+#
+# WHY A COPY. The local overlay composes deploy/k8s/components/pipelines-capacity,
+# which renders eight cluster-scoped kinds the shared project refuses, so Argo CD
+# would reject the overlay's sync. The cloud overlays render none of them, and
+# widening the shared project would let any Application there create a
+# ClusterRoleBinding. An installation that composes the component on the cloud
+# allows them in its own project, as the component's README says.
+#
+# WHY HERE, NOT IN deploy/argocd/apps/. That directory is the cloud's
+# app-of-apps source (root.yaml), and this project is the local cluster's alone.
+#
+# scripts/k3d/up_local_queue_test.go holds this file to the shared one plus
+# exactly these kinds: change the shared file and this one together.
+#
+# The shared file's header follows, unchanged.
+#
+# AppProject scoping the memql GitOps surface (deployment-v2 Phase 2, #700).
+# Restricts what the reconciler may deploy: only THIS repo, only the memql,
+# memql-pipelines (the Jobs pipeline steps run as), memql-build-system (the
+# optional image-builder profiles) and argocd (for the
+# app-of-apps) namespaces, on the in-cluster API. A tighter blast radius than
+# the default project.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: memql
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: MemQL engine mesh on AKS (digest-pinned overlays)
+  sourceRepos:
+    - https://github.com/znasllc-io/memql.git
+  # An Application whose destination namespace is missing from this list is
+  # rejected at sync. There is ONE mesh namespace (epic memql#3943): a second
+  # environment is a second install, with its own ArgoCD and its own project.
+  #
+  # memql-pipelines is NOT a second mesh. It is where pipeline steps run, as
+  # Jobs the workbench creates (epic memql#5478, task #5492): the instance
+  # overlays render that namespace and its Role, quota, limits, cache and
+  # network policy from deploy/k8s/components/pipelines, so the Application
+  # reconciles objects there and is refused at sync without this entry.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: memql
+    - server: https://kubernetes.default.svc
+      namespace: memql-pipelines
+    - server: https://kubernetes.default.svc
+      namespace: memql-build-system
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+  # Cluster-scoped resources the mesh legitimately needs (none today beyond the
+  # mesh/pipeline namespaces and the optional builder namespace). Keep
+  # empty-ish; widen on need.
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    # The public-entry overlay manages a cert-manager ClusterIssuer
+    # (letsencrypt-prod) for the ingress TLS certs -- a cluster-scoped resource
+    # the memql app legitimately owns, so the reconciler must be permitted it.
+    - group: cert-manager.io
+      kind: ClusterIssuer
+    # The pipeline queue (deploy/k8s/components/pipelines-capacity): the
+    # ClusterQueue, its flavor and the promoter's priority classes, the
+    # operator's capacity ceiling and the admission policy that enforces it,
+    # and the one ClusterRole and binding through which the Cluster app reads
+    # the ceiling and patches the queue's budget. That ClusterRole names its
+    # three objects; render_pipelines_test.go holds it to them.
+    - group: kueue.x-k8s.io
+      kind: ClusterQueue
+    - group: kueue.x-k8s.io
+      kind: ResourceFlavor
+    - group: kueue.x-k8s.io
+      kind: WorkloadPriorityClass
+    - group: capacity.memql.io
+      kind: BackgroundCapacityPolicy
+    - group: admissionregistration.k8s.io
+      kind: ValidatingAdmissionPolicy
+    - group: admissionregistration.k8s.io
+      kind: ValidatingAdmissionPolicyBinding
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'

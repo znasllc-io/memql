@@ -1065,6 +1065,12 @@ const MANIFEST_SUBCOMMAND_FLOORS: readonly { manifest: string; subcommand: strin
   // #5631: the environment bootstrap and pack boot ordering the local
   // overlay's package-DSL init container needs. v0.19.1 had no dsl-fetch.
   { manifest: "deploy/k8s/components/dsl-packages/kustomization.yaml", subcommand: "dsl-fetch", since: "v0.22.10" },
+  // #6382: the local overlay's queue runs the deadline promoter every five
+  // minutes on the workbench image. v0.31.11 and earlier have no such
+  // subcommand; read from their source (not run), the word falls through to a
+  // node's own startup inside the promoter's 128 MiB pod, killed at its
+  // 120-second deadline, every pass.
+  { manifest: "deploy/k8s/components/pipelines-capacity/deadline-priority.yaml", subcommand: "pipeline-deadline-priority", since: "v0.31.12" },
 ];
 
 test("the pin is not older than any engine subcommand the shipped manifests run", async () => {
@@ -1079,7 +1085,7 @@ test("the pin is not older than any engine subcommand the shipped manifests run"
       relation === "current" || relation === "ahead",
       `DEFAULT_STACK_TAG ${DEFAULT_STACK_TAG} ${relation === "behind" ? "predates" : "cannot be compared with"} ` +
         `${floor.since}, the first release whose \`memql ${floor.subcommand}\` ${floor.manifest} can run. ` +
-        `A --commit install pairs those manifests with this pin's images, so every one fails on that init container.`,
+        `A --commit install pairs those manifests with this pin's images, so every one fails where they run it.`,
     );
   }
 });
@@ -1343,30 +1349,35 @@ test("clusterUp is told to pull published images, not locally built ones", async
     assert.equal(decision.params["image-registry"], DEFAULT_IMAGE_REGISTRY);
     // THE SAME RELEASE as the manifests -- pinning one and floating the other
     // would run this version's images against another version's deploy tree --
-    // but in the IMAGE spelling. Git tags carry the `v`, image tags do not
-    // (memql#3574), and asking a registry for `memql-bff:v0.16.0` is an
-    // ImagePullBackOff whose cause is one character.
+    // but in the spelling its images were PUBLISHED under, which is not always
+    // the git tag's: bare before v0.31.3 (memql#3574), the git tag from then on.
+    // Either mismatch is an ImagePullBackOff whose cause is one character;
+    // imageTag.test.ts pins both sides of the boundary.
     assert.equal(decision.params["image-tag"], imageTagFor(DEFAULT_STACK_TAG));
-    assert.doesNotMatch(decision.params["image-tag"]!, /^v/);
   }
 });
 
 test("an explicit tag moves the images with it", async () => {
-  const plan = installPlan(options({ tag: "v9.9.9" }));
-  const decision = plan({
-    id: "clusterUp",
-    script: "k3d.up",
-    label: "Working",
-    description: "",
-    elevation: "none",
-    retained: false,
-    retainedReason: "",
-    shared: false,
-    sharedReason: "",
-    verify: { kind: "scriptOk" },
-  });
-  if (decision.action === "run") {
-    assert.equal(decision.params["image-tag"], "9.9.9");
+  // One release on each side of the publication boundary (imageTagFor): the
+  // images follow the tag, in the spelling that release was published under.
+  for (const [tag, imageTag] of [["v9.9.9", "v9.9.9"], ["v0.17.1", "0.17.1"]]) {
+    const plan = installPlan(options({ tag }));
+    const decision = plan({
+      id: "clusterUp",
+      script: "k3d.up",
+      label: "Working",
+      description: "",
+      elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
+      verify: { kind: "scriptOk" },
+    });
+    assert.equal(decision.action, "run");
+    if (decision.action === "run") {
+      assert.equal(decision.params["image-tag"], imageTag);
+    }
   }
 });
 
@@ -1385,7 +1396,19 @@ test("a recorded image tag outranks anything the session would derive", () => {
   // `--image-registry` without a tag (exit 2), so passing an empty one would
   // trade a silent wrong version for a loud broken install.
   const blank = installPlan(options({ tag: "v9.9.9", imageTag: "   " }));
-  assert.equal(paramsFor(blank, "clusterUp", "k3d.up")["image-tag"], "9.9.9");
+  assert.equal(paramsFor(blank, "clusterUp", "k3d.up")["image-tag"], "v9.9.9");
+});
+
+// A recorded tag is replayed as the SAME release, in the spelling that release's
+// images were published under (imageTagFor). An extension built before that was
+// understood recorded `0.31.12` for a v0.31.12 install, a tag GHCR does not have;
+// replayed verbatim, the repair of exactly the install that failed would fail the
+// same way. Releases published bare stay bare.
+test("a recorded image tag is replayed in its release's published spelling", () => {
+  for (const [recorded, want] of [["0.31.12", "v0.31.12"], ["v0.31.12", "v0.31.12"], [" 0.31.3 ", "v0.31.3"], ["0.17.1", "0.17.1"]]) {
+    const plan = installPlan(options({ tag: "", commit: "a".repeat(40), imageTag: recorded }));
+    assert.equal(paramsFor(plan, "clusterUp", "k3d.up")["image-tag"], want, `recorded ${JSON.stringify(recorded)}`);
+  }
 });
 
 // THE WIZARD'S SIDE OF THE SAME FIELD, and the reason it is tested here rather

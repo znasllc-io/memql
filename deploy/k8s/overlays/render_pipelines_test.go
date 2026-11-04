@@ -132,6 +132,14 @@ func ptr[T any](v T) *T { return &v }
 // node (ruling R46). An instance on larger disks raises it in its own
 // overlay. The workspace's own size limit is the same number
 // (TestThePipelinesWorkspaceLimitIsTheLimitRanges).
+//
+// LOCAL'S CEILING IS 32 BECAUSE ITS STEPS QUEUE (memql#6387). The local overlay
+// composes the pipelines queue, whose Jobs are created suspended and counted
+// here while they wait, so this number stops meaning "steps at once": the
+// queue's `pods` quota holds that at two (render_local_queue_test.go). 32 is
+// two overlapping runs at the driver's parallel(16); past it the runner's slot
+// wait still works. The cloud overlays compose no queue and keep theirs as the
+// concurrency bound.
 var pipelinesSizing = map[string]struct {
 	ceiling                   string
 	limitCPU, limitMemory     string
@@ -140,7 +148,7 @@ var pipelinesSizing = map[string]struct {
 }{
 	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
 	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
-	"local":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
+	"local":       {ceiling: "32", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
 }
 
 // The local overlay pins every step to the build node `make up` creates
@@ -459,13 +467,82 @@ func TestPipelinesRoleGrantsJobsThereAndNothingElse(t *testing.T) {
 							"would hand the engine identity Jobs and Secrets in every namespace.", o.Kind, o.Name, pipelinesNamespace)
 					}
 				case "Role", "RoleBinding":
-					if o.Namespace == pipelinesNamespace && o.Name != "memql-pipelines-runner" {
-						t.Errorf("%s/%s renders in %s. That namespace carries the runner's grant and nothing else.",
-							o.Kind, o.Name, pipelinesNamespace)
+					if o.Namespace == pipelinesNamespace && o.Name != "memql-pipelines-runner" && !promoterGrantIsNarrow(t, o) {
+						t.Errorf("%s/%s renders in %s. That namespace carries the runner's grant, and the queue "+
+							"promoter's list and patch of Jobs, and nothing else.", o.Kind, o.Name, pipelinesNamespace)
 					}
 				}
 			}
 		})
+	}
+}
+
+// queuePromoter is the pipeline queue's deadline promoter
+// (deploy/k8s/components/pipelines-capacity/deadline-priority.yaml, composed by
+// the local overlay since memql#6387): the one other identity granted anything in
+// the steps' namespace. Its own ServiceAccount, in the mesh namespace, holds one
+// Role there: list and patch Jobs, so a pass can relabel a waiting step and do
+// nothing else -- no get, no create or delete, no Secret, no Pod.
+const queuePromoter = "pipeline-deadline-priority"
+
+// promoterGrantIsNarrow says whether a Role or RoleBinding in the steps'
+// namespace is exactly the promoter's, rule for rule and subject for subject. A
+// verb, resource or subject added ends the exemption.
+func promoterGrantIsNarrow(t *testing.T, o renderedObject) bool {
+	t.Helper()
+	if o.Name != queuePromoter {
+		return false
+	}
+	switch o.Kind {
+	case "Role":
+		var role rbacRole
+		o.decode(t, &role)
+		if len(role.Rules) != 1 {
+			return false
+		}
+		r := role.Rules[0]
+		return len(r.ResourceNames) == 0 && len(r.NonResourceURLs) == 0 &&
+			slices.Equal(r.APIGroups, []string{"batch"}) && slices.Equal(r.Resources, []string{"jobs"}) &&
+			slices.Equal(r.Verbs, []string{"list", "patch"})
+	case "RoleBinding":
+		var binding rbacBinding
+		o.decode(t, &binding)
+		return binding.RoleRef.Kind == "Role" && binding.RoleRef.Name == queuePromoter && len(binding.Subjects) == 1 &&
+			binding.Subjects[0] == rbacSubject{Kind: "ServiceAccount", Name: queuePromoter, Namespace: cloudNamespace}
+	}
+	return false
+}
+
+func TestThePromotersGrantIsExemptOnlyAsItShips(t *testing.T) {
+	object := func(kind string, body map[string]any) renderedObject {
+		body["kind"] = kind
+		body["metadata"] = map[string]string{"name": queuePromoter, "namespace": pipelinesNamespace}
+		raw, err := yaml.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var node yaml.Node
+		if err := yaml.Unmarshal(raw, &node); err != nil {
+			t.Fatal(err)
+		}
+		return renderedObject{Kind: kind, Name: queuePromoter, Namespace: pipelinesNamespace, node: &node}
+	}
+	rule := func(verbs ...string) map[string]any {
+		return map[string]any{"rules": []map[string]any{{"apiGroups": []string{"batch"}, "resources": []string{"jobs"}, "verbs": verbs}}}
+	}
+	binding := func(subject map[string]string) map[string]any {
+		return map[string]any{"roleRef": map[string]string{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": queuePromoter},
+			"subjects": []map[string]string{subject}}
+	}
+	promoter := map[string]string{"kind": "ServiceAccount", "name": queuePromoter, "namespace": cloudNamespace}
+	if !promoterGrantIsNarrow(t, object("Role", rule("list", "patch"))) || !promoterGrantIsNarrow(t, object("RoleBinding", binding(promoter))) {
+		t.Fatal("the component's own promoter grant is not recognised")
+	}
+	if promoterGrantIsNarrow(t, object("Role", rule("list", "patch", "create"))) {
+		t.Error("a promoter Role that may create Jobs kept the exemption")
+	}
+	if promoterGrantIsNarrow(t, object("RoleBinding", binding(map[string]string{"kind": "ServiceAccount", "name": engineAccount, "namespace": cloudNamespace}))) {
+		t.Error("a promoter RoleBinding naming the engine identity kept the exemption")
 	}
 }
 
@@ -521,6 +598,9 @@ func TestNoClusterRoleBindingReachesTheEngineIdentity(t *testing.T) {
 				}
 				var binding rbacBinding
 				o.decode(t, &binding)
+				if o.Name == queueCapacityGrant && queueCapacityGrantIsNarrow(t, objs, binding) {
+					continue
+				}
 				for _, s := range binding.Subjects {
 					if reachesTheEngine(s) {
 						t.Errorf("ClusterRoleBinding/%s binds ClusterRole %q to %s %q, which reaches the %s identity every "+
@@ -531,6 +611,97 @@ func TestNoClusterRoleBindingReachesTheEngineIdentity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// queueCapacityGrant is the one cluster-wide grant the gate above lets reach the
+// engine identity: the pipeline queue's (deploy/k8s/components/pipelines-capacity,
+// composed by the local overlay since memql#6387). The Cluster app reads the
+// operator's capacity ceiling and patches the queue's budget through it, and
+// both are cluster-scoped objects, so no Role can name them. It is exempt only
+// while its ClusterRole names exactly those three objects and verbs.
+const queueCapacityGrant = "memql-background-capacity"
+
+// queueCapacityRules are that ClusterRole's rules, verbatim: get the ceiling, get
+// and patch the queue, get its flavor, each by resourceName. A rule added, a
+// resourceName dropped or a verb widened ends the exemption.
+var queueCapacityRules = []clusterRule{
+	{APIGroups: []string{"capacity.memql.io"}, Resources: []string{"backgroundcapacitypolicies"}, ResourceNames: []string{"memql-background-capacity"}, Verbs: []string{"get"}},
+	{APIGroups: []string{"kueue.x-k8s.io"}, Resources: []string{"clusterqueues"}, ResourceNames: []string{"memql-background"}, Verbs: []string{"get", "patch"}},
+	{APIGroups: []string{"kueue.x-k8s.io"}, Resources: []string{"resourceflavors"}, ResourceNames: []string{"memql-background"}, Verbs: []string{"get"}},
+}
+
+type clusterRule struct {
+	APIGroups     []string `yaml:"apiGroups"`
+	Resources     []string `yaml:"resources"`
+	ResourceNames []string `yaml:"resourceNames"`
+	Verbs         []string `yaml:"verbs"`
+}
+
+func queueCapacityGrantIsNarrow(t *testing.T, objs []renderedObject, binding rbacBinding) bool {
+	t.Helper()
+	if binding.RoleRef.Kind != "ClusterRole" || binding.RoleRef.Name != queueCapacityGrant {
+		return false
+	}
+	if want := (rbacSubject{Kind: "ServiceAccount", Name: engineAccount, Namespace: cloudNamespace}); len(binding.Subjects) != 1 || binding.Subjects[0] != want {
+		return false
+	}
+	roles := findObjects(objs, "ClusterRole", queueCapacityGrant)
+	if len(roles) != 1 {
+		return false
+	}
+	var role struct {
+		Rules           []clusterRule `yaml:"rules"`
+		AggregationRule any           `yaml:"aggregationRule"`
+	}
+	roles[0].decode(t, &role)
+	return role.AggregationRule == nil && fmt.Sprint(role.Rules) == fmt.Sprint(queueCapacityRules)
+}
+
+// The exemption is a gate of its own: it must still refuse the same binding the
+// moment its ClusterRole reaches further than the queue's three objects.
+func TestTheQueueGrantIsExemptOnlyWhileItNamesItsObjects(t *testing.T) {
+	binding := rbacBinding{Subjects: []rbacSubject{{Kind: "ServiceAccount", Name: engineAccount, Namespace: cloudNamespace}}}
+	binding.RoleRef.Kind, binding.RoleRef.Name = "ClusterRole", queueCapacityGrant
+	role := func(rules []clusterRule) []renderedObject {
+		body, err := yaml.Marshal(map[string]any{"kind": "ClusterRole", "metadata": map[string]string{"name": queueCapacityGrant}, "rules": rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var node yaml.Node
+		if err := yaml.Unmarshal(body, &node); err != nil {
+			t.Fatal(err)
+		}
+		return []renderedObject{{Kind: "ClusterRole", Name: queueCapacityGrant, node: &node}}
+	}
+	if !queueCapacityGrantIsNarrow(t, role(queueCapacityRules), binding) {
+		t.Fatal("the component's own grant is not recognised as narrow")
+	}
+	wider := append([]clusterRule{}, queueCapacityRules...)
+	wider[1] = clusterRule{APIGroups: []string{"kueue.x-k8s.io"}, Resources: []string{"clusterqueues"}, Verbs: []string{"get", "patch"}}
+	if queueCapacityGrantIsNarrow(t, role(wider), binding) {
+		t.Error("a rule that patches every ClusterQueue kept the exemption")
+	}
+	if queueCapacityGrantIsNarrow(t, role(append(append([]clusterRule{}, queueCapacityRules...), clusterRule{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"get"}})), binding) {
+		t.Error("a ClusterRole that also reads every Secret kept the exemption")
+	}
+	other := binding
+	other.Subjects = append([]rbacSubject{}, binding.Subjects...)
+	other.Subjects = append(other.Subjects, rbacSubject{Kind: "Group", Name: "system:authenticated"})
+	if queueCapacityGrantIsNarrow(t, role(queueCapacityRules), other) {
+		t.Error("a binding with a second subject kept the exemption")
+	}
+	// An aggregated ClusterRole's rules are filled in at runtime from every
+	// ClusterRole its selector matches, so the rules written here say nothing.
+	aggregated := role(queueCapacityRules)
+	aggregated[0].node.Content[0].Content = append(aggregated[0].node.Content[0].Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: "aggregationRule"},
+		&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Value: "clusterRoleSelectors"},
+			{Kind: yaml.SequenceNode, Content: []*yaml.Node{{Kind: yaml.MappingNode}}},
+		}})
+	if queueCapacityGrantIsNarrow(t, aggregated, binding) {
+		t.Error("an aggregated ClusterRole kept the exemption")
 	}
 }
 

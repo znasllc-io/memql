@@ -15,8 +15,13 @@ import (
 // Drive the actual registration function with a kubectl boundary that records
 // every submitted Application. Applying main and then patching is too late:
 // ArgoCD may already have started reconciling the first object.
+//
+// The function takes the manifest's PATH in the checkout, not an app name:
+// Kueue's Application lives at deploy/kueue/application.yaml, outside
+// deploy/argocd/apps/, because root.yaml renders that directory on the cloud
+// and this operator is only local's to register (memql#6387).
 func TestOperatorApplicationPinsItsFirstApply(t *testing.T) {
-	for _, app := range []string{"cert-manager", "cnpg-operator"} {
+	for _, app := range []string{"deploy/argocd/apps/cert-manager.yaml", "deploy/argocd/apps/cnpg-operator.yaml", "deploy/kueue/application.yaml"} {
 		for _, tc := range []struct {
 			name, repo, revision, want, failure string
 		}{
@@ -97,7 +102,7 @@ _register_operator_app "$MEMQL_OPERATOR_TEST_APP"
 				if err := json.Unmarshal(data, &got); err != nil {
 					t.Fatal(err)
 				}
-				original, err := os.ReadFile(filepath.Join(repo, "deploy", "argocd", "apps", app+".yaml"))
+				original, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(app)))
 				if err != nil {
 					t.Fatal(err)
 				}

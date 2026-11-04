@@ -152,7 +152,7 @@ test("a main install's plan carries the build step, with the lane pinned by the 
 
 test("a tag install still passes the registry pair", () => {
   const params = paramsFor(options({ tag: "v9.9.9" }), "clusterUp", "k3d.up");
-  assert.equal(params["image-tag"], "9.9.9");
+  assert.equal(params["image-tag"], "v9.9.9");
   assert.equal(params["image-registry"], DEFAULT_IMAGE_REGISTRY);
 });
 
@@ -162,7 +162,8 @@ test("imageTagForVersion REFUSES main rather than substituting a release", () =>
   // as a fallback: a caller that forgets isMainBranchChoice now fails at the
   // call, not forty pods later as an ImagePullBackOff naming one word.
   assert.throws(() => imageTagForVersion("main"), /main/);
-  assert.equal(imageTagForVersion("v1.2.3"), "1.2.3");
+  assert.equal(imageTagForVersion("v1.2.3"), "v1.2.3");
+  assert.equal(imageTagForVersion("v0.17.1"), "0.17.1");
   assert.equal(imageTagForVersion(""), imageTagFor(DEFAULT_STACK_TAG));
   assert.ok(isReleaseTag(DEFAULT_STACK_TAG), "the offline fallback must be a published release");
 });

@@ -1,0 +1,63 @@
+# The pipeline queue's LOCAL values (memql#6387), over
+# ../../components/pipelines-capacity. Design record:
+# docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md ("Quotas and fit").
+#
+# PODS IS THE ONLY BOUND. Two steps at once, the number this cluster has always
+# run: #6018 was six cold builds writing at once on one shared disk, which
+# stalled etcd and restarted the serving cluster, so raising it needs that
+# warning's cold-cache storage evidence and not a bigger laptop.
+#
+# THE OTHER THREE BUDGETS ARE TOO LARGE TO BIND, on purpose. Production reserves
+# each step container's full memory and disk limit, so its budgets mean what
+# they say. Here the step requests stay today's (pipelines-values.yaml's
+# LimitRange), because a binding budget is worse than slow on a laptop: a step
+# over it sits at the head of the strict queue and holds everything behind it
+# until its run's ceiling (measured: an 8 GiB step at the head of a 5 GiB budget
+# held a 4 GiB one). 64 CPUs, 64 GiB and 256 GiB are more than two step pods can
+# request (render_local_queue_test.go computes the most from the workbench's
+# default reservation maximum, 4 CPUs and 8192 MiB for the command). They are
+# also larger than any laptop's build node, so a step the node cannot hold is
+# admitted and then fails `pipeline_job_unschedulable`, as it did before the
+# queue. The cost: local never exercises a refusal by memory or disk;
+# deploy/kueue/install's opt-in tests still can.
+#
+# THE CEILING EQUALS THE BUDGET, so the admission policy admits the queue as
+# committed whenever it checks it: every later apply, and every save from the
+# Cluster app's capacity section, which may lower the budget within it. Argo CD
+# can create the ClusterQueue before the policy on a cluster's first sync, so
+# that first apply is not what proves the two agree; render_local_queue_test.go
+# is.
+#
+# Both objects are cluster-scoped custom resources, so these patches merge as
+# JSON merge patches: a list is replaced whole, which is why resourceGroups is
+# restated in full.
+apiVersion: capacity.memql.io/v1alpha1
+kind: BackgroundCapacityPolicy
+metadata:
+  name: memql-background-capacity
+spec:
+  cpuMilli: 64000
+  memoryMiB: 65536
+  diskMiB: 262144
+  jobs: 2
+  nodePool: builds
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: memql-background
+spec:
+  # ON, not the component's Hold. Hold is for an installation still rolling
+  # runners that predate the queue; under it every local step stayed suspended
+  # with `ClusterQueue memql-background is inactive`. The workbench rolls in the
+  # same sync (kustomization.yaml, replacements), so no old runner is left.
+  stopPolicy: None
+  resourceGroups:
+    - coveredResources: [cpu, memory, ephemeral-storage, pods]
+      flavors:
+        - name: memql-background
+          resources:
+            - { name: cpu, nominalQuota: "64" }
+            - { name: memory, nominalQuota: 64Gi }
+            - { name: ephemeral-storage, nominalQuota: 256Gi }
+            - { name: pods, nominalQuota: "2" }

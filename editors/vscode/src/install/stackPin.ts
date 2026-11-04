@@ -189,6 +189,8 @@
 //
 // Refs: #5632 #5631 #4066 #4063 #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
+import { compareVersions } from "../version/compare.js";
+
 /**
  * The release tag an install checks out when nothing else names one.
  *
@@ -200,11 +202,18 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-// v0.30.0 includes the wrapped optional-.env repair and the compressed-history
-// slug migration repair required by a fresh installation. Publish its native
-// engine images before exposing this release's installer downloads. Installed
+// v0.31.12 (memql#6387, step 2 of the local-queue design record): the first
+// release whose workbench image carries `memql pipeline-deadline-priority`
+// (#6382). The local overlay composes the pipelines queue, and its promoter
+// CronJob runs that subcommand on the workbench image. A `--commit` install
+// pairs the checkout's manifests with THIS release's images, so with v0.30.0
+// every pass would have run a binary without the subcommand
+// (installSession.test.ts holds the floor). It keeps what v0.30.0 was chosen
+// for, the wrapped optional-.env repair and the compressed-history slug
+// migration repair a fresh installation needs. Its seven node images are on
+// GHCR under `v0.31.12`; imageTagFor says why the `v` stays. Installed
 // lifecycle qualification uses this exact release, not an older broken pin.
-export const DEFAULT_STACK_TAG = "v0.30.0";
+export const DEFAULT_STACK_TAG = "v0.31.12";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).
@@ -318,22 +327,41 @@ export const DEFAULT_REGISTRATION_MODE = "invite_only";
 export const DEFAULT_IMAGE_REGISTRY = "ghcr.io/znasllc-io";
 
 /**
+ * The first release whose node images were published under the git tag itself.
+ *
+ * Read off the registry, not chosen here. A release's image tag is whatever its
+ * publication wrote, and an installation's registry targets decide that
+ * (release-candidates.md: a target "may declare `tag`", the version "optionally
+ * prefixed with `v`"). Through v0.31.2 the images carry the bare version; from
+ * v0.31.3 the publication targets name `v<version>`, and those releases have no
+ * bare tag at all (`ghcr.io/znasllc-io/memql-*`, checked 2026-11-04).
+ */
+export const FIRST_GIT_TAGGED_IMAGE_RELEASE = "v0.31.3";
+
+/**
  * The IMAGE tag for a release tag.
  *
- * TWO CONVENTIONS, ONE RELEASE. Git tags carry the `v` (`v0.16.0`, and
- * clone-stack.sh checks out exactly that); image tags do not -- the base
- * manifests name `acrmemql.azurecr.io/memql-identity:0.9.9`, and
- * build-engine-images.yml takes its `version` input as the tag verbatim,
- * documented as "e.g. 0.9.61".
+ * TWO CONVENTIONS, AND THE BOUNDARY BETWEEN THEM. Git tags carry the `v`
+ * (`v0.16.0`, and clone-stack.sh checks out exactly that). Images of releases
+ * before FIRST_GIT_TAGGED_IMAGE_RELEASE do not: build-engine-images.yml took
+ * its `version` input as the tag verbatim, documented as "e.g. 0.9.61", so
+ * passing the git tag through asked for `memql-bff:v0.16.0`, a tag nothing
+ * published -- an ImagePullBackOff whose cause is one character (memql#3574).
+ * The native publisher that replaced it writes the git tag, so from v0.31.3 the
+ * same one character is missing the other way round: stripping it asked for
+ * `memql-bff:0.31.12`, which does not exist, and every install of a release
+ * since then (the picker's `Latest` included) failed on every pod's image.
  *
- * Both are long-standing and neither is wrong, so the installer converts rather
- * than asking anyone to remember which surface wants which. Passing the git tag
- * straight through would ask a registry for `memql-bff:v0.16.0`, which is not a
- * tag anything publishes -- an ImagePullBackOff whose cause is one character
- * (memql#3574).
+ * Decided by the release's number, offline, because the install plan is built
+ * before anything is pulled and an install with no network still needs an
+ * answer. A value that is not a release has no number to decide by and keeps
+ * the old conversion.
  */
 export function imageTagFor(releaseTag: string): string {
-  return releaseTag.replace(/^v/, "");
+  const value = releaseTag.trim();
+  const bare = value.replace(/^v/, "");
+  const relation = compareVersions(value, FIRST_GIT_TAGGED_IMAGE_RELEASE);
+  return relation === "current" || relation === "ahead" ? `v${bare}` : bare;
 }
 
 /**

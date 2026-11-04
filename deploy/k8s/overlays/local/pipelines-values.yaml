@@ -18,7 +18,17 @@
 # ConfigMap after the limits. CPU and memory caps do not isolate the shared
 # physical disk: six cold builds stalled etcd and restarted the serving
 # cluster in the October 15 rehearsal (#6018). Bound concurrent writers as
-# well as compute; increasing this count needs cold-cache storage evidence.
+# well as compute; increasing the number at once needs cold-cache storage
+# evidence.
+#
+# WHAT HOLDS "TWO AT ONCE" IS THE QUEUE'S pods QUOTA (memql#6387,
+# pipelines-queue-values.yaml), not this count. Steps are Jobs created
+# suspended in the pipeline queue, so this quota counts the ones WAITING as
+# well: with 128 queued, two ran. 32 is two overlapping runs at the driver's
+# parallel(16); past it the runner's slot wait still works. It is not raised
+# further because a workbench that has not yet rolled onto the queue creates
+# unlabelled Jobs that start at once, which this count is then the only thing
+# bounding (the overlay's replacements roll the workbench in the same sync).
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -26,7 +36,7 @@ metadata:
   namespace: memql-pipelines
 spec:
   hard:
-    count/jobs.batch: "2"
+    count/jobs.batch: "32"
 ---
 # `limits` is replaced whole, not merged, so the item is restated in full.
 apiVersion: v1

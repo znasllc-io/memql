@@ -116,7 +116,8 @@ ARGOCD_VERSION="v2.13.3"
 #
 # i.e. permanently un-diffable, so drift in the operator stack stops being
 # visible while both apps still report Healthy. The bring-up that worked in
-# July and failed in August had no commit between them.
+# July and failed in August had no commit between them. Kueue's Application
+# (memql#6387) opts into ServerSideApply as well, so it shares this pin.
 #
 # 1.32 is the newest line before that field. Raising it means raising
 # ARGOCD_VERSION in the same commit -- which is the better long-term fix, since
@@ -197,7 +198,7 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # ArgoCD was still downloading.
 APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-1800}"
 
-# One ceiling for both operators, including ArgoCD's cold repository fetch.
+# One ceiling for every operator, including ArgoCD's cold repository fetch.
 # A fetch itself can take up to the repo-server's 1800s ceiling; ending setup at
 # the same instant prevents even one recovery attempt. This shared budget covers
 # that fetch and the operators starting without granting a fresh long wait to
@@ -1361,30 +1362,36 @@ function kustomize_source_block() {
 
 
 #=============================================================================
-# OPERATOR STACK (cert-manager + CloudNativePG)
+# OPERATOR STACK (cert-manager + CloudNativePG + Kueue)
 #=============================================================================
 
-# _register_operator_app -- apply one committed operator Application manifest.
+# _register_operator_app <manifest> -- apply one committed operator Application
+# manifest, named by its path in the checkout.
 #
-# The manifest is the single source of truth (deploy/argocd/apps/<app>.yaml);
-# this only overrides its targetRevision so a branch that bumps an operator pin
-# is testable locally, which is exactly the treatment the mesh Application
-# already gets. A downstream stack points --repo-url at its OWN repo, where
-# these manifests do not exist, so in that case the committed `main` is left
-# alone -- that is a statement about which REPO owns the operator stack, not an
-# environment branch.
+# The manifest is the single source of truth; this only overrides its
+# targetRevision so a branch that bumps an operator pin is testable locally,
+# which is exactly the treatment the mesh Application already gets. A
+# downstream stack points --repo-url at its OWN repo, where these manifests do
+# not exist, so in that case the committed `main` is left alone -- that is a
+# statement about which REPO owns the operator stack, not an environment branch.
+#
+# A PATH, NOT AN APP NAME (memql#6387). cert-manager and CloudNativePG live in
+# deploy/argocd/apps/, which root.yaml renders on the cloud; Kueue's
+# Application is deploy/kueue/application.yaml and must stay out of that
+# directory, because only an installation that composes the pipelines queue
+# wants the operator, and the local cluster registers it here.
 function _register_operator_app() {
-    local app="$1" manifest patch
+    local path="${REPO_ROOT}/$1" manifest patch
     if [[ "${REPO_URL}" == "https://github.com/znasllc-io/memql.git" ]]; then
         # ArgoCD can start syncing immediately on apply. Render the selected
         # revision BEFORE that first write, rather than briefly admitting main.
         # Capture first so a failed render cannot pipe partial output to apply.
         patch="{\"spec\":{\"source\":{\"targetRevision\":\"$(cap_json_escape "${TARGET_REVISION}")\"}}}"
-        manifest="$(kubectl patch --local -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" \
+        manifest="$(kubectl patch --local -f "${path}" \
             --type=merge -p "$patch" -o yaml)" || return $?
         printf '%s\n' "$manifest" | kubectl apply -f - >&2
     else
-        kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" >&2
+        kubectl apply -f "${path}" >&2
     fi
 }
 
@@ -1469,35 +1476,74 @@ function operator_diagnostics() {
     done
 }
 
-# install_operator_stack -- register cert-manager and CloudNativePG, in that
-# order, and wait for each.
+# checkout_has_local_queue -- whether the checkout this run installs composes the
+# pipeline queue (memql#6387), told by the file that arrived with it.
 #
-# WHY THE ORDER IS ENFORCED HERE AND NOT LEFT TO SYNC-WAVES. The waves on the
-# two Application manifests (-2 and -1) express the dependency declaratively for
-# the cloud app-of-apps. Locally the Applications are applied directly, so the
+# THE SCRIPT AND THE CHECKOUT CAN BE FROM DIFFERENT RELEASES. `make up` runs a
+# checkout's own up.sh, but the editor's installer runs ITS bundled copy against
+# the release it cloned (--repo-root), and every release before the queue lacks
+# both deploy/argocd/local/project.yaml and an overlay that needs Kueue.
+# Applying a project file that is not there stops the install. Registering Kueue
+# there would add an operator whose Job webhooks, before memql#6396, fail every
+# Job in memql-pipelines while its controller is down, on a cluster with no
+# queue to gain from it. So the checkout decides by a file it carries, as
+# merge_argocd_settings does: a fact about the checkout's version, not an
+# environment branch. up_local_queue_test.go runs both paths.
+function checkout_has_local_queue() {
+    [[ -f "${REPO_ROOT}/deploy/argocd/local/project.yaml" ]]
+}
+
+# install_operator_stack -- register cert-manager, CloudNativePG and Kueue, in
+# that order, and wait for each.
+#
+# WHY THE ORDER IS ENFORCED HERE AND NOT LEFT TO SYNC-WAVES. The waves on
+# cert-manager's and CloudNativePG's Application manifests (-2 and -1) express
+# the dependency declaratively for the cloud app-of-apps; Kueue's (-1) is for an
+# installation that registers it beside them, since root.yaml does not. Locally the Applications are applied directly, so the
 # waves do not order them; and the failure they prevent is not cosmetic -- the
 # Barman Cloud plugin's manifest declares Certificate and Issuer objects, so
 # without cert-manager's CRDs already served the CNPG Application does not
 # degrade, it fails to apply. Waiting turns a retry loop that eventually
 # converges into a bring-up that either works or says why.
 #
-# The stack is reconciled by ArgoCD in every environment, from the same two
+# KUEUE IS THE PIPELINE QUEUE'S CONTROLLER (memql#6387). The local overlay
+# composes deploy/k8s/components/pipelines-capacity, whose ClusterQueue,
+# ResourceFlavor, LocalQueue and WorkloadPriorityClasses are Kueue's kinds, and
+# whose ceiling policy's kind is installed beside the controller. An overlay
+# synced without them is refused as unknown kinds, so the operator is waited
+# for here, before apply_argocd_app, as CNPG is for the database. The wait
+# matters for its own kinds: only its two Job webhooks fail open
+# (deploy/kueue/README.md), and the ones that validate a ClusterQueue, a flavor
+# or a Workload refuse while no controller answers. It is last because nothing
+# in it depends on the other two and nothing in them on it, and it shares the
+# one stack deadline. A checkout from before the queue does not register it
+# (checkout_has_local_queue).
+#
+# The stack is reconciled by ArgoCD in every environment, from the same
 # directories; this function is bootstrap, not a second install path.
 function install_operator_stack() {
     local operator_stack_deadline=$((SECONDS + OPERATOR_STACK_TIMEOUT))
-    section "Registering the cluster operator stack (cert-manager + CloudNativePG)"
+    section "Registering the cluster operator stack (cert-manager + CloudNativePG + Kueue)"
     # One phase for this and apply_argocd_app, which follows it: both register
     # what the cluster is to run, and a status line that changed between them
     # would be naming the installer's steps rather than the operator's wait.
     cap_progress "Registering services"
 
     info "cert-manager -> deploy/cert-manager/install"
-    _register_operator_app cert-manager
+    _register_operator_app deploy/argocd/apps/cert-manager.yaml
     _wait_for_operator cert-manager cert-manager cert-manager cert-manager-cainjector cert-manager-webhook
 
     info "CloudNativePG + Barman Cloud plugin -> deploy/cnpg/install"
-    _register_operator_app cnpg-operator
+    _register_operator_app deploy/argocd/apps/cnpg-operator.yaml
     _wait_for_operator cnpg-system cnpg-operator cnpg-controller-manager barman-cloud
+
+    if checkout_has_local_queue; then
+        info "Kueue (the pipeline queue's controller) -> deploy/kueue/install"
+        _register_operator_app deploy/kueue/application.yaml
+        _wait_for_operator kueue-system kueue kueue-controller-manager
+    else
+        info "Kueue: not registered; this checkout predates the local pipeline queue."
+    fi
 
     OPERATOR_STACK_READY=true
 }
@@ -1513,7 +1559,22 @@ function apply_argocd_app() {
     # engine's memql AppProject restricts sourceRepos to the engine repo, so
     # a downstream stack tracking its own repo supplies its own AppProject
     # manifest via --project-manifest and names it via --app-project.
-    kubectl apply -f "${PROJECT_MANIFEST:-${REPO_ROOT}/deploy/argocd/apps/project.yaml}" >&2
+    #
+    # THE ENGINE'S DEFAULT IS LOCAL'S OWN COPY (memql#6387):
+    # deploy/argocd/apps/project.yaml plus the pipeline queue's eight
+    # cluster-scoped kinds, which the local overlay renders and the shared
+    # project refuses. Not a widened shared project: the cloud overlays render
+    # none of those kinds, and widening it would allow ClusterRoleBinding to
+    # every Application on the cloud too. Not in deploy/argocd/apps/, which
+    # root.yaml renders on the cloud. up_local_queue_test.go holds the copy to
+    # the shared file plus exactly those kinds. A checkout from before the queue
+    # has neither the file nor the kinds, and gets the shared project it always
+    # had (checkout_has_local_queue).
+    local default_project="${REPO_ROOT}/deploy/argocd/apps/project.yaml"
+    if checkout_has_local_queue; then
+        default_project="${REPO_ROOT}/deploy/argocd/local/project.yaml"
+    fi
+    kubectl apply -f "${PROJECT_MANIFEST:-$default_project}" >&2
 
     # Generate and apply the local Application manifest.
     # We template the targetRevision so it follows the current branch.
@@ -1553,6 +1614,21 @@ spec:
       kind: Deployment
       jsonPointers:
         - /spec/replicas
+    # The pipeline queue's owner controls (memql#6387), exactly the fields the
+    # first installation delegates: the Cluster app saves the four budgets, the
+    # admission switch and its change marker by patching the ClusterQueue, and
+    # selfHeal would revert each save. Pool selection, namespace selection,
+    # preemption and the operator ceiling stay reconciled.
+    - group: kueue.x-k8s.io
+      kind: ClusterQueue
+      name: memql-background
+      jsonPointers:
+        - /spec/stopPolicy
+        - /spec/resourceGroups/0/flavors/0/resources/0/nominalQuota
+        - /spec/resourceGroups/0/flavors/0/resources/1/nominalQuota
+        - /spec/resourceGroups/0/flavors/0/resources/2/nominalQuota
+        - /spec/resourceGroups/0/flavors/0/resources/3/nominalQuota
+        - /metadata/annotations/memql.io~1capacity-change
 YAML
 
     info "Application '${APP_NAME}' registered."

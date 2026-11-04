@@ -27,6 +27,15 @@ Install and verify this operator before enabling
 active leaves new work suspended. Its Application deliberately does not prune
 CRDs: deleting a CRD deletes its queue and workload records.
 
+**The local cluster runs it** (memql#6387). `make up` registers `application.yaml`
+after cert-manager and CloudNativePG and waits for the controller
+(`scripts/k3d/up.sh`, `install_operator_stack`), because the local overlay composes
+`pipelines-capacity`. The file stays here rather than in `../argocd/apps/`, which the
+cloud's app-of-apps renders: a cloud installation registers it from its own
+repository. A cluster brought up before this gets the operator at its next `make up`.
+Measured on k3d (2026-10-30): 68 s on a cold bring-up, 47 s of it the image pull, and
+about 270 MiB, most of it the API server holding the large CRDs.
+
 That component's promoter (`memql pipeline-deadline-priority`) stands on a behaviour
 of this controller: a workload that has not reserved quota is re-prioritized when its
 Job's priority-class label changes, a Job that started with no class included. Before

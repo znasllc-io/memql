@@ -63,8 +63,10 @@ the last quarter to `memql-pipeline-expiring` (400), and, for a run an operator 
 to `memql-pipeline-boosted` (375). A Job only moves up, and admitted work is never
 touched. Keep the classes you map events to below 350. An operator turns it off, states
 fixed windows or names a run with a patch to that CronJob; the component's README has
-the patch. No shipping instance overlay composes this component, so a local cluster
-has no queue and needs no promoter: its steps wait for a slot before a Job exists.
+the patch. The local overlay composes this component, with a local cluster's sizing
+([Steps at once, and their size](#steps-at-once-and-their-size)), and `make up`
+installs the Kueue controller it needs. The cloud overlays do not compose it: an
+installation that wants the queue composes it above its own overlay.
 
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
@@ -290,8 +292,10 @@ is names the failure,
 than a second of its ceiling left is not started (`pipeline_run_ceiling`).
 
 **Time queued is the run's, not the step's.** A step's own timeout counts from
-its Job's creation. Before that -- waiting for a free slot under the ceiling,
-for a forward to reach a runner, or for the isolation proof -- only the run's
+its Job's creation, or, on a cluster with the pipeline queue (the local one
+included), from the Job's admission, since a suspended Job has not started.
+Before that -- waiting for a free slot under the ceiling, in the queue, for a
+forward to reach a runner, or for the isolation proof -- only the run's
 ceiling bounds the wait, so a stage wider than the ceiling runs every step, a
 slot at a time, for as long as the run's ceiling allows. The Job is created
 with the lesser of the step's timeout and what is left of the run's ceiling as
@@ -342,6 +346,22 @@ Unconfirmed cleanup leaves the run unfinished for recovery. A replacement
 driver retries cleanup from the committed receipt without executing the command
 again. The Job's 30-minute TTL remains a fallback, not evidence of deletion.
 
+On a cluster with the pipeline queue, the local one included, the runner creates
+each step's Job suspended and Kueue admits it. The quota then counts waiting Jobs as
+well as running ones, so it stops bounding how many run: the queue's `pods` budget
+does. The local overlay's queue admits two steps at once, and its Job quota is 32,
+two overlapping runs at the driver's `parallel(16)`; past that, a step waits for a
+slot as above. A queued step's own timeout starts when it is admitted.
+
+The local queue is bounded by `pods` alone. Its CPU, memory and disk budgets (64
+CPUs, 64Gi, 256Gi) are larger than two step pods can request, because a step over a
+budget waits at the head of the strict queue and holds every step behind it until
+its run's ceiling. So local keeps the requests below, unlike an installation that
+reserves each container's full limit, as `deploy/k8s/components/pipelines-capacity`
+asks of one. The budgets are also larger than any laptop's build node: a step the
+node cannot hold is admitted and fails `pipeline_job_unschedulable`, as it did
+before the queue.
+
 The LimitRange is the one place a step's size is decided: the runner sets no
 resources, and every container of the pod -- `cache-prep`, `clone` and each
 service as well as the step -- gets the namespace's default, so a step's request
@@ -349,7 +369,8 @@ multiplies with its services.
 
 | Overlay value | `local` | `cloud` | `cloud-entry` |
 |---|---|---|---|
-| Steps at once | 2 | 2 | 1 |
+| Steps at once | 2, the queue's `pods` | 2 | 1 |
+| Jobs counted (`count/jobs.batch`) | 32, waiting ones included | 2 | 1 |
 | Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
 | Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 8Gi of disk | 2 CPU, 4Gi, 8Gi of disk |
 | The workspace's size limit | 20Gi | 8Gi | 8Gi |
@@ -369,7 +390,7 @@ Provision the nodes before enabling this setting. The local overlay sets
 ([The pipeline build node](reproduce-the-cloud-locally.md#the-pipeline-build-node)).
 An existing local-path cache remains bound to its original node; changing
 placement does not migrate it. All local k3d nodes share one Docker VM's CPU,
-memory and disk. The local two-Job ceiling applies across Workbench replicas;
+memory and disk. The local queue's two-step bound applies across Workbench replicas;
 CPU and memory caps do not isolate disk I/O, and additional virtual nodes do
 not increase physical capacity. Raising concurrency requires cold-cache storage
 measurements as well as CPU and memory measurements. An isolation probe

@@ -2490,15 +2490,13 @@ survive any replica change, a retried step is a new Job that starts at its event
 and is promoted at the next pass, and passes keep relabelling under `stopPolicy: Hold`,
 so the order is ready when admission resumes.
 
-**It reaches the installations that compose the component, and no overlay in this
-repository does.** A local cluster has no Kueue and no queue: its steps wait for a slot
-under `count/jobs.batch` before a Job exists, so there is nothing for a pass to
-reorder, and a CronJob there would only look like coverage. Giving it one means
-installing Kueue in `make up` and in the editor's installer, reserving every local
-step container's full limit (4 GiB and 20 GiB, against that overlay's own warning about
-cold builds on a shared disk), raising the Job quota so that a queue can form, and
-widening the AppProject the cloud shares. That is a decision about local admission
-rather than about this promoter, and it is left open.
+**It reaches the installations that compose the component, and the local cluster is
+one of them since 2026-11-04.** When this section was written a local cluster had no
+Kueue and no queue: its steps waited for a slot under `count/jobs.batch` before a Job
+existed, so there was nothing for a pass to reorder. The owner decided on 2026-10-30
+to give it the queue, with local's own sizing rather than production's reservations
+and without widening the AppProject the cloud shares; the next section is that
+decision.
 
 Known limits. A step created late in an old run starts at its event's class and waits
 up to five minutes for its first promotion. A pass cannot read a class's value, so an
@@ -2530,6 +2528,188 @@ workbench binary built from this source over `memql-workbench:local`, against Jo
 written in the runner's shape. Not verified: AKS, an image from the release pipeline,
 reconciliation through ArgoCD, a release through the native receiver, or a step created
 by a real runner in a queue.
+
+## The local cluster runs production's pipeline queue (2026-11-04)
+
+The owner wanted every installation to get the deadline promoter, the local k3d cluster
+included, and a local cluster had no Kueue: its steps waited for a slot under
+`count/jobs.batch: 2` before a Job existed, so only production ran the queue's admission
+path and no installer exercised it. On 2026-10-30 the owner approved the design record
+`docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md` (memql#6387): production's
+controller, queue, flavor, strict order and promoter, with local's own sizing. Its first
+step (memql#6396) made Kueue's two Job webhooks fail open and its image start
+`IfNotPresent`, so a controller restart costs a waiting step time instead of failing a new
+one `pipeline_execution_uncertain`. This entry is the other three steps.
+
+**The same manifests, with local values.** The local overlay composes
+`deploy/k8s/components/pipelines-capacity` in the layer of its `images:` block, so the
+promoter runs the workbench image `make dev` imports, and a release install's image
+override retargets both from one line. `make up` registers `deploy/kueue/application.yaml`
+as the third operator, after cert-manager and CloudNativePG (`install_operator_stack` in
+`scripts/k3d/up.sh`), on the stack's one shared deadline and before the mesh Application,
+because an overlay synced without Kueue's kinds is refused as unknown kinds.
+`_register_operator_app` now takes the manifest's path, since that file must stay out of
+`deploy/argocd/apps/`, which the cloud's app-of-apps renders. Rejected: leaving local as
+it was, which keeps the queue untested outside production; and an opt-in flag or a second
+overlay, because the parity rule refuses a second way to deploy and the weekly install
+legs would not run it.
+
+**The checkout decides, because the script and the checkout can be from different
+releases.** `make up` runs a checkout's own `up.sh`, but the editor's installer runs its
+bundled copy against the release it cloned (`--repo-root`), and no release before this
+change has `deploy/argocd/local/project.yaml` or an overlay that needs Kueue. So
+`checkout_has_local_queue` asks the checkout for that file: with it, `make up` applies
+the local project and registers Kueue; without it, the shared project and no Kueue,
+exactly what that release always got. Applying the missing file would have stopped every
+installer install of an existing release, the new offline fallback included, and
+registering Kueue there would have added an operator whose Job webhooks, before
+memql#6396, fail every Job in `memql-pipelines` while its controller is down. Found by
+the final review; `TestUpAppliesTheSharedProjectToACheckoutWithoutTheLocalQueue` and
+`TestKueueIsRegisteredOnlyForACheckoutWithTheLocalQueue` run both paths. The reverse skew
+remains: an extension built before this change, installing a release that contains it,
+applies the shared project and registers no Kueue, so that sync is refused. Such an
+extension already fails every release from v0.31.3 on (the image tag, below), so it gains
+no install that worked; the release's own extension is the one to use.
+
+**`pods` is the only bound, and the step requests stay as they were.** Production reserves
+each step container's full memory and disk limit, so its budgets mean what they say.
+Locally that would never admit the engine's 8 GiB steps at Docker's minimum size, and two
+behaviours measured for the record make a binding budget worse than slow on a laptop: a
+step over the budget waits at the head of the strict queue and holds everything behind it
+until its run's ceiling, and a budget larger than the node admits a pod that then sits
+Pending until its deadline. So the queue admits two pods at once, the number #6018's
+cold-build warning set; its CPU, memory and disk budgets (64, 64Gi, 256Gi) are more than
+two step pods can request; the operator ceiling equals them, so the admission policy
+admits the queue as committed on every later apply and save (Argo CD can create the
+queue before the policy on a first sync, so the render gate is what proves the two
+agree); `stopPolicy` is `None`, because the component's `Hold`
+left every step suspended; and the LimitRange keeps 250m, 512Mi and 1Gi requests under
+2, 4Gi and 20Gi limits (`overlays/local/pipelines-queue-values.yaml`). That departs from
+the component's request-equals-limit rule on purpose. The cost is that local never
+exercises a refusal by memory or disk, which `deploy/kueue/install`'s opt-in tests still
+can.
+
+**The Job quota is 32, and the workbench rolls with the queue.** Suspended Jobs count
+against `count/jobs.batch`, so once steps queue it stops meaning concurrency; 32 is two
+overlapping runs at the driver's `parallel(16)`, and past it the runner's slot wait still
+works. The trap is the upgrade. A workbench that has not restarted creates unlabelled
+Jobs, which Kueue neither admits nor holds, and under 32 they would all start at once,
+which is #6018 again. envFrom restarts nothing when the ConfigMap gains
+`MEMQL_PIPELINES_QUEUE`, so a `replacements` entry copies the queue's name onto the
+workbench's pod template (`memql.io/pipeline-queue`), and the sync that adds the queue
+rolls the workbench, as the first installation does for its priority classes. On a
+cluster scaled to two workbenches the roll replaces one pod at a time
+(`maxSurge: 0`), so until the new pods are ready the old one can still create
+unlabelled Jobs under the raised quota: a window of seconds, not closed.
+
+**Permissions.** The shared AppProject refuses the component's eight cluster-scoped kinds,
+and widening it would allow `ClusterRoleBinding` to every Application on the cloud, where
+no overlay renders them. So `make up` applies `deploy/argocd/local/project.yaml` unless
+told otherwise: the shared file plus exactly those kinds. Two render gates gained
+exemptions shaped exactly to the component's grants, and lost when a rule, verb,
+subject or aggregation is added: the ClusterRoleBinding through which the engine identity
+reads the ceiling and gets and patches the queue, each by resource name, and the
+promoter's list and patch of Jobs in the steps' namespace under its own ServiceAccount.
+Because the AppProject cannot narrow a kind by name, a further gate holds the local
+render's cluster-wide grants to exactly that ClusterRole and binding
+(`TestTheLocalOverlaysOnlyClusterWideGrantIsTheQueues`), and the project file to one
+document, since `make up` applies all of it with the person's own credentials. The mesh Application ignores the
+ClusterQueue's `stopPolicy`, its four budgets and its change annotation, which are the
+fields the first installation delegates, so selfHeal does not undo a save from the Cluster
+app. Pool selection, namespace selection, preemption and the ceiling stay reconciled.
+
+**What survives what.** The queue's state is in the API server, as a Workload beside each
+Job, so a waiting step survives a workbench restart and another replica adopts it as
+before, and a promoted class stays on its Job. Argo CD writes local's budgets when it
+creates the ClusterQueue and leaves them to the owner after, so a later change to the
+committed numbers reaches a new cluster and not an existing one. A cluster brought up
+before this change gets the operator and the AppProject at its next `make up`; until
+then, if its Application follows a revision that composes the queue, that sync fails on
+the unknown kinds and the mesh keeps running what it had. An installer upgrade re-runs
+`k3d.up`, which registers the operator, and moves no data, so no upgrade barrier was added.
+The record wanted step 3 landed before step 4, to narrow that window for clusters that
+run `make up` between the two. They landed together because each push to `main` starts a
+three-hour run and the owner asked for one push; the owner's own local cluster follows a
+branch, not `main`, so the window does not reach it. Known limit: `make up` waits for
+Deployments, not for the sync's result, so if the queue's objects were refused on the
+first sync (a Kueue webhook not yet serving, say) it would still report the cluster ready
+while every step waited suspended. The inline Application has no `retry`; not seen in
+the runs below.
+
+**The pin moved, and the image tag with it.** A `--commit` install, which the weekly
+`repair` and `round-trip` legs run, pairs the checkout's manifests with
+`DEFAULT_STACK_TAG`'s images, so the promoter would have run v0.30.0's workbench, which
+has no such subcommand. The pin moved to v0.31.12, the first release with it, and
+`installSession.test.ts` records that floor. That turned up a second defect: since
+v0.31.3 the release images on GHCR are tagged with the git tag's `v`
+(`memql-bff:v0.31.12`) and have no bare tag, because the installation's publication
+targets name `v<version>`. The installer stripped the `v`, so every install of a release
+since then, the picker's `Latest` included, asked for images that do not exist.
+`imageTagFor` now keeps the `v` from `FIRST_GIT_TAGGED_IMAGE_RELEASE` (v0.31.3) on and
+strips it before, and a repair replays its recorded tag through the same conversion, so an
+install recorded as `0.31.12` by an older extension is repaired as `v0.31.12`, the same
+release in the spelling it was published under. If a publisher returns to bare tags, that
+boundary needs an upper end. The release tooling makes the same bare-tag assumption
+(`integrations/release/ghcr.go`'s `Check`, `scripts/release/release-engine.sh`), so it
+reports releases from v0.31.3 on as unbuilt; that is outside this change.
+
+Tests: `TestTheLocalOverlayComposesThePipelineQueue`, `TestTheLocalQueueIsBoundByPodsAlone`,
+`TestTheWorkbenchRollsWithItsQueue`, `TestThePromoterRunsTheLocalWorkbenchImage` and
+`TestTheLocalAppProjectAllowsEveryClusterScopedKindTheOverlayRenders`
+(`deploy/k8s/overlays/render_local_queue_test.go`); `TestPipelinesCeilingAndLimitsAreValues`,
+`TestTheQueueGrantIsExemptOnlyWhileItNamesItsObjects` and
+`TestThePromotersGrantIsExemptOnlyAsItShips` (`render_pipelines_test.go`); the component's
+own tests, which render the local overlay as it ships; `TestTheLocalAppProjectIsTheSharedOnePlusTheQueueKinds`,
+`TestUpAppliesTheLocalAppProjectByDefault` and
+`TestTheMeshApplicationLeavesTheQueuesOwnerControlsAlone` (`scripts/k3d/up_local_queue_test.go`);
+`TestKueueIsTheThirdOperatorOnTheSharedDeadline`, `TestOperatorApplicationPinsItsFirstApply`,
+the two checkout tests above and `TestTheProjectFileMayHoldOneDocumentOnly` (`scripts/k3d`);
+`TestTheLocalOverlaysOnlyClusterWideGrantIsTheQueues`; and
+`editors/vscode/test/imageTag.test.ts`, with the pin's floor and the repair's spelling in
+`installSession.test.ts`.
+
+Verified on 2026-11-04 on a throwaway k3d cluster (k3s v1.32.13, Argo CD v2.13.3,
+Kueue v0.20.2, Apple silicon), driven by `up.sh`'s own functions against a pushed branch
+of this change, with the installer's image override at the new pin
+(`ghcr.io/znasllc-io/memql-*:v0.31.12`):
+
+- `install_operator_stack` registered Kueue third, and all three operator Applications
+  were Synced and Healthy. The mesh Application synced every object of the composed
+  overlay, "successfully synced (all tasks run)": the local AppProject let the eight
+  kinds through.
+- The ClusterQueue came up Active with `stopPolicy: None`, two pods and the large
+  budgets, beside a Job quota of 32 and the LimitRange's old requests. The workbench
+  rolled with `memql.io/pipeline-queue`, on the v0.31.12 image.
+- Of three step-shaped Jobs, two were admitted and the third waited with "insufficient
+  unused quota for pods ... 1 more needed" until one finished. Each admitted pod
+  reserved 250m, 512Mi and 1Gi. With the queue in place the ceiling policy refused a
+  `pods` budget of 3, and after a hard refresh Argo CD kept a delegated save
+  (`pods: 1`, `stopPolicy: Hold`).
+- A promoter pass started from the CronJob ran on the v0.31.12 workbench image,
+  `IfNotPresent`, on the serving node, and found nothing waiting, as did the scheduled
+  passes. The first scheduled pass failed `DeadlineExceeded`: its pod spent 3m16s
+  pulling that image, past the Job's 120-second deadline. `make up` imports the image
+  instead, so only a fresh installer cluster's first tick meets this; the next pass is
+  the recovery.
+- `TestPipelinesSubstrate`'s real runner created step Jobs that the queue admitted
+  within a second, in three runs. `database.psql`, with its sidecar, secret and
+  artifact, succeeded in two of them and one shard in one; isolation, cleanup and
+  cancellation passed every time. Every failure was a clone that timed out: GitHub's
+  git endpoint served this machine at 16 to 25 KB/s, measured from the host too, while
+  other downloads ran at 1 to 7 MB/s. So the test as a whole was not green, for a
+  reason outside the queue.
+- With the shared AppProject in place, as on a cluster not yet re-run through `make up`,
+  Argo CD refused the whole sync ("one or more synchronization tasks are not valid")
+  and applied nothing, the workbench's annotation included; with the local project
+  back, the sync completed.
+
+Not verified: a full `make up` or installer run with this change, because the owner's
+local cluster was running and holds the host ports, so `create_cluster`,
+`seed_secrets` and `wait_for_workloads` were not run and the mesh had no secrets; the
+older-cluster case with Kueue absent rather than the project; a green
+`TestPipelinesSubstrate` at local's requests; the upgrade of an existing cluster; the
+Cluster app's capacity section locally; cold builds under the queue; the weekly
+install legs on the new pin; and Linux or amd64.
 
 ## Release trains carry main (2026-10-27)
 

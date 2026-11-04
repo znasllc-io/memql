@@ -384,12 +384,26 @@ patches:
 
   # -------------------------------------------------------------------------
   # PIPELINES -- local VALUES over the pipelines component (epic memql#5478,
-  # task #5492): the concurrency ceiling and the step limits a laptop gives,
-  # and the cache's binds-on-first-use mark, which Argo CD's claim health
-  # check (deploy/argocd/bootstrap/pvc-health.yaml) reads so an unbound cache
-  # does not hold this Application at Progressing. The file says why.
+  # task #5492): the Job quota and the step limits a laptop gives, and the
+  # cache's binds-on-first-use mark, which Argo CD's claim health check
+  # (deploy/argocd/bootstrap/pvc-health.yaml) reads so an unbound cache does
+  # not hold this Application at Progressing. The file says why.
+  #
+  # Overlay patches run after the components, so this file's LimitRange is the
+  # one that renders: today's step requests, not pipelines-capacity's
+  # request-equals-limit reservation. pipelines-queue-values.yaml says why.
   # -------------------------------------------------------------------------
   - path: pipelines-values.yaml
+  # THE QUEUE'S LOCAL VALUES (memql#6387): admission on, two steps at once as
+  # the only binding bound, and the operator ceiling matching the queue.
+  - path: pipelines-queue-values.yaml
+  # The promoter's image is the workbench's, imported into k3d and in no
+  # registry, like every engine image below.
+  - target: { kind: CronJob, name: pipeline-deadline-priority }
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
 
 # ---------------------------------------------------------------------------
 # Image tags for local builds
@@ -426,6 +440,28 @@ images:
     newName: memql-edge
     newTag: local
 
+# THE WORKBENCH ROLLS WITH ITS QUEUE (memql#6387). The runner reads
+# MEMQL_PIPELINES_QUEUE through envFrom, which restarts nothing when the
+# ConfigMap changes. A workbench left running would keep creating UNLABELLED
+# Jobs, which Kueue neither admits nor holds, and under the queue's Job quota
+# of 32 they would all start at once: six cold builds writing at once is what
+# stalled etcd in #6018. Carrying the queue's name on the pod template makes the
+# sync that adds the queue roll the workbench too, as the first installation
+# does for its priority classes.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: memql-pipelines
+      fieldPath: data.MEMQL_PIPELINES_QUEUE
+    targets:
+      - select:
+          kind: Deployment
+          name: workbench
+        fieldPaths:
+          - spec.template.metadata.annotations.[memql.io/pipeline-queue]
+        options:
+          create: true
+
 components:
   # engine/ labels the DSL consumers before these selector-based components.
   - ../../components/dsl-mount
@@ -455,3 +491,13 @@ components:
   # this cluster runs that package. The cloud overlays keep the default until
   # a cloud cluster runs it.
   - ../../components/pipelines-long-runs
+  # THE PIPELINE QUEUE (memql#6387; design record
+  # docs/superpowers/specs/2026-10-30-local-kueue-queue-design.md): production's
+  # Kueue ClusterQueue, flavor, strict order, operator ceiling and deadline
+  # promoter, so a local cluster admits steps the way production does. Kueue
+  # itself is the operator `make up` registers (scripts/k3d/up.sh,
+  # install_operator_stack), and deploy/argocd/local/project.yaml allows the
+  # queue's cluster-scoped kinds. In this layer, beside the images: block,
+  # because the promoter runs the workbench image. Local's sizing differs from
+  # production's on purpose: see pipelines-queue-values.yaml.
+  - ../../components/pipelines-capacity

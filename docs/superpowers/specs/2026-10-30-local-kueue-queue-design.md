@@ -232,4 +232,13 @@ today and under the queue alike.
 ## Decision
 
 The owner said yes on 2026-10-30. Step 1 goes first, as its own change, and steps 2 to 4
-follow in order. Nothing past step 1 has been built.
+follow in order. Step 1 landed as memql#6396. Steps 2 to 4 landed together on
+2026-11-04, after #6382 shipped in v0.31.12, with two findings this record did not have.
+From v0.31.3 the release images on GHCR carry the git tag's `v`, so moving the pin also
+taught the installer to ask for that form. And the installer runs its own bundled
+`up.sh` against the release it clones, not that release's, so "the editor's installer
+runs the same script" above holds only for the newest release: `up.sh` now applies the
+local project and registers Kueue only for a checkout that carries
+`deploy/argocd/local/project.yaml`. What was verified, and what was not, is in the
+decision map (`docs/internal/ops/harness-decisions.md`, "The local cluster runs
+production's pipeline queue").
