@@ -102,6 +102,17 @@ async function open(hostname: string): Promise<HTMLElement> {
   return (await screen.findByRole("region", { name: `Deployable ${hostname}` })).closest("[data-deployable-view]") as HTMLElement;
 }
 
+/** The detail page that is open in place of the deployable's own, or null. */
+function openDetail(): HTMLElement | null {
+  return screen.queryAllByRole("region").find((region) => / for \S+$/.test(region.getAttribute("aria-label") ?? "")) ?? null;
+}
+
+function detailPage(): HTMLElement {
+  const open = openDetail();
+  if (open === null) throw new Error("no detail page is open");
+  return open;
+}
+
 /**
  * Opens one of the rail's stops (epic memql#4937).
  *
@@ -111,8 +122,8 @@ async function open(hostname: string): Promise<HTMLElement> {
  * a person does.
  */
 async function openStop(page: HTMLElement, label: string): Promise<void> {
-  const dialog = screen.queryByRole("dialog");
-  if (dialog) await click(within(dialog).getByRole("button", { name: /^Close / }));
+  // A STOP'S DETAIL IS A PAGE OF ITS OWN: step back to the deployable first.
+  if (openDetail() !== null) await click(within(openDetail() as HTMLElement).getByRole("button", { name: /^Back to / }));
   const selector = { Source: ".deployable-source-piece", "What it is": ".deployable-piece-chip", "Where it lives": ".deployable-slot", Build: ".deployable-version-row:last-of-type button",  }[label];
   if (!selector) throw new Error(`no detail named ${label}`);
   await click(page.querySelector(selector));
@@ -598,8 +609,9 @@ describe("a first publish", () => {
     // EXACTLY ONE, on the bar, reading Go live. The stop offers no second one
     // -- which is the assertion that survived two renames.
     expect(screen.getAllByRole("button", { name: /^Go live/ })).toHaveLength(1);
-    // ...and exactly one stop is open (design section C).
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    // ...and exactly one stop is open (design section C), as a page of its own.
+    expect(detailPage()).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("a placeholder is not a publish: the source is waiting for the first push", async () => {
@@ -625,7 +637,7 @@ describe("the Source stop", () => {
     const { connection, page } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
     await openStop(page, "Source");
     expect(within(page).getByText("blob://sites/site-shop/v1/")).toBeTruthy();
-    expect(within(screen.getByRole("dialog")).getByText("uploaded bundle")).toBeTruthy();
+    expect(within(detailPage()).getByText("uploaded bundle")).toBeTruthy();
     expect(within(page).getByText("artifact-zip")).toBeTruthy();
     expect(within(page).getByText("Deployed from the Library.")).toBeTruthy();
     // THE STORE IS NOT A BUILD FACT AND IS NO LONGER ON WHAT-IT-IS (epic
@@ -634,7 +646,7 @@ describe("the Source stop", () => {
     // reports what DEPLOYING would do. Both moved to the Store pane, which is
     // where the store is read and changed.
     await openStop(page, "What it is");
-    expect(within(screen.getByRole("dialog")).queryByText("example.myshopify.com")).toBeNull();
+    expect(within(detailPage()).queryByText("example.myshopify.com")).toBeNull();
     expect(within(page).queryByText("SHOPIFY_STORE-EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
     // AND NOTHING ANYWHERE FETCHES A SECRET'S VALUE. The panel that does show
     // the three references shows their NAMES; this is the control that says
@@ -733,7 +745,7 @@ describe("the Source stop", () => {
         { role: "reader" },
       );
       await openStop(page, "Source");
-      const source = screen.getByRole("dialog");
+      const source = detailPage();
       // The chip still says which credential is in force -- reading is not
       // the privileged half.
       expect(await within(source).findByText("acme deploy token")).toBeTruthy();
@@ -912,7 +924,7 @@ describe("What it is", () => {
     const { page } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
     await openStop(page, "What it is");
     expect(within(page).queryByText("Web apps")).toBeNull();
-    expect(within(screen.getByRole("dialog")).getByText("Shopify storefront")).toBeTruthy();
+    expect(within(detailPage()).getByText("Shopify storefront")).toBeTruthy();
     expect(within(page).queryByText(/index\.html present/)).toBeNull();
   });
 });
@@ -922,12 +934,13 @@ describe("Build", () => {
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [REFUSED, SUCCEEDED] } }, "store.memql.example.com");
     expect(within(page).getAllByText("Unknown").length).toBeGreaterThan(0);
     expect(within(page).getByText("Refused")).toBeTruthy();
+    // On the deployable's own page, before its Build detail takes the page's place.
+    expect(within(page).getByText("The latest attempt did not replace the published version.")).toBeTruthy();
     await openStop(page, "Build");
-    const build = screen.getByRole("dialog");
+    const build = detailPage();
     expect(within(build).getByText("The build did not finish")).toBeTruthy();
     expect(within(build).getAllByText(/npm run build exited 1 in clients\/web/).length).toBeGreaterThan(0);
     expect(within(build).getByText(/npm ERR! missing script: build/)).toBeTruthy();
-    expect(within(page).getByText("The latest attempt did not replace the published version.")).toBeTruthy();
   });
 
   it("a prebuilt app: skipped with the reason", async () => {
@@ -1014,7 +1027,7 @@ describe("the Live stop", () => {
     const traffic = within(page).getByRole("button", { name: "Traffic" });
     expect(logs.nextElementSibling).toBe(traffic);
     await click(traffic);
-    expect(await screen.findByRole("dialog", { name: "Traffic" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: `Traffic for ${String(PLATFORM_SITE.hostname)}` })).toBeTruthy();
   });
 
   it("keeps history readable without publication permission", async () => {
@@ -1279,7 +1292,8 @@ describe("the bundle flip marker", () => {
     // The title is a What-it-is fact, and exactly one stop is open at a time,
     // so reaching it means opening it.
     await openStop(page, "What it is");
-    expect(within(screen.getByRole("dialog")).getByText("Renamed")).toBeTruthy();
+    // The fact, and the trail that names the deployable by it.
+    expect(within(detailPage()).getAllByText("Renamed").length).toBeGreaterThan(0);
   });
 });
 

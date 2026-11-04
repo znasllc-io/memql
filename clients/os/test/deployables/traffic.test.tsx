@@ -338,7 +338,8 @@ async function openDeployable(seed: FakeSeed, hostname: string, detail: "traffic
   await click((await screen.findByText(hostname)).closest("button"));
   const page = await screen.findByRole("region", { name: `Deployable ${hostname}` });
   await click(within(page).getByRole("button", { name: detail === "traffic" ? "Traffic" : /^App values/ }));
-  return { connection, page: await screen.findByRole("dialog") };
+  // THE DETAIL IS A PAGE OF ITS OWN now, not a dialog over this one.
+  return { connection, page: await screen.findByRole("region", { name: `${detail === "traffic" ? "Traffic" : "App values"} for ${hostname}` }) };
 }
 
 describe("a deployable's readings, rendered", () => {

@@ -182,14 +182,15 @@ async function openPage(seed: FakeSeed, hostname: string, session: Parameters<ty
 }
 
 describe("the lock sits after Traffic and is absent without the part, on a system-owned site, and with no package deployable", () => {
-  it("sits immediately after Traffic and opens the codes in a dialog", async () => {
+  it("sits immediately after Traffic and opens the codes on a page of their own", async () => {
     const page = await openPage({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] }, "desk.memql.example.com");
     const traffic = within(page).getByRole("button", { name: "Traffic" });
     const lock = within(page).getByRole("button", { name: "Access codes" });
     expect(traffic.nextElementSibling).toBe(lock);
     await click(lock);
-    const dialog = await screen.findByRole("dialog", { name: "Access codes" });
-    expect(await within(dialog).findByText("Client reviewers")).toBeTruthy();
+    const codes = await screen.findByRole("region", { name: "Access codes for desk.memql.example.com" });
+    expect(await within(codes).findByText("Client reviewers")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("is absent without the part", async () => {
@@ -213,29 +214,28 @@ describe("the lock sits after Traffic and is absent without the part, on a syste
   });
 });
 
-describe("the dialog holds while a write is out and while a new code stands", () => {
-  const closeControl = () => screen.getByRole("button", { name: "Close Access codes" }) as HTMLButtonElement;
-  const pressEscape = () => fireEvent.keyDown(screen.getByRole("dialog", { name: "Access codes" }), { key: "Escape" });
+describe("Back holds while a write is out and while a new code stands", () => {
+  // THE CODES ARE A PAGE NOW, so what the dialog's Close and Escape held, Back
+  // holds: while a reply is the only copy of a code, there is no Back to press.
+  const backControl = () => screen.queryByRole("button", { name: /^Back to / });
+  const codesPage = () => screen.queryByRole("region", { name: "Access codes for desk.memql.example.com" });
   const codesSeed = (): FakeSeed => ({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] });
 
-  async function openCodes(seed: FakeSeed, connection: FakeConnection): Promise<HTMLElement> {
+  async function openCodes(seed: FakeSeed, connection: FakeConnection): Promise<void> {
     const page = await openPage(seed, "desk.memql.example.com", {}, connection);
     await click(within(page).getByRole("button", { name: "Access codes" }));
     await screen.findByText("Client reviewers");
-    return page;
   }
 
-  it("will not close on Close or Escape while a regenerate is out, because its reply is the only copy of the code", async () => {
+  it("offers no Back while a regenerate is out, because its reply is the only copy of the code", async () => {
     const seed = codesSeed();
     const connection = fakeConnection(seed);
     const release = holdAnswers(connection, "siteAccessCodeRegenerate");
     await openCodes(seed, connection);
     await answerYes("Client reviewers", "Regenerate");
 
-    expect(closeControl().disabled).toBe(true);
-    await click(closeControl());
-    pressEscape();
-    expect(screen.getByRole("dialog", { name: "Access codes" })).toBeTruthy();
+    await waitFor(() => expect(backControl()).toBeNull());
+    expect(codesPage()).toBeTruthy();
 
     release();
     expect(await screen.findByText(FIRST_CODE)).toBeTruthy();
@@ -246,36 +246,34 @@ describe("the dialog holds while a write is out and while a new code stands", ()
     await openCodes(seed, fakeConnection(seed));
     await answerYes("Client reviewers", "Remove");
     await screen.findByText("Not this time.");
-    expect(closeControl().disabled).toBe(false);
+    await waitFor(() => expect(backControl()).toBeTruthy());
   });
 
-  it("will not close over a new code, and Done is the way out", async () => {
+  it("offers no Back over a new code, and Done is the way out", async () => {
     const seed = codesSeed();
-    const page = await openCodes(seed, fakeConnection(seed));
+    await openCodes(seed, fakeConnection(seed));
     await answerYes("Client reviewers", "Regenerate");
     await screen.findByText(FIRST_CODE);
 
-    expect(closeControl().disabled).toBe(true);
-    pressEscape();
+    await waitFor(() => expect(backControl()).toBeNull());
     expect(screen.getByText(FIRST_CODE)).toBeTruthy();
 
     await readTheBar();
     await click(screen.getByRole("button", { name: "Done" }));
-    expect(closeControl().disabled).toBe(false);
-    await click(closeControl());
-    expect(screen.queryByRole("dialog", { name: "Access codes" })).toBeNull();
+    await click(await screen.findByRole("button", { name: /^Back to / }));
+    await waitFor(() => expect(codesPage()).toBeNull());
 
+    const page = await screen.findByRole("region", { name: "Deployable desk.memql.example.com" });
     await click(within(page).getByRole("button", { name: "Access codes" }));
     await screen.findByText("Client reviewers");
     expect(document.body.innerHTML).not.toContain(FIRST_CODE);
   });
 
-  it("closes as ever with nothing out and no code standing", async () => {
+  it("steps back as ever with nothing out and no code standing", async () => {
     const seed = codesSeed();
     await openCodes(seed, fakeConnection(seed));
-    expect(closeControl().disabled).toBe(false);
-    pressEscape();
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Access codes" })).toBeNull());
+    await click(await screen.findByRole("button", { name: /^Back to / }));
+    await waitFor(() => expect(codesPage()).toBeNull());
   });
 });
 

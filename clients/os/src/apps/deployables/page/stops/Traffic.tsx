@@ -141,7 +141,6 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
   if (systemOwned) {
     return (
       <section className="os-report-part">
-        <h4 className="os-report-heading">Traffic</h4>
         <Caption>{SYSTEM_OWNED_TRAFFIC_NOTE}</Caption>
       </section>
     );
@@ -151,8 +150,8 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
   return (
     <section className="os-report-part">
       <AutoRefresh onRefresh={read} busy={state === "loading"} enabled={connection !== null} intervalMs={windowSpec(window).refreshMs} />
+      {/* The page's own Head names it Traffic: the window choice is all this row holds. */}
       <div className="os-traffic-head">
-        <h4 className="os-report-heading">Traffic</h4>
         <div className="os-choice-row os-traffic-windows" role="radiogroup" aria-label="Traffic window">
           {TRAFFIC_WINDOWS.map((w) => (
             <button

@@ -161,7 +161,8 @@ async function openRefusedStop(): Promise<HTMLElement> {
   await click((await screen.findByText("store.memql.example.com")).closest("button"));
   const page = await screen.findByRole("region", { name: "Deployable store.memql.example.com" });
   await click(page.querySelector(".deployable-piece-chip"));
-  return page;
+  // The stop's detail takes the page's place.
+  return screen.findByRole("region", { name: "App and deployment plan for store.memql.example.com" });
 }
 
 describe("a refusal never widens the deployable pane", () => {
@@ -204,7 +205,7 @@ describe("a refusal never widens the deployable pane", () => {
     // Scoped to the STOPPED stage: every stop has an answer, and the first on
     // the page is Source's hostname, which was never the one holding the pane
     // open.
-    expect(page.querySelector(".deployable-dialog[open]")).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     // And the detail is inside the stop body, which is the grid track the
     // line was holding open -- that adjacency is the whole bug.

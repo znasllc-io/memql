@@ -20,7 +20,6 @@ import { confirmationWordFor } from "../words";
 import { actsFor, candidateBlockedReason, candidateTargetOffered, runForApp, siblingRunInFlight, type ActName } from "./acts";
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import { DeployableWorkspace, type WorkspaceDetail } from "./DeployableWorkspace";
-import { DetailDialog } from "./DetailDialog";
 import { RuntimeSettingsPanel } from "./stops/RuntimeSettings";
 import { TrafficPanel } from "./stops/Traffic";
 import "../composition.css";
@@ -167,8 +166,11 @@ export function DeployablePage({
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
   const [detail, setDetail] = useState<WorkspaceDetail | null>(initialDetail ?? null);
-  // WHETHER THE ACCESS CODES HOLD THE DIALOG OPEN: what they hold is the only copy.
+  // WHETHER THE ACCESS CODES HOLD BACK: what they hold is the only copy.
   const [accessHeld, setAccessHeld] = useState(false);
+  useEffect(() => {
+    if (detail !== "access") setAccessHeld(false);
+  }, [detail]);
   // WHICH PART OF "Addresses and client" IS OPEN. The domains list, one
   // binding's setup, or the add form -- each its OWN view with its own Head, so
   // the trail names the real depth and a list never shares a scroll column
@@ -412,6 +414,33 @@ export function DeployablePage({
       back={{ label: name, onSelect: toOverview }} />;
   }
 
+  // EVERY DETAIL CHANGES THE PAGE (the owner's rule, 2026-11-03).
+  // Traffic, Access codes and each stop's detail used to open a dialog over
+  // the page; now each takes the page's place under its own Head, so the
+  // trail names where the person is and both Backs -- the row's and the
+  // browser's -- step out. The bar stays: the deployable's acts are still the
+  // deployable's while one of its details is open. Visit still asks in a
+  // dialog, and Logs opens the Logs app.
+  const inPage = detail !== null && detail !== "whereItLives" && detail !== "store" ? detail : null;
+  // A NEW ACCESS CODE IS SHOWN ONCE, so Back waits for Done while one stands,
+  // as the dialog's Close and Escape did: the row's Back is inert, and the
+  // browser's Back lands on it.
+  const holding = inPage === "access" && accessHeld;
+  const toOverview = () => setDetail(null);
+  const detailView = inPage === null ? null : (
+    <Panel label={`${detailTitle(inPage)} for ${siteName(site)}`}>
+      <Head navigationKey={`deployable:${site.id}:${inPage}`} title={detailTitle(inPage)}
+        breadcrumbs={[{ label: backLabel, onSelect: holding ? undefined : onBack }, { label: name, onSelect: holding ? undefined : toOverview }, { label: detailTitle(inPage) }]}
+        back={holding ? undefined : { label: name, onSelect: toOverview }} />
+      {inPage === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
+        inPage === "traffic" ? <TrafficPanel site={site} /> :
+        // KEYED, so a code held for one deployable is never drawn over another.
+        inPage === "access" ? <AccessCodesPanel key={site.id} site={site} onBusyChange={setAccessHeld} /> :
+        (() => { const stage = railFor(rail).stages.find(s => s.id === inPage); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
+      {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
+    </Panel>
+  );
+
   if (detail === "whereItLives") {
     const stage = railFor(rail).stages.find(stage => stage.id === "whereItLives");
     return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: "Addresses and client" })}><div className="os-deploy-scroll">
@@ -426,7 +455,7 @@ export function DeployablePage({
   return (
     <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, status: site.status, packageId: pkg?.id, view: detail ? detailTitle(detail) : "Overview" })}>
       <div className="os-deploy-scroll">
-        <Panel label={`Deployable ${siteName(site)}`}>
+        {detailView ?? <Panel label={`Deployable ${siteName(site)}`}>
           {/* Page navigation stays with the title; Ask belongs to the window. */}
           <Head navigationKey={`deployable:${site.id}`} title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
             <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
@@ -510,16 +539,7 @@ export function DeployablePage({
           {lifecycle.refusal ? (
             <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" />
           ) : null}
-      {detail ? <DetailDialog title={detailTitle(detail)} busy={detail === "access" && accessHeld} onClose={() => setDetail(null)}>
-        {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
-          detail === "traffic" ? <TrafficPanel site={site} /> :
-          // KEYED, so a code held for one deployable is never drawn over another:
-          // the effect that closes this dialog runs after the render that moves on.
-          detail === "access" ? <AccessCodesPanel key={site.id} site={site} onBusyChange={setAccessHeld} /> :
-          (() => { const stage = railFor(rail).stages.find(s => s.id === detail); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
-        {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
-      </DetailDialog> : null}
-        </Panel>
+        </Panel>}
       </div>
 
       <ActionBar state={reading.state} detail={reading.detail} tone={reading.tone} acts={confirming ? [] : acts}>
@@ -662,9 +682,7 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
   });
 }
 
-// The DIALOG's titles. `store` and `whereItLives` are deliberately absent:
-// both take the pane and draw their own Head, and an entry here would be a
-// second title for a surface that already has one.
+// Each detail's title, as its page's Head and the trail name it.
 function detailTitle(detail: WorkspaceDetail): string {
   return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store" }[detail];
 }
