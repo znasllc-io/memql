@@ -192,14 +192,19 @@ func (i *Integration) claimAndDrive(runID string) {
 	defer i.release(l)
 
 	ctx := context.Background()
-	run, ok, err := i.claim(ctx, d, runID)
+	// The push lane (push_lane.go): whether the run is a member is decided
+	// here, with no gate held, from a fresh read, and kept for the hand-off
+	// below. A member that has not started is held at the claim while another
+	// push run of its pipeline executes.
+	laneMember := i.pushLaneMember(ctx, d, runID)
+	run, ok, err := i.claimInLane(ctx, d, runID, laneMember)
 	if err != nil {
 		d.Logger.Warn("pipelines: claiming a run failed; recovery tries again",
 			"component", "pipelinerun", logger.Subject(RunConcept, runID), "error", err)
 		return
 	}
 	if !ok {
-		return // finished, or another replica's
+		return // finished, another replica's, or held by admission or the push lane
 	}
 	dr := &runDriver{
 		i: i, d: d, lease: l, runID: runID, run: run, claimID: run.DriverLeaseID,
@@ -213,6 +218,15 @@ func (i *Integration) claimAndDrive(runID string) {
 	switch outcome {
 	case driveConcluded:
 		i.forgetAborts(runID)
+		// A concluded push run frees its pipeline's push lane. This replica
+		// starts the next waiting run now, rather than leaving it a minute for
+		// recovery -- for any lane-SHAPED run, because shape is what holds the
+		// lane (push_lane.go): a run opened before the installation opted in
+		// held it too. Outside the opt-in there is no waiting lane run, and
+		// this is one fresh read that starts nothing.
+		if pushLaneShaped(run) {
+			i.advancePushLane(ctx, d, run)
+		}
 	case driveAborted:
 		i.noteAbort(runID, d.now())
 	}

@@ -147,6 +147,16 @@ type Store interface {
 	// the mode rule. A pull request numbered 0 or less is no pull request,
 	// and reads nothing.
 	RunsUnfinishedForPullRequest(ctx context.Context, pipelineID string, pullRequest int) ([]Run, error)
+	// RunsUnfinishedForPipelineEvent is every queued or in-progress run of one
+	// pipeline's event, in EVERY mode, the ones in progress first and then the
+	// most recently queued, at most a hundred
+	// (pipelineRunsUnfinishedForPipelineEvent): what the push lane reads
+	// (push_lane.go) -- a claim, whether another push run of the pipeline is
+	// executing; a new push, which waiting push runs it supersedes; recovery and
+	// a drive that just concluded, which waiting push run starts next. The
+	// caller applies the lane's rules, and reads FRESH, because each of those
+	// decides on the answer. A blank pipeline or event reads nothing.
+	RunsUnfinishedForPipelineEvent(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error)
 	// RunsFinalCheckRunUnavailable is every run concluded at or after since
 	// whose final check run did not land (checkRunState unavailable), newest
 	// first: what recovery republishes.

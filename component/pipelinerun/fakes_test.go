@@ -106,6 +106,9 @@ type memStore struct {
 	// failRunsForPullRequest is every RunsUnfinishedForPullRequest call's
 	// answer when set.
 	failRunsForPullRequest error
+	// failRunsForPipelineEvent is every RunsUnfinishedForPipelineEvent call's
+	// answer when set.
+	failRunsForPipelineEvent error
 
 	// afterCreatePipeline runs after each CreatePipeline lands, outside the
 	// store's lock: what another writer does right after a connect.
@@ -709,6 +712,38 @@ func (s *memStore) RunsUnfinishedForPullRequest(_ context.Context, pipelineID st
 	return out, nil
 }
 
+// RunsUnfinishedForPipelineEvent is pipelineRunsUnfinishedForPipelineEvent:
+// one pipeline's runs of one event that are queued or in progress, in EVERY
+// mode, in progress first and then the most recently queued, one page of a
+// hundred. Mode, trigger and opt-in are the caller's rules, not the read's.
+func (s *memStore) RunsUnfinishedForPipelineEvent(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+	if strings.TrimSpace(pipelineID) == "" || event == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noteFresh(ctx, "RunsUnfinishedForPipelineEvent")
+	if s.failRunsForPipelineEvent != nil {
+		return nil, s.failRunsForPipelineEvent
+	}
+	var out []Run
+	for _, r := range s.runs {
+		if sameID(r.PipelineID, pipelineID) && r.Event == event && (r.Status == StatusQueued || r.Status == StatusInProgress) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Status != out[j].Status {
+			return out[i].Status < out[j].Status // "in_progress" before "queued", as the DSL sorts
+		}
+		return out[i].QueuedAt.After(out[j].QueuedAt)
+	})
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	return out, nil
+}
+
 func (s *memStore) RunByCheckRun(_ context.Context, repository string, checkRunID int64) (*Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1282,8 +1317,16 @@ type fakeGitHub struct {
 	trees   map[string]fstest.MapFS
 	compare map[string]compareAnswer
 	// ancestry answers CompareAncestry, keyed "<repository>@<base>...<head>";
-	// a pair it does not hold answers 404, which proves nothing.
-	ancestry map[string]githubapp.Ancestry
+	// a pair it does not hold answers 404, which proves nothing. ancestryErr
+	// is every CompareAncestry call's answer when set; ancestryCalls is each
+	// one asked, "<repository>@<base>...<head>", in order.
+	ancestry      map[string]githubapp.Ancestry
+	ancestryErr   error
+	ancestryCalls []string
+	// branchHeadErr is every BranchHead call's answer when set; branchHeadCalls
+	// is each one asked, "<repository>@<branch>", in order.
+	branchHeadErr   error
+	branchHeadCalls []string
 
 	// pullsErr is every OpenPullRequests call's answer when set.
 	pullsErr error
@@ -1481,9 +1524,14 @@ func (g *fakeGitHub) BranchHead(ctx context.Context, _, repository, branch strin
 	g.mu.Lock()
 	h, ok := g.heads[repository+"@"+branch]
 	hook := g.onBranchHead
+	g.branchHeadCalls = append(g.branchHeadCalls, repository+"@"+branch)
+	failed := g.branchHeadErr
 	g.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	if failed != nil {
+		return "", "", failed
 	}
 	if !ok {
 		return "", "", &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/branches/" + branch}
@@ -1559,6 +1607,10 @@ func (g *fakeGitHub) CompareAncestry(ctx context.Context, _, repository, base, h
 	watchGitHubCall(g.t, ctx, "CompareAncestry")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.ancestryCalls = append(g.ancestryCalls, repository+"@"+base+"..."+head)
+	if g.ancestryErr != nil {
+		return githubapp.Ancestry{}, g.ancestryErr
+	}
 	a, ok := g.ancestry[repository+"@"+base+"..."+head]
 	if !ok {
 		return githubapp.Ancestry{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare"}
@@ -1573,6 +1625,36 @@ func (g *fakeGitHub) setAncestor(repository, base, head string, files ...string)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.ancestry[repository+"@"+base+"..."+head] = githubapp.Ancestry{Ancestor: true, Files: files, Complete: true}
+}
+
+// setNotAncestor records GitHub answering that base is NOT an ancestor of
+// head: a compare that reads, and proves nothing (history rewritten, or a
+// commit of another branch).
+func (g *fakeGitHub) setNotAncestor(repository, base, head string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ancestry[repository+"@"+base+"..."+head] = githubapp.Ancestry{Complete: true}
+}
+
+// setBranchHead is a push to branch on GitHub: its head moves to sha.
+func (g *fakeGitHub) setBranchHead(repository, branch, sha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.heads[repository+"@"+branch] = headAnswer{SHA: sha, Message: "Land " + sha[:min(len(sha), 7)]}
+}
+
+// branchHeadReads is every BranchHead call, in order.
+func (g *fakeGitHub) branchHeadReads() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.branchHeadCalls)
+}
+
+// ancestryReads is every CompareAncestry call, in order.
+func (g *fakeGitHub) ancestryReads() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.ancestryCalls)
 }
 
 func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string) (string, string, error) {

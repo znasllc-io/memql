@@ -426,6 +426,14 @@ func (h githubAt) CommitTree(_ context.Context, _, _, _ string) (string, error) 
 	return "", fmt.Errorf("the hop fixture has no commit objects to read")
 }
 
+// CompareAncestry is the history half of a compare, which the hop fixture does
+// not model: its answer proves nothing, so nothing rests on it -- no push run
+// is superseded and no verified step carried forward from an unproven ancestor
+// (component/pipelinerun's ports.go).
+func (h githubAt) CompareAncestry(_ context.Context, _, _, _, _ string) (githubapp.Ancestry, error) {
+	return githubapp.Ancestry{}, fmt.Errorf("the hop fixture has no commit history to compare")
+}
+
 func (h githubAt) CommitForRef(_ context.Context, token, repository, ref string) (string, string, error) {
 	g := h.g
 	g.mu.Lock()

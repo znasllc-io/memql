@@ -1900,6 +1900,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
+
+		// The push lane (design record 2026-11-05 D4): a claim, a new push and
+		// recovery find the push run holding a pipeline's lane whoever owns it.
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinishedForPipelineEvent"}: true,
+
 		// Release trains (design record 2026-10-27): the coordinator reads and
 		// writes the train record on a scheduled tick with no person behind it.
 		{Path: "pipelines/queries.memql", Name: "pipelineTrainsForPipeline"}: true,

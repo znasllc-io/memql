@@ -32,6 +32,12 @@ import (
 // Each claim is the same gated claim an event makes, so a recovery and an
 // event, or two replicas recovering, still drive a run exactly once.
 //
+// A PUSH-LANE RUN THAT HAS NOT STARTED is not this pass's to claim
+// (push_lane.go, recoverPushLanes): the lane's own pass, run first, supersedes
+// the waiting runs its head's run covers and starts at most one per pipeline --
+// the head's, else the newest -- and none while another push run of the
+// pipeline executes. A run that has started is recovered here as any other.
+//
 // A RUN WHOSE DRIVE STOPPED SHORT HERE WAITS before it is taken up again, and
 // longer each time (abortBackoff): a write the run cannot go on without that
 // fails every time -- a refusal, not an outage -- must not cost a tarball
@@ -110,13 +116,19 @@ func (i *Integration) RecoverRuns(ctx context.Context) error {
 		return err
 	}
 	now := d.now()
+	// The push lanes first (push_lane.go): each supersedes what its head's run
+	// covers and starts at most one waiting run, the newest, when it is free.
+	// Every unstarted lane run is the lane's to start, never this pass's: a
+	// claim of one while its lane is held writes nothing, and would be tried
+	// -- and logged -- every minute.
+	lane := i.recoverPushLanes(ctx, d, runs, now)
 	for _, r := range runs {
 		if cancelled, err := i.reconcileQueueRun(ctx, d, r); err != nil {
 			d.Logger.Warn("pipelines: queue reconciliation could not be confirmed", "run", r.ID, "error", err)
 		} else if cancelled {
 			continue
 		}
-		if i.driving(r.ID) != nil || !recoverable(r, d.NodeID, now) || i.backingOff(r.ID, now) {
+		if lane[bareID(r.ID)] || i.driving(r.ID) != nil || !recoverable(r, d.NodeID, now) || i.backingOff(r.ID, now) {
 			continue
 		}
 		d.Logger.Info("pipelines: recovering a run nobody is driving",

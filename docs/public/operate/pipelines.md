@@ -895,7 +895,9 @@ Afterwards:
   lands while a step's Job is being created concludes some minutes later
   ([Cancel](pipelines-substrate.md#cancel)). A new push to a pull request cancels
   the pull request's earlier runs the same way
-  ([Cancel-on-push](pipelines-substrate.md#cancel-on-push)).
+  ([Cancel-on-push](pipelines-substrate.md#cancel-on-push)), and, where the
+  installation opted in, a push to the default branch cancels the push runs still
+  waiting that it covers ([The push lane](pipelines-substrate.md#the-push-lane)).
 
 Each acts on your own pipeline or run only. A caller who does not own it is
 refused by name before anything is written. The one exception is disconnect: a
@@ -1192,8 +1194,18 @@ Optional roles are `supersession`, `reconciliation`, `maintenance`,
 Their default behavior
 preserves affected-PR supersession, cancels an invalidated queue ref, retries a
 failed step within the portable limits ([Retries and failover](#retries-and-failover)),
-and performs no repair, evidence reuse, ordinary-PR AI review or pool-to-cloud
-fallback.
+and performs no push coalescing, repair, evidence reuse, ordinary-PR AI review or
+pool-to-cloud fallback.
+
+The `supersession` template receives `event`, `mode`, `previousMode` and
+`trigger` and returns a boolean. For a new pull-request head it is asked about
+each earlier run of the pull request, with `previousMode` that run's mode. For a
+push to the default branch it decides the
+[push lane](pipelines-substrate.md#the-push-lane): a push run joins the lane when
+its own saved policy answers true for `event: "push"`, `mode: "full"`,
+`previousMode: "full"` and its trigger, `webhook` or `poll`. The portable
+template answers true only for an affected pull-request run, never for a push, so
+an installation opts into the lane by adding that case to its own template.
 A resolver cannot change merge-group coverage mode away from `full` or grant
 repository write access.
 Source manifests declare commands and artifacts; they cannot replace this binding.
@@ -1276,7 +1288,10 @@ carries passes inside the release's own attempt chain
 Recovery reads GitHub's current queue ref before cancelling work whose merge
 group disappeared or moved. GitHub answers a deleted ref with 422, not 404, and
 both count as disappeared. An unavailable provider response leaves it running.
-Supersession cannot cancel unrelated full runs or releases.
+Supersession cannot cancel a release, a merge queue's run, a push run already
+executing or an unrelated full run. It cancels a waiting push run only under the
+[push lane](pipelines-substrate.md#the-push-lane), and only when GitHub proves the
+run's commit an ancestor of the default branch's head.
 
 After a failed run, the frozen `maintenance` policy returns `none`, `human`, or
 `analysis` with an installed diagnosis template and an explanation. Analysis
@@ -1469,6 +1484,11 @@ reused without merging the separate events or their effect receipts.
 
 A re-run is not a second sighting: it opens the key's next attempt, a new run
 row with a new check run, and leaves the original as it ended.
+
+Runs of different keys run side by side. Pushes to the default branch are the
+exception where the installation opts into the push lane: each waits for the
+pipeline's push run ahead of it, and a newer push supersedes the ones still
+waiting ([The push lane](pipelines-substrate.md#the-push-lane)).
 
 ### Stages, in order
 
@@ -1990,6 +2010,11 @@ replica takes the run over once the lease is 120 seconds stale, and the
 every-minute poll claims any queued run no agent picked up. **A cluster with no
 agent replica opens runs and never starts them.**
 
+A push the [push lane](pipelines-substrate.md#the-push-lane) holds is not
+claimed while another push run of its pipeline executes. The replica that
+concludes that run starts the next waiting one; recovery does it within a minute
+when that replica is gone.
+
 A pipeline's work run belongs to its runner (`triggeredBy: pipeline:<mode>`):
 the work dispatcher never executes one, the spine's waiting sweep leaves it
 alone, and Nexus's re-run and branch refuse it. Re-run a pipeline run with
@@ -2035,7 +2060,9 @@ a completed proof is a reusable isolation fact, never spending permission.
 ```mermaid
 flowchart LR
     S[Webhook, poll or manual request] --> Q[Durable queued pipeline run]
-    Q --> G{Run or train allowance open?}
+    Q --> L{Push lane free? Lane runs only}
+    L -->|Another push run executes| Q
+    L -->|Free, or not a lane run| G{Run or train allowance open?}
     G -->|Hold or unavailable| Q
     G -->|Allow| C[Claim lease and start run clock]
     C --> F[Eligible opted-in Fleet capacity]
@@ -2065,7 +2092,9 @@ A global hold with no train allowance covers new runs on both cluster and Fleet
 compute, including release and manual runs. It does not stop application requests, agent goals,
 backups or database work. A globally held run stays queued without consuming
 `MEMQL_PIPELINES_RUN_MAX_MINUTES`; the usual poll, deduplication and supersession
-rules still apply. A cloud-only hold allows the run to start and use Fleet.
+rules still apply. The [push lane](pipelines-substrate.md#the-push-lane) holds a
+run the same way, before admission is asked: a lane run behind another push run
+of its pipeline writes nothing and starts no deadline until the lane is free. A cloud-only hold allows the run to start and use Fleet.
 Waiting for Fleet, cloud admission or Kueue capacity then consumes the existing
 run deadline; it does not consume the command's own execution timeout before a
 Job starts. These waits are bounded, not an indefinite pause. Started-run

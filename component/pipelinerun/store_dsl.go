@@ -63,6 +63,9 @@ const (
 	// The opening's read of what a push supersedes, likewise server-only: a
 	// pull request's runs that have not finished, every mode (supersede.go).
 	qPipelineRunsUnfinishedForPullRequest = "pipelineRunsUnfinishedForPullRequest" // (pipelineId, pullRequest)
+	// The push lane's read, likewise server-only: one pipeline's runs of one
+	// event that have not finished, every mode (push_lane.go).
+	qPipelineRunsUnfinishedForPipelineEvent = "pipelineRunsUnfinishedForPipelineEvent" // (pipelineId, event)
 
 	// The work spine's read of one run's steps (dsl/work), server-only and
 	// cluster-owner-conjoined like the reads above: a resumed driver reads the
@@ -437,6 +440,18 @@ func (s *dslStore) RunsUnfinishedForPullRequest(ctx context.Context, pipelineID 
 		"pipelineId":  bareID(pipelineID),
 		"pullRequest": int64(pullRequest),
 	}))
+}
+
+// RunsUnfinishedForPipelineEvent reads one pipeline's unfinished runs of one
+// event, whoever owns them: the push lane has no person behind it. A blank
+// pipeline or event is no read -- in the query a blank value equals an absent
+// field, so it would answer every run that names none.
+func (s *dslStore) RunsUnfinishedForPipelineEvent(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+	id, ev := bareID(pipelineID), strings.TrimSpace(string(event))
+	if id == "" || ev == "" {
+		return nil, nil
+	}
+	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinishedForPipelineEvent, map[string]any{"pipelineId": id, "event": ev}))
 }
 
 func (s *dslStore) RunsFinalCheckRunUnavailable(ctx context.Context, since time.Time) ([]Run, error) {
