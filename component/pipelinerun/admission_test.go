@@ -27,19 +27,19 @@ func TestFileRunAdmissionFailsClosedAndReadsEveryDecision(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "admission.json")
 	gate := FileRunAdmission(path)
-	if allow, err := gate(testNow, false); allow || err == nil {
+	if allow, err := gate(testNow); allow || err == nil {
 		t.Fatal("missing configured decision must hold new runs")
 	}
 	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow, false); !allow || err != nil {
+	if allow, err := gate(testNow); !allow || err != nil {
 		t.Fatalf("fresh allowance: %v, %v", allow, err)
 	}
 	writeAdmission(t, path, false, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow, false); allow || err != nil {
+	if allow, err := gate(testNow); allow || err != nil {
 		t.Fatalf("the updated hold must be read without restarting: %v, %v", allow, err)
 	}
 	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow.Add(90*time.Minute), false); allow || err == nil {
+	if allow, err := gate(testNow.Add(90 * time.Minute)); allow || err == nil {
 		t.Fatal("a stopped writer cannot leave an indefinite allowance")
 	}
 	for _, content := range []string{
@@ -50,7 +50,7 @@ func TestFileRunAdmissionFailsClosedAndReadsEveryDecision(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if allow, err := gate(testNow, false); allow || err == nil {
+		if allow, err := gate(testNow); allow || err == nil {
 			t.Fatalf("invalid decision allowed admission: %q", content)
 		}
 	}
@@ -105,87 +105,13 @@ func TestAdmissionDoesNotPreventCancellingAnUnstartedClaim(t *testing.T) {
 	run.CancelRequested = true
 	h.store.addRun(run)
 	h.integ.Configure(func(d *Deps) {
-		d.AdmitRun = func(time.Time, bool) (bool, error) {
+		d.AdmitRun = func(time.Time) (bool, error) {
 			t.Fatal("cancellation must not depend on admission")
 			return false, nil
 		}
 	})
 	if _, ok, err := h.integ.claim(context.Background(), h.integ.snapshot(), run.ID); !ok || err != nil {
 		t.Fatalf("cancel recovery blocked: %v, %v", ok, err)
-	}
-}
-
-func writeTrainAdmission(t *testing.T, path string, allowRuns, allowTrains bool, until time.Time) {
-	t.Helper()
-	data, err := json.Marshal(map[string]any{"allowNewRuns": allowRuns, "allowTrainRuns": allowTrains, "validUntil": until, "reason": "train allowance"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The cost guard can hold new runs and still admit release trains, which run
-// on a schedule and a budget of their own (design record 2026-10-27, 5.3).
-func TestAdmissionAdmitsATrainRunUnderTheTrainAllowance(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "admission.json")
-	gate := FileRunAdmission(path)
-	writeTrainAdmission(t, path, false, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow, true); !allow || err != nil {
-		t.Fatalf("a train run under the train allowance: %v, %v", allow, err)
-	}
-	if allow, err := gate(testNow, false); allow || err != nil {
-		t.Fatalf("an ordinary run under the train allowance alone was admitted: %v, %v", allow, err)
-	}
-}
-
-func TestAdmissionWithoutTheTrainFieldIsUnchanged(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "admission.json")
-	gate := FileRunAdmission(path)
-	writeAdmission(t, path, false, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow, true); allow || err != nil {
-		t.Fatalf("a hold with no train field held a train run: %v, %v", allow, err)
-	}
-	writeAdmission(t, path, true, testNow.Add(90*time.Minute))
-	if allow, err := gate(testNow, true); !allow || err != nil {
-		t.Fatalf("an open window admits a train run too: %v, %v", allow, err)
-	}
-	if err := os.WriteFile(path, []byte(`{"allowNewRuns":false,"allowTrainRuns":"yes","validUntil":"`+testNow.Add(time.Hour).Format(time.RFC3339)+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if allow, err := gate(testNow, true); allow || err == nil {
-		t.Fatalf("a train allowance that is not a boolean was read: %v, %v", allow, err)
-	}
-}
-
-func TestClaimPassesTheTrainFact(t *testing.T) {
-	h := newHarness(t)
-	p := testPipeline(DeliveryWebhook)
-	h.store.addPipeline(p)
-	train := queuedRun(p, shaA)
-	train.HeadBranch = "train/2026-10-28-1"
-	ordinary := queuedRun(p, shaB)
-	ordinary.ID, ordinary.RunKey = "run-ordinary", "k-ordinary"
-	h.store.addRun(train)
-	h.store.addRun(ordinary)
-	var asked []bool
-	h.integ.Configure(func(d *Deps) {
-		d.AdmitRun = func(_ time.Time, isTrain bool) (bool, error) {
-			asked = append(asked, isTrain)
-			return false, nil
-		}
-	})
-	for _, id := range []string{train.ID, ordinary.ID} {
-		if _, _, err := h.integ.claim(context.Background(), h.integ.snapshot(), id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(asked) != 2 || !asked[0] || asked[1] {
-		t.Fatalf("admission was asked %v, want [true false]: a train run, then an ordinary one", asked)
-	}
-	if !IsTrainRun(train) || IsTrainRun(ordinary) {
-		t.Errorf("IsTrainRun misreads the head branch")
 	}
 }
 
@@ -211,6 +137,11 @@ func TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate(t *testing.T) {
 		{"unknown version", map[string]any{"version": 3, "allowNewRuns": true, "allowCloud": true}, false, false, true},
 		{"null version", map[string]any{"version": nil, "allowNewRuns": true}, false, false, true},
 		{"unknown field", map[string]any{"version": 2, "allowNewRuns": true, "allowCloud": true, "bypass": true}, false, false, true},
+		// Release trains were removed (2026-11-05). A guard still writing their
+		// allowance is out of step with this engine, so the decision holds every
+		// new run and every new cloud Job instead of being read without it.
+		{"retired train allowance", map[string]any{"allowNewRuns": true, "allowTrainRuns": true}, false, false, true},
+		{"retired train allowance, version 2", map[string]any{"version": 2, "allowNewRuns": true, "allowTrainRuns": false, "allowCloud": true}, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.decision["validUntil"] = testNow.Add(time.Hour)
@@ -221,7 +152,7 @@ func TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate(t *testing.T) {
 			if err := os.WriteFile(path, data, 0600); err != nil {
 				t.Fatal(err)
 			}
-			for name, gate := range map[string]func(time.Time) (bool, error){"runs": func(now time.Time) (bool, error) { return runs(now, false) }, "cloud": func(now time.Time) (bool, error) { return cloud(now, false) }} {
+			for name, gate := range map[string]func(time.Time) (bool, error){"runs": runs, "cloud": cloud} {
 				want := tc.runs
 				if name == "cloud" {
 					want = tc.cloud
@@ -232,47 +163,6 @@ func TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate(t *testing.T) {
 				}
 				if got, err := gate(testNow.Add(time.Hour)); got || err == nil {
 					t.Fatalf("%s accepted expired decision", name)
-				}
-			}
-		})
-	}
-}
-
-// Release trains and Fleet/cloud placement came from independent branches.
-// A train allowance preserves legacy train execution under a new-run hold.
-// A separate v2 cloud spending hold still wins for both classes.
-func TestTrainAllowancePreservesIndependentCloudHold(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "admission.json")
-	runs, cloud := FileRunAdmission(path), FileCloudAdmission(path)
-	for _, tc := range []struct {
-		name                                       string
-		decision                                   map[string]any
-		ordinary, train, ordinarySpend, trainSpend bool
-	}{
-		{"legacy train allowance", map[string]any{"allowNewRuns": false, "allowTrainRuns": true}, false, true, false, true},
-		{"legacy all held", map[string]any{"allowNewRuns": false, "allowTrainRuns": false}, false, false, false, false},
-		{"train during ordinary run hold", map[string]any{"version": 2, "allowNewRuns": false, "allowTrainRuns": true, "allowCloud": true}, false, true, false, true},
-		{"train during spending hold", map[string]any{"version": 2, "allowNewRuns": true, "allowTrainRuns": true, "allowCloud": false}, true, true, false, false},
-		{"train only during spending hold", map[string]any{"version": 2, "allowNewRuns": false, "allowTrainRuns": true, "allowCloud": false}, false, true, false, false},
-		{"both allowances", map[string]any{"version": 2, "allowNewRuns": true, "allowTrainRuns": true, "allowCloud": true}, true, true, true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.decision["validUntil"] = testNow.Add(time.Hour)
-			data, err := json.Marshal(tc.decision)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, data, 0600); err != nil {
-				t.Fatal(err)
-			}
-			for _, check := range []struct{ train, want bool }{{false, tc.ordinary}, {true, tc.train}} {
-				if got, err := runs(testNow, check.train); got != check.want || err != nil {
-					t.Fatalf("run train=%v: got %v/%v, want %v", check.train, got, err, check.want)
-				}
-			}
-			for _, check := range []struct{ train, want bool }{{false, tc.ordinarySpend}, {true, tc.trainSpend}} {
-				if got, err := cloud(testNow, check.train); got != check.want || err != nil {
-					t.Fatalf("cloud train=%v: got %v/%v, want %v", check.train, got, err, check.want)
 				}
 			}
 		})

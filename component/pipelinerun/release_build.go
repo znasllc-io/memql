@@ -114,42 +114,6 @@ func (i *Integration) InspectReleaseBuild(ctx context.Context, r pipelines.Relea
 	return source, err
 }
 
-// InspectReleaseBuildAt selects a named commit rather than the branch's head: a train
-// tags the commit its run tested, and main's head, pushed to directly, has no check of
-// its own (design record 2026-11-02-nightly-release-from-main-design.md, D5). It answers
-// the request bound to that commit, and what a bound request is checked against is the
-// same as for a person's selection.
-func (i *Integration) InspectReleaseBuildAt(ctx context.Context, r pipelines.ReleaseBuildRequest, sha string) (pipelines.ReleaseBuildRequest, pipelines.ReleaseBuildSource, error) {
-	empty := pipelines.ReleaseBuildSource{}
-	if !validReleaseCommit(sha) {
-		return r, empty, errors.New("release build requires an exact selected commit")
-	}
-	if err := validateBuildRequest(r, false); err != nil {
-		return r, empty, err
-	}
-	d := i.snapshot()
-	p, err := releaseBuildPipeline(ctx, d, r)
-	if err != nil {
-		return r, empty, err
-	}
-	provider, ok := d.GitHub.(releaseBuildGitHub)
-	if !ok {
-		return r, empty, errors.New("release source verification is unavailable")
-	}
-	token, err := releaseBuildToken(ctx, d, p)
-	if err != nil {
-		return r, empty, err
-	}
-	proof, err := provider.ObserveReleaseSource(ctx, token, p.Repository, p.DefaultBranch, sha)
-	if err != nil {
-		return r, empty, err
-	}
-	r.ExpectedSHA, r.SourceID, r.CredentialID = sha, p.PackageID, p.CredentialID
-	r.InstallationID, r.RepositoryID = p.InstallationID, proof.RepositoryID
-	source, err := i.InspectReleaseBuild(ctx, r)
-	return r, source, err
-}
-
 func (i *Integration) inspectReleaseBuild(ctx context.Context, r pipelines.ReleaseBuildRequest) (pipelines.ReleaseBuildSource, Pipeline, string, error) {
 	empty := pipelines.ReleaseBuildSource{}
 	if err := validateBuildRequest(r, false); err != nil {
@@ -285,7 +249,7 @@ const maxReleaseAttempts = 50
 // handful of commits back; 20 covers several hours of pushes. The cost is about one
 // GitHub call per commit examined plus three (the head, its rules, the
 // history), inside preparation's two-minute budget (integrations/release
-// prepareBuildAt). Further back than that, the release would be of work old
+// prepareBuild). Further back than that, the release would be of work old
 // enough that the person should look at why nothing since has passed, which is
 // what the refusal release_source_untested says.
 const releaseSourceLookBack = 20

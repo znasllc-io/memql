@@ -2375,10 +2375,9 @@ Two alternatives were rejected. A field on `pl.StepResult` for the kubelet's
 reason would have needed every reader -- the driver, the check run, the run
 page -- to learn it, where a catalogued code already reaches all of them. A
 note changes no outcome, and the step has failed. The code is
-`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing. It
-is not one of the release train's `EnvironmentalStepCodes`, so it earns no
-automatic retry; whether an intermittent out-of-memory kill should is a
-separate decision.
+`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing, so
+it earns no automatic retry; whether an intermittent out-of-memory kill should
+is a separate decision.
 
 The out-of-memory rows of `TestClassify`,
 `TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt`,
@@ -2810,129 +2809,70 @@ older-cluster case with Kueue absent rather than the project; a green
 Cluster app's capacity section locally; cold builds under the queue; the weekly
 install legs on the new pin; and Linux or amd64.
 
-## Release trains carry main (2026-10-27)
+## Release trains are removed (2026-11-05)
 
-Every pull request to this repository is opened under the owner's account, so
-GitHub never lets one be approved: each merged through `merge-as-owner.sh`'s
-admin bypass, which skips the merge queue, and every merge left the other open
-pull requests behind `main` to run the whole pipeline again. The owner chose
-trains (design record `docs/superpowers/specs/2026-10-27-release-trains-design.md`):
-ready pull requests collect, a train tests them together once, and only the
-owner's GitHub approval of the train pull request moves `main`. The connected
-workflow is in [pipelines.md](../../public/operate/pipelines.md#release-trains).
+**Trigger.** On 2026-11-05 the owner decided that only they move `main`, by
+pushing to it, with pull requests off on the repositories that matter, and that
+releases and deploys are done by hand ([design record](../../superpowers/specs/2026-11-05-owner-pushes-main-design.md),
+D1 and D2). A release train landed pull requests, or, from `main`, published it
+once a day, and its automatic deploy merged the installation pin through a pull
+request. With pull requests off and `main` restricted to the owner, none of
+those paths can finish, and the owner asked for the trains to be deleted, not
+deprecated.
 
-**Trigger.** `tickPipelineTrains` runs every minute on the one agent replica
-holding the `pipelines-trains` lease (`TestReleaseTrainsTickOnlyOnElectedAgent`):
-an agent, because a retry opens the same failed-only re-run a person's re-run
-opens, and only an agent's driver picks that up. `pipelinesTrainTick` is
-internal-origin only (`TestTickRefusesAClientCaller`). A repository takes part
-only when `MEMQL_PIPELINES_TRAINS` names it with `enabled: true`; a value that
-does not parse runs no train anywhere and logs the field at fault, rather than
-guessing at a typo every minute. An express train is
-`pipelinesTrainExpress`, the pipeline owner's alone, under
-`execute app:pipelines/rerun`.
+**What went.** The train coordinator and its every-minute tick
+(`tickPipelineTrains`, lease `pipelines-trains`), express departures, standing
+approval ("Publish by itself", "Deploy by itself") and the automatic deploy
+with **Deploy newest release** and **Resume**: the builtins
+`pipelinesTrainTick`, `pipelinesTrainExpress`, `pipelinesTrainStatus`,
+`pipelinesTrainStanding`, `pipelinesDeployRelease` and
+`pipelinesDeploymentResume`, with their queries, mutations and shapes; the
+concepts `v1:pipelines:train`, `v1:pipelines:standing` and
+`v1:pipelines:pipelineDeployment`; `v1:pipelines:run.onlyStages`; the GitHub
+calls only a train made (`githubapp/train.go`); the packages train token and
+owner login; the exact-commit ArgoCD sync (`integrations/argocd/sync.go`); the
+release integration's train and deploy adapters; the MemQL OS Releases panel;
+the `MEMQL_PIPELINES_TRAINS` setting; and `merge-as-owner.sh`'s `--emergency`
+gate, which existed only because trains carried `main`.
 
-**Evidence, and what it is not.** A pull request boards on its pipeline's own
-pull request check, `pipelines.CheckRunName(name)`, completed `success` on its
-current head, and on its labels, and only when its head is a branch of this
-repository. Two independent guards, because anything that writes checks can
-report one of that name, a fork's own workflow included. The check counts only
-from the App that minted the train's token (`RepositoryTrainToken` answers its
-id; `TestBoardingCountsOnlyTheAppsOwnCheck`), and a fork never boards
-(`TestAForkNeverBoards`): its code would otherwise run in this repository's
-train run with the pipeline's secrets, which the engine's refusal of fork runs
-(`pipelines/trigger.go`, D6) exists to prevent. A branch in this repository
-needs write access, which the repository already trusts. The token also reads
-checks, which a private repository's installation token cannot without it.
+**What stayed.** Releases by hand on Pipelines > Releases (prepare, approve,
+publish, seal, catalog), ordinary pipeline runs, and installation proposals on
+Cluster > Updates, including `proposeOverlay` and
+`MEMQL_RELEASE_INSTALLATION_OVERLAY`, which back them.
 
-A failed train run is judged only on its FAILED steps (a cancelled step proved
-nothing), their error codes and Go packages; on each boarded pull request's
-files at the BOARDED commit (`compare/<base>...<boarded head>`, 300 at most);
-on what those files reach in the train head's import graph, through the
-pipeline's own affected analysis (`pipelines.TrainReachOf`, mirroring the
-shipped `pipelinePackageSelection` policy's global paths); and on `main`'s
-newest completed push run's failed steps with their packages (`TestTrainReachOf`,
-`TestADependencyMakesTwoSuspects`, `TestTriageReadsTheBoardedCommitsFiles`,
-`TestACancelledStepNamesNoSuspect`). The approval is the latest `APPROVED` or
-`CHANGES_REQUESTED` review by the pipeline owner's login, learned from their own
-GitHub connection, and it counts only for the commit it names.
+**Stored rows.** No production row is purged. The three concepts are retired in
+the concept-field ledger with waivers: nothing registers or writes them any
+more, so their rows are inert history. `onlyStages` is stripped from
+`v1:pipelines:run` by `20261105043000_pipelines_run_only_stages_retired`,
+because a run row still carrying it would refuse its next write once the field
+is no longer declared.
 
-**The invariant: what lands is what the owner approved.**
-`pipelines.ApprovalLands` requires that review to name the train pull
-request's current head; landing requires `main` to still be the train's base;
-and the merge sends that head as GitHub's guard. Any of them moving sends the
-train back to `building` and the owner is asked again
-(`TestRebuiltTrainAsksAgain`, `TestMainMovingRebuildsAWaitingTrain`,
-`TestApprovalForAnOlderHeadDoesNotLand`, `TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain`).
-Nothing in the coordinator creates a review. That alone does not keep a model
-from approving: agent sessions act on GitHub under the owner's account, so the
-rest of the guarantee is the `CLAUDE.md` rule that a session never reviews or
-approves a pull request. Boarding merges the head commit read at
-boarding, not the branch, so a push after boarding never rides along
-(`TestTrainMergesTheBoardedCommitNotTheNewHead`).
+**The head branch stays on the step wire.** `StepRequest.HeadBranch` and
+`StepRun.HeadBranch` selected the train admission class; they now decide
+nothing and are recorded for diagnosis. The workbench binds the whole `StepRun`
+into a Job's creation definition, so dropping the field would change every
+queued attempt's fingerprint and need a new `PipelineStepAction`, with a window
+of refused steps, for no change in behaviour. A shared isolation proof again
+asks the one live cloud decision before each probe POST: with no train class
+there is no per-waiter allowance to weigh.
 
-**Ownership and permissions.** Every GitHub call uses an installation token
-minted through the pipeline owner's GitHub connection, and is refused if the
-repository's installation changed since the pipeline was connected. The train
-row is on the owner tier like every pipelines concept; its two mutations are
-`@serverOnly`. The merge goes through the branch's normal rules with no bypass.
+**Admission ordering.** `allowTrainRuns` left the run-admission file, and the
+decoder still refuses unknown fields, so a decision that keeps writing it fails
+closed and holds every new run and every new cloud Job (the "retired train
+allowance" cases of `TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate`).
+Production's cost guard stops writing the field, and that change is deployed,
+before an engine without trains. Rejected: ignoring the field, which would let
+a guard written for trains believe it still admits something.
 
-**Freshness and replicas.** The row is the state, not the process. Each tick
-reads it with `memql.ContextWithFreshRead` and takes one step; every write is a
-compare-and-swap on `(id, state, updatedAt)` under `TrainGateKey`'s Postgres
-lock, with `updatedAt` written in nanoseconds and moved strictly forward as the
-row's version. GitHub is never called under the gate. A build makes many GitHub
-calls, so a `building` train younger than 10 minutes belongs to the tick that
-claimed it and an older one is reclaimed and rebuilt from `main`
-(`TestTwoTicksBuildOneTrain`). A replica lost between approval and merge
-leaves the train `landing`, and the next tick merges it or records the merge
-it finds (`TestLandingResumesAfterAReplicaChange`). Both race tests are
-in-process: two ticks over one store, not a live two-replica cluster.
+**Regression tests.** `TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate`,
+`TestCloudAdmissionRechecksIsolationProbeAllocation`,
+`TestEveryPipelinesBuiltinResolvesToACapability` (35 builtins),
+`TestStrictAutomationBoot_EmbeddedTreeIsClean` (195 automations),
+`TestConceptFieldSnapshotIsNotStale` and
+`TestRetiredConceptFieldsAreMigratedSafely`.
 
-**Failure handling, in order** (`pipelines.TriageTrainFailure`,
-`TestTriageTrainFailure`): every failed step environmental and not yet
-retried, retry once; `main` failing one of the same steps, hold, because
-dropping a pull request would blame its author for `main`'s break; the rebuild
-cap reached, hold; exactly one suspect, drop it with a comment and
-`train:dropped`, and rebuild; anything else, hold. Rejected: dropping the
-newest or largest pull request when several are suspects, because a wrong drop
-costs its author a day and blames them for someone else's break. Splitting a
-train to isolate the cause needs a run limited to named steps, which the engine
-cannot start, so it waits until after the switch. A held train waits for the
-owner: closing its pull request cancels it, and `train:hold` on a pull request
-on board, or `main` moving, rebuilds it.
-
-**Retained and temporary.** The train rows are kept as the history of every
-departure, a cancelled empty departure included: recording it stops the next
-tick re-reading GitHub every minute until the next departure time, at the cost
-of one row. The train branch is deleted on landing. A train's messages are
-keyed `<event>@<headSha>` on the row and on the outbound delivery's dedupe
-key, so a message staged twice by two replicas, or before a write failed, is
-one delivery (`TestTrainMessagesAreSentOnce`); a message that cannot be sent is
-logged and never stops the train.
-
-**Admission.** A train run is the pull request run of a `train/` branch; the
-admission file's optional `allowTrainRuns` admits it while `allowNewRuns`
-holds other runs (`TestAdmissionAdmitsATrainRunUnderTheTrainAllowance`,
-`TestAdmissionWithoutTheTrainFieldIsUnchanged`). The engine reads the field
-before any guard emits it, because the reader refuses unknown fields and an
-older engine would hold every run. A train run queued 15 minutes while
-admission holds it sends the owner an ACTION NEEDED message.
-
-**The bypass becomes break-glass.** `scripts/dev/merge-as-owner.sh` refuses to
-merge without `--emergency=<why>` and posts the reason on the pull request
-before merging; a reason it cannot post stops the merge, so the trail always
-says why `main` moved outside a train.
-
-**Not verified here.** No live train has run. Unverified until the first one:
-that the App may create `train/*` branches and merge into them under this
-repository's rulesets; that the train pull request's run starts from the App's
-own pull request event or the poll; and that the owner's review of an
-App-authored pull request satisfies `require_code_owner_review` together with
-`require_extra_approval_for_unattributed_changes`. Verified on 2026-10-28:
-GitHub marks a pull request merged when its head reaches `main` through
-another pull request's merge (memql#6325 marked memql#6318 to memql#6324
-merged).
+**Not verified here.** The migration against production's rows, and an engine
+without trains reading production's admission file after the guard change.
 
 ## A failed release re-runs only what failed (2026-10-28)
 
@@ -3583,8 +3523,7 @@ runs keep their run's suffix, because two runs of different events on one
 commit select different stages and must not overwrite each other's steps.
 Stage and step names cannot hold a slash, so the name always has more
 segments than any context a ruleset, a release source
-(`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
-exact name; a step check can never satisfy or fail a required context
+(`githubapp.releaseChecks`) or the merge queue asks for by exact name; a step check can never satisfy or fail a required context
 (`TestStepCheckName`).
 
 **A writer per drive, off the run's path (the invariant).** A publish writes
@@ -3592,8 +3531,7 @@ the run's own check first and, only once that landed, hands the drive's writer
 goroutine the token it minted and each step's newest state
 (`offerStepChecks`). The writer sends one write at a time, a second apart,
 keeping only each step's newest state, so neither the merge-gating check, a
-step, nor the run row's conclusion -- which a release train waits on -- ever
-waits on a step check. A step's check is created when the step first leaves
+step, nor the run row's conclusion ever waits on a step check. A step's check is created when the step first leaves
 pending, not when the run opens: sixty creates at once would spend a third of
 GitHub's per-minute secondary write limit, and several runs opening together
 would exceed it. Rejected: creating every check queued at the start (the first
@@ -3924,7 +3862,7 @@ Settings > AI. Connected workflow:
 
 - **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
   (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
-  `{"review": bool, "diagnosis": bool}`, like `MEMQL_PIPELINES_TRAINS`. The OS
+  `{"review": bool, "diagnosis": bool}`. The OS
   writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
 - **Read at use, not at run open** (`Deps.aiSettings`,
   `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
@@ -3949,9 +3887,8 @@ Settings > AI. Connected workflow:
   while diagnosis was on is decided under the switch as it is when recovered.
 
 The other review and maintenance tests run with both switches on
-(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster,
-and a train's pull request with review off (it is an ordinary pull-request run,
-so the same gate applies). Known limit: a reader error reads as off and is not
+(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster.
+Known limit: a reader error reads as off and is not
 reported on the run.
 
 ## A release records vulnerability findings and keeps going (2026-10-29)
@@ -4000,11 +3937,6 @@ own contracts. Current machine consent and resources remain independent gates.
 
 Version 2 of the operator admission file separates a global new-run pause from
 cloud spending. Cost holds can therefore leave eligible Fleet work running.
-The optional release-train allowance still admits train runs under a global
-hold, but never overrides an explicit version 2 `allowCloud:false`; that hold can
-therefore leave an admitted train waiting for capacity
-(`TestTrainAllowancePreservesIndependentCloudHold`; how a legacy decision treats
-trains is in the release-train section below).
 Workbench reads the live cloud decision again before each command or isolation
 probe Job, including a later step in an already-started run. A held attempt saves
 its exact queued definition before waiting; a new replica can recover that
@@ -4477,37 +4409,6 @@ only such a step teaches it (`pipelines.Step.Balanced`, set at compile and read 
 run under this rule. The first successful full run on an engine with this change
 rewrites the rows, and the run after it is the first planned from them.
 
-## Release-train allowance across cloud allocation (2026-10-28)
-
-The separate Fleet/cloud spending gate must preserve main's existing train
-allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
-run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
-an explicit spending hold wins even for a train. Ordinary runs do not inherit
-the train allowance.
-
-The driver forwards the immutable run event and head branch in `StepRequest`
-and `StepRun`, independent of command environment. Execution and queued-effect
-fingerprints bind both, so a replacement replica cannot widen a retained
-attempt's admission class. Reusable verification excludes these run-only facts
-because its command still receives neither event nor branch. The coordinated
-workbench action is `pipelineStepV11`; older actions cannot silently discard
-this identity.
-
-A shared isolation proof retains each current waiter's class and cancellation
-context, rechecking the live operator decision before every probe POST. A train
-can fund that proof only while waiting; after cancellation, ordinary waiters
-need their own allowance. A cached successful probe is only isolation evidence,
-and every command rechecks its own spending gate after using it. Recovery of
-existing Jobs and cleanup remain independent of new-allocation admission.
-
-Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
-`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
-`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
-`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
-`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
-contract and in-process replica hop; they do not establish that a running
-installation has been upgraded.
-
 ## Fleet workspace continuation
 
 The Fleet binding's original one-hour expiry accidentally ended productive
@@ -4723,34 +4624,3 @@ unit checks do not count as MemQL performing its own feature work or as a live
 utility lookup. Required-database checks and native CI must cover the final
 revision before integration. Shared test/runtime capacity and the active Ask
 run are not changed by this work.
-
-## Releasing from main (2026-11-02)
-
-**Trigger.** No scheduled release train had landed. Of 89 pull requests left off the last
-four trains, 75 had not passed their own check, and pull request runs were 7 in 10 of all
-runs. The owner removed the pull request requirement and asked for one automatic release a
-day ([design record](../../superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
-
-**Chosen path.** A train from main (`source: main`) reuses the coordinator's record, lease and
-compare-and-swap, with no cars. It never rebuilds, lands after `main` moved, and follows a push
-to its own branch. Its run is full whatever the policy says (`policyModeForEvent`). A failure
-re-runs once and then holds.
-
-**Alternatives.** A branch per change boarding like a pull request: kept out because whoever
-pushes second resolves a conflict at push time, and it needs boarding, rehearsal and merging
-`main` into every branch. A separate release branch beside the train: the train branch is one.
-
-**What survives a takeover.** Everything: every step reads the row and writes through
-`casTrain`. `TestASecondReplicaResumesATrainFromMain` resumes from running, held and landing, and
-two ticks at once land once.
-
-**Stop conditions.** A second failure, a cancelled or refused run, and a refused merge each hold
-and mention the owner. A held train's fix is a push to its branch.
-
-**Regression tests.** `component/pipelinerun/train_main_test.go`, `train_land_test.go`,
-`component/pipelines/train_test.go`, `train_triage_test.go`, `TestATrainRunIsFullWhateverThePolicyAnswers`,
-and `clients/os/test/cluster/releaseTrains.test.tsx`.
-
-**Unverified.** No live train from main has run: the settings are not set, and production has not
-deployed this code. Landing without `main`'s push run, and a release built from a train's receipts,
-are stages 2 and 3.

@@ -55,14 +55,6 @@ func (i *Integration) buildPipeline() (ReleaseBuildPipeline, error) {
 }
 
 func (i *Integration) prepareBuild(ctx context.Context, name, pipelineID, expected string) (releaseBuildRecord, error) {
-	return i.prepareBuildAt(ctx, name, pipelineID, expected, "")
-}
-
-// prepareBuildAt saves a release of selected, or, when it is empty, of the
-// newest commit on the branch whose required checks passed: the first,
-// unbound inspection walks back from the head to choose it (pipelinerun
-// walkReleaseSource) and records the newer commits it passed over.
-func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expected, selected string) (releaseBuildRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var record releaseBuildRecord
@@ -88,12 +80,11 @@ func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expe
 	b := profile.Build
 	component := profile.Components[0]
 	request := pl.ReleaseBuildRequest{PipelineID: pipelineID, Repository: component.Repository, Branch: b.Branch}
-	var source pl.ReleaseBuildSource
-	if selected != "" {
-		request, source, err = pipeline.InspectReleaseBuildAt(ctx, request, selected)
-	} else {
-		source, err = pipeline.InspectReleaseBuild(ctx, request)
-	}
+	// The first, unbound inspection chooses the commit: the newest on the
+	// branch whose required checks passed. It walks back from the head
+	// (pipelinerun walkReleaseSource) and records the newer commits it passed
+	// over; the bound inspection below re-proves the commit it chose.
+	source, err := pipeline.InspectReleaseBuild(ctx, request)
 	var untested *pl.ReleaseSourceUntestedError
 	if errors.As(err, &untested) {
 		// Nothing within the look back passed, so nothing is saved: the person's

@@ -61,11 +61,7 @@ type Deps struct {
 	OpenMaintenanceGoal func(context.Context, MaintenanceRequest) (string, error)
 	Store               Store
 	GitHub              GitHub
-	// TrainReleaser and DeployEffects let a train go on past landing. Nil on a node
-	// wired with neither, and then it stops at landed (design record 2026-11-02).
-	TrainReleaser TrainReleaser
-	DeployEffects DeployEffects
-	Gate          Gate
+	Gate                Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies
@@ -78,9 +74,7 @@ type Deps struct {
 	// must be a bounded local read: claim calls it inside the shared row gate.
 	// False or an error keeps the run queued, without starting its deadline.
 	// Recovery of started runs and cancellation never depend on this gate.
-	// The bool says whether the run is a release train's (IsTrainRun), which
-	// the cost guard may admit on its own allowance.
-	AdmitRun func(time.Time, bool) (bool, error)
+	AdmitRun func(time.Time) (bool, error)
 	// Secrets resolves a globalSecret value for the driver (Task 10b).
 	Secrets Secrets
 	// Journal writes a pipeline run's v1:work goal, run and steps (Task 10b).
@@ -165,13 +159,6 @@ type Integration struct {
 	// stepWriters counts this node's live step-check writers
 	// (step_checks.go), so a test can wait for them.
 	stepWriters sync.WaitGroup
-
-	// trainStalls is how long each pipeline's train step has kept failing on
-	// this replica (train.go, noteTrainStall). In memory on purpose: it only
-	// decides when to tell the owner, the lease keeps the tick on one agent,
-	// and a replica change restarts the count rather than losing the train.
-	trainStalls  trainStallClock
-	deployStalls trainStallClock
 }
 
 // New builds the integration over deps. The plug-in factory (capabilities.go)

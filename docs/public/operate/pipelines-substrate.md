@@ -961,8 +961,8 @@ Cockpit is not eligible on an engine that requires 4, so there is no window in
 which both work. Switch the engine and every opted-in machine's Cockpit
 together, behind a global hold ([Operator run admission](pipelines.md#operator-run-admission)):
 
-1. Hold new runs: `allowNewRuns: false`, with no `allowTrainRuns`. Held runs
-   stay queued, and their clocks do not start.
+1. Hold new runs: `allowNewRuns: false`. Held runs stay queued, and their
+   clocks do not start.
 2. Let the runs in flight finish. Under the engine you are replacing, the hold
    stops only new runs, and a fleet step of a run still going when the engine
    changes finds no eligible machine.
@@ -1109,9 +1109,11 @@ the row's `nextAttemptAt` has passed.
 The workbench action is `pipelineStepV11` and its receipt acknowledgement is
 `pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
 new execution, recovery or cleanup guarantees. V11 carries the saved run's
-head branch beside its event for train-aware cloud admission; command
-environment variables cannot supply it. Upgrade the coordinated engine
-set and drain old drivers before enabling the new protocol.
+head branch beside its event; command environment variables cannot supply it.
+It selected release trains' cloud admission until trains were removed
+(2026-11-05) and is now recorded for diagnosis only, kept so the action and
+every queued attempt's creation fingerprint stay unchanged. Upgrade the
+coordinated engine set and drain old drivers before enabling the new protocol.
 
 Job retirement fences delayed creation and confirms owned resource absence.
 Streamed upload intents preserve object and file identity across an interrupted

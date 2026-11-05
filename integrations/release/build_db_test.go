@@ -63,16 +63,6 @@ type buildPipelineFixture struct {
 	untested *pl.ReleaseSourceUntestedError
 }
 
-func (f *buildPipelineFixture) InspectReleaseBuildAt(ctx context.Context, r pl.ReleaseBuildRequest, sha string) (pl.ReleaseBuildRequest, pl.ReleaseBuildSource, error) {
-	source, err := f.InspectReleaseBuild(ctx, r)
-	if err != nil {
-		return r, source, err
-	}
-	r.ExpectedSHA, r.SourceID, r.CredentialID = sha, source.SourceID, source.CredentialID
-	r.InstallationID, r.RepositoryID = source.InstallationID, source.RepositoryID
-	return r, source, nil
-}
-
 func (f *buildPipelineFixture) InspectReleaseBuild(_ context.Context, r pl.ReleaseBuildRequest) (pl.ReleaseBuildSource, error) {
 	if r.ExpectedSHA == "" && f.untested != nil {
 		return pl.ReleaseBuildSource{}, f.untested

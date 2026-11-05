@@ -196,7 +196,7 @@ func TestQualificationCannotReplaceOrdinaryPipelineOrBorrowOwner(t *testing.T) {
 	}
 }
 
-func TestQualificationCannotOpenOrdinaryRunsOrBorrowTrainAdmission(t *testing.T) {
+func TestQualificationCannotOpenOrdinaryRuns(t *testing.T) {
 	h := connectHarness(t, connectManifest)
 	prepareQualification(h)
 	r, err := h.integ.QualifyPullRequest(personCtx(ownerID), qualificationRequest(t, h))
@@ -211,10 +211,6 @@ func TestQualificationCannotOpenOrdinaryRunsOrBorrowTrainAdmission(t *testing.T)
 	}
 	if _, err := h.integ.Rerun(personCtx(ownerID), r.ID, false); err == nil {
 		t.Fatal("rerun inherited authority")
-	}
-	r.HeadBranch = "train/now"
-	if IsTrainRun(r) {
-		t.Fatal("qualification borrowed train-only admission")
 	}
 }
 
@@ -727,24 +723,6 @@ func TestQualificationDisconnectPreservesRevocationUntilNormalConnect(t *testing
 	}
 	if _, err := h.integ.RunLatest(personCtx(ownerID), p.ID, ""); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestQualificationCannotBorrowTrainAdmissionAtClaim(t *testing.T) {
-	dh, r := newQualificationDrive(t)
-	// The real claim sees the qualification trigger even if its branch looks
-	// like a train. No source permission or admission setting is changed.
-	r.HeadBranch = "train/fixture"
-	q, _ := readQualification(r.Qualification)
-	q.HeadBranch = r.HeadBranch
-	q.RequestDigest = q.digest()
-	r.Qualification = q.object()
-	dh.store.addRun(r)
-	dh.integ.Configure(func(d *Deps) { d.AdmitRun = func(_ time.Time, train bool) (bool, error) { return train, nil } })
-	deliver(t, dh.integ, r)
-	got, _ := dh.store.run(r.ID)
-	if got.Status != StatusQueued || len(dh.exec.sent()) != 0 {
-		t.Fatal("qualification escaped closed general admission")
 	}
 }
 
