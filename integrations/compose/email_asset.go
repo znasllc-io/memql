@@ -10,6 +10,10 @@ import (
 // email gets. An email is composed in the Email app: a person picks a layout,
 // the template is created with the organization's brand kit applied, and the
 // content is written in the background (component/campaigns).
+//
+// It is a sentence a person reads, as the clients show it, so it is written as
+// one: capitalized and ended with a full stop, on purpose, whatever an error
+// string style check (ST1005) would otherwise ask.
 var ErrEmailsElsewhere = errors.New("Emails are made in the Email app.")
 
 // EmailAssetHandle is the name a picture selected for inclusion is offered to

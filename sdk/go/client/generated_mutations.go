@@ -3063,7 +3063,7 @@ func CreateClusterSettingsBuild(args CreateClusterSettingsArgs) string {
 	return b.String()
 }
 
-// CreateComposeRecipe -- Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read.
+// CreateComposeRecipe -- Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read. outputKind and layoutId are retired with email_template, for old recipes only: a run of a recipe that names an output kind is refused (Emails are made in the Email app.).
 //
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["createComposeRecipe"] in generated_concepts.go).
 type CreateComposeRecipeArgs struct {
@@ -13150,7 +13150,7 @@ func UpdateClusterSettingsBuild(args UpdateClusterSettingsArgs) string {
 	return b.String()
 }
 
-// UpdateComposeRecipe -- Rename or re-aim a recipe. Owned.
+// UpdateComposeRecipe -- Rename or re-aim a recipe. Owned. outputKind and layoutId are retired with email_template, for old recipes only, as on createComposeRecipe.
 //
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["updateComposeRecipe"] in generated_concepts.go).
 type UpdateComposeRecipeArgs struct {

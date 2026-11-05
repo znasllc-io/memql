@@ -58,9 +58,9 @@ concept composition {
 
   format       enum("markdown", "html", "txt", "csv", "json", "docx", "pdf")!  @description("Document format produced by component/compose. Other artifact types use their own discovered generation capabilities; this document-only format list does not describe platform-wide availability.")
 
-  outputKind   string  @description("email_template for an editable Campaigns email JSON draft; absent means an ordinary document. Publication is a separate reviewed action.")
+  outputKind   string  @description("Retired: email_template marked an editable email JSON draft the Materializer once wrote, and stays only on rows written before emails moved to the Email app. A request that names an output kind is refused (Emails are made in the Email app.). Absent means an ordinary document, as it is on every new row.")
 
-  layoutId     string  @description("For an email template, the layout it was written into: builtin:<name> or org:<id>, as the request named it (builtin:article when it named none). Absent for every other file. Kept so the record says which layout, and a recipe saved from this composition keeps it.")
+  layoutId     string  @description("Retired with email_template, on old rows only: the layout such a draft was written into, builtin:<name> or org:<id>. A request that names a layout is refused. Absent for every other file.")
 
   sources      []object  @description("What went in: a list of {kind, ref, label, capturedAt} where kind is concept_row | library_file | query. THREE KINDS RATHER THAN A LIST OF IDS, and the distinction is load-bearing (design C): 'made from the 4 invoices matching status=open' and 'made from these 4 invoice ids' are different claims about repeatability, and flattening them to ids keeps only the second. `ref` is a BARE id for the row and file kinds and a rendered call string for the query kind; `capturedAt` is when it was resolved, which is what makes a re-run's difference explainable.")
 
@@ -207,9 +207,9 @@ concept recipe {
 
   accountIds   []string  @description("Optional v1:accounts:account tags. A record, never a visibility scope.")
 
-  outputKind   string  @description("email_template for an editable Campaigns email JSON draft; absent means an ordinary document. Publication is a separate reviewed action.")
+  outputKind   string  @description("Retired: email_template marked a recipe whose runs wrote an email JSON draft, and stays only on recipes saved before emails moved to the Email app. A run of such a recipe is refused (Emails are made in the Email app.). Absent means an ordinary document.")
 
-  layoutId     string  @description("For an email recipe, the layout each run writes into: builtin:<name> or org:<id>, as emailLayouts lists it. Empty means builtin:article. A run refuses it, as a request would, when it is not an email recipe or the layout has been archived or belongs to another organization.")
+  layoutId     string  @description("Retired with email_template, on old recipes only: the layout an email recipe's runs wrote into, builtin:<name> or org:<id>. Absent on every other recipe.")
 
   lastRunAt    datetime  @description("When this recipe last produced something. Rendered continuously beside the row and deliberately ABSENT from the arrival-cue fingerprint: a recipe on a schedule would touch it forever, and naming it as news would strobe the list on that schedule's own cycle (the heartbeat rule, clients/os/README.md).")
 

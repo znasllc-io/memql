@@ -1816,7 +1816,7 @@ QueryClient.prototype.createClusterSettings = function (this: QueryClient, args:
   return this.executeNamed("createClusterSettings", buildCreateClusterSettings(args), opts);
 };
 
-/** Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read. */
+/** Promote a composition that worked into something you can run again. Owned. The selectors are the caller's -- resolved under their own actor at every later run -- so a recipe can never widen what its runner may read. outputKind and layoutId are retired with email_template, for old recipes only: a run of a recipe that names an output kind is refused (Emails are made in the Email app.). */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["createComposeRecipe"] in generated_concepts.ts).
 export interface CreateComposeRecipeArgs {
   recipeId: string;
@@ -7715,7 +7715,7 @@ QueryClient.prototype.updateClusterSettings = function (this: QueryClient, args:
   return this.executeNamed("updateClusterSettings", buildUpdateClusterSettings(args), opts);
 };
 
-/** Rename or re-aim a recipe. Owned. */
+/** Rename or re-aim a recipe. Owned. outputKind and layoutId are retired with email_template, for old recipes only, as on createComposeRecipe. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["updateComposeRecipe"] in generated_concepts.ts).
 export interface UpdateComposeRecipeArgs {
   recipeId: string;
