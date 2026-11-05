@@ -617,6 +617,21 @@ func CampaignImportRecipientsBuild(args CampaignImportRecipientsArgs) string {
 	return b.String()
 }
 
+// CampaignLayoutCatalogue -- The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId.
+type CampaignLayoutCatalogueArgs struct {
+}
+
+// CampaignLayoutCatalogue calls the engine builtin campaignLayoutCatalogue.
+func (qc *QueryClient) CampaignLayoutCatalogue(ctx context.Context, args CampaignLayoutCatalogueArgs) (*Result, error) {
+	call := CampaignLayoutCatalogueBuild(args)
+	return qc.executeNamed(ctx, "campaignLayoutCatalogue", call)
+}
+
+func CampaignLayoutCatalogueBuild(args CampaignLayoutCatalogueArgs) string {
+	_ = args
+	return "builtin campaignLayoutCatalogue()"
+}
+
 // CampaignPauseSend -- Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.
 type CampaignPauseSendArgs struct {
 	// The campaign to pause. The caller needs update permission in its organization.
@@ -3347,21 +3362,6 @@ func (qc *QueryClient) LanguageStatus(ctx context.Context, args LanguageStatusAr
 func LanguageStatusBuild(args LanguageStatusArgs) string {
 	_ = args
 	return "builtin languageStatus()"
-}
-
-// LayoutCatalogue -- The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId.
-type LayoutCatalogueArgs struct {
-}
-
-// LayoutCatalogue calls the engine builtin layoutCatalogue.
-func (qc *QueryClient) LayoutCatalogue(ctx context.Context, args LayoutCatalogueArgs) (*Result, error) {
-	call := LayoutCatalogueBuild(args)
-	return qc.executeNamed(ctx, "layoutCatalogue", call)
-}
-
-func LayoutCatalogueBuild(args LayoutCatalogueArgs) string {
-	_ = args
-	return "builtin layoutCatalogue()"
 }
 
 // LibraryAddArtifactLabel -- Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.

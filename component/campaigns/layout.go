@@ -253,9 +253,13 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 		if err != nil {
 			return nil, err
 		}
+		wireframe, err := builtinWireframe(info)
+		if err != nil {
+			return nil, err
+		}
 		rows = append(rows, map[string]any{
 			"id": info.ID, "kind": "builtin", "name": info.Name, "description": info.Description, "document": document, "status": "active",
-			"category": info.Category, "wireframe": builtinWireframe(info),
+			"category": info.Category, "wireframe": wireframe,
 		})
 	}
 	used := 0
@@ -367,12 +371,12 @@ func (s *Store) eachEmailLayoutForAccount(ctx context.Context, accountID string,
 
 // builtinWireframe draws a built-in layout in its smallest form, so a layout
 // whose repeatable blocks must appear more than once shows that minimum.
-func builtinWireframe(info emaildoc.LayoutInfo) string {
+func builtinWireframe(info emaildoc.LayoutInfo) (string, error) {
 	doc, err := emaildoc.ExpandToMinimum(info.Document, info)
 	if err != nil {
-		doc = info.Document
+		return "", fmt.Errorf("layout %s: %w", info.ID, err)
 	}
-	return emaildoc.Wireframe(doc)
+	return emaildoc.Wireframe(doc), nil
 }
 
 // documentWireframe draws an organization layout from its stored document as
@@ -396,9 +400,13 @@ func (w *Worker) handleLayoutCatalogue(_ context.Context, _ map[string]any, _ in
 	builtins := emaildoc.Layouts()
 	rows := make([]map[string]any, 0, len(builtins))
 	for _, info := range builtins {
+		wireframe, err := builtinWireframe(info)
+		if err != nil {
+			return nil, err
+		}
 		rows = append(rows, map[string]any{
 			"id": info.ID, "name": info.Name, "category": info.Category, "description": info.Description,
-			"outline": layoutOutline(info), "wireframe": builtinWireframe(info),
+			"outline": layoutOutline(info), "wireframe": wireframe,
 		})
 	}
 	return resultRows("layoutCatalogue", rows)

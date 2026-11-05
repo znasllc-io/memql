@@ -1086,3 +1086,46 @@ func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
 		t.Fatal("the catalogue read organization layouts")
 	}
 }
+
+func TestLayoutWireframesDrawTheMinimumForm(t *testing.T) {
+	var info emaildoc.LayoutInfo
+	for _, l := range emaildoc.Layouts() {
+		if l.ID == "builtin:steps" {
+			info = l
+		}
+	}
+	if info.ID == "" {
+		t.Fatal("builtin:steps is not a built-in layout")
+	}
+	expanded, err := emaildoc.ExpandToMinimum(info.Document, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := emaildoc.Wireframe(expanded)
+	if want == emaildoc.Wireframe(info.Document) {
+		t.Fatal("the minimum form of steps draws like the bare layout; the test proves nothing")
+	}
+	w, _, _ := layoutFixture(t)
+	list, err := w.handleEmailLayouts(importCtx(), map[string]any{"accountId": layoutOrg}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogue, err := w.handleLayoutCatalogue(importCtx(), map[string]any{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, nodes := range map[string][]memorynodes.MemoryNode{"emailLayouts": list, "catalogue": catalogue} {
+		found := false
+		for _, row := range nodePayloads(t, nodes) {
+			if row["id"] == "builtin:steps" {
+				found = true
+				if row["wireframe"] != want {
+					t.Errorf("%s: steps wireframe is not the minimum form", name)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: no steps row", name)
+		}
+	}
+}

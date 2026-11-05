@@ -478,6 +478,25 @@ QueryClient.prototype.campaignImportRecipients = function (this: QueryClient, ar
   return this.executeNamed("campaignImportRecipients", buildCampaignImportRecipients(args), opts);
 };
 
+/** The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId. */
+export interface CampaignLayoutCatalogueArgs {
+}
+
+export function buildCampaignLayoutCatalogue(args: CampaignLayoutCatalogueArgs): string {
+  void args;
+  return "builtin campaignLayoutCatalogue()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignLayoutCatalogue(args?: CampaignLayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignLayoutCatalogue = function (this: QueryClient, args: CampaignLayoutCatalogueArgs = {} as CampaignLayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignLayoutCatalogue", buildCampaignLayoutCatalogue(args), opts);
+};
+
 /** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
 export interface CampaignPauseSendArgs {
   /** The campaign to pause. The caller needs update permission in its organization. */
@@ -2570,25 +2589,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.languageStatus = function (this: QueryClient, args: LanguageStatusArgs = {} as LanguageStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("languageStatus", buildLanguageStatus(args), opts);
-};
-
-/** The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId. */
-export interface LayoutCatalogueArgs {
-}
-
-export function buildLayoutCatalogue(args: LayoutCatalogueArgs): string {
-  void args;
-  return "builtin layoutCatalogue()";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    layoutCatalogue(args?: LayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.layoutCatalogue = function (this: QueryClient, args: LayoutCatalogueArgs = {} as LayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("layoutCatalogue", buildLayoutCatalogue(args), opts);
 };
 
 /** Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own. */
