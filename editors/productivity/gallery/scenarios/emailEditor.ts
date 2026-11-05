@@ -66,6 +66,20 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
       render: () => page("Calmer mornings.email.json", [restore({ width: "desktop", selected: "intro" }), CONNECTED, bar("Cancelled", ["publish", "retry"]), shown(article), rendered(article)], { reveal: "intro" }),
     },
     {
+      id: "email-left-out",
+      group: GROUP,
+      title: "What MemQL left out, said once and quietly at the top of the inspector",
+      render: () => page("Calmer mornings.email.json", [restore({ width: "desktop", selected: "intro" }), CONNECTED, draft,
+        { type: "notes", notes: ["Left out brochure.pdf: not a picture or text file.", "Left out STAGE B - 1__team.png: a picture over 24 million pixels."] },
+        shown(article), rendered(article)], { reveal: "intro" }),
+    },
+    {
+      id: "email-unreachable",
+      group: GROUP,
+      title: "MemQL is writing and the cluster has not answered: Can’t reach MemQL, and Cancel stays",
+      render: () => page("Calmer mornings.email.json", [restore({ width: "desktop", selected: "intro" }), CONNECTED, bar(C.unreachable, ["cancel"], { writing: true }), shown(article), rendered(article)], { reveal: "intro" }),
+    },
+    {
       id: "email-custom",
       group: GROUP,
       title: "An email written in HTML, with Preview with open",
