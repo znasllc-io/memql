@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
+import { bare } from "../deployables/people";
 
 // The wire rows the Email app renders, projected into the shapes its
 // surfaces read.
@@ -697,6 +698,8 @@ export interface Composition {
   error: string;
   /** One plain sentence for each file left out and why. */
   notes: string[];
+  /** Who asked MemQL to write it (a user id), or "" when the row does not say: the one person who may retry it. */
+  requestedBy: string;
 }
 
 function compositionFromRow(flat: Record<string, unknown>): Composition | null {
@@ -705,11 +708,13 @@ function compositionFromRow(flat: Record<string, unknown>): Composition | null {
   const state = object.state;
   if (state !== "writing" && state !== "done" && state !== "failed") return null;
   const notes = Array.isArray(object.notes) ? object.notes.filter((note): note is string => typeof note === "string" && note !== "") : [];
+  const request = object.request !== null && typeof object.request === "object" && !Array.isArray(object.request) ? (object.request as Record<string, unknown>) : {};
   return {
     state,
     startedAt: typeof object.startedAt === "string" ? object.startedAt : "",
     error: typeof object.error === "string" ? object.error : "",
     notes,
+    requestedBy: typeof request.requestedBy === "string" ? request.requestedBy : "",
   };
 }
 
@@ -721,6 +726,17 @@ export function isWriting(template: TemplateRow): boolean {
 /** Whether the last attempt to write this template's email failed. */
 export function compositionFailed(template: TemplateRow): boolean {
   return template.composition?.state === "failed";
+}
+
+/**
+ * Whether `viewer` (the signed-in user's id) may retry this template's failed
+ * composition: only the person who asked may, since a retry reads the files
+ * the request names as whoever runs it. Ids are compared bare, whichever way
+ * either is written; a composition that does not say who asked is nobody's.
+ */
+export function mayRetry(template: TemplateRow, viewer: string): boolean {
+  const asker = bare(template.composition?.requestedBy ?? "");
+  return compositionFailed(template) && asker !== "" && asker === bare(viewer);
 }
 
 export function templateFromRow(row: Row): TemplateRow {

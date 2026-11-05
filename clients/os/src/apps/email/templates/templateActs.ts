@@ -1,6 +1,6 @@
 import { editorArtifactURL, editorTemplateURL } from "../../../items/editorPreference";
 import type { ActSpec } from "../acts";
-import { compositionFailed, isPublished, isWriting, templateIsArchived, templateName, type TemplateRecord, type TemplateRow } from "../rows";
+import { compositionFailed, isPublished, isWriting, mayRetry, templateIsArchived, templateName, type TemplateRecord, type TemplateRow } from "../rows";
 
 // WHAT A TEMPLATE'S PAGE OFFERS (DESIGN.md rule 12), as a pure table.
 //
@@ -13,6 +13,11 @@ import { compositionFailed, isPublished, isWriting, templateIsArchived, template
 //   archived                             Restore
 //   writing     Cancel                   (MemQL is writing the email)
 //   failed      the usual acts, then Retry (primary, last): at most three
+//
+// Retry is the person's who asked MemQL to write the email, and nobody else's:
+// a retry reads the files the request names as whoever runs it, and the engine
+// refuses anyone else's. Anyone else sees the usual acts. Cancel is open to
+// every writer.
 //
 // A published template is asked about before it is archived, because
 // campaigns and automations that use it stop being able to send it; a draft
@@ -30,8 +35,8 @@ const CANCEL: ActSpec = { id: "cancel-composition", label: "Cancel" };
 const RETRY: ActSpec = { id: "retry-composition", label: "Retry", tone: "primary" };
 const RESTORE: ActSpec = { id: "restore", label: "Restore", tone: "primary" };
 
-/** What a template's page offers, given what is being asked of it. */
-export function templateActs(t: TemplateRow, asking: "" | "archive"): ActSpec[] {
+/** What a template's page offers `viewer` (the signed-in user's id), given what is being asked of it. */
+export function templateActs(t: TemplateRow, asking: "" | "archive", viewer: string): ActSpec[] {
   if (templateIsArchived(t)) return [RESTORE];
   // While MemQL writes the email, the only thing to do is stop it: the editor
   // and Archive would be racing the writer.
@@ -39,7 +44,8 @@ export function templateActs(t: TemplateRow, asking: "" | "archive"): ActSpec[] 
   if (asking === "archive" && isPublished(t)) return [KEEP, ARCHIVE_CONFIRMED];
   // After a failure Retry is what the state is for, so it is last; the usual
   // acts keep their order before it, and all three fit.
-  if (compositionFailed(t)) return [isPublished(t) ? ARCHIVE_ASKS : ARCHIVE_NOW, OPEN_QUIETLY, RETRY];
+  if (mayRetry(t, viewer)) return [isPublished(t) ? ARCHIVE_ASKS : ARCHIVE_NOW, OPEN_QUIETLY, RETRY];
+  if (compositionFailed(t)) return [isPublished(t) ? ARCHIVE_ASKS : ARCHIVE_NOW, OPEN_IN_EDITOR];
   if (!isPublished(t)) return [ARCHIVE_NOW, OPEN_IN_EDITOR];
   return [ARCHIVE_ASKS, OPEN_IN_EDITOR];
 }

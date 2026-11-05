@@ -13,7 +13,7 @@ import { useLanding } from "../campaigns/landing";
 import { organizationName } from "../organizations";
 import { compositionFailed, isPublished, isWriting, layoutName, templateIsArchived, templateName, type TemplateRow } from "../rows";
 import { useEmailRender, useTemplateRecord, type EmailLayouts } from "../useEmail";
-import { browserZone, elapsedClock, momentWords } from "../when";
+import { browserZone, elapsedWords, momentWords } from "../when";
 import { WORDS, templateState } from "../words";
 import { Preview } from "./Preview";
 import { lifecycleContent, templateActs, templateEditorURL } from "./templateActs";
@@ -58,7 +58,8 @@ export function TemplatePage({ template, layouts, onBack, onReread }: {
   /** Read the templates again: a change that was taken but has not arrived. */
   onReread: () => void;
 }) {
-  const { config } = useSession();
+  const { config, access } = useSession();
+  const viewer = access?.userId ?? "";
   const accounts = useAccountOptions();
   const zone = browserZone();
 
@@ -96,7 +97,7 @@ export function TemplatePage({ template, layouts, onBack, onReread }: {
   const stopListening = useRef<() => void>(() => {});
   useEffect(() => () => stopListening.current(), []);
 
-  const specs = landing !== null ? [landing.spec] : templateActs(template, askingNow);
+  const specs = landing !== null ? [landing.spec] : templateActs(template, askingNow, viewer);
 
   async function change(spec: ActSpec, act: Lifecycle) {
     // One change at a time: a second press while the first is on its way is the same press.
@@ -172,17 +173,18 @@ export function TemplatePage({ template, layouts, onBack, onReread }: {
     : templateState(template.status);
   // What went wrong is the server's own plain sentence, shown as it is.
   const detail = landing === null && failed ? template.composition?.error : undefined;
-  // How long MemQL has been writing, ticking once a second while it does.
+  // How long MemQL has been writing, in the editor's words ("2 min"), looked
+  // at again every few seconds while it does.
   const startedAt = template.composition?.startedAt ?? "";
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!writing) return;
     setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(timer);
   }, [writing]);
   const started = Date.parse(startedAt);
-  const meta = writing && landing === null && !Number.isNaN(started) ? elapsedClock(now - started) : undefined;
+  const meta = writing && landing === null && !Number.isNaN(started) ? elapsedWords(now - started) : undefined;
   const notes = template.composition?.notes ?? [];
   const question = askingNow === "archive" && landing === null ? `Archive “${name}”? Campaigns and automations that use it can't send it until it's restored.` : null;
 

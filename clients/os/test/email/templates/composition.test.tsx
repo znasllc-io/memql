@@ -29,8 +29,10 @@ type Conn = ReturnType<typeof fakeConnection>;
 
 const TEMPLATE = "v1:campaigns:template";
 const STARTED = "2026-11-04T10:00:00Z";
-const writing = { state: "writing", startedAt: STARTED, error: "", notes: [] };
-const failed = (error = "Cancelled") => ({ state: "failed", startedAt: STARTED, error, notes: [] });
+// The person signed in to the test session is "me"; the request records who asked.
+const ME = { requestedBy: "me" };
+const writing = { state: "writing", startedAt: STARTED, error: "", notes: [], request: ME };
+const failed = (error = "Cancelled", request: Record<string, unknown> = ME) => ({ state: "failed", startedAt: STARTED, error, notes: [], request });
 
 function mount(connection: Conn) {
   h.connection = connection;
@@ -61,7 +63,8 @@ describe("a template MemQL is writing", () => {
     expect(barWord()).toBe("MemQL is writing this email");
     // Only Cancel: nothing to archive or open while the writer is at work, and nothing disabled.
     expect(barActs()).toEqual(["Cancel"]);
-    expect(bar().querySelector(".os-actbar-meta")?.textContent).toMatch(/^\d+:\d{2}$/);
+    // How long, in the editor's words: "Just started", "2 min", "1 h 5 min".
+    expect(bar().querySelector(".os-actbar-meta")?.textContent).toMatch(/^(Just started|\d+ min|\d+ h|\d+ h \d+ min)$/);
 
     await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Cancel" }));
@@ -97,6 +100,32 @@ describe("a template MemQL is writing", () => {
     });
     await waitFor(() => expect(barWord()).toBe("MemQL is writing this email"));
     expect(barActs()).toEqual(["Cancel"]);
+  });
+
+  it("offers Retry only to the person who asked, whose files a retry reads", async () => {
+    const conn = fakeConnection({
+      templates: [templateRow({ id: "t1", name: "Their letter", status: "draft", composition: failed("Cancelled", { requestedBy: "v1:identity:user:colleague" }) })],
+    });
+    mount(conn);
+    await openPage("Their letter");
+    expect(barWord()).toBe("Failed");
+    expect(within(bar()).getByText("Cancelled")).toBeTruthy();
+    // Absent, not disabled: the server would refuse it.
+    expect(barActs()).toEqual(["Archive", "Open in editor"]);
+  });
+
+  it("shows an email a person finished by hand as the template it is: no Failed, no Retry", async () => {
+    // A person's save or publish ends the failure; the reason and the notes stay as the record.
+    const finished = { state: "done", startedAt: STARTED, error: "Cancelled", notes: ["Left out a.pdf: not a picture or text file."], request: ME };
+    const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "Autumn letter", status: "ready", composition: finished })] });
+    mount(conn);
+    const row = (await screen.findByText("Autumn letter")).closest(".os-row") as HTMLElement;
+    expect(row.textContent).toContain("Published");
+    expect(row.textContent).not.toContain("Failed");
+    await openPage("Autumn letter");
+    expect(barWord()).toBe("Published");
+    expect(barActs()).toEqual(["Archive", "Open in editor"]);
+    expect(bar().textContent).not.toContain("Cancelled");
   });
 
   it("changes by itself when the composition finishes, on the list and on the page", async () => {
@@ -161,19 +190,24 @@ describe("a template MemQL is writing", () => {
 });
 
 describe("what a template's bar offers while its email is written, as a table", () => {
-  const acts = (status: string, composition: unknown, asking: "" | "archive" = "") =>
-    templateActs(templateFromRow(templateRow({ id: "t1", status, composition: composition as never })), asking).map((spec) => spec.label);
+  const acts = (status: string, composition: unknown, asking: "" | "archive" = "", viewer = "v1:identity:user:me") =>
+    templateActs(templateFromRow(templateRow({ id: "t1", status, composition: composition as never })), asking, viewer).map((spec) => spec.label);
 
-  it("offers Cancel only while writing, whatever the status", () => {
+  it("offers Cancel only while writing, whatever the status, to every writer", () => {
     expect(acts("draft", writing)).toEqual(["Cancel"]);
     expect(acts("ready", writing)).toEqual(["Cancel"]);
+    expect(acts("draft", { ...writing, request: { requestedBy: "colleague" } })).toEqual(["Cancel"]);
   });
 
-  it("offers the usual acts then Retry after a failure", () => {
+  it("offers the usual acts then Retry after a failure, to the person who asked", () => {
     expect(acts("draft", failed())).toEqual(["Archive", "Open in editor", "Retry"]);
     expect(acts("ready", failed())).toEqual(["Archive", "Open in editor", "Retry"]);
     expect(acts("ready", failed(), "archive")).toEqual(["Keep", "Archive"]);
     expect(acts("archived", failed())).toEqual(["Restore"]);
+    // Anyone else, or nobody known, has the usual acts and no Retry.
+    expect(acts("draft", failed("Cancelled", { requestedBy: "colleague" }))).toEqual(["Archive", "Open in editor"]);
+    expect(acts("draft", failed("Cancelled", {}))).toEqual(["Archive", "Open in editor"]);
+    expect(acts("draft", failed(), "", "")).toEqual(["Archive", "Open in editor"]);
   });
 
   it("leaves a done composition and a template without one as they were", () => {

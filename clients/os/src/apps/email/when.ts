@@ -110,6 +110,19 @@ export function shortDay(instant: string, zone = browserZone()): string {
   return clock === null ? instant : `${clock.month} ${clock.day}`;
 }
 
+/**
+ * How long something has been going, as the editor says it: "Just started",
+ * "2 min", "1 h", "1 h 5 min". What a template MemQL is writing shows.
+ */
+export function elapsedWords(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 1) return "Just started";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
 /** A wait, as minutes and seconds: "0:42", "12:05". Never negative. */
 export function elapsedClock(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));

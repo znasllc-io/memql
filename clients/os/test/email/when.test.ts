@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { browserZone, elapsedClock, localToInstant, shortDay, shortMoment, whenWords } from "../../src/apps/email/when";
+import { browserZone, elapsedClock, elapsedWords, localToInstant, shortDay, shortMoment, whenWords } from "../../src/apps/email/when";
 
 // WHEN A CAMPAIGN GOES, IN A PERSON'S OWN CLOCK (memql#6033).
 //
@@ -78,6 +78,17 @@ describe("when, in words", () => {
     expect(shortDay(localToInstant("2026-10-03T12:00")!)).toBe("Oct 3");
     // Not an instant: said as it is, never a blank.
     expect(shortMoment("soon")).toBe("soon");
+  });
+
+  it("says how long MemQL has been writing as the editor says it", () => {
+    expect(elapsedWords(0)).toBe("Just started");
+    expect(elapsedWords(59_999)).toBe("Just started");
+    expect(elapsedWords(-5_000)).toBe("Just started");
+    expect(elapsedWords(60_000)).toBe("1 min");
+    expect(elapsedWords(125_000)).toBe("2 min");
+    expect(elapsedWords(3_600_000)).toBe("1 h");
+    expect(elapsedWords(3_900_000)).toBe("1 h 5 min");
+    expect(elapsedWords(7_200_000)).toBe("2 h");
   });
 
   it("measures a wait in minutes and seconds", () => {

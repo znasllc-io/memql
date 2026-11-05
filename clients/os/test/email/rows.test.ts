@@ -209,8 +209,10 @@ describe("the other four cues", () => {
 
   it("reads a composition, and tells a change of it by the fingerprint", () => {
     const writing = { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "", notes: ["A file was left out."] };
-    const row = templateFromRow(templateRow({ id: "t1", composition: writing }));
-    expect(row.composition).toEqual(writing);
+    const row = templateFromRow(templateRow({ id: "t1", composition: { ...writing, request: { layoutId: "builtin:letter", requestedBy: "me" } } }));
+    // Who asked comes from the request, the one person who may retry it.
+    expect(row.composition).toEqual({ ...writing, requestedBy: "me" });
+    expect(templateFromRow(templateRow({ id: "t1", composition: writing })).composition?.requestedBy).toBe("");
     // A state this build does not know is no composition.
     expect(templateFromRow(templateRow({ id: "t1", composition: { state: "paused" } })).composition).toBeNull();
     const failed = templateFromRow(templateRow({ id: "t1", composition: { ...writing, state: "failed", error: "Cancelled" } }));

@@ -376,13 +376,13 @@ describe("what a template's bar offers, as a table", () => {
   const template = (status: string) => templateFromRow(templateRow({ id: "t1", name: "Welcome 2", status }));
 
   it("asks before archiving a published template, and only a published one", () => {
-    expect(dress(templateActs(template("ready"), ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
-    expect(dress(templateActs(template("ready"), "archive"))).toEqual([["Keep", "text"], ["Archive", "danger"]]);
+    expect(dress(templateActs(template("ready"), "", ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+    expect(dress(templateActs(template("ready"), "archive", ""))).toEqual([["Keep", "text"], ["Archive", "danger"]]);
     // The Archive that asks and the Archive that does are two acts.
-    expect(templateActs(template("ready"), "")[0]?.id).not.toBe(templateActs(template("draft"), "")[0]?.id);
+    expect(templateActs(template("ready"), "", "")[0]?.id).not.toBe(templateActs(template("draft"), "", "")[0]?.id);
     // A stale question never brings an archived template more than Restore.
-    expect(dress(templateActs(template("archived"), "archive"))).toEqual([["Restore", "primary"]]);
-    expect(dress(templateActs(template("draft"), "archive"))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+    expect(dress(templateActs(template("archived"), "archive", ""))).toEqual([["Restore", "primary"]]);
+    expect(dress(templateActs(template("draft"), "archive", ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
   });
 
   it("opens the file a template was published from, else the template", () => {
