@@ -33,16 +33,20 @@ import (
 //
 // Pictures (PNG, JPEG or GIF) and text files are kept; a ZIP is read with the
 // hardened reader and the limits composition gives it (compose.ReadArchive,
-// compose.CompositionArchiveLimits: no path leaving the archive, no nested
-// archive, no link). Anything else, and anything that cannot be read as what
-// its name says, is left out with a reason in the Materializer's own words, and
-// a run names each in its notes ("Left out <name>: <reason>."). A ZIP the
-// reader refuses is left out whole, with the reader's sentence.
+// compose.CompositionArchiveLimits: no path leaving the archive, no archive
+// inside it opened, no link). Anything else, and anything that cannot be read
+// as what its name says, is left out with a reason, and a run names each in its
+// notes ("Left out <name>: <reason>."). One ZIP member that cannot be used (a
+// picture past the pixel limit, an archive inside the archive, text past the
+// ZIP's budget) is left out by itself and the rest of the ZIP is used; a ZIP
+// the reader refuses (a path leaving it, a link, more than it may unpack to) is
+// left out whole, with the reader's sentence.
 //
 // A picture over 1 MiB can never go in an email (emaildoc.MaxImageBytes), and
 // pictures are neither shrunk nor converted, so one is left out too. The picture
 // of the finished email is the exception: it is guidance the composer looks at,
-// kept whatever its size, and has a handle only when an email could carry it.
+// kept up to the per-file limit, and has a handle only when an email could
+// carry it.
 //
 // # Names
 //

@@ -3,7 +3,9 @@ package compose
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"strings"
 	"testing"
@@ -67,8 +69,86 @@ func TestReadArchiveRefusesPathsLeavingTheArchive(t *testing.T) {
 func TestReadArchiveRefusesNestedArchives(t *testing.T) {
 	inner := buildZIP(t, []zipEntry{{name: "a.txt", data: []byte("x")}})
 	for _, name := range []string{"inner.zip", "inner.txt"} {
-		if _, err := ReadArchive(buildZIP(t, []zipEntry{{name: name, data: inner}}), CompositionArchiveLimits); err == nil || !strings.Contains(err.Error(), "nested") {
+		if _, err := ReadArchive(buildZIP(t, []zipEntry{{name: name, data: inner}}), MaterializerArchiveLimits); err == nil || !strings.Contains(err.Error(), "nested") {
 			t.Fatalf("%q: nested archive must be refused, got %v", name, err)
+		}
+	}
+}
+
+// pictureHeader is the start of a PNG that says it is w by h pixels: all a
+// reader looks at to know how large a picture is.
+func pictureHeader(w, h uint32) []byte {
+	var header bytes.Buffer
+	header.WriteString("\x89PNG\r\n\x1a\n")
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], w)
+	binary.BigEndian.PutUint32(ihdr[4:], h)
+	ihdr[8], ihdr[9] = 8, 2 // 8 bits, RGB
+	chunk := append([]byte("IHDR"), ihdr...)
+	_ = binary.Write(&header, binary.BigEndian, uint32(len(ihdr)))
+	header.Write(chunk)
+	_ = binary.Write(&header, binary.BigEndian, crc32.ChecksumIEEE(chunk))
+	return header.Bytes()
+}
+
+// In composition, one member that cannot be used is left out, with why, and
+// the rest of the ZIP is used: a picture past the pixel limit, a file that is
+// itself an archive, whatever its name, and text past the ZIP's text budget.
+// The reasons are composition's own words, never the Materializer's. Its
+// limits keep failing the whole archive.
+func TestReadArchiveLeavesOutOneBadMemberInComposition(t *testing.T) {
+	inner := buildZIP(t, []zipEntry{{name: "a.txt", data: []byte("x")}})
+	limits := CompositionArchiveLimits
+	limits.MaxTextBytes = 1 << 10 // the text budget, at a test's scale
+	entries := []zipEntry{
+		{name: "copy.txt", data: []byte("Spring.")},
+		{name: "huge.png", data: pictureHeader(6000, 5000)},
+		{name: "notes.txt", data: inner},
+		{name: "inner.zip", data: inner},
+		{name: "more.txt", data: bytes.Repeat([]byte("a"), 1100)},
+		{name: "pic.png", data: referencePNG(t)},
+	}
+	got, err := ReadArchive(buildZIP(t, entries), limits)
+	if err != nil {
+		t.Fatalf("one bad member failed the whole ZIP: %v", err)
+	}
+	var kept []string
+	for _, m := range got.Members {
+		kept = append(kept, m.Path)
+	}
+	if strings.Join(kept, ",") != "copy.txt,pic.png" {
+		t.Errorf("kept %v", kept)
+	}
+	want := map[string]string{
+		"huge.png":  "a picture over 24 million pixels",
+		"notes.txt": "an archive inside the ZIP, which is not opened",
+		"inner.zip": "an archive inside the ZIP, which is not opened",
+		"more.txt":  "the ZIP holds more than 1 KiB of text",
+	}
+	if len(got.Skipped) != len(want) {
+		t.Errorf("skipped = %+v", got.Skipped)
+	}
+	for _, s := range got.Skipped {
+		if want[s.Path] != s.Reason {
+			t.Errorf("%s left out because %q, want %q", s.Path, s.Reason, want[s.Path])
+		}
+		if strings.Contains(s.Reason, "reference") {
+			t.Errorf("%s: %q is the Materializer's wording", s.Path, s.Reason)
+		}
+	}
+
+	// A ZIP that unpacks to more than the budget is still left out whole, in
+	// composition's words.
+	small := CompositionArchiveLimits
+	small.MaxUnpackedBytes = 1 << 20
+	if _, err := ReadArchive(buildZIP(t, []zipEntry{{name: "copy.txt", data: bytes.Repeat([]byte("a"), 2<<20)}}), small); err == nil || err.Error() != "it unpacks to more than 1 MiB" {
+		t.Errorf("an archive past its unpacked budget: %v", err)
+	}
+
+	// The Materializer's limits fail the whole archive for each, as ever.
+	for _, entry := range entries[1:4] {
+		if _, err := ReadArchive(buildZIP(t, []zipEntry{entry}), MaterializerArchiveLimits); err == nil {
+			t.Errorf("%s: the Materializer read the archive", entry.name)
 		}
 	}
 }

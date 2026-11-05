@@ -13,9 +13,9 @@ import (
 )
 
 // ArchiveLimits are one caller's bounds on a ZIP read in memory. The hardened
-// rules (no path leaving the archive, no nested archive, no link) are the same
-// for every caller; only these numbers and the treatment of unsupported
-// members differ.
+// rules (no path leaving the archive, no nested archive opened, no link) are
+// the same for every caller; only these numbers and the treatment of members
+// that cannot be used differ.
 type ArchiveLimits struct {
 	MaxEntries       int
 	MaxUnpackedBytes int64
@@ -25,6 +25,12 @@ type ArchiveLimits struct {
 	// SkipUnsupported names a member that is not a picture or text file in
 	// Archive.Skipped instead of failing the whole archive.
 	SkipUnsupported bool
+	// SkipUnusable is composition's mode: a member that cannot be used -- a
+	// picture past MaxPixels, an archive inside the archive (never opened),
+	// text past MaxTextBytes -- is named in Archive.Skipped, in composition's
+	// own words, and the rest of the archive is used. Without it, any of them
+	// fails the whole archive, as the Materializer has always read one.
+	SkipUnusable bool
 	// reportUnpacked, when set, is the total named in the over-budget sentence
 	// while MaxUnpackedBytes is a smaller remainder of a shared budget.
 	reportUnpacked int64
@@ -42,7 +48,10 @@ func (l ArchiveLimits) unpackedWords() string {
 var MaterializerArchiveLimits = ArchiveLimits{MaxEntries: 64, MaxUnpackedBytes: 16 << 20, MaxTextBytes: 256 << 10, MaxImages: 8, MaxPixels: 24_000_000}
 
 // CompositionArchiveLimits are what email composition applies to an uploaded ZIP.
-var CompositionArchiveLimits = ArchiveLimits{MaxEntries: 256, MaxUnpackedBytes: 64 << 20, MaxTextBytes: 4 << 20, MaxPixels: 24_000_000, SkipUnsupported: true}
+var CompositionArchiveLimits = ArchiveLimits{MaxEntries: 256, MaxUnpackedBytes: 64 << 20, MaxTextBytes: 4 << 20, MaxPixels: 24_000_000, SkipUnsupported: true, SkipUnusable: true}
+
+// reasonNestedArchive is why composition leaves out an archive inside a ZIP.
+const reasonNestedArchive = "an archive inside the ZIP, which is not opened"
 
 // ArchiveMember is one readable file. Path is as written in the archive, with
 // forward slashes, so a/x.txt and b/x.txt stay distinct.
@@ -92,6 +101,10 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 			continue
 		}
 		if strings.ToLower(path.Ext(name)) == ".zip" {
+			if limits.SkipUnusable {
+				out.Skipped = append(out.Skipped, SkippedMember{Path: name, Reason: reasonNestedArchive})
+				continue
+			}
 			return out, fmt.Errorf("ZIP member %q: %w", name, errNestedArchive)
 		}
 		if limits.SkipUnsupported && !supportedExt(name, limits) {
@@ -100,7 +113,7 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 		}
 		remaining := limits.MaxUnpackedBytes - unpacked
 		if remaining <= 0 || f.UncompressedSize64 > uint64(remaining) {
-			return out, fmt.Errorf("reference contents exceed %s expanded", limits.unpackedWords())
+			return out, unpackedError(limits)
 		}
 		r, err := f.Open()
 		if err != nil {
@@ -115,7 +128,7 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 			return out, closeErr
 		}
 		if int64(len(body)) > remaining {
-			return out, fmt.Errorf("reference contents exceed %s expanded", limits.unpackedWords())
+			return out, unpackedError(limits)
 		}
 		unpacked += int64(len(body))
 		member, reason, err := classifyMember(name, body, limits)
@@ -134,6 +147,11 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 		} else {
 			text += int64(len(body))
 			if text > limits.MaxTextBytes {
+				if limits.SkipUnusable {
+					text -= int64(len(body))
+					out.Skipped = append(out.Skipped, SkippedMember{Path: name, Reason: "the ZIP holds more than " + sizeWords(limits.MaxTextBytes) + " of text"})
+					continue
+				}
 				return out, fmt.Errorf("ZIP member %q: %w", name, textTotalError(limits))
 			}
 		}
@@ -143,6 +161,15 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 }
 
 var errNestedArchive = errors.New("nested archives are not supported; provide their files directly")
+
+// unpackedError is the refusal of an archive that unpacks to more than its
+// budget: in composition's words when the limits are composition's.
+func unpackedError(l ArchiveLimits) error {
+	if l.SkipUnusable {
+		return fmt.Errorf("it unpacks to more than %s", l.unpackedWords())
+	}
+	return fmt.Errorf("reference contents exceed %s expanded", l.unpackedWords())
+}
 
 func imageCountError(l ArchiveLimits) error {
 	n := fmt.Sprint(l.MaxImages)
@@ -191,7 +218,8 @@ func unsupportedReason(name string) string {
 }
 
 // classifyMember applies the content rules to one member. It returns either a
-// member, a skip reason (only when limits.SkipUnsupported), or an error.
+// member, a skip reason (only when limits.SkipUnsupported or SkipUnusable), or
+// an error.
 func classifyMember(name string, data []byte, l ArchiveLimits) (ArchiveMember, string, error) {
 	m := ArchiveMember{Path: name}
 	skip := func(reason string, err error) (ArchiveMember, string, error) {
@@ -205,6 +233,9 @@ func classifyMember(name string, data []byte, l ArchiveLimits) (ArchiveMember, s
 	}
 	ext := strings.ToLower(path.Ext(name))
 	if bytes.HasPrefix(data, []byte{'P', 'K'}) || ext == ".zip" {
+		if l.SkipUnusable {
+			return m, reasonNestedArchive, nil
+		}
 		return m, "", errNestedArchive
 	}
 	switch {
@@ -214,6 +245,9 @@ func classifyMember(name string, data []byte, l ArchiveLimits) (ArchiveMember, s
 			return skip("not a valid picture", errors.New("image content is invalid"))
 		}
 		if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > l.MaxPixels {
+			if l.SkipUnusable {
+				return m, fmt.Sprintf("a picture over %d million pixels", l.MaxPixels/1_000_000), nil
+			}
 			return m, "", fmt.Errorf("reference image exceeds %d million pixels", l.MaxPixels/1_000_000)
 		}
 		m.MIME = "image/" + format
