@@ -3119,7 +3119,10 @@ mutation invitation createUserInvitation {
     inviterId     string!
     inviterName   string
     role          string
-    groupIds      object
+    // A LIST of group ids, as component/identity/adminops sends it. Declared
+    // `object` until 0.31.15, which the argument validator refuses for a list,
+    // so every invitation that named a group was refused unwritten.
+    groupIds      array
     accountId     string
   }
   insert {
