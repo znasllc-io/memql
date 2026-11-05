@@ -1686,10 +1686,6 @@ type ComposeMaterializeArgs struct {
 	Statement string
 	// Document formats: markdown (md), html, txt, csv, json, docx or pdf. Media generation belongs to other discovered capabilities; this document composer does not establish their availability.
 	Format string
-	// email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent.
-	OutputKind string
-	// one of the built-in layouts (builtin:<name>), or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article.
-	LayoutId string
 	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
 	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused.
@@ -1735,20 +1731,6 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 	}
 	b.WriteString("format: ")
 	b.WriteString(quoteMemQL(args.Format))
-	if args.OutputKind != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("outputKind: ")
-		b.WriteString(quoteMemQL(args.OutputKind))
-	}
-	if args.LayoutId != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("layoutId: ")
-		b.WriteString(quoteMemQL(args.LayoutId))
-	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -2410,7 +2392,7 @@ func EmailInboxBuild(args EmailInboxArgs) string {
 	return "builtin emailInbox()"
 }
 
-// EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
+// EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId.
 type EmailLayoutsArgs struct {
 	AccountId          string
 	IncludeArchived    bool

@@ -244,7 +244,7 @@ builtin campaignSaveLayout {
 builtin campaignLayoutCatalogue {
 }
 
-@description("The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.")
+@description("The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId.")
 @sdk
 @executor("integration.campaigns.emailLayouts")
 builtin emailLayouts {

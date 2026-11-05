@@ -32,12 +32,11 @@ type SourceDownloader interface {
 // SourceContent is captured in the owner-only execution input before dispatch.
 // Another replica composes from the same bytes even if the source changes later.
 type SourceContent struct {
-	Name          string `json:"name"`
-	MimeType      string `json:"mimeType"`
-	Text          string `json:"text,omitempty"`
-	Image         []byte `json:"image,omitempty"`
-	SHA256        string `json:"sha256"`
-	EmailAssetURL string `json:"emailAssetUrl,omitempty"`
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text,omitempty"`
+	Image    []byte `json:"image,omitempty"`
+	SHA256   string `json:"sha256"`
 }
 
 type referenceBudget struct{ bytes, text, images, entries int }

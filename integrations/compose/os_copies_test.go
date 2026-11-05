@@ -267,8 +267,6 @@ func readFiledNames(t *testing.T) filedNames {
 // kindOf names a row's kind of file, as the app's choice does not: the engine knows it by three fields.
 func kindOf(row filedNameRow) string {
 	switch {
-	case row.OutputKind == "email_template":
-		return "email template"
 	case row.DeployableKind != "":
 		return row.DeployableKind + " package"
 	}
@@ -281,7 +279,7 @@ func kindOf(row filedNameRow) string {
 func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 	table := readFiledNames(t)
 	kinds := map[string]int{}
-	refused, cut, email := 0, 0, 0
+	refused, cut := 0, 0
 	for _, row := range table.Rows {
 		kinds[kindOf(row)]++
 		args := map[string]any{"name": row.Name, "format": row.Format}
@@ -295,7 +293,7 @@ func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 		if row.Filed == "" {
 			refused++
 			if err == nil {
-				t.Errorf("%s %q: the table says the engine refuses this name, and it files it as %q", kindOf(row), row.Name, filedFileName(parsed.Name, parsed.Format, parsed.DeployableKind, parsed.OutputKind))
+				t.Errorf("%s %q: the table says the engine refuses this name, and it files it as %q", kindOf(row), row.Name, filedFileName(parsed.Name, parsed.Format, parsed.DeployableKind))
 			}
 			continue
 		}
@@ -303,7 +301,7 @@ func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 			t.Errorf("%s %q: the table says the engine files this as %q, and it refuses the name: %v", kindOf(row), row.Name, row.Filed, err)
 			continue
 		}
-		got := filedFileName(parsed.Name, parsed.Format, parsed.DeployableKind, parsed.OutputKind)
+		got := filedFileName(parsed.Name, parsed.Format, parsed.DeployableKind)
 		// A filed name is text: a stem longer than 120 bytes is cut on a character, never inside one.
 		if !utf8.ValidString(got) {
 			t.Errorf("%s %q: the engine files this as %q, which is not valid UTF-8: the stem was cut inside a character", kindOf(row), row.Name, got)
@@ -311,25 +309,22 @@ func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 		if limitFallsInsideACharacter(row.Name) {
 			cut++
 		}
-		if row.OutputKind == "email_template" {
-			email++
-		}
 		if got != row.Filed {
 			t.Errorf("%s %q: the engine files this as %q and the table says %q", kindOf(row), row.Name, got, row.Filed)
 		}
 	}
 
 	// A table that lost a kind, its refused names or its cuts would guard less than it says.
-	if len(kinds) != 11 {
-		t.Errorf("%s holds rows for %d kinds of file (%v); it must hold all eleven the app offers", filedNamesTable, len(kinds), kinds)
+	if len(kinds) != 10 {
+		t.Errorf("%s holds rows for %d kinds of file (%v); it must hold all ten the app offers", filedNamesTable, len(kinds), kinds)
 	}
 	for kind, rows := range kinds {
 		if rows < 10 {
 			t.Errorf("%s holds only %d rows for %s", filedNamesTable, rows, kind)
 		}
 	}
-	if len(table.Rows) < 300 || refused < 20 || cut < 4 || email < 20 {
-		t.Errorf("%s holds %d rows, of which %d refused, %d with a character across the 120-byte limit and %d for an email template: it is meant to hold a few hundred, with each of those well represented", filedNamesTable, len(table.Rows), refused, cut, email)
+	if len(table.Rows) < 300 || refused < 20 || cut < 4 {
+		t.Errorf("%s holds %d rows, of which %d refused and %d with a character across the 120-byte limit: it is meant to hold a few hundred, with each of those well represented", filedNamesTable, len(table.Rows), refused, cut)
 	}
 }
 
