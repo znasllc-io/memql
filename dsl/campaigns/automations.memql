@@ -155,3 +155,17 @@ automation campaignJourneyDrainWorkflow {
  active := builtin campaignActiveJourneys()
  for id in active { builtin campaignRunJourney(id: id) on error continue }
 }
+
+/// Write one email composition in Claude Code on the Apps route. campaignComposeEmail opens a goal
+/// that runs this template (source route:apps, level strong, requestedVia email); its one step hands
+/// the template's composition, its material and the three emailCompose tools to the composer, which
+/// saves a draft. Nothing here publishes.
+@template
+automation composeEmailRun {
+  args {
+    /// The template whose writing composition the run writes.
+    templateId string!
+  }
+
+  composeEmail := builtin campaignRunComposition(templateId: args.templateId)
+}

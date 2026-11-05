@@ -15471,11 +15471,27 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-work-link:hover { color: var(--os-ink); background: var(--os-hover); }
 .os-ask-work-link:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
-.os-ask-question { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border-radius: var(--os-radius-sm); background: var(--os-plate); }
+.os-ask-question { container-type: inline-size; display: grid; gap: 10px; margin-top: 12px; padding: 12px; border-radius: var(--os-radius-sm); background: var(--os-plate); }
 .os-ask-question > p { margin: 0; }
 .os-ask-question-options { display: flex; flex-wrap: wrap; gap: 6px; }
 .os-ask-question-options button { border: 1px solid var(--os-line); border-radius: var(--os-selection-radius); background: var(--os-surface); color: var(--os-ink); padding: 6px 10px; font: inherit; cursor: pointer; }
 .os-ask-question-options button[aria-pressed="true"] { border-color: var(--os-accent); background: var(--os-hover); }
+/* A choice of layouts: each option is a card, the server's drawing on a soft mat with its name directly under it. Three across a wide
+   column and two across a phone-width one. The mat is the same portrait frame for every layout, so the cards line up. */
+.os-ask-layouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@container (max-width: 420px) { .os-ask-layouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.os-ask-question-options.os-ask-layouts button { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; color: inherit; text-align: left; }
+.os-ask-layout-mat { display: block; aspect-ratio: 4 / 5; overflow: hidden; padding: 9px; background: color-mix(in srgb, var(--os-ink) 6%, transparent); }
+.os-ask-layout-mat img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: top center; }
+.os-ask-question-options.os-ask-layouts button:hover .os-ask-layout-mat { background: color-mix(in srgb, var(--os-ink) 10%, transparent); }
+.os-ask-question-options.os-ask-layouts button[aria-pressed="true"] .os-ask-layout-mat { background: var(--os-accent-soft); }
+.os-ask-layout-name { padding: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-shadow: inset 0 -2px 0 transparent; }
+.os-ask-question-options.os-ask-layouts button:hover .os-ask-layout-name { box-shadow: inset 0 -2px 0 var(--os-muted); }
+.os-ask-question-options.os-ask-layouts button[aria-pressed="true"] .os-ask-layout-name { color: var(--os-accent); box-shadow: inset 0 -2px 0 var(--os-accent); }
+.os-ask-question-options.os-ask-layouts button:focus-visible { outline-offset: 4px; }
+/* The server draws a white page with grey panels, a glaring block on a dark theme: drawn inverted, partly, so the page sits just above the mat. */
+:root[data-theme="dark"] .os-ask-layout-mat img { filter: invert(.82); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .os-ask-layout-mat img { filter: invert(.82); } }
 .os-ask-question-input { display: flex; align-items: flex-end; gap: 8px; }
 .os-ask-question-input textarea { min-width: 0; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); font: inherit; }
 .os-ask-question-options button:focus-visible, .os-ask-question-input textarea:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }

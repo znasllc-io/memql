@@ -248,3 +248,31 @@ func (e *ownerScopeFactoryEngine) InvokeAIStructured(
 ) (string, error) {
 	return "", errors.New("no provider in this test")
 }
+
+// TestRequestUserFeedbackCarriesPresentation: how a question is shown travels
+// with it to the work runtime, which owns what a presentation allows; a
+// question without one reaches it with none.
+func TestRequestUserFeedbackCarriesPresentation(t *testing.T) {
+	for _, tc := range []struct {
+		name, presentation string
+		args               map[string]any
+	}{
+		{"a choice of layouts", "layouts", map[string]any{"presentation": " layouts "}},
+		{"a plain choice", "", map[string]any{}},
+	} {
+		i := New(memql.NewAgentRegistry(), nil)
+		goals := &fakeWorkGoals{}
+		i.SetWorkGoals(goals)
+		args := map[string]any{"question": "Which layout should the email use?", "kind": "choice", "runId": "v1:work:run:r1", "ownerUserId": userA,
+			"options": []any{map[string]any{"label": "Article", "value": "builtin:article"}}}
+		for k, v := range tc.args {
+			args[k] = v
+		}
+		if _, err := i.handleRequestUserFeedback(asPerson(userA), args, 0); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if len(goals.asked) != 1 || goals.asked[0].Presentation != tc.presentation {
+			t.Fatalf("%s: asked %+v, want presentation %q", tc.name, goals.asked, tc.presentation)
+		}
+	}
+}

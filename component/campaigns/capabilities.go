@@ -65,12 +65,23 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
 		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
+		{Name: "createTemplateFromLayout", Description: "Create a draft email template from a built-in layout, with the organization's brand applied.", Handler: w.handleCreateTemplateFromLayout},
 		{Name: "saveLayout", Description: "Save an organization email layout on the reviewed revision, or archive or restore it.", Handler: w.handleSaveLayout},
 		// PreserveOrder: the picker lists the built-in layouts first, in catalogue
 		// order, and then the organization's own, newest first. A builtin's nodes
 		// are keyed by id, which sorts them; the flag is what keeps this order.
 		{Name: "emailLayouts", Description: "List the email layouts an organization can start from: the built-in layouts, then its own.", Handler: w.handleEmailLayouts, PreserveOrder: true},
+		{Name: "layoutCatalogue", Description: "List the built-in email layouts with their category and outline.", Handler: w.handleLayoutCatalogue, PreserveOrder: true},
 		{Name: "renderEmail", Description: "Render an email document for preview, embedding the pictures the caller can read. Saves and sends nothing.", Handler: w.handleRenderEmail},
+		{Name: "saveBrandKit", Description: "Save an organization's brand kit on the reviewed revision, answering its contrast and size warnings.", Handler: w.handleSaveBrandKit},
+		{Name: "brandPreview", Description: "Render a built-in layout with a brand kit for preview, with the kit's warnings. Saves nothing.", Handler: w.handleBrandPreview},
+		{Name: "composeContext", Description: "What a running email composition writes into: its layout, brand slots, material pictures and picture budget. Saves nothing.", Handler: w.handleComposeContext},
+		{Name: "composeRender", Description: "Render a running email composition in its brand-applied layout, with its issues. Saves nothing.", Handler: w.handleComposeRender},
+		{Name: "composeSubmit", Description: "Save a running email composition as its template's draft and finish it. Never publishes.", Handler: w.handleComposeSubmit},
+		{Name: "runComposition", Description: "Run an email composition, the step of the composeEmailRun template: file its material, hand it with three tools to the email composer on the Apps route, and settle the composition when the composer is done. Never publishes.", Handler: w.handleRunComposition},
+		{Name: "composeEmail", Description: "Start an email composition: create a draft template from a built-in layout with the organization's brand kit, marked writing, and open its goal on the Apps route, where MemQL writes the email in Claude Code on the caller's machine. Answers at once. Never publishes.", Handler: w.handleComposeEmail},
+		{Name: "cancelComposition", Description: "Cancel a writing email composition: ask its goal to stop and fail the composition as Cancelled. The draft stays.", Handler: w.handleCancelComposition},
+		{Name: "retryComposition", Description: "Start a failed email composition again with the request it recorded, under a new goal on the Apps route.", Handler: w.handleRetryComposition},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",

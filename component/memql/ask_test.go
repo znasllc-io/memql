@@ -349,3 +349,82 @@ func TestWorkWorkbenchCapabilityUsesOwnedExecutionIdentity(t *testing.T) {
 	require.ErrorContains(t, err, "owned work run")
 	require.Equal(t, 2, calls)
 }
+
+// TestAskQuestionCarriesPresentation: a choice of layouts reaches the client as
+// one -- the question says presentation "layouts" and each option keeps the
+// wireframe the server drew for it. A question without that presentation
+// carries neither, whatever its options hold: only a layout choice's
+// server-drawn wireframes are ever shown.
+func TestAskQuestionCarriesPresentation(t *testing.T) {
+	article := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900"><rect width="600" height="900"/></svg>`
+	letter := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 700"><rect width="600" height="700"/></svg>`
+	row := map[string]any{"id": "v1:work:approval:question-1", "kind": "feedback", "question": "Which layout should the email use?", "decision": "",
+		"subject": map[string]any{"question": "Which layout should the email use?", "kind": "choice", "presentation": "layouts",
+			"options": []any{map[string]any{"label": "Article", "value": "builtin:article"}, map[string]any{"label": "Letter", "value": "builtin:letter"}}},
+		"options": []any{map[string]any{"label": "Article", "value": "builtin:article", "wireframe": article}, map[string]any{"label": "Letter", "value": "builtin:letter", "wireframe": letter}}}
+
+	question, _ := askFeedbackProjection(row)
+	require.NotNil(t, question)
+	raw, err := json.Marshal(question)
+	require.NoError(t, err)
+	var wire struct {
+		Presentation string           `json:"presentation"`
+		Kind         string           `json:"kind"`
+		Options      []map[string]any `json:"options"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &wire))
+	require.Equal(t, "layouts", wire.Presentation)
+	require.Equal(t, "choice", wire.Kind)
+	require.Equal(t, []map[string]any{
+		{"label": "Article", "value": "builtin:article", "wireframe": article},
+		{"label": "Letter", "value": "builtin:letter", "wireframe": letter},
+	}, wire.Options)
+
+	for _, subject := range []map[string]any{
+		{"kind": "choice"},
+		{"kind": "choice", "presentation": "grid"},
+	} {
+		row["subject"] = subject
+		question, _ = askFeedbackProjection(row)
+		require.NotNil(t, question)
+		raw, err = json.Marshal(question)
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), "presentation", "subject %v", subject)
+		require.NotContains(t, string(raw), "wireframe", "subject %v", subject)
+		require.Len(t, question.Options, 2)
+		require.Equal(t, "builtin:article", question.Options[0]["value"])
+	}
+}
+
+// TestRequestUserFeedbackTakesALayoutPresentation: the tool offers one
+// presentation, "layouts", and leaving it out is a plain question: an explicit
+// empty value is not offered, since a builtin refuses an empty optional
+// string. Its builtin takes the field. A builtin refuses every argument it does
+// not declare, so a tool field the builtin lacked would refuse each layout
+// choice before it reached the work runtime.
+func TestRequestUserFeedbackTakesALayoutPresentation(t *testing.T) {
+	e := sharedDblessEngine(t)
+	tool, err := e.Tools().Get("requestUserFeedback")
+	require.NoError(t, err)
+	var schema struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+		Required []string `json:"required"`
+	}
+	require.NoError(t, json.Unmarshal(tool.InputSchema, &schema))
+	require.Equal(t, []string{"layouts"}, schema.Properties["presentation"].Enum)
+	require.NotContains(t, schema.Required, "presentation")
+
+	fn, err := e.Functions().Get("requestUserFeedback")
+	require.NoError(t, err)
+	require.NotNil(t, fn.BuiltinArgs)
+	for name := range schema.Properties {
+		require.Contains(t, fn.BuiltinArgs.Properties, name, "the tool declares %s, which its builtin refuses", name)
+	}
+	require.NoError(t, validateBuiltinCallArgs("requestUserFeedback", map[string]any{
+		"question": "Which layout should the email use?", "kind": "choice", "presentation": "layouts",
+		"options": []any{map[string]any{"label": "Article", "value": "builtin:article"}},
+		"agentId": "v1:agents:agent:a", "ownerUserId": "v1:identity:user:u", "runId": "v1:work:run:r",
+	}, fn.BuiltinArgs))
+}

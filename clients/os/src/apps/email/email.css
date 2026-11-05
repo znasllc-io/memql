@@ -41,6 +41,207 @@
   min-height: 0;
 }
 
+/* ---- Email -> Settings -> Brand (Task 24) --------------------------------- */
+
+/* THE EDITOR AND ITS PREVIEW. One column on a narrow window, the preview under
+ * the editor; two given room, the preview beside the editor and standing in
+ * view while the editor scrolls. The editor keeps enough width for its groups'
+ * labels to stand beside their fields; the preview is about an email's width,
+ * whose canvas goes full width below 600px as it does on a phone. */
+.email-brand {
+  /* Positioned, so what is drawn out of the flow inside it (a field's visually
+   * hidden label) stays inside the page's scroller instead of the window's. */
+  position: relative;
+  display: grid;
+  gap: 28px;
+  align-items: start;
+  min-width: 0;
+}
+.email-brand-editor {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* THE PREVIEW FITS THE PANE. The page's scroller is the measure: with an email
+ * to show, the preview column is exactly as tall as the scroller shows (its
+ * content box, so inside the page's padding and above the bar). The frame takes
+ * what the column leaves and keeps its own scroll, and what is said about the
+ * email stands under it. The column starts at the top of the scroller -- the
+ * page's heading is in the editor's column -- so it fits whether or not the
+ * editor has been scrolled. The shared frame (`.email-preview-frame`, the
+ * template page and the inbox) keeps its own height. */
+.email-brand-body {
+  container: email-brand-pane / size;
+}
+.email-brand-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.email-brand-preview:has(> .email-preview-frame) {
+  height: 100cqh;
+}
+.email-brand-preview > .email-preview-frame {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 14rem;
+}
+@container os-window (min-width: 1040px) {
+  .email-brand {
+    grid-template-columns: minmax(28rem, 1fr) minmax(20rem, 34rem);
+    gap: 32px;
+  }
+  .email-brand-preview {
+    position: sticky;
+    top: 0;
+  }
+}
+.email-brand-editor > :empty {
+  display: none;
+}
+
+/* A colour: the picker and its hex on one control line. A hex is seven
+ * characters, so its field keeps a hex's width. */
+.email-colour {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.email-colour > .os-input {
+  flex: 0 0 8.5rem;
+  min-width: 0;
+}
+.email-colour-swatch {
+  flex: none;
+  width: var(--os-control-h);
+  height: var(--os-control-h);
+  padding: 3px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-raised);
+  cursor: pointer;
+}
+.email-colour-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.email-colour-swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+.email-colour-swatch::-moz-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+.email-colour-swatch:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+
+/* What is wrong with what a field holds, under it, in the error colour. */
+.email-field-problem {
+  margin: 6px 0 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-error);
+}
+
+/* A picture: drawn small in a field-shaped frame, Upload and Remove beside it. */
+.email-picture {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.email-picture-frame {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 7.5rem;
+  height: calc(var(--os-control-h) * 1.5);
+  padding: 4px;
+  overflow: hidden;
+  color: var(--os-muted);
+  background: var(--email-picture-ground, var(--os-raised));
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+}
+.email-picture-frame > img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.email-picture-field > .os-caption,
+.email-brand-stack > .os-caption {
+  margin-top: 6px;
+}
+
+/* A field and the line under it, at a field's width. */
+.email-brand-stack {
+  max-width: 34rem;
+}
+.email-brand-stack > .os-input {
+  width: 100%;
+}
+
+/* The signature's name: how it is shown, then the name, on one line. */
+.email-brand-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 34rem;
+}
+.email-brand-name > .os-select-wrap {
+  flex: 0 0 9.5rem;
+}
+.email-brand-name > .os-select-wrap > .os-select {
+  width: 100%;
+  min-width: 0;
+}
+
+/* An entry's field with the control that removes the entry at its end. */
+.email-brand-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(34rem + 44px);
+}
+
+/* One social link is three rows; the space above the next is the gap between them. */
+.email-brand-entry + .email-brand-entry {
+  margin-top: 12px;
+}
+
+/* The footer's links, one to a line: what it says, where it goes, and Remove
+ * for a link of the organization's own. A fixed link says where it goes. */
+.email-brand-links {
+  display: grid;
+  gap: 8px;
+  max-width: calc(34rem + 44px);
+}
+.email-brand-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 36px;
+  align-items: center;
+  gap: 8px;
+}
+.email-brand-link > .os-input {
+  min-width: 0;
+}
+.email-brand-fixed {
+  grid-column: 2 / 4;
+  padding-left: 2px;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* The footer's separator is a few characters. */
+.email-brand-short > .os-input {
+  width: 8rem;
+}
+
 /* ---- A campaign's page ---------------------------------------------------- */
 
 /* "Show more" under who got it: the panel's own gap spaces it from the rows, so

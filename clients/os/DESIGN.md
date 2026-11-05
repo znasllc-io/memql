@@ -49,7 +49,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    being worked on, not in a sweep of apps nobody asked to change; the default
    follows once the surfaces have. A store's Reviews is the first; Cut release
    is the second, and a guided flow moves through the kit `Wizard`'s
-   `dividers="none"`.
+   `dividers="none"`. Email's Templates and Settings, with the Brand page,
+   are the third.
 
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection

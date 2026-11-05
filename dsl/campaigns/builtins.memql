@@ -238,7 +238,13 @@ builtin campaignSaveLayout {
   action            string   @description("save (default), archive or restore.")
 }
 
-@description("The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.")
+@description("The built-in email layouts, for an assistant choosing one: rows are {id, name, category, description, outline}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The rows carry no drawing; emailLayouts gives a person each layout's wireframe. Needs no organization. The id is opaque: pass it as layoutId to campaignComposeEmail or campaignCreateTemplateFromLayout.")
+@sdk
+@executor("integration.campaigns.layoutCatalogue")
+builtin campaignLayoutCatalogue {
+}
+
+@description("The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId.")
 @sdk
 @executor("integration.campaigns.emailLayouts")
 builtin emailLayouts {
@@ -253,6 +259,108 @@ builtin emailRender {
   document   object!  @description("The *.email.json document, in layout or custom mode.")
   accountId  string!  @description("The organization the email is for. You need read access to its data.")
   sample     object   @description("Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).")
+}
+
+@description("Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change.")
+@sdk
+@executor("integration.campaigns.saveBrandKit")
+builtin campaignSaveBrandKit {
+  accountId         string!  @description("The organization the kit is for; an organization has one kit.")
+  kit               object!  @description("The brand kit: {theme, logo, signature, follow, social, footer, reply}.")
+  expectedRevision  string   @description("Exact createdAt from brandKitForAccount; empty only when creating.")
+}
+
+@description("Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything.")
+@sdk
+@executor("integration.campaigns.brandPreview")
+builtin campaignBrandPreview {
+  accountId  string!  @description("The organization the kit is for. You need read access to its data.")
+  kit        object!  @description("The brand kit, as campaignSaveBrandKit takes it.")
+  layoutId   string   @description("A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article.")
+}
+
+@description("Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate.")
+@sdk
+@executor("integration.campaigns.createTemplateFromLayout")
+builtin campaignCreateTemplateFromLayout {
+  accountId  string!  @description("The organization the template is for.")
+  name       string!  @description("The template's name, up to 200 characters.")
+  layoutId   string!  @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
+}
+
+// ---- Starting, cancelling and retrying an email composition ----
+//
+// @sdk: the New email page's Write it, Ask's assistant once the person has
+// chosen a layout, and the editor's and the OS's Cancel and Retry. A
+// composition's goal runs on route:apps at level strong, whatever route the
+// caller's conversation uses, and only on a signed-in app of the caller's own
+// machines; it never falls back to a local model and never publishes.
+
+@description("Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (the answer says to set it up first in Email, Settings, Brand) and when none of your machines has an app signed in (the answer says to open Cockpit with Claude Code signed in). Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision, state}. When the goal cannot start, the draft is kept with its composition failed and the answer is {templateId, revision, state, error}: open that draft and retry it there rather than starting another.")
+@sdk
+@executor("integration.campaigns.composeEmail")
+builtin campaignComposeEmail {
+  accountId        string!    @description("The organization the email is for.")
+  name             string!    @description("The template's name, up to 200 characters.")
+  layoutId         string!    @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
+  description      string!    @description("What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest.")
+  fileIds          []string!  @description("The attached Library files: pictures, ZIPs and text files, at most 64. May be empty.")
+  referenceFileId  string     @description("A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it.")
+}
+
+@description("Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails as Cancelled. The draft stays as it was. Refused unless the composition is writing. A cancel acts only on the composition run it read: one its run finished, or one started again, meanwhile is left as it is. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.")
+@sdk
+@executor("integration.campaigns.cancelComposition")
+builtin campaignCancelComposition {
+  templateId  string!  @description("The template MemQL is writing.")
+}
+
+@description("Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers as campaignComposeEmail does: {templateId, goalId, revision, state}, or {templateId, revision, state, error} when the new goal cannot start.")
+@sdk
+@executor("integration.campaigns.retryComposition")
+builtin campaignRetryComposition {
+  templateId  string!  @description("The template whose composition failed.")
+}
+
+// ---- The tools of an email composition run (dsl/campaigns/tools.memql) ----
+//
+// NOT @sdk: a composition run calls them through its three emailCompose* tools,
+// which stamp templateId and goalId from the run. A call reaches the template
+// only with template write permission in its organization, only while its
+// composition is writing, and only when goalId is that composition's goal.
+
+@description("The context of a running email composition: the template's built-in layout with the organization's brand kit applied (each block's id, type, role, sizes and example words; the optional ids; the repeat ranges; the content slots at their minimum), the brand slots the kit fills, the attached files by their names in the composer's workspace with each picture's handle, type, bytes, width and height, the picture of the finished email, the files left out and why, the picture budget the brand leaves, the request's description and the organization's name. Holds no picture's bytes. Saves nothing. Answers only while the composition is writing, for its own goal.")
+@executor("integration.campaigns.composeContext")
+builtin campaignComposeContext {
+  templateId  string!  @description("The template being composed.")
+  goalId      string!  @description("The goal of the composition run the call belongs to.")
+}
+
+@description("Render a composition of a running email composition: the raw built-in layout with the organization's current brand kit applied and the composition written in, its pictures resolved from their handles, rendered as a preview. Answers {subject, html, text, issues: [{code, block, message}], slots}; the HTML shows each picture as its handle. A composition the layout refuses is answered with the sentence that says why. Saves nothing. Answers only while the composition is writing, for its own goal.")
+@executor("integration.campaigns.composeRender")
+builtin campaignComposeRender {
+  templateId   string!  @description("The template being composed.")
+  goalId       string!  @description("The goal of the composition run the call belongs to.")
+  composition  object!  @description("{subject, preheader, content: [{id, text, label, href, alt, image}], drop: [id], repeat: {id: copies}}; image is a picture's handle.")
+}
+
+@description("Submit a running email composition: the composition is written into the raw built-in layout with the organization's current brand kit and saved as the template's draft, and the composition is done, with each file left out named in its notes, in one revision. When the template changed since the composition began, the email is saved as a new draft beside it, \"<name> (MemQL's version)\", and the original's composition fails with where it went. Refused unless the composition is writing and goalId is its goal. Never publishes. Answers {templateId, revision, issues}.")
+@executor("integration.campaigns.composeSubmit")
+builtin campaignComposeSubmit {
+  templateId   string!  @description("The template being composed.")
+  goalId       string!  @description("The goal of the composition run the call belongs to.")
+  composition  object!  @description("The composition last rendered, as campaignComposeRender takes it.")
+}
+
+// ---- The run of an email composition (the composeEmailRun template) ----
+//
+// NOT @sdk: it is the one step of composeEmailRun, which a composition's goal
+// runs. Called outside that goal's run on the Apps route, it refuses.
+
+@description("Run an email composition, the one step of the composeEmailRun template: claims the template's writing composition for this run's goal, files the attached material in the owner's Library (folder Email material) and hands it, with the composition and the three emailCompose tools, to the per-user email composer, whole in Claude Code on the Apps route. The material it filed is archived when the composer finishes, and a composition the composer did not save is failed with the reason. Refused outside a goal's run on route:apps. Never publishes. Answers {templateId, goalId, state}.")
+@executor("integration.campaigns.runComposition")
+builtin campaignRunComposition {
+  templateId  string!  @description("The template whose writing composition this run writes.")
 }
 
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")

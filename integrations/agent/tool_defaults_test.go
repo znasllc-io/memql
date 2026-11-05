@@ -86,6 +86,23 @@ func autoInjectedFieldsByTool(t *testing.T) map[string][]string {
 	return out
 }
 
+// stampedByTheirRun are the tools no agent turn stamps, with what does. Each is
+// given only to one kind of run, which hands it whole to an app session and
+// stamps its @autoInjected fields itself, on the handover
+// (common.DelegatedTools.Defaults), where the MCP door puts them back after the
+// anti-forgery strip (component/mcp/delegated_tools.go). Offered on an agent
+// turn instead, the fields are stripped and the tool refuses, which is what
+// they are for: they act only for the run that stamped them.
+//
+// The stamps are pinned where they are made: an email composition's by
+// TestRunCompositionCallsTheComposerWithExactlyTheEmailTools and its fields by
+// TestComposeToolsLoadWithTheirBuiltins (component/campaigns).
+var stampedByTheirRun = map[string]string{
+	"emailComposeContext": "an email composition run stamps templateId and goalId (component/campaigns/compose_run.go)",
+	"emailComposeRender":  "an email composition run stamps templateId and goalId (component/campaigns/compose_run.go)",
+	"emailComposeSubmit":  "an email composition run stamps templateId and goalId (component/campaigns/compose_run.go)",
+}
+
 // THE COVERAGE HALF. For every tool the agent runtime dispatches with runtime
 // context, every field that tool declares @autoInjected must have a default the
 // runtime can supply.
@@ -99,7 +116,21 @@ func TestAgentToolDefaultsCoverEveryAutoInjectedField(t *testing.T) {
 	declared := autoInjectedFieldsByTool(t)
 	turnCtx := turnCtxAllFields()
 
+	// The list above stays honest: each entry is a tool that still declares
+	// @autoInjected fields, and none is also on the agent's own table.
+	for toolName := range stampedByTheirRun {
+		if len(declared[toolName]) == 0 {
+			t.Errorf("stampedByTheirRun lists %q, which declares no @autoInjected field; remove the entry", toolName)
+		}
+		if _, dispatched := agentContextStamps[toolName]; dispatched {
+			t.Errorf("%q is stamped both by its run and by an agent turn; it can only be one", toolName)
+		}
+	}
+
 	for toolName, fields := range declared {
+		if _, byRun := stampedByTheirRun[toolName]; byRun {
+			continue
+		}
 		stamp, dispatched := agentContextStamps[toolName]
 		if !dispatched {
 			// Not a runtime-context tool as far as this package is concerned.

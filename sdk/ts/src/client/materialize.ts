@@ -125,13 +125,8 @@ import { rowNumber, rowString, type Row } from "./types.js";
 export type MaterializeExecute = (name: string, call: string) => Promise<Record<string, unknown>[]>;
 export type MaterializeFormat = "markdown" | "html" | "txt" | "csv" | "json" | "docx" | "pdf";
 export interface MaterializeSource { kind: "concept_row" | "library_file" | "query"; ref: string; label: string; content?: boolean; includeImages?: boolean }
-/**
- * What a person asked for. `layoutId` is the layout an email template is
- * written into (`outputKind: "email_template"`), as the email layout picker
- * (the emailLayouts builtin) lists it: an opaque id this module passes on
- * untouched. Left out, the cluster writes the email into its Article layout.
- */
-export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; outputKind?: "email_template"; layoutId?: string; accountIds?: string[]; recipeId?: string; deployableKind?: string }
+/** What a person asked for. Emails are not made here: they are composed in the Email app. */
+export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; accountIds?: string[]; recipeId?: string; deployableKind?: string }
 /**
  * What the helpers need from their caller. `signal` stops the follow and
  * cancels the composition; `onStatus` hears every poll's status; `intervalMs`
@@ -224,9 +219,9 @@ export function libraryFileFacts(row: Record<string, unknown> | null | undefined
 // section keys rule it out as well, and startMaterialize never sends either) and no source that is
 // not a Library file, whatever those files are. Whether they are ones the Library attaches is the
 // rest of the rule (isDescribedMarkdown), and it needs their rows.
-function describable(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">): boolean {
+function describable(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "deployableKind" | "sources">): boolean {
   return request.format === "markdown" && has(request.statement) &&
-    !has(request.templateId) && !has(request.recipeId) && !has(request.outputKind) && !has(request.deployableKind) &&
+    !has(request.templateId) && !has(request.recipeId) && !has(request.deployableKind) &&
     (request.sources ?? []).every(source => source.kind === "library_file");
 }
 
@@ -241,7 +236,7 @@ function describable(request: Pick<MaterializeRequest, "format" | "statement" | 
  * cannot be read, is not one the Library attaches. A request that names no file is
  * described by its shape alone. The two move together.
  */
-export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">, files: LibraryFileLookup): boolean {
+export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "deployableKind" | "sources">, files: LibraryFileLookup): boolean {
   return describable(request) && (request.sources ?? []).every(source => {
     const file = files(source.ref);
     return !!file && !file.archived && attachmentKind(file.name, file.size) !== "";
@@ -255,7 +250,7 @@ export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" |
  * A file with no row is one that cannot be read, so it is not described: the
  * composer is the one to say so if it matters.
  */
-export async function readDescribedMarkdown(execute: MaterializeExecute, request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">, known?: LibraryFileLookup): Promise<boolean> {
+export async function readDescribedMarkdown(execute: MaterializeExecute, request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "deployableKind" | "sources">, known?: LibraryFileLookup): Promise<boolean> {
   const sources = request.sources ?? [];
   if (!describable(request) || sources.some(source => !has(source.ref))) return false;
   const run = inPlainWords(execute);
@@ -291,8 +286,6 @@ export async function startMaterialize(execute: MaterializeExecute, request: Mat
   if (request.sources?.length) args.sources = request.sources.map(source => ({ ...source }));
   if (has(request.templateId)) args.templateId = request.templateId;
   if (has(request.folderId)) args.folderId = request.folderId;
-  if (has(request.outputKind)) args.outputKind = request.outputKind;
-  if (has(request.layoutId)) args.layoutId = request.layoutId;
   if (request.accountIds?.length) args.accountIds = [...request.accountIds];
   if (has(request.recipeId)) args.recipeId = request.recipeId;
   if (has(request.deployableKind)) args.deployableKind = request.deployableKind;

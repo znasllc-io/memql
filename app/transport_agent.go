@@ -56,6 +56,9 @@ func (a *App) transportAgent() {
 	// Materializer automation steps execute here, with this node's own
 	// registered integration, AI router and shared Library blob container.
 	a.wireComposeIntegration(uploader, blobContainer)
+	// An email composition's run executes here too, and files its material in
+	// the Library with this same blob client and container.
+	a.wireCampaignMaterial(uploader, blobContainer)
 	a.wireLibraryIntegration(uploader, blobContainer)
 	a.wireReleaseCandidates(uploader, blobContainer)
 	a.wirePipelineSARIF(uploader, blobContainer)

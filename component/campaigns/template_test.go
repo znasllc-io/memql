@@ -87,6 +87,9 @@ type templateEngine struct {
 	stateful bool
 	// refuseCreate, when set, is what a createTemplate is refused with.
 	refuseCreate error
+	// brandKit, when set, is the organization's stored kit as brandKitForAccount
+	// answers it.
+	brandKit map[string]any
 }
 
 func (e *templateEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -94,6 +97,11 @@ func (e *templateEngine) Execute(ctx context.Context, q string) (any, error) {
 	e.made = append(e.made, layoutCall{query: q, internal: auth.OriginFromContext(ctx).IsInternal(), fresh: memql.FreshReadFromContext(ctx)})
 	e.mu.Unlock()
 	switch {
+	case strings.HasPrefix(q, "query brandKitForAccount"):
+		if e.brandKit != nil {
+			return rowsEnvelope([]map[string]any{e.brandKit}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query templateById"):
 		// The package's fake answers its one template to any id; a handler that
 		// read the wrong template would not be told so.
@@ -134,7 +142,7 @@ func (e *templateEngine) keep(q string) {
 		row["accountId"] = "v1:accounts:account:" + fmt.Sprint(args["accountId"])
 		row["status"] = "draft"
 	}
-	for _, field := range []string{"name", "subject", "textBody", "htmlBody", "preheader", "layoutId", "sourceArtifactId", "document", "status"} {
+	for _, field := range []string{"name", "subject", "textBody", "htmlBody", "preheader", "layoutId", "sourceArtifactId", "document", "composition", "status"} {
 		if value, named := args[field]; named {
 			row[field] = value
 		}

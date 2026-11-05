@@ -220,6 +220,9 @@ test("a published document compares equal despite key order and omitted empty va
   assert.ok(!sameEmail(gapped, ungapped));
   assert.ok(!sameEmail(readEmail(layout([{ id: "f", type: "footer", separator: "" }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }),
     "an empty separator is not the same as the default separator");
+  // A footer's lineGap is a plain number in the engine: 0 is written as no lineGap at all.
+  assert.ok(sameEmail(readEmail(layout([{ id: "f", type: "footer", lineGap: 0 }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }));
+  assert.ok(!sameEmail(readEmail(layout([{ id: "f", type: "footer", lineGap: 16 }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }));
   // A custom email: the engine always writes htmlBody, even when it is empty.
   assert.ok(sameEmail(readEmail('{"subject":"Plain","textBody":"Hello","htmlBody":""}'), { subject: "Plain", textBody: "Hello", htmlBody: "" }));
   assert.ok(sameEmail(readEmail('{"subject":"Plain","textBody":"Hello","htmlBody":""}'), { subject: "Plain", textBody: "Hello" }));
@@ -300,7 +303,7 @@ test("the JSON schema in media/ is generated from the field table", () => {
 test("the built-in layouts use only fields this editor knows", { skip: existsSync("../../component/compose/emaildoc/layouts") ? false : "the built-in layouts (engine layouts plan, Task 4) are not merged into this branch yet" }, () => {
   const dir = "../../component/compose/emaildoc/layouts";
   const files = readdirSync(dir).filter(name => name.endsWith(".email.json"));
-  assert.equal(files.length, 4);
+  assert.equal(files.length, readdirSync(dir).filter(name => name.endsWith(".email.json")).length);
   for (const name of files) {
     const doc = readEmail(readFileSync(`${dir}/${name}`, "utf8"));
     assert.ok(isLayoutEmail(doc), name);
@@ -752,7 +755,7 @@ const everyBlock = (): unknown[] => [
   ] },
   { id: "follow", type: "social", ...edges, title: "Follow us", links: [{ network: "Example", href: "https://example.com/x", icon: "artifact:icon-1", width: 32 }, { network: "Mail", href: "mailto:hello@example.com" }], maxWidth: 300, gap: 8 },
   { id: "raw", type: "html", ...edges, html: "<p>Hello</p>" },
-  { id: "fine", type: "footer", ...edges, links: [{ label: "Unsubscribe", href: "{{unsubscribeUrl}}" }, { label: "Plain", href: "" }], lines: ["Acme Inc.", "1 Example Street"], background: "page", inset: [16, 16, 16, 16], maxWidth: 560, cellPadding: 8, size: 12, lineHeight: 18, letterSpacing: "0.01em", color: "muted", linkColor: "primary", separator: " | ", gap: 4, after: 8, font: "base" },
+  { id: "fine", type: "footer", ...edges, links: [{ label: "Unsubscribe", href: "{{unsubscribeUrl}}" }, { label: "Plain", href: "" }], lines: ["Acme Inc.\n1 Example Street", "Privacy"], lineGap: 16, background: "page", inset: [16, 16, 16, 16], maxWidth: 560, cellPadding: 8, size: 12, lineHeight: 18, letterSpacing: "0.01em", color: "muted", linkColor: "primary", separator: " | ", gap: 4, after: 8, font: "base" },
 ];
 
 test("the kitchen-sink document uses every key of every block type", () => {
@@ -904,6 +907,8 @@ const edgeCases: [string, Record<string, unknown>, Record<string, unknown>][] = 
   ["eight social links", { id: "x", type: "social", links: Array.from({ length: 8 }, () => ({ network: "n" })) }, { id: "x", type: "social", links: Array.from({ length: 9 }, () => ({ network: "n" })) }],
   ["twelve footer lines", { id: "x", type: "footer", lines: Array.from({ length: 12 }, () => "l".repeat(300)) }, { id: "x", type: "footer", lines: ["l".repeat(301)] }],
   ["separator", { id: "x", type: "footer", separator: "s".repeat(40) }, { id: "x", type: "footer", separator: "s".repeat(41) }],
+  ["footer line gap", { id: "x", type: "footer", lineGap: 200 }, { id: "x", type: "footer", lineGap: 201 }],
+  ["footer line gap in whole pixels", { id: "x", type: "footer", lineGap: 16 }, { id: "x", type: "footer", lineGap: 16.5 }],
   ["id", { id: "a".repeat(64), type: "divider" }, { id: "a".repeat(65), type: "divider" }],
   ["social network", { id: "x", type: "social", links: [{ network: "n".repeat(40) }] }, { id: "x", type: "social", links: [{ network: "n".repeat(41) }] }],
   ["footer link label", { id: "x", type: "footer", links: [{ label: "l".repeat(80) }] }, { id: "x", type: "footer", links: [{ label: "l".repeat(81) }] }],
@@ -948,7 +953,7 @@ test("the writer writes what the engine writes: the built-in layouts and the wri
   // component/compose/emaildoc keeps it so); the built-in layouts are held to Document.JSON by the engine's own test.
   const fixture = `${dir}/testdata/writer.email.json`;
   const files = [...readdirSync(`${dir}/layouts`).filter(name => name.endsWith(".email.json")).map(name => `${dir}/layouts/${name}`), fixture];
-  assert.equal(files.length, 5);
+  assert.equal(files.length, readdirSync(`${dir}/layouts`).filter(name => name.endsWith(".email.json")).length + 1);
   for (const file of files) {
     const text = readFileSync(file, "utf8");
     assert.equal(writeEmail(readEmail(text)), text, `${file} is written again as the engine wrote it`);

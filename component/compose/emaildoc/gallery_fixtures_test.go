@@ -125,8 +125,8 @@ func TestWriteEditorGalleryFixtures(t *testing.T) {
 	}
 
 	layouts := Layouts()
-	if len(layouts) != 4 {
-		t.Fatalf("want the four built-in layouts, got %d", len(layouts))
+	if len(layouts) != len(builtinCatalog) {
+		t.Fatalf("want the %d built-in layouts, got %d", len(builtinCatalog), len(layouts))
 	}
 	for _, info := range layouts {
 		name := strings.TrimPrefix(info.ID, "builtin:")

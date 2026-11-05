@@ -163,18 +163,21 @@ export interface FakeSeed {
    * the built-ins alone.
    */
   layouts?: Record<string, Row[] | Error>;
-  /**
-   * `emailLayoutById`'s rows (emailLayoutFull). Absent: each organization
-   * layout of `layouts` read back by its bare id, owned by the session's
-   * person, its revision its createdAt.
-   */
-  layoutRecords?: Row[] | Error;
   /** `emailRender`'s answer for a call, or one answer for every call. Absent: the subject, as HTML and as text, and no issues. */
   render?: Row | Error | ((args: { document?: Record<string, unknown>; accountId?: string }) => Row | Error);
   /** `searchUsers`: the people this session can name. An Error is a reader below the roster's floor. */
   people?: Row[] | Error;
   /** `libraryArtifactById`: Library files the session owns. */
   artifacts?: Row[];
+  /**
+   * `brandKitForAccount`'s rows (brandKitFull): `{id, ownerUserId, accountId,
+   * kit, createdAt}`, read by organization. An organization not named has no
+   * kit; an Error refuses the read. A `campaignSaveBrandKit` is read back, as
+   * the engine's is.
+   */
+  brandKits?: Row[] | Error;
+  /** `campaignBrandPreview`'s answer for a call, or one answer for every call. Absent: a line in the kit's primary colour, and no warnings. */
+  brandPreview?: Row | Error | ((args: { accountId?: string; kit?: Record<string, unknown>; layoutId?: string }) => Row | Error);
 }
 
 /** The four layouts every organization starts from, as `emailLayouts` lists them. */
@@ -198,6 +201,13 @@ export function layoutRow(over: Partial<Row> & { layoutId: string }): Row {
     revision: "2026-10-03T09:00:00Z",
     ...over,
   };
+}
+
+/** What `campaignBrandPreview` answers by default: a line in the kit's primary colour, and no warnings. */
+function plainBrandPreview(args: { kit?: Record<string, unknown> }): Row {
+  const theme = args.kit?.["theme"] as Record<string, unknown> | undefined;
+  const primary = typeof theme?.["primary"] === "string" ? (theme["primary"] as string) : "#000000";
+  return { html: `<p style="color:${primary}">Three small changes for calmer mornings</p>`, warnings: [] };
 }
 
 /** What `emailRender` answers by default: the document's subject, as HTML and as text, and no issues. */
@@ -244,6 +254,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
   // runs (emitted) is read back whole by id, as the engine would answer it.
   const subscriptions = fakeSubscriptions();
   const written = new Map<string, Row>();
+  // Each organization's brand kit, as saved: a save is read back by the next read.
+  const brandKits: Row[] = seed.brandKits instanceof Error ? [] : [...(seed.brandKits ?? [])];
+  let brandSaves = 0;
   const emit = subscriptions.emit;
   subscriptions.emit = (concept, payload, kind) => {
     if (concept === "v1:campaigns:template" && typeof payload.id === "string") written.set(payload.id, payload);
@@ -328,37 +341,35 @@ export function fakeConnection(seed: FakeSeed = {}) {
         const listed = [...BUILT_IN_LAYOUTS, ...own];
         return rowsResult(args.includeArchived === true ? listed : listed.filter((row) => row.status !== "archived"));
       }),
-      emailLayoutById: vi.fn(async (args: { layoutId?: string }, _opts?: unknown) => {
-        if (seed.layoutRecords instanceof Error) throw seed.layoutRecords;
-        const records =
-          seed.layoutRecords ??
-          Object.entries(seed.layouts ?? {}).flatMap(([accountId, rows]) =>
-            rows instanceof Error
-              ? []
-              : rows.map((row) => ({
-                  id: row.layoutId,
-                  ownerUserId: "v1:identity:user:me",
-                  accountId,
-                  name: row.name,
-                  description: row.description,
-                  document: row.document ?? { subject: "From Acme", blocks: [] },
-                  sourceArtifactId: row.sourceArtifactId ?? "",
-                  status: row.status,
-                  createdAt: row.revision,
-                })),
-          );
-        return rowsResult(records.filter((row) => row.id === args.layoutId));
-      }),
       emailRender: vi.fn(async (args: { document?: Record<string, unknown>; accountId?: string }, _opts?: unknown) => {
         const answer = typeof seed.render === "function" ? seed.render(args) : seed.render ?? plainRender(args);
         if (answer instanceof Error) throw answer;
         return rowsResult([answer]);
       }),
-      campaignSaveLayout: vi.fn(async (args: Record<string, unknown>) =>
-        rowsResult([{ layoutId: args.layoutId, revision: "2026-10-12T00:00:00Z", status: args.action === "archive" ? "archived" : "active", saved: true }]),
-      ),
       libraryArtifactById: reader(seed.artifacts, (row, args) => row.id === args.artifactId),
       searchUsers: reader(seed.people ?? []),
+
+      // An organization's brand kit (Task 24): read by organization, saved
+      // with the revision it was read at, and previewed without saving.
+      brandKitForAccount: vi.fn(async (args: { accountId?: string }, _opts?: unknown) => {
+        if (seed.brandKits instanceof Error) throw seed.brandKits;
+        return rowsResult(brandKits.filter((row) => row.accountId === args.accountId));
+      }),
+      campaignSaveBrandKit: vi.fn(async (args: { accountId?: string; kit?: Record<string, unknown>; expectedRevision?: string }) => {
+        brandSaves += 1;
+        const revision = `2026-11-05T09:00:${String(brandSaves).padStart(2, "0")}Z`;
+        const accountId = args.accountId ?? "";
+        const row: Row = { id: `kit-${accountId}`, ownerUserId: "v1:identity:user:me", accountId, kit: args.kit ?? {}, createdAt: revision };
+        const at = brandKits.findIndex((held) => held.accountId === accountId);
+        if (at >= 0) brandKits[at] = row;
+        else brandKits.push(row);
+        return rowsResult([{ revision, warnings: [] }]);
+      }),
+      campaignBrandPreview: vi.fn(async (args: { accountId?: string; kit?: Record<string, unknown>; layoutId?: string }, _opts?: unknown) => {
+        const answer = typeof seed.brandPreview === "function" ? seed.brandPreview(args) : seed.brandPreview ?? plainBrandPreview(args);
+        if (answer instanceof Error) throw answer;
+        return rowsResult([answer]);
+      }),
 
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
       // a test that asserts WHICH arguments a write received cannot do it
@@ -379,6 +390,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
       addRecipient: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       setRecipientSubscription: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       campaignSaveTemplate: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true, revision: "2026-10-01T00:00:00Z" }])),
+      // An email MemQL is writing (Task 23): cancelled, or written again.
+      campaignCancelComposition: vi.fn(async (args: Record<string, unknown>) => rowsResult([{ templateId: args.templateId, revision: "2026-10-01T00:00:01Z", state: "failed" }])),
+      campaignRetryComposition: vi.fn(async (args: Record<string, unknown>) => rowsResult([{ templateId: args.templateId, goalId: "goal-2", revision: "2026-10-01T00:00:02Z", state: "writing" }])),
       createSenderIdentity: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       updateSenderIdentity: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       setSenderIdentityStatus: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),

@@ -2,7 +2,7 @@ import { configureProblems, ProblemReporter, UserInputError, userOperation } fro
 import { setProblemOutput, showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
-import { Documents, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
+import { Documents, isReadOnly, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
 import { EmailEditor } from "./emailEditor.js";
 import { NewEmail } from "./newEmail.js";
 import { DocumentDictation } from "./dictation.js";
@@ -56,7 +56,7 @@ export class MemQLFiles implements vscode.FileSystemProvider {
     if (this.isNewEmail(uri)) return { type: vscode.FileType.File, ctime: 0, mtime: 0, size: 0, permissions: vscode.FilePermission.Readonly };
     const doc = await this.load(uri);
     return { type: vscode.FileType.File, ctime: 0, mtime: Date.parse(doc.revision || "") || doc.version, size: doc.content.length,
-      permissions: ["file", "generated_output", "campaign_template"].includes(doc.kind) ? undefined : vscode.FilePermission.Readonly };
+      permissions: isReadOnly(doc) ? vscode.FilePermission.Readonly : undefined };
   }
   async readFile(uri: vscode.Uri): Promise<Uint8Array> {
     if (this.isNewEmail(uri)) return new Uint8Array();
@@ -89,7 +89,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const files = new Documents(connection);
   const provider = new MemQLFiles(files);
   const dictation = new DocumentDictation(context, files);
-  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), async document => {
+  // Reloads a document the cluster changed under an editor, in place, unless the person has edits of their own.
+  const refreshRemote = async (document: vscode.TextDocument): Promise<boolean> => {
     if (document.isDirty) return false;
     const version = document.version;
     const latest = await provider.latest(document.uri);
@@ -97,7 +98,8 @@ export async function activate(context: vscode.ExtensionContext) {
     provider.useBase(document.uri, latest);
     provider.changed.fire([{type:vscode.FileChangeType.Changed,uri:document.uri}]);
     return true;
-  }, dictation);
+  };
+  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), refreshRemote, dictation);
   const pdf = new PDFEditor(context, {
     base: async uri => { const doc = await provider.load(uri); return { version: doc.version, revision: doc.revision, sourceId: doc.sourceId }; },
     recover: async (uri, base) => {
@@ -108,7 +110,7 @@ export async function activate(context: vscode.ExtensionContext) {
     refresh: async uri => { provider.useBase(uri, await provider.latest(uri)); },
     release: uri => { if (!vscode.workspace.textDocuments.some(doc => doc.uri.toString() === uri.toString())) provider.close(uri); },
   });
-  const emails = new EmailEditor(context, connection, files, uri => provider.load(uri));
+  const emails = new EmailEditor(context, connection, files, uri => provider.load(uri), refreshRemote);
   const newEmail = new NewEmail(context, connection, dictation);
   const comparisons = new Map<string, { snapshot: vscode.Uri; document: OpenDocument }>();
   const snapshots = new Map<string, string>();

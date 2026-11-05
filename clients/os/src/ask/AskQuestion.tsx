@@ -2,11 +2,19 @@ import { useState, type FormEvent } from "react";
 import { ArrowUp } from "lucide-react";
 import type { AskQuestion as Question } from "./conversationSession";
 
+/** The server's drawing as an image address. It is only ever an image source, never markup. */
+function wireframeSrc(svg: string) {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(svg)) binary += String.fromCharCode(byte);
+  return `data:image/svg+xml;base64,${btoa(binary)}`;
+}
+
 /** A temporary question within the original exchange. Suggested answers never
  * exclude the person's own words; submitting resumes the existing work. */
 export function AskQuestion({ question, onAnswer }: { question: Question; onAnswer: (answer: Record<string, unknown>) => Promise<void> }) {
   const resumeLabel = question.resumeAnswer?.value === "abandon" ? "Stop saved work" : "Continue saved work";
   const options = Array.isArray(question.options) ? question.options : [];
+  const layouts = question.presentation === "layouts";
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -23,9 +31,9 @@ export function AskQuestion({ question, onAnswer }: { question: Question; onAnsw
   return <form className="os-ask-question" data-ask-question={question.id} onSubmit={submit} aria-label="Question from MemQL">
     <p>{question.text}</p>
     {question.optional ? <p>{question.continued ? "Work has continued. Your answer can still guide it." : "Optional. Work will continue after a short wait."}</p> : null}
-    {options.length ? <div className="os-ask-question-options" role="group" aria-label="Suggested answers">{options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
+    {options.length ? <div className={layouts ? "os-ask-question-options os-ask-layouts" : "os-ask-question-options"} role="group" aria-label="Suggested answers">{options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
       setText(""); setSelected(question.kind === "multi" ? selected.includes(option.value) ? selected.filter(value => value !== option.value) : [...selected, option.value] : [option.value]);
-    }}>{option.label}</button>)}</div> : null}
+    }}>{layouts ? <><span className="os-ask-layout-mat">{option.wireframe ? <img src={wireframeSrc(option.wireframe)} alt="" /> : null}</span><span className="os-ask-layout-name">{option.label}</span></> : option.label}</button>)}</div> : null}
     <div className="os-ask-question-input">{!question.choiceOnly ? <textarea aria-label="Your answer" placeholder="Your answer" maxLength={8000} rows={2} value={text} disabled={busy} onChange={event => { setText(event.target.value); setSelected([]); }} /> : null}
       <button type="submit" className="os-icon-button" title={question.resumeAnswer ? resumeLabel : "Send answer"} aria-label={busy ? "Sending answer" : question.resumeAnswer ? resumeLabel : "Send answer"} disabled={busy || (!question.resumeAnswer && !text.trim() && !selected.length)}><ArrowUp size={16} /></button></div>
     {error ? <p role="alert" className="os-ask-error">{error}</p> : null}

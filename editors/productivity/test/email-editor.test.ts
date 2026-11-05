@@ -39,6 +39,8 @@ interface Options {
   opened?: Partial<OpenDocument>;
   answers?: Record<string, Answer>;
   state?: Record<string, unknown>;
+  /** What the editor does to reload a document in place (extension.ts); the default reloads. */
+  refresh?: (document: vscode.TextDocument) => Promise<boolean>;
 }
 
 function deferred<T>() {
@@ -68,7 +70,6 @@ const defaults = (): Record<string, Answer> => ({
   clientAccountsAll: () => organizations,
   compositionForOutputFile: () => [],
   templateForSource: () => [],
-  emailLayouts: () => [],
   emailRender: () => [{ subject: "Welcome", html: rendered, text: "Hi", issues: [] }],
 });
 
@@ -77,6 +78,8 @@ const defaults = (): Record<string, Answer> => ({
  * replaced for the test (and put back after it). A test that opens two editors moves one clock.
  */
 const clocks = new WeakMap<TestContext, (ms: number) => void>();
+/** How many timers a test's clock still holds: a panel that is gone must leave none. */
+const pendingTimers = new WeakMap<(ms: number) => void, () => number>();
 function clock(t: TestContext): (ms: number) => void {
   const existing = clocks.get(t);
   if (existing) return existing;
@@ -94,6 +97,7 @@ function clock(t: TestContext): (ms: number) => void {
       due[1].run();
     }
   };
+  pendingTimers.set(advance, () => timers.size);
   clocks.set(t, advance);
   return advance;
 }
@@ -198,7 +202,8 @@ async function open(t: TestContext, options: Options = {}) {
       update: async (key: string, value: unknown) => { stateWrites.push({ key, value }); if (value === undefined) state.delete(key); else state.set(key, value); },
     },
   } as unknown as vscode.ExtensionContext;
-  const editor = new EmailEditor(context, api, files, load);
+  const refreshed: unknown[] = [];
+  const editor = new EmailEditor(context, api, files, load, async reloading => { refreshed.push(reloading); return options.refresh ? options.refresh(reloading) : true; });
 
   const panels: ReturnType<typeof fakePanel>[] = [];
   function fakePanel() {
@@ -232,7 +237,7 @@ async function open(t: TestContext, options: Options = {}) {
   const of = (type: string) => view.messages.filter(message => message.type === type);
   return {
     editor, document, view, panel: view.panel, uri, calls, connects, uploads, applied, commands, quickPicks, dialogs, toasts, closed, localTab, state, stateWrites, log, pictures,
-    text: () => text, change, settle, attach, of,
+    text: () => text, change, settle, attach, of, refreshed, timers: () => pendingTimers.get(advance)!(),
     send: async (message: unknown) => { await view.send(message); await settle(); },
     tick: async (ms: number) => { advance(ms); await settle(); },
     renders: () => calls.filter(call => call.name === "emailRender"),
@@ -330,13 +335,13 @@ test("a render the cluster refuses is shown in its words and counts as an issue"
   const failed = f.of("renderFailed");
   assert.equal(failed.length, 1);
   assert.equal(failed[0].problem.message, "Previews are busy right now. Try again in a moment.", "the cluster's sentence, without the call's name or the engine's frame");
-  assert.deepEqual(f.lastBar(), { type: "bar", state: C.issuesOne, acts: ["saveLayout"], layoutName: "Welcome" }, "a refused render offers no Publish");
+  assert.deepEqual(f.lastBar(), { type: "bar", state: C.issuesOne, acts: [] }, "a refused render offers no Publish");
   // The next render that works clears it.
   f.answer("emailRender", () => [{ subject: "Welcome", html: rendered, text: "Hi", issues: [] }]);
   f.change(f.edited({ kind: "subject", value: "Again" }));
   await f.tick(300);
   assert.equal(f.lastBar().state, C.unsaved);
-  assert.deepEqual(f.lastBar().acts, ["saveLayout", "publish"]);
+  assert.deepEqual(f.lastBar().acts, ["publish"]);
 });
 
 test("seq stays monotonic for the panel's life, across a reload of the page", async t => {
@@ -519,7 +524,7 @@ test("publishing stays in the same editor", async t => {
       ? [{ templateId: "t1", revision: "2026-10-12T10:00:01Z", status: "ready", saved: true, issues: [] }]
       : [{ templateId: "t1", revision: "2026-10-12T10:00:00Z", status: "draft", saved: true, issues: [] }],
   } });
-  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["publish"] });
   f.change(f.edited({ kind: "subject", value: "Welcome to Acme" }));
   await f.tick(300);
   assert.equal(f.lastBar().state, C.unsaved);
@@ -528,7 +533,7 @@ test("publishing stays in the same editor", async t => {
   await f.send({ type: "act", act: "publish" });
   assert.deepEqual(f.bars().slice(bars), [
     { state: C.publishing, acts: [] },
-    { state: fill(C.published, { organization: "Client" }), acts: ["saveLayout"] },
+    { state: fill(C.published, { organization: "Client" }), acts: [] },
   ]);
   assert.deepEqual(f.log.filter(entry => !entry.startsWith("post ") && entry !== "emailRender"), ["save", "templateForSource", "campaignSaveTemplate", "campaignSaveTemplate"], "saved first, then saved to the template and published");
   assert.ok(!f.commands.some(command => command.name === "vscode.openWith"), "publishing opens nothing");
@@ -566,7 +571,7 @@ test("a refused publish reads in the cluster's words, re-reads the template and 
   holdRender.resolve([{ subject: "Welcome to Acme", html: rendered, text: "Hi", issues: [] }]);
   await f.settle();
   assert.ok(f.calls.filter(call => call.name === "templateById").length > reads, "the template is read again");
-  assert.deepEqual(f.bars().at(-1), { state: C.draft, acts: ["saveLayout", "publish"] }, "the cluster's draft, not “Published to Client”");
+  assert.deepEqual(f.bars().at(-1), { state: C.draft, acts: ["publish"] }, "the cluster's draft, not “Published to Client”");
   assert.ok(!f.bars().slice(f.bars().findIndex(bar => bar.state === C.publishing)).some(bar => bar.state === fill(C.published, { organization: "Client" })));
 
   // Issues found by the save stop the publication and stay counted until the email changes, even when a render does not show them.
@@ -642,7 +647,7 @@ test("only the check after a failed publish ends its count: a render already und
   f.answer("emailRender", () => [{ subject: "Welcome", html: rendered, text: "Hi", issues: [] }]);
   reading.resolve([stored]);
   await f.settle();
-  assert.deepEqual(f.bars().at(-1), { state: C.draft, acts: ["saveLayout", "publish"] });
+  assert.deepEqual(f.bars().at(-1), { state: C.draft, acts: ["publish"] });
 });
 
 test("a failure to find the organization is told, and the next change tries again", async t => {
@@ -662,7 +667,7 @@ test("a failure to find the organization is told, and the next change tries agai
 test("a failure to find what is published is told, and the bar never says Published", async t => {
   const f = await open(t, { answers: { templateForSource: () => { throw new Error(`templateForSource: ${ENGINE}Previews are busy right now. Try again in a moment.`); } } });
   assert.equal(f.problems().at(-1), "Previews are busy right now. Try again in a moment.");
-  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["publish"] });
   assert.equal(f.renders().length, 1, "the email is still shown");
 });
 
@@ -728,7 +733,7 @@ test("every act is answered by the bar or a problem", async t => {
     assert.ok(f.view.messages.slice(before).some(message => message.type === "bar" || message.type === "problem"), `act ${String(act)} is answered`);
   }
   const g = await open(t, { uri: LOCAL });
-  for (const act of ["publish", "saveLayout"]) {
+  for (const act of ["publish"]) {
     const before = g.view.messages.length;
     await g.send({ type: "act", act });
     assert.ok(g.view.messages.slice(before).some(message => message.type === "bar" || message.type === "problem"), `act ${act} is answered`);
@@ -747,51 +752,6 @@ test("an organization the person does not list is named in words, never by its i
   // A template's own organization, when it is listed, is named as it is.
   const g = await open(t, { uri: "memql-file://client.example/templates/t9/Welcome.email.json", opened: templateDocument("other-org") });
   assert.equal(g.lastBar().state, fill(C.published, { organization: "Other" }));
-});
-
-test("Save as layout prefills the layout saved from this file and keeps its pending id under the email and organization", async t => {
-  const layouts: Rows = [
-    { id: "builtin:article", kind: "builtin", name: "Article" },
-    { id: "org:l1", layoutId: "l1", kind: "organization", name: "Monthly letter", sourceArtifactId: "art-1", revision: "r1", description: "", documentOmitted: true },
-  ];
-  const f = await open(t, { answers: { emailLayouts: () => layouts } });
-  assert.equal(f.lastBar().layoutName, "Monthly letter");
-  assert.ok(!f.calls.some(call => call.name === "emailLayoutById"), "the name is all the bar needs");
-
-  const pendingKey = `memql.emailLayoutPending:${JSON.stringify([FILE, "client-org"])}`;
-  let pendingDuringSave: unknown;
-  const g = await open(t, { answers: { campaignSaveLayout: () => { pendingDuringSave = g.state.get(pendingKey); return [{ layoutId: String(pendingDuringSave), revision: "r1", saved: true }]; } } });
-  assert.equal(g.lastBar().layoutName, "Welcome", "no layout yet: the file's name");
-  const bars = g.of("bar").length;
-  await g.send({ type: "saveLayout", name: "Spring" });
-  assert.match(String(pendingDuringSave), /^[0-9a-f-]{36}$/, "the new layout's id is kept, under the email and its organization, before the request");
-  assert.match(g.calls.find(call => call.name === "campaignSaveLayout")!.call, new RegExp(`layoutId: "${String(pendingDuringSave)}"`));
-  assert.equal(g.state.get(pendingKey), undefined, "and let go once the cluster has it");
-  assert.deepEqual(g.bars().slice(bars), [{ state: C.savingLayout, acts: [] }, { state: C.layoutSaved, acts: ["saveLayout", "publish"] }]);
-  assert.equal(g.lastBar().layoutName, "Spring");
-  await g.tick(4000);
-  assert.equal(g.lastBar().state, C.draft);
-  // A name the cluster would refuse is refused here, with the sentence.
-  await g.send({ type: "saveLayout", name: "   " });
-  assert.equal(g.of("problem").at(-1).problem.message, H.layoutNameInvalid);
-});
-
-test("one act at a time: nothing is published while a layout is being saved", async t => {
-  const saving = deferred<Rows>();
-  const f = await open(t, { answers: {
-    campaignSaveLayout: () => saving.promise,
-    campaignSaveTemplate: () => [{ templateId: "t1", revision: "r1", status: "ready", saved: true, issues: [] }],
-  } });
-  const layout = f.view.send({ type: "saveLayout", name: "Spring" });
-  await f.settle();
-  assert.equal(f.lastBar().state, C.savingLayout);
-  await f.send({ type: "act", act: "publish" });
-  assert.ok(!f.calls.some(call => call.name === "campaignSaveTemplate"), "no publication starts while the layout is being saved");
-  assert.equal(f.lastBar().state, C.savingLayout, "and the bar still says what is running");
-  saving.resolve([{ layoutId: "l1", revision: "r1", saved: true }]);
-  await layout;
-  await f.settle();
-  assert.equal(f.lastBar().state, C.layoutSaved);
 });
 
 test("a page reloaded while the organization is being found again gets its bar once it is found", async t => {
@@ -859,4 +819,233 @@ test("an organization chosen on the page is kept: as the file's label when it ha
   assert.deepEqual(opened.accountIds, ["client-org"]);
   assert.deepEqual(g.of("context").at(-1), { type: "context", connected: true, organization: { id: "client-org", name: "Client" }, choices: [] });
   assert.equal((g.state.get(stateKey(FILE)) as { organization?: string } | undefined)?.organization, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// MemQL writing the email
+// ---------------------------------------------------------------------------
+
+const TEMPLATE = "memql-file://client.example/templates/t9/Welcome.email.json";
+const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+const composed = (state: "writing" | "done" | "failed", extra: Record<string, unknown> = {}) => ({ state, startedAt: ago(125), error: "", notes: [] as string[], ...extra });
+/** A draft template the composition is writing (or wrote, or failed to write). */
+function draftTemplate(composition: { state: "writing" | "done" | "failed"; startedAt: string; error: string; notes?: unknown }): OpenDocument {
+  const opened = templateDocument("client-org");
+  opened.template!.status = "draft";
+  opened.composition = composition as OpenDocument["composition"];
+  return opened;
+}
+/** What templateById answers while the cluster's composition is as given. */
+const row = (composition: Record<string, unknown>): Rows => [{ id: "t9", name: "Welcome", accountId: "client-org", status: "draft", createdAt: "2026-10-12T09:00:00Z", composition: { goalId: "g1", finishedAt: "", notes: [], ...composition } }];
+
+test("a writing template shows the writing state and ignores edits", async t => {
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("writing")) });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "MemQL is writing this email", acts: ["cancel"], meta: "2 min", writing: true });
+  const before = f.text();
+  await f.send({ type: "edit", op: { kind: "subject", value: "Changed" } });
+  await f.send({ type: "picture", block: "banner", action: "remove" });
+  await f.send({ type: "act", act: "publish" });
+  await f.send({ type: "act", act: "saveToMemQL" });
+  assert.equal(f.text(), before, "the document is not touched");
+  assert.deepEqual(f.applied, []);
+  assert.equal(f.problems().length, 0, "an ignored edit is not a problem");
+  assert.ok(!f.calls.some(call => call.name === "campaignSaveTemplate"), "nothing is published while it writes");
+  assert.equal(f.lastBar().state, "MemQL is writing this email");
+});
+
+test("the editor reloads when the composition finishes, and stops polling", async t => {
+  const opened = draftTemplate(composed("writing"));
+  let answers = [composed("writing"), composed("done", { finishedAt: ago(0) })];
+  const f = await open(t, { uri: TEMPLATE, opened, answers: { templateById: () => row(answers.shift() ?? composed("done")) } });
+  const polls = () => f.calls.filter(call => call.name === "templateById").length;
+  const start = polls();
+  await f.tick(1999);
+  assert.equal(polls(), start, "not before 2 seconds");
+  await f.tick(1);
+  assert.equal(polls(), start + 1);
+  assert.equal(f.refreshed.length, 0, "still writing: the document is left as it is");
+  assert.match(String(f.lastBar().meta), /min/);
+  await f.tick(2000);
+  assert.equal(polls(), start + 2);
+  assert.equal(f.refreshed.length, 1, "the document is reloaded in place when it finishes");
+  assert.equal(f.refreshed[0], f.document);
+  // The reload brought the finished template; the editor reads it as it is.
+  assert.equal(f.lastBar().state, C.draft);
+  assert.deepEqual(f.lastBar().acts, ["publish"]);
+  assert.equal(f.lastBar().writing, undefined);
+  assert.equal(f.timers() , 0, "and the polling has stopped");
+  await f.tick(20000);
+  assert.equal(polls(), start + 2);
+});
+
+test("one poll at a time, and none after the page closes", async t => {
+  const slow = deferred<Rows>();
+  let calls = 0;
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("writing")), answers: { templateById: () => { calls++; return calls === 1 ? slow.promise : row(composed("writing")); } } });
+  await f.tick(2000);
+  assert.equal(calls, 1);
+  await f.tick(10000);
+  assert.equal(calls, 1, "a poll in flight is not joined by another");
+  slow.resolve(row(composed("writing")));
+  await f.settle();
+  await f.tick(2000);
+  assert.equal(calls, 2);
+  // Closing the page leaves no timer, and no call, behind.
+  f.panel.dispose();
+  assert.equal(f.timers(), 0);
+  await f.tick(60000);
+  assert.equal(calls, 2);
+  // A poll that was in flight when the page closed answers into nothing.
+  const late = deferred<Rows>();
+  let lateCalls = 0;
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("writing")), answers: { templateById: () => { lateCalls++; return late.promise; } } });
+  await g.tick(2000);
+  g.panel.dispose();
+  late.resolve(row(composed("done")));
+  await g.settle();
+  assert.equal(g.timers(), 0);
+  assert.equal(g.refreshed.length, 0, "nothing reloads for a page that is gone");
+  await g.tick(60000);
+  assert.equal(lateCalls, 1);
+});
+
+test("cancel calls campaignCancelComposition", async t => {
+  let state = composed("writing");
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(state), answers: {
+    campaignCancelComposition: () => { state = composed("failed", { error: "Cancelled" }); return [{ templateId: "t9", revision: "r2", state: "failed" }]; },
+    templateById: () => row(state),
+  } });
+  await f.send({ type: "act", act: "cancel" });
+  const cancel = f.calls.find(call => call.name === "campaignCancelComposition");
+  assert.equal(cancel?.call, 'builtin campaignCancelComposition(templateId: "t9")');
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] }, "the cluster's word, and Retry");
+  assert.equal(f.refreshed.length, 1, "the file system is told it can be written again");
+  assert.equal(f.timers(), 0, "no more polling");
+  assert.equal(f.problems().length, 0);
+  // A cancel the cluster refuses (it finished meanwhile) is told in words, and the bar is read again.
+  state = composed("writing");
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(state), answers: {
+    campaignCancelComposition: () => { state = composed("done"); throw new Error(`campaignCancelComposition: ${ENGINE}This email is not being written.`); },
+    templateById: () => row(state),
+  } });
+  await g.send({ type: "act", act: "cancel" });
+  assert.deepEqual(g.problems(), ["This email is not being written."]);
+  assert.equal(g.lastBar().state, C.draft);
+});
+
+test("a failed composition offers Retry, and after Retry it writes again and polling resumes", async t => {
+  let state = composed("failed", { error: "Cancelled" });
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(state), answers: {
+    campaignRetryComposition: () => { state = composed("writing", { startedAt: ago(0) }); return [{ templateId: "t9", goalId: "g2", revision: "r3", state: "writing" }]; },
+    templateById: () => row(state),
+  } });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+  assert.equal(f.timers(), 0, "a failed composition is not polled");
+  await f.send({ type: "act", act: "retry" });
+  assert.equal(f.calls.find(call => call.name === "campaignRetryComposition")?.call, 'builtin campaignRetryComposition(templateId: "t9")');
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "MemQL is writing this email", acts: ["cancel"], meta: "Just started", writing: true });
+  const polls = () => f.calls.filter(call => call.name === "templateById").length;
+  const before = polls();
+  await f.tick(2000);
+  assert.equal(polls(), before + 1, "polling is back");
+  // It fails again with the cluster's own sentence.
+  state = composed("failed", { error: "MemQL could not write this email." });
+  await f.tick(2000);
+  assert.equal(f.lastBar().state, "MemQL could not write this email.");
+  assert.equal(f.timers(), 0);
+  // A retry the cluster refuses is told in words.
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })), answers: {
+    campaignRetryComposition: () => { throw new Error(`campaignRetryComposition: ${ENGINE}This email is already being written.`); },
+    templateById: () => row(composed("failed", { error: "Cancelled" })),
+  } });
+  await g.send({ type: "act", act: "retry" });
+  assert.deepEqual(g.problems(), ["This email is already being written."]);
+  assert.equal(g.lastBar().state, "Cancelled");
+  // The editor does not know who is signed in, so it offers Retry to anyone who opens the email; the cluster refuses
+  // everyone but the person who asked, and its sentence is what the person reads.
+  const notYours = "Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files.";
+  const h = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })), answers: {
+    campaignRetryComposition: () => { throw new Error(`campaignRetryComposition: ${ENGINE}${notYours}`); },
+    templateById: () => row(composed("failed", { error: "Cancelled" })),
+  } });
+  await h.send({ type: "act", act: "retry" });
+  assert.deepEqual(h.problems(), [notYours]);
+  assert.deepEqual(h.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+});
+
+test("after five looks that cannot reach MemQL the bar says so, keeps looking, and recovers by itself", async t => {
+  let reachable = false;
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("writing")), answers: {
+    templateById: () => { if (!reachable) throw new Error("fetch failed: ECONNREFUSED"); return row(composed("writing")); },
+  } });
+  const polls = () => f.calls.filter(call => call.name === "templateById").length;
+  for (let look = 1; look <= 4; look++) {
+    await f.tick(2000);
+    assert.equal(polls(), look);
+    assert.equal(f.lastBar().state, C.writing, `after ${look} failed looks the bar still says MemQL is writing`);
+  }
+  await f.tick(2000);
+  assert.equal(polls(), 5);
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Can’t reach MemQL", acts: ["cancel"], writing: true });
+  assert.equal(f.problems().length, 0, "a look that fails is not a problem to show");
+  // It keeps looking, and the next good read puts the bar back.
+  reachable = true;
+  await f.tick(2000);
+  assert.equal(polls(), 6);
+  assert.equal(f.lastBar().state, C.writing);
+  assert.equal(f.lastBar().meta, "2 min");
+  // One more failure is one, not the sixth.
+  reachable = false;
+  await f.tick(2000);
+  assert.equal(f.lastBar().state, C.writing);
+  assert.equal(f.timers(), 1, "still looking");
+});
+
+test("a save or a publish of a failed composition's template ends the failure: the bar drops the sentence and Retry", async t => {
+  const failedState = composed("failed", { error: "Cancelled" });
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(failedState), answers: { templateById: () => row(failedState) } });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+  f.change(f.edited({ kind: "subject", value: "Finished by hand" }));
+  await f.settle();
+  await f.document.save();
+  await f.settle();
+  assert.equal(f.lastBar().state, C.draft);
+  assert.deepEqual(f.lastBar().acts, ["publish"]);
+  // Publishing, with nothing to save, ends it as well.
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })), answers: {
+    templateById: () => row(composed("failed", { error: "Cancelled" })),
+    campaignSaveTemplate: () => [{ saved: true, templateId: "t9", revision: "2026-10-12T10:00:00Z", status: "ready" }],
+  } });
+  await g.send({ type: "act", act: "publish" });
+  assert.ok(!g.lastBar().acts.includes("retry"), JSON.stringify(g.lastBar()));
+  assert.notEqual(g.lastBar().state, "Cancelled");
+});
+
+test("what MemQL left out is said once, quietly, beside the email, not on the bar", async t => {
+  const notes = ["Left out brochure.pdf: not a picture or text file."];
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("done", { notes })) });
+  assert.deepEqual(f.of("notes").at(-1), { type: "notes", notes });
+  assert.ok(!JSON.stringify(f.of("bar")).includes("brochure.pdf"), "the bar does not carry them");
+  // A composition that finishes while the page is open brings its notes then.
+  let state = composed("writing");
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(state), answers: { templateById: () => row(state) } });
+  assert.deepEqual(g.of("notes").at(-1), { type: "notes", notes: [] });
+  state = composed("done", { notes });
+  await g.tick(2000);
+  assert.deepEqual(g.of("notes").at(-1), { type: "notes", notes });
+  // A Library file has no composition, and no notes.
+  const h = await open(t);
+  assert.deepEqual(h.of("notes").at(-1), { type: "notes", notes: [] });
+});
+
+test("the bar never offers Save as layout", async t => {
+  const f = await open(t);
+  await f.send({ type: "saveLayout", name: "Spring" });
+  await f.send({ type: "act", act: "saveLayout" });
+  assert.ok(!f.calls.some(call => call.name === "campaignSaveLayout" || call.name === "emailLayouts"), "no layout is read or saved");
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })) });
+  for (const view of [f, g]) {
+    for (const bar of view.of("bar")) assert.ok(!bar.acts.includes("saveLayout") && !("layoutName" in bar), JSON.stringify(bar));
+  }
+  assert.deepEqual(f.lastBar(), { type: "bar", state: C.draft, acts: ["publish"] });
 });

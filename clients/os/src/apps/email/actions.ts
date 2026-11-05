@@ -10,11 +10,9 @@ import {
   campaignName,
   type AudienceRow,
   type CampaignRow,
-  type LayoutRow,
   type RecipientMode,
   type TemplateRow,
 } from "./rows";
-import { WORDS } from "./words";
 
 // Every write the Email app makes, and the busy/error pair each one owns.
 //
@@ -784,6 +782,70 @@ export function useImportRecipients(): ImportState {
 // empty, and a read made only to fill an ignored field could fail a change that
 // was never in doubt.
 
+// ---------------------------------------------------------------------------
+// An email MemQL is writing: stopped, or started again
+// ---------------------------------------------------------------------------
+
+export interface CompositionAct extends WriteState, MayBeLost {
+  /** Run the act on a template's composition; true when the cluster took it. */
+  run: (templateId: string) => Promise<boolean>;
+}
+
+function useComposition(name: "campaignCancelComposition" | "campaignRetryComposition"): CompositionAct {
+  const write = useWrite(async (query, templateId: string) => {
+    const result = name === "campaignCancelComposition" ? await query.campaignCancelComposition({ templateId }) : await query.campaignRetryComposition({ templateId });
+    const rows = result.rows().map(flatten);
+    // A retry whose goal could not start answers with the reason: the draft is kept, failed.
+    const refused = rows.find((row) => typeof row.error === "string" && row.error !== "");
+    if (refused !== undefined) throw new Error(String(refused.error));
+    if (!rows.some((row) => row.templateId === templateId)) throw new Error("The cluster did not confirm the change.");
+    return true;
+  }, false);
+  return { busy: write.busy, error: write.error === "" ? "" : refusalSentence(write.error, name), lost: write.lost, reset: write.reset, run: (id) => write.call(id) };
+}
+
+/** Stopping an email MemQL is writing: it fails as "Cancelled". The engine refuses unless it is writing. */
+export function useCancelComposition(): CompositionAct {
+  return useComposition("campaignCancelComposition");
+}
+
+/** Writing an email again after it failed. The engine refuses unless it failed. */
+export function useRetryComposition(): CompositionAct {
+  return useComposition("campaignRetryComposition");
+}
+
+// ---------------------------------------------------------------------------
+// An organization's brand kit (Task 24)
+// ---------------------------------------------------------------------------
+
+export interface SaveBrandKitState extends WriteState, MayBeLost {
+  /** Save the kit; the revision it has now, or "" when it was not saved. */
+  save: (accountId: string, kit: Record<string, unknown>, expectedRevision: string) => Promise<string>;
+}
+
+/**
+ * Saving an organization's brand kit, held to the revision the page read
+ * (`expectedRevision`: the kit row's createdAt, and "" when the organization
+ * has none yet). A kit saved somewhere else since is refused in the engine's
+ * words and nothing is written. Saving the same kit again answers with the
+ * revision it already has, so a save whose answer was lost is safe to repeat.
+ * The answer's warnings are the preview's, which the page already shows.
+ */
+export function useSaveBrandKit(): SaveBrandKitState {
+  const write = useWrite(async (query, accountId: string, kit: Record<string, unknown>, expectedRevision: string) => {
+    const row = flatten((await query.campaignSaveBrandKit({ accountId, kit, expectedRevision })).rows()[0] ?? {});
+    if (typeof row.revision !== "string" || row.revision === "") throw new Error("The cluster did not confirm the save.");
+    return row.revision;
+  }, "");
+  return {
+    busy: write.busy,
+    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveBrandKit"),
+    lost: write.lost,
+    reset: write.reset,
+    save: (accountId, kit, expectedRevision) => write.call(accountId, kit, expectedRevision),
+  };
+}
+
 /** A template or a layout put away or brought back: the busy/error pair, and whether the answer was lost. */
 export interface LifecycleState extends WriteState, MayBeLost {}
 
@@ -825,45 +887,6 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     reset: write.reset,
     archive: (template) => write.call(template, "archive"),
     restore: (template) => write.call(template, "restore"),
-  };
-}
-
-export interface LayoutLifecycle extends LifecycleState {
-  /** Archive an organization's layout: the editor stops offering it. */
-  archive: (layout: LayoutRow) => Promise<boolean>;
-  /** Bring an archived layout back. */
-  restore: (layout: LayoutRow) => Promise<boolean>;
-}
-
-/**
- * Archiving and restoring an organization's layout (Ruling 24), held to the
- * revision the page SHOWS -- the listing's, the one its "Changed" fact reads --
- * so a layout saved in the editor after the page read it is refused in the
- * engine's words ("this layout changed; ...") rather than archived unseen. A
- * revision read at the press would always match, and the check would guard
- * nothing. The engine reads no name or document for these two, so the name
- * goes as listed and no document is sent. A built-in layout has no lifecycle
- * and never reaches here.
- */
-export function useLayoutLifecycle(): LayoutLifecycle {
-  const write = useWrite(async (query, layout: LayoutRow, action: "archive" | "restore") => {
-    const layoutId = layout.layoutId ?? "";
-    if (layoutId === "") throw new Error(WORDS.unavailable.layout);
-    const base = { layoutId, accountId: layout.accountId, name: layout.name, expectedRevision: layout.revision ?? "" };
-    const result =
-      action === "archive"
-        ? await query.campaignSaveLayout({ ...base, action: "archive" })
-        : await query.campaignSaveLayout({ ...base, action: "restore" });
-    if (!result.rows().map(flatten).some((row) => row.saved === true)) throw new Error("The cluster did not confirm the layout change.");
-    return true;
-  }, false);
-  return {
-    busy: write.busy,
-    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveLayout"),
-    lost: write.lost,
-    reset: write.reset,
-    archive: (layout) => write.call(layout, "archive"),
-    restore: (layout) => write.call(layout, "restore"),
   };
 }
 

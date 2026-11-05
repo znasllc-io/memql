@@ -400,6 +400,122 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignBrandPreview -- Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything.
+type CampaignBrandPreviewArgs struct {
+	// The organization the kit is for. You need read access to its data.
+	AccountId string
+	// The brand kit, as campaignSaveBrandKit takes it.
+	Kit map[string]any
+	// A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article.
+	LayoutId string
+}
+
+// CampaignBrandPreview calls the engine builtin campaignBrandPreview.
+func (qc *QueryClient) CampaignBrandPreview(ctx context.Context, args CampaignBrandPreviewArgs) (*Result, error) {
+	call := CampaignBrandPreviewBuild(args)
+	return qc.executeNamed(ctx, "campaignBrandPreview", call)
+}
+
+func CampaignBrandPreviewBuild(args CampaignBrandPreviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignBrandPreview(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kit: ")
+	b.WriteString(renderMemQLValue(args.Kit))
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignCancelComposition -- Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails as Cancelled. The draft stays as it was. Refused unless the composition is writing. A cancel acts only on the composition run it read: one its run finished, or one started again, meanwhile is left as it is. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.
+type CampaignCancelCompositionArgs struct {
+	// The template MemQL is writing.
+	TemplateId string
+}
+
+// CampaignCancelComposition calls the engine builtin campaignCancelComposition.
+func (qc *QueryClient) CampaignCancelComposition(ctx context.Context, args CampaignCancelCompositionArgs) (*Result, error) {
+	call := CampaignCancelCompositionBuild(args)
+	return qc.executeNamed(ctx, "campaignCancelComposition", call)
+}
+
+func CampaignCancelCompositionBuild(args CampaignCancelCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignCancelComposition(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignComposeEmail -- Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (the answer says to set it up first in Email, Settings, Brand) and when none of your machines has an app signed in (the answer says to open Cockpit with Claude Code signed in). Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision, state}. When the goal cannot start, the draft is kept with its composition failed and the answer is {templateId, revision, state, error}: open that draft and retry it there rather than starting another.
+type CampaignComposeEmailArgs struct {
+	// The organization the email is for.
+	AccountId string
+	// The template's name, up to 200 characters.
+	Name string
+	// A built-in layout id, as campaignLayoutCatalogue lists them.
+	LayoutId string
+	// What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest.
+	Description string
+	// The attached Library files: pictures, ZIPs and text files, at most 64. May be empty.
+	FileIds []string
+	// A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it.
+	ReferenceFileId string
+}
+
+// CampaignComposeEmail calls the engine builtin campaignComposeEmail.
+func (qc *QueryClient) CampaignComposeEmail(ctx context.Context, args CampaignComposeEmailArgs) (*Result, error) {
+	call := CampaignComposeEmailBuild(args)
+	return qc.executeNamed(ctx, "campaignComposeEmail", call)
+}
+
+func CampaignComposeEmailBuild(args CampaignComposeEmailArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignComposeEmail(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("description: ")
+	b.WriteString(quoteMemQL(args.Description))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileIds: ")
+	b.WriteString(renderMemQLValue(args.FileIds))
+	if args.ReferenceFileId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("referenceFileId: ")
+		b.WriteString(quoteMemQL(args.ReferenceFileId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
 type CampaignConfigureNewsletterArgs struct {
 	SiteId           string
@@ -553,6 +669,41 @@ func CampaignConfigureTestAudienceBuild(args CampaignConfigureTestAudienceArgs) 
 	return b.String()
 }
 
+// CampaignCreateTemplateFromLayout -- Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate.
+type CampaignCreateTemplateFromLayoutArgs struct {
+	// The organization the template is for.
+	AccountId string
+	// The template's name, up to 200 characters.
+	Name string
+	// A built-in layout id, as campaignLayoutCatalogue lists them.
+	LayoutId string
+}
+
+// CampaignCreateTemplateFromLayout calls the engine builtin campaignCreateTemplateFromLayout.
+func (qc *QueryClient) CampaignCreateTemplateFromLayout(ctx context.Context, args CampaignCreateTemplateFromLayoutArgs) (*Result, error) {
+	call := CampaignCreateTemplateFromLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignCreateTemplateFromLayout", call)
+}
+
+func CampaignCreateTemplateFromLayoutBuild(args CampaignCreateTemplateFromLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignCreateTemplateFromLayout(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignDescribeJourney -- Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney.
 type CampaignDescribeJourneyArgs struct {
 	AccountId string
@@ -615,6 +766,21 @@ func CampaignImportRecipientsBuild(args CampaignImportRecipientsArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// CampaignLayoutCatalogue -- The built-in email layouts, for an assistant choosing one: rows are {id, name, category, description, outline}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The rows carry no drawing; emailLayouts gives a person each layout's wireframe. Needs no organization. The id is opaque: pass it as layoutId to campaignComposeEmail or campaignCreateTemplateFromLayout.
+type CampaignLayoutCatalogueArgs struct {
+}
+
+// CampaignLayoutCatalogue calls the engine builtin campaignLayoutCatalogue.
+func (qc *QueryClient) CampaignLayoutCatalogue(ctx context.Context, args CampaignLayoutCatalogueArgs) (*Result, error) {
+	call := CampaignLayoutCatalogueBuild(args)
+	return qc.executeNamed(ctx, "campaignLayoutCatalogue", call)
+}
+
+func CampaignLayoutCatalogueBuild(args CampaignLayoutCatalogueArgs) string {
+	_ = args
+	return "builtin campaignLayoutCatalogue()"
 }
 
 // CampaignPauseSend -- Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.
@@ -680,6 +846,27 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignRetryComposition -- Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers as campaignComposeEmail does: {templateId, goalId, revision, state}, or {templateId, revision, state, error} when the new goal cannot start.
+type CampaignRetryCompositionArgs struct {
+	// The template whose composition failed.
+	TemplateId string
+}
+
+// CampaignRetryComposition calls the engine builtin campaignRetryComposition.
+func (qc *QueryClient) CampaignRetryComposition(ctx context.Context, args CampaignRetryCompositionArgs) (*Result, error) {
+	call := CampaignRetryCompositionBuild(args)
+	return qc.executeNamed(ctx, "campaignRetryComposition", call)
+}
+
+func CampaignRetryCompositionBuild(args CampaignRetryCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetryComposition(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignRetryNewsletterWelcome -- Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.
 type CampaignRetryNewsletterWelcomeArgs struct {
 	SignupId         string
@@ -702,6 +889,43 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	}
 	b.WriteString("expectedRevision: ")
 	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveBrandKit -- Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change.
+type CampaignSaveBrandKitArgs struct {
+	// The organization the kit is for; an organization has one kit.
+	AccountId string
+	// The brand kit: {theme, logo, signature, follow, social, footer, reply}.
+	Kit map[string]any
+	// Exact createdAt from brandKitForAccount; empty only when creating.
+	ExpectedRevision string
+}
+
+// CampaignSaveBrandKit calls the engine builtin campaignSaveBrandKit.
+func (qc *QueryClient) CampaignSaveBrandKit(ctx context.Context, args CampaignSaveBrandKitArgs) (*Result, error) {
+	call := CampaignSaveBrandKitBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveBrandKit", call)
+}
+
+func CampaignSaveBrandKitBuild(args CampaignSaveBrandKitArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveBrandKit(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kit: ")
+	b.WriteString(renderMemQLValue(args.Kit))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -1462,10 +1686,6 @@ type ComposeMaterializeArgs struct {
 	Statement string
 	// Document formats: markdown (md), html, txt, csv, json, docx or pdf. Media generation belongs to other discovered capabilities; this document composer does not establish their availability.
 	Format string
-	// email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent.
-	OutputKind string
-	// builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article.
-	LayoutId string
 	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
 	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused.
@@ -1511,20 +1731,6 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 	}
 	b.WriteString("format: ")
 	b.WriteString(quoteMemQL(args.Format))
-	if args.OutputKind != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("outputKind: ")
-		b.WriteString(quoteMemQL(args.OutputKind))
-	}
-	if args.LayoutId != "" {
-		if b.Len() > 27 {
-			b.WriteString(", ")
-		}
-		b.WriteString("layoutId: ")
-		b.WriteString(quoteMemQL(args.LayoutId))
-	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -1711,7 +1917,7 @@ type CreateGoalArgs struct {
 	AccountIds []string
 	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
 	Ceilings map[string]any
-	// The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.
+	// The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer, email. Empty when unknown.
 	RequestedVia string
 }
 
@@ -2186,7 +2392,7 @@ func EmailInboxBuild(args EmailInboxArgs) string {
 	return "builtin emailInbox()"
 }
 
-// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
+// EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId.
 type EmailLayoutsArgs struct {
 	AccountId          string
 	IncludeArchived    bool

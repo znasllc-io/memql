@@ -23,17 +23,19 @@ import {
   TEMPLATE_CONCEPT,
   audienceFromRow,
   authoredAutomationsFrom,
+  brandKitFromRow,
+  brandPreviewFromRow,
   campaignFromRow,
   layoutFromRow,
-  layoutRecordFromRow,
   renderFromRow,
   sameLayout,
   statsFromPayload,
   templateRecordFromRow,
   type AuthoredAutomationsState,
+  type BrandKitRecord,
+  type BrandPreview,
   type CampaignStats,
   type EmailRender,
-  type LayoutRecord,
   type LayoutRow,
   type TemplateRecord,
 } from "./rows";
@@ -1240,26 +1242,6 @@ function shareLayouts(before: readonly LayoutRow[] | null, after: readonly Layou
 }
 
 /**
- * One organization layout, whole (`emailLayoutById`): who saved it, its document
- * when the listing had to leave it out, and the revision its page shows. Read
- * again when `revision` -- the listing's -- moves.
- */
-export function useLayoutRecord(layoutId: string, revision = ""): Reading<LayoutRecord | null> {
-  const connection = useOsConnection();
-  const query = connection?.query ?? null;
-  const read = useMemo(() => {
-    if (query === null || layoutId === "") return null;
-    return async (signal: AbortSignal) => {
-      const row = (await query.emailLayoutById({ layoutId }, { signal })).rows()[0];
-      return row === undefined ? null : layoutRecordFromRow(row);
-    };
-    // `revision` is the reason to read again: a save writes a new version.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, layoutId, revision]);
-  return useLastAnswer(useReading<LayoutRecord | null>(null, read, [read]));
-}
-
-/**
  * An email document as the engine's one renderer writes it for a preview
  * (`emailRender`): the HTML and the text a send would carry, and what keeps it
  * from being sent as it is. Rendered again when the document does -- the same
@@ -1278,6 +1260,47 @@ export function useEmailRender(document: Record<string, unknown> | null, account
     };
   }, [query, document, accountId]);
   return useLastAnswer(useReading<EmailRender | null>(null, read, [read]));
+}
+
+/**
+ * An organization's brand kit (`brandKitForAccount`), or null when it has none
+ * yet. One reading per organization, which the Settings row and the Brand page
+ * share: a save asks it again, and the row follows.
+ */
+export function useBrandKit(accountId: string): Reading<BrandKitRecord | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || accountId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.brandKitForAccount({ accountId }, { signal })).rows()[0];
+      return row === undefined ? null : brandKitFromRow(row);
+    };
+  }, [query, accountId]);
+  return useReading<BrandKitRecord | null>(null, read, [read]);
+}
+
+/**
+ * A brand kit drawn on a built-in layout (`layoutId`) before it is saved
+ * (`campaignBrandPreview`), with the kit's warnings. No one layout carries
+ * every brand part (Article has no follow line, social links or coloured
+ * panel), so the page names the layout that shows the part being edited.
+ * Drawn again when the kit or the layout does -- the same kit is the same
+ * object, so the page decides when (it waits for the person to stop changing
+ * it) -- and the last email drawn stays on screen while the next is on its
+ * way. No kit, nothing asked.
+ */
+export function useBrandPreview(accountId: string, kit: Record<string, unknown> | null, layoutId: string): Reading<BrandPreview | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || accountId === "" || kit === null || layoutId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.campaignBrandPreview({ accountId, kit, layoutId }, { signal })).rows()[0];
+      return row === undefined ? null : brandPreviewFromRow(row);
+    };
+  }, [query, accountId, kit, layoutId]);
+  return useLastAnswer(useReading<BrandPreview | null>(null, read, [read]));
 }
 
 /**

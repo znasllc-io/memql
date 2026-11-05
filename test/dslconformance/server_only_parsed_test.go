@@ -492,6 +492,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "campaigns/mutations.memql", Name: "scheduleCampaign"}:       true,
 		{Path: "campaigns/mutations.memql", Name: "updateCampaignProgress"}: true,
 		{Path: "campaigns/mutations.memql", Name: "recordCampaignDelivery"}: true,
+		// An organization's brand kit has a revision gate of its own, keyed by
+		// the organization; campaignSaveBrandKit retains the actor, checks
+		// organization rights and stores the caller's Library pictures as data:
+		// pictures every member can read.
+		{Path: "campaigns/mutations.memql", Name: "createBrandKit"}: true,
+		{Path: "campaigns/mutations.memql", Name: "updateBrandKit"}: true,
 		// memql#4823. The open/click writer. Its HTTP callers are an
 		// unauthenticated mail client fetching an image and an unauthenticated
 		// browser following a redirect, so there is no actor to scope by and the

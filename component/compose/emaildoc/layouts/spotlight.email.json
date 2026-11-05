@@ -3,14 +3,14 @@
   "preheader": "Our guide to getting the small things done.",
   "layout": "builtin:spotlight",
   "theme": {
-    "page": "#eef0f3",
+    "page": "#f1f1f1",
     "canvas": "#ffffff",
-    "primary": "#1f5f8b",
-    "secondary": "#5b8fb9",
-    "accent": "#d2322d",
-    "tint": "#f6f4ef",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
     "text": "#1c1c1c",
-    "muted": "#696e77",
+    "muted": "#666666",
     "headingFont": "Georgia",
     "bodyFont": "Arial"
   },
@@ -75,21 +75,15 @@
       "paddingY": 11
     },
     {
-      "id": "follow",
-      "type": "heading",
-      "role": "brand",
-      "text": "Follow us",
-      "size": 20,
-      "lineHeight": 20,
-      "color": "primary",
-      "italic": true,
-      "weight": 700,
-      "letterSpacing": "-0.032em"
-    },
-    {
       "id": "social",
       "type": "social",
       "role": "brand",
+      "padding": [
+        0,
+        24,
+        15,
+        24
+      ],
       "links": [
         {
           "network": "Instagram",
@@ -112,7 +106,7 @@
       "size": 14.7,
       "lineHeight": 22.4,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -143,11 +137,11 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
       ],
+      "lineGap": 16,
       "after": 115.2
     }
   ]

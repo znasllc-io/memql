@@ -3,14 +3,14 @@
   "preheader": "Pick one and try it tomorrow.",
   "layout": "builtin:article",
   "theme": {
-    "page": "#eef0f3",
+    "page": "#f1f1f1",
     "canvas": "#ffffff",
-    "primary": "#1f5f8b",
-    "secondary": "#5b8fb9",
-    "accent": "#d2322d",
-    "tint": "#f6f4ef",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
     "text": "#1c1c1c",
-    "muted": "#696e77",
+    "muted": "#666666",
     "headingFont": "Georgia",
     "bodyFont": "Arial"
   },
@@ -52,6 +52,17 @@
       "maxWidth": 502,
       "blocks": [
         {
+          "id": "lead",
+          "type": "heading",
+          "role": "content",
+          "text": "Small changes, calmer mornings",
+          "size": 17.3,
+          "lineHeight": 20.76,
+          "color": "primary",
+          "weight": 700,
+          "font": "body"
+        },
+        {
           "id": "intro",
           "type": "text",
           "role": "content",
@@ -65,10 +76,16 @@
           "id": "highlight",
           "type": "highlight",
           "role": "content",
+          "padding": [
+            0,
+            0,
+            3.89,
+            0
+          ],
           "text": "The fix that works most often:\nmake one decision the night before.",
           "size": 17.3,
-          "lineHeight": 24.65,
-          "gap": 0
+          "lineHeight": 20.76,
+          "gap": 3.89
         },
         {
           "id": "article",
@@ -79,40 +96,88 @@
           "lineHeight": 19.2,
           "listLineHeight": 17.64,
           "align": "left"
+        },
+        {
+          "id": "closing",
+          "type": "columns",
+          "role": "content",
+          "columns": [
+            {
+              "width": 100,
+              "blocks": [
+                {
+                  "id": "closing-title",
+                  "type": "text",
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  "text": "One decision tonight, an easier morning tomorrow.",
+                  "size": 14.7,
+                  "lineHeight": 19.2,
+                  "color": "accent",
+                  "align": "center",
+                  "weight": 700
+                },
+                {
+                  "id": "closing-text",
+                  "type": "text",
+                  "text": "Try it this week and tell us how it went.",
+                  "size": 14.7,
+                  "lineHeight": 19.2,
+                  "color": "primary",
+                  "align": "center",
+                  "italic": true
+                }
+              ]
+            }
+          ]
         }
       ]
     },
     {
-      "id": "question",
-      "type": "heading",
+      "id": "reply",
+      "type": "section",
       "role": "brand",
-      "text": "Got a question about this?",
-      "size": 21.3,
-      "lineHeight": 10.65,
-      "color": "primary",
-      "italic": true,
-      "weight": 700
-    },
-    {
-      "id": "question-more",
-      "type": "heading",
-      "role": "brand",
-      "text": "Write to us.",
-      "size": 21.3,
-      "lineHeight": 10.65,
-      "color": "secondary",
-      "italic": true,
-      "weight": 700
-    },
-    {
-      "id": "ask",
-      "type": "button",
-      "role": "content",
-      "size": 20.3,
-      "color": "primary",
-      "width": 305,
-      "label": "Ask our team",
-      "paddingY": 11
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "reply-heading",
+          "type": "heading",
+          "padding": [
+            0,
+            0,
+            5.35,
+            0
+          ],
+          "text": "Got a question about this?",
+          "size": 21.3,
+          "lineHeight": 21.3,
+          "color": "secondary",
+          "italic": true,
+          "weight": 700
+        },
+        {
+          "id": "reply-button",
+          "type": "button",
+          "size": 20.3,
+          "color": "primary",
+          "width": 305,
+          "label": "Write to us",
+          "paddingY": 8
+        },
+        {
+          "id": "reply-note",
+          "type": "text",
+          "text": "We read every reply.",
+          "size": 12,
+          "lineHeight": 22.4,
+          "align": "center",
+          "italic": true
+        }
+      ]
     },
     {
       "id": "signature",
@@ -166,9 +231,21 @@
       ]
     },
     {
-      "id": "rule",
-      "type": "divider",
-      "role": "brand"
+      "id": "footer-rule",
+      "type": "columns",
+      "role": "content",
+      "columns": [
+        {
+          "width": 100,
+          "blocks": [
+            {
+              "id": "rule",
+              "type": "divider",
+              "role": "brand"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "footer",
@@ -177,7 +254,7 @@
       "size": 14.7,
       "lineHeight": 22.4,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -208,11 +285,11 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
-      ]
+      ],
+      "lineGap": 16
     }
   ]
 }

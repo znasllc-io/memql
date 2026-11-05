@@ -7,13 +7,13 @@ import { ActionBar, type ActionBarTone } from "../../../kit/ActionBar";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../../items/vscode";
 import { useAccountOptions } from "../../accounts/tie";
-import { useTemplateLifecycle } from "../actions";
+import { useCancelComposition, useRetryComposition, useTemplateLifecycle } from "../actions";
 import { toKitActs, type ActSpec } from "../acts";
 import { useLanding } from "../campaigns/landing";
 import { organizationName } from "../organizations";
-import { isPublished, layoutName, templateIsArchived, templateName, type TemplateRow } from "../rows";
+import { compositionFailed, isPublished, isWriting, layoutName, templateIsArchived, templateName, type TemplateRow } from "../rows";
 import { useEmailRender, useTemplateRecord, type EmailLayouts } from "../useEmail";
-import { browserZone, momentWords } from "../when";
+import { browserZone, elapsedWords, momentWords } from "../when";
 import { WORDS, templateState } from "../words";
 import { Preview } from "./Preview";
 import { lifecycleContent, templateActs, templateEditorURL } from "./templateActs";
@@ -33,30 +33,33 @@ import { lifecycleContent, templateActs, templateEditorURL } from "./templateAct
 // restores and nothing else. An archived template stays on its page with
 // Restore right there, whatever the list is showing.
 
-type Lifecycle = "archive" | "restore";
+type Lifecycle = "archive" | "restore" | "cancel" | "retry";
 
 const REFUSED: Record<Lifecycle, string> = {
   archive: "The template wasn't archived.",
   restore: "The template wasn't restored.",
+  cancel: "The writing wasn't stopped.",
+  retry: "The email wasn't started again.",
 };
 
 const LOST: Record<Lifecycle, string> = {
   archive: "Couldn't confirm that it was archived.",
   restore: "Couldn't confirm that it was restored.",
+  cancel: "Couldn't confirm that it was stopped.",
+  retry: "Couldn't confirm that it was started again.",
 };
 
-export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread }: {
+export function TemplatePage({ template, layouts, onBack, onReread }: {
   template: TemplateRow;
   /** The organizations' layout readings, which name the layout it was made from. */
   layouts: EmailLayouts;
   /** Back to the templates. */
   onBack: () => void;
-  /** Open the page of the layout it was made from. */
-  onOpenLayout: (layoutId: string) => void;
   /** Read the templates again: a change that was taken but has not arrived. */
   onReread: () => void;
 }) {
-  const { config } = useSession();
+  const { config, access } = useSession();
+  const viewer = access?.userId ?? "";
   const accounts = useAccountOptions();
   const zone = browserZone();
 
@@ -67,6 +70,8 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
 
   // ---- the bar -------------------------------------------------------------
   const lifecycle = useTemplateLifecycle();
+  const cancelling = useCancelComposition();
+  const retrying = useRetryComposition();
   const [asking, setAsking] = useState<"" | "archive">("");
   const [busyId, setBusyId] = useState("");
   const working = useRef(false);
@@ -78,19 +83,21 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
   }, [asking, askingNow]);
 
   // A CHANGE ON ITS WAY HOLDS THE BAR until the template's row says it happened.
-  const flight = useLanding<Lifecycle>({ marker: () => template.status, reread: onReread });
+  // (An email being written moves its composition, not its status.)
+  const marker = `${template.status}|${template.composition?.state ?? ""}|${template.createdAt}`;
+  const flight = useLanding<Lifecycle>({ marker: () => marker, reread: onReread });
   const landing = flight.landing;
 
   /** The last change that did not go as asked, while the state it was pressed in still stands. */
   const [outcome, setOutcome] = useState<{ act: Lifecycle; lost: boolean; from: string } | null>(null);
-  const missed = outcome !== null && outcome.from === template.status ? outcome : null;
+  const missed = outcome !== null && outcome.from === marker ? outcome : null;
 
   // The editor's handoff, and whether it answered.
   const [editorSilent, setEditorSilent] = useState(false);
   const stopListening = useRef<() => void>(() => {});
   useEffect(() => () => stopListening.current(), []);
 
-  const specs = landing !== null ? [landing.spec] : templateActs(template, askingNow);
+  const specs = landing !== null ? [landing.spec] : templateActs(template, askingNow, viewer);
 
   async function change(spec: ActSpec, act: Lifecycle) {
     // One change at a time: a second press while the first is on its way is the same press.
@@ -99,16 +106,21 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
     setBusyId(spec.id);
     setAsking("");
     setOutcome(null);
-    const from = template.status;
+    const from = marker;
     flight.begin(act, spec);
     try {
-      const done = act === "archive" ? await lifecycle.archive(template) : await lifecycle.restore(template);
+      const done =
+        act === "archive" ? await lifecycle.archive(template)
+        : act === "restore" ? await lifecycle.restore(template)
+        : act === "cancel" ? await cancelling.run(template.id)
+        : await retrying.run(template.id);
       if (done) {
         flight.taken();
         return;
       }
       flight.drop();
-      const lost = lifecycle.lost();
+      const doing = act === "cancel" ? cancelling : act === "retry" ? retrying : lifecycle;
+      const lost = doing.lost();
       setOutcome({ act, lost, from });
       if (lost) onReread();
     } finally {
@@ -134,6 +146,12 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
       case "restore":
         void change(spec, "restore");
         return;
+      case "cancel-composition":
+        void change(spec, "cancel");
+        return;
+      case "retry-composition":
+        void change(spec, "retry");
+        return;
       case "open-editor":
         setEditorSilent(false);
         stopListening.current();
@@ -145,8 +163,29 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
 
   const name = templateName(template);
   const archived = templateIsArchived(template);
-  const tone: ActionBarTone = landing !== null ? "busy" : isPublished(template) ? "live" : "none";
-  const word = landing !== null ? WORDS.changing[landing.act] : templateState(template.status);
+  const writing = isWriting(template);
+  const failed = compositionFailed(template);
+  const tone: ActionBarTone = landing !== null || writing ? "busy" : failed ? "paused" : isPublished(template) ? "live" : "none";
+  const word =
+    landing !== null ? WORDS.changing[landing.act]
+    : writing ? WORDS.composition.writingBar
+    : failed ? WORDS.composition.failed
+    : templateState(template.status);
+  // What went wrong is the server's own plain sentence, shown as it is.
+  const detail = landing === null && failed ? template.composition?.error : undefined;
+  // How long MemQL has been writing, in the editor's words ("2 min"), looked
+  // at again every few seconds while it does.
+  const startedAt = template.composition?.startedAt ?? "";
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!writing) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, [writing]);
+  const started = Date.parse(startedAt);
+  const meta = writing && landing === null && !Number.isNaN(started) ? elapsedWords(now - started) : undefined;
+  const notes = template.composition?.notes ?? [];
   const question = askingNow === "archive" && landing === null ? `Archive “${name}”? Campaigns and automations that use it can't send it until it's restored.` : null;
 
   // ---- what the page says --------------------------------------------------
@@ -154,9 +193,7 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
     template.layoutId === "" ? (
       WORDS.customLayout
     ) : layoutName(layouts.readings, template.layoutId) !== "" ? (
-      <button type="button" className="os-link" onClick={() => onOpenLayout(template.layoutId)}>
-        {layoutName(layouts.readings, template.layoutId)}
-      </button>
+      layoutName(layouts.readings, template.layoutId)
     ) : layouts.settled ? (
       ""
     ) : (
@@ -165,8 +202,9 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
 
   function outcomeNotice(): ReactNode {
     if (missed === null) return null;
-    if (missed.lost) return <Notice tone="warn" sentence={LOST[missed.act]} next="Its state will update here." detail={lifecycle.error} />;
-    return <Notice tone="error" sentence={REFUSED[missed.act]} next="Nothing changed." detail={lifecycle.error} />;
+    const said = missed.act === "cancel" ? cancelling.error : missed.act === "retry" ? retrying.error : lifecycle.error;
+    if (missed.lost) return <Notice tone="warn" sentence={LOST[missed.act]} next="Its state will update here." detail={said} />;
+    return <Notice tone="error" sentence={REFUSED[missed.act]} next="Nothing changed." detail={said} />;
   }
 
   /**
@@ -207,7 +245,7 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
   }
 
   return (
-    <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
+    <div className="os-action-pane" data-os-dividers="none" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
@@ -221,10 +259,11 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
             <Fact label={WORDS.changed} value={template.createdAt === "" ? "" : momentWords(template.createdAt, zone)} />
           </Facts>
         </Panel>
+        {notes.length === 0 ? null : <Notice tone="info" sentence={notes.join(" ")} />}
         {preview()}
       </div>
 
-      <ActionBar state={word} tone={archived && landing === null ? "none" : tone} live acts={toKitActs(specs, run, landing !== null ? landing.spec.id : busyId)}>
+      <ActionBar state={word} detail={detail} meta={meta} tone={archived && landing === null ? "none" : tone} live acts={toKitActs(specs, run, landing !== null ? landing.spec.id : busyId)}>
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
     </div>

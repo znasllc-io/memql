@@ -117,6 +117,8 @@ export function Input({
   onEnter,
   code = false,
   type = "text",
+  invalid = false,
+  describedBy,
 }: {
   type?: "text" | "password";
   value: string;
@@ -136,6 +138,11 @@ export function Input({
    *  working condition into a refused one, and the person never typed the
    *  capital. */
   code?: boolean;
+  /** The value cannot be taken as it is. Says so to assistive tech; the field's
+   *  problem, in words, is the element `describedBy` names. */
+  invalid?: boolean;
+  /** The id of what describes the field: its problem, or a hint beside it. */
+  describedBy?: string;
 }) {
   return (
     <>
@@ -149,6 +156,8 @@ export function Input({
         value={value}
         disabled={disabled}
         placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         spellCheck={code ? false : undefined}
         autoCapitalize={code ? "off" : undefined}
         autoCorrect={code ? "off" : undefined}

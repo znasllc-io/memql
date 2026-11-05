@@ -253,8 +253,13 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 		if err != nil {
 			return nil, err
 		}
+		wireframe, err := emaildoc.BuiltinWireframe(info.ID)
+		if err != nil {
+			return nil, err
+		}
 		rows = append(rows, map[string]any{
 			"id": info.ID, "kind": "builtin", "name": info.Name, "description": info.Description, "document": document, "status": "active",
+			"category": info.Category, "wireframe": wireframe,
 		})
 	}
 	used := 0
@@ -284,6 +289,7 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 			"id": "org:" + layoutID, "layoutId": layoutID, "kind": "organization", "name": str(row, "name"), "description": str(row, "description"),
 			"document": row["document"], "status": str(row, "status"), "sourceArtifactId": bare(str(row, "sourceArtifactId")),
 			"revision": templateTime(row["createdAt"]).UTC().Format(time.RFC3339Nano),
+			"category": "Saved", "wireframe": documentWireframe(row["document"]),
 		}
 		if err := appendDocument(listed); err != nil {
 			return err
@@ -361,4 +367,76 @@ func (s *Store) eachEmailLayoutForAccount(ctx context.Context, accountID string,
 		cursor = next
 	}
 	return errors.New("campaigns: emailLayoutsForAccount: this organization has more layouts than can be listed")
+}
+
+// documentWireframe draws an organization layout from its stored document as
+// it is. A document that no longer parses gets no drawing; its row still lists.
+func documentWireframe(document any) string {
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return ""
+	}
+	doc, err := emaildoc.Parse(encoded)
+	if err != nil {
+		return ""
+	}
+	return emaildoc.Wireframe(doc)
+}
+
+// handleLayoutCatalogue lists the built-in layouts for an assistant choosing
+// one: name, category, description and a one-line outline of the blocks. No
+// wireframe: its reader is a model, and a person sees each layout's wireframe
+// where one is shown to them (emailLayouts, and the options of a choice of
+// layouts in Ask). It reads no organization data, so it needs no organization.
+func (w *Worker) handleLayoutCatalogue(_ context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	builtins := emaildoc.Layouts()
+	rows := make([]map[string]any, 0, len(builtins))
+	for _, info := range builtins {
+		rows = append(rows, map[string]any{
+			"id": info.ID, "name": info.Name, "category": info.Category, "description": info.Description,
+			"outline": layoutOutline(info),
+		})
+	}
+	return resultRows("layoutCatalogue", rows)
+}
+
+// layoutOutline is the layout's blocks in document order on one line:
+// id:type, with containers listing their children in brackets -- a section its
+// blocks, a columns block each column's blocks with " | " between the columns
+// -- brand blocks marked (brand), optional ones "opt" and repeatable ones
+// "rep min..max".
+func layoutOutline(info emaildoc.LayoutInfo) string {
+	optional := map[string]bool{}
+	for _, id := range info.Optional {
+		optional[id] = true
+	}
+	var write func(blocks []emaildoc.Block) string
+	write = func(blocks []emaildoc.Block) string {
+		parts := make([]string, 0, len(blocks))
+		for _, b := range blocks {
+			part := b.ID + ":" + b.Type
+			if len(b.Blocks) > 0 {
+				part += "[" + write(b.Blocks) + "]"
+			}
+			if len(b.Columns) > 0 {
+				columns := make([]string, 0, len(b.Columns))
+				for _, column := range b.Columns {
+					columns = append(columns, write(column.Blocks))
+				}
+				part += "[" + strings.Join(columns, " | ") + "]"
+			}
+			if b.Role == "brand" {
+				part += "(brand)"
+			}
+			if optional[b.ID] {
+				part += " opt"
+			}
+			if r, ok := info.Repeat[b.ID]; ok {
+				part += fmt.Sprintf(" rep %d..%d", r.Min, r.Max)
+			}
+			parts = append(parts, part)
+		}
+		return strings.Join(parts, ", ")
+	}
+	return write(info.Document.Blocks)
 }

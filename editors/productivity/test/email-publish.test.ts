@@ -195,14 +195,15 @@ test("choosing labels an unlabelled Library file once", async () => {
 
 // -- The action bar -----------------------------------------------------------
 
-const BASE: BarInput = { connected: true, domain: "client.example", invalid: false, local: false, organization: CLIENT, mode: "layout", dirty: false, issues: 0, unchanged: true };
+const BASE: BarInput = { connected: true, domain: "client.example", invalid: false, local: false, organization: CLIENT, dirty: false, issues: 0, unchanged: true };
 const READY: TemplateState = { templateId: "t1", status: "ready", revision: "r1" };
 const bar = (change: Partial<BarInput>) => editorBar({ ...BASE, ...change });
+const NOW = Date.parse("2026-11-04T10:30:00Z");
+const composition = (state: "writing" | "done" | "failed", startedAt: string, error = ""): NonNullable<BarInput["composition"]> => ({ state, startedAt, error, notes: [], now: NOW });
 
 test("the action bar follows the email's state", () => {
   // 1. Busy: the work in words, no acts, whatever else is true.
   assert.deepEqual(bar({ busy: "publish" }), { state: "Publishing", acts: [] });
-  assert.deepEqual(bar({ busy: "layout" }), { state: "Saving the layout", acts: [] });
   assert.deepEqual(bar({ busy: "copy" }), { state: "Saving to MemQL", acts: [] });
   assert.deepEqual(bar({ busy: "publish", connected: false, invalid: true, organization: undefined, issues: 2, dirty: true }), { state: "Publishing", acts: [] });
 
@@ -223,70 +224,98 @@ test("the action bar follows the email's state", () => {
 
   // 5. A local file is saved to MemQL before anything else.
   assert.deepEqual(bar({ local: true, domain: undefined }), { state: "On this computer", acts: ["saveToMemQL"] });
-  assert.deepEqual(bar({ local: true, dirty: true, issues: 2, mode: "custom" }), { state: "On this computer", acts: ["saveToMemQL"] });
+  assert.deepEqual(bar({ local: true, dirty: true, issues: 2 }), { state: "On this computer", acts: ["saveToMemQL"] });
 
-  // 6. Issues: fix them first. Publish is absent, and Save as layout stays for a layout.
-  assert.deepEqual(bar({ issues: 1 }), { state: "Fix 1 issue to publish", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ issues: 3, dirty: true }), { state: "Fix 3 issues to publish", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ issues: 2, template: READY }), { state: "Fix 2 issues to publish", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ issues: 1, mode: "custom" }), { state: "Fix 1 issue to publish", acts: [] });
+  // 6. Issues: fix them first. Publish is absent.
+  assert.deepEqual(bar({ issues: 1 }), { state: "Fix 1 issue to publish", acts: [] });
+  assert.deepEqual(bar({ issues: 3, dirty: true }), { state: "Fix 3 issues to publish", acts: [] });
+  assert.deepEqual(bar({ issues: 2, template: READY }), { state: "Fix 2 issues to publish", acts: [] });
 
-  // 7. Unsaved changes: save a layout or publish, which saves first.
-  assert.deepEqual(bar({ dirty: true }), { state: "Unsaved changes", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ dirty: true, template: READY, unchanged: true }), { state: "Unsaved changes", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ dirty: true, mode: "custom" }), { state: "Unsaved changes", acts: ["publish"] });
+  // 7. Unsaved changes: publish saves first.
+  assert.deepEqual(bar({ dirty: true }), { state: "Unsaved changes", acts: ["publish"] });
+  assert.deepEqual(bar({ dirty: true, template: READY, unchanged: true }), { state: "Unsaved changes", acts: ["publish"] });
 
   // 8. Published and unchanged: nothing left to publish.
-  assert.deepEqual(bar({ template: READY }), { state: "Published to Client", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ template: READY, organization: OTHER }), { state: "Published to Other", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ template: READY, mode: "custom" }), { state: "Published to Client", acts: [] });
+  assert.deepEqual(bar({ template: READY }), { state: "Published to Client", acts: [] });
+  assert.deepEqual(bar({ template: READY, organization: OTHER }), { state: "Published to Other", acts: [] });
 
   // 9. Published, then changed.
-  assert.deepEqual(bar({ template: READY, unchanged: false }), { state: "Changes since publishing", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ template: READY, unchanged: false, mode: "custom" }), { state: "Changes since publishing", acts: ["publish"] });
+  assert.deepEqual(bar({ template: READY, unchanged: false }), { state: "Changes since publishing", acts: ["publish"] });
 
   // 10. Otherwise a draft: no template yet, a template that is a draft, or one that was archived.
-  assert.deepEqual(bar({ unchanged: false }), { state: "Draft", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({}), { state: "Draft", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ template: { ...READY, status: "draft" } }), { state: "Draft", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ template: { ...READY, status: "archived" }, unchanged: false }), { state: "Draft", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ mode: "custom" }), { state: "Draft", acts: ["publish"] });
-
-  // A layout that was just saved replaces the state of rows 6 to 10, and only those.
-  assert.deepEqual(bar({ layoutSaved: true }), { state: "Saved as a layout", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ layoutSaved: true, template: READY }), { state: "Saved as a layout", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ layoutSaved: true, dirty: true }), { state: "Saved as a layout", acts: ["saveLayout", "publish"] });
-  assert.deepEqual(bar({ layoutSaved: true, issues: 1 }), { state: "Saved as a layout", acts: ["saveLayout"] });
-  assert.deepEqual(bar({ layoutSaved: true, busy: "layout" }), { state: "Saving the layout", acts: [] });
-  assert.deepEqual(bar({ layoutSaved: true, connected: false }), { state: "Not connected to client.example", acts: ["connect"] });
-  assert.deepEqual(bar({ layoutSaved: true, invalid: true }), { state: "Can’t read this email", acts: ["openSource"] });
-  assert.deepEqual(bar({ layoutSaved: true, organization: undefined }), { state: "Choose the organization", acts: [] });
-  assert.deepEqual(bar({ layoutSaved: true, local: true }), { state: "On this computer", acts: ["saveToMemQL"] });
+  assert.deepEqual(bar({ unchanged: false }), { state: "Draft", acts: ["publish"] });
+  assert.deepEqual(bar({}), { state: "Draft", acts: ["publish"] });
+  assert.deepEqual(bar({ template: { ...READY, status: "draft" } }), { state: "Draft", acts: ["publish"] });
+  assert.deepEqual(bar({ template: { ...READY, status: "archived" }, unchanged: false }), { state: "Draft", acts: ["publish"] });
 
   // Every combination: at most three acts, none twice, and an act only where it is legal. An act that is not legal is absent.
   const templates: (TemplateState | undefined)[] = [undefined, READY, { ...READY, status: "draft" }, { ...READY, status: "archived" }];
+  const compositions = [undefined, composition("writing", "2026-11-04T10:00:00Z"), composition("failed", "2026-11-04T10:00:00Z", "Cancelled"), composition("done", "2026-11-04T10:00:00Z")];
   let combinations = 0;
   for (const connected of [true, false]) for (const invalid of [false, true]) for (const isLocal of [false, true]) for (const organization of [undefined, CLIENT])
-    for (const mode of ["layout", "custom"] as const) for (const dirty of [false, true]) for (const issues of [0, 1, 4]) for (const current of templates)
-      for (const unchanged of [true, false]) for (const busy of [undefined, "publish", "layout", "copy"] as const) for (const layoutSaved of [false, true]) {
-        const input: BarInput = { connected, domain: isLocal ? undefined : "client.example", invalid, local: isLocal, organization, mode, dirty, issues, template: current, unchanged, busy, layoutSaved };
+    for (const dirty of [false, true]) for (const issues of [0, 1, 4]) for (const current of templates)
+      for (const unchanged of [true, false]) for (const busy of [undefined, "publish", "copy"] as const) for (const written of compositions) {
+        const input: BarInput = { connected, domain: isLocal ? undefined : "client.example", invalid, local: isLocal, organization, dirty, issues, template: current, unchanged, busy, composition: written };
         const { state, acts } = editorBar(input);
         const where = JSON.stringify(input);
         combinations++;
         assert.ok(state !== "" && !/[{}]/.test(state), `a state in words with no placeholder left: ${where} gave "${state}"`);
         assert.ok(acts.length <= 3 && new Set(acts).size === acts.length, `at most three acts, none twice: ${where}`);
         const usable = connected && !invalid && organization !== undefined && !busy;
+        const writing = written?.state === "writing" && connected && !busy;
         if (busy) assert.deepEqual(acts, [], `busy has no acts: ${where}`);
+        if (writing) assert.deepEqual(acts, ["cancel"], `writing offers Cancel only: ${where}`);
+        if (acts.includes("cancel")) assert.ok(writing, where);
+        if (acts.includes("retry")) assert.ok(written?.state === "failed" && connected && !busy, where);
         if (acts.includes("connect")) assert.ok(!connected && !busy, where);
-        if (acts.includes("openSource")) assert.ok(connected && invalid && !busy, where);
+        if (acts.includes("openSource")) assert.ok(connected && invalid && !busy && !writing, where);
         if (acts.includes("saveToMemQL")) assert.ok(usable && isLocal, where);
         if (acts.includes("publish")) assert.ok(usable && !isLocal && issues === 0, `publish only for an email that can be published: ${where}`);
-        if (acts.includes("saveLayout")) assert.ok(usable && !isLocal && mode === "layout", `custom HTML and local files have no Save as layout: ${where}`);
         if (/^Published to /.test(state)) assert.ok(!acts.includes("publish"), `nothing to publish when published and unchanged: ${where}`);
-        if (acts.includes("publish") && !dirty && issues === 0) assert.ok(!(current?.status === "ready" && unchanged), where);
-        if (layoutSaved && usable && !isLocal) assert.equal(state, "Saved as a layout", where);
+        if (acts.includes("publish") && !dirty && issues === 0 && !acts.includes("retry")) assert.ok(!(current?.status === "ready" && unchanged), where);
       }
-  assert.equal(combinations, 2 * 2 * 2 * 2 * 2 * 2 * 3 * 4 * 2 * 4 * 2);
+  assert.equal(combinations, 2 * 2 * 2 * 2 * 2 * 3 * 4 * 2 * 3 * 4);
+});
+
+test("the bar says MemQL is writing, with how long, and offers only Cancel", () => {
+  const writing = (startedAt: string) => bar({ template: { templateId: "t1", status: "draft", revision: "r1" }, composition: composition("writing", startedAt) });
+  assert.deepEqual(writing("2026-11-04T10:29:30Z"), { state: "MemQL is writing this email", acts: ["cancel"], meta: "Just started", writing: true });
+  assert.equal(writing("2026-11-04T10:29:00Z").meta, "1 min");
+  assert.equal(writing("2026-11-04T10:28:00Z").meta, "2 min");
+  assert.equal(writing("2026-11-04T10:00:00Z").meta, "30 min");
+  assert.equal(writing("2026-11-04T09:25:00Z").meta, "1 h 5 min");
+  assert.equal(writing("2026-11-04T08:30:00Z").meta, "2 h");
+  assert.equal(writing("2026-11-04T10:31:00Z").meta, "Just started", "a clock a little behind the cluster's is not negative");
+  assert.equal(writing("").meta, undefined, "no start time, no time to show");
+  assert.ok("MemQL is writing this email".split(" ").length <= 6);
+  // Dirty, issues and a published template change nothing while it writes.
+  assert.deepEqual(bar({ dirty: true, issues: 3, template: READY, unchanged: false, composition: composition("writing", "2026-11-04T10:29:30Z") }).acts, ["cancel"]);
+  // Not connected, Cancel could not be sent: Connect comes first.
+  assert.deepEqual(bar({ connected: false, composition: composition("writing", "2026-11-04T10:29:30Z") }).acts, ["connect"]);
+});
+
+test("while MemQL writes and the cluster cannot be reached, the bar says so and keeps Cancel", () => {
+  const writing = { template: { templateId: "t1", status: "draft", revision: "r1" }, composition: composition("writing", "2026-11-04T10:00:00Z") };
+  assert.deepEqual(bar({ ...writing, unreachable: true }), { state: "Can’t reach MemQL", acts: ["cancel"], writing: true });
+  assert.ok("Can’t reach MemQL".split(" ").length <= 6);
+  // Reached again, it is writing as before, with how long.
+  assert.deepEqual(bar({ ...writing, unreachable: false }), { state: "MemQL is writing this email", acts: ["cancel"], meta: "30 min", writing: true });
+  // Only while writing: a finished or failed email is its own state.
+  assert.deepEqual(bar({ composition: composition("done", "2026-11-04T10:00:00Z"), unreachable: true }), { state: "Draft", acts: ["publish"] });
+});
+
+test("a failed composition shows the cluster's sentence and offers Retry beside the usual acts", () => {
+  const failed = (error: string, change: Partial<BarInput> = {}) => bar({ composition: composition("failed", "2026-11-04T10:00:00Z", error), ...change });
+  assert.deepEqual(failed("Cancelled"), { state: "Cancelled", acts: ["publish", "retry"] }, "the sentence as given; the primary act last");
+  assert.deepEqual(failed("MemQL could not write this email. Try again."), { state: "MemQL could not write this email. Try again.", acts: ["publish", "retry"] });
+  assert.deepEqual(failed("Cancelled", { template: READY }), { state: "Cancelled", acts: ["retry"] });
+  assert.deepEqual(failed("Cancelled", { issues: 1 }), { state: "Cancelled", acts: ["retry"] });
+  assert.deepEqual(failed(""), { state: "Couldn’t write this email", acts: ["publish", "retry"] }, "a failure with no sentence still says so");
+  // Without a usable email the usual rows come first.
+  assert.deepEqual(failed("Cancelled", { connected: false }).acts, ["connect"]);
+  assert.deepEqual(failed("Cancelled", { invalid: true }).acts, ["openSource"]);
+  // A finished composition is a plain email.
+  assert.deepEqual(bar({ composition: composition("done", "2026-11-04T10:00:00Z") }), { state: "Draft", acts: ["publish"] });
 });
 
 test("the acts the bar can name are the acts the page draws", () => {
@@ -297,8 +326,9 @@ test("the acts the bar can name are the acts the page draws", () => {
   const produced = new Set<string>();
   const templates: (TemplateState | undefined)[] = [undefined, READY, { ...READY, status: "draft" }];
   for (const connected of [true, false]) for (const invalid of [false, true]) for (const isLocal of [false, true]) for (const organization of [undefined, CLIENT])
-    for (const mode of ["layout", "custom"] as const) for (const dirty of [false, true]) for (const issues of [0, 1]) for (const current of templates)
-      for (const unchanged of [true, false]) for (const act of editorBar({ connected, invalid, local: isLocal, organization, mode, dirty, issues, template: current, unchanged }).acts) produced.add(act);
+    for (const dirty of [false, true]) for (const issues of [0, 1]) for (const current of templates)
+      for (const unchanged of [true, false]) for (const written of [undefined, composition("writing", "2026-11-04T10:00:00Z"), composition("failed", "2026-11-04T10:00:00Z", "Cancelled")])
+        for (const act of editorBar({ connected, invalid, local: isLocal, organization, dirty, issues, template: current, unchanged, composition: written }).acts) produced.add(act);
   assert.deepEqual([...produced].sort(), [...drawn.matchAll(/"(\w+)"/g)].map(match => match[1]!).sort());
 });
 
@@ -579,266 +609,4 @@ test("a file's template is the one published from it, read whole by id", async (
   }
   assert.equal(await templateFor(local, CLIENT, quiet.ports), undefined);
   assert.deepEqual(quiet.calls, []);
-});
-
-// -- Layouts ------------------------------------------------------------------
-
-const BUILTINS: Rows = [
-  { id: "builtin:confirmation", kind: "builtin", name: "Confirmation", status: "active" },
-  { id: "builtin:article", kind: "builtin", name: "Article", status: "active" },
-];
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const UNRELATED: Record<string, unknown> = { id: "org:colleague", layoutId: "colleague", kind: "organization", name: "Autumn letter", description: "A colleague’s layout", revision: "r0", status: "active" };
-
-test("save as layout creates once with a stable id and updates the layout saved from the same file", async () => {
-  // A new layout is created under an id that is kept until the cluster has answered, so a lost answer retries the same layout.
-  let lose = true;
-  const f = ports({
-    emailLayouts: () => BUILTINS,
-    campaignSaveLayout: call => {
-      if (lose) { lose = false; throw new Error("connection lost"); }
-      return [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "2026-10-11T11:00:00Z", status: "active", saved: true }];
-    },
-  });
-  const publisher = new EmailPublisher(f.ports);
-  const ask = { target: file(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
-  await assert.rejects(publisher.saveLayout(ask), /connection lost/);
-  const pending = f.state.get("memql.emailLayoutPending:k1");
-  assert.match(String(pending), UUID, "the id is made and kept before the request");
-  assert.match(f.calls[1]!.call, new RegExp(`layoutId: "${pending}"`));
-
-  const result = await publisher.saveLayout(ask);
-  assert.deepEqual(result, { layoutId: pending, revision: "2026-10-11T11:00:00Z" });
-  const saves = f.calls.filter(call => call.name === "campaignSaveLayout");
-  assert.equal(saves.length, 2);
-  assert.match(saves[1]!.call, new RegExp(`layoutId: "${pending}"`), "the retry carries the stored id");
-  for (const save of saves) {
-    assert.match(save.call, /accountId: "client-org"/);
-    assert.match(save.call, /name: "Monthly"/);
-    assert.match(save.call, /sourceArtifactId: "a1"/, "the layout remembers the file it was saved from");
-    assert.match(save.call, /expectedRevision: ""/);
-    assert.match(save.call, /action: "save"/);
-    assert.match(save.call, /document: \{[^]*"?blocks"?: \[/, "the whole email is the layout");
-    assert.doesNotMatch(save.call, /description/);
-  }
-  assert.equal(f.state.has("memql.emailLayoutPending:k1"), false, "cleared once the cluster answered");
-  assert.deepEqual(names(f.calls), ["emailLayouts", "campaignSaveLayout", "emailLayouts", "campaignSaveLayout"]);
-  assert.match(f.calls[0]!.call, /^builtin emailLayouts\(accountId: "client-org"\)$/);
-
-  // Another email key is another request. This fake lists no layout from the file, so it creates another, under a new id; a cluster
-  // that had kept the first would list it by its file, and the next test shows that save updating it.
-  const again = await publisher.saveLayout({ ...ask, key: "k2" });
-  assert.notEqual(again.layoutId, pending);
-
-  // With a layout saved from this file the call updates it: its layoutId and revision, its description, and the file it came from.
-  const g = ports({
-    emailLayouts: () => [...BUILTINS, { id: "org:l1", layoutId: "l1", sourceArtifactId: "a2", revision: "r0", name: "Other file", kind: "organization" },
-      { id: "org:l2", layoutId: "l2", sourceArtifactId: "a1", revision: "r1", name: "Monthly", description: "For the monthly letter", kind: "organization" }],
-    campaignSaveLayout: () => [{ layoutId: "l2", revision: "r2", status: "active", saved: true }],
-  });
-  const updated = await new EmailPublisher(g.ports).saveLayout({ ...ask, name: "Monthly letter" });
-  assert.deepEqual(updated, { layoutId: "l2", revision: "r2" });
-  const call = g.calls[1]!.call;
-  assert.match(call, /layoutId: "l2"/);
-  assert.match(call, /expectedRevision: "r1"/);
-  assert.match(call, /description: "For the monthly letter"/);
-  assert.match(call, /name: "Monthly letter"/);
-  assert.match(call, /sourceArtifactId: "a1"/);
-  assert.doesNotMatch(call, /org:/, "the client never builds the opaque id");
-  assert.equal(g.state.size, 0, "an update needs no id kept");
-
-  // A lost answer on an update that follows a lost creation finds the layout that creation made, and leaves no id behind.
-  const h = ports({
-    emailLayouts: () => [{ id: "org:made", layoutId: "made", sourceArtifactId: "a1", revision: "r5", name: "Monthly", description: "", kind: "organization" }],
-    campaignSaveLayout: () => [{ layoutId: "made", revision: "r5", status: "active", saved: true }],
-  });
-  h.state.set("memql.emailLayoutPending:k1", "made");
-  await new EmailPublisher(h.ports).saveLayout(ask);
-  assert.match(h.calls[1]!.call, /layoutId: "made"/);
-  assert.match(h.calls[1]!.call, /expectedRevision: "r5"/);
-  assert.equal(h.state.has("memql.emailLayoutPending:k1"), false);
-});
-
-test("publishing an email and saving it as a layout are separate jobs", async () => {
-  const f = ports({
-    templateForSource: () => [],
-    emailLayouts: () => BUILTINS,
-    campaignSaveTemplate: call => [saved("r1", /action: "publish"/.test(call) ? "ready" : "draft")],
-    campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r7", status: "active", saved: true }],
-  });
-  const publisher = new EmailPublisher(f.ports);
-  const [published, layout] = await Promise.all([
-    publisher.publish(publishing()),
-    publisher.saveLayout({ target: file(), organization: CLIENT, email: welcome, name: "Monthly", key: "memql-file://client.example/artifacts/a1/Welcome.email.json" }),
-  ]);
-  assert.equal(published.templateId, "t1");
-  assert.match(layout.layoutId, UUID);
-  assert.equal(layout.revision, "r7");
-});
-
-/**
- * The cluster as saveLayout meets it. A layout is made under the id it is sent. An update must name the revision it read. Saving
- * what is already stored answers with the receipt already given. `lose` is how many answers are lost after the layout is stored.
- */
-function layoutCluster(lose: number) {
-  const stored = new Map<string, { revision: string; content: string }>();
-  let revisions = 0;
-  let lost = lose;
-  const answers: Record<string, Answer> = {
-    // A layout nobody here made, saved by a colleague since (newest first), is listed ahead of the one this email made: it has no file either.
-    emailLayouts: () => [...BUILTINS, UNRELATED, ...[...stored].map(([layoutId, row]) => ({ id: `org:${layoutId}`, layoutId, kind: "organization", name: "Monthly", description: "", revision: row.revision, status: "active" }))],
-    campaignSaveLayout: call => {
-      const layoutId = /layoutId: "([^"]+)"/.exec(call)![1]!;
-      const expected = /expectedRevision: "([^"]*)"/.exec(call)![1]!;
-      const content = call.replace(/expectedRevision: "[^"]*"/, "");
-      const row = stored.get(layoutId);
-      if (row && row.content === content) return [{ layoutId, revision: row.revision, status: "active", saved: true }];
-      if (row && row.revision !== expected) throw new Error("this layout changed; compare the latest revision before saving");
-      if (!row && expected !== "") throw new Error("That layout isn’t available. Choose another layout or save a new one.");
-      const revision = `r${++revisions}`;
-      stored.set(layoutId, { revision, content });
-      if (lost > 0) { lost--; throw new Error("connection lost"); }
-      return [{ layoutId, revision, status: "active", saved: true }];
-    },
-  };
-  return { stored, answers };
-}
-
-test("a lost creation, then an edit, updates the layout the creation made", async () => {
-  // A template opened as a file has no Library file to find its layout by, so the id kept for it is what finds it again.
-  const cluster = layoutCluster(1);
-  const f = ports(cluster.answers);
-  const publisher = new EmailPublisher(f.ports);
-  const ask = { target: template(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
-
-  await assert.rejects(publisher.saveLayout(ask), /connection lost/);
-  assert.deepEqual(names(f.calls), ["campaignSaveLayout"], "a first save makes one call: there is nothing yet to look for");
-  assert.equal(cluster.stored.size, 1, "the creation reached the cluster, and its answer was lost");
-  const kept = String(f.state.get("memql.emailLayoutPending:k1"));
-  assert.match(kept, UUID);
-
-  // The person changes the email and saves it as a layout again.
-  const edited = readEmail(layout([
-    { id: "headline", type: "heading", text: "Welcome back" },
-    { id: "cta", type: "button", label: "Get started", href: "https://example.com/start" },
-  ]));
-  const result = await publisher.saveLayout({ ...ask, email: edited });
-  assert.deepEqual(names(f.calls), ["campaignSaveLayout", "emailLayouts", "campaignSaveLayout"]);
-  const update = f.calls[2]!.call;
-  assert.match(update, new RegExp(`layoutId: "${kept}"`), "the layout the creation made");
-  assert.match(update, /expectedRevision: "r1"/, "at the revision it was listed at");
-  assert.ok(update.includes("Welcome back"), "with the edited email");
-  assert.deepEqual(result, { layoutId: kept, revision: "r2" });
-  assert.equal(cluster.stored.size, 1, "one layout, not two");
-  assert.ok(f.calls.every(call => !call.call.includes("colleague")), "a layout that is not this email's is never touched");
-  assert.equal(f.state.has("memql.emailLayoutPending:k1"), false, "cleared once the cluster has answered");
-  assert.deepEqual(f.writes, [{ key: "memql.emailLayoutPending:k1", value: kept }, { key: "memql.emailLayoutPending:k1", value: undefined }], "kept once, before the first request, and cleared when the cluster answered");
-
-  // The same without an edit finds the layout all the same, and updates it rather than making another.
-  const same = layoutCluster(1);
-  const g = ports(same.answers);
-  await assert.rejects(new EmailPublisher(g.ports).saveLayout(ask), /connection lost/);
-  const again = await new EmailPublisher(g.ports).saveLayout(ask);
-  assert.equal(again.layoutId, String(Array.from(same.stored.keys())[0]));
-  assert.equal(same.stored.size, 1);
-});
-
-test("a creation that never reached the cluster is retried under the same id", async () => {
-  let reached = false;
-  const f = ports({
-    emailLayouts: () => [...BUILTINS, UNRELATED],
-    campaignSaveLayout: call => {
-      if (!reached) { reached = true; throw new Error("connection lost"); }
-      return [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }];
-    },
-  });
-  const publisher = new EmailPublisher(f.ports);
-  const ask = { target: template(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
-  await assert.rejects(publisher.saveLayout(ask), /connection lost/);
-  const kept = String(f.state.get("memql.emailLayoutPending:k1"));
-  const result = await publisher.saveLayout(ask);
-  assert.deepEqual(names(f.calls), ["campaignSaveLayout", "emailLayouts", "campaignSaveLayout"], "the kept id is looked for, and nothing is there");
-  assert.equal(result.layoutId, kept);
-  assert.match(f.calls[2]!.call, new RegExp(`layoutId: "${kept}"`));
-  assert.match(f.calls[2]!.call, /expectedRevision: ""/, "so it creates, and under the id it already tried");
-  assert.ok(!f.calls[2]!.call.includes("colleague"), "and does not take another email's layout for its own");
-  assert.equal(f.state.size, 0);
-  assert.deepEqual(f.writes, [{ key: "memql.emailLayoutPending:k1", value: kept }, { key: "memql.emailLayoutPending:k1", value: undefined }], "the id is kept once: the retry reuses it without writing it again");
-
-  // Whatever is kept that is not an id is not used: the cluster would refuse it, and there is nothing to look for.
-  for (const notAnId of [{ not: "an id" }, "not an id", "", 7]) {
-    const h = ports({ emailLayouts: () => BUILTINS, campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }] });
-    h.state.set("memql.emailLayoutPending:k1", notAnId);
-    const fresh = await new EmailPublisher(h.ports).saveLayout(ask);
-    assert.match(fresh.layoutId, UUID, JSON.stringify(notAnId));
-    assert.deepEqual(names(h.calls), ["campaignSaveLayout"], JSON.stringify(notAnId));
-    assert.equal(h.state.size, 0);
-  }
-});
-
-test("a layout saved from a template or a local file is always a new layout", async () => {
-  for (const target of [template(), local]) {
-    const f = ports({ campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }] });
-    const result = await new EmailPublisher(f.ports).saveLayout({ target, organization: CLIENT, email: welcome, name: "Monthly", key: "k" });
-    assert.deepEqual(names(f.calls), ["campaignSaveLayout"], "there is no file to look a layout up by");
-    assert.match(result.layoutId, UUID);
-    assert.match(f.calls[0]!.call, /expectedRevision: ""/);
-    assert.doesNotMatch(f.calls[0]!.call, /sourceArtifactId/);
-    assert.equal(f.state.size, 0);
-  }
-});
-
-test("saving a layout twice at once makes one layout", async () => {
-  const f = ports({
-    emailLayouts: () => BUILTINS,
-    campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }],
-  });
-  const publisher = new EmailPublisher(f.ports);
-  const ask = { target: file(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
-  const [first, second] = await Promise.all([publisher.saveLayout(ask), publisher.saveLayout(ask)]);
-  assert.deepEqual(second, first);
-  assert.equal(f.calls.filter(call => call.name === "campaignSaveLayout").length, 1);
-  // Another email is another layout.
-  const [third, fourth] = await Promise.all([publisher.saveLayout({ ...ask, key: "k2" }), publisher.saveLayout({ ...ask, key: "k3" })]);
-  assert.notEqual(third.layoutId, fourth.layoutId);
-  assert.equal(f.calls.filter(call => call.name === "campaignSaveLayout").length, 3);
-});
-
-test("an email written in HTML cannot be a layout", async () => {
-  const f = ports();
-  await assert.rejects(new EmailPublisher(f.ports).saveLayout({ target: file(), organization: CLIENT, email: written, name: "Monthly", key: "k1" }),
-    (error: unknown) => error instanceof UserInputError && error.message === "An email written in HTML can’t be a layout.");
-  assert.deepEqual(f.calls, [], "nothing is asked of the cluster, and no id is kept");
-  assert.equal(f.state.size, 0);
-});
-
-test("a layout name is one line of up to 200 characters", async () => {
-  const sentence = "Enter a layout name up to 200 characters.";
-  const f = ports({
-    emailLayouts: () => BUILTINS,
-    campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }],
-  });
-  const publisher = new EmailPublisher(f.ports);
-  const save = (name: string) => publisher.saveLayout({ target: file(), organization: CLIENT, email: welcome, name, key: `k${name.length}` });
-  for (const name of ["", "   ", "x".repeat(201), "Monthly\nletter", "Monthly\u0007", "Monthly\u007f", "Monthly\u0085", "😀".repeat(201)]) {
-    await assert.rejects(save(name), (error: unknown) => error instanceof UserInputError && error.message === sentence, JSON.stringify(name));
-  }
-  assert.equal(f.calls.length, 0, "a name that cannot be saved is not sent");
-  await save("x".repeat(200));
-  await save("😀".repeat(200));
-  await save("  Monthly letter  ");
-  const sent = f.calls.filter(call => call.name === "campaignSaveLayout").map(call => /name: ("(?:[^"\\]|\\.)*")/.exec(call.call)![1]);
-  assert.deepEqual(sent.map(name => (JSON.parse(name!) as string).length), [200, 400, "Monthly letter".length], "characters are counted as the cluster counts them, and the name is trimmed");
-});
-
-test("a layout that does not answer as saved is not saved", async () => {
-  for (const answer of [[], [{}], [{ saved: false, layoutId: "l1", revision: "r1" }], [{ saved: true, revision: "r1" }], [{ saved: true, layoutId: "l1" }]]) {
-    const f = ports({ emailLayouts: () => BUILTINS, campaignSaveLayout: () => answer });
-    await assert.rejects(new EmailPublisher(f.ports).saveLayout({ target: file(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" }),
-      (error: unknown) => error instanceof Error && !(error instanceof UserInputError) && /did not confirm/.test(error.message), JSON.stringify(answer));
-    assert.match(String(f.state.get("memql.emailLayoutPending:k1")), UUID, "the id stays, so the retry recovers the layout");
-  }
-  const f = ports({ emailLayouts: () => [{ id: "org:l1", layoutId: "l1", sourceArtifactId: "a1", name: "Monthly", kind: "organization" }] });
-  await assert.rejects(new EmailPublisher(f.ports).saveLayout({ target: file(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" }), /did not return the layout revision/);
-  assert.deepEqual(names(f.calls), ["emailLayouts"]);
 });

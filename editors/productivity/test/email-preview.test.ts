@@ -247,7 +247,7 @@ test("the email copy has no empty strings, only the placeholders the pages fill,
   assert.ok(strings.every(text => text.trim() !== ""));
   assert.ok(strings.every(text => !text.includes("'")), "apostrophes are typographic");
   assert.ok(strings.every(text => !/\bbytes?\b/i.test(text)), "limits counted in bytes are the code's; a person reads only that something is too long");
-  assert.deepEqual([...new Set(strings.flatMap(text => [...text.matchAll(/\{([^{}]*)\}/g)].map(match => match[1])))].sort(), ["count", "domain", "name", "organization"]);
+  assert.deepEqual([...new Set(strings.flatMap(text => [...text.matchAll(/\{([^{}]*)\}/g)].map(match => match[1])))].sort(), ["count", "domain", "hours", "minutes", "name", "organization"]);
   assert.equal(fill(EMAIL_COPY.editor.published, { organization: "Acme Co" }), "Published to Acme Co");
   assert.equal(fill(EMAIL_COPY.editor.issuesMany, { count: 3 }), "Fix 3 issues to publish");
   assert.equal(fill(EMAIL_COPY.newEmail.notConnected, { domain: "acme.example" }), "Not connected to acme.example");

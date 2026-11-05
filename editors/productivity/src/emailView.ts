@@ -20,7 +20,7 @@ import { UserInputError } from "./userError.js";
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 
 type Width = "desktop" | "mobile" | "plain";
-type BarAct = "connect" | "openSource" | "saveToMemQL" | "saveLayout" | "publish";
+type BarAct = "connect" | "openSource" | "saveToMemQL" | "publish" | "cancel" | "retry";
 interface ViewState { width: Width; selected?: string; themeOpen?: boolean; samplesOpen?: boolean; samples?: Record<string, string> }
 interface Issue { code: string; block?: string; message: string }
 interface Placed { block: EmailBlock; brand: boolean }
@@ -29,10 +29,10 @@ const C = EMAIL_COPY.editor;
 /** Typing is sent once the person pauses this long, or leaves the field. */
 const PAUSE = 250;
 /** The states in which the host is working: the bar shows its spinner. */
-const BUSY: readonly string[] = [C.publishing, C.savingLayout, C.savingCopy];
-/** Acts drawn as the bar's button; the others are text acts. */
-const BUTTON_ACTS: readonly BarAct[] = ["connect", "openSource", "saveToMemQL", "publish"];
-const ACT_WORDS: Readonly<Record<BarAct, string>> = { connect: C.connect, openSource: C.openSource, saveToMemQL: C.saveToMemQL, saveLayout: C.saveLayout, publish: C.publish };
+const BUSY: readonly string[] = [C.publishing, C.savingCopy, C.writing];
+/** Acts that can be drawn as the bar's button (the last act is the button, when it is one of these); the others are text acts. */
+const BUTTON_ACTS: readonly BarAct[] = ["connect", "openSource", "saveToMemQL", "publish", "retry"];
+const ACT_WORDS: Readonly<Record<BarAct, string>> = { connect: C.connect, openSource: C.openSource, saveToMemQL: C.saveToMemQL, publish: C.publish, cancel: C.cancel, retry: C.retry };
 const HEX = /^#[0-9a-fA-F]{6}$/;
 /** The most links a social or footer block takes. */
 const MAX_LINKS = 8;
@@ -77,7 +77,8 @@ const menuItems = Array.from(addMenu.querySelectorAll<HTMLButtonElement>('[role=
 const fieldRows = Array.from(blockGroup.querySelectorAll<HTMLElement>("[data-field]"));
 const customNote = byId("custom-note"), customWords = byId("custom-words");
 const theme = byId<HTMLDetailsElement>("theme"), samplesBox = byId<HTMLDetailsElement>("samples"), sampleFields = byId("sample-fields");
-const barState = byId("bar-state"), barActs = byId("bar-acts"), barForm = byId("bar-form"), layoutName = byId<HTMLInputElement>("layout-name"), barNotice = byId("bar-notice");
+const barState = byId("bar-state"), barMeta = byId("bar-meta"), barActs = byId("bar-acts"), barNotice = byId("bar-notice"), inspector = byId("inspector");
+const notesGroup = byId("notes"), noteList = byId("note-list");
 
 // -- What the page knows -------------------------------------------------------
 
@@ -112,7 +113,7 @@ let failedSeq = Number.NEGATIVE_INFINITY;
 let organizationKnown = false;
 let pageColour = "";
 let skeletonFor: EmailDocument | undefined;
-let bar: { state: string; acts: BarAct[]; layoutName?: string } = { state: "", acts: [] };
+let bar: { state: string; acts: BarAct[]; meta: string; writing: boolean } = { state: "", acts: [], meta: "", writing: false };
 /** An act was sent; the next one waits for the host's answer (a bar or a problem). */
 let actPending = false;
 
@@ -287,12 +288,21 @@ const heightField: Field = {
 listen(heightField);
 
 const linesControl = byId<HTMLTextAreaElement>("field-lines");
+/** Whether the selected footer spaces its lines as paragraphs (a lineGap): then a blank line, not a line break, starts the next entry. */
+const paragraphed = (): boolean => { const gap = selectedBlock()?.lineGap; return typeof gap === "number" && gap > 0; };
 const linesField: Field = {
   control: linesControl, notice: byId("field-lines-notice"), typed: true, key: blockKey("lines"),
-  // An empty line at the end is not a line of the footer (the engine would count it toward the twelve).
-  read: () => { const lines = linesControl.value.split("\n"); while (lines.length && lines[lines.length - 1] === "") lines.pop(); return lines; },
+  // An empty line at the end is not a line of the footer (the engine would count it toward the twelve). With a lineGap an
+  // entry is a paragraph, which may hold line breaks: paragraphs are told apart by the blank line between them.
+  read: () => {
+    const lines = paragraphed()
+      ? linesControl.value.split(/\n[ \t]*\n/).map(line => line.replace(/^\n+|\n+$/g, "")).filter(line => line !== "")
+      : linesControl.value.split("\n");
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return lines;
+  },
   current: () => { const lines = selectedBlock()?.lines; return Array.isArray(lines) ? lines : []; },
-  show: value => { linesControl.value = (Array.isArray(value) ? value : []).map(str).join("\n"); },
+  show: value => { linesControl.value = (Array.isArray(value) ? value : []).map(str).join(paragraphed() ? "\n\n" : "\n"); },
   edit: fieldEdit("lines"),
   check: value => {
     const lines = value as string[];
@@ -942,20 +952,27 @@ samplesBox.addEventListener("toggle", () => { if (samplesBox.open !== samplesOpe
 
 const isAct = (value: unknown): value is BarAct => typeof value === "string" && Object.hasOwn(ACT_WORDS, value);
 
-/** The state's words (a live region: written only when they change) and the acts, kept as they are when they are the same. */
+/** The state's words (a live region: written only when they change), how long MemQL has been writing, and the acts, kept as they are when they are the same. */
 function drawBar(): void {
   if (barState.textContent !== bar.state) barState.textContent = bar.state;
   barState.classList.toggle("busy", BUSY.includes(bar.state));
+  if (barMeta.textContent !== bar.meta) barMeta.textContent = bar.meta;
+  barMeta.hidden = bar.meta === "";
+  // MemQL is writing: the email is read-only, so nothing in the inspector can be changed.
+  inspector.toggleAttribute("inert", bar.writing);
   const shown = Array.from(barActs.querySelectorAll<HTMLElement>("button"));
+  const wanted = bar.acts.map(act => shown.find(button => button.dataset.act === act) ?? actButtonFor(act));
+  // The last act is the one button, when it is a button act; the others are text.
+  wanted.forEach((button, index) => { button.className = index === wanted.length - 1 && BUTTON_ACTS.includes(bar.acts[index]!) ? "primary" : "text-act"; });
   if (same(shown.map(button => button.dataset.act), bar.acts)) return;
   const active = document.activeElement;
   const focused = holds(barActs) && active instanceof HTMLElement ? active.dataset.act : undefined;
-  barActs.replaceChildren(...bar.acts.map(act => shown.find(button => button.dataset.act === act) ?? actButtonFor(act)));
+  barActs.replaceChildren(...wanted);
   if (focused !== undefined) actButton(focused)?.focus();
 }
 
 function actButtonFor(act: BarAct): HTMLElement {
-  const button = textElement("button", ACT_WORDS[act], BUTTON_ACTS.includes(act) ? "primary" : "text-act") as HTMLButtonElement;
+  const button = textElement("button", ACT_WORDS[act], "text-act") as HTMLButtonElement;
   button.type = "button";
   button.dataset.act = act;
   button.addEventListener("click", () => runAct(act));
@@ -967,50 +984,11 @@ const actButton = (act: string) => Array.from(barActs.querySelectorAll<HTMLEleme
 function runAct(act: BarAct): void {
   if (actPending) return;
   clearBarNotice();
-  if (act === "saveLayout") { openForm(); return; }
   actPending = true;
   post({ type: "act", act });
   // The act's button may go with the host's answer: the focus waits on the state, not on the page.
   barState.focus();
 }
-
-function openForm(): void {
-  barState.hidden = true;
-  barActs.hidden = true;
-  barForm.hidden = false;
-  layoutName.value = bar.layoutName ?? "";
-  layoutName.focus();
-  layoutName.select();
-}
-
-function closeForm(focusAct: boolean): void {
-  if (barForm.hidden) return;
-  barForm.hidden = true;
-  barState.hidden = false;
-  barActs.hidden = false;
-  if (focusAct) actButton("saveLayout")?.focus();
-}
-
-function saveLayout(): void {
-  const name = layoutName.value.trim();
-  if (name === "" || characters(name) > 200 || /[\u0000-\u001f\u007f-\u009f]/.test(name)) {
-    showProblem({ message: EMAIL_COPY.host.layoutNameInvalid });
-    return;
-  }
-  if (actPending) return;
-  clearBarNotice();
-  actPending = true;
-  post({ type: "saveLayout", name });
-  closeForm(false);
-  barState.focus();
-}
-
-layoutName.addEventListener("keydown", event => {
-  if (event.key === "Enter") { event.preventDefault(); saveLayout(); }
-  if (event.key === "Escape") { event.preventDefault(); closeForm(true); }
-});
-byId("layout-save").addEventListener("click", saveLayout);
-byId("layout-cancel").addEventListener("click", () => closeForm(true));
 
 function showProblem(problem: Problem): void {
   renderProblem(barNotice, { message: problem.message || C.renderFailed, reference: problem.reference }, post);
@@ -1141,10 +1119,17 @@ function onContext(message: Record<string, unknown>): void {
 }
 
 function onBar(message: Record<string, unknown>): void {
-  bar = { state: str(message.state), acts: (Array.isArray(message.acts) ? message.acts : []).filter(isAct), layoutName: typeof message.layoutName === "string" ? message.layoutName : undefined };
+  bar = { state: str(message.state), acts: (Array.isArray(message.acts) ? message.acts : []).filter(isAct), meta: str(message.meta), writing: message.writing === true };
   actPending = false;
-  if (!bar.acts.includes("saveLayout")) closeForm(false);
   drawBar();
+}
+
+/** What MemQL left out of the email, and why: said once, quietly, at the top of the inspector; nothing when there is none. */
+function onNotes(message: Record<string, unknown>): void {
+  const notes = (Array.isArray(message.notes) ? message.notes : []).filter((note): note is string => typeof note === "string" && note !== "");
+  notesGroup.hidden = notes.length === 0;
+  if (same(Array.from(noteList.children, item => item.textContent ?? ""), notes)) return;
+  noteList.replaceChildren(...notes.map(note => textElement("li", note)));
 }
 
 function onSelect(message: Record<string, unknown>): void {
@@ -1167,6 +1152,7 @@ window.addEventListener("message", event => {
     case "renderFailed": onRenderFailed(message); break;
     case "context": onContext(message); break;
     case "bar": onBar(message); break;
+    case "notes": onNotes(message); break;
     case "restore": restore(asViewState(message.state)); break;
     case "select": onSelect(message); break;
     case "problem":

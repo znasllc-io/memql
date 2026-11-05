@@ -20,8 +20,7 @@ const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settin
 const { fakeConnection, layoutRow, templateRow, withSession } = await import("../harness");
 
 // THE TEMPLATES SECTION'S LIST (memql#6033, Task 11): every template with its
-// layout and its state in one word, asked questions of through Refine; and,
-// beside it under the same Head, the layouts a template can be made from.
+// layout and its state in one word, asked questions of through Refine.
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -56,40 +55,56 @@ const rowOf = (name: string) => screen.getByText(name).closest(".os-record-row")
 /** The live-list item (where the arrival cue is drawn) a name is drawn in. */
 const itemOf = (name: string) => screen.getByText(name).closest(".os-livelist-row") as HTMLElement;
 const headCount = (view: ReturnType<typeof render>) => view.container.querySelector(".os-head-meta")?.textContent ?? null;
-const tabs = () => screen.getByRole("navigation", { name: "Templates and layouts" });
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe("the templates list", () => {
-  it("switches between templates and layouts under the Head", async () => {
+  it("Templates has no Layouts tab", async () => {
     const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "Welcome 2" })] });
     const { view } = mount(conn);
     await screen.findByText("Welcome 2");
     await waitFor(() => expect(headCount(view)).toBe("1"));
 
-    // Directly under the Head: sibling views inside the page, not a second tab bar.
-    const head = screen.getByRole("heading", { level: 3, name: "Templates" }).closest(".os-head");
-    expect(head?.nextElementSibling).toBe(tabs());
-    expect(within(tabs()).getAllByRole("button").map((tab) => tab.textContent)).toEqual(["Templates", "Layouts"]);
-    expect(within(tabs()).getByRole("button", { name: "Templates" }).getAttribute("aria-current")).toBe("page");
-    // Templates are added here: the editor writes them.
+    // One view, so no tab bar and no Layouts to switch to.
+    expect(screen.queryByRole("navigation", { name: "Templates and layouts" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Layouts" })).toBeNull();
+    // Templates are still added here: the editor writes them.
     expect(screen.getByRole("button", { name: "Create new template" })).toBeTruthy();
-
-    fireEvent.click(within(tabs()).getByRole("button", { name: "Layouts" }));
-    expect(await screen.findByText("Article")).toBeTruthy();
-    expect(within(tabs()).getByRole("button", { name: "Layouts" }).getAttribute("aria-current")).toBe("page");
-    // Layouts are saved in the editor, so there is nothing to add here.
-    expect(screen.queryByRole("button", { name: "Create new template" })).toBeNull();
-    expect(screen.queryByText("Welcome 2")).toBeNull();
-    // Still one Head, still Templates, counting what is open: the four built-ins.
     expect(screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)).toEqual(["Templates"]);
-    await waitFor(() => expect(headCount(view)).toBe("4"));
+  });
 
-    fireEvent.click(within(tabs()).getByRole("button", { name: "Templates" }));
-    expect(screen.getByText("Welcome 2")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create new template" })).toBeTruthy();
+  it("the list shows Writing for a template MemQL is writing", async () => {
+    const conn = fakeConnection({
+      templates: [
+        templateRow({ id: "t1", name: "Autumn letter", status: "draft", composition: { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "", notes: ["One file was left out."] } }),
+        templateRow({ id: "t2", name: "Done letter", status: "draft", composition: { state: "done", startedAt: "2026-11-04T10:00:00Z", error: "", notes: [] } }),
+      ],
+    });
+    mount(conn);
+    await screen.findByText("Autumn letter");
+    const state = (name: string) => rowOf(name).querySelector(".os-record-status") as HTMLElement;
+    expect(state("Autumn letter").textContent).toBe("Writing");
+    expect(state("Autumn letter").getAttribute("data-tone")).toBe("accent");
+    // A finished composition is just the template's own state, and notes never reach the list.
+    expect(state("Done letter").textContent).toBe("Draft");
+    expect(screen.queryByText("One file was left out.")).toBeNull();
+    // No row actions.
+    expect(within(rowOf("Autumn letter")).queryByRole("button", { name: /Cancel|Retry/ })).toBeNull();
+  });
+
+  it("the list shows Failed with the reason on hover", async () => {
+    const conn = fakeConnection({
+      templates: [templateRow({ id: "t1", name: "Autumn letter", status: "draft", composition: { state: "failed", startedAt: "2026-11-04T10:00:00Z", error: "Cancelled", notes: [] } })],
+    });
+    mount(conn);
+    await screen.findByText("Autumn letter");
+    const state = rowOf("Autumn letter").querySelector(".os-record-status") as HTMLElement;
+    expect(state.textContent).toBe("Failed");
+    expect(state.getAttribute("data-tone")).toBe("warn");
+    expect(state.getAttribute("title")).toBe("Cancelled");
+    expect(within(rowOf("Autumn letter")).queryByText("Cancelled")).toBeNull();
   });
 
   it("names each template's layout and state", async () => {

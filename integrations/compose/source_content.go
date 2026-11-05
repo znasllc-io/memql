@@ -1,19 +1,15 @@
 package compose
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"io"
 	"path"
 	"strings"
-	"unicode/utf8"
 
 	pure "github.com/znasllc-io/memql/component/compose"
 	"github.com/znasllc-io/memql/core/librarykey"
@@ -36,12 +32,11 @@ type SourceDownloader interface {
 // SourceContent is captured in the owner-only execution input before dispatch.
 // Another replica composes from the same bytes even if the source changes later.
 type SourceContent struct {
-	Name          string `json:"name"`
-	MimeType      string `json:"mimeType"`
-	Text          string `json:"text,omitempty"`
-	Image         []byte `json:"image,omitempty"`
-	SHA256        string `json:"sha256"`
-	EmailAssetURL string `json:"emailAssetUrl,omitempty"`
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text,omitempty"`
+	Image    []byte `json:"image,omitempty"`
+	SHA256   string `json:"sha256"`
 }
 
 type referenceBudget struct{ bytes, text, images, entries int }
@@ -122,51 +117,20 @@ func readReference(name, mime string, data []byte, budget *referenceBudget) ([]S
 		}
 		return []SourceContent{entry}, nil
 	}
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	limits := MaterializerArchiveLimits
+	// Reading stops at what the composition's shared budget has left, but the
+	// sentence keeps naming the whole 16 MiB.
+	limits.MaxUnpackedBytes = int64(maxReferenceBytes - budget.bytes)
+	limits.reportUnpacked = maxReferenceBytes
+	read, err := ReadArchive(data, limits)
 	if err != nil {
-		return nil, fmt.Errorf("invalid ZIP: %w", err)
+		return nil, err
 	}
-	if len(zr.File) > maxReferenceEntries {
-		return nil, errors.New("ZIP contains more than 64 entries")
-	}
-	seen := map[string]bool{}
 	var out []SourceContent
-	for _, f := range zr.File {
-		name := strings.TrimSuffix(f.Name, "/")
-		if !safeReferencePath(name) || seen[name] {
-			return nil, fmt.Errorf("ZIP has an unsafe or duplicate member path %q", f.Name)
-		}
-		seen[name] = true
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		if !f.Mode().IsRegular() {
-			return nil, fmt.Errorf("ZIP member %q is not a regular file", f.Name)
-		}
-		// Finder's packaging metadata is not user material. Its contents are never
-		// opened, so skipping it cannot evade the expanded-byte budget.
-		if strings.HasPrefix(name, "__MACOSX/") || path.Base(name) == ".DS_Store" {
-			continue
-		}
-		remaining := maxReferenceBytes - budget.bytes
-		if remaining <= 0 || f.UncompressedSize64 > uint64(remaining) {
-			return nil, errors.New("reference contents exceed 16 MiB expanded")
-		}
-		r, err := f.Open()
+	for _, m := range read.Members {
+		entry, err := budget.take(m)
 		if err != nil {
-			return nil, err
-		}
-		member, readErr := io.ReadAll(io.LimitReader(r, int64(remaining)+1))
-		closeErr := r.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		entry, err := readReferenceMember(name, member, budget)
-		if err != nil {
-			return nil, fmt.Errorf("ZIP member %q: %w", name, err)
+			return nil, fmt.Errorf("ZIP member %q: %w", m.Path, err)
 		}
 		out = append(out, entry)
 	}
@@ -200,42 +164,38 @@ func readReferenceMember(name string, data []byte, budget *referenceBudget) (Sou
 	if budget.entries > maxReferenceEntries || budget.bytes > maxReferenceBytes {
 		return out, errors.New("references exceed 64 files or 16 MiB expanded")
 	}
-	if len(data) == 0 {
-		return out, errors.New("reference is empty")
+	member, _, err := classifyMember(name, data, MaterializerArchiveLimits)
+	if err != nil {
+		return out, err
 	}
-	ext := strings.ToLower(path.Ext(name))
-	if bytes.HasPrefix(data, []byte{'P', 'K'}) || ext == ".zip" {
-		return out, errors.New("nested archives are not supported; provide their files directly")
+	return budget.account(member)
+}
+
+// take charges one already-validated archive member against the running budget
+// shared by every reference of a composition.
+func (b *referenceBudget) take(m ArchiveMember) (SourceContent, error) {
+	b.entries++
+	b.bytes += len(m.Data)
+	if b.entries > maxReferenceEntries || b.bytes > maxReferenceBytes {
+		return SourceContent{}, errors.New("references exceed 64 files or 16 MiB expanded")
 	}
-	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" {
-		config, format, err := image.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			return out, errors.New("image content is invalid")
+	return b.account(m)
+}
+
+func (b *referenceBudget) account(m ArchiveMember) (SourceContent, error) {
+	out := SourceContent{Name: m.Path, SHA256: (pure.Result{Bytes: m.Data}).SHA256(), MimeType: m.MIME}
+	if strings.HasPrefix(m.MIME, "image/") {
+		b.images++
+		if b.images > maxReferenceImages {
+			return out, imageCountError(MaterializerArchiveLimits)
 		}
-		if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > maxReferencePixels {
-			return out, errors.New("reference image exceeds 24 million pixels")
-		}
-		budget.images++
-		if budget.images > maxReferenceImages {
-			return out, errors.New("use up to eight reference images per composition")
-		}
-		out.MimeType = "image/" + format
-		out.Image = data
+		out.Image = m.Data
 		return out, nil
 	}
-	switch ext {
-	case ".txt", ".md", ".markdown", ".html", ".htm", ".css", ".json", ".csv", ".svg":
-		if !utf8.Valid(data) || bytes.ContainsRune(data, '\x00') {
-			return out, errors.New("reference text must be UTF-8")
-		}
-		budget.text += len(data)
-		if budget.text > maxReferenceText {
-			return out, errors.New("reference text exceeds 256 KiB in total")
-		}
-		out.MimeType = "text/plain"
-		out.Text = string(data)
-		return out, nil
-	default:
-		return out, errors.New("unsupported reference; use PNG, JPEG, GIF, UTF-8 text, Markdown, HTML, CSS, JSON, CSV, or SVG")
+	b.text += len(m.Data)
+	if b.text > maxReferenceText {
+		return out, textTotalError(MaterializerArchiveLimits)
 	}
+	out.Text = string(m.Data)
+	return out, nil
 }

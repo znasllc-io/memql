@@ -216,8 +216,9 @@ HTML retain their rendered preview and editable source.
 
 **Publish** saves the file and makes it a template in the Email app for its
 organization. Publishing the same file again updates that template. Resolve
-any issues shown before publishing. **Save as layout** keeps the finished
-layout for the organization’s future emails. Local files use **Save to MemQL**
+any issues shown before publishing. While MemQL is writing an email, the
+document is read-only and the bar shows how long it has taken; **Cancel** stops
+it, and a failed writing shows its reason with **Retry**. Local files use **Save to MemQL**
 first, preserving the bytes and organization choice and opening the saved copy.
 Publishing never sends a message. Editing a published template returns it to
 draft; concurrent edits require comparing with the latest revision.

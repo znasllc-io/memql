@@ -3,10 +3,14 @@ package work
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
@@ -19,7 +23,27 @@ func (i *Integration) AskFeedback(ctx context.Context, owner, runID, question, k
 	return i.AskFeedbackWithPolicy(ctx, owner, runID, question, kind, options, expires, false)
 }
 
+// AskFeedbackWithPolicy asks a question shown as words (no presentation).
 func (i *Integration) AskFeedbackWithPolicy(ctx context.Context, owner, runID, question, kind string, options []map[string]any, expires time.Time, optional bool) (string, error) {
+	return i.AskFeedbackPresented(ctx, owner, runID, question, kind, "", options, expires, optional)
+}
+
+// AskFeedbackPresented is AskFeedbackWithPolicy with how the question is shown:
+// presentation "" shows it as words, and workstate.FeedbackPresentationLayouts
+// as a choice of built-in email layouts -- kind choice, every option's value a
+// layout id, stored as the exact id it names -- which Ask shows as the
+// layouts' wireframes.
+//
+// A WIREFRAME IS THE SERVER'S TO DRAW. One a caller put on an option is dropped
+// whatever the presentation, so a model never puts a picture of its own in
+// front of a person; a choice of layouts gets each layout's wireframe drawn
+// here, as every picker draws it (emaildoc.BuiltinWireframe). The drawings ride
+// the stored options alone. The question's subject -- what an answer is
+// checked against and what the question's id is hashed from -- holds the
+// options as asked, so a question with no presentation is stored byte for byte
+// as it always was, and a choice of layouts keeps its id however its layouts
+// come to be drawn.
+func (i *Integration) AskFeedbackPresented(ctx context.Context, owner, runID, question, kind, presentation string, options []map[string]any, expires time.Time, optional bool) (string, error) {
 	if strings.TrimSpace(question) == "" || len(question) > 8000 {
 		return "", fmt.Errorf("feedback needs a concise, nonempty question")
 	}
@@ -37,7 +61,14 @@ func (i *Integration) AskFeedbackWithPolicy(ctx context.Context, owner, runID, q
 		}
 		seen[value] = true
 	}
-	subject := map[string]any{"question": question, "kind": kind, "options": options}
+	asked, shown, err := presentedOptions(kind, presentation, options)
+	if err != nil {
+		return "", err
+	}
+	subject := map[string]any{"question": question, "kind": kind, "options": asked}
+	if presentation != "" {
+		subject["presentation"] = presentation
+	}
 	if optional {
 		if err := i.optionalFeedbackSubject(ctx, owner, runID, subject); err != nil {
 			return "", err
@@ -46,7 +77,62 @@ func (i *Integration) AskFeedbackWithPolicy(ctx context.Context, owner, runID, q
 		// not a new caller-supplied expiry on every retry.
 		expires = time.Time{}
 	}
-	return i.parkHumanDecision(ctx, owner, runID, "feedback", subject, question, options, expires)
+	return i.parkHumanDecision(ctx, owner, runID, "feedback", subject, question, shown, expires)
+}
+
+// optionWireframe is the key of an option's wireframe: an SVG the server drew.
+const optionWireframe = "wireframe"
+
+// presentedOptions answers a question's options as asked and as shown. Asked
+// are the caller's, less any wireframe. For a choice of layouts each value is
+// the exact layout id it names, its surrounding space trimmed, so an answer
+// carries an id campaignComposeEmail takes as it is, and each shown option has
+// that layout's wireframe; otherwise the shown options are the asked ones. The
+// caller's options are not changed.
+func presentedOptions(kind, presentation string, options []map[string]any) (asked, shown []map[string]any, err error) {
+	switch presentation {
+	case "":
+		asked = withoutWireframes(options)
+		return asked, asked, nil
+	case workstate.FeedbackPresentationLayouts:
+		if kind != "choice" {
+			return nil, nil, fmt.Errorf("a choice of layouts must be kind choice")
+		}
+	default:
+		return nil, nil, fmt.Errorf("feedback presentation must be %s, or left out", workstate.FeedbackPresentationLayouts)
+	}
+	asked = make([]map[string]any, len(options))
+	shown = make([]map[string]any, len(options))
+	for n, option := range options {
+		id := rowString(option, "value")
+		wireframe, err := emaildoc.BuiltinWireframe(id)
+		if errors.Is(err, emaildoc.ErrNotBuiltinLayout) {
+			return nil, nil, fmt.Errorf("%w; offer the layout ids emailLayoutCatalogue lists", err)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		asked[n] = maps.Clone(option)
+		delete(asked[n], optionWireframe)
+		asked[n]["value"] = id
+		shown[n] = maps.Clone(asked[n])
+		shown[n][optionWireframe] = wireframe
+	}
+	return asked, shown, nil
+}
+
+// withoutWireframes is the options less any wireframe a caller put on them:
+// the options as given when there is none to drop.
+func withoutWireframes(options []map[string]any) []map[string]any {
+	if !slices.ContainsFunc(options, func(option map[string]any) bool { _, drawn := option[optionWireframe]; return drawn }) {
+		return options
+	}
+	out := make([]map[string]any, len(options))
+	for n, option := range options {
+		out[n] = maps.Clone(option)
+		delete(out[n], optionWireframe)
+	}
+	return out
 }
 
 func (i *Integration) AskComputerScope(ctx context.Context, owner, runID string, subject map[string]any) (string, error) {

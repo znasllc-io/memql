@@ -1,0 +1,14 @@
+How did we do?
+
+You bought this recently, and we would love to hear what you think. A short review helps others choose.
+
+Write a review
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

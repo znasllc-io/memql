@@ -384,6 +384,7 @@ var tierDecidesTheRead = map[string]string{
 	"deliveryLedgerForCampaign":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailLayoutById":               "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailLayoutsForAccount":        "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"brandKitForAccount":            "memql#5598: the mandatory organization and Email app boundary scopes an organization's one brand kit; creator-only filtering would hide the kit from the authorized peers who edit it and make templates with it. TestBrandKitAcrossReplicasAndOrganizations checks a colleague's read and a stranger's.",
 	"emailRuleById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailRules":                    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"journeyById":                   "memql#6032: the mandatory organization and Email app boundary scopes automations to current members; creator-only filtering would exclude authorized organization peers.",

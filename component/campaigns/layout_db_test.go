@@ -16,6 +16,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -255,6 +256,17 @@ func layoutIDs(t *testing.T, w *Worker, ctx context.Context, account string, inc
 	return ids
 }
 
+// builtinLayoutIDs is the ids of the built-in layouts in catalogue order, the
+// order a picker lists them in before an organization's own. Taken from the
+// catalogue, so a layout added to it does not change these tests.
+func builtinLayoutIDs() []string {
+	var ids []string
+	for _, l := range emaildoc.Layouts() {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
 func TestLayoutRevisionGateArchiveAndRestore(t *testing.T) {
 	w := newLayoutWorld(t)
 	account, other, layout := w.suffix+"-org", w.suffix+"-other-org", w.suffix+"-layout"
@@ -333,7 +345,8 @@ func TestLayoutRevisionGateArchiveAndRestore(t *testing.T) {
 		t.Fatalf("a stale revision: %v", err)
 	}
 	// A layout already saved on one replica is listed on the other, built-ins first.
-	wantList := []string{"builtin:confirmation", "builtin:letter", "builtin:article", "builtin:spotlight", "org:" + layout}
+	builtins := builtinLayoutIDs()
+	wantList := append(append([]string(nil), builtins...), "org:"+layout)
 	if ids := layoutIDs(t, w.workers[1], w.owner, account, false); strings.Join(ids, ",") != strings.Join(wantList, ",") {
 		t.Fatalf("replica 1 lists %v", ids)
 	}
@@ -353,10 +366,10 @@ func TestLayoutRevisionGateArchiveAndRestore(t *testing.T) {
 	if status != "archived" || archivedAt == current {
 		t.Fatalf("archive gave %q at %q", status, archivedAt)
 	}
-	if ids := layoutIDs(t, w.workers[0], w.owner, account, false); strings.Join(ids, ",") != strings.Join(wantList[:4], ",") {
+	if ids := layoutIDs(t, w.workers[0], w.owner, account, false); strings.Join(ids, ",") != strings.Join(builtins, ",") {
 		t.Fatalf("an archived layout is still offered: %v", ids)
 	}
-	if ids := layoutIDs(t, w.workers[0], w.owner, account, true); len(ids) != 5 || ids[4] != "org:"+layout {
+	if ids := layoutIDs(t, w.workers[0], w.owner, account, true); len(ids) != len(builtins)+1 || ids[len(builtins)] != "org:"+layout {
 		t.Fatalf("includeArchived lacks the archived layout: %v", ids)
 	}
 	if got := read(0); str(got, "status") != "archived" || str(got, "name") == "" || got["document"] == nil {
@@ -375,7 +388,7 @@ func TestLayoutRevisionGateArchiveAndRestore(t *testing.T) {
 	if status != "active" || restoredAt == archivedAt {
 		t.Fatalf("restore gave %q at %q", status, restoredAt)
 	}
-	if ids := layoutIDs(t, w.workers[1], w.owner, account, false); len(ids) != 5 {
+	if ids := layoutIDs(t, w.workers[1], w.owner, account, false); len(ids) != len(builtins)+1 {
 		t.Fatalf("a restored layout is not offered again: %v", ids)
 	}
 	editedAt, _ := saveOn(t, w.workers[1], w.owner, layoutArgs(t, layout, account, restoredAt, "save", func(a map[string]any) { a["name"] = "Acme letter, restored" }))
@@ -389,7 +402,7 @@ func TestLayoutRevisionGateArchiveAndRestore(t *testing.T) {
 
 	// The builtins run the whole way through the engine, and the list keeps
 	// the order a node map would lose: built-ins first, then the organization's.
-	w.checkBuiltinsThroughTheEngine(t, account, layout+"-through-the-engine", wantList[:4])
+	w.checkBuiltinsThroughTheEngine(t, account, layout+"-through-the-engine", builtins)
 }
 
 // checkBuiltinsThroughTheEngine calls campaignSaveLayout and emailLayouts as a
@@ -432,10 +445,12 @@ func (w *layoutWorld) checkBuiltinsThroughTheEngine(t *testing.T, account, layou
 	for _, n := range ordered {
 		ids = append(ids, n.ID)
 	}
-	if len(ids) < 6 || strings.Join(ids[:4], ",") != strings.Join(builtins, ",") {
+	// The built-ins, then at least the two layouts this test saved.
+	n := len(builtins)
+	if len(ids) < n+2 || strings.Join(ids[:n], ",") != strings.Join(builtins, ",") {
 		t.Fatalf("the engine delivered %v; the built-ins must come first, in catalogue order", ids)
 	}
-	if !strings.Contains(strings.Join(ids[4:], ","), "org:"+layout) {
+	if !strings.Contains(strings.Join(ids[n:], ","), "org:"+layout) {
 		t.Fatalf("the layout saved by the builtin is not listed: %v", ids)
 	}
 }
@@ -478,9 +493,10 @@ func TestLayoutStaysInItsOrganization(t *testing.T) {
 	}
 
 	// The people who belong see it. A reader lists but does not write.
+	builtinCount := len(builtinLayoutIDs())
 	for name, ctx := range map[string]context.Context{"colleague": colleague, "viewer": viewer} {
 		ids := layoutIDs(t, w.workers[1], ctx, victim, false)
-		if len(ids) != 5 || ids[4] != "org:"+layout {
+		if len(ids) != builtinCount+1 || ids[builtinCount] != "org:"+layout {
 			t.Fatalf("%s lists %v", name, ids)
 		}
 		row, found, err := w.workers[1].store.EmailLayoutByID(fresh(ctx), layout)

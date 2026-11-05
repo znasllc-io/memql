@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/integrations/email"
+	"slices"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -200,6 +201,22 @@ func (a *CognitionEngineAdapter) ToolDefinitionsForNames(names []string) []commo
 	return a.Engine.ToolDefinitionsForNames(bound)
 }
 
+// ToolAgentRoles answers the agent roles that may call a tool -- its
+// @requiresAgentRole -- and none when any agent may or the engine has no such
+// tool. Owned work offers a tool only on a turn whose acting agent it admits
+// (integrations/agent work_execution.go); the adapter exists because the tool
+// registry is on the concrete *MemQLEngine.
+func (a *CognitionEngineAdapter) ToolAgentRoles(tool string) []string {
+	if a == nil || a.Engine == nil || a.Engine.Tools() == nil {
+		return nil
+	}
+	t, err := a.Engine.Tools().Get(memql.HarnessToolBinding(tool))
+	if err != nil || t == nil {
+		return nil
+	}
+	return slices.Clone(t.RequiresAgentRole)
+}
+
 func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
@@ -355,6 +372,14 @@ func (a *CampaignsEngineAdapter) Execute(ctx context.Context, query string) (any
 
 func (a *CampaignsEngineAdapter) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
 	return a.Engine.OrganizationCapable(ctx, account, verb, resource)
+}
+
+// InvokeAIChatWithFilteredTools is the engine's bounded tool loop, for the one
+// campaigns step that calls a model: an email composition run
+// (component/campaigns/compose_run.go), whose call on the Apps route is one
+// app session that takes the step whole.
+func (a *CampaignsEngineAdapter) InvokeAIChatWithFilteredTools(ctx context.Context, templateID string, data map[string]any, toolNames []string) (string, error) {
+	return a.Engine.InvokeAIChatWithFilteredTools(ctx, templateID, data, toolNames)
 }
 
 // campaignEmailSender resolves the email sender off the integration

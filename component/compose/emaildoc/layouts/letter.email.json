@@ -3,14 +3,14 @@
   "preheader": "Why we started, and what comes next.",
   "layout": "builtin:letter",
   "theme": {
-    "page": "#eef0f3",
+    "page": "#f1f1f1",
     "canvas": "#ffffff",
-    "primary": "#1f5f8b",
-    "secondary": "#5b8fb9",
-    "accent": "#d2322d",
-    "tint": "#f6f4ef",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
     "text": "#1c1c1c",
-    "muted": "#696e77",
+    "muted": "#666666",
     "headingFont": "Georgia",
     "bodyFont": "Arial"
   },
@@ -82,22 +82,28 @@
         0
       ],
       "background": "secondary",
+      "inset": [
+        29.5,
+        0,
+        29.5,
+        0
+      ],
       "maxWidth": 600,
       "columns": [
         {
-          "width": 56,
+          "width": 44,
           "blocks": [
             {
               "id": "signature-photo",
               "type": "image",
               "alt": "Founder photo",
-              "width": 204,
-              "height": 214
+              "width": 256,
+              "height": 236
             }
           ]
         },
         {
-          "width": 41.33,
+          "width": 53.33,
           "blocks": [
             {
               "id": "signature-space",
@@ -117,6 +123,7 @@
               "text": "Founder of Acme",
               "size": 14,
               "lineHeight": 16,
+              "color": "white",
               "align": "center"
             }
           ]
@@ -131,7 +138,7 @@
     {
       "id": "promo",
       "type": "columns",
-      "role": "brand",
+      "role": "content",
       "maxWidth": 552,
       "columns": [
         {
@@ -181,8 +188,8 @@
       "type": "heading",
       "role": "brand",
       "text": "Follow us",
-      "size": 20,
-      "lineHeight": 20,
+      "size": 18.7,
+      "lineHeight": 18.7,
       "color": "primary",
       "italic": true,
       "weight": 700,
@@ -219,7 +226,7 @@
       "size": 14.7,
       "lineHeight": 22.4,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -250,11 +257,11 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
-      ]
+      ],
+      "lineGap": 16
     }
   ]
 }

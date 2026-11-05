@@ -5,7 +5,9 @@ import { Button, EmptyState, LiveList, Notice, RecordRow, Refine, Select, type R
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import type { LiveListSource } from "../../../live/LiveList";
 import {
+  compositionFailed,
   isPublished,
+  isWriting,
   layoutName,
   templateFingerprint,
   templateFromRow,
@@ -168,6 +170,8 @@ export function TemplatesView({ source, listKey, readings, layoutsSettled, organ
         }
         renderRow={(template, tick) => {
           const archived = templateIsArchived(template);
+          // An email being written, or one that failed, is the row's state; a finished one is the template's own.
+          const composing = isWriting(template) || compositionFailed(template);
           const layout = template.layoutId === "" ? WORDS.customLayout : layoutName(readings, template.layoutId);
           const organization = organizationName(template.accountId);
           return (
@@ -175,7 +179,9 @@ export function TemplatesView({ source, listKey, readings, layoutsSettled, organ
               icon={<FileText size={16} aria-hidden />}
               name={templateName(template)}
               secondary={template.subject}
-              state={templateState(template.status)}
+              state={composing ? WORDS.composition[template.composition!.state as "writing" | "failed"] : templateState(template.status)}
+              tone={composing ? (isWriting(template) ? "accent" : "warn") : undefined}
+              stateTitle={compositionFailed(template) ? template.composition!.error : undefined}
               current={!archived}
               dim={archived}
               onOpen={() => onOpen(template.id)}

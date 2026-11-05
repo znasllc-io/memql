@@ -539,7 +539,7 @@ func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobRea
 	}
 	key := blobStorageKey(blobURL, container)
 	if key == "" {
-		return nil, "", "", errors.New("the file row records no storage location in this cluster's Library")
+		return nil, "", "", errBlobNoLocation
 	}
 	// The row is the caller's; the KEY must be its owner's too. This reads the
 	// key with the node's credential, so a row naming somebody else's object
@@ -547,10 +547,17 @@ func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobRea
 	// their file into the caller's audience or picture. Judged as the exact key
 	// read.
 	if err := librarykey.CheckKey(key, owner); err != nil {
-		return nil, "", "", errors.New("the file is not stored in its owner's Library")
+		return nil, "", "", errBlobNotOwners
 	}
 	return reader, container, key, nil
 }
+
+// The two answers of blobTarget that say where a file row points, not whether
+// storage answered: a file that will never be read, however often it is asked.
+var (
+	errBlobNoLocation = errors.New("the file row records no storage location in this cluster's Library")
+	errBlobNotOwners  = errors.New("the file is not stored in its owner's Library")
+)
 
 func (w *Worker) objectStore(ctx context.Context) (blobReader, string, error) {
 	w.blobOnce.Do(func() {

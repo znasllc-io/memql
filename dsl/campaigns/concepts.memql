@@ -9,7 +9,7 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// NINETEEN CONCEPTS. Seven answer the five questions a send has to answer --
+// TWENTY-TWO CONCEPTS. Eight answer the five questions a send has to answer --
 // who, what, from whom, when, and what happened. The rest are the sending
 // engine's own state (memql#3348) and the compliance, engagement, automation,
 // recurrence, newsletter and testing surfaces layered on top:
@@ -18,6 +18,7 @@
 //   recipient          WHO         one address in an audience, with its subscription state
 //   template           WHAT        the subject + bodies, authored once and reused
 //   emailLayout        WHAT        an organization's saved email, kept as the starting point for the next one
+//   brandKit           WHAT        an organization's look: the theme, logo, signature, footer and reply its emails take
 //   senderIdentity     FROM        a mailbox this deployment may send as (memql#4821)
 //   campaign           WHEN        audience x template x schedule, plus the send state
 //   delivery           OUTCOME     one row per recipient per campaign
@@ -33,11 +34,14 @@
 //   newsletterBinding  NEWSLETTER  a deployable's sign-up form bound to an audience and a welcome
 //   newsletterSignup   NEWSLETTER  one opt-in and its welcome, from consent to outcome
 //   testSettings       TESTING     an organization's shared testing audience
+//   journey            AUTOMATION  an organization's email automation: a trigger and its steps
+//   journeyEnrollment  AUTOMATION  one recipient's way through a journey
 //
 // The census used to say EIGHT and list nine, having been written before the
-// reputation and warmup rows landed, and later said THIRTEEN over eighteen
-// declarations. A count in a header is a claim the file makes about itself;
-// keep it true when you add to this file.
+// reputation and warmup rows landed, later said THIRTEEN over eighteen
+// declarations, and then NINETEEN over twenty-one, the two journey concepts
+// unlisted. A count in a header is a claim the file makes about itself; keep it
+// true when you add to this file.
 //
 // ORGANIZATION OWNERSHIP on the operator-facing resources. Creation stamps
 // the authenticated person as ownerUserId and persists the selected accountId.
@@ -143,6 +147,7 @@ concept template {
   layoutId          string  @description("The layout the document was made from: 'builtin:<name>' or 'org:<layoutId>'. Provenance only; an opaque id the server issues. Empty for custom HTML.")
   preheader         string  @description("The hidden line an inbox shows after the subject, from the document. It is already written into htmlBody; kept here so an editor can show it.")
   sourceArtifactId  string  @description("The Library file the template was published from. There is one template per organization and file: publishing the same file again updates this template (templateForSource). Empty for templates not made from a file.")
+  composition       object  @description("The state of an AI composition of this template, when one has been asked for: {goalId, state: writing|done|failed, startedAt, finishedAt, error, request: {layoutId, name, description, fileIds, referenceFileId, requestedBy}, baseRevision, notes}. request.requestedBy is the bare user id of the person who asked, the only person who may retry it. error is one short fixed sentence. notes lists, in plain sentences, each file left out and why. Absent on a template nobody asked to have written. Written only by the campaigns capabilities; campaignSaveTemplate leaves it as stored, except that a person's save or publish of a template whose composition failed ends the failure (state done, with the request, error and notes kept).")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
@@ -161,6 +166,24 @@ concept emailLayout {
   document          object!  @description("The layout-mode email document (emaildoc), validated on every save.")
   sourceArtifactId  string   @description("The Library file the layout was saved from, when it was.")
   status            enum("active", "archived")!  @description("Archived layouts stay readable for emails made from them and leave the layout picker.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+/// An organization's brand kit: the look a colourless layout takes when an email is made from it --
+/// the theme's colours and fonts, the logo, the signature, the follow line, the social links, the
+/// footer and the standing reply. One per organization: its id is made from the organization's, so
+/// two members who both create it meet in one row. Its pictures are kept inside the kit as data:
+/// pictures, because a Library picture can be read only by whoever uploaded it and a kit is every
+/// member's. Only campaignSaveBrandKit writes it, on the revision the person read (the row's
+/// createdAt). Changing a kit does not change the templates already made with it.
+// @no-displayCard: one configuration row per organization, shown on Email Settings
+@serverWritten
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept brandKit {
+  ownerUserId  string!  @description("The person who first saved the kit. Preserved when organization members save it again.")
+  accountId    string!  @description("The organization the kit belongs to. Fixed when the kit is first saved; an organization has one kit.")
+  kit          object!  @description("The kit as campaignSaveBrandKit validated it (emaildoc.BrandKit): theme, logo {src, onColour, wide, alt, href}, signature {photo, name {src or text}, title, picture}, follow, social [{network, href, icon}], footer {lines, links [{label, href}], separator} and reply {heading, button {label, href}, note}. Every picture is a data: PNG, JPEG or GIF, and the footer links {{unsubscribeUrl}}.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }

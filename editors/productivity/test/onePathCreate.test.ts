@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 
 // ONE CREATION PATH (design: docs/superpowers/specs/2026-10-11-materializer-front-door-design.md,
 // section 5). In this extension a new file comes from the Materializer: the SDK's materialize
-// (New Markdown) and startMaterialize (email drafts) record what was asked for, what it was made
+// (New Markdown) records what was asked for, what it was made
 // from and which run made it. Uploading bytes the person already has is the one other way in, and
 // only the modules in ALLOWED do it.
 //

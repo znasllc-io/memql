@@ -4,6 +4,7 @@ import { useSession } from "../../../chrome/access";
 import { ContentSkeleton, Field, Head, SetupGroup, canConfigure } from "../../../kit";
 import { OrganizationSendingDomain } from "../../../modules/connections/AzureEmailConnections";
 import { CampaignPackageConfig } from "../../../modules/connections/CampaignPackageConfig";
+import type { UploadProvider } from "../../../items/upload";
 import { AccountPicker } from "../../accounts/AccountPicker";
 import { useDefaultOrganization } from "../../accounts/organization";
 import { useAccountOptionsFeed } from "../../accounts/tie";
@@ -12,8 +13,10 @@ import { organizationName, selectableOrganizations } from "../organizations";
 import { recordNamed, useOpenSettingsRequest, type SettingsRequest } from "../openRequest";
 import { senderIdentityFromRow } from "../rows";
 import { EMAIL_REQUIRES, EMAIL_WANTS, type EmailSettings } from "../settings";
-import type { EmailFeeds, EmailRecordFeeds } from "../useEmail";
+import { useBrandKit, type EmailFeeds, type EmailRecordFeeds } from "../useEmail";
 import { AddSenderWizard } from "./AddSenderWizard";
+import { BrandPage } from "./brand/BrandPage";
+import { BrandPanel } from "./brand/BrandPanel";
 import { PreferencesPanel } from "./PreferencesPanel";
 import { SenderPage } from "./SenderPage";
 import { SendersPanel } from "./SendersPanel";
@@ -24,24 +27,27 @@ import { TestingPanel } from "./TestingPanel";
 // ONE PAGE, GROUPED BY WHOSE IT IS (memql#6033, Ruling 4). The Set up group
 // leads, because it is where the gear's "not set up" mark points. Then the
 // organization -- asked ONCE, and only when there is a choice -- scopes
-// everything an organization owns: its sending domain, its senders, its testing
-// audience and its package. Preferences come last because they belong to this
-// browser, not to an organization. The page used to ask for the organization
-// three times, once per subject, and a person could be looking at three
-// different organizations at once.
+// everything an organization owns: its sending domain, its senders, its brand,
+// its testing audience and its package. Preferences come last because they
+// belong to this browser, not to an organization. The page used to ask for the
+// organization three times, once per subject, and a person could be looking at
+// three different organizations at once.
 //
-// THE PAGE GIVES WAY. A sender's page, the Add a sender wizard and the sending
-// domain's wizard and page each take the pane, as every list's page does: the
-// window draws its one trail row for the FIRST heading on the pane, so a page
-// drawn beneath Settings' own heading would have no way back. What Settings
-// drew stays MOUNTED behind them, parked, so an unsaved choice survives a visit.
+// THE PAGE GIVES WAY. A sender's page, the Add a sender wizard, the Brand page
+// and the sending domain's wizard and page each take the pane, as every list's
+// page does: the window draws its one trail row for the FIRST heading on the
+// pane, so a page drawn beneath Settings' own heading would have no way back.
+// What Settings drew stays MOUNTED behind them, parked, so an unsaved choice
+// survives a visit.
 
-type Page = { kind: "list" } | { kind: "add" } | { kind: "sender"; id: string };
+type Page = { kind: "list" } | { kind: "add" } | { kind: "sender"; id: string } | { kind: "brand" };
 
-export function SettingsSection({ feeds, recordFeeds, writes, settings, update, request, onOrganization }: {
+export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings, update, request, onOrganization }: {
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
+  /** The shell's one upload path: the Brand page's pictures go through it. */
+  uploads: UploadProvider;
   settings: EmailSettings;
   update: (patch: Partial<EmailSettings>) => void;
   /** Open Settings on one organization (`useOpenSettings`); acted on once per revision. */
@@ -82,16 +88,19 @@ export function SettingsSection({ feeds, recordFeeds, writes, settings, update, 
   useEffect(() => { onOrganization(accountId); }, [accountId, onOrganization]);
   const organization = organizationName(accounts, accountId);
   const mayConfigure = canConfigure(access?.role ?? "");
+  // The organization's brand kit: its row here and its page read the same one.
+  const brand = useBrandKit(accountId);
 
   // A sender's page opens whichever sender its id names in the app's WHOLE
   // feed, however the list is filtered; one the feed has not delivered yet
   // leaves the list on screen and the page opens when it does.
   const sender = page.kind === "sender" ? recordNamed(feeds.senders.snapshot.rows, senderIdentityFromRow, page.id) : null;
   const adding = page.kind === "add";
-  const away = adding || sender !== null;
+  const branding = page.kind === "brand" && accountId !== "";
+  const away = adding || sender !== null || branding;
 
   return (
-    <div className="os-settings os-settings-wide os-app-stack email-settings">
+    <div className="os-settings os-settings-wide os-app-stack email-settings" data-os-dividers="none">
       <div className="email-pane" hidden={away}>
         <div className="email-pane" hidden={domainOpen}>
           <Head title="Settings" />
@@ -135,6 +144,7 @@ export function SettingsSection({ feeds, recordFeeds, writes, settings, update, 
                 onOpen={(id) => setPage({ kind: "sender", id })}
                 onAdd={() => setPage({ kind: "add" })}
               />
+              <BrandPanel brand={brand} onOpen={() => setPage({ kind: "brand" })} />
               <TestingPanel key={`testing:${accountId}`} accountId={accountId} audiences={feeds.audiences} testSettings={recordFeeds.testSettings} />
               {/* A package is read and written by an owner or developer, and by
                   nobody else: for the rest it is absent rather than refused. */}
@@ -159,6 +169,15 @@ export function SettingsSection({ feeds, recordFeeds, writes, settings, update, 
           writes={writes}
           onBack={() => setPage({ kind: "list" })}
           onCreated={(id) => setPage({ kind: "sender", id })}
+        />
+      ) : null}
+      {branding ? (
+        <BrandPage
+          accountId={accountId}
+          organization={organization}
+          brand={brand}
+          uploads={uploads}
+          onBack={() => setPage({ kind: "list" })}
         />
       ) : null}
       {sender === null ? null : (

@@ -4,8 +4,6 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { emailNameProblem, newEmailPage } from "../src/newEmailPage.js";
 import { EMAIL_COPY, fill } from "../src/emailCopy.js";
-import { previewHTML, skeletonHTML } from "../src/emailPreview.js";
-import type { EmailBlock } from "../src/emailDocument.js";
 
 const C = EMAIL_COPY.newEmail;
 
@@ -52,32 +50,16 @@ function fixture(saved?: unknown, globals: Record<string, unknown> = {}) {
   return { dom, doc, el, send, type, key, cards, card, named, acts, act, barState, visible, posted, loadThumbnail, messages, focuses, away, back, state: () => state };
 }
 
-const theme = { page: "#eef0f3", canvas: "#ffffff", primary: "#2f5d8a", secondary: "#6f93b8", accent: "#d9822b", tint: "#f5f4f0", text: "#2b2b2b", muted: "#8a8a8a", headingFont: "Georgia", bodyFont: "Helvetica" };
-const layoutDocument = (layout: string, blocks: EmailBlock[]) => ({ subject: "Hello from Acme", preheader: "A short note", layout, theme, blocks });
-const logo: EmailBlock = { id: "logo", type: "image", role: "brand", src: "", alt: "Acme", width: 120, height: 40 };
-const footer: EmailBlock = { id: "footer", type: "footer", role: "brand", lines: ["Acme Co", "1 Example Street"] };
-const ARTICLE = layoutDocument("builtin:article", [logo,
-  { id: "banner", type: "image", src: "", alt: "Banner", width: 600, height: 200 },
-  { id: "headline", type: "heading", text: "Three ways to get more from your plan", size: 30 },
-  { id: "intro", type: "text", text: "Most busy mornings start the same way. Here are three small changes our customers swear by." },
-  { id: "cta", type: "button", label: "Read the guide", href: "https://acme.example/guide" }, footer]);
+const SVG = (label: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 780" width="600" height="780"><rect width="600" height="780" fill="#fff"/><title>${label}</title></svg>`;
 const BUILTINS = [
-  { id: "builtin:confirmation", name: "Confirmation", description: "Asks a new subscriber to confirm their address.", kind: "builtin",
-    document: layoutDocument("builtin:confirmation", [logo, { id: "headline", type: "heading", text: "Confirm your address" }, { id: "cta", type: "button", label: "Confirm", href: "{{confirmUrl}}" }, footer]) },
-  { id: "builtin:letter", name: "Letter", description: "A personal note with a signature.", kind: "builtin",
-    document: layoutDocument("builtin:letter", [logo, { id: "body", type: "text", text: "Dear reader, a short note from all of us at Acme." }, footer]) },
-  { id: "builtin:article", name: "Article", description: "A banner, a headline, the story and a button.", kind: "builtin", document: ARTICLE },
-  { id: "builtin:spotlight", name: "Spotlight", description: "One offer, front and centre.", kind: "builtin",
-    document: layoutDocument("builtin:spotlight", [logo, { id: "offer", type: "highlight", text: "Members save 20 percent" }, { id: "cta", type: "button", label: "Shop now", href: "https://acme.example" }, footer]) },
-];
-const ACME_LAYOUTS = [
-  { id: "org:acme-monthly", name: "Monthly", description: "Our monthly letter.", kind: "organization", document: layoutDocument("org:acme-monthly", [logo, { id: "body", type: "text", text: "This month at Acme." }, footer]) },
-  { id: "org:acme-welcome", name: "Welcome", description: "The first email a new member gets.", kind: "organization", document: layoutDocument("org:acme-welcome", [logo, { id: "headline", type: "heading", text: "Welcome" }, footer]) },
+  { id: "builtin:confirmation", name: "Confirmation", category: "Welcome", description: "Asks a new subscriber to confirm their address.", wireframe: SVG("Confirmation") },
+  { id: "builtin:letter", name: "Letter", category: "Letters", description: "A personal note with a signature.", wireframe: SVG("Letter") },
+  { id: "builtin:article", name: "Article", category: "Articles", description: "A banner, a headline, the story and a button.", wireframe: SVG("Article") },
+  { id: "builtin:spotlight", name: "Spotlight", category: "Promotions", description: "One offer, front and centre.", wireframe: SVG("Spotlight") },
 ];
 const acme = { id: "acme", name: "Acme Co" };
 const client = { id: "client-org", name: "Client Example" };
 const setup = (extra: Record<string, unknown> = {}) => ({ type: "setup", connected: true, domain: "acme.example", organizations: [acme], organizationId: "acme", layouts: BUILTINS, dictation: false, ...extra });
-const rendered = `<html><head><style>body{margin:0}</style></head><body style="background-color:#eef0f3"><table><tr><td data-block="headline">Hello</td></tr><tr><td data-block="cta"><a href="https://acme.example/guide" onclick="alert(1)">Read the guide</a></td></tr></table><script>alert(1)</script></body></html>`;
 const description = "Welcome the autumn subscribers and point them to the new guide.";
 const problem = { message: "The AI couldn’t finish within the time allowed. Try a smaller request, or choose another model in Fleet.", reference: "tools-4f7c2a" };
 
@@ -97,9 +79,11 @@ test("choosing a layout and a name makes it ready; a description adds Write it",
   assert.equal(f.barState(), C.chooseLayout);
   assert.deepEqual(f.acts(), []);
   assert.equal(f.el("layouts").getAttribute("role"), "radiogroup");
-  assert.equal(f.named(f.el("layouts")), C.layout);
+  assert.equal(f.el("layouts").getAttribute("aria-label"), C.layout);
   assert.deepEqual(f.cards().map(card => f.named(card)), ["Confirmation", "Letter", "Article", "Spotlight"]);
   assert.deepEqual(f.cards().map(card => f.named(card, "aria-describedby")), BUILTINS.map(layout => layout.description));
+  // Groups are quiet headings, in the engine's category order.
+  assert.deepEqual([...f.el("groups").querySelectorAll('[role="group"]')].map(group => f.named(group)), ["Welcome", "Letters", "Articles", "Promotions"]);
   assert.deepEqual(f.cards().map(card => card.getAttribute("aria-checked")), ["false", "false", "false", "false"]);
   assert.equal(f.el("layouts").closest(".loading"), null, "the cards stand still once the layouts are here");
   f.card("builtin:article").click();
@@ -119,30 +103,21 @@ test("choosing a layout and a name makes it ready; a description adds Write it",
   f.act(C.start).click();
   assert.deepEqual(f.posted("start"), [{ type: "start", layoutId: "builtin:article", name: "Autumn welcome" }]);
   // The page reports each state it shows, once.
-  assert.deepEqual(f.posted("shown").map(m => [m.state, m.loading]), [[C.loading, true], [C.chooseLayout, false], [C.nameIt, false], [C.ready, false]]);
+  assert.deepEqual(f.posted("shown").map(m => [m.state, m.loading]), [[C.loading, true], [C.chooseLayout, false], [C.nameIt, false], [C.ready, false], [C.starting, false]]);
   f.dom.window.close();
 });
 
-test("Write it posts the whole request and the page shows the layout's shape while writing", () => {
+test("Write it posts the whole request once and the page waits quietly for the host", () => {
   const f = ready();
   f.act(C.write).click();
-  f.act(C.write).click();
+  f.act(C.write)?.click();
   assert.deepEqual(f.posted("write"), [{ type: "write", layoutId: "builtin:article", name: "Autumn welcome", description }], "a double click writes once");
   assert.equal(f.doc.activeElement, f.el("bar-state"), "the focus waits on the state, not on an act that may go");
-  f.send({ type: "writing", layoutId: "builtin:article" });
-  assert.equal(f.visible("form"), false);
-  assert.equal(f.visible("writing"), true);
-  assert.equal(f.el("writing").querySelector(".sk-email")?.outerHTML, skeletonHTML(ARTICLE.blocks), "the chosen layout's shape");
-  assert.ok(f.el("writing").closest(".loading"), "the shape sweeps while the email is written");
-  assert.equal(f.barState(), C.writing);
+  assert.equal(f.visible("form"), true, "the form stays");
+  assert.equal(f.barState(), C.starting);
   assert.ok(f.el("bar-state").classList.contains("busy"));
-  assert.deepEqual(f.acts(), [[C.cancel, "text"]]);
-  f.act(C.cancel).click();
-  f.act(C.cancel).click();
-  assert.deepEqual(f.posted("cancel"), [{ type: "cancel" }]);
+  assert.deepEqual(f.acts(), [], "no act while the host works");
   f.send({ type: "idle" });
-  assert.equal(f.visible("form"), true);
-  assert.equal(f.visible("writing"), false);
   assert.equal((f.el("name") as HTMLInputElement).value, "Autumn welcome");
   assert.equal((f.el("description") as HTMLTextAreaElement).value, description);
   assert.equal(f.card("builtin:article").getAttribute("aria-checked"), "true");
@@ -157,10 +132,8 @@ test("Write it posts the whole request and the page shows the layout's shape whi
 test("a failure keeps the form filled and shows the problem with its reference", () => {
   const f = ready();
   f.act(C.write).click();
-  f.send({ type: "writing", layoutId: "builtin:article" });
   f.send({ type: "failed", problem });
   assert.equal(f.visible("form"), true);
-  assert.equal(f.visible("writing"), false);
   assert.equal((f.el("name") as HTMLInputElement).value, "Autumn welcome");
   assert.equal((f.el("description") as HTMLTextAreaElement).value, description);
   assert.equal(f.card("builtin:article").getAttribute("aria-checked"), "true");
@@ -187,127 +160,118 @@ test("a failure keeps the form filled and shows the problem with its reference",
   f.dom.window.close();
 });
 
-test("thumbnails replace each card's skeleton as they arrive", () => {
+test("each card draws the server's wireframe as an image and never as markup", () => {
   const f = fixture();
-  Object.assign(globalThis, { DOMParser: f.dom.window.DOMParser });
   f.send(setup());
-  for (const card of f.cards()) {
-    assert.ok(card.querySelector(".sk-email"), "a skeleton until the render arrives");
-    assert.equal(card.querySelector("iframe"), null);
-    assert.ok(card.querySelector(".sk-email")!.closest('[aria-hidden="true"]'), "the picture is not read out: the card's name is");
+  const decoded = (card: Element) => { const src = card.querySelector("img")!.getAttribute("src")!; assert.match(src, /^data:image\/svg\+xml;base64,/); return Buffer.from(src.split(",")[1]!, "base64").toString("utf8"); };
+  for (const layout of BUILTINS) {
+    const card = f.card(layout.id);
+    assert.equal(decoded(card), layout.wireframe);
+    assert.ok(card.querySelector("img")!.closest('[aria-hidden="true"]'), "the picture is not read out: the card's name is");
+    assert.equal(card.querySelector("img")!.getAttribute("alt"), "");
+    assert.equal(card.querySelector("svg"), null, "never inlined");
+    assert.equal(card.querySelector(".sk"), null, "no skeleton once the layouts are here");
   }
-  assert.equal(f.card("builtin:article").querySelector(".sk-email")!.outerHTML, skeletonHTML(ARTICLE.blocks), "each layout's own shape");
-  f.send({ type: "thumbnail", id: "builtin:article", html: rendered });
-  const card = f.card("builtin:article"), skeleton = card.querySelector(".sk-email")!;
-  const frame = card.querySelector("iframe")!;
-  assert.ok(frame, "the render goes into a frame");
-  assert.equal(frame.getAttribute("sandbox"), "", "a sandbox with no tokens: no scripts, no same origin");
-  assert.equal(frame.getAttribute("tabindex"), "-1");
-  assert.ok(frame.closest('[aria-hidden="true"]'));
-  const srcdoc = frame.getAttribute("srcdoc")!;
-  assert.equal(srcdoc, previewHTML(rendered, { blocks: false }));
-  assert.doesNotMatch(srcdoc, /<script|href=|onclick|data-block/);
-  assert.equal(f.visible(skeleton), true, "the skeleton stays until the render has loaded");
-  assert.equal(f.visible(frame), false);
-  f.loadThumbnail(frame);
-  assert.equal(f.visible(frame), true);
-  assert.equal(f.visible(skeleton), false);
-  for (const id of ["builtin:confirmation", "builtin:letter", "builtin:spotlight"]) assert.equal(f.visible(f.card(id).querySelector(".sk-email")!), true, id);
-  // A thumbnail for a layout the page does not list is ignored.
-  f.send({ type: "thumbnail", id: "builtin:elsewhere", html: rendered });
-  f.send({ type: "thumbnail", id: 7, html: rendered });
-  assert.equal(f.doc.querySelectorAll("#layouts iframe").length, 1);
-  // A render that failed sends no HTML: the card keeps its skeleton.
-  f.send({ type: "thumbnail", id: "builtin:letter", html: "" });
-  assert.equal(f.card("builtin:letter").querySelector("iframe"), null);
-  assert.equal(f.visible(f.card("builtin:letter").querySelector(".sk-email")!), true);
-  // A newer render loads behind the one shown and takes its place once loaded.
-  f.send({ type: "thumbnail", id: "builtin:article", html: rendered.replace("Hello", "Hello again") });
-  const frames = [...card.querySelectorAll("iframe")];
-  assert.equal(frames.length, 2);
-  const newer = frames.find(item => item !== frame)!;
-  assert.equal(f.visible(frame), true, "no blank while the newer one loads");
-  f.loadThumbnail(newer);
-  assert.deepEqual([...card.querySelectorAll("iframe")], [newer]);
-  assert.equal(f.visible(newer), true);
-  // Two renders in a row: the older one finishing first gives way to the newer, never the other way round.
-  const spotlight = f.card("builtin:spotlight");
-  f.send({ type: "thumbnail", id: "builtin:spotlight", html: rendered });
-  f.send({ type: "thumbnail", id: "builtin:spotlight", html: rendered.replace("Hello", "Newest") });
-  const [older, newest] = [...spotlight.querySelectorAll("iframe")];
-  f.loadThumbnail(older!);
-  assert.deepEqual([...spotlight.querySelectorAll("iframe")], [newest]);
-  assert.equal(f.visible(spotlight.querySelector(".sk-email")!), true, "the shape stays until the newest render has loaded");
-  f.loadThumbnail(newest!);
-  assert.equal(f.visible(newest!), true);
-  assert.match(newest!.getAttribute("srcdoc")!, /Newest/);
-  // The same list again keeps the cards and what they show; a changed layout goes back to its shape until its render comes.
-  f.send(setup());
-  assert.equal(f.card("builtin:article"), card);
-  assert.equal(card.querySelector("iframe"), newer);
-  const changed = BUILTINS.map(layout => layout.id === "builtin:article" ? { ...layout, document: layoutDocument("builtin:article", [logo, footer]) } : layout);
-  f.send(setup({ layouts: changed }));
-  assert.equal(f.card("builtin:article").querySelector("iframe"), null);
-  assert.equal(f.card("builtin:article").querySelector(".sk-email")!.outerHTML, skeletonHTML([logo, footer]));
+  // The name is under the picture, with nothing else drawn in the card: no description, chip or badge.
+  assert.equal(f.card("builtin:article").textContent, "Article" + BUILTINS[2]!.description);
+  assert.ok(f.card("builtin:article").querySelector(".sr-only"), "the description is for a screen reader alone");
+  // A hostile wireframe and a hostile name stay data: an image source and text.
+  const hostile = "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>";
+  f.send(setup({ layouts: [{ id: "x", name: "<img src=x onerror=alert(1)>", category: "Letters", description: "", wireframe: hostile }] }));
+  assert.equal(f.cards().length, 1);
+  assert.equal(f.cards()[0]!.querySelectorAll("script, svg").length, 0);
+  assert.equal(f.cards()[0]!.querySelectorAll("img").length, 1);
+  assert.equal(f.named(f.cards()[0]!), "<img src=x onerror=alert(1)>");
+  assert.equal(decoded(f.cards()[0]!), hostile);
+  // A layout with no wireframe draws a name only, and one without an id or a name is not listed.
+  f.send(setup({ layouts: [{ id: "a", name: "Plain", category: "Letters" }, { id: "", name: "No id" }, { id: "b" }, 5] }));
+  assert.deepEqual(f.cards().map(card => f.named(card)), ["Plain"]);
+  assert.ok(f.cards()[0]!.querySelector(".thumb"), "the mat stays");
+  assert.equal(f.cards()[0]!.querySelector("img"), null);
   f.dom.window.close();
 });
 
-test("the layout cards keep their size: 168 pixel columns from the left, each render shown at 168 by 218", () => {
+test("the grid groups layouts by category in the engine's order; an unknown category goes last, an empty one shows nothing", () => {
   const f = fixture();
-  f.send(setup({ layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
+  const layout = (id: string, category: string) => ({ id, name: id, category, description: "", wireframe: SVG(id) });
+  f.send(setup({ layouts: [layout("p1", "Promotions"), layout("z1", "Zeta"), layout("w1", "Welcome"), layout("p2", "Promotions"), layout("y1", "Yonder"), layout("a1", "Articles")] }));
+  const groups = [...f.el("groups").querySelectorAll<HTMLElement>('[role="group"]')];
+  assert.deepEqual(groups.map(group => f.named(group)), ["Welcome", "Articles", "Promotions", "Zeta", "Yonder"]);
+  assert.deepEqual(groups.map(group => [...group.querySelectorAll<HTMLElement>('[role="radio"]')].map(card => card.dataset.id)), [["w1"], ["a1"], ["p1", "p2"], ["z1"], ["y1"]]);
+  assert.deepEqual(f.cards().map(card => card.dataset.id), ["w1", "a1", "p1", "p2", "z1", "y1"], "the keyboard walks the grid in the order it is drawn");
+  // The same list again keeps the cards.
+  const card = f.card("p1");
+  f.send(setup({ layouts: [layout("p1", "Promotions"), layout("w1", "Welcome")] }));
+  assert.equal(f.card("p1"), card);
+  assert.equal(f.el("groups").querySelectorAll('[role="group"]').length, 2);
+  f.dom.window.close();
+});
+
+test("every card is a tinted mat round a drawing in one portrait frame; the grid fills the width", () => {
+  const f = fixture();
   const style = (element: Element) => f.dom.window.getComputedStyle(element);
   const flat = (value: string) => value.replace(/\s+/g, "");
-  // The organization's cards, the built-in ones and the shapes that stand in while they load: the same fixed tracks, never stretched.
-  for (const id of ["cards-organization", "cards-builtin", "placeholders"]) {
-    const grid = style(f.el(id));
-    assert.equal(grid.display, "grid", id);
-    assert.equal(flat(grid.getPropertyValue("grid-template-columns")), "repeat(auto-fill,168px)", id);
-    assert.equal(grid.getPropertyValue("gap"), "16px", id);
-    assert.equal(grid.getPropertyValue("justify-content"), "start", `${id} is left aligned`);
+  f.send(setup());
+  // The loading shapes and the cards share the grid: columns that fill the width, a 16 pixel gap.
+  for (const grid of [f.el("placeholders").querySelector(".cards")!, f.el("groups").querySelector(".cards")!]) {
+    const css = style(grid);
+    assert.equal(css.display, "grid");
+    assert.equal(flat(css.getPropertyValue("grid-template-columns")), "repeat(auto-fill,minmax(150px,1fr))");
+    assert.equal(css.getPropertyValue("gap"), "16px");
   }
-  // A render is 600 by 780 pixels, shown at 0.28: exactly 168 by 218, the same for every card at every width.
-  const card = f.card("builtin:article");
-  const thumb = style(card.querySelector(".thumb")!), canvas = style(card.querySelector(".canvas")!);
-  assert.deepEqual([thumb.width, thumb.height], ["168px", "218px"]);
-  assert.deepEqual([canvas.width, canvas.height], ["600px", "780px"]);
-  assert.match(flat(canvas.getPropertyValue("transform")), /^scale\(0?\.28\)$/);
-  const tile = style(f.el("placeholders").querySelector(".tile")!);
-  assert.deepEqual([tile.width, tile.height], ["168px", "218px"], "the loading shape is a card's size too");
+  const css = f.doc.querySelector("style")!.textContent!;
+  // The mat: theme colours only, no border, padding round the drawing; the same frame for every card (4:5), contain, top and centre.
+  assert.match(css, /\.thumb,\.tile\{aspect-ratio:4\/5;overflow:hidden;padding:9px;border-radius:0;background:color-mix\(in srgb,var\(--vscode-editor-foreground\) 6%,transparent\)\}/);
+  assert.match(css, /\.thumb img\{[^}]*width:100%;height:100%;object-fit:contain;object-position:top center\}/);
+  const cards = css.slice(css.indexOf(".cards{"), css.indexOf(".loading-group"));
+  assert.doesNotMatch(cards, /#fff|#ffffff|border:|border-(top|bottom):/i, "no hard-coded colour and no border on the cards");
+  assert.doesNotMatch(css, /\.card[^{]*\{[^}]*font-weight/, "the chosen name is marked by colour, not weight: its width does not move");
+  // Straight edges; the chosen card: soft accent fill on the mat, the accent colour and underline on the name.
+  assert.match(css, /\.card\{[^}]*border-radius:0/);
+  assert.match(css, /\.card\[aria-checked="true"\] \.thumb\{background:color-mix\(in srgb,var\(--vscode-focusBorder\) 24%,transparent\)\}/);
+  assert.match(css, /\.card\[aria-checked="true"\] \.card-name\{color:var\(--vscode-textLink-foreground\);box-shadow:inset 0 -2px 0 var\(--vscode-focusBorder\)\}/);
+  // A dark editor gets the drawing inverted, in one block.
+  assert.match(css, /body\.vscode-dark \.thumb img,body\.vscode-high-contrast:not\(\.vscode-high-contrast-light\) \.thumb img\{filter:invert\(\.82\)\}/);
+  assert.match(css, /\.bar\{border-top:0\}/, "no divider above the bar");
+  assert.match(css, /\.bar-notice\{padding:8px 16px;background:var\(--vscode-editor-background\)\}/, "none above the problem either");
+  // Loading is the loaded page's shape: heading bars and card-shaped mats, in groups, with no words.
+  const loading = f.el("placeholders");
+  assert.equal(loading.querySelectorAll(".loading-group").length, 3);
+  assert.equal(loading.querySelectorAll(".heading-bar").length, 3);
+  assert.ok(loading.querySelectorAll(".tile").length >= 8);
+  assert.equal(loading.textContent, "");
+  // A layout with no drawing keeps the card's shape: the mat, empty.
+  f.send(setup({ layouts: [{ id: "a", name: "Plain", category: "Letters" }] }));
+  assert.ok(f.card("a").querySelector(".thumb"));
+  assert.equal(f.card("a").querySelector("img"), null);
+  assert.equal(f.doc.getElementById("layout-label"), null, "no label above the first heading");
   f.dom.window.close();
 });
 
-test("references show as chips; pictures and ZIPs have a switch; removing posts the index", () => {
+test("references show as chips; removing posts the index", () => {
   const f = fixture();
   f.send(setup());
   assert.equal(f.el("attach").getAttribute("aria-label"), C.addReferences);
   f.el("attach").click();
   assert.deepEqual(f.messages.at(-1), { type: "attach" });
   f.send({ type: "references", items: [
-    { label: "brief.md", kind: "file", include: false, uploading: false },
-    { label: "logo.png", kind: "picture", include: false, uploading: false },
-    { label: "brand.zip", kind: "bundle", include: true, uploading: false },
-    { label: "photo.jpg", kind: "picture", include: false, uploading: true },
+    { label: "brief.md", kind: "file", uploading: false },
+    { label: "logo.png", kind: "picture", uploading: false },
+    { label: "brand.zip", kind: "bundle", uploading: false },
+    { label: "photo.jpg", kind: "picture", uploading: true },
   ] });
   const chips = () => [...f.el("references").querySelectorAll<HTMLElement>(".chip")];
   assert.deepEqual(chips().map(chip => chip.querySelector(".chip-name")?.textContent), ["brief.md", "logo.png", "brand.zip", "photo.jpg"]);
-  const switchOf = (chip: HTMLElement) => chip.querySelector<HTMLInputElement>('input[type="checkbox"][role="switch"]');
-  assert.equal(switchOf(chips()[0]!), null, "a file is a reference only");
-  assert.equal(switchOf(chips()[1]!)!.checked, false, "off until the person turns it on");
-  assert.equal(switchOf(chips()[2]!)!.checked, true);
-  assert.equal(switchOf(chips()[1]!)!.closest("label")?.textContent, C.useInEmail);
+  assert.equal(f.el("references").querySelector('input'), null, "no switch: every file is material for the email");
   assert.ok(chips()[3]!.querySelector(".spinner"), "an uploading reference shows a spinner");
   assert.equal(chips()[0]!.querySelector(".spinner"), null);
-  switchOf(chips()[1]!)!.click();
-  assert.deepEqual(f.messages.at(-1), { type: "include", index: 1, on: true });
-  switchOf(chips()[2]!)!.click();
-  assert.deepEqual(f.messages.at(-1), { type: "include", index: 2, on: false });
   const remove = chips()[2]!.querySelector<HTMLButtonElement>("button.remove")!;
   assert.equal(remove.getAttribute("aria-label"), fill(C.removeReference, { name: "brand.zip" }));
   remove.click();
   assert.deepEqual(f.messages.at(-1), { type: "removeReference", index: 2 });
   // A label is text, never markup; a problem shows under the references until a list comes without one.
   const hostile = "<img src=x onerror=alert(1)>.png";
-  f.send({ type: "references", items: [{ label: hostile, kind: "picture", include: false, uploading: false }, { label: 5, kind: "file" }], problem: { message: EMAIL_COPY.host.tooMany } });
+  f.send({ type: "references", items: [{ label: hostile, kind: "picture", uploading: false }, { label: 5, kind: "file" }], problem: { message: EMAIL_COPY.host.tooMany } });
   assert.deepEqual(chips().map(chip => chip.querySelector(".chip-name")?.textContent), [hostile]);
   assert.equal(f.el("references").querySelector("img"), null);
   assert.equal(f.el("describe-notice").getAttribute("role"), "alert");
@@ -324,18 +288,14 @@ test("the Organization select appears only with more than one organization and p
   assert.equal(f.visible("organization-row"), false);
   assert.equal(f.visible("meta"), true);
   assert.equal(f.el("meta").textContent, "Acme Co", "one organization is a quiet line under the title");
-  f.send(setup({ organizations: [acme, client], layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
+  f.send(setup({ organizations: [acme, client], layouts: BUILTINS }));
   assert.equal(f.visible("organization-row"), true);
   assert.equal(f.visible("meta"), false);
   const select = f.el("organization") as HTMLSelectElement;
   assert.equal(f.doc.querySelector('label[for="organization"]')?.textContent, C.organization);
   assert.deepEqual([...select.options].map(option => [option.value, option.textContent]), [["acme", "Acme Co"], ["client-org", "Client Example"]]);
   assert.equal(select.value, "acme");
-  // Two groups of layouts: the organization's, under its name, then the built-in ones.
-  const groups = () => [...f.el("layouts").querySelectorAll<HTMLElement>('[role="group"]')];
-  assert.deepEqual(groups().map(group => f.named(group)), ["Acme Co", C.builtIn]);
-  assert.deepEqual(groups().map(group => [...group.querySelectorAll<HTMLElement>('[role="radio"]')].map(card => card.dataset.id)), [ACME_LAYOUTS.map(layout => layout.id), BUILTINS.map(layout => layout.id)]);
-  f.card("org:acme-welcome").click();
+  f.card("builtin:letter").click();
   select.value = "client-org";
   select.dispatchEvent(new f.dom.window.Event("change", { bubbles: true }));
   assert.deepEqual(f.posted("organization"), [{ type: "organization", id: "client-org" }]);
@@ -346,15 +306,10 @@ test("the Organization select appears only with more than one organization and p
   assert.ok(f.el("layouts").querySelector(".placeholder"));
   f.send(setup({ organizations: [acme, client], organizationId: "client-org", layouts: BUILTINS }));
   assert.equal(select.value, "client-org");
-  assert.equal(groups().length, 0, "subheads only when both groups exist");
   assert.equal(f.cards().length, 4);
-  assert.equal(f.cards().some(card => card.getAttribute("aria-checked") === "true"), false, "Acme's layout is not the client's");
-  assert.equal(f.barState(), C.chooseLayout);
-  // The choice went with Acme's layouts: back on Acme, nothing is chosen until the person chooses again.
-  f.send(setup({ organizations: [acme, client], organizationId: "acme", layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
-  assert.equal(f.cards().some(card => card.getAttribute("aria-checked") === "true"), false);
+  assert.equal(f.card("builtin:letter").getAttribute("aria-checked"), "true", "a built-in layout is the same in every organization");
   f.type("name", "Autumn welcome");
-  assert.deepEqual(f.posted("draft").at(-1), { type: "draft", draft: { organizationId: "acme", name: "Autumn welcome" } });
+  assert.deepEqual(f.posted("draft").at(-1), { type: "draft", draft: { organizationId: "client-org", layoutId: "builtin:letter", name: "Autumn welcome" } });
   // Without a chosen organization, the select asks for one.
   f.send(setup({ organizations: [acme, client], organizationId: undefined, layouts: BUILTINS }));
   assert.deepEqual([...select.options].map(option => [option.value, option.textContent]), [["", C.chooseOrganization], ["acme", "Acme Co"], ["client-org", "Client Example"]]);
@@ -372,14 +327,10 @@ test("not connected shows only Connect", () => {
   assert.equal(f.barState(), fill(C.notConnected, { domain: "acme.example" }));
   assert.deepEqual(f.acts(), [[C.connect, "button"]]);
   assert.equal(f.visible("form"), false);
-  assert.equal(f.visible("writing"), false);
   assert.equal(f.visible("no-organization"), false);
   f.act(C.connect).click();
   f.act(C.connect).click();
   assert.deepEqual(f.posted("connect"), [{ type: "connect" }], "a double click connects once");
-  // Not connected comes first, even mid-write.
-  f.send({ type: "writing", layoutId: "builtin:article" });
-  assert.deepEqual(f.acts(), [[C.connect, "button"]]);
   f.send({ type: "idle" });
   f.send(setup());
   assert.equal(f.barState(), C.chooseLayout);
@@ -389,8 +340,8 @@ test("not connected shows only Connect", () => {
 
 test("arrow keys move the layout choice", () => {
   const f = fixture();
-  f.send(setup({ layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
-  const ids = [...ACME_LAYOUTS, ...BUILTINS].map(layout => layout.id);
+  f.send(setup({ layouts: BUILTINS }));
+  const ids = BUILTINS.map(layout => layout.id);
   const checked = () => f.cards().filter(card => card.getAttribute("aria-checked") === "true").map(card => card.dataset.id);
   const stops = () => f.cards().filter(card => card.tabIndex === 0).map(card => card.dataset.id);
   assert.deepEqual(stops(), [ids[0]], "one tab stop: the first card until one is chosen");
@@ -482,19 +433,18 @@ test("the draft is posted for keeping and restored on ready", () => {
 
 test("a restored organization is asked for once, and its layout chosen when it arrives", () => {
   const f = fixture();
-  f.send({ type: "restore", draft: { organizationId: "client-org", layoutId: "org:client-news", name: "News" } });
-  f.send(setup({ organizations: [acme, client], organizationId: "acme", layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
+  f.send({ type: "restore", draft: { organizationId: "client-org", layoutId: "builtin:letter", name: "News" } });
+  f.send(setup({ organizations: [acme, client], organizationId: "acme", layouts: BUILTINS }));
   assert.deepEqual(f.posted("organization"), [{ type: "organization", id: "client-org" }]);
   assert.equal(f.barState(), C.loading);
   assert.equal((f.el("organization") as HTMLSelectElement).value, "client-org");
-  const news = { id: "org:client-news", name: "News", description: "The client’s news.", kind: "organization", document: layoutDocument("org:client-news", [logo, footer]) };
-  f.send(setup({ organizations: [acme, client], organizationId: "client-org", layouts: [news, ...BUILTINS] }));
-  assert.equal(f.card("org:client-news").getAttribute("aria-checked"), "true");
+  f.send(setup({ organizations: [acme, client], organizationId: "client-org", layouts: BUILTINS }));
+  assert.equal(f.card("builtin:letter").getAttribute("aria-checked"), "true");
   assert.equal(f.barState(), C.ready);
   // The host has the last word: a later list for another organization is not argued with.
-  f.send(setup({ organizations: [acme, client], organizationId: "acme", layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
+  f.send(setup({ organizations: [acme, client], organizationId: "acme", layouts: BUILTINS }));
   assert.equal(f.posted("organization").length, 1);
-  assert.equal(f.barState(), C.chooseLayout);
+  assert.equal(f.barState(), C.ready);
   f.dom.window.close();
 });
 
@@ -548,7 +498,7 @@ test("dictation appears only where the host can dictate", () => {
   assert.deepEqual(f.messages.at(-1), { type: "dictationCancel" });
   f.send({ type: "dictation", phase: "listening", text: "and more" });
   f.act(C.write).click();
-  assert.deepEqual(f.messages.slice(-2), [{ type: "dictationCancel" }, { type: "write", layoutId: "builtin:article", name: "Autumn welcome", description: "Hello welcome everyone. and more" }]);
+  assert.deepEqual(f.messages.filter(m => m.type !== "shown").slice(-2), [{ type: "dictationCancel" }, { type: "write", layoutId: "builtin:article", name: "Autumn welcome", description: "Hello welcome everyone. and more" }]);
   // A transcript the page did not ask for is not written into the description.
   const g = fixture();
   g.send(setup({ dictation: true }));
@@ -564,8 +514,8 @@ test("messages from another origin are ignored", () => {
   const forged = (data: unknown) => f.dom.window.dispatchEvent(new f.dom.window.MessageEvent("message", { data, origin: "https://attacker.example" }));
   forged(setup());
   forged({ type: "restore", draft: { name: "Forged" } });
-  forged({ type: "references", items: [{ label: "x.png", kind: "picture", include: false, uploading: false }] });
-  forged({ type: "writing", layoutId: "builtin:article" });
+  forged({ type: "references", items: [{ label: "x.png", kind: "picture", uploading: false }] });
+  forged({ type: "reference", item: { label: "forged.png" } });
   forged({ type: "layoutsFailed", problem });
   assert.equal(f.cards().length, 0);
   assert.equal((f.el("name") as HTMLInputElement).value, "");
@@ -573,8 +523,7 @@ test("messages from another origin are ignored", () => {
   assert.equal(f.barState(), C.loading);
   assert.deepEqual(f.messages.map(m => m.type), ["ready", "shown"]);
   f.send(setup());
-  forged({ type: "thumbnail", id: "builtin:article", html: rendered });
-  assert.equal(f.doc.querySelectorAll("#layouts iframe").length, 0);
+  assert.equal(f.el("finished").children.length, 0);
   assert.equal(f.cards().length, 4);
   f.dom.window.close();
 });
@@ -640,7 +589,6 @@ test("Ctrl or Cmd+Enter in the description writes", () => {
   const f = ready();
   f.key(f.el("description"), "Enter", { ctrlKey: true });
   assert.deepEqual(f.posted("write"), [{ type: "write", layoutId: "builtin:article", name: "Autumn welcome", description }]);
-  f.send({ type: "writing", layoutId: "builtin:article" });
   f.send({ type: "idle" });
   f.key(f.el("description"), "Enter", { metaKey: true });
   assert.equal(f.posted("write").length, 2);
@@ -657,7 +605,7 @@ test("Ctrl or Cmd+Enter in the description writes", () => {
 test("the page is static: every id the view uses, the policy, and only the email copy", () => {
   const html = newEmailPage({ script: "https://file+.vscode-resource.test/out/newEmailView.js", nonce: "abc123" });
   const doc = new JSDOM(html).window.document;
-  for (const id of ["meta", "no-organization", "form", "organization-row", "organization", "layout-group", "layouts", "name", "name-notice", "description", "attach", "dictate", "references", "dictation-status", "describe-notice", "writing", "bar", "bar-state", "bar-acts", "bar-notice"]) {
+  for (const id of ["meta", "no-organization", "form", "organization-row", "organization", "layout-group", "layouts", "name", "name-notice", "description", "attach", "dictate", "references", "dictation-status", "describe-notice", "groups", "placeholders", "attach-reference", "finished", "bar", "bar-state", "bar-acts", "bar-notice"]) {
     assert.ok(doc.getElementById(id), id);
   }
   assert.equal(doc.title, C.title);
@@ -720,7 +668,7 @@ test("a control the keyboard reaches scrolls into view above the bar, which the 
 
 test("no host update takes focus while the window is elsewhere, and the page keeps the focus it holds", () => {
   const f = fixture();
-  f.send(setup({ layouts: [...ACME_LAYOUTS, ...BUILTINS], dictation: true }));
+  f.send(setup({ layouts: BUILTINS, dictation: true }));
   const unfocused = (what: string, update: () => void) => {
     f.away();
     const before = f.focuses.length;
@@ -732,31 +680,25 @@ test("no host update takes focus while the window is elsewhere, and the page kee
   f.card("builtin:letter").focus();
   unfocused("a card", () => f.send(setup({ layouts: BUILTINS, dictation: true })));
   // A focused reference, removed by the host.
-  f.send({ type: "references", items: [{ label: "a.md", kind: "file", include: false, uploading: false }, { label: "b.md", kind: "file", include: false, uploading: false }] });
+  f.send({ type: "references", items: [{ label: "a.md", kind: "file", uploading: false }, { label: "b.md", kind: "file", uploading: false }] });
   f.el("references").querySelector<HTMLElement>(".chip button")!.focus();
-  unfocused("a reference", () => f.send({ type: "references", items: [{ label: "b.md", kind: "file", include: false, uploading: false }] }));
-  // A focused field, hidden by a write the host resumed.
+  unfocused("a reference", () => f.send({ type: "references", items: [{ label: "b.md", kind: "file", uploading: false }] }));
+  // A focused field, with the host answering an act.
   f.el("description").focus();
-  unfocused("the description", () => f.send({ type: "writing", layoutId: "builtin:article" }));
+  unfocused("the description", () => f.send({ type: "failed", problem }));
   unfocused("the form coming back", () => f.send({ type: "idle" }));
   // While the page holds the focus, a card drawn again keeps it, and so does a reference.
   f.card("builtin:article").focus();
-  f.send(setup({ layouts: [...ACME_LAYOUTS, ...BUILTINS], dictation: true }));
+  f.send(setup({ layouts: BUILTINS, dictation: true }));
   assert.equal(f.doc.activeElement, f.card("builtin:article"));
-  f.send({ type: "references", items: [{ label: "a.md", kind: "file", include: false, uploading: false }, { label: "b.md", kind: "file", include: false, uploading: false }] });
+  f.send({ type: "references", items: [{ label: "a.md", kind: "file", uploading: false }, { label: "b.md", kind: "file", uploading: false }] });
   const removeFirst = f.el("references").querySelector<HTMLElement>(".chip button")!;
   removeFirst.focus();
   removeFirst.click();
-  f.send({ type: "references", items: [{ label: "b.md", kind: "file", include: false, uploading: false }] });
+  f.send({ type: "references", items: [{ label: "b.md", kind: "file", uploading: false }] });
   assert.equal(f.doc.activeElement, f.el("references").querySelector(".chip button"), "the next reference takes the focus of the one removed");
   f.send({ type: "references", items: [] });
   assert.equal(f.doc.activeElement, f.el("attach"), "the last one gives it to Add references");
-  // A field the page holds is hidden by a write: the focus goes to the state.
-  f.card("builtin:article").click();
-  f.type("name", "Autumn welcome");
-  f.el("name").focus();
-  f.send({ type: "writing", layoutId: "builtin:article" });
-  assert.equal(f.doc.activeElement, f.el("bar-state"));
   f.dom.window.close();
 });
 
@@ -770,10 +712,52 @@ test("organization changes save the draft and refresh the select after blur", ()
   f.el("name").focus(); assert.equal(select.querySelector('option[value=""]'), null); f.dom.window.close();
 });
 
-test("an unrelated setup cannot reopen an in-flight write; reference switches name their file", () => {
+test("an unrelated setup cannot reopen an in-flight write; a card names its layout", () => {
   const f = fixture(); f.send(setup()); f.card("builtin:article").click(); f.type("name", "Welcome"); f.type("description", "Write a welcome.");
-  f.act(C.write).click(); f.send(setup()); f.act(C.write).click(); assert.equal(f.posted("write").length, 1);
-  f.send({ type: "references", items: [{ label: "logo.png", kind: "picture", include: false }] });
-  const toggle = f.el("references").querySelector('input')!; assert.equal(f.named(toggle, "aria-describedby"), "logo.png");
-  assert.equal(f.card("builtin:article").querySelector('.card-name')?.getAttribute("title"), "Article"); f.dom.window.close();
+  f.act(C.write).click(); f.send(setup()); f.act(C.write)?.click(); assert.equal(f.posted("write").length, 1);
+  f.send({ type: "references", items: [{ label: "logo.png", kind: "picture" }] });
+  assert.equal(f.card("builtin:article").querySelector('.card-name')?.getAttribute("title"), `Article. ${BUILTINS[2]!.description}`); f.dom.window.close();
+});
+
+test("the picture of the finished email is one optional picture, apart from the files", () => {
+  const f = fixture();
+  f.send(setup());
+  const label = f.doc.getElementById("finished-label")!;
+  assert.equal(label.textContent?.startsWith(C.finishedPicture), true);
+  const add = f.el("attach-reference");
+  assert.equal(f.visible(add), true);
+  assert.equal(add.getAttribute("aria-label"), C.addFinishedPicture);
+  add.click();
+  assert.deepEqual(f.messages.at(-1), { type: "attachReference" });
+  f.send({ type: "reference", item: { label: "mock.png" } });
+  assert.equal(f.visible(add), false, "one picture: nothing to add once it is here");
+  assert.equal(f.el("finished").querySelector(".chip-name")?.textContent, "mock.png");
+  assert.equal(f.el("references").children.length, 0, "it is not one of the files");
+  const remove = f.el("finished").querySelector<HTMLButtonElement>("button.remove")!;
+  assert.equal(remove.getAttribute("aria-label"), C.removeFinishedPicture);
+  remove.click();
+  assert.deepEqual(f.messages.at(-1), { type: "clearReference" });
+  f.send({ type: "reference", item: null });
+  assert.equal(f.el("finished").children.length, 0);
+  assert.equal(f.visible(add), true);
+  // A refusal says why under the description; a label is text.
+  f.send({ type: "reference", item: null, problem: { message: EMAIL_COPY.host.pictureType } });
+  assert.equal(f.el("describe-notice").textContent, EMAIL_COPY.host.pictureType);
+  f.send({ type: "reference", item: { label: "<b>x</b>.png" } });
+  assert.equal(f.el("finished").querySelector("b"), null);
+  assert.equal(f.el("describe-notice").textContent, "");
+  f.dom.window.close();
+});
+
+test("Start from the layout is shown with a layout and a name, Write it only with a description too; neither before a layout", () => {
+  const f = fixture();
+  f.send(setup());
+  f.type("name", "Autumn welcome"); f.type("description", description);
+  assert.deepEqual(f.acts(), [], "no act until a layout is chosen");
+  f.card("builtin:letter").click();
+  assert.deepEqual(f.acts().map(a => a[0]), [C.start, C.write]);
+  f.type("description", "");
+  assert.deepEqual(f.acts().map(a => a[0]), [C.start], "Write it is absent, not disabled");
+  assert.equal(f.dom.querySelector?.("button:disabled") ?? null, null);
+  f.dom.window.close();
 });

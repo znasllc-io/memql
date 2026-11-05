@@ -60,6 +60,7 @@ shape template templateSummary {
   layoutId
   preheader
   sourceArtifactId
+  composition
   row.createdAt
 }
 
@@ -88,6 +89,7 @@ shape template templateFull {
   layoutId
   preheader
   sourceArtifactId
+  composition
   row.createdAt
 }
 
@@ -103,6 +105,17 @@ shape emailLayout emailLayoutFull {
   document
   sourceArtifactId
   status
+  row.createdAt
+}
+
+/// Full brand kit projection: the kit and its revision (createdAt). Backs brandKitForAccount: the
+/// Brand page's read and the revision check campaignSaveBrandKit makes before it writes.
+@row
+shape brandKit brandKitFull {
+  row.id
+  ownerUserId
+  accountId
+  kit
   row.createdAt
 }
 

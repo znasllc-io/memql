@@ -118,11 +118,7 @@ export function MakeWizard({
             label="Kind of file"
             voice="prose"
             value={fileKindEntry(draft.fileKind).value}
-            options={FILE_KINDS.filter(
-              (choice) =>
-                choice.kind.kind !== "emailTemplate" ||
-                draft.fileKind.kind === "emailTemplate",
-            )}
+            options={FILE_KINDS}
             onChange={(value) => {
               const picked = FILE_KINDS.find((kind) => kind.value === value);
               if (picked) {
@@ -229,7 +225,6 @@ export function MakeWizard({
             label="Organization"
             value={draft.accountId}
             accounts={accounts}
-            required={draft.fileKind.kind === "emailTemplate"}
             emptyLabel="No organization"
             onChange={(accountId) => change({ accountId })}
           />

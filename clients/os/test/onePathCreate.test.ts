@@ -58,6 +58,7 @@ const UPLOAD = /\.upload\s*(?:\?\.\s*)?\(|\b(?:uploadFile|createFile)\s*(?:\?\.\
 // text: each sends a File the person picked or dropped.
 const ALLOWED: Record<string, string> = {
   "apps/email/audiences/AddPeopleWizard.tsx": "uploads the CSV of addresses the person picked, then imports it",
+  "apps/email/settings/brand/PictureField.tsx": "uploads the picture the person picked for their organization's brand",
   "apps/files/uploadTree.ts": "uploads each file of a folder the person dropped",
   "apps/files/useUploadTasks.ts": "uploads the files the person picked or dropped in Files",
   "apps/training/useUploads.ts": "uploads the files the person dropped in Training",

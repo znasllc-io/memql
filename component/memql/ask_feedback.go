@@ -35,6 +35,15 @@ func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
 	if options == nil {
 		options = []map[string]any{}
 	}
+	// Only a choice of layouts shows wireframes, and the work runtime drew
+	// them; an option of any other question carries none to the client.
+	presentation, _ := subject["presentation"].(string)
+	if presentation != work.FeedbackPresentationLayouts {
+		presentation = ""
+		for _, option := range options {
+			delete(option, "wireframe")
+		}
+	}
 	text, _ := row["question"].(string)
 	id := BareShortId(fmt.Sprint(row["id"]))
 	decision, _ := row["decision"].(string)
@@ -43,7 +52,7 @@ func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
 			return nil, nil
 		}
 		_, _, optional := work.OptionalFeedback(row)
-		return &AskQuestion{ID: id, Text: text, Kind: kind, Options: options, ChoiceOnly: subject["continuationAllowed"] == false, Optional: optional, Continued: work.OptionalFeedbackContinued(row, time.Now())}, nil
+		return &AskQuestion{ID: id, Text: text, Kind: kind, Presentation: presentation, Options: options, ChoiceOnly: subject["continuationAllowed"] == false, Optional: optional, Continued: work.OptionalFeedbackContinued(row, time.Now())}, nil
 	}
 	if decision != "answered" {
 		return nil, nil

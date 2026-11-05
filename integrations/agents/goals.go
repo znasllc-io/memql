@@ -41,12 +41,16 @@ type WorkGoals interface {
 
 // FeedbackApproval is one question put to a person, mid-run.
 type FeedbackApproval struct {
-	RunId     string
-	Question  string
-	Kind      string
-	Options   []map[string]any
-	ExpiresAt time.Time
-	Optional  bool
+	RunId    string
+	Question string
+	Kind     string
+	// Presentation is how the question is shown: "" as words, or "layouts"
+	// for a choice of built-in email layouts. The work runtime decides what a
+	// presentation allows and draws what it shows.
+	Presentation string
+	Options      []map[string]any
+	ExpiresAt    time.Time
+	Optional     bool
 }
 
 // DirectGoal mirrors integrations/work.DirectGoal. It is redeclared rather

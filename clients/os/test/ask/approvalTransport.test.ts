@@ -52,3 +52,10 @@ it("refuses a stop decision before dispatch when the cluster connection is unava
   const transport = new SdkAskTransport(() => null);
   await expect(transport.decideStop({ conversationId: "chat", turnId: "turn", runId: "run", decision: "keep" })).rejects.toThrow("Not connected to the cluster.");
 });
+
+it("carries a layouts question and each option's wireframe from the snapshot untouched", async () => {
+  const question = { id: "q", text: "Which layout?", kind: "choice", presentation: "layouts", options: [{ label: "Article", value: "builtin:article", wireframe: "<svg/>" }] };
+  const { transport } = setup({ transcript: { turns: [{ id: "t", question }] } });
+  const turns = await transport.conversations.read("c");
+  expect(turns[0]!.question).toEqual(question);
+});

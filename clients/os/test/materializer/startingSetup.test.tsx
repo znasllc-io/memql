@@ -415,31 +415,23 @@ describe("the folder a setup names", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The email template kind
+// Emails are made in the Email app
 // ---------------------------------------------------------------------------
 
-describe("the email template kind", () => {
+describe("a setup that asks for an email template", () => {
   const reply = { compositionId: "c1" } as unknown as Row;
 
-  it("is carried to the Materializer with the format it needs", async () => {
+  it("opens as an ordinary file, offers no email kind, and sends no output kind", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    mount(conn, { intent: setupIntent("i1", { outputKind: "email_template" }) });
-    await waitFor(() => expect(kindOfFile()).toContain("Email template"));
-    await materializeNotes();
-    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
-    expect(sent(conn)).toMatchObject({ format: "json", outputKind: "email_template" });
-  });
-
-  it("is dropped when the person chooses a kind of file that cannot be a template", async () => {
-    const conn = fakeConnection({ materializeReply: reply });
-    mount(conn, { intent: setupIntent("i1", { outputKind: "email_template" }) });
-    await waitFor(() => expect(kindOfFile()).toContain("Email template"));
+    mount(conn, { intent: setupIntent("i1", { outputKind: "email_template" } as never) });
+    await waitFor(() => expect(kindOfFile()).toContain("Markdown"));
     openStep("Kind of file");
-    fireEvent.click(await screen.findByRole("radio", { name: "Plain text" }));
+    expect(await screen.findByRole("radio", { name: "Plain text" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Email template" })).toBeNull();
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
-    expect(sent(conn)).toMatchObject({ format: "txt" });
     expect(sent(conn)).not.toHaveProperty("outputKind");
+    expect(sent(conn)).not.toHaveProperty("layoutId");
   });
 });
 

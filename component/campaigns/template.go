@@ -162,6 +162,10 @@ type templateContent struct {
 	// document is the email document as a JSON object, or nil for a template
 	// saved before documents existed, which is written back without one.
 	document map[string]any
+	// composition is the state of an AI composition as a JSON object, or nil for
+	// a template that has none. A write that leaves it nil does not name it, so
+	// the stored one stays.
+	composition map[string]any
 }
 
 // handleSaveTemplate implements integration.campaigns.saveTemplate.
@@ -330,19 +334,28 @@ func (w *Worker) mayWriteTemplates(ctx context.Context, accountID string) bool {
 
 // createTemplate saves a template nobody has saved yet, as a draft.
 func (w *Worker) createTemplate(ctx context.Context, req templateRequest, rendered *renderedTemplate) ([]memorynodes.MemoryNode, error) {
+	revision, err := w.insertTemplate(ctx, req, rendered)
+	if err != nil {
+		return nil, err
+	}
+	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
+}
+
+// insertTemplate is createTemplate's write, answering the revision it stamped.
+func (w *Worker) insertTemplate(ctx context.Context, req templateRequest, rendered *renderedTemplate) (time.Time, error) {
 	if req.expected != "" || req.action != "save" {
-		return nil, errTemplateNotFound
+		return time.Time{}, errTemplateNotFound
 	}
 	revision := w.templateRevision(time.Time{})
 	values := rendered.content.values(req.templateID, revision)
 	values["accountId"] = req.accountID
 	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
 		if req.sourceID != "" && req.templateID == sourceTemplateID(req.accountID, req.sourceID) && errors.Is(err, memql.ErrOrganizationRowForbidden) {
-			return nil, errTemplateIDTaken
+			return time.Time{}, errTemplateIDTaken
 		}
-		return nil, err
+		return time.Time{}, err
 	}
-	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
+	return revision, nil
 }
 
 // changeTemplate saves, publishes, archives or restores a template that is
@@ -380,10 +393,26 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 		if content.sourceArtifactID == "" {
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
 		}
+		// A save does not touch the composition: the stored one is written back
+		// explicitly, not left to an omitted argument. Except that a person's
+		// save or publish ends a composition that failed: the email is theirs
+		// now, so nothing offers to write it again (a retry would write over
+		// their work). It is done from this moment, and keeps what was asked,
+		// why it failed and what it left out.
+		content.composition = storedTemplate(row).composition
+		var ended bool
+		if c, has := compositionFromRow(row); has && c.State == compositionFailed {
+			c.State, c.FinishedAt = compositionDone, w.nowUTC()
+			object, err := c.object()
+			if err != nil {
+				return nil, err
+			}
+			content.composition, ended = object, true
+		}
 		same = sameTemplate(row, content)
 		// The same content already saved, or published, answers with the receipt
 		// it already has. This also makes an autosave of unchanged bytes inert.
-		if same && current == target {
+		if same && current == target && !ended {
 			return templateReceipt(req.templateID, prior, target, issues)
 		}
 	}
@@ -426,6 +455,13 @@ func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (*rend
 		return nil, err
 	}
 	defer releaseSlot()
+	return w.renderInSlot(ctx, req)
+}
+
+// renderInSlot is renderTemplate for a caller that already holds a render slot
+// for the work around the render (a composition's submit, which reads its
+// material in the same slot), so that one call never holds two.
+func (w *Worker) renderInSlot(ctx context.Context, req templateRequest) (*renderedTemplate, error) {
 	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
@@ -465,6 +501,9 @@ func storedTemplate(row map[string]any) templateContent {
 	if document, ok := row["document"].(map[string]any); ok && len(document) > 0 {
 		content.document = document
 	}
+	if stored, ok := row["composition"].(map[string]any); ok && len(stored) > 0 {
+		content.composition = stored
+	}
 	return content
 }
 
@@ -480,6 +519,9 @@ func (c templateContent) values(templateID string, revision time.Time) map[strin
 	}
 	if c.document != nil {
 		values["document"] = c.document
+	}
+	if c.composition != nil {
+		values["composition"] = c.composition
 	}
 	return values
 }

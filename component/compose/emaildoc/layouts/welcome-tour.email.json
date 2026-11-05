@@ -1,0 +1,213 @@
+{
+  "subject": "Welcome to Acme",
+  "preheader": "Three things to try first.",
+  "layout": "builtin:welcome-tour",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "hero",
+      "type": "image",
+      "role": "content",
+      "padding": [
+        24,
+        24,
+        16,
+        24
+      ],
+      "alt": "Welcome picture",
+      "width": 552,
+      "height": 260
+    },
+    {
+      "id": "headline",
+      "type": "heading",
+      "role": "content",
+      "padding": [
+        16,
+        24,
+        8,
+        24
+      ],
+      "text": "Welcome, and thanks for joining us",
+      "size": 26.7,
+      "lineHeight": 29.37,
+      "color": "primary",
+      "align": "center",
+      "weight": 700,
+      "font": "heading"
+    },
+    {
+      "id": "intro",
+      "type": "text",
+      "role": "content",
+      "padding": [
+        0,
+        24,
+        16,
+        24
+      ],
+      "text": "Here is a quick tour of what you can do with your new account.",
+      "size": 16,
+      "lineHeight": 24,
+      "align": "center"
+    },
+    {
+      "id": "benefit",
+      "type": "columns",
+      "role": "content",
+      "padding": [
+        8,
+        0,
+        16,
+        0
+      ],
+      "maxWidth": 502,
+      "columns": [
+        {
+          "width": 20,
+          "blocks": [
+            {
+              "id": "benefit-icon",
+              "type": "image",
+              "role": "content",
+              "padding": [
+                0,
+                0,
+                24,
+                0
+              ],
+              "alt": "Icon",
+              "width": 48,
+              "height": 48
+            }
+          ]
+        },
+        {
+          "width": 76,
+          "blocks": [
+            {
+              "id": "benefit-text",
+              "type": "text",
+              "role": "content",
+              "padding": [
+                14,
+                0,
+                24,
+                0
+              ],
+              "text": "**Set up your space.** Add your details in a couple of minutes.",
+              "size": 14.7,
+              "lineHeight": 19.2,
+              "align": "left"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "type": "button",
+      "role": "content",
+      "size": 20.4,
+      "color": "accent",
+      "width": 306,
+      "label": "Start the tour",
+      "paddingY": 11
+    },
+    {
+      "id": "social",
+      "type": "social",
+      "role": "brand",
+      "padding": [
+        0,
+        24,
+        15,
+        24
+      ],
+      "links": [
+        {
+          "network": "Instagram",
+          "href": ""
+        },
+        {
+          "network": "YouTube",
+          "href": ""
+        },
+        {
+          "network": "LinkedIn",
+          "href": ""
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME\n123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ],
+      "lineGap": 16
+    }
+  ]
+}

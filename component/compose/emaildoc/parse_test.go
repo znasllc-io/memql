@@ -225,6 +225,7 @@ func TestParseRefusesBadBlockValues(t *testing.T) {
 		{"list line height", layoutJSON(`{"id":"t","type":"text","listLineHeight":201}`), `block "t": listLineHeight must be between 0 and 200 pixels`},
 		{"negative gap", layoutJSON(`{"id":"t","type":"text","gap":-1}`), `block "t": gap must be between 0 and 200 pixels`},
 		{"footer after", layoutJSON(`{"id":"f","type":"footer","after":201}`), `block "f": after must be between 0 and 200 pixels`},
+		{"footer line gap", layoutJSON(`{"id":"f","type":"footer","lineGap":201}`), `block "f": lineGap must be between 0 and 200 pixels`},
 		{"section cell padding", layoutJSON(`{"id":"s","type":"section","cellPadding":201}`), `block "s": cellPadding must be between 0 and 200 pixels`},
 		{"button vertical padding", layoutJSON(`{"id":"b","type":"button","label":"Go","paddingY":201}`), `block "b": paddingY must be between 0 and 200 pixels`},
 		{"spacer taller than 2000", layoutJSON(`{"id":"s","type":"spacer","height":2001}`), `block "s": height must be between 0 and 2000 pixels`},
@@ -358,7 +359,7 @@ func TestParseAcceptsEveryBlockType(t *testing.T) {
     {"id":"panel","type":"section","role":"brand","background":"tint","inset":[8,8,8,8],"maxWidth":520,"cellPadding":12,"padding":[0,0,0,0],"blocks":[{"id":"inner","type":"text","text":"Inside"},{"id":"inner-cols","type":"columns","columns":[{"width":50,"blocks":[{"id":"deep","type":"text","text":"Deep"}]},{"width":50,"blocks":[]}]}]},
     {"id":"cols","type":"columns","background":"canvas","inset":[0,0,0,0],"maxWidth":560,"gap":16,"stackBelow":450,"columns":[{"width":33.33,"cellPadding":8,"blocks":[{"id":"left","type":"text","text":"Left"}]},{"width":33.33,"blocks":[{"id":"right","type":"image","width":100,"src":"artifact:icon1"}]},{"width":33.34,"blocks":[]}]},
     {"id":"follow","type":"social","title":"Follow us","links":[{"network":"Example","href":"https://example.com/x","icon":"artifact:icon1","width":32},{"network":"Mail","href":"mailto:hello@example.com"},{"network":"Phone","href":"tel:+15551234567"}],"maxWidth":300,"gap":8},
-    {"id":"fine","type":"footer","links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"},{"label":"Preferences","href":"{{preferencesUrl}}"},{"label":"View online","href":"{{viewUrl}}"},{"label":"Plain","href":""}],"lines":["Acme Inc.","1 Example Street"],"background":"page","inset":[16,16,16,16],"maxWidth":560,"cellPadding":8,"size":12,"lineHeight":18,"letterSpacing":"0.01em","color":"muted","linkColor":"primary","separator":" | ","gap":4,"after":8,"font":"base"},
+    {"id":"fine","type":"footer","links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"},{"label":"Preferences","href":"{{preferencesUrl}}"},{"label":"View online","href":"{{viewUrl}}"},{"label":"Plain","href":""}],"lines":["Acme Inc.\n1 Example Street","Privacy"],"lineGap":16,"background":"page","inset":[16,16,16,16],"maxWidth":560,"cellPadding":8,"size":12,"lineHeight":18,"letterSpacing":"0.01em","color":"muted","linkColor":"primary","separator":" | ","gap":4,"after":8,"font":"base"},
     {"id":"raw","type":"html","html":"<p style=\"color:#333\">Hello <a href=\"https://example.com\" target=\"_blank\" rel=\"noopener\">link</a> <a href=\"{{viewUrl}}\">view</a></p>"}
   ]
 }`)
@@ -1339,7 +1340,7 @@ var sampleValue = map[string]string{
 	"src": `"artifact:abc"`, "alt": `"a"`, "width": `10`, "height": `10`, "href": `"https://example.com"`, "bleed": `true`,
 	"label": `"Go"`, "paddingY": `8`, "inset": `[1,2,3,4]`, "maxWidth": `500`, "cellPadding": `4`, "stackBelow": `450`,
 	"blocks": `[]`, "columns": `[{"width":100,"blocks":[]}]`, "title": `"t"`, "lines": `["x"]`, "separator": `"|"`,
-	"after": `8`, "html": `"<p>x</p>"`,
+	"after": `8`, "html": `"<p>x</p>"`, "lineGap": `16`,
 }
 
 // sampleFor is a valid value for the key on the type.
@@ -1393,7 +1394,7 @@ var specKeys = map[string]string{
 	"section":   "background inset maxWidth cellPadding blocks",
 	"columns":   "background inset maxWidth gap stackBelow columns",
 	"social":    "title links maxWidth gap",
-	"footer":    "links lines background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
+	"footer":    "links lines lineGap background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
 	"html":      "html",
 }
 
@@ -1708,4 +1709,17 @@ func FuzzParse(f *testing.F) {
 			t.Fatalf("canonical bytes are not stable: %v", err)
 		}
 	})
+}
+
+func TestParseAcceptsHyphenatedBuiltinLayoutIDs(t *testing.T) {
+	for _, id := range []string{"builtin:three-reasons", "builtin:a", "builtin:side-by-side"} {
+		if !builtinPattern.MatchString(id) {
+			t.Errorf("%s refused", id)
+		}
+	}
+	for _, id := range []string{"builtin:Three", "builtin:-x", "builtin:x-", "builtin:" + strings.Repeat("a", 41)} {
+		if builtinPattern.MatchString(id) {
+			t.Errorf("%s accepted", id)
+		}
+	}
 }

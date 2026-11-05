@@ -3,111 +3,125 @@
   "preheader": "One click and you're on the list.",
   "layout": "builtin:confirmation",
   "theme": {
-    "page": "#eef0f3",
-    "canvas": "#5b8fb9",
-    "primary": "#1f5f8b",
-    "secondary": "#5b8fb9",
-    "accent": "#d2322d",
-    "tint": "#f6f4ef",
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
     "text": "#1c1c1c",
-    "muted": "#696e77",
+    "muted": "#666666",
     "headingFont": "Georgia",
     "bodyFont": "Arial"
   },
   "blocks": [
     {
-      "id": "top",
-      "type": "spacer",
-      "role": "brand",
-      "height": 48
-    },
-    {
-      "id": "logo",
-      "type": "image",
-      "role": "brand",
-      "alt": "Your logo",
-      "width": 226,
-      "height": 128
-    },
-    {
-      "id": "rule-top",
-      "type": "divider",
-      "role": "brand",
-      "color": "primary"
-    },
-    {
-      "id": "headline",
-      "type": "heading",
-      "role": "content",
-      "text": "Welcome aboard!",
-      "size": 48,
-      "lineHeight": 52.8,
-      "color": "white",
-      "italic": true,
-      "weight": 700,
-      "font": "heading"
-    },
-    {
-      "id": "subhead",
-      "type": "heading",
-      "role": "content",
-      "text": "You'll get our best ideas and updates, straight to your inbox.",
-      "size": 26.7,
-      "lineHeight": 29.37,
-      "color": "white",
-      "weight": 700,
-      "font": "body"
-    },
-    {
-      "id": "hero",
-      "type": "image",
-      "role": "content",
-      "alt": "Hero picture",
-      "width": 552,
-      "height": 218
-    },
-    {
-      "id": "confirm",
-      "type": "button",
-      "role": "content",
-      "size": 20.2,
-      "color": "primary",
-      "width": 303,
-      "href": "{{confirmUrl}}",
-      "label": "Confirm my address",
-      "paddingY": 11
-    },
-    {
-      "id": "note",
-      "type": "text",
-      "role": "content",
-      "text": "If you didn't sign up, you can ignore this email.",
-      "size": 14.7,
-      "lineHeight": 22.4,
-      "color": "text",
-      "align": "center"
-    },
-    {
-      "id": "rule-bottom",
-      "type": "divider",
-      "role": "brand",
-      "color": "primary"
+      "id": "panel",
+      "type": "section",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "background": "secondary",
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "top",
+          "type": "spacer",
+          "role": "brand",
+          "height": 48
+        },
+        {
+          "id": "logo",
+          "type": "image",
+          "role": "brand",
+          "alt": "Your logo",
+          "width": 226,
+          "height": 128
+        },
+        {
+          "id": "rule-top",
+          "type": "divider",
+          "role": "brand",
+          "color": "primary"
+        },
+        {
+          "id": "headline",
+          "type": "heading",
+          "role": "content",
+          "text": "Welcome aboard!",
+          "size": 48,
+          "lineHeight": 52.8,
+          "color": "white",
+          "italic": true,
+          "weight": 700,
+          "font": "heading"
+        },
+        {
+          "id": "subhead",
+          "type": "heading",
+          "role": "content",
+          "text": "You'll get our best ideas and updates, straight to your inbox.",
+          "size": 26.7,
+          "lineHeight": 29.37,
+          "color": "white",
+          "weight": 700,
+          "font": "body"
+        },
+        {
+          "id": "hero",
+          "type": "image",
+          "role": "content",
+          "alt": "Hero picture",
+          "width": 552,
+          "height": 218
+        },
+        {
+          "id": "confirm",
+          "type": "button",
+          "role": "content",
+          "size": 20.2,
+          "color": "primary",
+          "width": 303,
+          "href": "{{confirmUrl}}",
+          "label": "Confirm my address",
+          "paddingY": 11
+        },
+        {
+          "id": "note",
+          "type": "text",
+          "role": "content",
+          "text": "If you didn't sign up, you can ignore this email.",
+          "size": 14.7,
+          "lineHeight": 22.4,
+          "color": "white",
+          "align": "center"
+        },
+        {
+          "id": "rule-bottom",
+          "type": "divider",
+          "role": "brand",
+          "padding": [
+            0,
+            0,
+            16,
+            0
+          ],
+          "color": "primary"
+        }
+      ]
     },
     {
       "id": "footer",
       "type": "footer",
       "role": "brand",
-      "padding": [
-        0,
-        0,
-        24,
-        0
-      ],
       "size": 14.7,
       "lineHeight": 22.4,
-      "gap": 38.4,
+      "gap": 16,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -138,12 +152,37 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
       ],
-      "after": 22.4
+      "lineGap": 16
+    },
+    {
+      "id": "panel-end",
+      "type": "section",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "background": "secondary",
+      "inset": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "panel-end-space",
+          "type": "spacer",
+          "height": 24
+        }
+      ]
     }
   ]
 }

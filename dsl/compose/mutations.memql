@@ -38,6 +38,10 @@
 /// facts only the executor holds. A browser that wrote this row perfectly, owning it perfectly,
 /// would be recording a run that nothing ever performed -- and the Materialized list would show it
 /// beside real ones with nothing to tell them apart.
+///
+/// outputKind and layoutId are retired with email_template and kept for the shape of old rows: the
+/// Materializer refuses a request that names either (Emails are made in the Email app.), so no new
+/// row carries them.
 @actor
 @serverOnly
 mutation composition createComposition {
@@ -244,7 +248,9 @@ mutation composeTemplate restoreComposeTemplate {
 
 /// Promote a composition that worked into something you can run again. Owned. The selectors are
 /// the caller's -- resolved under their own actor at every later run -- so a recipe can never widen
-/// what its runner may read.
+/// what its runner may read. outputKind and layoutId are retired with email_template, for old
+/// recipes only: a run of a recipe that names an output kind is refused (Emails are made in the
+/// Email app.).
 @actor
 mutation recipe createComposeRecipe {
   args {
@@ -270,7 +276,8 @@ mutation recipe createComposeRecipe {
   }
 }
 
-/// Rename or re-aim a recipe. Owned.
+/// Rename or re-aim a recipe. Owned. outputKind and layoutId are retired with email_template, for
+/// old recipes only, as on createComposeRecipe.
 @actor
 mutation recipe updateComposeRecipe {
   args {

@@ -730,6 +730,20 @@
       }
     },
     {
+      "concept": "v1:campaigns:brandKit",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "kit",
+        "ownerUserId"
+      ],
+      "required": [
+        "accountId",
+        "kit",
+        "ownerUserId"
+      ]
+    },
+    {
       "concept": "v1:campaigns:campaign",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -1329,6 +1343,7 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "composition",
         "document",
         "htmlBody",
         "layoutId",
@@ -8820,6 +8835,7 @@
           "agent",
           "api",
           "ask",
+          "email",
           "library",
           "materializer",
           "nexus",

@@ -93,7 +93,9 @@ describe("a template's page", () => {
     const terms = [...facts.querySelectorAll("dt")].map((term) => term.textContent);
     expect(terms).toEqual(["Organization", "Layout", "Subject", "Preheader", "Changed"]);
     expect(within(facts).getByText("Operator organization")).toBeTruthy();
-    await waitFor(() => expect(within(facts).getByRole("button", { name: "Article" })).toBeTruthy());
+    await waitFor(() => expect(within(facts).getByText("Article")).toBeTruthy());
+    // The layout is named, not linked: there is no Layouts view to open.
+    expect(within(facts).queryByRole("button", { name: "Article" })).toBeNull();
     expect(within(facts).getByText("Glad you're here")).toBeTruthy();
     expect(within(facts).getByText("Three things to try")).toBeTruthy();
     const tabs = screen.getByRole("navigation", { name: "Preview" });
@@ -367,19 +369,6 @@ describe("a template's page", () => {
     const notice = screen.getByText(VSCODE_NO_ANSWER_MESSAGE).closest(".os-notice") as HTMLElement;
     expect(notice.previousElementSibling?.classList.contains("os-head")).toBe(true);
   });
-
-  it("opens the layout it was made from", async () => {
-    const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "Welcome 2", layoutId: "builtin:article" })] });
-    mount(conn);
-    await openPage("Welcome 2");
-    const facts = screen.getByRole("region", { name: "Template details" });
-    fireEvent.click(await within(facts).findByRole("button", { name: "Article" }));
-    expect(await screen.findByRole("heading", { level: 3, name: "Article" })).toBeTruthy();
-    // Back is the Layouts view.
-    fireEvent.click(screen.getByRole("button", { name: "Back to Templates" }));
-    expect(await screen.findByRole("heading", { level: 3, name: "Templates" })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: "Templates and layouts" })).getByRole("button", { name: "Layouts" }).getAttribute("aria-current")).toBe("page");
-  });
 });
 
 describe("what a template's bar offers, as a table", () => {
@@ -387,13 +376,13 @@ describe("what a template's bar offers, as a table", () => {
   const template = (status: string) => templateFromRow(templateRow({ id: "t1", name: "Welcome 2", status }));
 
   it("asks before archiving a published template, and only a published one", () => {
-    expect(dress(templateActs(template("ready"), ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
-    expect(dress(templateActs(template("ready"), "archive"))).toEqual([["Keep", "text"], ["Archive", "danger"]]);
+    expect(dress(templateActs(template("ready"), "", ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+    expect(dress(templateActs(template("ready"), "archive", ""))).toEqual([["Keep", "text"], ["Archive", "danger"]]);
     // The Archive that asks and the Archive that does are two acts.
-    expect(templateActs(template("ready"), "")[0]?.id).not.toBe(templateActs(template("draft"), "")[0]?.id);
+    expect(templateActs(template("ready"), "", "")[0]?.id).not.toBe(templateActs(template("draft"), "", "")[0]?.id);
     // A stale question never brings an archived template more than Restore.
-    expect(dress(templateActs(template("archived"), "archive"))).toEqual([["Restore", "primary"]]);
-    expect(dress(templateActs(template("draft"), "archive"))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+    expect(dress(templateActs(template("archived"), "archive", ""))).toEqual([["Restore", "primary"]]);
+    expect(dress(templateActs(template("draft"), "archive", ""))).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
   });
 
   it("opens the file a template was published from, else the template", () => {

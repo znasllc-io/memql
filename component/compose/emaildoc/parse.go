@@ -85,7 +85,7 @@ var (
 			"section":   "background inset maxWidth cellPadding blocks",
 			"columns":   "background inset maxWidth gap stackBelow columns",
 			"social":    "title links maxWidth gap",
-			"footer":    "links lines background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
+			"footer":    "links lines lineGap background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
 			"html":      "html",
 		}
 		keys := make(map[string]map[string]bool, len(own))
@@ -105,7 +105,7 @@ var (
 	hexPattern      = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 	fontPattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 -]{0,39}$`)
 	spacingPattern  = regexp.MustCompile(`^-?[0-9]{1,2}(\.[0-9]{1,3})?em$`)
-	builtinPattern  = regexp.MustCompile(`^builtin:[a-z]{1,40}$`)
+	builtinPattern  = regexp.MustCompile(`^builtin:[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
 	orgPattern      = regexp.MustCompile(`^org:[A-Za-z0-9_-]{1,160}$`)
 	artifactPattern = regexp.MustCompile(`^artifact:[A-Za-z0-9_-]{1,160}$`)
 )
@@ -660,7 +660,7 @@ const (
 
 // misplaced says why a block of this type cannot sit in this container. A
 // section is a top-level band, columns sit at the top level or in a section, a
-// footer is the last thing in the email, and nothing else nests.
+// footer sits at the top level, and nothing else nests.
 func misplaced(in container, typ string) string {
 	switch {
 	case typ == typeFooter && in != inTop:
@@ -932,6 +932,9 @@ func blockProblem(b *Block) string {
 			return err.Error()
 		}
 	case typeFooter:
+		if b.LineGap < 0 || b.LineGap > 200 {
+			return rangeMessage("lineGap", 0, 200)
+		}
 		if len(b.Lines) > 12 {
 			return "a footer can have at most 12 lines"
 		}

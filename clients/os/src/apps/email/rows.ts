@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
+import { bare } from "../deployables/people";
 
 // The wire rows the Email app renders, projected into the shapes its
 // surfaces read.
@@ -684,6 +685,58 @@ export interface TemplateRow {
   sourceArtifactId: string;
   /** The revision: it moves on every save. */
   createdAt: string;
+  /** An email MemQL is writing into this template, or null when none was asked for. */
+  composition?: Composition | null;
+}
+
+/** MemQL writing an email into a draft template: writing, then done or failed. */
+export interface Composition {
+  state: "writing" | "done" | "failed";
+  /** When the writing began (an instant), or "". */
+  startedAt: string;
+  /** The reason it failed, as a plain sentence the server wrote. */
+  error: string;
+  /** One plain sentence for each file left out and why. */
+  notes: string[];
+  /** Who asked MemQL to write it (a user id), or "" when the row does not say: the one person who may retry it. */
+  requestedBy: string;
+}
+
+function compositionFromRow(flat: Record<string, unknown>): Composition | null {
+  const object = rowObject(flat, "composition");
+  if (object === null) return null;
+  const state = object.state;
+  if (state !== "writing" && state !== "done" && state !== "failed") return null;
+  const notes = Array.isArray(object.notes) ? object.notes.filter((note): note is string => typeof note === "string" && note !== "") : [];
+  const request = object.request !== null && typeof object.request === "object" && !Array.isArray(object.request) ? (object.request as Record<string, unknown>) : {};
+  return {
+    state,
+    startedAt: typeof object.startedAt === "string" ? object.startedAt : "",
+    error: typeof object.error === "string" ? object.error : "",
+    notes,
+    requestedBy: typeof request.requestedBy === "string" ? request.requestedBy : "",
+  };
+}
+
+/** Whether MemQL is writing this template's email now. */
+export function isWriting(template: TemplateRow): boolean {
+  return template.composition?.state === "writing";
+}
+
+/** Whether the last attempt to write this template's email failed. */
+export function compositionFailed(template: TemplateRow): boolean {
+  return template.composition?.state === "failed";
+}
+
+/**
+ * Whether `viewer` (the signed-in user's id) may retry this template's failed
+ * composition: only the person who asked may, since a retry reads the files
+ * the request names as whoever runs it. Ids are compared bare, whichever way
+ * either is written; a composition that does not say who asked is nobody's.
+ */
+export function mayRetry(template: TemplateRow, viewer: string): boolean {
+  const asker = bare(template.composition?.requestedBy ?? "");
+  return compositionFailed(template) && asker !== "" && asker === bare(viewer);
 }
 
 export function templateFromRow(row: Row): TemplateRow {
@@ -699,6 +752,7 @@ export function templateFromRow(row: Row): TemplateRow {
     preheader: rowString(flat, "preheader"),
     sourceArtifactId: rowString(flat, "sourceArtifactId"),
     createdAt: rowString(flat, "createdAt"),
+    composition: compositionFromRow(flat),
   };
 }
 
@@ -760,6 +814,8 @@ export function templateFingerprint(template: TemplateRow): string {
     template.status,
     template.accountId,
     template.createdAt,
+    template.composition?.state ?? "",
+    template.composition?.error ?? "",
   ].join("|");
 }
 
@@ -770,15 +826,14 @@ export function templateFingerprint(template: TemplateRow): string {
 // A LAYOUT IS A ROW OF THE `emailLayouts` BUILTIN (layouts plan Ruling 16), not
 // a concept row: the four built-ins are Go data that ships with the renderer,
 // and an organization's own layouts follow them. One reading per organization
-// lists both, so a list of every organization's layouts sees each built-in once
-// per organization -- `layoutsInView` says each once.
+// lists both; the Templates list uses them only to name the layout a template
+// was made from.
 //
 // THE ID IS OPAQUE. "builtin:<name>" and "org:<id>" are the server's, the same
 // string a template carries as its `layoutId`; the OS matches them whole,
 // displays them only through the name the reading gives, and never builds or
 // splits one. `layoutId` is the bare row id the server hands beside it for an
-// organization's layout, which is what `campaignSaveLayout` and
-// `emailLayoutById` take.
+// organization's layout.
 
 /** One row of an organization's `emailLayouts` reading. */
 export interface LayoutRow {
@@ -789,13 +844,10 @@ export interface LayoutRow {
   description: string;
   /** The layout's email document; {} when the listing left it out (`documentOmitted`). */
   document: Record<string, unknown>;
-  /**
-   * The listing left this layout's document out to stay under its size; the
-   * layout is read by id (`emailLayoutById`) before it is previewed.
-   */
+  /** The listing left this layout's document out to stay under its size. */
   documentOmitted: boolean;
   status: "active" | "archived";
-  /** The organization whose reading returned it; "" for a built-in once `layoutsInView` has said it once. */
+  /** The organization whose reading returned it. */
   accountId: string;
   /** Organization layouts only: the bare row id, for the calls that take one. */
   layoutId?: string;
@@ -831,35 +883,6 @@ export function layoutTitle(layout: LayoutRow): string {
   return layout.name.trim() || "Untitled layout";
 }
 
-export function layoutIsArchived(layout: LayoutRow): boolean {
-  return layout.status === "archived";
-}
-
-/**
- * What the Layouts view lists: each built-in once, then every organization's
- * own layouts in the order their readings came, archived ones only when asked.
- *
- * A built-in is every organization's, so once said it belongs to none of them
- * (`accountId` ""). The copy kept is the first that carries its document, so a
- * reading that had to leave it out does not stand for one that did not.
- */
-export function layoutsInView(readings: ReadonlyMap<string, readonly LayoutRow[]>, includeArchived: boolean): LayoutRow[] {
-  const builtIns = new Map<string, LayoutRow>();
-  const own: LayoutRow[] = [];
-  for (const rows of readings.values()) {
-    for (const layout of rows) {
-      if (layout.id === "") continue;
-      if (layout.kind === "builtin") {
-        const held = builtIns.get(layout.id);
-        if (held === undefined || (held.documentOmitted && !layout.documentOmitted)) builtIns.set(layout.id, { ...layout, accountId: "" });
-      } else if (includeArchived || !layoutIsArchived(layout)) {
-        own.push(layout);
-      }
-    }
-  }
-  return [...builtIns.values(), ...own];
-}
-
 /**
  * The name of the layout a template was made from, by the opaque id the
  * template carries. "" when no reading knows it -- and for a template made
@@ -888,40 +911,6 @@ export function sameLayout(a: LayoutRow, b: LayoutRow): boolean {
     return false;
   }
   return a.kind === "organization" ? true : JSON.stringify(a.document) === JSON.stringify(b.document);
-}
-
-/**
- * An organization layout read whole, by id (`emailLayoutById`, the
- * emailLayoutFull shape): who saved it, and the revision a change of its
- * state is checked against.
- */
-export interface LayoutRecord {
-  /** The bare row id. */
-  layoutId: string;
-  ownerUserId: string;
-  accountId: string;
-  name: string;
-  description: string;
-  document: Record<string, unknown> | null;
-  sourceArtifactId: string;
-  status: string;
-  /** The revision: it moves on every save, archive and restore. */
-  createdAt: string;
-}
-
-export function layoutRecordFromRow(row: Row): LayoutRecord {
-  const flat = flatten(row);
-  return {
-    layoutId: rowString(flat, "id"),
-    ownerUserId: rowString(flat, "ownerUserId"),
-    accountId: rowString(flat, "accountId"),
-    name: rowString(flat, "name"),
-    description: rowString(flat, "description"),
-    document: rowObject(flat, "document"),
-    sourceArtifactId: rowString(flat, "sourceArtifactId"),
-    status: rowString(flat, "status"),
-    createdAt: rowString(flat, "createdAt"),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -955,6 +944,45 @@ export function renderFromRow(row: Row): EmailRender {
       .filter((issue): issue is Row => issue !== null && typeof issue === "object" && !Array.isArray(issue))
       .map((issue) => ({ code: rowString(issue, "code"), block: rowString(issue, "block"), message: rowString(issue, "message") }))
       .filter((issue) => issue.message !== ""),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// An organization's brand kit (Task 24)
+// ---------------------------------------------------------------------------
+
+/** An organization's brand kit as saved (brandKitFull): the kit, and its revision, the row's createdAt. */
+export interface BrandKitRecord {
+  kit: Record<string, unknown>;
+  revision: string;
+}
+
+export function brandKitFromRow(row: Row): BrandKitRecord {
+  const flat = flatten(row);
+  return { kit: rowObject(flat, "kit") ?? {}, revision: rowString(flat, "createdAt") };
+}
+
+/** Something a kit does that is allowed but worth knowing: a pair of colours under WCAG AA, or pictures that leave an email little room. */
+export interface BrandWarning {
+  code: string;
+  message: string;
+}
+
+/** What `campaignBrandPreview` answers: a built-in layout drawn in the kit, and the kit's warnings. Never saved. */
+export interface BrandPreview {
+  html: string;
+  warnings: BrandWarning[];
+}
+
+export function brandPreviewFromRow(row: Row): BrandPreview {
+  const flat = flatten(row);
+  const warnings = Array.isArray(flat["warnings"]) ? (flat["warnings"] as unknown[]) : [];
+  return {
+    html: rowString(flat, "html"),
+    warnings: warnings
+      .filter((warning): warning is Row => warning !== null && typeof warning === "object" && !Array.isArray(warning))
+      .map((warning) => ({ code: rowString(warning, "code"), message: rowString(warning, "message") }))
+      .filter((warning) => warning.message !== ""),
   };
 }
 

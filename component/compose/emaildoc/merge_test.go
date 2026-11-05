@@ -88,13 +88,13 @@ func TestMergeWritesContentAndKeepsBrand(t *testing.T) {
 	}
 	// The brand is the layout's, byte for byte: the logo, the divider, the
 	// signature columns and the footer, and the theme.
-	for _, id := range []string{"logo", "question", "question-more", "signature", "rule", "footer"} {
+	for _, id := range []string{"logo", "reply", "signature", "rule", "footer"} {
 		if !bytes.Equal(blockBytes(t, blockByID(t, got, id)), blockBytes(t, blockByID(t, layout, id))) {
 			t.Errorf("brand block %q changed", id)
 		}
 	}
 	// A content block the draft did not name keeps the layout's example.
-	for _, id := range []string{"highlight", "article", "ask"} {
+	for _, id := range []string{"highlight", "article"} {
 		if !bytes.Equal(blockBytes(t, blockByID(t, got, id)), blockBytes(t, blockByID(t, layout, id))) {
 			t.Errorf("content block %q changed although the draft did not name it", id)
 		}
@@ -137,10 +137,10 @@ func TestMergeRefuses(t *testing.T) {
 			`the draft set label on text block "intro"`, false},
 		{"a link on text", "builtin:article", Content{Subject: "S", Blocks: []ContentItem{{ID: "intro", Href: textPtr("https://example.com")}}},
 			`the draft set href on text block "intro"`, false},
-		{"text on a button", "builtin:article", Content{Subject: "S", Blocks: []ContentItem{{ID: "ask", Text: textPtr("Ask")}}},
-			`the draft set text on button block "ask"`, false},
-		{"a picture on a button", "builtin:article", Content{Subject: "S", Blocks: []ContentItem{{ID: "ask", Image: textPtr("memql-asset:abc")}}},
-			`the draft set image on button block "ask"`, false},
+		{"text on a button", "builtin:confirmation", Content{Subject: "S", Blocks: []ContentItem{{ID: "confirm", Text: textPtr("Ask")}}},
+			`the draft set text on button block "confirm"`, false},
+		{"a picture on a button", "builtin:confirmation", Content{Subject: "S", Blocks: []ContentItem{{ID: "confirm", Image: textPtr("memql-asset:abc")}}},
+			`the draft set image on button block "confirm"`, false},
 		{"text on a picture", "builtin:article", Content{Subject: "S", Blocks: []ContentItem{{ID: "banner", Text: textPtr("Caption")}}},
 			`the draft set text on image block "banner"`, false},
 		{"text on a section", "builtin:article", Content{Subject: "S", Blocks: []ContentItem{{ID: "body", Text: textPtr("All of it")}}},
@@ -270,7 +270,6 @@ func TestNullKeepsTheLayoutsValue(t *testing.T) {
 	got, err := Merge(layout, Content{Subject: "Autumn", Blocks: []ContentItem{
 		{ID: "intro"},
 		{ID: "highlight", Text: textPtr("  \n\t ")},
-		{ID: "ask", Label: textPtr(" "), Href: nil},
 		{ID: "banner", Alt: textPtr(""), Image: nil},
 		// Blank fields a block does not have are not set either, so they are not
 		// refused: a model answering null-ish for everything changes nothing.
@@ -279,7 +278,7 @@ func TestNullKeepsTheLayoutsValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"intro", "highlight", "ask", "banner", "article"} {
+	for _, id := range []string{"intro", "highlight", "banner", "article"} {
 		if !bytes.Equal(blockBytes(t, blockByID(t, got, id)), blockBytes(t, blockByID(t, layout, id))) {
 			t.Errorf("block %q changed although the draft set nothing in it", id)
 		}
@@ -298,7 +297,7 @@ func TestContentSlotsListOnlyContentBlocks(t *testing.T) {
 	for _, slot := range slots {
 		ids = append(ids, slot.ID)
 	}
-	if want := []string{"banner", "intro", "highlight", "article", "ask"}; !reflect.DeepEqual(ids, want) {
+	if want := []string{"banner", "lead", "intro", "highlight", "article", "closing-title", "closing-text"}; !reflect.DeepEqual(ids, want) {
 		t.Fatalf("article slots = %v, want %v", ids, want)
 	}
 	byID := map[string]Slot{}
@@ -311,9 +310,6 @@ func TestContentSlotsListOnlyContentBlocks(t *testing.T) {
 	}
 	if s := byID["banner"]; s.Type != "image" || s.Alt != "Article banner" || s.Width != 552 || s.Text != "" {
 		t.Errorf("banner slot = %+v", s)
-	}
-	if s := byID["ask"]; s.Type != "button" || s.Label != "Ask our team" || s.Width != 305 {
-		t.Errorf("ask slot = %+v", s)
 	}
 	confirmation := builtin(t, "builtin:confirmation")
 	for _, slot := range ContentSlots(confirmation) {

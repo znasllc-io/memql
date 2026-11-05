@@ -138,11 +138,37 @@ type ExecutionClaimer interface {
 	ClaimWithTTL(ctx context.Context, name, dedupKey string, ttl time.Duration) bool
 }
 
+// CompositionGoal is what an email composition's goal is opened with: the
+// person it runs for (its owner, on whose machine it runs), the organization and
+// the template it writes, and the statement a person sees it as in Nexus.
+type CompositionGoal struct{ OwnerUserID, AccountID, TemplateID, Statement string }
+
+// GoalStarter opens the goal of an email composition (compose_start.go): the
+// composeEmailRun template, on route:apps at level strong and requested via
+// email, owned by g.OwnerUserID, with the template as its input. It answers the
+// goal's id; the goal's run starts on its own.
+type GoalStarter interface {
+	StartComposition(ctx context.Context, g CompositionGoal) (goalID string, err error)
+}
+
+// GoalCanceller asks a composition's goal to stop, as the caller: the work
+// runtime's own cancel, the one the cancelGoal builtin makes.
+type GoalCanceller interface {
+	CancelGoal(ctx context.Context, goalID, reason string) error
+}
+
+// AppReachability says whether a person has an app a call can reach right now:
+// a signed-in app on one of their machines.
+type AppReachability interface {
+	HasReachableApp(ctx context.Context, userID string) (bool, error)
+}
+
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
 	testGate     func(context.Context, string) (func(), error)
 	templateGate func(context.Context, string) (func(), error)
 	layoutGate   func(context.Context, string) (func(), error)
+	brandGate    func(context.Context, string) (func(), error)
 	// singleSendGate holds the receipt lock and verifies ownership before an attempt.
 	singleSendGate     func(context.Context, string) (gateHold, error)
 	journeyGate        func(context.Context, string) (gateHold, error)
@@ -204,6 +230,21 @@ type Worker struct {
 	digestSweepFirst time.Duration
 	digestSweepEvery time.Duration
 	sweepDoneCh      chan struct{}
+
+	// materialFiler files an email composition's material in its owner's
+	// Library for the composer's session (compose_run.go), installed by the
+	// application where object storage is resolved. Nil means this node cannot
+	// run a composition that has files. Guarded by mu.
+	materialFiler MaterialFiler
+
+	// goalStarter, goalCanceller and appReach are what starting, cancelling
+	// and retrying an email composition take from the work runtime and the app
+	// doors (compose_start.go), installed by the application on every node
+	// (SetCompositionGoals). Nil means this node refuses that part by name.
+	// Guarded by mu.
+	goalStarter   GoalStarter
+	goalCanceller GoalCanceller
+	appReach      AppReachability
 
 	cancel      context.CancelFunc
 	running     atomic.Bool
@@ -301,6 +342,10 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 		},
 		layoutGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-layout:"+key)
+		},
+		// Keyed by the organization: it has one kit.
+		brandGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "campaign-brand:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,
@@ -403,6 +448,22 @@ func (w *Worker) Stop(_ context.Context) {
 		}
 		w.running.Store(false)
 	})
+}
+
+// SetCompositionGoals installs what starting, cancelling and retrying an email
+// composition take from outside this package: the goal starter, the goal
+// canceller and the app check. Any of them nil leaves its part refusing on this
+// node by name.
+func (w *Worker) SetCompositionGoals(starter GoalStarter, canceller GoalCanceller, apps AppReachability) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.goalStarter, w.goalCanceller, w.appReach = starter, canceller, apps
+}
+
+func (w *Worker) compositionGoals() (GoalStarter, GoalCanceller, AppReachability) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.goalStarter, w.goalCanceller, w.appReach
 }
 
 // Dependency surface.

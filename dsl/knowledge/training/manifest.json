@@ -155,7 +155,7 @@
       "domainId": "work-guidance",
       "sourceRef": "memql/work/delivery/v1",
       "catalog": "workGuidance",
-      "sha256": "0d5185f7f6addbb5f29e18d9bc7069fd906ed0cca7622acf2d05f8c29bad9ec6"
+      "sha256": "0bf7f78d40de0ec2bc1996d233944ec1d372d50377f63b6312a3f4e7ad39fcf2"
     },
     {
       "domainId": "work-guidance",

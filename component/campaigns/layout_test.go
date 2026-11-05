@@ -732,7 +732,13 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 	for _, r := range rows {
 		ids = append(ids, str(r, "id"))
 	}
-	if want := "builtin:confirmation, builtin:letter, builtin:article, builtin:spotlight, org:l1"; strings.Join(ids, ", ") != want {
+	var wantIDs []string
+	for _, l := range emaildoc.Layouts() {
+		wantIDs = append(wantIDs, l.ID)
+	}
+	builtinCount := len(wantIDs)
+	wantIDs = append(wantIDs, "org:l1")
+	if want := strings.Join(wantIDs, ", "); strings.Join(ids, ", ") != want {
 		t.Fatalf("ids = %s\nwant %s", strings.Join(ids, ", "), want)
 	}
 	for i, n := range nodes {
@@ -741,7 +747,7 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 		}
 	}
 
-	for _, row := range rows[:4] {
+	for _, row := range rows[:builtinCount] {
 		if row["kind"] != "builtin" || row["status"] != "active" || str(row, "name") == "" || str(row, "description") == "" {
 			t.Errorf("built-in row = %v", row)
 		}
@@ -759,7 +765,7 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 		}
 	}
 
-	org := rows[4]
+	org := rows[builtinCount]
 	if org["layoutId"] != "l1" || org["kind"] != "organization" || org["name"] != "Acme letter" || org["status"] != "active" ||
 		org["sourceArtifactId"] != "art-1" || org["revision"] != layoutStored.Format(time.RFC3339Nano) || org["description"] != "A personal note with a signature band." {
 		t.Fatalf("organization row = %v", org)
@@ -787,7 +793,8 @@ func TestEmailLayoutsIncludesArchivedOnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := nodePayloads(t, nodes)
-	if len(rows) != 6 || rows[4]["id"] != "org:l1" || rows[5]["id"] != "org:l2" || rows[5]["status"] != "archived" {
+	n := len(emaildoc.Layouts())
+	if len(rows) != n+2 || rows[n]["id"] != "org:l1" || rows[n+1]["id"] != "org:l2" || rows[n+1]["status"] != "archived" {
 		t.Fatalf("rows = %v", rows)
 	}
 	reads := engine.calls("query emailLayoutsForAccount")
@@ -813,8 +820,9 @@ func TestEmailLayoutsBoundsDocumentsAndKeepsEveryLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := nodePayloads(t, nodes)
-	if len(rows) != 16 {
-		t.Fatalf("a large list lost layouts: got %d rows, want 16", len(rows))
+	builtins := len(emaildoc.Layouts())
+	if len(rows) != builtins+12 {
+		t.Fatalf("a large list lost layouts: got %d rows, want %d", len(rows), builtins+12)
 	}
 	used, omitted := 0, 0
 	for i, row := range rows {
@@ -837,7 +845,7 @@ func TestEmailLayoutsBoundsDocumentsAndKeepsEveryLayout(t *testing.T) {
 			}
 			used += len(data)
 		}
-		if i < 4 && row["kind"] != "builtin" {
+		if i < builtins && row["kind"] != "builtin" {
 			t.Fatal("large lists changed the built-in layout order")
 		}
 	}
@@ -1001,5 +1009,134 @@ func TestLayoutCapabilitiesAreRegistered(t *testing.T) {
 	}
 	if save.PreserveOrder {
 		t.Error("saveLayout answers one receipt; there is no order to preserve")
+	}
+}
+
+func TestEmailLayoutsRowsCarryWireframeAndCategory(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	engine.emailLayouts["l1"] = storedLayout(t, "active")
+	nodes, err := w.handleEmailLayouts(importCtx(), map[string]any{"accountId": layoutOrg}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	categories := map[string]bool{}
+	for _, c := range emaildoc.LayoutCategories {
+		categories[c] = true
+	}
+	for _, row := range nodePayloads(t, nodes) {
+		wireframe, _ := row["wireframe"].(string)
+		if !strings.HasPrefix(wireframe, "<svg") {
+			t.Errorf("%v: wireframe = %.40q", row["id"], wireframe)
+		}
+		category, _ := row["category"].(string)
+		if row["kind"] == "organization" {
+			if category != "Saved" {
+				t.Errorf("%v: category = %q", row["id"], category)
+			}
+		} else if !categories[category] {
+			t.Errorf("%v: category %q is not a layout category", row["id"], category)
+		}
+	}
+}
+
+func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	engine.emailLayouts["l1"] = storedLayout(t, "active")
+	nodes, err := w.handleLayoutCatalogue(importCtx(), map[string]any{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := nodePayloads(t, nodes)
+	builtins := emaildoc.Layouts()
+	if len(rows) != len(builtins) {
+		t.Fatalf("%d rows, want %d built-in layouts", len(rows), len(builtins))
+	}
+	for i, info := range builtins {
+		row := rows[i]
+		if row["id"] != info.ID || row["name"] != info.Name || row["category"] != info.Category || row["description"] != info.Description {
+			t.Errorf("row %d = %v", i, row)
+		}
+		if _, present := row["wireframe"]; present {
+			t.Errorf("%s: catalogue row carries a wireframe; its reader is a model, and people see wireframes in emailLayouts", info.ID)
+		}
+		outline, _ := row["outline"].(string)
+		if outline == "" || strings.Contains(outline, "\n") {
+			t.Errorf("%s: outline = %q", info.ID, outline)
+		}
+		// Every block, those inside sections and columns included: Ask's
+		// assistant chooses a layout from what it holds.
+		eachLayoutBlock(info.Document.Blocks, func(b emaildoc.Block) {
+			if !strings.Contains(outline, b.ID+":"+b.Type) {
+				t.Errorf("%s: outline lacks %s:%s: %s", info.ID, b.ID, b.Type, outline)
+			}
+		})
+		for _, id := range info.Optional {
+			if !strings.Contains(outline, id) || !strings.Contains(outline, " opt") {
+				t.Errorf("%s: outline does not mark %s optional: %s", info.ID, id, outline)
+			}
+		}
+		for id, r := range info.Repeat {
+			if want := fmt.Sprintf("rep %d..%d", r.Min, r.Max); !strings.Contains(outline, want) {
+				t.Errorf("%s: outline lacks %q for %s: %s", info.ID, want, id, outline)
+			}
+		}
+		if _, present := row["document"]; present {
+			t.Errorf("%s: catalogue row carries a document", info.ID)
+		}
+	}
+	if len(engine.calls("query emailLayoutsForAccount")) != 0 {
+		t.Fatal("the catalogue read organization layouts")
+	}
+}
+
+// TestLayoutOutlineShowsWhatColumnsHold: a columns block lists each column's
+// blocks in its brackets, the columns apart by " | ".
+func TestLayoutOutlineShowsWhatColumnsHold(t *testing.T) {
+	var outline string
+	for _, info := range emaildoc.Layouts() {
+		if info.ID == "builtin:side-by-side" {
+			outline = layoutOutline(info)
+		}
+	}
+	want := "cards:columns[card-a-icon:image, card-a-title:heading, card-a-subtitle:text, card-a-text:text | " +
+		"card-b-icon:image, card-b-title:heading, card-b-subtitle:text, card-b-text:text]"
+	if !strings.Contains(outline, want) {
+		t.Errorf("outline = %s\nwant it to hold %s", outline, want)
+	}
+}
+
+// TestLayoutWireframesDrawTheMinimumForm: the layout grid draws each built-in
+// layout as every picker does (emaildoc.BuiltinWireframe), in its smallest
+// form, so Steps shows its two steps.
+func TestLayoutWireframesDrawTheMinimumForm(t *testing.T) {
+	steps, err := emaildoc.BuiltinWireframe("builtin:steps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := emaildoc.Layout("builtin:steps"); steps == emaildoc.Wireframe(raw) {
+		t.Fatal("the minimum form of steps draws like the bare layout; the test proves nothing")
+	}
+	w, _, _ := layoutFixture(t)
+	list, err := w.handleEmailLayouts(importCtx(), map[string]any{"accountId": layoutOrg}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drawn := 0
+	for _, row := range nodePayloads(t, list) {
+		if row["kind"] != "builtin" {
+			continue
+		}
+		id, _ := row["id"].(string)
+		want, err := emaildoc.BuiltinWireframe(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row["wireframe"] != want {
+			t.Errorf("%s: the grid's wireframe is not the layout's picker drawing", id)
+		}
+		drawn++
+	}
+	if drawn != len(emaildoc.Layouts()) {
+		t.Errorf("emailLayouts drew %d built-in layouts, want %d", drawn, len(emaildoc.Layouts()))
 	}
 }

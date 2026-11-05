@@ -2759,3 +2759,111 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 		t.Fatalf("2 MiB of open parentheses: want the budget's refusal, cheaply, got %v after %d bytes", err, allocated)
 	}
 }
+
+// footerLinesCell is the cell a footer of the neutral theme, at its default
+// size and line height, writes one paragraph of its lines in, below bottom
+// pixels of space.
+func footerLinesCell(bottom, words string) string {
+	return `<tr><td dir="ltr" style="color:#8a8f98;font-size:14px;white-space:pre-wrap;text-align:center;padding:0px 0px ` + bottom +
+		`px;line-height:22px;mso-line-height-alt:22px">` + words + `</td></tr>`
+}
+
+// TestFooterLinesAreParagraphsSeparatedByLineGap pins the footer's paragraphs,
+// as the emails of a series write them: with a lineGap, each entry of lines is
+// a paragraph of its own, lineGap pixels above the next, and the last keeps the
+// footer's after. A line break inside an entry is a line of the same paragraph.
+// The text part is the same lines as without a gap: lineGap only spaces them.
+func TestFooterLinesAreParagraphsSeparatedByLineGap(t *testing.T) {
+	d, err := Parse([]byte(layoutJSON(`{"id":"legal","type":"footer","lineGap":16,"after":8,` +
+		`"links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"}],` +
+		`"lines":["Acme\nExample Street","Privacy & terms","© 2026 Acme"]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Blocks[0].LineGap; got != 16 {
+		t.Fatalf("lineGap = %d, want 16", got)
+	}
+	r := mustRender(t, d, nil, RenderOptions{})
+	want := footerLinesCell("16", "Acme<br>Example Street") + footerLinesCell("16", "Privacy &amp; terms") + footerLinesCell("8", "© 2026 Acme") + `</tbody></table>`
+	if !strings.Contains(r.HTML, want) {
+		t.Fatalf("want three paragraphs, 16 pixels apart and 8 after the last:\n%s\nin\n%s", want, r.HTML)
+	}
+	if want := "Unsubscribe: {{unsubscribeUrl}}\nAcme\nExample Street\nPrivacy & terms\n© 2026 Acme\n"; r.Text != want {
+		t.Fatalf("text part: got %q, want %q", r.Text, want)
+	}
+	data, err := d.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\"lines\": [\n        \"Acme\\nExample Street\",\n        \"Privacy & terms\",\n        \"© 2026 Acme\"\n      ],\n      \"lineGap\": 16,\n      \"after\": 8") {
+		t.Fatalf("the canonical file keeps lineGap after the lines:\n%s", data)
+	}
+	// One paragraph is one cell, with the footer's after below it.
+	d.Blocks[0].Lines = []string{"Alone"}
+	if r = mustRender(t, d, nil, RenderOptions{}); !strings.Contains(r.HTML, footerLinesCell("8", "Alone")+`</tbody></table>`) {
+		t.Fatalf("a single paragraph:\n%s", r.HTML)
+	}
+	for _, c := range []struct{ value, want string }{
+		{`-1`, `block "f": lineGap must be between 0 and 200 pixels`},
+		{`201`, `block "f": lineGap must be between 0 and 200 pixels`},
+		{`1.5`, `block "f": lineGap must be a whole number`},
+		{`"16"`, `block "f": lineGap must be a whole number`},
+	} {
+		if _, err := Parse([]byte(layoutJSON(`{"id":"f","type":"footer","lineGap":` + c.value + `}`))); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("lineGap %s: want %q, got %v", c.value, c.want, err)
+		}
+	}
+	if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"x","lineGap":16}`))); err == nil || !strings.Contains(err.Error(), `unknown field "lineGap"`) {
+		t.Errorf("lineGap is a footer's alone: %v", err)
+	}
+}
+
+// TestFooterLineBreakInsideAnEntry pins that a line break inside an entry of a
+// footer's lines is a line break of its paragraph: <br> in the HTML and a
+// newline in the text part, written the same way whichever line break it is,
+// with a lineGap and without one.
+func TestFooterLineBreakInsideAnEntry(t *testing.T) {
+	for _, gap := range []int{0, 12} {
+		d, err := Parse([]byte(layoutJSON(`{"id":"legal","type":"footer","lineGap":` + strconv.Itoa(gap) + `,` +
+			`"links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"}],"lines":["One\ntwo\r\nthree\rfour","Five"]}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := mustRender(t, d, nil, RenderOptions{})
+		if !strings.Contains(r.HTML, ">One<br>two<br>three<br>four") || strings.ContainsAny(r.HTML, "\r\n") {
+			t.Errorf("lineGap %d: want every line break of the entry as <br>, and no raw one:\n%s", gap, r.HTML)
+		}
+		if want := "Unsubscribe: {{unsubscribeUrl}}\nOne\ntwo\nthree\nfour\nFive\n"; r.Text != want {
+			t.Errorf("lineGap %d: text part: got %q, want %q", gap, r.Text, want)
+		}
+	}
+}
+
+// TestFooterLineGapZeroKeepsExistingOutput pins that a footer without a
+// lineGap, or with one of 0, is written exactly as footers were before there
+// was one: its lines in one cell, joined by <br>, and nothing new in the file.
+func TestFooterLineGapZeroKeepsExistingOutput(t *testing.T) {
+	block := `{"id":"legal","type":"footer","after":8,"links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"}],"lines":["Acme","Example Street"]}`
+	without, err := Parse([]byte(layoutJSON(block)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zero, err := Parse([]byte(layoutJSON(strings.Replace(block, `"after":8,`, `"after":8,"lineGap":0,`, 1))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := mustRender(t, without, nil, RenderOptions{}), mustRender(t, zero, nil, RenderOptions{})
+	if a.HTML != b.HTML || a.Text != b.Text {
+		t.Fatal("a lineGap of 0 must write what no lineGap writes")
+	}
+	if !strings.Contains(a.HTML, footerLinesCell("8", "Acme<br>Example Street")+`</tbody></table>`) {
+		t.Fatalf("want the lines in one cell, as before:\n%s", a.HTML)
+	}
+	data, err := zero.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "lineGap") {
+		t.Fatalf("a lineGap of 0 is not written:\n%s", data)
+	}
+}

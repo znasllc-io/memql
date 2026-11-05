@@ -105,6 +105,11 @@ var promptLevels = map[string]string{
 	"plannerAgent": "strong",
 	// Bounded human-reviewed email journey planning uses catalog IDs and native validation.
 	"composeEmailJourney": "strong",
+	// emailCompose: one email written into a layout, whole in Claude Code on the
+	// Apps route. It writes prose a person reviews before publishing, and the
+	// server checks its structure (Compose) and parses what it saves, so the
+	// judgement band is the right one; it never emits executable DSL.
+	"emailCompose": "strong",
 	// workAgentReply: executes one owned work step with tools and reports its
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.

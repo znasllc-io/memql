@@ -71,8 +71,17 @@ export const PREVIEW_POLICY = "default-src 'none'; style-src 'unsafe-inline'; im
  */
 const DEFAULTS = "body{margin:0;padding:16px;font:15px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img{max-width:100%}pre{white-space:pre-wrap}";
 
+/**
+ * Two empty marks a preview can carry, at the start and at the end of the
+ * email, for a page that keeps one part of it in view (the Brand page). The
+ * page reaches the frame only by asking it to go to one of them (a fragment
+ * of its own document), never its document; the email's own ids never take
+ * these names.
+ */
+export const PREVIEW_MARKS = { start: "email-preview-start", end: "email-preview-end" } as const;
+
 /** Keep an email readable as it is sent, without running it or loading anything it names. */
-export function emailPreview(html: string): string {
+export function emailPreview(html: string, { marks = false }: { marks?: boolean } = {}): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   // The email's style blocks, wherever they stood (an email's are in its head),
@@ -99,6 +108,14 @@ export function emailPreview(html: string): string {
     keepAttributes(element);
   }
   keepAttributes(doc.body);
+
+  if (marks) {
+    const names: readonly string[] = Object.values(PREVIEW_MARKS);
+    for (const element of [...doc.body.querySelectorAll("[id]")]) if (names.includes(element.id)) element.removeAttribute("id");
+    const mark = (name: string) => Object.assign(doc.createElement("a"), { id: name });
+    doc.body.prepend(mark(PREVIEW_MARKS.start));
+    doc.body.append(mark(PREVIEW_MARKS.end));
+  }
 
   return (
     '<!doctype html><html><head>' +

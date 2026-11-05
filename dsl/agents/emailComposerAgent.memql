@@ -1,0 +1,31 @@
+// emailComposerAgent -- per-user Email Composer.
+//
+// Materialized as one v1:agents:agent row per user by the SeedMaterializer
+// (deterministic id `emailComposerAgent-<userId>`), at every node's startup
+// sweep for the users that exist and on every user created after.
+//
+// An email composition run (the composeEmailRun template, whose one step is
+// campaignRunComposition in component/campaigns/compose_run.go) acts as this
+// agent: it is the acting agent, as a specialist, of the step it hands whole to
+// Claude Code, and the three emailCompose tools require a specialist. Not
+// user-facing in chat.
+//
+// NO providerConfig, deliberately. A composition's goal names the route its
+// model call takes (route:apps, level strong), and an agent-level provider
+// would be a second answer to a question the route already answers.
+
+@scope("perUser")
+@description("Per-user Email Composer. Platform persona that writes an email into a layout, in Claude Code on the Apps route.")
+seed agent emailComposerAgent {
+  name:        "MemQL Email Composer"
+  description: "Platform agent -- writes an email into a layout from a person's description and attached material, in Claude Code on the Apps route, and saves it as a draft. Not user-facing in chat."
+  personality: "Exact with the material: copies text word for word and never invents a claim, a price, a date, an address or a link."
+  role:        "specialist"
+  roleSlug:    "system-email-composer"
+  kind:        "system"
+
+  capabilities {
+    keywords:     []
+  }
+
+}

@@ -203,8 +203,20 @@ describe("the other four cues", () => {
     const row = templateFromRow(templateRow({ id: "t1", layoutId: "builtin:letter", preheader: "Why we started" }));
     expect(row).toEqual({
       id: "t1", ownerUserId: "v1:identity:user:me", name: "August copy", subject: "What we shipped", status: "ready", accountId: "self",
-      layoutId: "builtin:letter", preheader: "Why we started", sourceArtifactId: "", createdAt: "2026-08-01T00:00:00Z",
+      layoutId: "builtin:letter", preheader: "Why we started", sourceArtifactId: "", createdAt: "2026-08-01T00:00:00Z", composition: null,
     });
+  });
+
+  it("reads a composition, and tells a change of it by the fingerprint", () => {
+    const writing = { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "", notes: ["A file was left out."] };
+    const row = templateFromRow(templateRow({ id: "t1", composition: { ...writing, request: { layoutId: "builtin:letter", requestedBy: "me" } } }));
+    // Who asked comes from the request, the one person who may retry it.
+    expect(row.composition).toEqual({ ...writing, requestedBy: "me" });
+    expect(templateFromRow(templateRow({ id: "t1", composition: writing })).composition?.requestedBy).toBe("");
+    // A state this build does not know is no composition.
+    expect(templateFromRow(templateRow({ id: "t1", composition: { state: "paused" } })).composition).toBeNull();
+    const failed = templateFromRow(templateRow({ id: "t1", composition: { ...writing, state: "failed", error: "Cancelled" } }));
+    expect(templateFingerprint(failed)).not.toBe(templateFingerprint(row));
   });
 
   it("says a template is published by the engine's word for it, and nothing else", () => {

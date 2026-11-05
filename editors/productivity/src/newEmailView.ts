@@ -1,22 +1,19 @@
 // The New email page, running inside the webview. It draws what the host sends
-// (the organizations and their layouts, a render of each layout, the
-// references and the writing's progress) and sends back what the person does:
-// the organization, the layout, the name and the description as a draft the
-// host keeps, the references' switches and removals, dictation, and the acts.
+// (the organizations, the built-in layouts as wireframes the server drew, the
+// files and the picture of the finished email) and sends back what the person
+// does: the organization, the layout, the name and the description as a draft the
+// host keeps, the files, and the two acts.
 // The markup is newEmailPage.ts's.
 //
 // Host messages count only from this webview's own origin, and every field is
-// checked before use. Nothing from a message becomes markup except through
-// previewHTML (a layout's render, in a frame with no sandbox tokens) and
-// skeletonHTML (numbers only); names and labels go in as text, and layout ids
-// are only ever compared, never written into a selector.
+// checked before use. A wireframe is only ever the source of an <img> as a data
+// address, never markup; names and labels go in as text, and layout ids are only
+// ever compared, never written into a selector.
 //
 // A host update moves the focus only while the person is in the page, and only
 // when what had it went away.
 
 import { EMAIL_COPY, fill } from "./emailCopy.js";
-import type { EmailBlock } from "./emailDocument.js";
-import { previewHTML, skeletonHTML } from "./emailPreview.js";
 import { emailNameProblem } from "./newEmailPage.js";
 import { ICONS } from "./pageBase.js";
 import type { Problem } from "./problems.js";
@@ -24,22 +21,22 @@ import { renderProblem } from "./problemView.js";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 
-type Act = "connect" | "retry" | "cancel" | "start" | "write";
+type Act = "connect" | "retry" | "start" | "write";
 type Phase = "starting" | "listening" | "transcribing" | "idle";
 interface Organization { id: string; name: string }
-interface Layout { id: string; name: string; description: string; kind: "builtin" | "organization"; blocks: EmailBlock[]; key: string }
+interface Layout { id: string; name: string; category: string; description: string; wireframe: string; key: string }
 interface Setup { connected: boolean; domain: string; organizations: Organization[]; organizationId?: string; layouts: Layout[]; dictation: boolean }
-interface Reference { index: number; label: string; kind: "picture" | "bundle" | "file"; include: boolean; uploading: boolean }
+interface Reference { index: number; label: string; kind: "picture" | "bundle" | "file"; uploading: boolean }
 interface Draft { organizationId?: string; layoutId?: string; name?: string; description?: string }
 /** What the page is: which parts show, the state in words and the acts legal from it. */
-interface View { kind: "notConnected" | "loading" | "layoutsFailed" | "noOrganization" | "writing" | "form"; state: string; acts: Act[]; busy?: boolean; quiet?: boolean; notice?: Problem }
+interface View { kind: "notConnected" | "loading" | "layoutsFailed" | "noOrganization" | "form"; state: string; acts: Act[]; busy?: boolean; quiet?: boolean; notice?: Problem }
 
 const C = EMAIL_COPY.newEmail;
-const ACT_WORDS: Readonly<Record<Act, string>> = { connect: C.connect, retry: C.retry, cancel: C.cancel, start: C.start, write: C.write };
+const ACT_WORDS: Readonly<Record<Act, string>> = { connect: C.connect, retry: C.retry, start: C.start, write: C.write };
 /** The description's limit, in UTF-16 code units as the field's maxlength counts. */
 const DESCRIPTION_LIMIT = 8000;
-/** The shape drawn while an email is written in a layout the page does not know. */
-const SOME_EMAIL: EmailBlock[] = [{ id: "a", type: "heading" }, { id: "b", type: "text", text: " ".repeat(210) }, { id: "c", type: "button" }];
+/** The order of the groups, as the engine lists its categories (emaildoc.LayoutCategories); any other category goes last, in the order its rows arrived. */
+const CATEGORIES = ["Welcome", "Letters", "Articles", "Announcements", "Products", "Promotions", "News", "Guides", "Events", "Feedback"];
 // The drawings the shared set lacks: a file, and the square that stops a dictation. Constant markup, nothing from a message.
 const svg = (shape: string) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
 const FILE_ICON = svg('<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>');
@@ -79,16 +76,12 @@ function reconcile(parent: Element, children: readonly Element[]): void {
 
 const meta = byId("meta"), noOrganization = byId("no-organization"), form = byId("form");
 const organizationRow = byId("organization-row"), organizationSelect = byId<HTMLSelectElement>("organization");
-const layoutGroup = byId("layout-group"), layoutsBox = byId("layouts"), placeholders = byId("placeholders");
-const sets = {
-  organization: { box: byId("set-organization"), head: byId("set-organization-head"), cards: byId("cards-organization") },
-  builtin: { box: byId("set-builtin"), head: byId("set-builtin-head"), cards: byId("cards-builtin") },
-};
+const layoutGroup = byId("layout-group"), layoutsBox = byId("layouts"), groupsBox = byId("groups"), placeholders = byId("placeholders");
 const nameInput = byId<HTMLInputElement>("name"), nameNotice = byId("name-notice");
 const descriptionInput = byId<HTMLTextAreaElement>("description");
 const attach = byId("attach"), dictate = byId("dictate"), referencesBox = byId("references");
 const dictationStatus = byId("dictation-status"), describeNotice = byId("describe-notice");
-const writingBox = byId("writing");
+const attachReference = byId("attach-reference"), finishedBox = byId("finished");
 const barNotice = byId("bar-notice"), barState = byId("bar-state"), barActs = byId("bar-acts");
 
 // The bar and the problem above it stay at the foot of the window: the scroll margin of the page's controls keeps one
@@ -110,8 +103,6 @@ let organization: string | undefined;
 /** An organization from a restored draft that the host has not listed layouts for: asked for once. */
 let wantedOrganization: string | undefined;
 let chosen: string | undefined;
-/** The layout being written, while the host writes ("" when it did not say). */
-let writing: string | undefined;
 /** The last write that failed: its state and problem stay until the person changes something. */
 let failure: Problem | undefined;
 /** An act was sent; the next waits for the host's answer. */
@@ -125,11 +116,13 @@ let dictationBase: string | undefined;
 let describeAbout: "references" | "dictation" | undefined;
 let shownState: string | undefined;
 let noticeShown: Problem | undefined;
-let writingShape: string | undefined;
 /** The cards by layout (id, words and shape): a card whose layout comes back keeps its render. */
 let cardCache = new Map<string, HTMLElement>();
 let cardCount = 0;
 let referenceCount = 0;
+/** The groups by category: a group whose layouts come back keeps its heading and cards. */
+let groupCache = new Map<string, HTMLElement>();
+let groupCount = 0;
 
 const layouts = () => setup?.layouts ?? [];
 const chosenLayout = () => waiting ? undefined : layouts().find(layout => layout.id === chosen);
@@ -144,10 +137,10 @@ function view(): View {
   if (waiting) return { kind: "loading", state: C.loading, acts: [], quiet: true };
   if (layoutsProblem || !setup) return { kind: "layoutsFailed", state: C.layoutsFailed, acts: ["retry"], notice: layoutsProblem };
   if (setup.organizations.length === 0) return { kind: "noOrganization", state: C.noOrganization, acts: [] };
-  if (writing !== undefined) return { kind: "writing", state: C.writing, acts: ["cancel"], busy: true };
   if (!organization) return { kind: "form", state: C.chooseOrganization, acts: [] };
   if (!chosenLayout()) return { kind: "form", state: C.chooseLayout, acts: [] };
   if (emailNameProblem(nameInput.value)) return { kind: "form", state: C.nameIt, acts: [] };
+  if (pending === "start" || pending === "write") return { kind: "form", state: C.starting, acts: [], busy: true };
   const acts: Act[] = described() ? ["start", "write"] : ["start"];
   return failure ? { kind: "form", state: C.failed, acts, notice: failure } : { kind: "form", state: C.ready, acts };
 }
@@ -155,15 +148,13 @@ function view(): View {
 /** Draws the parts the state decides: which regions show, the problem above the bar, and the bar. */
 function render(): void {
   const now = view();
-  form.hidden = now.kind === "notConnected" || now.kind === "noOrganization" || now.kind === "writing";
+  form.hidden = now.kind === "notConnected" || now.kind === "noOrganization";
   layoutGroup.hidden = now.kind === "layoutsFailed";
   noOrganization.hidden = now.kind !== "noOrganization";
-  writingBox.hidden = now.kind !== "writing";
   organizationRow.hidden = (setup?.organizations.length ?? 0) < 2;
   const only = setup?.connected && setup.organizations.length === 1 ? setup.organizations[0]!.name : undefined;
   meta.hidden = only === undefined;
   if (meta.textContent !== (only ?? "")) meta.textContent = only ?? "";
-  if (now.kind === "writing") drawWriting();
   drawNotice(now.notice);
   drawBar(now);
   measureDock();
@@ -180,8 +171,8 @@ function drawNotice(problem: Problem | undefined): void {
 
 // -- The action bar ---------------------------------------------------------------
 
-/** Write it, Connect and Retry are buttons and Cancel a text act; Start from the layout is the button when it is the only act. */
-const actStyle = (act: Act, acts: readonly Act[]) => act === "cancel" || act === "start" && acts.length > 1 ? "text-act" : "primary";
+/** Write it, Connect and Retry are buttons; Start from the layout is the button when it is the only act. */
+const actStyle = (act: Act, acts: readonly Act[]) => act === "start" && acts.length > 1 ? "text-act" : "primary";
 
 /** The state's words (a live region: written only when they change) and the acts, kept as they are when they are the same. */
 function drawBar(now: View): void {
@@ -225,7 +216,6 @@ function runAct(act: Act): void {
       post({ type: "retry" });
       drawLayouts();
       break;
-    case "cancel":
     case "connect":
       post({ type: act });
       break;
@@ -273,6 +263,13 @@ organizationSelect.addEventListener("blur", drawOrganizations);
 
 // -- Layouts --------------------------------------------------------------------------
 
+/** A wireframe as the source of an image: the server's drawing as a data address. It is never markup. */
+function wireframeSource(svgText: string): string {
+  // UTF-8 bytes as a binary string, then base64.
+  const binary = encodeURIComponent(svgText).replace(/%([0-9A-F]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+  return "data:image/svg+xml;base64," + btoa(binary);
+}
+
 function cardFor(layout: Layout): HTMLElement {
   const count = ++cardCount;
   const card = document.createElement("div");
@@ -281,21 +278,23 @@ function cardFor(layout: Layout): HTMLElement {
   card.setAttribute("aria-checked", "false");
   card.tabIndex = -1;
   card.dataset.id = layout.id;
-  // The render, or the layout's shape until it comes: a picture of the card, which a screen reader skips for its name.
-  const thumb = textElement("div", "", "thumb"), canvas = textElement("div", "", "canvas"), shape = textElement("div", "", "shape");
+  // The wireframe is a picture of the card: a screen reader skips it for the name.
+  const thumb = textElement("div", "", "thumb");
   thumb.setAttribute("aria-hidden", "true");
-  shape.innerHTML = skeletonHTML(layout.blocks); // numbers only: no text from the layout enters it
-  canvas.append(shape);
-  thumb.append(canvas);
+  if (layout.wireframe) {
+    const image = document.createElement("img");
+    image.src = wireframeSource(layout.wireframe);
+    image.alt = "";
+    thumb.append(image);
+  }
   const name = textElement("span", layout.name, "card-name");
   name.id = `layout-name-${count}`;
-  name.title = layout.name;
+  name.title = layout.description ? `${layout.name}. ${layout.description}` : layout.name;
   card.setAttribute("aria-labelledby", name.id);
   card.append(thumb, name);
   if (layout.description) {
-    const description = textElement("span", layout.description, "card-description");
+    const description = textElement("span", layout.description, "sr-only");
     description.id = `layout-description-${count}`;
-    description.title = layout.description;
     card.setAttribute("aria-describedby", description.id);
     card.append(description);
   }
@@ -304,28 +303,34 @@ function cardFor(layout: Layout): HTMLElement {
   return card;
 }
 
-/** The cards in their sets (the organization's under its name, then the built-in ones; subheads only when both have cards), or their shape while the list loads. */
+/** The built-in layouts in groups by category, in the engine's order, or their shape while the list loads. A category with no layouts shows nothing. */
 function drawLayouts(): void {
   layoutsBox.classList.toggle("loading", waiting);
   placeholders.hidden = !waiting;
   const list = waiting ? [] : layouts();
+  const order = [...CATEGORIES];
+  for (const layout of list) if (!order.includes(layout.category)) order.push(layout.category);
   const next = new Map<string, HTMLElement>();
-  const take = (layout: Layout) => { const card = cardCache.get(layout.key) ?? cardFor(layout); next.set(layout.key, card); return card; };
-  const own = list.filter(layout => layout.kind === "organization").map(take);
-  const builtIn = list.filter(layout => layout.kind === "builtin").map(take);
-  // While the list loads, the cards wait off the page with their renders, in case their layouts come back.
-  if (!waiting) cardCache = next;
-  reconcile(sets.organization.cards, own);
-  reconcile(sets.builtin.cards, builtIn);
-  const both = own.length > 0 && builtIn.length > 0;
-  for (const [set, cards] of [[sets.organization, own], [sets.builtin, builtIn]] as const) {
-    set.box.hidden = cards.length === 0;
-    set.head.hidden = !both;
-    if (both) { set.box.setAttribute("role", "group"); set.box.setAttribute("aria-labelledby", set.head.id); }
-    else { set.box.removeAttribute("role"); set.box.removeAttribute("aria-labelledby"); }
-  }
-  const owner = setup?.organizations.find(choice => choice.id === setup?.organizationId)?.name ?? C.organization;
-  if (sets.organization.head.textContent !== owner) sets.organization.head.textContent = owner;
+  const nextGroups = new Map<string, HTMLElement>();
+  const groups = order.flatMap(category => {
+    const members = list.filter(layout => layout.category === category);
+    if (members.length === 0) return [];
+    const cards = members.map(layout => { const card = cardCache.get(layout.key) ?? cardFor(layout); next.set(layout.key, card); return card; });
+    const group = groupCache.get(category) ?? (() => {
+      const box = textElement("div", "", "set"), head = textElement("p", category, "set-head"), grid = textElement("div", "", "cards");
+      head.id = `set-head-${++groupCount}`;
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-labelledby", head.id);
+      box.append(head, grid);
+      return box;
+    })();
+    reconcile(group.querySelector(".cards")!, cards);
+    nextGroups.set(category, group);
+    return [group];
+  });
+  // While the list loads, the cards wait off the page with their wireframes, in case their layouts come back.
+  if (!waiting) { cardCache = next; groupCache = nextGroups; }
+  reconcile(groupsBox, groups);
   markCards();
 }
 
@@ -364,37 +369,6 @@ function cardKey(card: HTMLElement, event: KeyboardEvent): void {
   if (!next) return;
   if (next !== card) next.focus();
   choose(next.dataset.id!);
-}
-
-/**
- * A layout's render, in its own frame: sandboxed with no tokens (nothing runs,
- * and the page has no way in), cleaned by previewHTML, and shown once it has
- * loaded so the card never goes blank. A render that failed (no HTML) leaves
- * the layout's shape.
- */
-function showRender(card: HTMLElement, html: string): void {
-  const canvas = card.querySelector(".canvas")!, shape = canvas.querySelector<HTMLElement>(".shape")!;
-  const frames = () => Array.from(canvas.querySelectorAll("iframe"));
-  if (!html) {
-    for (const frame of frames()) frame.remove();
-    shape.hidden = false;
-    return;
-  }
-  const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "");
-  frame.tabIndex = -1;
-  frame.hidden = true;
-  frame.addEventListener("load", () => {
-    if (!frame.isConnected) return;
-    const all = frames();
-    // A newer render is on its way: this one gives way to it.
-    if (all[all.length - 1] !== frame) { if (frame.hidden) frame.remove(); return; }
-    for (const other of all) if (other !== frame) other.remove();
-    frame.hidden = false;
-    shape.hidden = true;
-  });
-  frame.setAttribute("srcdoc", previewHTML(html, { blocks: false }));
-  canvas.append(frame);
 }
 
 // -- The name and the description ---------------------------------------------------
@@ -446,17 +420,6 @@ function chipFor(item: Reference): HTMLElement {
   name.title = item.label;
   name.id = `reference-name-${++referenceCount}`;
   chip.append(icon, name);
-  if (item.kind !== "file") {
-    // Pictures and ZIPs can go into the email itself; off until the person turns it on.
-    const label = textElement("label", "", "switch");
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.setAttribute("aria-describedby", name.id);
-    toggle.setAttribute("role", "switch");
-    toggle.addEventListener("change", () => { changed(); post({ type: "include", index: Number(chip.dataset.index), on: toggle.checked }); render(); });
-    label.append(toggle, textElement("span", C.useInEmail));
-    chip.append(label);
-  }
   const remove = textElement("button", "", "icon-button remove") as HTMLButtonElement;
   remove.type = "button";
   remove.innerHTML = ICONS.close; // a constant drawing, no text from the host
@@ -471,8 +434,6 @@ function chipFor(item: Reference): HTMLElement {
 /** Brings a chip up to date: where it is in the host's list, its switch, and a spinner while it uploads. */
 function updateChip(chip: HTMLElement, item: Reference): void {
   chip.dataset.index = String(item.index);
-  const toggle = chip.querySelector<HTMLInputElement>('input[role="switch"]');
-  if (toggle) toggle.checked = item.include;
   const icon = chip.querySelector<HTMLElement>(".chip-icon")!;
   const drawing = item.uploading ? "uploading" : item.kind === "picture" ? "picture" : "file";
   if (icon.dataset.drawing === drawing) return;
@@ -502,6 +463,31 @@ function drawReferences(items: readonly Reference[]): void {
   reconcile(referencesBox, chips);
   if (focused && !focused.isConnected) (chips[Math.min(at, chips.length - 1)]?.querySelector<HTMLElement>("button.remove") ?? attach).focus();
 }
+
+/** The picture of the finished email: its name as a chip with a remove, or nothing. */
+function drawFinished(label: string | undefined): void {
+  const old = finishedBox.firstElementChild as HTMLElement | null;
+  if (label === undefined) { if (old && holds(finishedBox)) attachReference.focus(); finishedBox.replaceChildren(); attachReference.hidden = false; return; }
+  attachReference.hidden = true;
+  if (old && old.dataset.label === label) return;
+  const chip = document.createElement("li");
+  chip.className = "chip";
+  chip.dataset.label = label;
+  const icon = textElement("span", "", "chip-icon");
+  icon.innerHTML = ICONS.picture; // a constant drawing
+  const name = textElement("span", label, "chip-name");
+  name.title = label;
+  const remove = textElement("button", "", "icon-button remove") as HTMLButtonElement;
+  remove.type = "button";
+  remove.innerHTML = ICONS.close; // a constant drawing, no text from the host
+  remove.setAttribute("aria-label", C.removeFinishedPicture);
+  remove.title = C.removeFinishedPicture;
+  remove.addEventListener("click", () => { changed(); post({ type: "clearReference" }); render(); });
+  chip.append(icon, name, remove);
+  finishedBox.replaceChildren(chip);
+}
+
+attachReference.addEventListener("click", () => { changed(); post({ type: "attachReference" }); render(); });
 
 function showDescribeNotice(about: "references" | "dictation", problem: Problem): void {
   describeAbout = about;
@@ -605,12 +591,9 @@ function readProblem(value: unknown): Problem | undefined {
 }
 
 function readLayout(value: unknown): Layout | undefined {
-  if (!isRecord(value) || typeof value.id !== "string" || !value.id || typeof value.name !== "string" || (value.kind !== "builtin" && value.kind !== "organization")) return undefined;
-  const blocks = isRecord(value.document) && Array.isArray(value.document.blocks) ? value.document.blocks as EmailBlock[] : [];
-  const description = str(value.description);
-  let key: string;
-  try { key = JSON.stringify([value.id, value.name, description, value.kind, blocks]); } catch { return undefined; }
-  return { id: value.id, name: value.name, description, kind: value.kind, blocks, key };
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id || typeof value.name !== "string" || !value.name) return undefined;
+  const description = str(value.description), category = str(value.category), wireframe = str(value.wireframe);
+  return { id: value.id, name: value.name, category, description, wireframe, key: JSON.stringify([value.id, value.name, category, description, wireframe]) };
 }
 
 function readSetup(message: Record<string, unknown>): Setup | undefined {
@@ -651,9 +634,17 @@ function onSetup(message: Record<string, unknown>): void {
 function onReferences(message: Record<string, unknown>): void {
   if (!Array.isArray(message.items)) return;
   const items = message.items.flatMap((item: unknown, index: number): Reference[] => isRecord(item) && typeof item.label === "string" && item.label
-    ? [{ index, label: item.label, kind: item.kind === "picture" || item.kind === "bundle" ? item.kind : "file", include: item.include === true, uploading: item.uploading === true }]
+    ? [{ index, label: item.label, kind: item.kind === "picture" || item.kind === "bundle" ? item.kind : "file", uploading: item.uploading === true }]
     : []);
   drawReferences(items);
+  const problem = readProblem(message.problem);
+  if (problem && problem.message) showDescribeNotice("references", problem);
+  else clearDescribeNotice("references");
+}
+
+function onReference(message: Record<string, unknown>): void {
+  const item = message.item;
+  drawFinished(isRecord(item) && typeof item.label === "string" && item.label ? item.label : undefined);
   const problem = readProblem(message.problem);
   if (problem && problem.message) showDescribeNotice("references", problem);
   else clearDescribeNotice("references");
@@ -676,34 +667,13 @@ function onDictation(message: Record<string, unknown>): void {
   render();
 }
 
-function onWriting(message: Record<string, unknown>): void {
-  writing = typeof message.layoutId === "string" ? message.layoutId : "";
-  pending = undefined;
-  failure = undefined;
-  stopDictating();
-  render();
-}
-
-/** The shape of the layout being written: the one the host names, else the chosen one. */
-function drawWriting(): void {
-  const list = layouts();
-  const layout = list.find(item => item.id === writing) ?? list.find(item => item.id === chosen);
-  const blocks = layout?.blocks ?? SOME_EMAIL;
-  const key = layout?.key ?? "";
-  if (writingShape === key) return;
-  writingShape = key;
-  writingBox.innerHTML = skeletonHTML(blocks); // numbers only: no text from the layout enters it
-}
-
 function onFailed(message: Record<string, unknown>): void {
-  writing = undefined;
   pending = undefined;
   failure = readProblem(message.problem) ?? { message: "" };
   render();
 }
 
 function onIdle(): void {
-  writing = undefined;
   pending = undefined;
   render();
 }
@@ -720,12 +690,6 @@ function onRestore(message: Record<string, unknown>): void {
   if (restored || !isRecord(message.draft)) return;
   restored = true;
   applyDraft(readDraft(message.draft));
-}
-
-function onThumbnail(message: Record<string, unknown>): void {
-  if (typeof message.id !== "string" || typeof message.html !== "string") return;
-  const card = allCards().find(item => item.dataset.id === message.id);
-  if (card) showRender(card, message.html);
 }
 
 /** What had the focus, if the person is in the page; when a host update takes it away, the focus waits on the state. */
@@ -745,9 +709,8 @@ window.addEventListener("message", event => {
   switch (message.type) {
     case "setup": onSetup(message); break;
     case "layoutsFailed": onLayoutsFailed(message); break;
-    case "thumbnail": onThumbnail(message); break;
     case "references": onReferences(message); break;
-    case "writing": onWriting(message); break;
+    case "reference": onReference(message); break;
     case "failed": onFailed(message); break;
     case "idle": onIdle(); break;
     case "restore": onRestore(message); break;

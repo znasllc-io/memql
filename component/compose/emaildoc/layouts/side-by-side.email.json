@@ -1,0 +1,343 @@
+{
+  "subject": "Two sizes, made for different jobs",
+  "preheader": "Find the one that fits your home.",
+  "layout": "builtin:side-by-side",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "banner",
+      "type": "image",
+      "role": "content",
+      "padding": [
+        24,
+        24,
+        16,
+        24
+      ],
+      "alt": "Products banner",
+      "width": 552,
+      "height": 191
+    },
+    {
+      "id": "body",
+      "type": "section",
+      "role": "content",
+      "background": "tint",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "intro",
+          "type": "text",
+          "role": "content",
+          "text": "Every home is different, so we make our most popular tool in two sizes.\n\nThe small one fits in a drawer. The large one is built for the bigger jobs.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "listLineHeight": 17.64,
+          "align": "left"
+        },
+        {
+          "id": "statement",
+          "type": "text",
+          "role": "content",
+          "text": "Here's how to choose between them.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "align": "center",
+          "italic": true,
+          "weight": 700
+        }
+      ]
+    },
+    {
+      "id": "cards",
+      "type": "columns",
+      "role": "content",
+      "inset": [
+        0,
+        50.5,
+        0,
+        50.5
+      ],
+      "maxWidth": 451,
+      "columns": [
+        {
+          "width": 48.23,
+          "blocks": [
+            {
+              "id": "card-a-icon",
+              "type": "image",
+              "alt": "Icon",
+              "width": 30,
+              "height": 29
+            },
+            {
+              "id": "card-a-title",
+              "type": "heading",
+              "text": "Acme Mini | Small spaces",
+              "size": 17.3,
+              "lineHeight": 20.76,
+              "color": "accent",
+              "weight": 700,
+              "font": "body"
+            },
+            {
+              "id": "card-a-subtitle",
+              "type": "text",
+              "text": "Made for drawers, desks and quick fixes.",
+              "size": 14.7,
+              "lineHeight": 19.2,
+              "color": "accent",
+              "align": "center"
+            },
+            {
+              "id": "card-a-text",
+              "type": "text",
+              "text": "Light and compact, so it's always close at hand.",
+              "size": 14.7,
+              "lineHeight": 19.2,
+              "color": "accent",
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "width": 48.23,
+          "blocks": [
+            {
+              "id": "card-b-icon",
+              "type": "image",
+              "alt": "Icon",
+              "width": 22,
+              "height": 26
+            },
+            {
+              "id": "card-b-title",
+              "type": "heading",
+              "text": "Acme Max | Big jobs",
+              "size": 17.3,
+              "lineHeight": 20.76,
+              "color": "primary",
+              "weight": 700,
+              "font": "body"
+            },
+            {
+              "id": "card-b-subtitle",
+              "type": "text",
+              "text": "Made for workshops and weekend projects.",
+              "size": 14.7,
+              "lineHeight": 19.2,
+              "color": "primary",
+              "align": "center"
+            },
+            {
+              "id": "card-b-text",
+              "type": "text",
+              "text": "Sturdy and comfortable, ready for the longer jobs.",
+              "size": 14.7,
+              "lineHeight": 19.2,
+              "color": "primary",
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "type": "section",
+      "role": "content",
+      "background": "tint",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "closing-title",
+          "type": "text",
+          "role": "content",
+          "text": "Not sure which to pick?",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "align": "center",
+          "weight": 700
+        },
+        {
+          "id": "closing-text",
+          "type": "text",
+          "role": "content",
+          "text": "Start with the small one. Most homes never need more.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "align": "center",
+          "italic": true
+        }
+      ]
+    },
+    {
+      "id": "reply",
+      "type": "section",
+      "role": "brand",
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "reply-heading",
+          "type": "heading",
+          "padding": [
+            0,
+            0,
+            5.35,
+            0
+          ],
+          "text": "Got a question about this?",
+          "size": 21.3,
+          "lineHeight": 21.3,
+          "color": "secondary",
+          "italic": true,
+          "weight": 700
+        },
+        {
+          "id": "reply-button",
+          "type": "button",
+          "size": 20.3,
+          "color": "primary",
+          "width": 305,
+          "label": "Write to us",
+          "paddingY": 8
+        },
+        {
+          "id": "reply-note",
+          "type": "text",
+          "text": "We read every reply.",
+          "size": 12,
+          "lineHeight": 22.4,
+          "align": "center",
+          "italic": true
+        }
+      ]
+    },
+    {
+      "id": "signature",
+      "type": "columns",
+      "role": "brand",
+      "inset": [
+        0,
+        39.81606744178767,
+        0,
+        39.81606744178767
+      ],
+      "maxWidth": 473,
+      "columns": [
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-photo",
+              "type": "image",
+              "alt": "Founder photo",
+              "width": 183,
+              "height": 191
+            }
+          ]
+        },
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-space",
+              "type": "spacer",
+              "height": 70.4
+            },
+            {
+              "id": "signature-name",
+              "type": "image",
+              "alt": "Founder signature",
+              "width": 184,
+              "height": 32
+            },
+            {
+              "id": "signature-title",
+              "type": "text",
+              "text": "Founder of Acme",
+              "size": 14,
+              "lineHeight": 16,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule",
+      "type": "divider",
+      "role": "brand"
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME\n123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ],
+      "lineGap": 16
+    }
+  ]
+}

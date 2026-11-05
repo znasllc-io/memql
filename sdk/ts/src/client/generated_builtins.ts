@@ -337,6 +337,93 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything. */
+export interface CampaignBrandPreviewArgs {
+  /** The organization the kit is for. You need read access to its data. */
+  accountId: string;
+  /** The brand kit, as campaignSaveBrandKit takes it. */
+  kit: Record<string, unknown>;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article. */
+  layoutId?: string;
+}
+
+export function buildCampaignBrandPreview(args: CampaignBrandPreviewArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("kit: " + renderMemQLValue(args.kit));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "builtin campaignBrandPreview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignBrandPreview(args: CampaignBrandPreviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignBrandPreview = function (this: QueryClient, args: CampaignBrandPreviewArgs = {} as CampaignBrandPreviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignBrandPreview", buildCampaignBrandPreview(args), opts);
+};
+
+/** Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails as Cancelled. The draft stays as it was. Refused unless the composition is writing. A cancel acts only on the composition run it read: one its run finished, or one started again, meanwhile is left as it is. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}. */
+export interface CampaignCancelCompositionArgs {
+  /** The template MemQL is writing. */
+  templateId: string;
+}
+
+export function buildCampaignCancelComposition(args: CampaignCancelCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "builtin campaignCancelComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignCancelComposition(args: CampaignCancelCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignCancelComposition = function (this: QueryClient, args: CampaignCancelCompositionArgs = {} as CampaignCancelCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignCancelComposition", buildCampaignCancelComposition(args), opts);
+};
+
+/** Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (the answer says to set it up first in Email, Settings, Brand) and when none of your machines has an app signed in (the answer says to open Cockpit with Claude Code signed in). Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision, state}. When the goal cannot start, the draft is kept with its composition failed and the answer is {templateId, revision, state, error}: open that draft and retry it there rather than starting another. */
+export interface CampaignComposeEmailArgs {
+  /** The organization the email is for. */
+  accountId: string;
+  /** The template's name, up to 200 characters. */
+  name: string;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. */
+  layoutId: string;
+  /** What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest. */
+  description: string;
+  /** The attached Library files: pictures, ZIPs and text files, at most 64. May be empty. */
+  fileIds: string[];
+  /** A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it. */
+  referenceFileId?: string;
+}
+
+export function buildCampaignComposeEmail(args: CampaignComposeEmailArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  if (args.referenceFileId !== undefined) parts.push("referenceFileId: " + renderMemQLValue(args.referenceFileId));
+  return "builtin campaignComposeEmail(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignComposeEmail(args: CampaignComposeEmailArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignComposeEmail = function (this: QueryClient, args: CampaignComposeEmailArgs = {} as CampaignComposeEmailArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignComposeEmail", buildCampaignComposeEmail(args), opts);
+};
+
 /** Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter. */
 export interface CampaignConfigureNewsletterArgs {
   siteId: string;
@@ -427,6 +514,34 @@ QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClien
   return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
 };
 
+/** Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate. */
+export interface CampaignCreateTemplateFromLayoutArgs {
+  /** The organization the template is for. */
+  accountId: string;
+  /** The template's name, up to 200 characters. */
+  name: string;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. */
+  layoutId: string;
+}
+
+export function buildCampaignCreateTemplateFromLayout(args: CampaignCreateTemplateFromLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "builtin campaignCreateTemplateFromLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignCreateTemplateFromLayout(args: CampaignCreateTemplateFromLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignCreateTemplateFromLayout = function (this: QueryClient, args: CampaignCreateTemplateFromLayoutArgs = {} as CampaignCreateTemplateFromLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignCreateTemplateFromLayout", buildCampaignCreateTemplateFromLayout(args), opts);
+};
+
 /** Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney. */
 export interface CampaignDescribeJourneyArgs {
   accountId: string;
@@ -476,6 +591,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignImportRecipients = function (this: QueryClient, args: CampaignImportRecipientsArgs = {} as CampaignImportRecipientsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignImportRecipients", buildCampaignImportRecipients(args), opts);
+};
+
+/** The built-in email layouts, for an assistant choosing one: rows are {id, name, category, description, outline}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The rows carry no drawing; emailLayouts gives a person each layout's wireframe. Needs no organization. The id is opaque: pass it as layoutId to campaignComposeEmail or campaignCreateTemplateFromLayout. */
+export interface CampaignLayoutCatalogueArgs {
+}
+
+export function buildCampaignLayoutCatalogue(args: CampaignLayoutCatalogueArgs): string {
+  void args;
+  return "builtin campaignLayoutCatalogue()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignLayoutCatalogue(args?: CampaignLayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignLayoutCatalogue = function (this: QueryClient, args: CampaignLayoutCatalogueArgs = {} as CampaignLayoutCatalogueArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignLayoutCatalogue", buildCampaignLayoutCatalogue(args), opts);
 };
 
 /** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
@@ -544,6 +678,28 @@ QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, arg
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
+/** Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers as campaignComposeEmail does: {templateId, goalId, revision, state}, or {templateId, revision, state, error} when the new goal cannot start. */
+export interface CampaignRetryCompositionArgs {
+  /** The template whose composition failed. */
+  templateId: string;
+}
+
+export function buildCampaignRetryComposition(args: CampaignRetryCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "builtin campaignRetryComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetryComposition(args: CampaignRetryCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetryComposition = function (this: QueryClient, args: CampaignRetryCompositionArgs = {} as CampaignRetryCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetryComposition", buildCampaignRetryComposition(args), opts);
+};
+
 /** Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain. */
 export interface CampaignRetryNewsletterWelcomeArgs {
   signupId: string;
@@ -565,6 +721,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClient, args: CampaignRetryNewsletterWelcomeArgs = {} as CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
+};
+
+/** Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change. */
+export interface CampaignSaveBrandKitArgs {
+  /** The organization the kit is for; an organization has one kit. */
+  accountId: string;
+  /** The brand kit: {theme, logo, signature, follow, social, footer, reply}. */
+  kit: Record<string, unknown>;
+  /** Exact createdAt from brandKitForAccount; empty only when creating. */
+  expectedRevision?: string;
+}
+
+export function buildCampaignSaveBrandKit(args: CampaignSaveBrandKitArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("kit: " + renderMemQLValue(args.kit));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSaveBrandKit(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveBrandKit(args: CampaignSaveBrandKitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveBrandKit = function (this: QueryClient, args: CampaignSaveBrandKitArgs = {} as CampaignSaveBrandKitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveBrandKit", buildCampaignSaveBrandKit(args), opts);
 };
 
 /** Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on. */
@@ -1112,10 +1296,6 @@ export interface ComposeMaterializeArgs {
   statement?: string;
   /** Document formats: markdown (md), html, txt, csv, json, docx or pdf. Media generation belongs to other discovered capabilities; this document composer does not establish their availability. */
   format: string;
-  /** email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent. */
-  outputKind?: string;
-  /** builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
-  layoutId?: string;
   /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
   /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused. */
@@ -1143,8 +1323,6 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
-  if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
-  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.sectionKeys !== undefined) parts.push("sectionKeys: " + renderMemQLValue(args.sectionKeys));
@@ -1264,7 +1442,7 @@ export interface CreateGoalArgs {
   accountIds?: string[];
   /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
   ceilings?: Record<string, unknown>;
-  /** The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown. */
+  /** The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer, email. Empty when unknown. */
   requestedVia?: string;
 }
 
@@ -1606,7 +1784,7 @@ QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInbox
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
 };
 
-/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId. */
+/** The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId. */
 export interface EmailLayoutsArgs {
   accountId: string;
   includeArchived?: boolean;

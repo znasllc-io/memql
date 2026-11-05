@@ -2,6 +2,8 @@ package emaildoc
 
 import (
 	"embed"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -20,19 +22,76 @@ type LayoutInfo struct {
 	Name        string // "Confirmation"
 	Description string
 	Document    Document // Layout field equals ID
+
+	// Category is the group a picker files the layout under: one of LayoutCategories.
+	Category string
+	// Optional lists the ids of content blocks a person may leave out.
+	Optional []string
+	// Repeat maps the id of a content block to how many times it may appear.
+	Repeat map[string]RepeatRange
+}
+
+// RepeatRange is how many copies of a repeatable content block a layout allows.
+type RepeatRange struct{ Min, Max int }
+
+// LayoutCategories are the groups layouts are filed under, in the order a picker shows them.
+var LayoutCategories = []string{"Welcome", "Letters", "Articles", "Announcements", "Products", "Promotions", "News", "Guides", "Events", "Feedback"}
+
+// The ids of the brand blocks every layout keeps for the organization's brand kit.
+const (
+	SlotLogo      = "logo"
+	SlotSignature = "signature"
+	SlotFollow    = "follow"
+	SlotSocial    = "social"
+	SlotFooter    = "footer"
+	SlotReply     = "reply"
+)
+
+// BrandSlots lists the brand slot ids: logo, signature, follow, social, footer and reply.
+func BrandSlots() []string {
+	return []string{SlotLogo, SlotSignature, SlotFollow, SlotSocial, SlotFooter, SlotReply}
 }
 
 // builtinLayouts is the catalogue, in the order Layouts lists it. An id is
 // "builtin:" and the name of the file in layouts/ that holds the document.
-var builtinLayouts = [...]struct{ id, name, description string }{
-	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription."},
-	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links."},
-	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature."},
-	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button."},
+var builtinLayouts = [...]struct {
+	id, name, description, category string
+	optional                        []string
+	repeat                          map[string]RepeatRange
+}{
+	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription.", "Welcome", nil, nil},
+	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links.", "Letters", nil, nil},
+	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature.", "Articles",
+		[]string{"lead", "highlight", "closing", "footer-rule"}, nil},
+	{"builtin:lesson", "Lesson", "A banner, a tinted lesson that ends on its takeaway, a promotion beside a picture, and social links.", "Articles", []string{"highlight", "promo-rule"}, nil},
+	{"builtin:three-reasons", "Three reasons", "A banner, a row of icons, a tinted body of titled reasons with a closing line, and a signature.", "Articles",
+		[]string{"icons", "closing"}, map[string]RepeatRange{"reason": {Min: 2, Max: 4}}},
+	{"builtin:side-by-side", "Side by side", "A banner, a tinted introduction, two cards side by side and closing lines, with a signature.", "Products", []string{"closing"}, nil},
+	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button.", "Announcements", nil, nil},
+	{"builtin:welcome-tour", "Welcome tour", "A banner, a short introduction, one to three benefits with icons, a button and social links.", "Welcome", nil, map[string]RepeatRange{"benefit": {Min: 1, Max: 3}}},
+	{"builtin:plain-note", "Plain note", "A greeting and a few paragraphs of plain text, with a signature.", "Letters", nil, nil},
+	{"builtin:greeting", "Greeting", "A full-width picture, a short message and a signature.", "Letters", nil, nil},
+	{"builtin:announcement", "Announcement", "A banner, a headline, a short text, one button and social links.", "Announcements", nil, nil},
+	{"builtin:video", "Video", "A headline, a video picture that links to the video, a short text, one button and social links.", "Announcements", nil, nil},
+	{"builtin:product-launch", "Product launch", "A product picture, a headline with a short line above it, a list of features, one button and social links.", "Products", []string{"eyebrow"}, nil},
+	{"builtin:product-grid", "Product grid", "A headline, a short introduction and rows of two products, each with a picture, name, line and button, with social links.", "Products",
+		[]string{"intro"}, map[string]RepeatRange{"row": {Min: 1, Max: 2}}},
+	{"builtin:product-focus", "Product focus", "One product with its picture beside its name, text and button, and a quote below.", "Products", []string{"quote"}, nil},
+	{"builtin:offer", "Offer", "A headline, a short text, a highlighted code, one button, small print and social links.", "Promotions", []string{"fine-print"}, nil},
+	{"builtin:newsletter", "Newsletter", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links.", "News", nil, map[string]RepeatRange{"story": {Min: 1, Max: 3}}},
+	{"builtin:steps", "Steps", "A headline, a short introduction and two to six numbered steps, each with a title and text, with a button and a reply.", "Guides", []string{"cta"}, map[string]RepeatRange{"step": {Min: 2, Max: 6}}},
+	{"builtin:picture-steps", "Picture steps", "A headline and two to four rows, each with a picture beside its text.", "Guides", nil, map[string]RepeatRange{"row": {Min: 2, Max: 4}}},
+	{"builtin:questions", "Questions", "A headline, a short introduction and two to six questions, each with its answer, with a reply.", "Guides", []string{"intro"}, map[string]RepeatRange{"qa": {Min: 2, Max: 6}}},
+	{"builtin:event", "Event", "A picture, a headline, a tinted box with when and where, a short text and one button.", "Events", []string{"text"}, nil},
+	{"builtin:testimonial", "Testimonial", "A highlighted quote, the person who said it with a photo, one button and social links.", "Feedback", nil, nil},
+	{"builtin:review-request", "Review request", "A headline, a product picture, a short text and one button.", "Feedback", nil, nil},
+	{"builtin:thank-you", "Thank you", "A headline, a short text, a tinted box of tips, a reply and a signature.", "Feedback", nil, nil},
 }
 
-// Layouts lists the built-in layouts: Confirmation, Letter, Article and
-// Spotlight, in that order.
+// Layouts lists the built-in layouts in the order of the catalogue, which
+// groups them loosely by use (a confirmation and letters first, then articles,
+// products, announcements, promotions and news); each entry's Category says
+// where a picker files it.
 //
 // Each is a ready-made layout-mode document in a neutral example brand
 // ("Acme", Georgia and Arial, a small blue and grey palette with a red
@@ -63,10 +122,32 @@ var builtinLayouts = [...]struct{ id, name, description string }{
 func Layouts() []LayoutInfo {
 	verifyLayouts()
 	list := make([]LayoutInfo, len(builtinLayouts))
-	for i, entry := range builtinLayouts {
-		list[i] = LayoutInfo{ID: entry.id, Name: entry.name, Description: entry.description, Document: layoutDocument(entry.id)}
+	for i := range builtinLayouts {
+		list[i] = layoutInfo(i, true)
 	}
 	return list
+}
+
+// LayoutMeta returns the catalogue entry of the built-in layout with the id,
+// without its document, as a copy the caller may change. ok is false for any
+// other id.
+func LayoutMeta(id string) (LayoutInfo, bool) {
+	for i, entry := range builtinLayouts {
+		if entry.id == id {
+			return layoutInfo(i, false), true
+		}
+	}
+	return LayoutInfo{}, false
+}
+
+func layoutInfo(i int, withDocument bool) LayoutInfo {
+	entry := builtinLayouts[i]
+	info := LayoutInfo{ID: entry.id, Name: entry.name, Description: entry.description, Category: entry.category,
+		Optional: slices.Clone(entry.optional), Repeat: maps.Clone(entry.repeat)}
+	if withDocument {
+		info.Document = layoutDocument(entry.id)
+	}
+	return info
 }
 
 // Layout returns the built-in layout with the id "builtin:<name>", as a

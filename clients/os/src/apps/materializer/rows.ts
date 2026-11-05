@@ -44,7 +44,6 @@ export interface CompositionRow {
   outputKind: string;
   format: string;
   templateId: string;
-  layoutId?: string;
   outputFileId: string;
   folderId: string;
   accountIds: string[];
@@ -87,7 +86,6 @@ export interface RecipeRow {
   description: string;
   sourceSelectors: SelectorRow[];
   templateId: string;
-  layoutId?: string;
   format: string;
   folderId: string;
   accountIds: string[];
@@ -133,9 +131,6 @@ export function compositionFromRow(row: Row): CompositionRow {
     outputKind: rowString(row, "outputKind"),
     format: rowString(row, "format"),
     templateId: rowString(row, "templateId"),
-    ...(rowString(row, "layoutId")
-      ? { layoutId: rowString(row, "layoutId") }
-      : {}),
     outputFileId: rowString(row, "outputFileId"),
     folderId: rowString(row, "folderId"),
     accountIds: stringArray(row, "accountIds"),
@@ -172,9 +167,6 @@ export function recipeFromRow(row: Row): RecipeRow {
     description: rowString(row, "description"),
     sourceSelectors: selectorsOf(row),
     templateId: rowString(row, "templateId"),
-    ...(rowString(row, "layoutId")
-      ? { layoutId: rowString(row, "layoutId") }
-      : {}),
     format: rowString(row, "format"),
     folderId: rowString(row, "folderId"),
     accountIds: stringArray(row, "accountIds"),

@@ -1,0 +1,38 @@
+Every home is different, so we make our most popular tool in two sizes.
+
+The small one fits in a drawer. The large one is built for the bigger jobs.
+
+Here's how to choose between them.
+
+Acme Mini | Small spaces
+
+Made for drawers, desks and quick fixes.
+
+Light and compact, so it's always close at hand.
+
+Acme Max | Big jobs
+
+Made for workshops and weekend projects.
+
+Sturdy and comfortable, ready for the longer jobs.
+
+Not sure which to pick?
+
+Start with the small one. Most homes never need more.
+
+Got a question about this?
+
+Write to us
+
+We read every reply.
+
+Founder of Acme
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

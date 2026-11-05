@@ -502,32 +502,15 @@ test("startMaterialize sends only what the person set", async () => {
 test("startMaterialize carries every field the request declares", async () => {
   const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
   await startMaterialize(f.execute, {
-    name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome email", outputKind: "email_template",
-    layoutId: "builtin:letter",
+    name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome note",
     sources: [{ kind: "library_file", ref: "f9", label: "Brand notes", content: true }], templateId: "t1", folderId: "fold1",
     accountIds: ["acct1"], recipeId: "rc1", deployableKind: "spa",
   });
   assert.equal(f.calls[0]?.call, buildComposeMaterialize({
-    name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome email", outputKind: "email_template",
-    layoutId: "builtin:letter",
+    name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome note",
     sources: [{ kind: "library_file", ref: "f9", label: "Brand notes", content: true }], templateId: "t1", folderId: "fold1",
     accountIds: ["acct1"], recipeId: "rc1", deployableKind: "spa",
   }));
-});
-
-test("startMaterialize sends the layout an email is written into, as the id the picker gave it", async () => {
-  // Layout ids are opaque: what the picker listed is what is sent, untouched.
-  for (const layoutId of ["builtin:confirmation", "org:layout-7"]) {
-    const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
-    await startMaterialize(f.execute, { name: "Welcome", format: "json", requestId: "req-0009", outputKind: "email_template", accountIds: ["acct1"], layoutId });
-    const call = f.named("composeMaterialize")[0]?.call ?? "";
-    assert.ok(call.includes(`layoutId: "${layoutId}"`), `the layout did not reach composeMaterialize: ${call}`);
-    assert.equal(call, buildComposeMaterialize({ name: "Welcome", format: "json", requestId: "req-0009", outputKind: "email_template", accountIds: ["acct1"], layoutId }));
-  }
-  // A layout left empty is not sent, so the cluster takes its default (the Article).
-  const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
-  await startMaterialize(f.execute, { name: "Welcome", format: "json", requestId: "req-0010", outputKind: "email_template", accountIds: ["acct1"], layoutId: "  " });
-  assert.ok(!(f.calls[0]?.call ?? "").includes("layoutId"), f.calls[0]?.call);
 });
 
 test("startMaterialize never forwards a field the request type does not declare", async () => {
@@ -1215,10 +1198,8 @@ const notDescribed: [string, MaterializeRequest][] = [
   ["a statement of only spaces", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "   " }],
   ["Markdown through a template", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", templateId: "t1" }],
   ["Markdown from a recipe", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", recipeId: "rc1" }],
-  ["a described email template", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", outputKind: "email_template" }],
   ["a package", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", deployableKind: "spa" }],
   ["a described file that is not Markdown", { name: "Notes", format: "txt", requestId: "req-0005", statement: "Brief" }],
-  ["a described email JSON", { name: "Notes", format: "json", requestId: "req-0005", statement: "Brief", outputKind: "email_template" }],
   // The revision workflow reads Markdown and images and cannot read the graph, so
   // a request to write a document from records keeps the composer, which can.
   ["Markdown from a query", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", sources: [{ kind: "query", ref: "query openInvoices()", label: "Invoices" }] }],
@@ -1341,7 +1322,6 @@ test("isDescribedMarkdown matches the server's shape rule, whatever the files", 
   const files = { sources: [fileSource("f1")] };
   assert.equal(isDescribedMarkdown({ ...ASKED, ...files, templateId: "t1" }, takesAll), false, "a template");
   assert.equal(isDescribedMarkdown({ ...ASKED, ...files, recipeId: "rc1" }, takesAll), false, "a recipe");
-  assert.equal(isDescribedMarkdown({ ...ASKED, ...files, outputKind: "email_template" }, takesAll), false, "an output kind");
   assert.equal(isDescribedMarkdown({ ...ASKED, ...files, deployableKind: "spa" }, takesAll), false, "a deployable kind");
 });
 
@@ -1398,7 +1378,6 @@ test("readDescribedMarkdown reads nothing for a request that cannot be described
   const requests: [string, Parameters<typeof readDescribedMarkdown>[1]][] = [
     ["a template", { ...ASKED, sources: files, templateId: "t1" }],
     ["a recipe", { ...ASKED, sources: files, recipeId: "rc1" }],
-    ["an output kind", { ...ASKED, sources: files, outputKind: "email_template" }],
     ["a package", { ...ASKED, sources: files, deployableKind: "spa" }],
     ["a query among the files", { ...ASKED, sources: [...files, { kind: "query", ref: "query q()", label: "Q" }] }],
     ["a record before the files", { ...ASKED, sources: [{ kind: "concept_row", ref: "r1", label: "R" }, ...files] }],
