@@ -130,7 +130,7 @@ export function BrandPage({ accountId, organization, brand, uploads, onBack }: {
   // shown first would be a guess somebody could start changing.
   if (brand.readAt === "") {
     return (
-      <div className="os-action-pane" data-os-page-context={context}>
+      <div className="os-action-pane" data-os-dividers="none" data-os-page-context={context}>
         <div className="os-action-body os-app-stack">
           {head}
           {brand.state === "error" ? (
@@ -266,7 +266,7 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
     ) : null;
 
   return (
-    <div className="os-action-pane" data-os-page-context={context}>
+    <div className="os-action-pane" data-os-dividers="none" data-os-page-context={context}>
       <div className="os-action-body email-brand-body">
         <AutoRefresh onRefresh={brand.reload} busy={brand.state === "loading"} />
         <div className="email-brand">

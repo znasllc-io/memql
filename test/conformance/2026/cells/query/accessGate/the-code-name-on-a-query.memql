@@ -1,0 +1,13 @@
+/// accessCodeLabel, the operator's name for the code, is stamped on a mutation
+/// only. A query answers the visitor with what its shape selects, so a query told
+/// the name could hand it to them.
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+query ticket openTicketsNamingTheCode {
+  args {
+    accessCodeId    string!
+    accessCodeLabel string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.accessCodeId == args.accessCodeId && row.title == args.accessCodeLabel
+  paginate 20
+}

@@ -1070,3 +1070,441 @@ func TestTheHeadAnswerFreesOnlyTheAttemptItWasAsked(t *testing.T) {
 	}
 	wantUntouched(t, h, dropped)
 }
+
+// ---------------------------------------------------------------------------
+// Pushes to the default branch: the push lane (design record 2026-11-05 D4)
+// ---------------------------------------------------------------------------
+
+// laneRuns seeds h with an opted-in installation and two earlier pushes to
+// main: shaA's run executing on agent-b, and shaB's run waiting -- queued, no
+// agent claimed it -- whose check run is 602.
+func laneRuns(t *testing.T, h *harness, p Pipeline) (executing, waiting Run) {
+	t.Helper()
+	optInPushLane(t, h.integ)
+	h.store.addPipeline(p)
+	policy := laneSnapshot(t, h.integ, p)
+	executing = drivenBy(pushRunAt(p, shaA, 601, policy), "agent-b")
+	waiting = pushRunAt(p, shaB, 602, policy)
+	waiting.QueuedAt = testNow.Add(-5 * time.Minute)
+	h.store.addRun(executing)
+	h.store.addRun(waiting)
+	return executing, waiting
+}
+
+// A new push to main supersedes the push run waiting behind the one executing:
+// concluded cancelled on the spot, its check run with it, as "superseded by"
+// the new run. The run executing finishes. Delivered by a webhook or seen by
+// the poll alike.
+func TestAPushToMainSupersedesTheWaitingPushRunItCovers(t *testing.T) {
+	check := func(t *testing.T, h *harness, executing, waiting, opened Run) {
+		t.Helper()
+		got := wantAsked(t, h, waiting.ID, opened.ID)
+		if got.Status != StatusCompleted || got.Conclusion != ConclusionCancelled || got.FinishedAt.IsZero() || got.DriverNodeID != "" {
+			t.Errorf("the waiting push is concluded cancelled on the spot, never claimed: %+v", got)
+		}
+		w := checkRunWrites(h, 602)
+		if len(w) != 1 || w[0].Run.Status != "completed" || w[0].Run.Conclusion != "cancelled" || w[0].Run.Output == nil {
+			t.Fatalf("its check run is concluded cancelled -- not failure: %+v", w)
+		}
+		if out := w[0].Run.Output; out.Title != "Cancelled" || !strings.Contains(out.Summary, "Push to the default branch") ||
+			!strings.Contains(out.Summary, "No step ran.") {
+			t.Errorf("the superseded push's check run reads %q / %q", out.Title, out.Summary)
+		}
+		if w[0].Run.Name != "MemQL / shop / push" {
+			t.Errorf("the check run moved is the push's own: %q", w[0].Run.Name)
+		}
+		wantUntouched(t, h, executing)
+		if now, _ := h.store.run(opened.ID); now.Status != StatusQueued || now.CancelRequested || now.SHA != shaC || now.Event != pipelines.EventPush {
+			t.Errorf("the new push's run = %+v", now)
+		}
+		if reads := h.github.ancestryReads(); !slices.Equal(reads, []string{repoName + "@" + shaB + "..." + shaC}) {
+			t.Errorf("GitHub proves the waiting run's commit an ancestor of the head, once: %v", reads)
+		}
+	}
+
+	t.Run("a webhook delivers the push", func(t *testing.T) {
+		h := newHarness(t)
+		p := testPipeline(DeliveryWebhook)
+		executing, waiting := laneRuns(t, h, p)
+		h.github.setAncestor(repoName, shaB, shaC)
+		h.github.setAncestor(repoName, shaA, shaC) // proven too: it finishes all the same
+
+		opened := pushToMain(t, h, "d-push", shaB, shaC)
+		if opened.Trigger != TriggerWebhook {
+			t.Fatalf("opened %+v", opened)
+		}
+		check(t, h, executing, waiting, opened)
+	})
+
+	t.Run("the poll sees the push", func(t *testing.T) {
+		h := newHarness(t)
+		p := testPipeline(DeliveryPoll)
+		p.Heads = map[string]string{"branch:main": shaB}
+		executing, waiting := laneRuns(t, h, p)
+		h.github.setBranchHead(repoName, "main", shaC)
+		h.github.setAncestor(repoName, shaB, shaC)
+
+		res := poll(t, h)
+		if len(res.Opened) != 1 || res.Opened[0].SHA != shaC || res.Opened[0].Trigger != TriggerPoll {
+			t.Fatalf("the poll opens main's new head: %+v", res)
+		}
+		check(t, h, executing, waiting, res.Opened[0])
+	})
+}
+
+// The portable policy -- and every installation that has not opted in -- keeps
+// pushes as they were: nothing is superseded, and nothing of GitHub's is asked
+// for it.
+func TestAPushSupersedesNothingWithoutTheOptIn(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	policy := laneSnapshot(t, h.integ, p)
+	executing := drivenBy(pushRunAt(p, shaA, 601, policy), "agent-b")
+	waiting := pushRunAt(p, shaB, 602, policy)
+	h.store.addRun(executing)
+	h.store.addRun(waiting)
+	h.github.setAncestor(repoName, shaB, shaC)
+
+	opened := pushToMain(t, h, "d-push", shaB, shaC)
+
+	wantUntouched(t, h, executing)
+	wantUntouched(t, h, waiting)
+	if reads := h.github.branchHeadReads(); len(reads) != 0 {
+		t.Errorf("a push outside the lane asked for the default branch's head: %v", reads)
+	}
+	if reads := h.github.ancestryReads(); len(reads) != 0 {
+		t.Errorf("a push outside the lane compared commits: %v", reads)
+	}
+	if fresh := h.store.freshCalls("RunsUnfinishedForPipelineEvent"); len(fresh) != 0 {
+		t.Errorf("a push outside the lane read it: %v", fresh)
+	}
+	if now, _ := h.store.run(opened.ID); now.Status != StatusQueued {
+		t.Errorf("the push opened its run as before: %+v", now)
+	}
+}
+
+// R34 for pushes: processing order is not push order. A delivery for an OLDER
+// push that arrives after main has moved on supersedes nothing -- the newer
+// head's own opening does -- and GitHub is asked for main's head to know it.
+func TestALateDeliveryForAnOlderPushSupersedesNothing(t *testing.T) {
+	h := newHarness(t)
+	logs := withLogs(h.integ)
+	p := testPipeline(DeliveryWebhook)
+	executing, waiting := laneRuns(t, h, p)
+	h.github.setAncestor(repoName, shaB, shaC)
+	h.github.setAncestor(repoName, shaB, shaD)
+	h.github.setAncestor(repoName, shaC, shaD)
+	// main is at shaD already; shaC's delivery arrives now.
+	h.github.setBranchHead(repoName, "main", shaD)
+	res := trigger(t, h, "push", "d-late", pushDelivery(t, "refs/heads/main", shaB, shaC, testInstallation))
+	if len(res.Opened) != 1 {
+		t.Fatalf("the late delivery still opens its own commit's run: %+v", res)
+	}
+	late := res.Opened[0]
+
+	wantUntouched(t, h, executing)
+	wantUntouched(t, h, waiting)
+	if reads := h.github.branchHeadReads(); !slices.Equal(reads, []string{repoName + "@main"}) {
+		t.Errorf("GitHub is asked for main's head once: %v", reads)
+	}
+	if reads := h.github.ancestryReads(); len(reads) != 0 {
+		t.Errorf("nothing is compared when the push is not the head: %v", reads)
+	}
+	wantLogged(t, logs.String(), "the default branch's head has moved on since this push", "INFO")
+
+	// The control: shaD's own delivery supersedes both waiting pushes.
+	opened := pushToMain(t, h, "d-head", shaC, shaD)
+	wantAsked(t, h, waiting.ID, opened.ID)
+	wantAsked(t, h, late.ID, opened.ID)
+	wantUntouched(t, h, executing)
+}
+
+// Whatever keeps main's head from being KNOWN supersedes nothing: no
+// installation token to ask with, a read GitHub refused, an answer naming no
+// head. Each is a warning on its own line, and the run opens regardless.
+func TestTheDefaultBranchsHeadUnknownSupersedesNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		break_ func(g *fakeGitHub)
+		says   string
+	}{
+		"GitHub refuses the read": {func(g *fakeGitHub) { g.branchHeadErr = errStatus(502) }, "the default branch's head could not be read from GitHub, so this push supersedes none"},
+		"no installation token":   {func(g *fakeGitHub) { g.tokenErr = errors.New("reconnect_required") }, "no installation token to ask GitHub for the default branch's head"},
+		"GitHub names no head":    {func(g *fakeGitHub) { g.heads[repoName+"@main"] = headAnswer{} }, "GitHub named no head for the default branch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := withLogs(h.integ)
+			p := testPipeline(DeliveryWebhook)
+			executing, waiting := laneRuns(t, h, p)
+			h.github.setAncestor(repoName, shaB, shaC)
+			h.github.setBranchHead(repoName, "main", shaC)
+			c.break_(h.github)
+
+			res, err := h.integ.Trigger(automationCtx(), h.stage(t, "push", "d-push", pushDelivery(t, "refs/heads/main", shaB, shaC, testInstallation)))
+			if err != nil || len(res.Opened) != 1 {
+				t.Fatalf("the push opens its run whatever GitHub said of main's head: %+v %v", res, err)
+			}
+			wantUntouched(t, h, executing)
+			wantUntouched(t, h, waiting)
+			if reads := h.github.ancestryReads(); len(reads) != 0 {
+				t.Errorf("nothing is compared toward an unknown head: %v", reads)
+			}
+			wantLogged(t, logs.String(), c.says, "WARN")
+		})
+	}
+}
+
+// A waiting run is superseded only when GitHub PROVES its commit a proper
+// ancestor of main's head: a compare that fails, or one that says the commit
+// is not an ancestor (history rewritten, another branch's commit), supersedes
+// nothing.
+func TestAnUnprovenAncestrySupersedesNothing(t *testing.T) {
+	for name, c := range map[string]struct {
+		answer func(g *fakeGitHub)
+		says   string
+		level  string
+	}{
+		"the compare fails":     {func(g *fakeGitHub) { g.ancestryErr = errStatus(502) }, "could not be compared with the default branch's head", "WARN"},
+		"GitHub has no answer":  {func(g *fakeGitHub) {}, "could not be compared with the default branch's head", "WARN"},
+		"it is not an ancestor": {func(g *fakeGitHub) { g.setNotAncestor(repoName, shaB, shaC) }, "is not a proven ancestor of the default branch's head", "INFO"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := withLogs(h.integ)
+			p := testPipeline(DeliveryWebhook)
+			executing, waiting := laneRuns(t, h, p)
+			c.answer(h.github)
+
+			pushToMain(t, h, "d-push", shaB, shaC)
+
+			wantUntouched(t, h, executing)
+			wantUntouched(t, h, waiting)
+			wantLogged(t, logs.String(), c.says, c.level)
+		})
+	}
+}
+
+// A run already executing is never superseded: one in progress, and one an
+// agent claimed a moment ago that has not started yet. Neither is asked, even
+// with its commit proven an ancestor of the head -- while the run still
+// waiting beside them is.
+func TestAPushNeverCancelsAPushRunAlreadyExecuting(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	executing, waiting := laneRuns(t, h, p)
+	h.store.mu.Lock()
+	starting := h.store.runs[waiting.ID]
+	starting.DriverNodeID, starting.DriverLeaseID, starting.DriverHeartbeatAt = "agent-c", "lease-c", testNow
+	h.store.runs[waiting.ID] = starting
+	h.store.mu.Unlock()
+	// The control: an older push, still waiting.
+	older := pushRunAt(p, shaBase, 600, executing.PolicySnapshot)
+	older.QueuedAt = testNow.Add(-tenMinutes - time.Minute)
+	h.store.addRun(older)
+	for _, sha := range []string{shaBase, shaA, shaB} {
+		h.github.setAncestor(repoName, sha, shaC)
+	}
+
+	opened := pushToMain(t, h, "d-push", shaB, shaC)
+
+	wantUntouched(t, h, executing)
+	wantUntouched(t, h, starting)
+	wantAsked(t, h, older.ID, opened.ID)
+	if reads := h.github.ancestryReads(); !slices.Equal(reads, []string{repoName + "@" + shaBase + "..." + shaC}) {
+		t.Errorf("only the waiting run's commit is compared: %v", reads)
+	}
+}
+
+// The waiting run read before the new run existed can be claimed by an agent
+// while the push asks GitHub about it. The supersede asks it to stop only if it
+// is STILL waiting, under its gate: a run claimed in between is left to finish,
+// and the log says so.
+func TestARunClaimedWhileThePushAsksGitHubIsLeftToFinish(t *testing.T) {
+	h := newHarness(t)
+	logs := withLogs(h.integ)
+	p := testPipeline(DeliveryWebhook)
+	executing, waiting := laneRuns(t, h, p)
+	h.github.setAncestor(repoName, shaB, shaC)
+	var once sync.Once
+	h.github.onBranchHead = func() {
+		once.Do(func() {
+			// agent-c claims it, as its created event's claim would once the
+			// run ahead concluded.
+			h.store.mu.Lock()
+			defer h.store.mu.Unlock()
+			r := h.store.runs[waiting.ID]
+			r.DriverNodeID, r.DriverLeaseID, r.DriverHeartbeatAt = "agent-c", "lease-c", testNow
+			h.store.runs[waiting.ID] = r
+		})
+	}
+
+	pushToMain(t, h, "d-push", shaB, shaC)
+
+	got, _ := h.store.run(waiting.ID)
+	if got.CancelRequested || got.Finished() || got.DriverNodeID != "agent-c" {
+		t.Errorf("a run claimed before its supersede is left to finish: %+v", got)
+	}
+	if w := checkRunWrites(h, 602); len(w) != 0 {
+		t.Errorf("its check run is its driver's: %+v", w)
+	}
+	wantUntouched(t, h, executing)
+	wantLogged(t, logs.String(), "already executing; it finishes", "INFO")
+}
+
+// The lane is about pushes. With it opted in, a push to a pull request still
+// supersedes that pull request's earlier run and no push run, and a push to
+// main supersedes waiting push runs and no pull request's run.
+func TestTheLaneLeavesPullRequestSupersessionAsItWas(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	_, waiting := laneRuns(t, h, p)
+	earlier := prRun(p, 42, shaA, 501)
+	h.store.addRun(earlier)
+	h.github.setAncestor(repoName, shaB, shaC)
+	h.github.setAncestor(repoName, shaA, shaC)
+
+	pr := push42(t, h, "d-pr", shaD)
+	wantAsked(t, h, earlier.ID, pr.ID)
+	if got, _ := h.store.run(waiting.ID); got.CancelRequested {
+		t.Errorf("a push to a pull request superseded a push to main: %+v", got)
+	}
+
+	main := pushToMain(t, h, "d-main", shaB, shaC)
+	wantAsked(t, h, waiting.ID, main.ID)
+	if got, _ := h.store.run(pr.ID); got.CancelRequested || got.Finished() {
+		t.Errorf("a push to main superseded a pull request's run: %+v", got)
+	}
+}
+
+// R37 for pushes: push X, push Y (which supersedes X's waiting run), then main
+// is moved back to X. X's key already has a run, the superseded one, which
+// would answer the delivery as a second sighting -- leaving main's head with a
+// cancelled check and no run coming. When GitHub names X as main's head again,
+// the key opens its NEXT attempt. Y's run is not superseded by it: Y is not an
+// ancestor of X, and nothing is superseded unproven.
+func TestAPushBackToASupersededCommitRunsItAgain(t *testing.T) {
+	h := newHarness(t)
+	logs := withLogs(h.integ)
+	optInPushLane(t, h.integ)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	policy := laneSnapshot(t, h.integ, p)
+	dropped := pushRunAt(p, shaB, 602, policy)
+	back := pushRunAt(p, shaA, 601, policy)
+	back.Status, back.Conclusion, back.FinishedAt = StatusCompleted, ConclusionCancelled, testNow.Add(-time.Minute)
+	back.CancelRequested, back.CancelledBy = true, supersededPrefix+dropped.ID
+	h.store.addRun(back)
+	h.store.addRun(dropped)
+	h.github.setNotAncestor(repoName, shaB, shaA)
+
+	again := pushToMain(t, h, "d-back", shaB, shaA)
+
+	if again.RunKey != back.RunKey || again.Attempt != 2 || again.ID != RunIDFor(p.ID, back.RunKey, 2) {
+		t.Errorf("the key's NEXT attempt opens: key %q attempt %d", again.RunKey, again.Attempt)
+	}
+	if again.Trigger != TriggerWebhook || again.RerunOf != "" || again.Status != StatusQueued {
+		t.Errorf("it is the push's own run, queued, not a re-run: %+v", again)
+	}
+	if got, _ := h.store.run(back.ID); got.CancelledBy != back.CancelledBy || got.Attempt != 1 {
+		t.Errorf("the superseded run stays as it was stopped: %+v", got)
+	}
+	wantUntouched(t, h, dropped)
+	wantLogged(t, logs.String(), "the default branch's head comes back to a commit whose run a newer push superseded, so it runs again", "INFO")
+	wantLogged(t, logs.String(), "is not a proven ancestor of the default branch's head", "INFO")
+
+	// A late redelivery of the superseded commit while main is ELSEWHERE is
+	// answered by its run, as a second sighting always is.
+	h2 := newHarness(t)
+	logs2 := withLogs(h2.integ)
+	optInPushLane(t, h2.integ)
+	h2.store.addPipeline(p)
+	h2.store.addRun(back)
+	h2.store.addRun(dropped)
+	h2.github.setBranchHead(repoName, "main", shaB)
+	res := trigger(t, h2, "push", "d-late", pushDelivery(t, "refs/heads/main", shaBase, shaA, testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != back.ID {
+		t.Fatalf("the superseded run answers a commit main no longer names: %+v", res)
+	}
+	wantLogged(t, logs2.String(), "answered by its superseded run; the default branch's head is elsewhere", "INFO")
+}
+
+// THE GATE DISCIPLINE for a push: main's head and the ancestry are asked of
+// GitHub after the open gate is released and with no gate held, and only then
+// is the waiting run's gate taken to supersede it.
+func TestAPushAsksGitHubWithNoGateHeldBeforeItSupersedes(t *testing.T) {
+	h := newHarness(t)
+	rec := &disciplineRecorder{TB: t}
+	h.gate.t, h.github.t = rec, rec
+	var (
+		mu   sync.Mutex
+		asks []gateEvent
+	)
+	inner := h.gate.run
+	h.integ.Configure(func(d *Deps) {
+		d.Gate = func(ctx context.Context, key string, fn func(context.Context) error) error {
+			held, _ := gateHeldOn(ctx)
+			mu.Lock()
+			asks = append(asks, gateEvent{key: key, enter: true, held: held})
+			mu.Unlock()
+			defer func() {
+				mu.Lock()
+				asks = append(asks, gateEvent{key: key})
+				mu.Unlock()
+			}()
+			return inner(ctx, key, fn)
+		}
+		d.GitHub = laneHookedGitHub{fakeGitHub: h.github, after: func(ctx context.Context, call string) {
+			held, _ := gateHeldOn(ctx)
+			mu.Lock()
+			defer mu.Unlock()
+			asks = append(asks, gateEvent{key: "github:" + call, enter: true, held: held})
+		}}
+	})
+	p := testPipeline(DeliveryWebhook)
+	_, waiting := laneRuns(t, h, p)
+	h.github.setAncestor(repoName, shaB, shaC)
+
+	opened := pushToMain(t, h, "d-push", shaB, shaC)
+
+	if got := rec.took(); len(got) != 0 {
+		t.Errorf("the gate discipline was broken:\n  %s", strings.Join(got, "\n  "))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	released := slices.IndexFunc(asks, func(e gateEvent) bool { return !e.enter && e.key == OpenGateKey(opened.RunKey) })
+	head := slices.IndexFunc(asks, func(e gateEvent) bool { return e.key == "github:BranchHead" })
+	compared := slices.IndexFunc(asks, func(e gateEvent) bool { return e.key == "github:CompareAncestry" })
+	stopped := slices.IndexFunc(asks, func(e gateEvent) bool { return e.enter && e.key == RunGateKey(waiting.ID) })
+	switch {
+	case released < 0 || head < 0 || compared < 0 || stopped < 0:
+		t.Fatalf("want the open gate released, the head read, the compare and the waiting run's gate: %+v", asks)
+	case !(released < head && head < compared && compared < stopped):
+		t.Errorf("want: open gate released, then the head, then the compare, then the waiting run's gate: %+v", asks)
+	}
+	for _, i := range []int{head, compared, stopped} {
+		if asks[i].held != "" {
+			t.Errorf("%s while %q was held", asks[i].key, asks[i].held)
+		}
+	}
+	wantAsked(t, h, waiting.ID, opened.ID)
+}
+
+// laneHookedGitHub is the fake GitHub with a hook after each default-branch
+// read and each ancestry compare: where they fall among the gates.
+type laneHookedGitHub struct {
+	*fakeGitHub
+	after func(ctx context.Context, call string)
+}
+
+func (g laneHookedGitHub) BranchHead(ctx context.Context, token, repository, branch string) (string, string, error) {
+	sha, message, err := g.fakeGitHub.BranchHead(ctx, token, repository, branch)
+	g.after(ctx, "BranchHead")
+	return sha, message, err
+}
+
+func (g laneHookedGitHub) CompareAncestry(ctx context.Context, token, repository, base, head string) (githubapp.Ancestry, error) {
+	a, err := g.fakeGitHub.CompareAncestry(ctx, token, repository, base, head)
+	g.after(ctx, "CompareAncestry")
+	return a, err
+}

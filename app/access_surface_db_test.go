@@ -71,6 +71,7 @@ concept accessBrief {
   ownerUserId    string
   accessCodeId   string
   clientName     string
+  codeLabel      string
   siteId         string
   note           string
   secretNote     string
@@ -170,11 +171,12 @@ mutation accessBrief accessBriefRecord {
 @actor
 mutation accessBrief accessClientRecord {
   args {
-    noteId        string!
-    siteId        string!
-    accessCodeId  string!
-    accessGate    string!
-    accessSubject string
+    noteId          string!
+    siteId          string!
+    accessCodeId    string!
+    accessGate      string!
+    accessSubject   string
+    accessCodeLabel string!
   }
   insert {
     accept { siteId }
@@ -182,6 +184,7 @@ mutation accessBrief accessClientRecord {
       id:           args.noteId
       accessCodeId: args.accessCodeId
       clientName:   args.accessSubject
+      codeLabel:    args.accessCodeLabel
       note:         args.accessGate
       ownerUserId:  actor.userId
     }
@@ -1038,7 +1041,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.session(dropped).Code, "a code whose gate is gone is still a live session; it just opens nothing")
 	})
 
-	t.Run("all four stamps land on the row", func(t *testing.T) {
+	t.Run("all five stamps land on the row", func(t *testing.T) {
 		w := newAccessWorld(t, rig)
 		codeID, code := w.mint(w.site, "clients", "acme")
 		token := w.open(code)
@@ -1047,6 +1050,13 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		rec := w.call(token, "accessClientRecord", map[string]any{"noteId": noteID})
 		requireAccessReply(t, rec, http.StatusOK, `{"data":[{"id":"`+noteID+`"}]}`)
 
+		var label string
+		require.NoError(t, rig.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("payload->>'label'").
+			Where("id = ?", "v1:platform:siteAccessCode:"+codeID).OrderExpr(`"createdAt" DESC`).Limit(1).
+			Scan(context.Background(), &label))
+		require.NotEmpty(t, label, "the minted code has no name to stamp")
+		require.NotContains(t, rec.Body.String(), label, "the visitor's reply carries the code's name")
+
 		var stored []byte
 		require.NoError(t, rig.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("payload").
 			Where("id = ?", accessE2EConcept+":"+noteID).Limit(1).Scan(context.Background(), &stored))
@@ -1054,6 +1064,7 @@ func TestAccessSurfaceEndToEnd(t *testing.T) {
 		require.NoError(t, json.Unmarshal(stored, &row))
 		require.Equal(t, codeID, row["accessCodeId"], "accessCodeId")
 		require.Equal(t, "acme", row["clientName"], "accessSubject")
+		require.Equal(t, label, row["codeLabel"], "accessCodeLabel")
 		require.Equal(t, "clients", row["note"], "accessGate")
 		require.Equal(t, w.site, memql.BareShortId(fmt.Sprint(row["siteId"])), "siteId")
 	})

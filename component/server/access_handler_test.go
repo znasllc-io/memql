@@ -45,6 +45,7 @@ const (
 	accessTestCode       = "K7Q4M-2XPDN-8RT3V-WJ6HC-9F01A"
 	accessTestCodeID     = "code1"
 	accessTestSubject    = "acme"
+	accessTestLabel      = "Client reviewers"
 )
 
 // accessT0 is when every test starts, at a whole second so a remainingMs reads as
@@ -283,6 +284,8 @@ func newAccessRig(t *testing.T) *accessRig {
 			Args: []string{"window"}, Stamped: append([]string(nil), memql.ReservedAccessArgs...)}),
 		dashboard(memql.AccessGateEntry{Construct: "deskNote", Kind: memql.AccessKindMutation,
 			Args: []string{"noteId", "title"}, Stamped: []string{memql.AccessArgCodeID}}),
+		dashboard(memql.AccessGateEntry{Construct: "deskVisit", Kind: memql.AccessKindMutation,
+			Args: []string{"visitId"}, Stamped: []string{memql.AccessArgCodeID, memql.AccessArgCodeLabel}}),
 		// HAND-BUILT, since the load never lets a reserved name into Args: what stops a
 		// caller naming one is the reserved list, and not only that Args omits it.
 		dashboard(memql.AccessGateEntry{Construct: "deskListsReserved", Kind: memql.AccessKindQuery,
@@ -307,7 +310,7 @@ func newAccessRig(t *testing.T) *accessRig {
 	}
 	store.codes[accessTestCodeID] = &AccessCode{
 		ID: accessTestCodeID, SiteID: accessTestSite, AccountID: accessTestAccount, Gate: "dashboard",
-		Subject: accessTestSubject, Generation: 1, ExpiresAt: accessT0.Add(time.Hour),
+		Subject: accessTestSubject, Label: accessTestLabel, Generation: 1, ExpiresAt: accessT0.Add(time.Hour),
 	}
 	store.digests[memql.AccessCodeDigest(accessTestCode)] = accessTestCodeID
 	engine := &accessFakeEngine{}
@@ -1066,6 +1069,40 @@ func TestACodeWithNoSubjectStampsNoSubject(t *testing.T) {
 
 	if len(rig.engine.calls) != 1 || strings.Contains(rig.engine.calls[0], memql.AccessArgSubject) {
 		t.Fatalf("calls = %v", rig.engine.calls)
+	}
+}
+
+// A MUTATION MAY BE TOLD THE NAME OF ITS CODE, the operator's label, so a product can
+// say which code did something, in a message to the operator, without reading codes.
+// The visitor is not told: a mutation's reply is its bare id and nothing else.
+func TestAMutationIsToldTheNameOfItsCode(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.open()
+	result := memql.NewResultWithOutput([]any{map[string]any{"id": "v1:desk:deskVisit:visit1", "codeLabel": accessTestLabel}})
+	result.Bundle = &memqlv1.GraphBundle{RootIds: []string{"v1:desk:deskVisit:visit1"}}
+	rig.engine.result = result
+
+	rec := rig.call(token, "deskVisit", map[string]any{"visitId": "visit1"})
+
+	want := `desk.deskVisit(accessCodeId: "code1", accessCodeLabel: "Client reviewers", visitId: "visit1")`
+	if len(rig.engine.calls) != 1 || rig.engine.calls[0] != want {
+		t.Fatalf("calls = %v, want %q", rig.engine.calls, want)
+	}
+	assertAccessReply(t, rec, http.StatusOK, `{"data":[{"id":"visit1"}]}`)
+}
+
+// A QUERY IS NEVER TOLD IT, even one whose entry lists the name: a query's reply is what
+// its shape selects, so the load refuses the declaration and the handler, the second
+// line, stamps it on a mutation only.
+func TestAQueryIsNeverToldTheNameOfItsCode(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.open()
+
+	rig.call(token, "deskStamped", nil)
+
+	if len(rig.engine.calls) != 1 || strings.Contains(rig.engine.calls[0], memql.AccessArgCodeLabel) ||
+		strings.Contains(rig.engine.calls[0], accessTestLabel) {
+		t.Fatalf("calls = %v: a query was told the code's name", rig.engine.calls)
 	}
 }
 

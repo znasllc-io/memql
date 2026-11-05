@@ -22,7 +22,7 @@ remain available for artifacts that have already been built; see
 
 ```mermaid
 flowchart LR
-  Source[Verified main commit] --> Version[Read source version]
+  Source[Newest tested main commit] --> Version[Read source version]
   Version --> Tag[Confirm immutable tag]
   Tag --> Build[Full native release build]
   Build --> Candidate[Prepare candidate]
@@ -37,6 +37,8 @@ flowchart LR
 1. Choose the configured release profile and its repository pipeline. Selecting
    a pipeline does not prove access; **Check source** verifies the current owner,
    connected source, repository identity, default branch and required checks.
+   It also chooses the commit: the newest one on the default branch whose
+   required checks passed ([Which commit a release takes](#which-commit-a-release-takes)).
 2. Review the saved commit, version and immutable tag. The version comes from
    the profile's declared file at that exact commit, such as `VERSION` or a
    component's package file. An installed product recipe chooses the tag using
@@ -58,6 +60,45 @@ ambiguous results do not use this fallback.
 The saved commit must remain included in the configured default branch. A later
 unrelated commit on `main` does not retarget the selected release. Changed source
 identity, revoked access or an altered profile stops new effects.
+
+### Which commit a release takes
+
+**Check source** looks back along the default branch's first-parent history from
+its newest commit, at most 20 commits, and takes the newest one whose required
+checks all completed successfully under their declared GitHub App. It then proves
+that commit exactly as above. On `memql` the required check is
+`MemQL / memql / push`, which only a push to `main` reports, so a release comes
+from a commit whose full push run passed. The commits of a merged branch are not
+on the first-parent chain and are never taken.
+
+Each newer commit is passed over, and the saved release records why:
+
+| State | Shown as | Meaning |
+| --- | --- | --- |
+| `pending` | Checks running | A required check has not finished. |
+| `failed` | Checks failed | A required check completed without success, for any reason but cancellation. |
+| `cancelled` | Superseded | A required check was cancelled, which is how a run that a newer push superseded ends. |
+| `missing` | Not tested | No required check reported: a commit inside a multi-commit push, or one whose run never opened. |
+
+So `main` does not have to sit still while a run goes: pushing during the two to
+three hours a full run takes leaves the last commit that passed ready to release.
+The release's **Source** step shows the commit it took, the newest commit on the
+branch when the source was checked, and each newer commit with its state.
+
+A merge commit that no required check reported on is not passed over. It is
+offered to the proof, whose merged pull request fallback alone can judge it; if
+the proof refuses it, **Check source** reports that refusal rather than looking
+further back. Checking again looks back afresh.
+
+Evidence the look back cannot read stops it, and nothing is saved: a truncated
+check listing, a check not bound to its commit and App, the required check name
+reported by another App, or two latest runs for one check. It never passes over
+such a commit to reach an older one.
+
+When none of the commits it looked at passed, **Check source** is refused with
+`release_source_untested` and counts what it found, for example "2 running,
+1 failed, 17 untested". Nothing is saved, so there is no request to look for:
+check the source again once a commit's checks pass.
 
 ### Prepare the version through a pull request
 
@@ -125,7 +166,8 @@ holds. Anything else runs the step.
   image, services, shard and packages all match. The run's event, mode, version
   and commit, and which stages come first in the plan, do not take part.
 - The source executed the step itself and reported no artifact. A pass that source
-  only carried from an earlier attempt does not count.
+  only carried from an earlier attempt, reused from another run, or carried forward
+  from an earlier push does not count.
 - The installed `evidenceReuse` policy admits the source, and that source ran under
   the same policy version. The engine's default admits nothing.
 
@@ -146,8 +188,15 @@ is covered or none is.
 
 A pull request usually runs `affected`, so it covers fewer packages than a full
 release, and its `go-tests` and `db-tests` qualify only when its selection went
-full. The `push` run of the release commit covers them. To get the most out of
-reuse, start the release after that run finishes. The release does not wait for it.
+full. The release commit's `push` run covers them, and **Check source** takes a
+commit only once its required checks have passed, so that run has finished.
+
+**A push may carry a step forward** from an earlier push whose change left it
+untouched ([pipelines.md](pipelines.md#carrying-a-verified-step-forward-on-the-default-branch)).
+Such a step was not executed on the release's tree, so the release executes it, with
+every shard of it, and reuses only what the push executed. A release never stands on
+a carried step: candidate coverage refuses one named as evidence, so the 24-hour
+bound holds for every check a release ships with.
 
 A reused step has no log of its own in the release. Its log stays on the run it came
 from, under that run's artifact retention, which is usually shorter than a release's.

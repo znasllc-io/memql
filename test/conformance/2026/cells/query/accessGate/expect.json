@@ -42,7 +42,13 @@
       "file": "a-reserved-argument-as-an-int.memql",
       "verdict": "refuse_load",
       "message": "declares the reserved argument accessCodeId as int, but the access handler stamps it as a string",
-      "note": "Reserved arguments are siteId, accessCodeId, accessGate and accessSubject. Each must be a string."
+      "note": "Reserved arguments are siteId, accessCodeId, accessGate, accessSubject and accessCodeLabel. Each must be a string."
+    },
+    {
+      "file": "the-code-name-on-a-query.memql",
+      "verdict": "refuse_load",
+      "message": "is a query and declares accessCodeLabel, the operator's name for the code",
+      "note": "Raised by the registration pass. A mutation may declare it (see the mutation cell): its reply to the visitor is its bare id."
     }
   ]
 }

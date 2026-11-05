@@ -36,10 +36,21 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
    use the available width.
-   Shared record lists draw no dividers. Rows are separated by their own
-   spacing; a row shows the subtle hover and focus wash, and the open row keeps
-   its accent edge. Keep this in the shared list styles, never per-app row
-   borders.
+   Shared record lists draw dividers **only between items**: no top line on
+   the first, no bottom line on the last, and no lines for a single item.
+   Keep this in the shared list styles, including rows with separate actions
+   and live-list wrappers; never add per-app row borders.
+   **Horizontal dividers are on their way out** (the owner, 2026-11-04: they
+   "look pretty terrible" and crowd the page). A surface that has moved sets
+   `data-os-dividers="none"` on its root, and its record rows and details
+   sections then stand apart by spacing alone, with each row's hover wash
+   showing it is one target. Removing the line is not the whole job: the rows
+   must still read as separate items without it. Move a surface when it is
+   being worked on, not in a sweep of apps nobody asked to change; the default
+   follows once the surfaces have. A store's Reviews is the first; Cut release
+   is the second, and a guided flow moves through the kit `Wizard`'s
+   `dividers="none"`. Email's Templates and Settings, with the Brand page,
+   are the third.
 
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection
@@ -430,7 +441,11 @@ space below is tight. Keep keyboard position distinct from checked state.
 ## Record lists
 
 App record collections use `RecordList` and `RecordRow`, the Deployables list
-pattern. `LiveList` already provides the list container and arrival semantics.
+pattern. **No toasts, chips or badges inside a row or a card** (the owner,
+2026-11-04): a row's facts are quiet text, and its state is the kit's one
+state word, drawn only when the list mixes states. A list whose tab already
+names the state -- Reviews' Waiting -- draws none, because every row would
+say it again. `LiveList` already provides the list container and arrival semantics.
 Use the row's `actions` slot for independent controls, outside its opening
 button, and `Subhead.meta` for subordinate collection counts. Static collections
 can use `RecordList as="ul"` to retain list/listitem semantics. The repository
@@ -540,7 +555,10 @@ a list, and belongs behind `Refine` (rule 2), not on a tab.
 Sibling views **inside a page or an entity** use the shared `LocalTabs`, directly
 below that page's heading and above its content. Fleet's Model Library
 (Available models / Catalog / Inference sources) and machine details are the
-reference. Keep the app's top-level section tabs in `AppFrame`; do not add a
+reference. The owner's word (2026-11-04): a selected page whose sub-pages are
+reached through icons in its heading draws them as these tabs instead, the
+way a machine's are -- a store's Reviews is Waiting, Published, Decision log
+and Settings, and one review is a page opened from a tab, under its trail. Keep the app's top-level section tabs in `AppFrame`; do not add a
 second app-level tab bar or disguise page navigation as radio preferences.
 Local tabs keep one active view and scroll horizontally in a narrow window.
 The active view uses the theme's soft accent fill and a solid accent underline;

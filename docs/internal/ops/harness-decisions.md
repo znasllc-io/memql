@@ -2375,10 +2375,9 @@ Two alternatives were rejected. A field on `pl.StepResult` for the kubelet's
 reason would have needed every reader -- the driver, the check run, the run
 page -- to learn it, where a catalogued code already reaches all of them. A
 note changes no outcome, and the step has failed. The code is
-`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing. It
-is not one of the release train's `EnvironmentalStepCodes`, so it earns no
-automatic retry; whether an intermittent out-of-memory kill should is a
-separate decision.
+`ClassFailure`, like `pipeline_step_disk_exceeded`: the step's own doing, so
+it earns no automatic retry; whether an intermittent out-of-memory kill should
+is a separate decision.
 
 The out-of-memory rows of `TestClassify`,
 `TestClassifyNamesTheMemoryLimitOnlyWhenThePodSaysIt`,
@@ -2528,6 +2527,105 @@ workbench binary built from this source over `memql-workbench:local`, against Jo
 written in the runner's shape. Not verified: AKS, an image from the release pipeline,
 reconciliation through ArgoCD, a release through the native receiver, or a step created
 by a real runner in a queue.
+
+## A burst of pushes runs the newest commit (2026-11-05)
+
+Design record `docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md`, D4.
+The owner pushes straight to the default branch, and every push opens a full run. A
+run is claimed and started the moment it opens, and queueing happens per step inside
+Kueue, so three pushes in ten minutes started three full runs at once and the newest
+commit's verdict arrived last. `component/pipelinerun/push_lane.go` gives each
+pipeline's pushes one runner at a time and drops the commits a newer push covers.
+
+**Trigger and opt-in.** A push run joins the lane when it is a full push from a webhook
+or the poll and its OWN saved policy snapshot's `supersession` phase answers yes for
+`{event: push, mode: full, previousMode: full, trigger}`. The portable
+`pipelineSupersessionPolicy` answers no, so nothing changes until an installation opts
+in. Two alternatives were rejected. A new policy role is a contract change for one
+boolean. An environment variable is a second source of truth outside the snapshot, and
+would change a waiting run's treatment when a replica restarts. Reusing the role keeps
+the answer in the snapshot every run already saves, so every replica, retry and
+recovery reads the same answer, and a later policy change reaches only runs opened
+after it.
+
+**Hold, not refuse.** `claimInLane` (lease.go) holds an unstarted lane run while
+another lane-shaped push run of the pipeline executes: in progress whatever its lease,
+or queued under a lease renewed within `leaseStaleAfter`. Nothing is written, so the
+run stays queued, its check reads *Queued*, and its ceiling, counted from `startedAt`,
+does not begin. Holding is judged on shape, not opt-in, so a run opened before the
+opt-in holds the lane until it ends. A started run and a run asked to stop are never
+held: a takeover after a lost replica and a cancel never wait on the lane. Membership
+is decided before the gate (`pushLaneMember`, a fresh `RunByID`), because evaluating a
+snapshot is more than a gated section should do and membership rests on fields a run
+never changes. A lane that cannot be read fails the claim and the run stays queued for
+recovery, the stance operator admission takes.
+
+**Supersede on proof only.** A new lane push supersedes each waiting lane run (queued,
+no driver) of its pipeline whose commit `CompareAncestry` proves a PROPER ancestor of
+the new commit, when `readDefaultHead` names the new commit as the head
+(`coalescePush`, supersede.go). The head and the compares are read with no gate held.
+`cancelIfWaiting` (cancel.go) then concludes each run under its own gate, only if a
+fresh read still shows it waiting, with the same fenced write a cancel of an undriven
+run makes (`concludeUndriven`). It takes the gate the claim takes, so of a claim and a
+supersede exactly one wins. Recovery's lane pass (`reconcilePushLane`) supersedes
+toward a push run at the head that nobody asked to stop, which is how an older
+commit's run that opened after the head's is dropped. Stop conditions: no token, a
+failed or empty head read, no run at the head, an unproven ancestry, a run claimed
+meanwhile. Each supersedes nothing and is logged. The invariant: a run is superseded
+only while no agent holds it and while a run exists that tests a superset of its
+changes.
+
+**Starting the next.** The replica that concludes a lane-shaped run starts the next
+waiting run itself (`advancePushLane`): the one at the head, else the newest queued.
+Recovery does the same within a minute when that replica is gone, and leaves unstarted
+lane runs out of its ordinary pass, so a held run is neither claimed nor logged every
+minute.
+
+**Soft, deliberately.** Each claim takes only its own run's gate, so two waiting runs
+claimed at the same instant on two replicas can both find the lane free and both
+start. A pipeline-wide gate around every claim would close that window and put every
+claim of a pipeline behind one advisory lock for a fresh read. What it would prevent
+costs one runner, so the claim stays on the run's gate, the stance supersede.go takes
+for pull requests.
+
+**What survives a retry, a pause or a replica change.** Nothing about the lane lives in
+memory: membership is the saved snapshot, waiting is the row, the head and the
+ancestries are asked again every time. A replica that dies holding a lane run leaves a
+run in progress, which holds the lane until recovery takes it over and finishes it, or
+a claimed run that never started, whose lease goes stale and then holds nothing. That
+holds for a pod that restarts under the same name too: the run it claimed and never
+started holds the lane for up to `leaseStaleAfter` (120 seconds) before recovery
+resumes it, where an ordinary run is resumed at the next pass. A
+superseded run keeps its row, its check run concluded `cancelled` and
+`cancelledBy: superseded by <run>`. A force-push back runs its commit again (R37, now
+for the default branch's head too), and `previousRunFailed` passes it over so the next
+pass does not read as *recovered*.
+
+**Tests.** `push_lane_test.go`: membership
+(`TestOnlyAPushTheInstallationOptedInJoinsTheLane`), the hold
+(`TestAWaitingPushIsNotClaimedWhileAnotherExecutes`,
+`TestAFreshClaimHoldsTheLaneAndAStaleOneDoesNot`,
+`TestALaneThatCannotBeReadLeavesTheRunQueued`), the hop between replicas
+(`TestAWaitingPushStartsWhenTheRunAheadOfItConcludes`), the portable default
+(`TestWithoutTheOptInEveryPushStartsAtOnce`,
+`TestWithoutTheOptInTheClaimDoesNotReadTheLane`), recovery (`TestRecovery*`) and the
+race (`TestAClaimAndASupersedeOfOneRunNeverBothWin`). `supersede_test.go`: superseding
+from a webhook and from the poll, late deliveries, unknown heads, unproven ancestries,
+executing runs, R37 for pushes and the gate order. Also `cancel_test.go`
+(`cancelIfWaiting`), `notify_test.go`, `gate_discipline_test.go`
+(`TestThePushLaneKeepsTheGateDiscipline`), `store_db_test.go`
+(`pipelineRunsUnfinishedForPipelineEvent` over real rows) and `push_lane_db_test.go`
+(`TestThePushLaneOverRealRows`: the hold, the supersede and the fenced conclusion
+through the engine and the production advisory gate).
+
+**Not verified, and known limits.** No live cluster has run the lane: it has run
+against the package's fakes, and its query, hold and supersede against a real
+Postgres. Production's
+installed supersession policy does not opt in; until the installation adds the push
+case, none of this runs there. A head whose delivery never arrives covers nothing, so
+the runs waiting below it run one at a time, newest first. A superseded commit's push
+check is cancelled rather than passed, which release preparation (D6) must read as
+untested.
 
 ## The local cluster runs production's pipeline queue (2026-11-04)
 
@@ -2711,129 +2809,86 @@ older-cluster case with Kueue absent rather than the project; a green
 Cluster app's capacity section locally; cold builds under the queue; the weekly
 install legs on the new pin; and Linux or amd64.
 
-## Release trains carry main (2026-10-27)
+## Release trains are removed (2026-11-05)
 
-Every pull request to this repository is opened under the owner's account, so
-GitHub never lets one be approved: each merged through `merge-as-owner.sh`'s
-admin bypass, which skips the merge queue, and every merge left the other open
-pull requests behind `main` to run the whole pipeline again. The owner chose
-trains (design record `docs/superpowers/specs/2026-10-27-release-trains-design.md`):
-ready pull requests collect, a train tests them together once, and only the
-owner's GitHub approval of the train pull request moves `main`. The connected
-workflow is in [pipelines.md](../../public/operate/pipelines.md#release-trains).
+**Trigger.** On 2026-11-05 the owner decided that only they move `main`, by
+pushing to it, with pull requests off on the repositories that matter, and that
+releases and deploys are done by hand ([design record](../../superpowers/specs/2026-11-05-owner-pushes-main-design.md),
+D1 and D2). A release train landed pull requests, or, from `main`, published it
+once a day, and its automatic deploy merged the installation pin through a pull
+request. With pull requests off and `main` restricted to the owner, none of
+those paths can finish, and the owner asked for the trains to be deleted, not
+deprecated.
 
-**Trigger.** `tickPipelineTrains` runs every minute on the one agent replica
-holding the `pipelines-trains` lease (`TestReleaseTrainsTickOnlyOnElectedAgent`):
-an agent, because a retry opens the same failed-only re-run a person's re-run
-opens, and only an agent's driver picks that up. `pipelinesTrainTick` is
-internal-origin only (`TestTickRefusesAClientCaller`). A repository takes part
-only when `MEMQL_PIPELINES_TRAINS` names it with `enabled: true`; a value that
-does not parse runs no train anywhere and logs the field at fault, rather than
-guessing at a typo every minute. An express train is
-`pipelinesTrainExpress`, the pipeline owner's alone, under
-`execute app:pipelines/rerun`.
+**What went.** The train coordinator and its every-minute tick
+(`tickPipelineTrains`, lease `pipelines-trains`), express departures, standing
+approval ("Publish by itself", "Deploy by itself") and the automatic deploy
+with **Deploy newest release** and **Resume**: the builtins
+`pipelinesTrainTick`, `pipelinesTrainExpress`, `pipelinesTrainStatus`,
+`pipelinesTrainStanding`, `pipelinesDeployRelease` and
+`pipelinesDeploymentResume`, with their queries, mutations and shapes; the
+concepts `v1:pipelines:train`, `v1:pipelines:standing` and
+`v1:pipelines:pipelineDeployment`; `v1:pipelines:run.onlyStages`; the GitHub
+calls only a train made (`githubapp/train.go`); the packages train token and
+owner login; the exact-commit ArgoCD sync (`integrations/argocd/sync.go`); the
+release integration's train and deploy adapters; the MemQL OS Releases panel;
+the `MEMQL_PIPELINES_TRAINS` setting; and `merge-as-owner.sh`'s `--emergency`
+gate, which existed only because trains carried `main`.
 
-**Evidence, and what it is not.** A pull request boards on its pipeline's own
-pull request check, `pipelines.CheckRunName(name)`, completed `success` on its
-current head, and on its labels, and only when its head is a branch of this
-repository. Two independent guards, because anything that writes checks can
-report one of that name, a fork's own workflow included. The check counts only
-from the App that minted the train's token (`RepositoryTrainToken` answers its
-id; `TestBoardingCountsOnlyTheAppsOwnCheck`), and a fork never boards
-(`TestAForkNeverBoards`): its code would otherwise run in this repository's
-train run with the pipeline's secrets, which the engine's refusal of fork runs
-(`pipelines/trigger.go`, D6) exists to prevent. A branch in this repository
-needs write access, which the repository already trusts. The token also reads
-checks, which a private repository's installation token cannot without it.
+**What stayed.** Releases by hand on Pipelines > Releases (prepare, approve,
+publish, seal, catalog), ordinary pipeline runs, and installation proposals on
+Cluster > Updates, including `proposeOverlay` and
+`MEMQL_RELEASE_INSTALLATION_OVERLAY`, which back them.
 
-A failed train run is judged only on its FAILED steps (a cancelled step proved
-nothing), their error codes and Go packages; on each boarded pull request's
-files at the BOARDED commit (`compare/<base>...<boarded head>`, 300 at most);
-on what those files reach in the train head's import graph, through the
-pipeline's own affected analysis (`pipelines.TrainReachOf`, mirroring the
-shipped `pipelinePackageSelection` policy's global paths); and on `main`'s
-newest completed push run's failed steps with their packages (`TestTrainReachOf`,
-`TestADependencyMakesTwoSuspects`, `TestTriageReadsTheBoardedCommitsFiles`,
-`TestACancelledStepNamesNoSuspect`). The approval is the latest `APPROVED` or
-`CHANGES_REQUESTED` review by the pipeline owner's login, learned from their own
-GitHub connection, and it counts only for the commit it names.
+**Stored rows.** No production row is purged. The three concepts are retired in
+the concept-field ledger with waivers: nothing registers or writes them any
+more, so their rows are inert history. `v1:pipelines:run.onlyStages` is retired
+with a waiver too. A run row still carrying it would refuse its next write once
+the field is no longer declared, but its only writer was the automatic deploy's
+verification run, and production never ran an automatic deploy: on 2026-11-05 it
+held no `v1:pipelines:pipelineDeployment` row and none of its newest 50 runs
+carried the key.
 
-**The invariant: what lands is what the owner approved.**
-`pipelines.ApprovalLands` requires that review to name the train pull
-request's current head; landing requires `main` to still be the train's base;
-and the merge sends that head as GitHub's guard. Any of them moving sends the
-train back to `building` and the owner is asked again
-(`TestRebuiltTrainAsksAgain`, `TestMainMovingRebuildsAWaitingTrain`,
-`TestApprovalForAnOlderHeadDoesNotLand`, `TestAnApprovalBeforeARebuildNeverLandsTheRebuiltTrain`).
-Nothing in the coordinator creates a review. That alone does not keep a model
-from approving: agent sessions act on GitHub under the owner's account, so the
-rest of the guarantee is the `CLAUDE.md` rule that a session never reviews or
-approves a pull request. Boarding merges the head commit read at
-boarding, not the branch, so a push after boarding never rides along
-(`TestTrainMergesTheBoardedCommitNotTheNewHead`).
+0.31.15 shipped a repairing migration instead,
+`20261105043000_pipelines_run_only_stages_retired`, and 0.31.16 withdrew it
+before production ran it. Its one `UPDATE` tests `payload ? 'onlyStages'`, which
+reads every stored run version; a run rewrites itself on each 30 s lease renewal
+at about 76 KB a version, so production held an estimated 150,000 to 250,000 of
+them. The migration pool keeps pgdriver's 10 s read deadline, and a statement cut
+off there keeps the runner's lock (memql#5604), the stranding
+`database-reliability.md` in the installation repository records for 2026-10-30;
+every retry would have scanned again and stranded it again. A database that ran
+0.31.15 keeps the migration in its ledger; nothing reads that row, and the waiver
+holds there as everywhere. A retirement on a concept with a long history that
+does need repair is a batched Go migration, as
+`20260921000000_module_readiness_history_collapse.go` is.
 
-**Ownership and permissions.** Every GitHub call uses an installation token
-minted through the pipeline owner's GitHub connection, and is refused if the
-repository's installation changed since the pipeline was connected. The train
-row is on the owner tier like every pipelines concept; its two mutations are
-`@serverOnly`. The merge goes through the branch's normal rules with no bypass.
+**The head branch stays on the step wire.** `StepRequest.HeadBranch` and
+`StepRun.HeadBranch` selected the train admission class; they now decide
+nothing and are recorded for diagnosis. The workbench binds the whole `StepRun`
+into a Job's creation definition, so dropping the field would change every
+queued attempt's fingerprint and need a new `PipelineStepAction`, with a window
+of refused steps, for no change in behaviour. A shared isolation proof again
+asks the one live cloud decision before each probe POST: with no train class
+there is no per-waiter allowance to weigh.
 
-**Freshness and replicas.** The row is the state, not the process. Each tick
-reads it with `memql.ContextWithFreshRead` and takes one step; every write is a
-compare-and-swap on `(id, state, updatedAt)` under `TrainGateKey`'s Postgres
-lock, with `updatedAt` written in nanoseconds and moved strictly forward as the
-row's version. GitHub is never called under the gate. A build makes many GitHub
-calls, so a `building` train younger than 10 minutes belongs to the tick that
-claimed it and an older one is reclaimed and rebuilt from `main`
-(`TestTwoTicksBuildOneTrain`). A replica lost between approval and merge
-leaves the train `landing`, and the next tick merges it or records the merge
-it finds (`TestLandingResumesAfterAReplicaChange`). Both race tests are
-in-process: two ticks over one store, not a live two-replica cluster.
+**Admission ordering.** `allowTrainRuns` left the run-admission file, and the
+decoder still refuses unknown fields, so a decision that keeps writing it fails
+closed and holds every new run and every new cloud Job (the "retired train
+allowance" cases of `TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate`).
+Production's cost guard stops writing the field, and that change is deployed,
+before an engine without trains. Rejected: ignoring the field, which would let
+a guard written for trains believe it still admits something.
 
-**Failure handling, in order** (`pipelines.TriageTrainFailure`,
-`TestTriageTrainFailure`): every failed step environmental and not yet
-retried, retry once; `main` failing one of the same steps, hold, because
-dropping a pull request would blame its author for `main`'s break; the rebuild
-cap reached, hold; exactly one suspect, drop it with a comment and
-`train:dropped`, and rebuild; anything else, hold. Rejected: dropping the
-newest or largest pull request when several are suspects, because a wrong drop
-costs its author a day and blames them for someone else's break. Splitting a
-train to isolate the cause needs a run limited to named steps, which the engine
-cannot start, so it waits until after the switch. A held train waits for the
-owner: closing its pull request cancels it, and `train:hold` on a pull request
-on board, or `main` moving, rebuilds it.
+**Regression tests.** `TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate`,
+`TestCloudAdmissionRechecksIsolationProbeAllocation`,
+`TestEveryPipelinesBuiltinResolvesToACapability` (35 builtins),
+`TestStrictAutomationBoot_EmbeddedTreeIsClean` (195 automations),
+`TestConceptFieldSnapshotIsNotStale` and
+`TestRetiredConceptFieldsAreMigratedSafely`.
 
-**Retained and temporary.** The train rows are kept as the history of every
-departure, a cancelled empty departure included: recording it stops the next
-tick re-reading GitHub every minute until the next departure time, at the cost
-of one row. The train branch is deleted on landing. A train's messages are
-keyed `<event>@<headSha>` on the row and on the outbound delivery's dedupe
-key, so a message staged twice by two replicas, or before a write failed, is
-one delivery (`TestTrainMessagesAreSentOnce`); a message that cannot be sent is
-logged and never stops the train.
-
-**Admission.** A train run is the pull request run of a `train/` branch; the
-admission file's optional `allowTrainRuns` admits it while `allowNewRuns`
-holds other runs (`TestAdmissionAdmitsATrainRunUnderTheTrainAllowance`,
-`TestAdmissionWithoutTheTrainFieldIsUnchanged`). The engine reads the field
-before any guard emits it, because the reader refuses unknown fields and an
-older engine would hold every run. A train run queued 15 minutes while
-admission holds it sends the owner an ACTION NEEDED message.
-
-**The bypass becomes break-glass.** `scripts/dev/merge-as-owner.sh` refuses to
-merge without `--emergency=<why>` and posts the reason on the pull request
-before merging; a reason it cannot post stops the merge, so the trail always
-says why `main` moved outside a train.
-
-**Not verified here.** No live train has run. Unverified until the first one:
-that the App may create `train/*` branches and merge into them under this
-repository's rulesets; that the train pull request's run starts from the App's
-own pull request event or the poll; and that the owner's review of an
-App-authored pull request satisfies `require_code_owner_review` together with
-`require_extra_approval_for_unattributed_changes`. Verified on 2026-10-28:
-GitHub marks a pull request merged when its head reaches `main` through
-another pull request's merge (memql#6325 marked memql#6318 to memql#6324
-merged).
+**Not verified here.** The migration against production's rows, and an engine
+without trains reading production's admission file after the guard change.
 
 ## A failed release re-runs only what failed (2026-10-28)
 
@@ -3137,6 +3192,213 @@ release today and not `pull_request`, so reuse from a push turns on with the eng
 upgrade, and a pull request's results are reused only once that policy admits them.
 This change helps only after it ships in an engine release.
 
+## A release takes the newest commit whose run passed (2026-11-05)
+
+**Trigger.** The owner pushes to `main` directly, and `main`'s required check,
+`MemQL / memql / push`, is reported only by a push run, which takes two to three
+hours. `releasePrepareBuild` released the tip of `main` and refused while the
+tip's run was going, so `main` had to sit still for a release
+([design record](../../superpowers/specs/2026-11-05-owner-pushes-main-design.md), D6).
+The connected workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#which-commit-a-release-takes).
+
+**Chosen path.** When a release request names no commit, which only preparation's
+first read does, `inspectReleaseBuild` (`component/pipelinerun/release_build.go`)
+asks `WalkReleaseSource` (`component/identity/githubapp/release_source.go`) for
+the newest commit worth proving, then proves that commit with the unchanged
+`ObserveReleaseSource`. The walk reads the head and its rules once, then
+first-parent history from the head (a 100-commit history read, read again from
+any first parent it misses), and examines at most `releaseSourceLookBack` (20)
+commits, listing each one's latest runs per required check name. It takes the
+first commit the proof's own verdict accepts (`releaseCheckVerdict`, shared, so
+the two cannot disagree), and records every newer one as `pending`, `failed`,
+`cancelled` or `missing` (`releaseCheckState`: a commit that can no longer pass
+outranks one that may still). A request bound to a commit never walks, so every
+later gate re-proves the commit the saved release chose.
+
+- **Evidence used.** GitHub's branch head, applied rules and classic protection,
+  first-parent history and latest check runs. Nothing is written.
+- **A merge with no required check at all** is the one commit not passed over: it
+  is offered to the proof, whose merged pull request fallback alone can judge it.
+- **What is recorded.** `pl.ReleaseBuildSource.Walk` (head, bound, newer commits)
+  inside the release's immutable selection, so the digest covers it. Preparation
+  keeps the first, unbound inspection's record and copies it onto the bound
+  inspection's source (`prepareBuild`); `selectionWalk` validates it on every
+  read. A walk that passed nothing over records nothing (`Walk` is `omitempty`),
+  so a release of a green head encodes exactly as before.
+- **What survives a retry or a replica change.** Only a saved selection. A
+  refusal saves nothing and the next **Check source** walks afresh. Preparing
+  again while nothing newer has passed takes the same commit and finds the same
+  intent (`buildRequestID` does not cover the walk), so it keeps the first record
+  even when `main` has moved; a newer commit that passed is a new release.
+
+**Alternatives rejected.** Stopping at the first commit that is not green: the
+inner commits of a multi-commit push and superseded heads never pass, so a
+release would stop at nearly every push. Walking every parent (`git log`
+order): it would take a merged branch's commits, which were never `main`.
+Walking on past a pick the proof refuses: the walk read it as green and the
+proof found otherwise, so an older pick would hide why. A history read only as
+long as the look back: a merge of a longer branch would end the walk at the
+merge.
+
+**Fallback and stop conditions.** Nothing green within the bound is the typed
+`pl.ReleaseSourceUntestedError`, which preparation answers as the refusal
+`release_source_untested` with its counts ("2 running, 1 failed, 17 untested").
+Evidence the walk cannot read stops it with an error and picks nothing: a
+truncated or changing listing, a run not bound to its commit and an App, the
+required name reported by another App, two latest runs for one requirement, or a
+history answer that does not start where it asked. A walk whose record does not
+describe its choice (another repository, branch or bound; a pick it passed over)
+is refused before any proof. The walk runs inside preparation's two-minute
+budget, at about one GitHub call per commit examined plus three.
+
+**Invariants.** A release is only ever of a commit `ObserveReleaseSource`
+proved. The recorded newer commits never include the released one.
+
+**Regression tests.** `component/identity/githubapp/release_source_walk_test.go`
+(first parents, the bound, every state, the merge fallback, the re-read, every
+abort, and `TestReleaseCheckStateAgreesWithTheProofsVerdict`);
+`TestReleaseBuildInspectionWalksOnlyWhenUnbound` and its neighbours in
+`component/pipelinerun/release_build_test.go`, with
+`TestReleaseSourceLookBackMatchesTheOS`; `component/pipelines/release_source_walk_test.go`;
+`integrations/release/build_walk_test.go`; and, db-gated,
+`TestReleaseBuildSavesTheWalkThatChoseItsSource`,
+`TestReleaseBuildOfAGreenHeadRecordsNoWalk`,
+`TestReleaseBuildRefusesAnUntestedSourceWithoutSaving` and
+`TestReleaseBuildRefusesAWalkThatPassedItsOwnCommitOver`
+(`integrations/release/build_db_test.go`); the OS journey in
+`clients/os/test/cluster/releaseJourney.test.tsx`.
+
+**Unverified and known limits.** One read-only walk ran against `znasllc-io/memql`
+on 2026-11-04, outside the engine and with a person's GitHub token rather than the
+App's: it passed over a running head and a failed commit and took the next one,
+which the proof accepted (2.7 s for the walk, 2.5 s for the proof). No walk has
+run inside an engine, so the installation token's reach to the history read is
+assumed from the proof's own GraphQL read, which it already makes. The tests use
+a fake hub. An intermediate `--no-ff` merge with no run, inside a multi-commit
+push, is offered to the merged pull request fallback, which refuses it, so
+preparation reports that refusal until a newer commit passes. An engine from
+before this change decodes saved journals strictly and refuses a release whose
+walk passed a commit over, and the release list that reads it: during a rolling
+upgrade until the old replicas are gone, and after rolling the engine back for
+as long as such a release is among those the list reads.
+
+## A push carries a verified step forward (2026-11-05)
+
+The owner pushes to `main` with no pull request (design record
+`docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md`, D5), and every push
+opens a full run that executed every verification step again, even after a push that
+touched one package. A push now skips a verification step, or one slice of a sharded
+one, as `pipeline_passed_earlier` when an earlier push executed it and the change
+since leaves it untouched. The connected workflow is in
+[pipelines.md](../../public/operate/pipelines.md#carrying-a-verified-step-forward-on-the-default-branch).
+
+- **Trigger** (`carriesForward`, `component/pipelinerun/carry.go`). A push's first
+  attempt, in full mode, on the pipeline's default branch, after same-commit reuse
+  (`reuseVerification`) and before the work run opens. A re-run, a pull request, a
+  merge group, a release and a scheduled scan never carry forward.
+- **Opt-in** (`evidenceAsksRelation`, `evidenceAdmitted`). Only when the installed
+  `evidenceReuse` template declares `relation`, read from the run's captured policy
+  like `stageUsesPullRequest`. Such a template is told `commit`, `tree` or `ancestor`
+  for every source. One that does not declare it is asked exactly what it was before,
+  and never about an ancestor, so existing installations and the portable default
+  are unchanged. Rejected: always passing the argument (undeclared arguments are
+  tolerated), because a policy written for commits and trees would then admit
+  ancestors without anyone choosing to.
+- **Sources** (`carrySourceProblem`). The newest pushes from `PreviousRuns`, native
+  rules first: success, never asked to stop, full, the same pipeline, owner,
+  repository and branch, the same policy version, a work run, another commit, and a
+  finish within 24 hours (`carryWindow`). The policy then decides each one, and at
+  most four (`maxCarrySources`) are compared, because each costs a GitHub call.
+- **Evidence** (`compareAncestry`). `CompareAncestry` must prove the source a proper
+  ancestor and list the change whole (under 300 paths). A three-dot compare from a
+  commit that is not an ancestor leaves out that commit's own changes, so anything
+  less proves nothing. A failed compare skips the source and never fails the run.
+- **Untouched** (`readChange`, `untouched`). The change is read through what
+  `readPlan` selects an affected run by: the import graph and the block the plan was
+  compiled from (kept on the driver as `planSpec` and `planGraph`), then the pinned
+  `pipelinePackageSelection`, `pipelinePackageStepSelection` and
+  `pipelineBucketIncluded`, asked in affected mode. A slice carries when the
+  selection narrows and reaches none of its packages, when its step's bucket is not
+  selected, or when the tree did not change (an empty compare, checked against the
+  two tree hashes when both were read). A full selection, a whole-tree step on a
+  changed tree, and coverage that stays `all` carry nothing. A native refusal of the
+  policy's narrowing (`ResolveSelection`) carries nothing rather than failing the
+  push.
+- **Executed only** (`carrySourceRow`). The source row must be a done command with no
+  artifacts, no evidence run and no `carriedFrom`, over exactly the slice's packages,
+  under the same `carryFingerprint`: the verification fingerprint with a constant in
+  the commit's place and no `dependsOn` (`carryFingerprintOf`), so it binds the engine
+  revision, the policy version, the owner, pipeline, repository, compute, domain and
+  the whole step. `checkoutHistory` gives none. A carried row is never a source, so a
+  pass is never carried from a carry, and every slice executes at least once within
+  24 hours. A slice the newest source carried, or whose change reaches it, stays
+  undecided for an older source, judged against its own change.
+- **Slices** (`carryFromSource`, `sourceSplit`). A push takes a source's split, as
+  `reuseGroup` and `adoptReleaseSlices` do, when the source's rows hold exactly the
+  plan's keys and packages; only before any slice of the step is decided, and only
+  when the split carries something. The tracks are fingerprinted again, and the
+  slices the push executes cover what the carried ones do not.
+- **Record** (`decls`). A carried step's call names `evidenceRunId` (the run that
+  executed it), `carriedFrom` (that run, its work run, commit, tree and the changed
+  paths) and `carryFingerprint`, which every verification step declares. Its reason
+  is *Inputs unchanged since \<commit\>; verified in run \<id\>.*, which the step check
+  shows as a pass (`offerStepChecks` reads `evidenceRunID`).
+- **Failed-only re-runs** (`carryPassed`). Outside a release, a re-run no longer
+  carries a step its original took from another run (reused or carried forward): a
+  re-run opened days later would otherwise stretch the pass past the window. A release
+  keeps carrying such steps inside its own 24-hour chain.
+- **Releases** (no change, fail-closed). `reuseGroup` requires executed rows, so a
+  release executes every step the push of its tree carried, all its shards, and
+  `ProveReusedStep` refuses a carried row either way a candidate could reach it: a push
+  is no full release, and a reused receipt must be executed. The cost moves from push
+  runs to releases, which are fewer.
+- **This repository's bounds** (`memql-package.yaml`). The graph cannot see what a step
+  runs beside `go test`, so `select.full` names `build-css.sh`, its `lib.sh`, `brand/**`
+  (compiled into `component/identity/web`'s embedded stylesheet), and `db-tests`'
+  runner and budgets; and the `gates` stage runs `gate-inputs` on every push, since its
+  packages' tests read docs, scripts and `git ls-files`. A carried `go-tests` slice
+  holding a gate package is then still checked on every commit.
+
+Stop conditions: anything unproven runs the step. A `PreviousRuns` or `WorkSteps` read
+that fails, a policy that errs or answers no verdict, and a `relation` declared with
+another type stop the drive for recovery, as reuse does. A lost lease stops it; a
+cancel ends the decision with what was already decided.
+
+Invariants: a carried step stands on a receipt its source executed, within 24 hours of
+the decision, at a proven ancestor whose change the pinned selection says cannot reach
+it; a release never stands on a carry; a decision is journaled once and never made
+again. What survives a retry, pause or replica change: the decision is in each step's
+declaration before the work run opens, and `resume` and `adoptRows` restore
+`carryFingerprint` and `carriedFrom` from the rows before any call is declared again,
+because the run's definition fingerprint covers every call
+(`TestATakeoverKeepsWhatCarryForwardDeclared`). A drive stopped before the work run
+opened decides again from scratch, which is safe because nothing ran.
+
+Tests: `component/pipelinerun/carry_test.go` (every rule above, the four-source bound,
+the takeover, the failed-only re-run, a release over a carried push, the documented
+opt-in, and `TestCarryFingerprintIsTheSameCheckAtAnyCommit`),
+`TestACarriedStepShowsWhereItWasVerified`, and the db-gated
+`TestAPushCarriesForwardOverRealRows`, which runs the real `PreviousRuns` query,
+journal and proof over rows the driver wrote; `TestACarriedForwardStepStandsForNoRelease`
+(`integrations/release`, db-gated); `TestEngineCarriedStepRunnersSelectEveryPackage` and
+`TestEngineGatesRunOnEveryPush` (root package).
+
+Not verified: a live push on a cluster, or the time it saves; the real
+`CompareAncestry` against GitHub beyond `component/identity/githubapp`'s own tests.
+Known limits:
+
+- carry-forward is only as sound as the affected selection: a test that reads another
+  package's files by path, or a step runner outside `select.full`, is invisible to it
+  for up to 24 hours;
+- an engine upgrade or any policy change between two pushes carries nothing;
+- a failed-only re-run of a push executes what its original carried or reused;
+- the false-green count (`component/pipelines/falsegreen.go`) cannot see a selection
+  miss that a carried step hid, until the step executes again.
+
+It does nothing until the installation's `evidenceReuse` template declares `relation`,
+and helps only after the change ships in an engine release.
+
 ## A release publishes in one call (2026-11-01)
 
 `cockpit/v0.21.1` (41 files, 736 MB, engine 0.31.9, 2026-10-30) could not finish
@@ -3393,8 +3655,7 @@ runs keep their run's suffix, because two runs of different events on one
 commit select different stages and must not overwrite each other's steps.
 Stage and step names cannot hold a slash, so the name always has more
 segments than any context a ruleset, a release source
-(`githubapp.releaseChecks`), the merge queue or a train's boarding asks for by
-exact name; a step check can never satisfy or fail a required context
+(`githubapp.releaseChecks`) or the merge queue asks for by exact name; a step check can never satisfy or fail a required context
 (`TestStepCheckName`).
 
 **A writer per drive, off the run's path (the invariant).** A publish writes
@@ -3402,8 +3663,7 @@ the run's own check first and, only once that landed, hands the drive's writer
 goroutine the token it minted and each step's newest state
 (`offerStepChecks`). The writer sends one write at a time, a second apart,
 keeping only each step's newest state, so neither the merge-gating check, a
-step, nor the run row's conclusion -- which a release train waits on -- ever
-waits on a step check. A step's check is created when the step first leaves
+step, nor the run row's conclusion ever waits on a step check. A step's check is created when the step first leaves
 pending, not when the run opens: sixty creates at once would spend a third of
 GitHub's per-minute secondary write limit, and several runs opening together
 would exceed it. Rejected: creating every check queued at the start (the first
@@ -3734,7 +3994,7 @@ Settings > AI. Connected workflow:
 
 - **Where the switches live.** The global variable `MEMQL_PIPELINES_AI`
   (`pipelines.AISettingsVariable`, `component/pipelines/ai.go`), JSON
-  `{"review": bool, "diagnosis": bool}`, like `MEMQL_PIPELINES_TRAINS`. The OS
+  `{"review": bool, "diagnosis": bool}`. The OS
   writes it through `setGlobalVariable` (row `var-global-memql-pipelines-ai`).
 - **Read at use, not at run open** (`Deps.aiSettings`,
   `component/pipelinerun/ai_settings.go`). A captured-policy switch would make
@@ -3759,9 +4019,8 @@ Settings > AI. Connected workflow:
   while diagnosis was on is decided under the switch as it is when recovered.
 
 The other review and maintenance tests run with both switches on
-(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster,
-and a train's pull request with review off (it is an ordinary pull-request run,
-so the same gate applies). Known limit: a reader error reads as off and is not
+(`bindTestWorkflow`). Not verified here: the OS toggle against a live cluster.
+Known limit: a reader error reads as off and is not
 reported on the run.
 
 ## A release records vulnerability findings and keeps going (2026-10-29)
@@ -3810,11 +4069,6 @@ own contracts. Current machine consent and resources remain independent gates.
 
 Version 2 of the operator admission file separates a global new-run pause from
 cloud spending. Cost holds can therefore leave eligible Fleet work running.
-The optional release-train allowance still admits train runs under a global
-hold, but never overrides an explicit version 2 `allowCloud:false`; that hold can
-therefore leave an admitted train waiting for capacity
-(`TestTrainAllowancePreservesIndependentCloudHold`; how a legacy decision treats
-trains is in the release-train section below).
 Workbench reads the live cloud decision again before each command or isolation
 probe Job, including a later step in an already-started run. A held attempt saves
 its exact queued definition before waiting; a new replica can recover that
@@ -4287,37 +4541,6 @@ only such a step teaches it (`pipelines.Step.Balanced`, set at compile and read 
 run under this rule. The first successful full run on an engine with this change
 rewrites the rows, and the run after it is the first planned from them.
 
-## Release-train allowance across cloud allocation (2026-10-28)
-
-The separate Fleet/cloud spending gate must preserve main's existing train
-allowance. A legacy `allowNewRuns:false, allowTrainRuns:true` admits the train's
-run, probe and cloud commands. Version 2 additionally requires `allowCloud`, so
-an explicit spending hold wins even for a train. Ordinary runs do not inherit
-the train allowance.
-
-The driver forwards the immutable run event and head branch in `StepRequest`
-and `StepRun`, independent of command environment. Execution and queued-effect
-fingerprints bind both, so a replacement replica cannot widen a retained
-attempt's admission class. Reusable verification excludes these run-only facts
-because its command still receives neither event nor branch. The coordinated
-workbench action is `pipelineStepV11`; older actions cannot silently discard
-this identity.
-
-A shared isolation proof retains each current waiter's class and cancellation
-context, rechecking the live operator decision before every probe POST. A train
-can fund that proof only while waiting; after cancellation, ordinary waiters
-need their own allowance. A cached successful probe is only isolation evidence,
-and every command rechecks its own spending gate after using it. Recovery of
-existing Jobs and cleanup remain independent of new-allocation admission.
-
-Regressions: `TestTrainAllowancePreservesIndependentCloudHold`,
-`TestTrainAdmissionIdentityComesFromSavedRunAndBindsRecovery`,
-`TestTrainCloudAdmissionSurvivesForwardAndFundsIsolation`,
-`TestTrainCloudRecoveryBindsEventAndHeadBranch`, and
-`TestIsolationProbeDropsCancelledTrainAllowance`. These exercise the source
-contract and in-process replica hop; they do not establish that a running
-installation has been upgraded.
-
 ## Fleet workspace continuation
 
 The Fleet binding's original one-hour expiry accidentally ended productive
@@ -4533,34 +4756,3 @@ unit checks do not count as MemQL performing its own feature work or as a live
 utility lookup. Required-database checks and native CI must cover the final
 revision before integration. Shared test/runtime capacity and the active Ask
 run are not changed by this work.
-
-## Releasing from main (2026-11-02)
-
-**Trigger.** No scheduled release train had landed. Of 89 pull requests left off the last
-four trains, 75 had not passed their own check, and pull request runs were 7 in 10 of all
-runs. The owner removed the pull request requirement and asked for one automatic release a
-day ([design record](../../superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
-
-**Chosen path.** A train from main (`source: main`) reuses the coordinator's record, lease and
-compare-and-swap, with no cars. It never rebuilds, lands after `main` moved, and follows a push
-to its own branch. Its run is full whatever the policy says (`policyModeForEvent`). A failure
-re-runs once and then holds.
-
-**Alternatives.** A branch per change boarding like a pull request: kept out because whoever
-pushes second resolves a conflict at push time, and it needs boarding, rehearsal and merging
-`main` into every branch. A separate release branch beside the train: the train branch is one.
-
-**What survives a takeover.** Everything: every step reads the row and writes through
-`casTrain`. `TestASecondReplicaResumesATrainFromMain` resumes from running, held and landing, and
-two ticks at once land once.
-
-**Stop conditions.** A second failure, a cancelled or refused run, and a refused merge each hold
-and mention the owner. A held train's fix is a push to its branch.
-
-**Regression tests.** `component/pipelinerun/train_main_test.go`, `train_land_test.go`,
-`component/pipelines/train_test.go`, `train_triage_test.go`, `TestATrainRunIsFullWhateverThePolicyAnswers`,
-and `clients/os/test/cluster/releaseTrains.test.tsx`.
-
-**Unverified.** No live train from main has run: the settings are not set, and production has not
-deployed this code. Landing without `main`'s push run, and a release built from a train's receipts,
-are stages 2 and 3.

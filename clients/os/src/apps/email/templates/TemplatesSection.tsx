@@ -160,7 +160,7 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
   const organizationChoices = (ids: readonly string[]) => ids.map((id) => ({ id, name: nameOf(id) }));
 
   return (
-    <div className="os-app-stack">
+    <div className="os-app-stack" data-os-dividers="none">
       {refresher}
       <Head title="Templates" meta={listCount(source?.snapshot)}>
         {templatesSettledEmpty && !templatesNarrowed ? null : (

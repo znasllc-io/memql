@@ -337,29 +337,35 @@ native assembly and publication contract. Deployment composition remains in
 
 MemQL uses a single long-lived branch: `main`.
 
-1. **A change lands by pushing to `main`, with no pull request and no CI of its
-   own** (the owner's decision, 2026-11-02; design record
-   [2026-11-02](docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
-   Pull `main`, write the change and its tests, run the tests of what you touched,
-   pull again and resolve any conflict yourself, then push: the session that wrote
-   the change is the one that knows how to merge it. Work that is not ready stays
-   on a branch of its own. **Never force-push:** a ruleset with no bypass refuses
-   it, on `memql`, `memql-znas`, `memql-project` and `memql-fylo` alike.
+1. **A change lands by the owner pushing to `main`; pull requests are off** (the
+   owner's decision, 2026-11-05; design record
+   [2026-11-05](docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md)).
+   On `memql`, `memql-znas`, `memql-project` and `memql-fylo`, only the owner's
+   account can move `main` (`memql-fylo` also admits its main developer), so a
+   session pushes as the owner. Pull `main`, write the change and its tests, run
+   the tests of what you touched, pull again and resolve any conflict yourself,
+   then push: the session that wrote the change is the one that knows how to
+   merge it. Work that is not ready stays on a branch of its own. **Never
+   force-push:** a ruleset with no bypass refuses it, the owner included.
 
-   **Nothing tests `main` until the release does,** so a broken `main` stops every
-   session and the night's release. Fix it or revert it at once, whoever broke it.
-   Until production's delivery policy declines it (design record, D6), each push
-   also starts a full run, so push finished work, not every commit.
+   **Every push to `main` runs the full pipeline, and nothing tests a change
+   before it lands,** so a broken `main` stops every session and every release.
+   Fix it or revert it at once, whoever broke it. Where the installation opts in,
+   as production does, a burst of pushes runs the newest commit (a newer push
+   supersedes the push runs waiting behind the one executing), and a push run
+   reuses an ancestor's verified step whose inputs did not change, at most 24
+   hours old. Push finished work, not every commit.
 
-2. **A release leaves once a day, and by hand.** Where a repository sets
-   `source: main` in `MEMQL_PIPELINES_TRAINS`
-   ([pipelines.md](docs/public/operate/pipelines.md#releasing-from-main)), a train
-   branches off `main`, runs everything, and lands by the owner's approval or by
-   itself. A failure re-runs its failed steps once and then holds for a person, who
-   pushes the fix to the train's branch. Forks and Dependabot still use pull
-   requests, which a person merges once their check is green;
-   `scripts/dev/merge-as-owner.sh` remains for that. A session never reviews or
-   approves a pull request: it acts on GitHub under the owner's account.
+2. **Releases and deploys are done by hand; there are no release trains**
+   (removed 2026-11-05). A release is prepared in MemQL OS (Pipelines > Releases >
+   Cut release) from the newest commit on `main` whose `MemQL / memql / push` check
+   passed, looking back up to 20 commits, so `main` need not sit still; only a
+   cluster owner can cut one ([release-cutting.md](docs/public/operate/release-cutting.md)).
+   Deploying to the production installation follows memql-znas `docs/instance.md`,
+   "Releasing and deploying by hand": pin, sync, verify, and roll back by reverting
+   the pin. With pull requests off, Dependabot cannot propose updates; dependency
+   bumps are pushed like any other change. A session never reviews or approves a
+   pull request: it acts on GitHub under the owner's account.
 3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
    the DSL.** For Go seams, wire contracts, gRPC messages and env vars: fix
    MemQL and the consumer at once and delete what is no longer needed. The
@@ -633,7 +639,7 @@ individually; a new one needs the same approval.
 | **Campaign open/click tracking** | `GET /t/o/{token}`, `GET /t/c/{token}` (bff only) | A pixel is an `<img src>` and a tracked link is one a reader follows (memql#4823, P3). HMAC over the unsubscribe key ring under a DIFFERENT context string; the click destination lives INSIDE the signed payload (open-redirect-proof). Never shows a failure: the pixel always answers the GIF, a bad click token renders the "link is not valid" page. **The token must be a SINGLE PATH SEGMENT** (base64url): `SelfAuthenticatedPaths()`' exemption is bounded to one segment. `server.TrackingPaths()`; literals must agree with `campaigns.TrackingOpenPath` / `TrackingClickPath` |
 | **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content`, `POST /artifacts/uploads`, `GET /artifacts/uploads/{id}`, `PUT /artifacts/uploads/{id}/chunks/{n}`, `POST /artifacts/uploads/{id}/complete` (bff only) | Byte transport (memql#4341, memql#4782): 16 MiB chunks staged against Azure block blobs, resumable via the inventory `GET`. `GET .../content` STREAMS through the bff after re-resolving the row under the caller's actor, honoring single-range `Range` (206), never a redirect (no signed URLs). Ordinary AUTHENTICATED routes; `server.ArtifactPaths()` routes them. Caps: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (4 GiB/file), `MEMQL_LIBRARY_USER_QUOTA_BYTES` (100 GiB/user) |
 | **Shopper forms** | `POST /forms/{pack}/{name}`, `GET /reads/{pack}/{name}` (bff only) | A member of the PUBLIC posting a plain HTML form on a hosted storefront, no JavaScript, no MemQL identity (epic memql#5532). **A shopper is nobody to MemQL**: reach is declared PER ROUTE by a pack (`component/memql/shopper_surface.go`). Reached ONLY through the edge at `/_memql/forms/*` on a deployable's own origin, which owns the per-site switch (`site.shopperForms`, off by default), the rate limit, the size cap and the stamp (site, store, owner: stripped then set). `HandlerAuthorizedPaths()` + **`servedButNotExternallyRouted`**, so the edge is the only way in. The stamp is a POINTER: the bff re-reads the site row UNDER the named owner, so a forged owner reads zero rows. The write runs under that owner's borrowed authority and every row carries the `storeId` of the binding it arrived through (D9 from D7) |
-| **Deployable access codes** | `POST /access/unlock`, `GET /access/session`, `POST /access/leave`, `POST /access/call` (bff only) | A visitor holding a code an operator minted, with no MemQL identity (owner-approved 2026-10-29; `docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md`). A browser has no identity to open a stream with and only an HTTP response can set an `HttpOnly` cookie, so the other party dictates the wire. Reached ONLY through the edge's four exact method and path pairs `/_memql/access*` on a deployable's own origin (`POST /_memql/access`, `GET /_memql/access`, `POST /_memql/access/leave`, `POST /_memql/access/call`), answered whatever the site's `apiProxy` says. The edge owns the content-type and `Origin` checks, the size caps (1 KiB, 64 KiB for a call), the per-replica rate limits (keyed on the right-most `X-Forwarded-For`, so they bound load and not guessing) and the stamp (site, owner: stripped on every path, then set). `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` + **`servedButNotExternallyRouted`**, so the edge is the only way in. The stamp is a POINTER: the bff reads the site's row and requires its own owner to equal it, and nothing is read until a credential of the right shape has found a row by its digest, so a stranger costs no read. The session cookie is `__Host-memql_access`, so a sibling site cannot plant one and it has `Path=/`: the edge removes it from everything it forwards but these four routes, and forwards no other credential on them. **A session is not a credential**: no JWT, no actor, no stream; it is read from the database on every request and nothing in the decision is cached. A call runs only a construct declared `@accessGate` for the code's gate, under the site owner's borrowed authority and NEVER internal origin, after reading the site and its package under that owner, which is what closes a site whose owner left its organization, with the reserved arguments (`siteId`, `accessCodeId`, `accessGate`, `accessSubject`) stamped last. Only a person mints a code, in Deployables (`execute app:deployables/access`) and never inside a run; it is shown once and stored as a digest. [site-access-codes.md](docs/public/operate/site-access-codes.md) |
+| **Deployable access codes** | `POST /access/unlock`, `GET /access/session`, `POST /access/leave`, `POST /access/call` (bff only) | A visitor holding a code an operator minted, with no MemQL identity (owner-approved 2026-10-29; `docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md`). A browser has no identity to open a stream with and only an HTTP response can set an `HttpOnly` cookie, so the other party dictates the wire. Reached ONLY through the edge's four exact method and path pairs `/_memql/access*` on a deployable's own origin (`POST /_memql/access`, `GET /_memql/access`, `POST /_memql/access/leave`, `POST /_memql/access/call`), answered whatever the site's `apiProxy` says. The edge owns the content-type and `Origin` checks, the size caps (1 KiB, 64 KiB for a call), the per-replica rate limits (keyed on the right-most `X-Forwarded-For`, so they bound load and not guessing) and the stamp (site, owner: stripped on every path, then set). `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` + **`servedButNotExternallyRouted`**, so the edge is the only way in. The stamp is a POINTER: the bff reads the site's row and requires its own owner to equal it, and nothing is read until a credential of the right shape has found a row by its digest, so a stranger costs no read. The session cookie is `__Host-memql_access`, so a sibling site cannot plant one and it has `Path=/`: the edge removes it from everything it forwards but these four routes, and forwards no other credential on them. **A session is not a credential**: no JWT, no actor, no stream; it is read from the database on every request and nothing in the decision is cached. A call runs only a construct declared `@accessGate` for the code's gate, under the site owner's borrowed authority and NEVER internal origin, after reading the site and its package under that owner, which is what closes a site whose owner left its organization, with the reserved arguments (`siteId`, `accessCodeId`, `accessGate`, `accessSubject`, and on a mutation only `accessCodeLabel`, the operator's name for the code) stamped last. Only a person mints a code, in Deployables (`execute app:deployables/access`) and never inside a run; it is shown once and stored as a digest. [site-access-codes.md](docs/public/operate/site-access-codes.md) |
 
 ### The front door's HOST set is generated too (memql#3767)
 

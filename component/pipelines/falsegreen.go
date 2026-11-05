@@ -27,6 +27,16 @@ import (
 // passed there as a step may still have failed in a package its slice left
 // out; the count compares steps, cannot tell that from a tree that differed (a
 // sibling merge) or a flake, and files all three alike.
+//
+// A FULL PUSH RUN IS PARTLY CARRIED once an installation opts into carrying
+// verified steps forward (component/pipelinerun/carry.go; design record
+// 2026-11-05, D5). A push skips, as pipeline_passed_earlier, a step an earlier
+// push executed when the same affected selection says the change since cannot
+// reach it, so "the whole suite runs once on the tree that lands" holds only up
+// to that selection. A miss there is a pass the full run never executed: it
+// cannot fail that run, and so this count cannot see it until the step executes
+// again, at the latest when every push that executed it is a day old. A carried
+// step is read like any pass-earlier skip, as a pass.
 
 // RunFacts is what the count reads off a v1:pipelines:run row.
 //

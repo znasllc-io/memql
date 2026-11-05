@@ -203,12 +203,14 @@ type AccessSite struct {
 	PackageDomains []string
 }
 
-// AccessCode is one v1:platform:siteAccessCode, as the decision needs it.
+// AccessCode is one v1:platform:siteAccessCode, as the decision needs it. Label is
+// the operator's name for the code: nothing here decides by it, and the one place
+// it goes is the accessCodeLabel stamp on a gated mutation that declares it.
 type AccessCode struct {
-	ID, SiteID, AccountID, Gate, Subject string
-	Generation                           int
-	ExpiresAt                            time.Time
-	Revoked                              bool
+	ID, SiteID, AccountID, Gate, Subject, Label string
+	Generation                                  int
+	ExpiresAt                                   time.Time
+	Revoked                                     bool
 }
 
 // AccessSession is one v1:platform:siteAccessSession, as the decision needs it.
@@ -826,6 +828,11 @@ func (h *AccessHandler) serveCall(w http.ResponseWriter, r *http.Request, stamp 
 // with "" matches every row whose subject was never set, so a subject-less code would
 // read rows that belong to no client, while the absent argument is refused. A
 // construct that scopes by subject must not open to a code with none.
+//
+// accessCodeLabel IS STAMPED ON A MUTATION ONLY. The load already refuses it on a
+// query; this is the second line, because a query's reply is what its shape selects
+// and a mutation's is its bare id, so only a mutation can be told the operator's name
+// for the code without the visitor being told too.
 func accessCallArgs(entry *memql.AccessGateEntry, sent map[string]any, site *AccessSite, code *AccessCode) (map[string]any, bool) {
 	args := make(map[string]any, len(sent)+len(entry.Stamped))
 	for name, value := range sent {
@@ -845,6 +852,10 @@ func accessCallArgs(entry *memql.AccessGateEntry, sent map[string]any, site *Acc
 		case memql.AccessArgSubject:
 			if code.Subject != "" {
 				args[name] = code.Subject
+			}
+		case memql.AccessArgCodeLabel:
+			if entry.Kind == memql.AccessKindMutation && code.Label != "" {
+				args[name] = code.Label
 			}
 		}
 	}

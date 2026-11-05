@@ -160,6 +160,7 @@ cells/logic/requiresCapability/with-no-value.memql
 cells/logic/requiresRank/a-string.memql
 cells/logic/requiresRank/with-an-unquoted-value.memql
 cells/mutation/accessGate/keyword-arguments.memql
+cells/mutation/accessGate/the-code-name-on-a-mutation.memql
 cells/mutation/accessGate/with-a-positional-value.memql
 cells/mutation/accessGate/with-requires-rank.memql
 cells/mutation/accessGate/without-a-deployable.memql
@@ -257,6 +258,7 @@ cells/provider/vendor/no-vendor.memql
 cells/provider/vendor/with-an-unquoted-value.memql
 cells/query/accessGate/a-reserved-argument-as-an-int.memql
 cells/query/accessGate/keyword-arguments.memql
+cells/query/accessGate/the-code-name-on-a-query.memql
 cells/query/accessGate/with-a-positional-value.memql
 cells/query/accessGate/with-an-invalid-name.memql
 cells/query/accessGate/with-an-unknown-key.memql

@@ -100,7 +100,7 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
   const away = adding || sender !== null || branding;
 
   return (
-    <div className="os-settings os-settings-wide os-app-stack email-settings">
+    <div className="os-settings os-settings-wide os-app-stack email-settings" data-os-dividers="none">
       <div className="email-pane" hidden={away}>
         <div className="email-pane" hidden={domainOpen}>
           <Head title="Settings" />

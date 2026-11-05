@@ -1,29 +1,30 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ScrollText } from "lucide-react";
 
-import { Button, Caption, EmptyState, Head, Notice, RecordListSkeleton } from "../../../kit";
+import { Button, EmptyState, Notice, RecordListSkeleton } from "../../../kit";
 import { ActionBar } from "../../../kit/ActionBar";
-import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { formatMoment } from "../../../kit/format";
+import { PageHelp } from "../../../kit/pageHelp";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { deployedByLabel, type NameOf } from "../people";
-import { actionDone, reasonLabel, stateLabel, toneFor } from "./model";
+import { actionDone, reasonLabel, type LogEntry } from "./model";
+import { ReviewsPane } from "./ReviewsPane";
 import { useDecisionLog, type ReviewsScope } from "./useReviews";
 
-// THE STORE'S DECISION LOG: every decision on every one of its reviews,
-// newest first -- who decided, when, on which words, and why -- with the
-// state each review is in now. A row opens its review.
+// THE STORE'S DECISION LOG, a tab of its Reviews: every decision on every one
+// of its reviews, newest first -- what was decided and why, on which review,
+// by whom and when. A row opens its review, which is where its state is said.
 //
 // It names the product and the headline, never the writer: the log is the
 // record of decisions, and a writer's name belongs to their review.
 
-export function DecisionLogPage({ scope, revision, nameOf, viewerUserId, trail, back, onOpenReview }: {
+export function DecisionLog({ scope, heading, revision, nameOf, viewerUserId, onOpenReview }: {
   scope: ReviewsScope;
+  /** The Reviews heading and its tabs. */
+  heading: ReactNode;
   revision: number;
   nameOf: NameOf;
   viewerUserId: string;
-  trail: readonly Breadcrumb[];
-  back: { label: string; onSelect: () => void };
   onOpenReview: (reviewId: string) => void;
 }) {
   const [pages, setPages] = useState(1);
@@ -31,44 +32,48 @@ export function DecisionLogPage({ scope, revision, nameOf, viewerUserId, trail, 
   const page = log.value;
   const who = (userId: string) => deployedByLabel(userId, viewerUserId, nameOf) || "someone";
 
+  const bar = <ActionBar
+    state={page === null ? "" : page.total === 0 ? "No decisions yet" : page.total === 1 ? "1 decision" : `${page.total} decisions`}
+    detail={page?.total ? "newest first" : undefined}
+    tone={log.state === "reading" ? "busy" : "none"} />;
+
   return (
-    <section className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Decision log", siteId: scope.siteId, storeId: scope.storeId })}>
-      <div className="os-action-body os-app-stack">
-        <Head navigationKey={`review-log:${scope.siteId}`} title="Decision log" breadcrumbs={[...trail, { label: "Decision log" }]} back={back} />
-        <Caption>Every decision on this store&rsquo;s reviews, newest first: who decided, when, and why.</Caption>
-        {log.state === "failed" && page === null ? (
-          <Notice tone="error" sentence={log.error || "The decision log could not be read."}><Button onClick={log.reread}>Try again</Button></Notice>
-        ) : page === null ? (
-          <RecordListSkeleton label="Reading the decision log" rows={3} />
-        ) : page.entries.length === 0 ? (
-          <EmptyState title="No decisions yet" icon={ScrollText}>Each publish, decline and removal is recorded here as it is made.</EmptyState>
-        ) : (
-          <RecordList as="ul" label="Decision log">
-            {page.entries.map((entry) => {
-              const named = `${actionDone(entry.action)}${entry.reason ? `: ${reasonLabel(entry.reason)}` : ""}`;
-              const about = [entry.productHandle, entry.title].filter((part) => part !== "").join(" · ");
-              return (
-                <RecordRow
-                  key={entry.id}
-                  name={named}
-                  secondary={about || undefined}
-                  state={stateLabel(entry.reviewState) || undefined}
-                  tone={toneFor(entry.reviewState)}
-                  trailing={<span className="os-caption">{formatMoment(entry.at)}</span>}
-                  onOpen={() => onOpenReview(entry.reviewId)}
-                  label={`Open the review: ${named}`}>
-                  <span>by {who(entry.decidedBy)}</span>
-                  {entry.note ? <span>{entry.note}</span> : null}
-                </RecordRow>
-              );
-            })}
-          </RecordList>
-        )}
-        {page !== null && page.next !== "" && pages < 4 ? (
-          <div><Button tone="quiet" onClick={() => setPages((n) => n + 1)}>Show more</Button></div>
-        ) : null}
-      </div>
-      <ActionBar state={page === null ? "" : page.total === 1 ? "1 decision" : `${page.total} decisions`} tone={log.state === "reading" ? "busy" : "none"} />
-    </section>
+    <ReviewsPane heading={heading} bar={bar} context={{ page: "Decision log", siteId: scope.siteId, storeId: scope.storeId }}>
+      <PageHelp title="Decision log">
+        <p>Every decision on this store&rsquo;s reviews, newest first: what was decided and why, on which review, by whom and when. Select a decision to open its review.</p>
+      </PageHelp>
+      {log.state === "failed" && page === null ? (
+        <Notice tone="error" sentence={log.error || "The decision log could not be read."}><Button onClick={log.reread}>Try again</Button></Notice>
+      ) : page === null ? (
+        <RecordListSkeleton label="Reading the decision log" rows={3} />
+      ) : page.entries.length === 0 ? (
+        <EmptyState title="No decisions yet" icon={ScrollText}>Each publish, decline and removal is recorded here as it is made.</EmptyState>
+      ) : (
+        <RecordList as="ul" label="Decision log">
+          {page.entries.map((entry) => <LogRow key={entry.id} entry={entry} who={who} onOpen={() => onOpenReview(entry.reviewId)} />)}
+        </RecordList>
+      )}
+      {page !== null && page.next !== "" && pages < 4 ? (
+        <div><Button tone="quiet" onClick={() => setPages((n) => n + 1)}>Show more</Button></div>
+      ) : null}
+    </ReviewsPane>
+  );
+}
+
+function LogRow({ entry, who, onOpen }: { entry: LogEntry; who: (userId: string) => string; onOpen: () => void }) {
+  const named = `${actionDone(entry.action)}${entry.reason ? `: ${reasonLabel(entry.reason)}` : ""}`;
+  // WHICH REVIEW, in the words a moderator knows it by: its headline, on its product.
+  const about = entry.title !== "" ? `“${entry.title}” on ${entry.productHandle}` : entry.productHandle;
+  return (
+    <RecordRow
+      icon={<ScrollText size={18} aria-hidden />}
+      name={named}
+      secondary={about || undefined}
+      trailing={<span className="os-caption">{formatMoment(entry.at)}</span>}
+      onOpen={onOpen}
+      label={`Open the review: ${named}`}>
+      <span>by {who(entry.decidedBy)}</span>
+      {entry.note ? <span className="os-record-excerpt">{entry.note}</span> : null}
+    </RecordRow>
   );
 }

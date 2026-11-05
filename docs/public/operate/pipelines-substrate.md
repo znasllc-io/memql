@@ -961,8 +961,8 @@ Cockpit is not eligible on an engine that requires 4, so there is no window in
 which both work. Switch the engine and every opted-in machine's Cockpit
 together, behind a global hold ([Operator run admission](pipelines.md#operator-run-admission)):
 
-1. Hold new runs: `allowNewRuns: false`, with no `allowTrainRuns`. Held runs
-   stay queued, and their clocks do not start.
+1. Hold new runs: `allowNewRuns: false`. Held runs stay queued, and their
+   clocks do not start.
 2. Let the runs in flight finish. Under the engine you are replacing, the hold
    stops only new runs, and a fleet step of a run still going when the engine
    changes finds no eligible machine.
@@ -1109,9 +1109,11 @@ the row's `nextAttemptAt` has passed.
 The workbench action is `pipelineStepV11` and its receipt acknowledgement is
 `pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
 new execution, recovery or cleanup guarantees. V11 carries the saved run's
-head branch beside its event for train-aware cloud admission; command
-environment variables cannot supply it. Upgrade the coordinated engine
-set and drain old drivers before enabling the new protocol.
+head branch beside its event; command environment variables cannot supply it.
+It selected release trains' cloud admission until trains were removed
+(2026-11-05) and is now recorded for diagnosis only, kept so the action and
+every queued attempt's creation fingerprint stay unchanged. Upgrade the
+coordinated engine set and drain old drivers before enabling the new protocol.
 
 Job retirement fences delayed creation and confirms owned resource absence.
 Streamed upload intents preserve object and file identity across an interrupted
@@ -1168,8 +1170,10 @@ nothing, and neither does a head GitHub could not be asked about (no
 installation token, a refused read, no head named): the earlier runs run on, and
 the log says why. GitHub is asked only when there is something to cancel.
 
-A push never cancels a full-mode run -- the merge queue's, a push to the
-default branch's, a release's -- or another pull request's run. A re-run cancels
+A push to a pull request never cancels a full-mode run -- the merge queue's, a
+push to the default branch's, a release's -- or another pull request's run. A
+push to the default branch cancels only waiting push runs, and only where the
+installation opted into [the push lane](#the-push-lane). A re-run cancels
 nothing: it is not a push, and re-running an earlier head must not cancel the
 run of the head the pull request shows. Nor does a second sighting of a head (a
 redelivered webhook, or the webhook and the poll seeing one head), which opens
@@ -1184,6 +1188,97 @@ superseded head is answered by the superseded run and changes nothing; so is a
 fork's pull request at a superseded commit. A run a person cancelled still
 answers its head: a later delivery for that commit does not run it again; re-run
 it on purpose.
+
+### The push lane
+
+Every push to the default branch opens a full run, and a run starts the moment an
+agent claims it. Without the lane, three pushes in ten minutes start three full
+runs at once, and the newest commit's verdict arrives last. Where the installation
+opts in (below), a pipeline's pushes run one at a time, and only the newest
+waiting push survives. Design: `docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md`, D4.
+
+**Who is in the lane.** A push to the default branch in full mode, opened by the
+webhook or the poll, whose own saved policy says it joins. A re-run, a manual
+run, a release, a scheduled scan and a pull request's run are never in it. The
+answer is the policy the run was opened with, so it holds on every replica and
+across retries, whatever the installation decides later.
+
+**Waiting and executing.**
+
+- A lane run *waits* while it is `queued` and no agent has claimed it.
+- A push run *holds* the lane while it is `in_progress`, or while it is
+  `queued` and claimed under a lease renewed within 120 seconds (an agent is
+  starting it). A push run opened before the installation opted in holds the lane
+  too, until it finishes.
+- A waiting run is not claimed while another run holds the lane. Nothing is
+  written: it stays `queued` with no driver, and its
+  `MEMQL_PIPELINES_RUN_MAX_MINUTES` ceiling, counted from its start, has not
+  begun. Its check run shows *Queued*.
+- A run that has started is never held. Another agent takes it over after a
+  lost replica as it would any run, and a run asked to stop is never held
+  either.
+
+**Superseding.** When a push opens its run, it supersedes each waiting lane run
+of the pipeline whose commit GitHub proves a proper ancestor of the new commit.
+It does so only when GitHub, asked at that moment, names the new commit as the
+default branch's head. A superseded run is concluded `cancelled` on the spot,
+with `cancelledBy: superseded by <the new run's id>`. A run an agent claimed in
+the meantime is left to finish. The new commit's run tests everything a
+superseded commit carried, because the default branch only moves forward.
+
+Nothing is superseded when:
+
+- the delivery is late (the head has moved on); the newer head's own opening
+  supersedes;
+- the head cannot be known: no installation token, a refused read, no head
+  named;
+- GitHub does not prove the ancestry: a compare that fails, or one that says the
+  commit is not an ancestor.
+
+The log says which. GitHub is asked only when a run is waiting.
+
+**Out of order, and the next run.** Recovery, every minute, supersedes the
+waiting runs that a push run at the default branch's head covers. This is how
+an older commit's run that opened after the head's is dropped. It needs a run
+at the head that nobody asked to stop: a head whose delivery has not opened a
+run yet covers nothing. When a lane run concludes, the replica that drove it
+starts the next waiting run at once: the run at the head, else the most recently
+queued. Recovery does the same within a minute when that replica is gone, and
+never starts a waiting run while the lane is held.
+
+**What a superseded run shows.** Its check, `MemQL / <name> / push`, completes
+with the conclusion `cancelled`, not `failure`. It is titled *Cancelled*, and
+its summary says "No step ran." The commit's push check is therefore cancelled
+rather than passed. A notification passes over a superseded run when it decides
+whether a pass *recovered*. A person's cancel still counts.
+
+**A force-push back runs a superseded commit again.** If the default branch's
+head becomes a superseded commit again, that commit's next attempt opens. The
+run it moved away from is superseded only if GitHub proves it an ancestor, which
+after a force-push back it is not. The installation's ruleset refuses
+force-pushes to the default branch; the engine does not rely on it.
+
+**The lane is soft.** Each claim takes only its own run's gate. Two waiting runs
+claimed at the same instant on two replicas can both find the lane free and
+both start, which costs a runner and nothing else. A claim and a supersede of
+the same run take the same gate, so exactly one of them wins.
+
+**Opting in.** The lane is part of the optional `supersession` delivery-policy
+role ([Pipelines](pipelines.md#the-blocks-keys)). The portable
+`pipelineSupersessionPolicy` answers no for a push, so nothing changes until an
+installation's own supersession template also answers yes for a full push from
+a delivery or the poll:
+
+```memql
+@template
+automation installSupersession {
+ args { event string! mode string! previousMode string! trigger string! }
+ return (args.event == "pull_request" && args.mode == "affected" && args.previousMode == "affected" && args.trigger != "rerun") || (args.event == "push" && args.mode == "full" && args.previousMode == "full" && (args.trigger == "webhook" || args.trigger == "poll"))
+}
+```
+
+Name it in the resolver's `supersession` role. Runs opened before the change
+keep the answer their own snapshot gives.
 
 ### Losing a replica, a node or a machine
 

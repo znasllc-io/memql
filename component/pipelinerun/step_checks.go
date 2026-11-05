@@ -23,9 +23,9 @@ import (
 // (stepCheckPace), keeping only each step's newest state, so a step that
 // settles while an earlier state of it waits is written once, settled. No
 // step check ever delays the run's own check, a step, or the run row's
-// conclusion, which a release train waits on. The writer never reads the
-// drive's run row, which the drive's goroutine alone touches: each offer
-// hands it a copy of the run and pipeline to compose from.
+// conclusion. The writer never reads the drive's run row, which the drive's
+// goroutine alone touches: each offer hands it a copy of the run and pipeline
+// to compose from.
 //
 // CREATED WHEN A STEP STARTS. A step's check is created the first time the
 // step is seen past pending, not when the run opens: a run of sixty steps

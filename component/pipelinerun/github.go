@@ -153,6 +153,14 @@ func (g *packagesGitHub) Compare(ctx context.Context, token, repository, base, h
 	return c.Compare(ctx, token, owner, name, base, head)
 }
 
+func (g *packagesGitHub) CompareAncestry(ctx context.Context, token, repository, base, head string) (githubapp.Ancestry, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return githubapp.Ancestry{}, err
+	}
+	return c.CompareAncestry(ctx, token, owner, name, base, head)
+}
+
 func (g *packagesGitHub) CommitForRef(ctx context.Context, token, repository, ref string) (string, string, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {

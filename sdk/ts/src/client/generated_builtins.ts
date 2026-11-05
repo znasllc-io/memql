@@ -4292,53 +4292,6 @@ QueryClient.prototype.pipelinesConnect = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesConnect", buildPipelinesConnect(args), opts);
 };
 
-/** The owner's Deploy button: put a published release on the installation, ignoring the window and acknowledging what makes it wait. It starts within a minute. A failure rolls back to what ran before, unless the release changes tables or data, when it stops and says so. The pipeline's owner in the owner role only. */
-export interface PipelinesDeployReleaseArgs {
-  /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
-  repository: string;
-  /** The version to deploy. Absent is the newest in the release catalog. */
-  version?: string;
-}
-
-export function buildPipelinesDeployRelease(args: PipelinesDeployReleaseArgs): string {
-  const parts: string[] = [];
-  parts.push("repository: " + renderMemQLValue(args.repository));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  return "builtin pipelinesDeployRelease(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pipelinesDeployRelease(args: PipelinesDeployReleaseArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pipelinesDeployRelease = function (this: QueryClient, args: PipelinesDeployReleaseArgs = {} as PipelinesDeployReleaseArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pipelinesDeployRelease", buildPipelinesDeployRelease(args), opts);
-};
-
-/** Let automatic deploys go on after one went back. They pause then because what caused it is still on main. The pipeline's owner in the owner role only. */
-export interface PipelinesDeploymentResumeArgs {
-  /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
-  repository: string;
-}
-
-export function buildPipelinesDeploymentResume(args: PipelinesDeploymentResumeArgs): string {
-  const parts: string[] = [];
-  parts.push("repository: " + renderMemQLValue(args.repository));
-  return "builtin pipelinesDeploymentResume(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pipelinesDeploymentResume(args: PipelinesDeploymentResumeArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pipelinesDeploymentResume = function (this: QueryClient, args: PipelinesDeploymentResumeArgs = {} as PipelinesDeploymentResumeArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pipelinesDeploymentResume", buildPipelinesDeploymentResume(args), opts);
-};
-
 /** Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline. */
 export interface PipelinesDisconnectArgs {
   /** The v1:pipelines:pipeline to disconnect. Must be the caller's own, unless the caller is a cluster owner. */
@@ -4623,78 +4576,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelinesStatus = function (this: QueryClient, args: PipelinesStatusArgs = {} as PipelinesStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelinesStatus", buildPipelinesStatus(args), opts);
-};
-
-/** Start an express release train for one of the caller's repositories, carrying only the named pull requests, or, on a repository that releases from main, a release of main with none named: the same checks and the same landing as a scheduled train, off schedule. Only the pipeline's owner may start one. It replaces a train that is waiting for approval or held, whose pull requests board the next train, and is refused while a train is building or running. */
-export interface PipelinesTrainExpressArgs {
-  /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
-  repository: string;
-  /** The pull request numbers the express train carries. Each must be ready to board: open, not a draft, its MemQL / memql check passed, no train:hold or train:dropped label. Empty on a repository that releases from main, and only there. */
-  pullRequests: number[];
-}
-
-export function buildPipelinesTrainExpress(args: PipelinesTrainExpressArgs): string {
-  const parts: string[] = [];
-  parts.push("repository: " + renderMemQLValue(args.repository));
-  parts.push("pullRequests: " + renderMemQLValue(args.pullRequests));
-  return "builtin pipelinesTrainExpress(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pipelinesTrainExpress(args: PipelinesTrainExpressArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pipelinesTrainExpress = function (this: QueryClient, args: PipelinesTrainExpressArgs = {} as PipelinesTrainExpressArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pipelinesTrainExpress", buildPipelinesTrainExpress(args), opts);
-};
-
-/** Set the owner's standing word for one repository (design record docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md, D9): whether a landed train publishes itself, and whether a published release deploys itself inside its window. Only the pipeline's owner in the owner role may give it. It records the authority they hold as a ceiling, never a credential, and every use re-reads their current role. */
-export interface PipelinesTrainStandingArgs {
-  /** The repository as owner/name, configured in MEMQL_PIPELINES_TRAINS. */
-  repository: string;
-  /** A landed train builds, approves under this word, and publishes its version. */
-  release: boolean;
-  /** A published release deploys itself inside its window. Requires release. */
-  deploy: boolean;
-}
-
-export function buildPipelinesTrainStanding(args: PipelinesTrainStandingArgs): string {
-  const parts: string[] = [];
-  parts.push("repository: " + renderMemQLValue(args.repository));
-  parts.push("release: " + renderMemQLValue(args.release));
-  parts.push("deploy: " + renderMemQLValue(args.deploy));
-  return "builtin pipelinesTrainStanding(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pipelinesTrainStanding(args: PipelinesTrainStandingArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pipelinesTrainStanding = function (this: QueryClient, args: PipelinesTrainStandingArgs = {} as PipelinesTrainStandingArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pipelinesTrainStanding", buildPipelinesTrainStanding(args), opts);
-};
-
-/** What each of the caller's repositories does by itself: the settings that apply, the owner's standing word, and whether automatic deploys are paused after one went back. Reads only. */
-export interface PipelinesTrainStatusArgs {
-}
-
-export function buildPipelinesTrainStatus(args: PipelinesTrainStatusArgs): string {
-  void args;
-  return "builtin pipelinesTrainStatus()";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    pipelinesTrainStatus(args?: PipelinesTrainStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.pipelinesTrainStatus = function (this: QueryClient, args: PipelinesTrainStatusArgs = {} as PipelinesTrainStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("pipelinesTrainStatus", buildPipelinesTrainStatus(args), opts);
 };
 
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */

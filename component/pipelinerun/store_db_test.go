@@ -281,6 +281,69 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	if pr, err := store.RunsUnfinishedForPullRequest(fresh, "pr10a-other-pipeline-"+suffix, 42); err != nil || len(pr) != 0 {
 		t.Errorf("another pipeline's #42 reads none of this one's runs: %+v %v", pr, err)
 	}
+
+	// What holds the pipeline's push lane, read as the lane reads it (fresh):
+	// the pipeline's bare id against the canonical relationship stored, the
+	// event as createPipelineRun wrote it, only what has not finished, the run
+	// in progress first and then the most recently queued (push_lane.go).
+	pushRun := func(sha string, queuedAt time.Time) Run {
+		key := pipelines.RunKey(repo, sha, pipelines.ModeFull, pipelines.EventPush)
+		return Run{
+			ID: RunIDFor(p.ID, key, 1), OwnerUserID: got.OwnerUserID, AccountID: got.AccountID, PipelineID: p.ID, Repository: repo,
+			SHA: sha, Mode: pipelines.ModeFull, Event: pipelines.EventPush, RunKey: key, Attempt: 1, Trigger: TriggerWebhook,
+			HeadBranch: "main", BaseSHA: shaBase, Version: sha, Status: StatusQueued, QueuedAt: queuedAt,
+		}
+	}
+	executing, olderWaiting, newerWaiting := pushRun(shaBase, queued.Add(-2*time.Minute)), pushRun(shaB, queued), pushRun(shaC, queued.Add(time.Minute))
+	for _, r := range []Run{executing, olderWaiting, newerWaiting} {
+		if err := store.CreateRun(ctx, r); err != nil {
+			t.Fatalf("createPipelineRun (push %s): %v", r.SHA[:7], err)
+		}
+	}
+	if err := store.UpdateRun(ctx, executing.OwnerUserID, executing.ID, RunPatch{
+		Status: ptr(StatusInProgress), DriverNodeID: ptr("agent-" + suffix), DriverHeartbeatAt: ptr(queued), StartedAt: ptr(queued),
+	}); err != nil {
+		t.Fatalf("the push run ahead starts: %v", err)
+	}
+	lane, err := store.RunsUnfinishedForPipelineEvent(fresh, p.ID, pipelines.EventPush)
+	if err != nil {
+		t.Fatalf("pipelineRunsUnfinishedForPipelineEvent(push): %v", err)
+	}
+	var order []string
+	for _, r := range lane {
+		order = append(order, r.ID)
+	}
+	if want := []string{executing.ID, newerWaiting.ID, olderWaiting.ID}; strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("the push lane reads the run in progress, then the newest waiting: %v, want %v", order, want)
+	}
+	if lane[0].Status != StatusInProgress || lane[0].Event != pipelines.EventPush || lane[0].Mode != pipelines.ModeFull ||
+		lane[0].Trigger != TriggerWebhook || lane[0].PipelineID != p.ID {
+		t.Errorf("the run ahead read back = %+v", lane[0])
+	}
+	if prs, err := store.RunsUnfinishedForPipelineEvent(fresh, p.ID, pipelines.EventPullRequest); err != nil || len(prs) != 1 || prs[0].ID != run.ID {
+		t.Errorf("another event's read holds the pull request's run and no push: %+v %v", prs, err)
+	}
+	if other, err := store.RunsUnfinishedForPipelineEvent(fresh, "pr10a-other-pipeline-"+suffix, pipelines.EventPush); err != nil || len(other) != 0 {
+		t.Errorf("another pipeline's push lane reads none of this one's runs: %+v %v", other, err)
+	}
+	if err := store.UpdateRun(ctx, olderWaiting.OwnerUserID, olderWaiting.ID, RunPatch{
+		Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled), CancelRequested: ptr(true),
+		CancelledBy: ptr(supersededPrefix + newerWaiting.ID), FinishedAt: ptr(queued),
+	}); err != nil {
+		t.Fatalf("supersede the older waiting push: %v", err)
+	}
+	if lane, err := store.RunsUnfinishedForPipelineEvent(fresh, p.ID, pipelines.EventPush); err != nil || len(lane) != 2 || hasRun(lane, olderWaiting.ID) {
+		t.Errorf("a run superseded is no longer in the lane: %+v %v", lane, err)
+	}
+	// Leave nothing unfinished for a recovery another test runs over this
+	// database.
+	for _, r := range []Run{executing, newerWaiting} {
+		if err := store.UpdateRun(ctx, r.OwnerUserID, r.ID, RunPatch{
+			Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled), FinishedAt: ptr(queued),
+		}); err != nil {
+			t.Fatalf("conclude push %s: %v", r.SHA[:7], err)
+		}
+	}
 	if mineRun, err := store.RunForOwner(signedIn(owner), run.ID); err != nil || mineRun == nil {
 		t.Errorf("the owner reads their run: %+v %v", mineRun, err)
 	}
@@ -780,11 +843,12 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded all forty-one shipped pipeline builtins,
+	// The control: the engine has loaded all thirty-five shipped pipeline builtins,
 	// including legacy log adoption, channel configuration, schedule opt-in,
 	// connect preview, runner status, native merge-group review reporting,
-	// independent pull-request review, the train tick, the express train, what repositories do by themselves,
-	// the owner's standing word, the Deploy button and Resume, and exact pull-request preview/qualification.
+	// independent pull-request review, and exact pull-request preview/qualification.
+	// Forty-one before release trains went (2026-11-05) with their tick, express
+	// departure, status, standing word, Deploy button and Resume.
 	// An empty registry must not pass this audit.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
@@ -792,8 +856,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 41 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 41", executors)
+	if executors != 35 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 35", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

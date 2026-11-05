@@ -3,7 +3,6 @@ package pipelinerun
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -77,31 +76,3 @@ func OpenGateKey(runKey string) string {
 // of them, so a cancel and a claim cannot both decide from the same stale
 // row.
 func RunGateKey(runID string) string { return "pipelines.drive:" + bareID(runID) }
-
-// TrainGateKey serializes every read-modify-write of a repository's train
-// records: a departure (whose "one unfinished train" check and the create it
-// guards are one section) and every transition after it. Per repository,
-// because a repository has one train at a time; never held across a GitHub
-// call (the rules above).
-func TrainGateKey(repository string) string {
-	return "pipelines.train:" + normalizeRepository(repository)
-}
-
-// StandingIDFor is a pipeline's one standing row.
-func StandingIDFor(pipelineID string) string {
-	return deriveID("pipelines.standing", bareID(pipelineID))
-}
-
-// DeploymentIDFor is a deployment's id: one per (pipeline, version, attempt), so two
-// replicas that both decide to start one write the same row, and the second create is
-// refused by @createOnly rather than deploying twice.
-func DeploymentIDFor(pipelineID, version string, attempt int) string {
-	return deriveID("pipelines.deployment", fmt.Sprintf("%s\x00%s\x00%d", bareID(pipelineID), version, attempt))
-}
-
-// TrainIDFor is a train's id: one per (pipeline, branch), so two replicas
-// that both decide to depart write the same row, and the second create is
-// refused by @createOnly rather than opening a second train.
-func TrainIDFor(pipelineID, branch string) string {
-	return deriveID("pipelines.train", bareID(pipelineID)+"\x00"+branch)
-}

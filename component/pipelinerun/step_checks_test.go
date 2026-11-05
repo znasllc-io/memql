@@ -501,3 +501,31 @@ automation pipelineEvidenceReuse {
 		t.Fatalf("the push run's reused step shows %+v (found %v among %v), want a pass naming where it was verified", w, ok, names)
 	}
 }
+
+// TestACarriedStepShowsWhereItWasVerified: a push that carried a step forward
+// from an earlier push writes that step's check as a pass saying since which
+// commit its inputs are unchanged and which run executed it. Its name carries
+// this run's event, so nothing of the earlier run's checks is replaced.
+func TestACarriedStepShowsWhereItWasVerified(t *testing.T) {
+	dh := newCarryHarness(t, carryAncestors)
+	dh.at(0)
+	source := dh.driveSource(t, pushOf(shaA, shaBase))
+	dh.github.setAncestor(repoName, shaA, shaB, "b/b.go")
+	dh.at(time.Hour)
+	push := dh.driveSource(t, pushOf(shaB, shaA))
+	dh.integ.waitStepChecks()
+	want := "Passed: " + carriedReason(source)
+	found := false
+	for _, w := range dh.github.lastStepWrites() {
+		if w.ExternalID != bareID(push.ID)+":"+carryShardOne {
+			continue
+		}
+		found = true
+		if w.Status != "completed" || w.Conclusion != "success" || w.Output == nil || w.Output.Title != want || w.HeadSHA != shaB {
+			t.Fatalf("the carried step's check = %+v, want a pass on %s titled %q", w, shortSHA(shaB), want)
+		}
+	}
+	if !found {
+		t.Fatalf("the carried step has no check of its own on the push")
+	}
+}

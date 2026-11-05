@@ -230,3 +230,32 @@ func TestPackageDomainsForAccessIsAFreshPointReadAsTheCluster(t *testing.T) {
 		}
 	})
 }
+
+// BOTH LOOKUPS THAT OPEN A DOOR CARRY THE CODE'S NAME, the operator's label as the view
+// holds it, because the handler stamps it on a gated mutation that declares
+// accessCodeLabel: the unlock finds a code by its digest, and every call after it finds
+// the session's code by id.
+func TestTheCodeLookupsCarryTheCodesName(t *testing.T) {
+	row := map[string]any{
+		"id":         "v1:platform:siteAccessCode:code1",
+		"siteId":     "v1:platform:site:site1",
+		"gate":       "dashboard",
+		"label":      "Client reviewers",
+		"generation": 1,
+		"expiresAt":  "2026-11-30T00:00:00Z",
+	}
+	for name, lookup := range map[string]func(*GraphStore) (*Code, error){
+		"by its digest": func(s *GraphStore) (*Code, error) { return s.CodeByHash(context.Background(), "site1", "digest") },
+		"by its id":     func(s *GraphStore) (*Code, error) { return s.CodeByID(context.Background(), "code1") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, err := lookup(NewGraphStore(&storeFakeEngine{rows: []any{row}}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code == nil || code.Label != "Client reviewers" {
+				t.Fatalf("code = %+v, want it to carry its name", code)
+			}
+		})
+	}
+}

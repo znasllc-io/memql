@@ -220,8 +220,14 @@ type StepRequest struct {
 	BaseSHA      string     `json:"baseSha,omitempty"`
 	Mode         Mode       `json:"mode"`
 	Event        Event      `json:"event"`
-	// HeadBranch is the immutable run's head, used with Event for train admission.
-	// It is trusted driver metadata, never derived from a step's environment.
+	// HeadBranch is the branch the run's commit was pushed to, from the
+	// immutable run and never from a step's environment, recorded for
+	// diagnosis. It once selected release trains' admission allowance; trains
+	// were removed (2026-11-05) and it decides nothing now. It stays on the
+	// wire because the workbench binds the whole StepRun into a Job's creation
+	// definition: dropping it would change that fingerprint and need a
+	// protocol bump, with a rollout window of refused steps, for no change in
+	// behaviour.
 	HeadBranch string `json:"headBranch,omitempty"`
 	Version    string `json:"version"`
 	// Domain is the front-door domain of the cluster running the pipeline

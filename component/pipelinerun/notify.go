@@ -658,6 +658,12 @@ func (dr *runDriver) notifyFiles(ctx context.Context, ids []string, origin strin
 // pass RECOVERED. Read fresh: the run before may have concluded on another
 // replica a moment ago. A history that cannot be read is no evidence of a
 // failure, and the message says passed, which is true.
+//
+// A run a newer push SUPERSEDED (stoppedBySupersede) is passed over: it never
+// answered, it was dropped because a newer commit's run would, so it is no
+// previous answer. Counted as one, every push after a superseded push run --
+// the push lane drops them routinely (push_lane.go) -- would announce
+// "recovered". A run a person cancelled still counts: that was a decision.
 func (dr *runDriver) previousRunFailed(ctx context.Context) bool {
 	f := dr.facts
 	runs, err := dr.d.Store.PreviousRuns(memql.ContextWithFreshRead(ctx), f.pipelineID, f.event)
@@ -669,7 +675,7 @@ func (dr *runDriver) previousRunFailed(ctx context.Context) bool {
 	var newest *Run
 	for i := range runs {
 		r := &runs[i]
-		if sameID(r.ID, f.runID) || r.Status != StatusCompleted || !r.QueuedAt.Before(f.queuedAt) {
+		if sameID(r.ID, f.runID) || r.Status != StatusCompleted || !r.QueuedAt.Before(f.queuedAt) || stoppedBySupersede(*r) {
 			continue
 		}
 		if newest == nil || r.QueuedAt.After(newest.QueuedAt) {

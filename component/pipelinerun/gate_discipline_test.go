@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -311,6 +313,102 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 		}
 		if _, err := h.integ.Disconnect(personCtx(ownerID), PipelineIDFor(packageID)); err != nil {
 			t.Fatalf("disconnect: %v", err)
+		}
+	})
+}
+
+// TestThePushLaneKeepsTheGateDiscipline walks every path the push lane adds
+// (push_lane.go) on the shared fakes, which fail the test on a nested gate or
+// a call to GitHub under one: a push that supersedes a waiting push run, a
+// claim the lane holds, recovery's lane pass, and the hand-off a concluded
+// drive makes. Each asserts it reached the gate it is about, so a path that
+// stopped short cannot pass vacuously.
+func TestThePushLaneKeepsTheGateDiscipline(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	optInPushLane(t, dh.integ)
+	p := dh.p
+	policy := laneSnapshot(t, dh.integ, p)
+	sawKey := func(t *testing.T, before int, want string) {
+		t.Helper()
+		if !slices.Contains(dh.gate.seen()[before:], want) {
+			t.Errorf("the path never took %q (took %v)", want, dh.gate.seen()[before:])
+		}
+	}
+	executing := drivenBy(pushRunAt(p, shaA, 601, policy), "agent-b")
+	waiting := pushRunAt(p, shaB, 602, policy)
+	dh.store.addRun(executing)
+	dh.store.addRun(waiting)
+
+	t.Run("a push supersedes the waiting push run it covers", func(t *testing.T) {
+		dh.github.setAncestor(repoName, shaB, shaC)
+		before := len(dh.gate.seen())
+		opened := pushToMain(t, dh.harness, "d-lane-push", shaB, shaC)
+		sawKey(t, before, OpenGateKey(opened.RunKey))
+		sawKey(t, before, RunGateKey(waiting.ID))
+		if got, _ := dh.store.run(waiting.ID); got.CancelledBy != supersededPrefix+opened.ID {
+			t.Errorf("the waiting push is superseded by the new one: %+v", got)
+		}
+	})
+
+	t.Run("a claim the lane holds", func(t *testing.T) {
+		held := pushRunAt(p, shaC, 603, policy)
+		held.ID = "lane-held"
+		dh.store.addRun(held)
+		before := len(dh.gate.seen())
+		if _, ok, err := dh.integ.claim(context.Background(), dh.integ.snapshot(), held.ID); err != nil || ok {
+			t.Fatalf("held: %v %v", ok, err)
+		}
+		if keys := dh.gate.seen()[before:]; !slices.Equal(keys, []string{RunGateKey(held.ID)}) {
+			t.Errorf("a held claim takes its own run's gate and no other: %v", keys)
+		}
+		dh.store.mu.Lock()
+		delete(dh.store.runs, held.ID)
+		dh.store.mu.Unlock()
+	})
+
+	t.Run("recovery supersedes a late push toward the head's run", func(t *testing.T) {
+		// shaC's run, opened above, is the head's; shaD's delivery came late.
+		late := pushRunAt(p, shaD, 604, policy)
+		late.QueuedAt = testNow.Add(-time.Minute)
+		dh.store.addRun(late)
+		dh.github.setAncestor(repoName, shaD, shaC)
+		before := len(dh.gate.seen())
+		if err := dh.integ.RecoverRuns(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		waitDrives(t, dh.integ)
+		sawKey(t, before, RunGateKey(late.ID))
+		if got, _ := dh.store.run(late.ID); got.Conclusion != ConclusionCancelled {
+			t.Errorf("the late push is superseded: %+v", got)
+		}
+	})
+
+	t.Run("a concluded drive hands the lane on", func(t *testing.T) {
+		// The run ahead finishes on agent-b; the head's run (shaC) waits.
+		dh.store.mu.Lock()
+		r := dh.store.runs[executing.ID]
+		r.Status, r.Conclusion, r.FinishedAt = StatusCompleted, ConclusionSuccess, testNow
+		dh.store.runs[executing.ID] = r
+		dh.store.mu.Unlock()
+		dh.setTree(shaC, driveManifest)
+		var head Run
+		for _, run := range dh.store.allRuns() {
+			if run.SHA == shaC && run.Event == pipelines.EventPush {
+				head = run
+			}
+		}
+		// A run of its own concludes here, and its drive hands the lane on.
+		ahead := pushRunAt(p, shaBase, 600, policy)
+		ahead.ID = "lane-ahead"
+		dh.store.addRun(ahead)
+		dh.setTree(shaBase, driveManifest)
+		before := len(dh.gate.seen())
+		dh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, ahead))
+		waitDrives(t, dh.integ)
+		sawKey(t, before, RunGateKey(ahead.ID))
+		sawKey(t, before, RunGateKey(head.ID))
+		if got, _ := dh.store.run(head.ID); got.Conclusion != ConclusionSuccess {
+			t.Errorf("the head's push ran once the lane was handed on: %s/%s", got.Status, got.Conclusion)
 		}
 	})
 }

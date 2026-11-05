@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -19,7 +18,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
-	"github.com/znasllc-io/memql/core/id"
 )
 
 // The producer and reader are different engines over a disposable database.
@@ -233,128 +231,4 @@ func TestInstallationOverlayNativeFactsRefuseForeignOrAlteredEvidence(t *testing
 	require.Zero(t, h.refs)
 	require.Zero(t, h.prs)
 	require.Zero(t, h.writes)
-}
-
-// deployPinFixture is a sealed release ready to pin, on a cluster with no receiving
-// installation.
-func deployPinFixture(t *testing.T) (*overlayScope, *overlayHub, pl.DeployPinRequest, context.Context, *atomic.Value) {
-	t.Helper()
-	s, h, _, _ := overlayNativeJournalFixture(t)
-	i := s.integration
-	i.installation.Store(nil)
-	role := &atomic.Value{}
-	role.Store(string(auth.RoleOwner))
-	i.store.engine = &buildIdentityEngine{i.store.engine, role}
-	authority := map[string]any{"credentialClass": auth.ForwardedClassUser, "roleCeiling": string(auth.RoleOwner)}
-	tick := auth.ContextWithInternalOrigin(context.Background())
-	// The native recipe an instance binds: this one's text is the product's own.
-	cfg := s.configuration
-	cfg.ProposalWorkflow, cfg.ObservationWorkflow = "fixtureNativeProposal", "fixtureProposalObservation"
-	configBytes, err := json.Marshal(cfg)
-	require.NoError(t, err)
-	variables := i.resolver.systemVariable
-	i.resolver.systemVariable = func(ctx context.Context, name string) (string, error) {
-		if name == InstallationOverlayVariable {
-			return string(configBytes), nil
-		}
-		return variables(ctx, name)
-	}
-	i.profileSource = func(kind, name string) (string, error) {
-		switch {
-		case kind == "automation" && name == "fixtureNativeProposal":
-			return `@template
-automation fixtureNativeProposal {
- builtin releaseOverlayRead()
- facts := builtin releaseOverlayNativeEvidence()
- selected := facts.companions.first()
- builtin releaseOverlayBindPublication(candidateId: selected.candidateId, catalogDigest: selected.catalogDigest)
- builtin releaseOverlayBuild()
- builtin releaseOverlayReserve()
- builtin releaseOverlayPropose()
-}`, nil
-		case kind == "automation" && name == "fixtureProposalObservation":
-			return `@template
-automation fixtureProposalObservation {
- builtin releaseOverlayObserve()
-}`, nil
-		}
-		return "", errors.New("no such construct")
-	}
-	r := pl.DeployPinRequest{
-		RequestID: "deploy-" + id.NewShortId(), CandidateID: s.request.CandidateID, CatalogDigest: s.request.CatalogDigest,
-		ExpectedBase: s.request.ExpectedBaseRevision, OwnerUserID: s.owner, Authority: authority,
-	}
-	return s, h, r, tick, role
-}
-
-// A deploy makes its pin with no receiving installation: this cluster published the
-// release, so the signed catalog is its source, and the same native emitter writes the
-// same files under the same fences.
-func TestADeployPinComesFromTheCatalogWithNoReceiver(t *testing.T) {
-	s, h, r, tick, role := deployPinFixture(t)
-	i := s.integration
-	pin, err := i.ProposeDeployPin(tick, r)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, e := s.db.Exec(`DELETE FROM release_installation_proposals WHERE proposal_id=$1`, pin.ProposalID)
-		require.NoError(t, e)
-	})
-	require.Positive(t, pin.PullRequest)
-	require.Regexp(t, `^[a-f0-9]{40}$`, pin.Commit)
-	require.NotEmpty(t, pin.ProposalID)
-	require.Equal(t, 1, h.refs)
-	require.Equal(t, 1, h.prs)
-	for path := range h.expectedCreates {
-		require.Contains(t, h.afterFiles, path)
-	}
-
-	// Asked again, as a tick does that lost the reply: the same pin, no second one.
-	again, err := i.ProposeDeployPin(tick, r)
-	require.NoError(t, err)
-	require.Equal(t, pin, again)
-
-	// main moved before anything was made: it says so, and the caller starts over.
-	moved := r
-	moved.RequestID, moved.ExpectedBase = "deploy-"+id.NewShortId(), strings.Repeat("c", 40)
-	_, err = i.ProposeDeployPin(tick, moved)
-	require.ErrorIs(t, err, pl.ErrDeployBaseMoved)
-
-	// Asked with a changed input, it refuses rather than reuse the request.
-	changed := r
-	changed.CatalogDigest = "sha256:" + strings.Repeat("0", 64)
-	_, err = i.ProposeDeployPin(tick, changed)
-	require.Error(t, err)
-
-	// The person's door keeps its receiver.
-	_, err = i.handleInstallationPropose(ownerCtx(), map[string]any{"installationId": s.request.InstallationID, "requestId": "person-1", "candidateId": r.CandidateID, "catalogDigest": r.CatalogDigest, "expectedBaseRevision": r.ExpectedBase}, 1)
-	require.ErrorContains(t, err, "not configured")
-
-	// Without the owner's role, internal origin, or their word, it does nothing.
-	role.Store(string(auth.RoleAdmin))
-	_, err = i.ProposeDeployPin(tick, pl.DeployPinRequest{RequestID: "deploy-" + id.NewShortId(), CandidateID: r.CandidateID, CatalogDigest: r.CatalogDigest, ExpectedBase: r.ExpectedBase, OwnerUserID: s.owner, Authority: r.Authority})
-	require.Error(t, err)
-	role.Store(string(auth.RoleOwner))
-	_, err = i.ProposeDeployPin(ownerCtx(), r)
-	require.ErrorContains(t, err, "internal origin")
-	noWord := r
-	noWord.Authority = nil
-	_, err = i.ProposeDeployPin(tick, noWord)
-	require.ErrorContains(t, err, "standing authority")
-}
-
-// A release holding for the owner's Deploy button can wait past the 48 hours after which
-// its inputs are archived. A pin reads the catalog and the run's journal, which archival
-// leaves alone, so that press still works until the run leaves on its usual window.
-func TestADeployPinComesFromAnArchivedRelease(t *testing.T) {
-	s, h, r, tick, _ := deployPinFixture(t)
-	_, err := s.db.Exec(`UPDATE release_candidates SET state='archived' WHERE candidate_id=$1`, r.CandidateID)
-	require.NoError(t, err)
-	pin, err := s.integration.ProposeDeployPin(tick, r)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, e := s.db.Exec(`DELETE FROM release_installation_proposals WHERE proposal_id=$1`, pin.ProposalID)
-		require.NoError(t, e)
-	})
-	require.Positive(t, pin.PullRequest)
-	require.Equal(t, 1, h.prs)
 }

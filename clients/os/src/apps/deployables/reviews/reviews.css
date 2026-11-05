@@ -1,18 +1,40 @@
-/* A review's own words, as the writer sent them: their line breaks kept. */
+/* A review's own words, as the writer sent them: their line breaks kept, at
+   a readable measure, and in ink -- they are what the page is about. */
 .os-review-text {
-  margin: 0;
-  display: grid;
-  gap: 6px;
+  margin: 0 0 8px;
   max-width: 72ch;
 }
 .os-review-text p {
   margin: 0;
+  color: var(--os-ink);
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Cap the field, never the page: a number of days or an address needs no
-   more width than a line of text. */
-.os-review-settings .os-form-field {
-  max-width: 32rem;
+/* A fact that cannot be copied starts where a copyable one's text does, so a
+   section's values stand in one column -- Fleet's machine Details rule
+   (`.fleet-machine-details`), the same alignment for the same layout. */
+.os-reviews .os-details .os-facts dd:not(:has(> .os-copyvalue)) {
+  padding-inline: 10px;
+}
+
+/* A decision's step: its question, what it means, the reasons and the note,
+   standing in the page where the review's facts stood. */
+.os-review-step {
+  display: grid;
+  gap: 12px;
+  max-width: 72ch;
+}
+
+/* A setting's control and the one line that says what it means, stacked with
+   the same air every time. A field keeps the kit's width (`.os-setting-value`
+   caps it); a switch or a button keeps its own. */
+.os-review-settings .os-setting-value {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.os-review-settings .os-setting-value > .os-input {
+  justify-self: stretch;
 }

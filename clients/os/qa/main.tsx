@@ -807,6 +807,10 @@ const QA_REVIEWS = [
   { id: "v1:reviews:review:r2", state: "waiting", productHandle: "toothpaste-tablets", title: "", body: "They foam less than paste, which took a week to get used to, but my kids now ask for them. The jar is great for travel and nothing leaks in a bag.", rating: 4, authorName: "Sam", authorEmail: "sam@example.com", verifiedBuyer: true, revision: 2, contentHash: "h2", createdAt: reviewAt(30) },
   { id: "v1:reviews:review:r3", state: "waiting", productHandle: "kids-brush", title: "Too hard for my toddler", body: "The bristles are firmer than I expected.", rating: 2, authorName: "", authorEmail: "a.parent@example.com", verifiedBuyer: true, revision: 1, contentHash: "h3", createdAt: reviewAt(3) },
 ];
+const QA_PUBLISHED = [
+  { id: "v1:reviews:review:r9", state: "published", productHandle: "floss-picks", title: "Better than the plastic ones", body: "Sturdy, and the case is compostable.", rating: 5, authorName: "Lee", authorEmail: "lee@example.com", verifiedBuyer: true, revision: 1, contentHash: "h9", createdAt: reviewAt(30), lastDecision: { id: "l1", action: "publish", decidedBy: "u-carol", at: reviewAt(2), revision: 1 } },
+  { id: "v1:reviews:review:r6", state: "published", productHandle: "floss-picks", title: "Gums bled at first", body: "Fine after a week.", rating: 4, authorName: "Morgan", authorEmail: "morgan@example.com", verifiedBuyer: false, revision: 1, contentHash: "h6", createdAt: reviewAt(120), lastDecision: { id: "l6", action: "publish", decidedBy: "u-me", at: reviewAt(100), revision: 1 } },
+];
 const QA_REVIEW_DETAIL = {
   review: QA_REVIEWS[1],
   decisions: [
@@ -817,7 +821,10 @@ const QA_REVIEW_DETAIL = {
 };
 const QA_REVIEWS_SEED: FakeSeed = {
   reviews: {
-    list: { waiting: { reviews: QA_REVIEWS, total: 3, next: "", counts: { waiting: 3, published: 41, declined: 2, removed: 1, all: 47 } } as unknown as Row },
+    list: {
+      waiting: { reviews: QA_REVIEWS, total: 3, next: "", counts: { waiting: 3, published: 41, declined: 2, removed: 1, all: 47 } } as unknown as Row,
+      published: { reviews: QA_PUBLISHED, total: 41, next: "", counts: { waiting: 3, published: 41, declined: 2, removed: 1, all: 47 } } as unknown as Row,
+    },
     get: Object.fromEntries(QA_REVIEWS.map((r) => [r.id, { ...QA_REVIEW_DETAIL, review: r, decisions: r.id === "v1:reviews:review:r2" ? QA_REVIEW_DETAIL.decisions : [] }])) as unknown as Record<string, Row>,
     log: {
       decisions: [
@@ -841,8 +848,9 @@ function qaReviewNamed(index: number) {
 const REVIEWS_CLICKS: Record<string, string> = {
   review: `Open review ${reviewName(qaReviewNamed(1))}`,
   "review-decline": "Open review Too hard for my toddler|Decline",
+  "reviews-published": "Published",
   "reviews-log": "Decision log",
-  "reviews-settings": "Review settings",
+  "reviews-settings": "Settings",
 };
 
 function ReviewsPage({ site = REVIEWS_SITE }: { site?: Row }) {
@@ -1373,6 +1381,7 @@ const VIEWS: Record<
   "preview-none": { seed: PREVIEW_NONE, render: () => <PreviewPage site={siteFromRow(SHOP)} /> },
   reviews: { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   "reviews-empty": { seed: { reviews: { ...QA_REVIEWS_SEED.reviews, list: { waiting: { reviews: [], total: 0, next: "", counts: { waiting: 0, published: 41, declined: 2, removed: 1, all: 44 } } as unknown as Row } } }, framed: true, render: () => <ReviewsPage /> },
+  "reviews-published": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   review: { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   "review-decline": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   "reviews-log": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
@@ -1462,6 +1471,11 @@ const VIEWS: Record<
   "release-cut-uncertain": { render: () => <ReleaseJourneyPreview phase="uncertain" /> },
   "release-cut-published": { render: () => <ReleaseJourneyPreview phase="published" /> },
   "release-cut-error": { render: () => <ReleaseJourneyPreview phase="prepared" unavailable /> },
+  // A release whose source check passed newer commits over; open Source in the rail.
+  "release-cut-source": { render: () => <ReleaseJourneyPreview phase="prepared" skipped /> },
+  // A source check that found no tested commit, driven with
+  // `&click=Cut release|Release engine|Use pipeline MemQL|Check source`.
+  "release-cut-untested": { render: () => <ReleaseJourneyPreview phase="new" untested /> },
   "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
@@ -2292,10 +2306,12 @@ function ReleasePreview({ empty = false, fail = false, pending = false, file = f
   return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
 }
 
-function ReleaseJourneyPreview({ phase, unavailable = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean }) {
+function ReleaseJourneyPreview({ phase, unavailable = false, skipped = false, untested = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean; skipped?: boolean; untested?: boolean }) {
   const [fixture] = useState(() => {
     const f = releaseJourneyFixture(phase);
     f.journey.failedGet = unavailable;
+    if (skipped) f.skipped();
+    if (untested) f.journey.untestedPrepare = "None of the newest 20 commits on main has passed its required checks: 2 running, 1 failed, 17 untested. Check the source again once a commit's checks pass.";
     if (phase === "uncertain") { f.journey.build.reason = "The build start response was lost. Its recorded attempt must be checked before continuing."; f.journey.build.pipelineRunId = ""; f.journey.build.workRunId = ""; }
     return f;
   });

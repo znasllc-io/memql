@@ -38,27 +38,6 @@ type Gate func(ctx context.Context, key string, fn func(context.Context) error) 
 // name the pipeline's secretNames allowlist holds.
 type Secrets func(ctx context.Context, name string) (string, error)
 
-// TrainReleaser is the release integration as a train needs it (wired in app/): one step
-// of publishing a landed train's commit.
-type TrainReleaser interface {
-	AdvanceTrainRelease(context.Context, pipelines.TrainReleaseRequest) (pipelines.TrainReleaseStatus, error)
-}
-
-// DeployEffects is what a deployment does outside GitHub's pull requests and this
-// package's rows (wired in app/): the pin, the catalog, and the installation's ArgoCD.
-// pipelines.ErrDeployBusy from StartSync is another operation on that Application.
-type DeployEffects interface {
-	// CheckDeployOwner refuses when the owner no longer holds the owner role.
-	CheckDeployOwner(ctx context.Context, owner string, authority map[string]any) error
-	// NewestRelease reads the catalog: as the owner themself on a person's request, or
-	// under their recorded authority on a tick.
-	NewestRelease(ctx context.Context, owner string, authority map[string]any, profile, version string) (pipelines.DeployRelease, error)
-	ProposeDeployPin(context.Context, pipelines.DeployPinRequest) (pipelines.DeployPin, error)
-	ReadApplication(ctx context.Context, namespace, name string) (pipelines.DeployApplicationFacts, error)
-	StartSync(context.Context, pipelines.DeployRequest) (pipelines.DeployApplicationFacts, error)
-	TerminateSync(context.Context, pipelines.DeployRequest) error
-}
-
 // Store is every row this package reads and writes, over the DSL constructs
 // of dsl/pipelines (and Deployables' packageById, the outbound seam's staging
 // and the Library's file read). Each method applies its own authority, so a
@@ -147,6 +126,16 @@ type Store interface {
 	// the mode rule. A pull request numbered 0 or less is no pull request,
 	// and reads nothing.
 	RunsUnfinishedForPullRequest(ctx context.Context, pipelineID string, pullRequest int) ([]Run, error)
+	// RunsUnfinishedForPipelineEvent is every queued or in-progress run of one
+	// pipeline's event, in EVERY mode, the ones in progress first and then the
+	// most recently queued, at most a hundred
+	// (pipelineRunsUnfinishedForPipelineEvent): what the push lane reads
+	// (push_lane.go) -- a claim, whether another push run of the pipeline is
+	// executing; a new push, which waiting push runs it supersedes; recovery and
+	// a drive that just concluded, which waiting push run starts next. The
+	// caller applies the lane's rules, and reads FRESH, because each of those
+	// decides on the answer. A blank pipeline or event reads nothing.
+	RunsUnfinishedForPipelineEvent(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error)
 	// RunsFinalCheckRunUnavailable is every run concluded at or after since
 	// whose final check run did not land (checkRunState unavailable), newest
 	// first: what recovery republishes.
@@ -188,19 +177,6 @@ type Store interface {
 	CreateRun(ctx context.Context, r Run) error
 	UpdateRun(ctx context.Context, owner, runID string, patch RunPatch) error
 	CreateChannel(ctx context.Context, c Channel) error
-	// The release train's record (design record 2026-10-27): its newest row,
-	// the rows that departed since a time (a day's train count), and the two
-	// server-only writes, made under the pipeline owner's authority.
-	LatestTrain(ctx context.Context, pipelineID string) (*Train, error)
-	TrainsSince(ctx context.Context, pipelineID string, since time.Time) ([]Train, error)
-	LastLandedTrain(ctx context.Context, pipelineID string) (*Train, error)
-	CreateTrain(ctx context.Context, owner string, t Train) error
-	UpdateTrain(ctx context.Context, owner, trainID string, patch TrainPatch) error
-	Standing(ctx context.Context, pipelineID string) (*TrainStanding, error)
-	SetStanding(ctx context.Context, owner string, s TrainStanding) error
-	LatestDeployment(ctx context.Context, pipelineID string) (*Deployment, error)
-	CreateDeployment(ctx context.Context, owner string, dep Deployment) error
-	UpdateDeployment(ctx context.Context, owner, deploymentID string, patch DeploymentPatch) error
 	UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error
 
 	// StageNotification stages one outbound row for the outbound worker to
@@ -255,6 +231,12 @@ type GitHub interface {
 	PullRequestHead(ctx context.Context, token, repository string, number int) (githubapp.PullRequestHead, error)
 	// Compare answers complete=false when GitHub stopped listing (300+).
 	Compare(ctx context.Context, token, repository, base, head string) (files []string, complete bool, err error)
+	// CompareAncestry is Compare with the history read as well: whether base
+	// is a proper ancestor of head. A push run supersedes a waiting run, and
+	// carries a verified step forward, only from a proven ancestor, because a
+	// three-dot compare from a commit that is not one leaves out that commit's
+	// own changes. A failed read proves nothing and decides nothing.
+	CompareAncestry(ctx context.Context, token, repository, base, head string) (githubapp.Ancestry, error)
 	CommitForRef(ctx context.Context, token, repository, ref string) (sha, message string, err error)
 	// CommitTree is the hash of the git tree one exact commit records. A failure
 	// costs a run its reuse, never its checks (driver.go, readTreeHash).

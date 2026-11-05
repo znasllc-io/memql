@@ -1906,11 +1906,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
-		// Release trains (design record 2026-10-27): the coordinator reads and
-		// writes the train record on a scheduled tick with no person behind it.
-		{Path: "pipelines/queries.memql", Name: "pipelineTrainsForPipeline"}: true,
-		{Path: "pipelines/mutations.memql", Name: "createPipelineTrain"}:     true,
-		{Path: "pipelines/mutations.memql", Name: "updatePipelineTrain"}:     true,
+
+		// The push lane (design record 2026-11-05 D4): a claim, a new push and
+		// recovery find the push run holding a pipeline's lane whoever owns it.
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinishedForPipelineEvent"}: true,
 
 		// epic memql#5480, pipelines delivery. THE CHANNEL'S TWO WRITES carry a
 		// credential's REFERENCE: a channel names the globalSecret the notify
@@ -1928,16 +1927,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,
-		// The nightly release (2026-11-02). The coordinator reads these on a tick,
-		// under no person, and the standing and deployment rows carry an owner's
-		// authority, so a caller scope cannot express either; the owner's own reads
-		// are the ...ForOwner queries, whose shapes leave the authority out.
-		{Path: "pipelines/queries.memql", Name: "pipelineLastLandedTrain"}:        true,
-		{Path: "pipelines/queries.memql", Name: "pipelineStandingForPipeline"}:    true,
-		{Path: "pipelines/queries.memql", Name: "pipelineDeploymentsForPipeline"}: true,
-		{Path: "pipelines/mutations.memql", Name: "setPipelineStanding"}:          true,
-		{Path: "pipelines/mutations.memql", Name: "createPipelineDeployment"}:     true,
-		{Path: "pipelines/mutations.memql", Name: "updatePipelineDeployment"}:     true,
 	}
 	for k := range want {
 		if !set[k] {

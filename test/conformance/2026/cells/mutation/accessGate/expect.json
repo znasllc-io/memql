@@ -20,6 +20,10 @@
       "verdict": "refuse_load",
       "message": "carries both @accessGate and @requiresRank",
       "note": "@requiresCapability is refused the same way; @serverOnly is covered by the query cell."
+    },
+    {
+      "file": "the-code-name-on-a-mutation.memql",
+      "verdict": "load_ok"
     }
   ]
 }

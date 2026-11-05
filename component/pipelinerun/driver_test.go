@@ -1300,7 +1300,7 @@ func TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt(t *testing.T) {
 	other := dh.peer("agent-b")
 	// A budget hold must not strand a run already admitted on another node.
 	other.Configure(func(d *Deps) {
-		d.AdmitRun = func(time.Time, bool) (bool, error) {
+		d.AdmitRun = func(time.Time) (bool, error) {
 			t.Error("started-run recovery must bypass new-run admission")
 			return false, nil
 		}

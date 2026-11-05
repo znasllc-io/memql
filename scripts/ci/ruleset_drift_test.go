@@ -43,7 +43,7 @@ if [[ -n "${FAKE_GH_FAILS:-}" ]]; then
   echo "HTTP 404: Not Found" >&2
   exit 1
 fi
-checks="MemQL / memql"
+checks="MemQL / memql / push"
 if [[ -n "${FAKE_NO_CHECKS:-}" ]]; then
   checks=""
 fi
@@ -116,21 +116,30 @@ func runDrift(t *testing.T, rules string, ghFails bool) (string, int) {
 	return out.String(), code
 }
 
-// currentRules is what the live ruleset reports today: the four asserted
-// rules plus merge_queue, which stays until release trains are switched on.
-const currentRules = "deletion merge_queue non_fast_forward pull_request required_status_checks"
+// currentRules is what the live ruleset reports since 2026-11-05: the owner is
+// its only bypass actor, and `update` (Restrict updates) is what makes the
+// owner the only account that can move main.
+const currentRules = "deletion non_fast_forward required_status_checks update"
 
-// TestDriftPassesOnceTrainsReplaceTheQueue: release trains batch what the
-// merge queue batched, so switching main to trains removes the merge_queue
-// rule (design record 2026-10-27-release-trains-design.md, section 8). The
-// production baseline must pass both before the switch, with the queue still
-// present, and after it -- a daily audit that goes red at the switch is a
-// check people learn to ignore.
-func TestDriftPassesOnceTrainsReplaceTheQueue(t *testing.T) {
-	for _, rules := range []string{currentRules, "deletion non_fast_forward pull_request required_status_checks"} {
-		if out, code := runDrift(t, rules, false); code != 0 {
-			t.Errorf("rules %q: exit %d, want 0\n%s", rules, code, out)
-		}
+// TestDriftPassesOnTheLiveRuleset: the production baseline passes over the
+// ruleset as it stands, with no pull_request or merge_queue rule, because pull
+// requests are switched off and changes land by the owner's push.
+func TestDriftPassesOnTheLiveRuleset(t *testing.T) {
+	if out, code := runDrift(t, currentRules, false); code != 0 {
+		t.Errorf("rules %q: exit %d, want 0\n%s", currentRules, code, out)
+	}
+}
+
+// TestDriftFailsWhenRestrictUpdatesGoes: losing `update` is silent for the
+// owner, whose pushes keep working, and opens main to every account with write
+// access. Only this audit would notice, so it must fail and name the rule.
+func TestDriftFailsWhenRestrictUpdatesGoes(t *testing.T) {
+	out, code := runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	if code == 0 {
+		t.Errorf("exit 0 with the update rule MISSING: anyone with write access can move main\n%s", out)
+	}
+	if !strings.Contains(out, "update") {
+		t.Errorf("the failure does not name the missing update rule\n%s", out)
 	}
 }
 
@@ -343,7 +352,7 @@ func TestEnforcementFailsWhenARecordedDecisionIsReversed(t *testing.T) {
 // without turning the audit red.
 func TestDriftWarnsWhenTheRequiredCheckRuleNamesNoCheck(t *testing.T) {
 	t.Setenv("FAKE_NO_CHECKS", "1")
-	out, code := runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	out, code := runDrift(t, currentRules, false)
 	if code != 0 {
 		t.Fatalf("exit %d, want 0 with a warning: %s", code, out)
 	}
@@ -351,15 +360,16 @@ func TestDriftWarnsWhenTheRequiredCheckRuleNamesNoCheck(t *testing.T) {
 		t.Errorf("no warning that nothing is required: %s", out)
 	}
 	t.Setenv("FAKE_NO_CHECKS", "")
-	out, code = runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	out, code = runDrift(t, currentRules, false)
 	if code != 0 || strings.Contains(out, "names no check") {
 		t.Errorf("exit %d with a check named: %s", code, out)
 	}
 }
 
-// pull_request stopped being expected when a change began landing by a push.
+// pull_request stopped being expected when a change began landing by a push,
+// and pull requests are switched off on the repository since 2026-11-05.
 func TestDriftNoLongerExpectsAPullRequestRule(t *testing.T) {
-	out, code := runDrift(t, "deletion non_fast_forward required_status_checks", false)
+	out, code := runDrift(t, currentRules, false)
 	if code != 0 {
 		t.Errorf("exit %d: %s", code, out)
 	}

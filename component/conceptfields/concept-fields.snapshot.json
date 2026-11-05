@@ -4051,72 +4051,6 @@
       }
     },
     {
-      "concept": "v1:pipelines:pipelineDeployment",
-      "file": "pipelines/concepts.memql",
-      "fields": [
-        "accountId",
-        "acknowledged",
-        "applications",
-        "authority",
-        "baseSha",
-        "candidateId",
-        "catalogDigest",
-        "guards",
-        "installRepository",
-        "landedSha",
-        "notified",
-        "ownerUserId",
-        "pinSha",
-        "pipelineId",
-        "proposalId",
-        "pullRequest",
-        "pullRequestUrl",
-        "reason",
-        "repository",
-        "requestedAt",
-        "requestedBy",
-        "resumedAt",
-        "resumedBy",
-        "runId",
-        "sha",
-        "state",
-        "stateSince",
-        "step",
-        "tag",
-        "trainId",
-        "trigger",
-        "updatedAt",
-        "version"
-      ],
-      "required": [
-        "pipelineId",
-        "repository",
-        "requestedAt",
-        "state",
-        "trigger",
-        "version"
-      ],
-      "enums": {
-        "state": [
-          "cancelled",
-          "deployed",
-          "landing",
-          "pinning",
-          "rolled_back",
-          "rolling_back",
-          "stopped",
-          "syncing",
-          "verifying",
-          "verifying_rollback",
-          "waiting"
-        ],
-        "trigger": [
-          "automatic",
-          "button"
-        ]
-      }
-    },
-    {
       "concept": "v1:pipelines:run",
       "file": "pipelines/concepts.memql",
       "fields": [
@@ -4144,7 +4078,6 @@
         "maintenanceState",
         "mode",
         "notes",
-        "onlyStages",
         "ownerUserId",
         "pipelineId",
         "policySnapshot",
@@ -4222,90 +4155,6 @@
           "rerun",
           "schedule",
           "webhook"
-        ]
-      }
-    },
-    {
-      "concept": "v1:pipelines:standing",
-      "file": "pipelines/concepts.memql",
-      "fields": [
-        "accountId",
-        "authority",
-        "deploy",
-        "ownerUserId",
-        "pipelineId",
-        "release",
-        "repository",
-        "setAt"
-      ],
-      "required": [
-        "pipelineId",
-        "repository"
-      ]
-    },
-    {
-      "concept": "v1:pipelines:train",
-      "file": "pipelines/concepts.memql",
-      "fields": [
-        "accountId",
-        "approvedBy",
-        "approvedSha",
-        "baseSha",
-        "branch",
-        "departedAt",
-        "departure",
-        "dropped",
-        "headSha",
-        "heldReason",
-        "landedSha",
-        "leftOff",
-        "notified",
-        "onBoard",
-        "ownerUserId",
-        "pipelineId",
-        "publishAttempts",
-        "pullRequest",
-        "pullRequestUrl",
-        "rebuilds",
-        "releaseApprovalId",
-        "releaseApprovedBy",
-        "releaseCandidateId",
-        "releaseCatalogDigest",
-        "releaseIntentId",
-        "releaseRetried",
-        "releaseRunId",
-        "replaces",
-        "repository",
-        "requested",
-        "retried",
-        "runId",
-        "state",
-        "updatedAt",
-        "version"
-      ],
-      "required": [
-        "branch",
-        "departedAt",
-        "departure",
-        "pipelineId",
-        "repository",
-        "state"
-      ],
-      "enums": {
-        "departure": [
-          "express",
-          "scheduled"
-        ],
-        "state": [
-          "awaiting_approval",
-          "building",
-          "cancelled",
-          "held",
-          "landed",
-          "landing",
-          "published",
-          "releasing",
-          "running"
         ]
       }
     },
@@ -9847,6 +9696,31 @@
       "kind": "field",
       "migration": "20260908030000_planner_retirement_row_keys.up.sql",
       "note": "epic memql#5000 (commit f8b0126d6) deleted v1:planner:plan, task and taskState and swept the fields pointing at them. Measured by memql#5210."
+    },
+    {
+      "concept": "v1:pipelines:pipelineDeployment",
+      "kind": "concept",
+      "waiver": "Release trains were removed (owner decision 2026-11-05); nothing registers or writes the concept, so its stored rows are inert history.",
+      "note": "Release trains, their standing approval and the automatic deploy were deleted from the engine, the DSL and MemQL OS (design record docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D2). Their production rows were kept, not purged."
+    },
+    {
+      "concept": "v1:pipelines:run",
+      "field": "onlyStages",
+      "kind": "field",
+      "waiver": "Only the automatic deploy's verification run wrote it, and production never ran an automatic deploy: on 2026-11-05 it held no v1:pipelines:pipelineDeployment row and none of its newest 50 runs carried the key. The repairing UPDATE that 0.31.15 shipped (20261105043000) was withdrawn in 0.31.16 before production ran it: its `payload ? 'onlyStages'` reads every stored run version, a run rewrites itself on each 30 s lease renewal at about 76 KB a version, and that one statement cannot finish inside the migration pool's 10 s pgdriver read deadline, where a cut-off statement keeps the runner's lock (memql#5604).",
+      "note": "The deploy went with release trains (owner decision 2026-11-05, design record docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D2)."
+    },
+    {
+      "concept": "v1:pipelines:standing",
+      "kind": "concept",
+      "waiver": "Release trains were removed (owner decision 2026-11-05); nothing registers or writes the concept, so its stored rows are inert history.",
+      "note": "Release trains, their standing approval and the automatic deploy were deleted from the engine, the DSL and MemQL OS (design record docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D2). Their production rows were kept, not purged."
+    },
+    {
+      "concept": "v1:pipelines:train",
+      "kind": "concept",
+      "waiver": "Release trains were removed (owner decision 2026-11-05); nothing registers or writes the concept, so its stored rows are inert history.",
+      "note": "Release trains, their standing approval and the automatic deploy were deleted from the engine, the DSL and MemQL OS (design record docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D2). Their production rows were kept, not purged."
     },
     {
       "concept": "v1:shopify:collection",

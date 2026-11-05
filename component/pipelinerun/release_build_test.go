@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
+	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
@@ -18,10 +21,17 @@ type releaseBuildRemote struct {
 	proof    githubapp.ReleaseSourceEvidence
 	proofErr error
 	onProof  func()
+	// proved lists the commit each proof was asked for.
+	proved []string
+	walk   githubapp.ReleaseSourceWalk
+	// walkErr is what the walk answers instead of walk.
+	walkErr error
+	walks   int
 }
 
 func (g *releaseBuildRemote) ObserveReleaseSource(ctx context.Context, token, repository, branch, selected string) (githubapp.ReleaseSourceEvidence, error) {
 	watchGitHubCall(g.t, ctx, "ObserveReleaseSource")
+	g.proved = append(g.proved, selected)
 	if token == "" || repository != repoName || branch != "main" || selected != "" && selected != g.proof.SHA {
 		return githubapp.ReleaseSourceEvidence{}, errors.New("unbound proof input")
 	}
@@ -31,6 +41,15 @@ func (g *releaseBuildRemote) ObserveReleaseSource(ctx context.Context, token, re
 	return g.proof, g.proofErr
 }
 
+func (g *releaseBuildRemote) WalkReleaseSource(ctx context.Context, token, repository, branch string, lookBack int) (githubapp.ReleaseSourceWalk, error) {
+	watchGitHubCall(g.t, ctx, "WalkReleaseSource")
+	g.walks++
+	if token == "" || repository != repoName || branch != "main" || lookBack != releaseSourceLookBack {
+		return githubapp.ReleaseSourceWalk{}, errors.New("unbound walk input")
+	}
+	return g.walk, g.walkErr
+}
+
 func configureReleaseBuild(t *testing.T, h *harness) (pipelines.ReleaseBuildRequest, *releaseBuildRemote) {
 	t.Helper()
 	p := testPipeline(DeliveryWebhook)
@@ -38,7 +57,8 @@ func configureReleaseBuild(t *testing.T, h *harness) (pipelines.ReleaseBuildRequ
 	h.store.addPackage(PackageSource{ID: packageID, OwnerUserID: p.OwnerUserID, AccountID: p.AccountID, SourceKind: "repo", RepoURL: "https://github.com/" + repoName, CredentialID: credID, Status: "active"})
 	h.github.repos[repoName] = githubapp.RepositoryInfo{ID: 123, FullName: repoName, DefaultBranch: "main"}
 	h.github.commits[repoName+"@refs/tags/v1.4.0"] = headAnswer{SHA: shaA}
-	g := &releaseBuildRemote{fakeGitHub: h.github, proof: githubapp.ReleaseSourceEvidence{RepositoryID: 123, Repository: repoName, Branch: "main", HeadSHA: shaA, SHA: shaA, TreeSHA: shaB, ProofSHA: shaA, Checks: []githubapp.ReleaseSourceCheck{{Context: "ci-required", AppID: 42, SHA: shaA, Status: "completed", Conclusion: "success"}}}}
+	g := &releaseBuildRemote{fakeGitHub: h.github, proof: githubapp.ReleaseSourceEvidence{RepositoryID: 123, Repository: repoName, Branch: "main", HeadSHA: shaA, SHA: shaA, TreeSHA: shaB, ProofSHA: shaA, Checks: []githubapp.ReleaseSourceCheck{{Context: "ci-required", AppID: 42, SHA: shaA, Status: "completed", Conclusion: "success"}}},
+		walk: githubapp.ReleaseSourceWalk{RepositoryID: 123, Repository: repoName, Branch: "main", HeadSHA: shaA, LookBack: releaseSourceLookBack, Pick: shaA}}
 	h.integ.Configure(func(d *Deps) { d.GitHub = g })
 	return pipelines.ReleaseBuildRequest{PipelineID: p.ID, SourceID: packageID, CredentialID: credID, Repository: repoName, RepositoryID: 123, InstallationID: p.InstallationID, Branch: "main", ExpectedSHA: shaA, Tag: "v1.4.0"}, g
 }
@@ -74,6 +94,143 @@ func TestReleaseBuildInspectionReadsAMissingTagAsAbsent(t *testing.T) {
 	source, err := h.integ.InspectReleaseBuild(personCtx(ownerID), r)
 	if err != nil || source.TagExists || source.TagSHA != "" || source.SHA != shaA {
 		t.Fatalf("missing tag was not read as absent: %+v %v", source, err)
+	}
+}
+
+// An unbound inspection -- release preparation's first read, which names no
+// commit -- walks main and proves what the walk chose. A bound one re-proves
+// the commit it names and walks nothing, so every later gate checks the commit
+// the saved release chose rather than choosing again (design record
+// 2026-11-05-owner-pushes-main-design.md, D6).
+func TestReleaseBuildInspectionWalksOnlyWhenUnbound(t *testing.T) {
+	h := newHarness(t)
+	r, g := configureReleaseBuild(t, h)
+	g.walk.HeadSHA, g.proof.HeadSHA = shaC, shaC
+	g.walk.Newer = []githubapp.ReleaseSourceSkip{{SHA: shaC, State: githubapp.ReleaseSourcePending, Check: "ci-required"}}
+	initial := pipelines.ReleaseBuildRequest{PipelineID: r.PipelineID, Repository: r.Repository, Branch: r.Branch}
+	source, err := h.integ.InspectReleaseBuild(personCtx(ownerID), initial)
+	if err != nil || source.SHA != shaA || source.HeadSHA != shaC || g.walks != 1 || !reflect.DeepEqual(g.proved, []string{shaA}) {
+		t.Fatalf("unbound inspection: %+v %v (walks %d, proved %v)", source, err, g.walks, g.proved)
+	}
+	want := &pipelines.ReleaseSourceWalk{HeadSHA: shaC, LookBack: releaseSourceLookBack, Newer: []pipelines.ReleaseSourceSkip{{SHA: shaC, State: pipelines.ReleaseSourcePending, Check: "ci-required"}}}
+	if !reflect.DeepEqual(source.Walk, want) {
+		t.Fatalf("recorded walk:\n got %+v\nwant %+v", source.Walk, want)
+	}
+	bound, err := h.integ.InspectReleaseBuild(personCtx(ownerID), r)
+	if err != nil || bound.SHA != shaA || bound.Walk != nil || g.walks != 1 {
+		t.Fatalf("a bound inspection walked: %+v %v (walks %d)", bound, err, g.walks)
+	}
+	if _, err := h.integ.StartReleaseBuild(personCtx(ownerID), r, allowReleaseBuild); err != nil || g.walks != 1 {
+		t.Fatalf("a start walked: %v (walks %d)", err, g.walks)
+	}
+}
+
+// A walk that passed nothing over chose the head, and records nothing: its
+// source encodes exactly as a release of the head did before walks existed.
+func TestReleaseBuildInspectionOfAGreenHeadRecordsNoWalk(t *testing.T) {
+	h := newHarness(t)
+	r, g := configureReleaseBuild(t, h)
+	source, err := h.integ.InspectReleaseBuild(personCtx(ownerID), pipelines.ReleaseBuildRequest{PipelineID: r.PipelineID, Repository: r.Repository, Branch: r.Branch})
+	if err != nil || source.SHA != shaA || source.Walk != nil || g.walks != 1 {
+		t.Fatalf("green head: %+v %v", source, err)
+	}
+}
+
+// Nothing green within the look back is a typed answer carrying what the walk
+// found, reached before any proof is attempted. A pick the proof refuses is
+// that refusal: the inspection never walks on past it, and a retry walks again.
+func TestReleaseBuildInspectionAnswersAnUntestedSourceAndAProofsRefusal(t *testing.T) {
+	h := newHarness(t)
+	r, g := configureReleaseBuild(t, h)
+	initial := pipelines.ReleaseBuildRequest{PipelineID: r.PipelineID, Repository: r.Repository, Branch: r.Branch}
+	g.walk.Pick = ""
+	g.walk.Newer = []githubapp.ReleaseSourceSkip{{SHA: shaA, State: githubapp.ReleaseSourcePending, Check: "ci-required"}, {SHA: shaB, State: githubapp.ReleaseSourceMissing, Check: "ci-required"}}
+	_, err := h.integ.InspectReleaseBuild(personCtx(ownerID), initial)
+	var untested *pipelines.ReleaseSourceUntestedError
+	if !errors.As(err, &untested) || untested.Branch != "main" || untested.Walk.HeadSHA != shaA || len(untested.Walk.Newer) != 2 || untested.Walk.Newer[1].State != pipelines.ReleaseSourceMissing || len(g.proved) != 0 {
+		t.Fatalf("untested source: %v (proved %v)", err, g.proved)
+	}
+
+	h = newHarness(t)
+	r, g = configureReleaseBuild(t, h)
+	g.walk.HeadSHA = shaC
+	g.walk.Newer = []githubapp.ReleaseSourceSkip{{SHA: shaC, State: githubapp.ReleaseSourceFailed, Check: "ci-required", Conclusion: "failure"}}
+	g.proofErr = errors.New("required release check \"ci-required\" has not succeeded")
+	_, err = h.integ.InspectReleaseBuild(personCtx(ownerID), initial)
+	if err == nil || !errors.Is(err, g.proofErr) && err.Error() != g.proofErr.Error() || g.walks != 1 || !reflect.DeepEqual(g.proved, []string{shaA}) {
+		t.Fatalf("refused pick: %v (walks %d, proved %v)", err, g.walks, g.proved)
+	}
+	if _, err = h.integ.InspectReleaseBuild(personCtx(ownerID), initial); err == nil || g.walks != 2 {
+		t.Fatalf("a retry did not walk again: %v (walks %d)", err, g.walks)
+	}
+}
+
+// What the walk says is checked before it is believed or recorded, and a walk
+// that misdescribes its repository, branch, bound or commits proves nothing.
+func TestReleaseBuildInspectionRefusesAWalkItCannotBelieve(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		alter func(*releaseBuildRemote)
+	}{
+		{"walk failed", func(g *releaseBuildRemote) { g.walkErr = errors.New("GitHub truncated release check evidence") }},
+		{"another repository", func(g *releaseBuildRemote) { g.walk.Repository = "acme/other" }},
+		{"another branch", func(g *releaseBuildRemote) { g.walk.Branch = "develop" }},
+		{"another look back", func(g *releaseBuildRemote) { g.walk.LookBack = 5 }},
+		{"pick past the look back", func(g *releaseBuildRemote) {
+			g.walk.HeadSHA = shaC
+			for n := 0; n < releaseSourceLookBack; n++ {
+				g.walk.Newer = append(g.walk.Newer, githubapp.ReleaseSourceSkip{SHA: fmt.Sprintf("%040x", n+1), State: githubapp.ReleaseSourceMissing, Check: "ci-required"})
+			}
+			g.walk.Newer[0].SHA = shaC
+		}},
+		{"no repository identity", func(g *releaseBuildRemote) { g.walk.RepositoryID = 0 }},
+		{"another repository identity than the proof", func(g *releaseBuildRemote) { g.walk.RepositoryID = 999 }},
+		{"pick is not a commit", func(g *releaseBuildRemote) { g.walk.Pick = "main" }},
+		{"head is not a commit", func(g *releaseBuildRemote) { g.walk.HeadSHA = "HEAD" }},
+		{"head passed over without being recorded", func(g *releaseBuildRemote) { g.walk.HeadSHA = shaC }},
+		{"pick among the commits passed over", func(g *releaseBuildRemote) {
+			g.walk.HeadSHA = shaA
+			g.walk.Newer = []githubapp.ReleaseSourceSkip{{SHA: shaA, State: githubapp.ReleaseSourcePending, Check: "ci-required"}}
+		}},
+		{"unknown state", func(g *releaseBuildRemote) {
+			g.walk.HeadSHA = shaC
+			g.walk.Newer = []githubapp.ReleaseSourceSkip{{SHA: shaC, State: "green", Check: "ci-required"}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			r, g := configureReleaseBuild(t, h)
+			tc.alter(g)
+			source, err := h.integ.InspectReleaseBuild(personCtx(ownerID), pipelines.ReleaseBuildRequest{PipelineID: r.PipelineID, Repository: r.Repository, Branch: r.Branch})
+			if err == nil {
+				t.Fatalf("an unbelievable walk was used: %+v", source)
+			}
+			if tc.name != "another repository identity than the proof" && len(g.proved) != 0 {
+				t.Fatalf("a refused walk was proven: %v", g.proved)
+			}
+		})
+	}
+}
+
+// osReleaseJourneyPath is the MemQL OS file whose Cut release screen tells a
+// person how far checking the source looks back.
+const osReleaseJourneyPath = "../../clients/os/src/apps/cluster/releases/journey.ts"
+
+var osSourceLookBack = regexp.MustCompile(`export const SOURCE_LOOK_BACK = (\d+);`)
+
+// The OS says the number in words before anyone checks a source, so its copy
+// must be the engine's bound, not a guess at it.
+func TestReleaseSourceLookBackMatchesTheOS(t *testing.T) {
+	raw, err := os.ReadFile(osReleaseJourneyPath)
+	if err != nil {
+		t.Fatalf("the OS release journey is unreadable at %s: %v\nIf it moved, update osReleaseJourneyPath.", osReleaseJourneyPath, err)
+	}
+	m := osSourceLookBack.FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s does not export SOURCE_LOOK_BACK as a numeric literal, which this gate compares", osReleaseJourneyPath)
+	}
+	if n, err := strconv.Atoi(string(m[1])); err != nil || n != releaseSourceLookBack {
+		t.Fatalf("the OS says checking the source looks back %s commits; the engine looks back %d", m[1], releaseSourceLookBack)
 	}
 }
 

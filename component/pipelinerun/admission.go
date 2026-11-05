@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 const admissionMaxBytes = 4096
@@ -20,34 +18,35 @@ const admissionMaxBytes = 4096
 // a configured but unreadable, malformed or expired decision fails closed.
 // This gate controls new pipeline runs, never recovery or the serving runtime.
 //
-// TRAIN RUNS HAVE AN ALLOWANCE OF THEIR OWN (release trains, design record
-// 2026-10-27, section 5.3): an optional allowTrainRuns admits a train run while
-// allowNewRuns holds every other one, because trains are scheduled and the cost
-// guard budgets them apart. A decision without the field admits a train run
-// exactly as it admits any run. The reader refuses unknown fields, so the
-// engine that knows this field ships before any guard writes it. An explicit
-// cloud spending hold still applies to trains.
-func FileRunAdmission(path string) func(time.Time, bool) (bool, error) {
+// The reader refuses unknown fields, so a decision a guard writes for a newer
+// engine holds new runs here instead of being half-read. That includes
+// allowTrainRuns, the allowance release trains had of their own until trains
+// were removed (owner decision 2026-11-05, design record
+// docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D2): a
+// decision still carrying it fails closed and holds every new run. So the cost
+// guard stops writing the field, and that change is deployed, BEFORE an engine
+// without trains is (the "retired train allowance" cases of
+// TestSplitAdmissionKeepsCostAndOperatorHoldsSeparate).
+func FileRunAdmission(path string) func(time.Time) (bool, error) {
 	return fileAdmission(path, false)
 }
 
 // FileCloudAdmission gates new cloud Jobs, including isolation probes. A cost
 // hold must not stop Fleet work, but neither a captured policy nor an already
-// admitted run can authorize spending after this live decision closes. Legacy
-// decisions retain the train allowance from run admission; v2 additionally
-// requires allowCloud, including for trains. The train argument comes from the
-// immutable run event and head branch, never the command environment. Adoption
-// and cleanup of existing work do not call this gate.
-func FileCloudAdmission(path string) func(time.Time, bool) (bool, error) {
+// admitted run can authorize spending after this live decision closes. A
+// legacy decision's allowNewRuns answers both gates; v2 additionally requires
+// allowCloud for a cloud Job. Adoption and cleanup of existing work do not
+// call this gate.
+func FileCloudAdmission(path string) func(time.Time) (bool, error) {
 	return fileAdmission(path, true)
 }
 
-func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) {
+func fileAdmission(path string, cloud bool) func(time.Time) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
-	return func(now time.Time, train bool) (bool, error) {
+	return func(now time.Time) (bool, error) {
 		info, err := os.Stat(path)
 		if err != nil {
 			return false, fmt.Errorf("read admission decision: %w", err)
@@ -65,12 +64,11 @@ func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) 
 			return false, fmt.Errorf("admission decision could not be read within its size limit")
 		}
 		var decision struct {
-			Version        json.RawMessage `json:"version"`
-			AllowNewRuns   *bool           `json:"allowNewRuns"`
-			AllowTrainRuns *bool           `json:"allowTrainRuns"`
-			AllowCloud     json.RawMessage `json:"allowCloud"`
-			ValidUntil     time.Time       `json:"validUntil"`
-			Reason         string          `json:"reason"`
+			Version      json.RawMessage `json:"version"`
+			AllowNewRuns *bool           `json:"allowNewRuns"`
+			AllowCloud   json.RawMessage `json:"allowCloud"`
+			ValidUntil   time.Time       `json:"validUntil"`
+			Reason       string          `json:"reason"`
 		}
 		decoder := json.NewDecoder(strings.NewReader(string(data)))
 		decoder.DisallowUnknownFields()
@@ -84,7 +82,7 @@ func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) 
 		if decision.AllowNewRuns == nil || !decision.ValidUntil.After(now) || decision.ValidUntil.After(now.Add(2*time.Hour)) {
 			return false, fmt.Errorf("admission decision needs allowNewRuns and a future validUntil no more than two hours away")
 		}
-		allowRun := *decision.AllowNewRuns || (train && decision.AllowTrainRuns != nil && *decision.AllowTrainRuns)
+		allowRun := *decision.AllowNewRuns
 		if len(decision.Version) == 0 {
 			if len(decision.AllowCloud) != 0 {
 				return false, fmt.Errorf("separate cloud admission requires version 2")
@@ -102,12 +100,4 @@ func fileAdmission(path string, cloud bool) func(time.Time, bool) (bool, error) 
 		}
 		return allowRun, nil
 	}
-}
-
-// IsTrainRun reports whether a run is a release train's: the pull request run
-// of a train/ branch, which only a train coordinator creates (a person with
-// write access could name a branch so, and would be admitted on the train
-// allowance; write access is already trusted with the repository).
-func IsTrainRun(r Run) bool {
-	return r.Trigger != TriggerQualification && r.Qualification == nil && pipelines.IsTrainEvent(r.Event, r.HeadBranch)
 }

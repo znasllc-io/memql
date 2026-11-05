@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -55,24 +56,25 @@ type buildPipelineFixture struct {
 	nextRunID             string
 	loseStart, missingRun bool
 	beforeStart           func()
-}
-
-func (f *buildPipelineFixture) InspectReleaseBuildAt(ctx context.Context, r pl.ReleaseBuildRequest, sha string) (pl.ReleaseBuildRequest, pl.ReleaseBuildSource, error) {
-	source, err := f.InspectReleaseBuild(ctx, r)
-	if err != nil {
-		return r, source, err
-	}
-	r.ExpectedSHA, r.SourceID, r.CredentialID = sha, source.SourceID, source.CredentialID
-	r.InstallationID, r.RepositoryID = source.InstallationID, source.RepositoryID
-	return r, source, nil
+	// walk is how an unbound inspection says it chose source.SHA, and untested
+	// makes an unbound inspection choose nothing, as pipelinerun's walk does. A
+	// bound inspection walks nothing.
+	walk     *pl.ReleaseSourceWalk
+	untested *pl.ReleaseSourceUntestedError
 }
 
 func (f *buildPipelineFixture) InspectReleaseBuild(_ context.Context, r pl.ReleaseBuildRequest) (pl.ReleaseBuildSource, error) {
+	if r.ExpectedSHA == "" && f.untested != nil {
+		return pl.ReleaseBuildSource{}, f.untested
+	}
 	if r.ExpectedSHA != "" && r.ExpectedSHA != f.source.SHA {
 		return pl.ReleaseBuildSource{}, errors.New("selected source changed")
 	}
 	out := f.source
 	out.ExistingRun = f.run
+	if r.ExpectedSHA == "" {
+		out.Walk = f.walk
+	}
 	return out, nil
 }
 func (f *buildPipelineFixture) StartReleaseBuild(ctx context.Context, r pl.ReleaseBuildRequest, fence func(context.Context) error) (pl.ReleaseBuildRun, error) {
@@ -254,6 +256,120 @@ func buildAction(t *testing.T, i *Integration, key, action string) releaseBuildV
 		t.Fatal("invalid build projection")
 	}
 	return v
+}
+
+// storedWalk says whether the saved journal's selection names a walk at all.
+func (f *buildDBFixture) storedWalk(t *testing.T, key string) bool {
+	t.Helper()
+	var named bool
+	if err := f.db.QueryRow(`SELECT body->'selection'->'source'->'Walk' IS NOT NULL FROM release_build_intents WHERE intent_id=$1`, key).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	return named
+}
+
+func (f *buildDBFixture) savedFor(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := f.db.QueryRow(`SELECT count(*) FROM release_build_intents WHERE body->'selection'->'request'->>'PipelineID'=$1`, f.pipeline.source.PipelineID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Preparation saves how it chose its commit inside the immutable selection,
+// and another replica reads it back into the release's view. Preparing again
+// after main moved keeps the first record: a saved release never re-chooses.
+func TestReleaseBuildSavesTheWalkThatChoseItsSource(t *testing.T) {
+	f := newBuildDBFixture(t)
+	head := strings.Repeat("e", 40)
+	f.pipeline.walk = &pl.ReleaseSourceWalk{HeadSHA: head, LookBack: 20, Newer: []pl.ReleaseSourceSkip{
+		{SHA: head, State: pl.ReleaseSourcePending, Check: "MemQL / memql / push"},
+		{SHA: strings.Repeat("f", 40), State: pl.ReleaseSourceCancelled, Check: "MemQL / memql / push", Conclusion: "cancelled"},
+	}}
+	recorded := *f.pipeline.walk
+	r := f.prepare(t)
+	if r.Selection.Source.Walk == nil || !reflect.DeepEqual(*r.Selection.Source.Walk, recorded) || !f.storedWalk(t, r.ID) {
+		t.Fatalf("walk not saved with its selection: %+v", r.Selection.Source.Walk)
+	}
+	rows, err := f.peer(t).handleBuildGet(ownerCtx(), map[string]any{"intentId": r.ID}, 1)
+	if err != nil || len(rows) != 1 {
+		t.Fatal("another replica could not read the release", err)
+	}
+	var v releaseBuildView
+	if err := json.Unmarshal(rows[0].Payload, &v); err != nil {
+		t.Fatal(err)
+	}
+	want := []releaseSkippedView{{SHA: head, State: "pending", Check: "MemQL / memql / push"}, {SHA: strings.Repeat("f", 40), State: "cancelled", Check: "MemQL / memql / push", Conclusion: "cancelled"}}
+	if v.SHA != f.pipeline.source.SHA || v.Branch != "main" || v.HeadSHA != head || v.LookBack != 20 || !reflect.DeepEqual(v.Newer, want) {
+		t.Fatalf("view: %+v", v)
+	}
+	f.pipeline.walk = &pl.ReleaseSourceWalk{HeadSHA: strings.Repeat("1", 40), LookBack: 20, Newer: []pl.ReleaseSourceSkip{{SHA: strings.Repeat("1", 40), State: pl.ReleaseSourceFailed, Check: "MemQL / memql / push", Conclusion: "failure"}}}
+	again := f.prepare(t)
+	if again.ID != r.ID || again.SelectionDigest != r.SelectionDigest || !reflect.DeepEqual(*again.Selection.Source.Walk, recorded) {
+		t.Fatal("preparing again replaced how the saved release was chosen")
+	}
+}
+
+// A head that passed records no walk: its journal encodes as before walks
+// existed, so an engine from before them still reads it, and its view says
+// nothing was passed over.
+func TestReleaseBuildOfAGreenHeadRecordsNoWalk(t *testing.T) {
+	f := newBuildDBFixture(t)
+	r := f.prepare(t)
+	if r.Selection.Source.Walk != nil || f.storedWalk(t, r.ID) {
+		t.Fatal("a release of the head recorded a walk")
+	}
+	rows, err := f.i.handleBuildGet(ownerCtx(), map[string]any{"intentId": r.ID}, 1)
+	if err != nil || len(rows) != 1 {
+		t.Fatal(err)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(rows[0].Payload, &v); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := v["headSha"]; ok || v["lookBack"] != nil || !reflect.DeepEqual(v["newer"], []any{}) || v["branch"] != "main" {
+		t.Fatalf("view of a green head: %v", v)
+	}
+}
+
+// Nothing within the look back passed: the builtin refuses with the code that
+// tells MemQL OS nothing was saved, and nothing was.
+func TestReleaseBuildRefusesAnUntestedSourceWithoutSaving(t *testing.T) {
+	f := newBuildDBFixture(t)
+	head := strings.Repeat("e", 40)
+	f.pipeline.untested = &pl.ReleaseSourceUntestedError{Branch: "main", Walk: pl.ReleaseSourceWalk{HeadSHA: head, LookBack: 20, Newer: []pl.ReleaseSourceSkip{
+		{SHA: head, State: pl.ReleaseSourcePending, Check: "MemQL / memql / push"},
+		{SHA: strings.Repeat("f", 40), State: pl.ReleaseSourceMissing, Check: "MemQL / memql / push"},
+	}}}
+	_, _, digest, err := f.i.candidateProfile(ownerCtx(), "engine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.i.handleBuildPrepare(ownerCtx(), map[string]any{"profileName": "engine", "pipelineId": f.pipeline.source.PipelineID, "expectedConfiguration": digest}, 1)
+	if RefusalCode(err) != CodeReleaseSourceUntested || !strings.Contains(err.Error(), "1 running, 1 untested") {
+		t.Fatalf("untested source: %v", err)
+	}
+	if n := f.savedFor(t); n != 0 || f.tagPosts != 0 || f.pipeline.starts != 0 {
+		t.Fatalf("an untested source saved %d releases or had effects", n)
+	}
+}
+
+// A walk that names the released commit among those it passed over cannot be
+// how that commit was chosen, and is never saved.
+func TestReleaseBuildRefusesAWalkThatPassedItsOwnCommitOver(t *testing.T) {
+	f := newBuildDBFixture(t)
+	f.pipeline.walk = &pl.ReleaseSourceWalk{HeadSHA: f.pipeline.source.SHA, LookBack: 20, Newer: []pl.ReleaseSourceSkip{{SHA: f.pipeline.source.SHA, State: pl.ReleaseSourcePending, Check: "MemQL / memql / push"}}}
+	_, _, digest, err := f.i.candidateProfile(ownerCtx(), "engine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.i.prepareBuild(ownerCtx(), "engine", f.pipeline.source.PipelineID, digest); err == nil {
+		t.Fatal("a walk that passed over its own commit was accepted")
+	}
+	if n := f.savedFor(t); n != 0 {
+		t.Fatalf("an invalid walk saved %d releases", n)
+	}
 }
 
 func TestReleaseBuildTagLostReplyRecoversOnAnotherReplicaWithoutReplay(t *testing.T) {

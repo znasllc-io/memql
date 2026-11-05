@@ -15,7 +15,6 @@ import (
 const (
 	PipelineConcept = "v1:pipelines:pipeline"
 	RunConcept      = "v1:pipelines:run"
-	TrainConcept    = "v1:pipelines:train"
 )
 
 // The values v1:pipelines:run and v1:pipelines:pipeline spell their
@@ -121,9 +120,19 @@ type WorkStep struct {
 	// receipt. Empty unless the step declared verification and the tree is known.
 	TreeFingerprint string
 	// EvidenceRunID names the run whose receipt this step reused instead of
-	// executing (call.evidenceRunId). Empty for a step a failed-only re-run
-	// carried from an earlier attempt of its own run key.
+	// executing (call.evidenceRunId): at this commit, on this tree for a release,
+	// or at an earlier commit a push carried it forward from (CarriedFrom). Empty
+	// for a step a failed-only re-run carried from an earlier attempt of its own
+	// run key.
 	EvidenceRunID string
+	// CarryFingerprint is the same check at any commit of the pipeline
+	// (definition.go, carryFingerprintOf): what a push compares to carry the step
+	// forward from an earlier push's receipt (carry.go). Empty unless the step
+	// declared verification and reads no history beyond its tree.
+	CarryFingerprint string
+	// CarriedFrom is the receipt a push carried this step forward from
+	// (call.carriedFrom): nil for every step a push did not carry.
+	CarriedFrom *carriedFrom
 	// Raw is the row as read: a release runs the candidate's own receipt
 	// inspector over it before it plans a skip (evidence.go).
 	Raw map[string]any
@@ -234,10 +243,7 @@ type Run struct {
 	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
 	// (epic memql#5479); the driver carries the rest over as skipped
 	// pipeline_passed_earlier.
-	RerunFailedOnly bool
-	// OnlyStages limits the run to these manifest stages: a deploy's verification,
-	// which must not start everything else a manual run would.
-	OnlyStages       []string
+	RerunFailedOnly  bool
 	DeliveryID       string
 	InboundRequestID string
 	PullRequest      int
@@ -629,191 +635,4 @@ func withNote(notes []Note, note Note) []Note {
 	out := make([]Note, 0, len(notes)+1)
 	out = append(out, notes...)
 	return append(out, note)
-}
-
-// The values v1:pipelines:train spells its departure and lifecycle in
-// (dsl/pipelines/concepts.memql), one spelling for the coordinator and its
-// tests.
-const (
-	TrainDepartureScheduled = "scheduled"
-	TrainDepartureExpress   = "express"
-
-	TrainBuilding         = "building"
-	TrainRunning          = "running"
-	TrainAwaitingApproval = "awaiting_approval"
-	TrainLanding          = "landing"
-	TrainLanded           = "landed"
-	TrainReleasing        = "releasing"
-	TrainPublished        = "published"
-	TrainHeld             = "held"
-	TrainCancelled        = "cancelled"
-)
-
-// Train is one v1:pipelines:train row as the coordinator reads it: one
-// departure of a repository's release train (design record
-// docs/superpowers/specs/2026-10-27-release-trains-design.md, section 4.5).
-// Ids are bare; OwnerUserID is as stored.
-type Train struct {
-	ID, OwnerUserID, AccountID, PipelineID, Repository, Branch string
-	Departure, State                                           string
-	// Requested is an express train's pull requests; only these board it.
-	Requested []int
-	// Replaces is the train an express train went ahead of: cancelled, its
-	// pull requests leave on a new train as soon as this one finishes.
-	Replaces string
-	OnBoard  []TrainCar
-	LeftOff  []pipelines.TrainSkip
-	Dropped  []TrainCar
-	Version  string
-	// BaseSHA is the default branch head the train was built on; HeadSHA the
-	// train branch's head, which its run tests and the owner approves.
-	BaseSHA, HeadSHA string
-	PullRequest      int
-	PullRequestURL   string
-	RunID            string
-	Rebuilds         int
-	Retried          bool
-	ApprovedBy       string
-	ApprovedSHA      string
-	LandedSHA        string
-	HeldReason       string
-	// What a landed train is publishing (design record 2026-11-02, section 6).
-	ReleaseIntentID, ReleaseRunID, ReleaseCandidateID, ReleaseApprovalID string
-	ReleaseApprovedBy, ReleaseCatalogDigest                              string
-	ReleaseRetried                                                       bool
-	PublishAttempts                                                      int
-	// Notified holds the <event>@<headSha> keys of the messages already sent.
-	Notified   []string
-	DepartedAt time.Time
-	UpdatedAt  time.Time
-}
-
-// Finished reports whether the train is history: landed, published or cancelled.
-func (t Train) Finished() bool {
-	return t.State == TrainLanded || t.State == TrainPublished || t.State == TrainCancelled
-}
-
-// Landed reports a train whose head reached the default branch, whatever came next.
-func (t Train) Landed() bool { return t.LandedSHA != "" }
-
-// TrainCar is one pull request on a train, at the commit it boarded with;
-// Reason says why it was dropped, for a dropped car.
-type TrainCar struct {
-	Number int    `json:"number"`
-	Title  string `json:"title,omitempty"`
-	SHA    string `json:"sha,omitempty"`
-	URL    string `json:"url,omitempty"`
-	Reason string `json:"reason,omitempty"`
-}
-
-// TrainStanding is the owner's standing word for one pipeline (spec D9): what its
-// trains and releases may do with nobody pressing anything, and the authority they do
-// it under.
-type TrainStanding struct {
-	ID, OwnerUserID, AccountID, PipelineID, Repository string
-	Release, Deploy                                    bool
-	Authority                                          map[string]any
-	SetAt                                              time.Time
-}
-
-// The states of a deployment.
-const (
-	DeploymentWaiting           = "waiting"
-	DeploymentPinning           = "pinning"
-	DeploymentSyncing           = "syncing"
-	DeploymentVerifying         = "verifying"
-	DeploymentLanding           = "landing"
-	DeploymentDeployed          = "deployed"
-	DeploymentRollingBack       = "rolling_back"
-	DeploymentVerifyingRollback = "verifying_rollback"
-	DeploymentRolledBack        = "rolled_back"
-	DeploymentStopped           = "stopped"
-	DeploymentCancelled         = "cancelled"
-)
-
-// The two ways a deployment starts.
-const (
-	DeploymentTriggerAutomatic = "automatic"
-	DeploymentTriggerButton    = "button"
-)
-
-// Deployment is one v1:pipelines:pipelineDeployment row: one attempt to put one published
-// release on the installation.
-type Deployment struct {
-	ID, OwnerUserID, AccountID, PipelineID, Repository string
-	Version, Tag, SHA, CandidateID, CatalogDigest      string
-	TrainID, Trigger, RequestedBy                      string
-	Authority                                          map[string]any
-	Guards                                             []pipelines.DeployGuard
-	Acknowledged                                       bool
-	State, InstallRepository, ProposalID               string
-	PullRequest                                        int
-	PullRequestURL, BaseSHA, PinSHA, LandedSHA         string
-	Applications                                       []DeploymentApplication
-	Step                                               int
-	RunID, Reason, ResumedBy                           string
-	ResumedAt                                          time.Time
-	Notified                                           []string
-	StateSince, RequestedAt, UpdatedAt                 time.Time
-}
-
-// DeploymentApplication is one ArgoCD Application in a deployment: its identity, the
-// commit it ran before, and the sync in flight. StartedAt counts that sync's deadline.
-type DeploymentApplication struct {
-	Name      string    `json:"name"`
-	UID       string    `json:"uid,omitempty"`
-	Previous  string    `json:"previous,omitempty"`
-	Request   string    `json:"request,omitempty"`
-	Rollback  string    `json:"rollback,omitempty"`
-	StartedAt time.Time `json:"startedAt,omitzero"`
-}
-
-// Finished reports a deployment that has nothing more to do by itself.
-func (d Deployment) Finished() bool {
-	switch d.State {
-	case DeploymentDeployed, DeploymentRolledBack, DeploymentStopped, DeploymentCancelled:
-		return true
-	}
-	return false
-}
-
-// Moving reports a deployment that is changing, or may change, what production runs,
-// which restarts agent and kills running CI, so no train departs under it.
-func (d Deployment) Moving() bool { return !d.Finished() && d.State != DeploymentWaiting }
-
-// PausesAutomatic reports a deployment that went wrong and has not been resumed: the
-// bad change is still on main, so the next release would carry it again.
-func (d Deployment) PausesAutomatic() bool {
-	return (d.State == DeploymentRolledBack || d.State == DeploymentStopped) && d.ResumedAt.IsZero()
-}
-
-// DeploymentPatch is the fields one deployment step writes. A nil field is not written.
-type DeploymentPatch struct {
-	State, RequestedBy, Trigger, ProposalID, PullRequestURL *string
-	BaseSHA, PinSHA, LandedSHA, RunID, Reason, ResumedBy    *string
-	Guards                                                  *[]pipelines.DeployGuard
-	Acknowledged                                            *bool
-	Authority                                               *map[string]any
-	PullRequest, Step                                       *int
-	Applications                                            *[]DeploymentApplication
-	ResumedAt, StateSince, UpdatedAt                        *time.Time
-	Notified                                                *[]string
-}
-
-// TrainPatch is the fields one train transition writes. A nil field is not
-// written: updatePipelineTrain is a read-merge with no defaults.
-type TrainPatch struct {
-	State, Version, BaseSHA, HeadSHA, PullRequestURL, RunID *string
-	ApprovedBy, ApprovedSHA, LandedSHA, HeldReason          *string
-	ReleaseIntentID, ReleaseRunID, ReleaseCandidateID       *string
-	ReleaseApprovalID, ReleaseApprovedBy                    *string
-	ReleaseCatalogDigest                                    *string
-	ReleaseRetried                                          *bool
-	PublishAttempts                                         *int
-	OnBoard, Dropped                                        *[]TrainCar
-	LeftOff                                                 *[]pipelines.TrainSkip
-	PullRequest, Rebuilds                                   *int
-	Retried                                                 *bool
-	Notified                                                *[]string
-	UpdatedAt                                               *time.Time
 }

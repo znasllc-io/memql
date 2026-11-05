@@ -48,10 +48,6 @@ type memStore struct {
 	runs       map[string]Run
 	deliveries map[string]InboundDelivery
 
-	standings    map[string]TrainStanding
-	deployments  map[string]Deployment
-	failStanding error
-
 	// channels is the notify stage's destinations (D16) by bare id, and
 	// channelOrder the order they were created in -- the DSL reads the newest
 	// of two rows sharing a name. files is the Library's files by bare id.
@@ -72,11 +68,6 @@ type memStore struct {
 	channelCreates  []Channel
 	channelUpdates  []channelUpdate
 	staged          []NotificationRequest
-
-	// trains is the release trains by bare id, and their writes in order.
-	trains       map[string]Train
-	trainCreates []Train
-	trainUpdates []trainUpdate
 
 	// Injected failures.
 	failCreateRun error
@@ -106,6 +97,9 @@ type memStore struct {
 	// failRunsForPullRequest is every RunsUnfinishedForPullRequest call's
 	// answer when set.
 	failRunsForPullRequest error
+	// failRunsForPipelineEvent is every RunsUnfinishedForPipelineEvent call's
+	// answer when set.
+	failRunsForPipelineEvent error
 
 	// afterCreatePipeline runs after each CreatePipeline lands, outside the
 	// store's lock: what another writer does right after a connect.
@@ -158,287 +152,8 @@ func newMemStore() *memStore {
 	return &memStore{
 		packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{},
 		deliveries: map[string]InboundDelivery{}, channels: map[string]Channel{}, files: map[string]libraryFile{},
-		outbound: map[string]outboundRow{}, fresh: map[string][]bool{}, trains: map[string]Train{},
+		outbound: map[string]outboundRow{}, fresh: map[string][]bool{},
 	}
-}
-
-// LatestTrain is pipelineTrainsForPipeline's first row: the pipeline's train
-// that departed last, whoever owns it.
-func (s *memStore) LatestTrain(ctx context.Context, pipelineID string) (*Train, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.noteFresh(ctx, "LatestTrain")
-	var latest *Train
-	for _, t := range s.trains {
-		if t.PipelineID != bareID(pipelineID) {
-			continue
-		}
-		if latest == nil || t.DepartedAt.After(latest.DepartedAt) {
-			copy := cloneTrain(t)
-			latest = &copy
-		}
-	}
-	return latest, nil
-}
-
-// Standing is pipelineStandingForPipeline's row.
-func (s *memStore) Standing(_ context.Context, pipelineID string) (*TrainStanding, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failStanding != nil {
-		return nil, s.failStanding
-	}
-	st, ok := s.standings[bareID(pipelineID)]
-	if !ok {
-		return nil, nil
-	}
-	return &st, nil
-}
-
-// SetStanding is setPipelineStanding: an upsert, with the owner stamped.
-func (s *memStore) SetStanding(_ context.Context, owner string, st TrainStanding) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.standings == nil {
-		s.standings = map[string]TrainStanding{}
-	}
-	st.OwnerUserID = owner
-	s.standings[bareID(st.PipelineID)] = st
-	return nil
-}
-
-// LatestDeployment is pipelineDeploymentsForPipeline's first row.
-func (s *memStore) LatestDeployment(_ context.Context, pipelineID string) (*Deployment, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var latest *Deployment
-	for _, dep := range s.deployments {
-		if dep.PipelineID != bareID(pipelineID) {
-			continue
-		}
-		if latest == nil || dep.RequestedAt.After(latest.RequestedAt) {
-			copy := cloneDeployment(dep)
-			latest = &copy
-		}
-	}
-	return latest, nil
-}
-
-// CreateDeployment is createPipelineDeployment: @createOnly("state"), so a second
-// create on the same id leaves its state alone.
-func (s *memStore) CreateDeployment(_ context.Context, owner string, dep Deployment) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.deployments == nil {
-		s.deployments = map[string]Deployment{}
-	}
-	dep.OwnerUserID = owner
-	if prior, ok := s.deployments[dep.ID]; ok {
-		dep.State = prior.State
-	}
-	s.deployments[dep.ID] = cloneDeployment(dep)
-	return nil
-}
-
-// UpdateDeployment is updatePipelineDeployment: the named fields of a row that exists.
-func (s *memStore) UpdateDeployment(_ context.Context, _ string, id string, patch DeploymentPatch) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	dep, ok := s.deployments[id]
-	if !ok {
-		return fmt.Errorf("no deployment %q", id)
-	}
-	set := func(field *string, value *string) {
-		if value != nil {
-			*field = *value
-		}
-	}
-	set(&dep.State, patch.State)
-	set(&dep.RequestedBy, patch.RequestedBy)
-	set(&dep.Trigger, patch.Trigger)
-	set(&dep.ProposalID, patch.ProposalID)
-	set(&dep.PullRequestURL, patch.PullRequestURL)
-	set(&dep.BaseSHA, patch.BaseSHA)
-	set(&dep.PinSHA, patch.PinSHA)
-	set(&dep.LandedSHA, patch.LandedSHA)
-	set(&dep.RunID, patch.RunID)
-	set(&dep.Reason, patch.Reason)
-	set(&dep.ResumedBy, patch.ResumedBy)
-	if patch.Guards != nil {
-		dep.Guards = slices.Clone(*patch.Guards)
-	}
-	if patch.Acknowledged != nil {
-		dep.Acknowledged = *patch.Acknowledged
-	}
-	if patch.Authority != nil {
-		dep.Authority = *patch.Authority
-	}
-	if patch.PullRequest != nil {
-		dep.PullRequest = *patch.PullRequest
-	}
-	if patch.Step != nil {
-		dep.Step = *patch.Step
-	}
-	if patch.Applications != nil {
-		dep.Applications = slices.Clone(*patch.Applications)
-	}
-	if patch.ResumedAt != nil {
-		dep.ResumedAt = *patch.ResumedAt
-	}
-	if patch.StateSince != nil {
-		dep.StateSince = *patch.StateSince
-	}
-	if patch.UpdatedAt != nil {
-		dep.UpdatedAt = *patch.UpdatedAt
-	}
-	if patch.Notified != nil {
-		dep.Notified = slices.Clone(*patch.Notified)
-	}
-	s.deployments[id] = cloneDeployment(dep)
-	return nil
-}
-
-func cloneDeployment(dep Deployment) Deployment {
-	dep.Guards = slices.Clone(dep.Guards)
-	dep.Applications = slices.Clone(dep.Applications)
-	dep.Notified = slices.Clone(dep.Notified)
-	return dep
-}
-
-// LastLandedTrain is pipelineLastLandedTrain's first row.
-func (s *memStore) LastLandedTrain(_ context.Context, pipelineID string) (*Train, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var latest *Train
-	for _, t := range s.trains {
-		if t.PipelineID != bareID(pipelineID) || t.LandedSHA == "" {
-			continue
-		}
-		if latest == nil || t.DepartedAt.After(latest.DepartedAt) {
-			copy := cloneTrain(t)
-			latest = &copy
-		}
-	}
-	return latest, nil
-}
-
-// TrainsSince is the pipeline's trains that departed at or after since.
-func (s *memStore) TrainsSince(_ context.Context, pipelineID string, since time.Time) ([]Train, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []Train
-	for _, t := range s.trains {
-		if t.PipelineID == bareID(pipelineID) && !t.DepartedAt.Before(since) {
-			out = append(out, cloneTrain(t))
-		}
-	}
-	slices.SortFunc(out, func(a, b Train) int { return b.DepartedAt.Compare(a.DepartedAt) })
-	return out, nil
-}
-
-// CreateTrain is createPipelineTrain: @createOnly("state"), so a second create
-// on an existing id keeps that train's state, rebuilds and retry.
-func (s *memStore) CreateTrain(_ context.Context, owner string, t Train) error {
-	if strings.TrimSpace(owner) == "" {
-		return errors.New("memStore: a train is written only under its owner")
-	}
-	if bareID(t.ID) == "" {
-		return errors.New("memStore: a train needs an id")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t = cloneTrain(t)
-	t.ID, t.PipelineID, t.OwnerUserID = bareID(t.ID), bareID(t.PipelineID), owner
-	if existing, ok := s.trains[t.ID]; ok {
-		t.State, t.Rebuilds, t.Retried = existing.State, existing.Rebuilds, existing.Retried
-	} else {
-		t.Rebuilds, t.Retried = 0, false
-	}
-	s.trains[t.ID] = t
-	s.trainCreates = append(s.trainCreates, t)
-	return nil
-}
-
-// UpdateTrain is updatePipelineTrain: the named fields, on a train that
-// exists.
-func (s *memStore) UpdateTrain(_ context.Context, owner, trainID string, patch TrainPatch) error {
-	if strings.TrimSpace(owner) == "" {
-		return errors.New("memStore: a train is written only under its owner")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.trains[bareID(trainID)]
-	if !ok {
-		return fmt.Errorf("memStore: no train %q", trainID)
-	}
-	setS := func(dst *string, v *string) {
-		if v != nil {
-			*dst = *v
-		}
-	}
-	setS(&t.State, patch.State)
-	setS(&t.Version, patch.Version)
-	setS(&t.BaseSHA, patch.BaseSHA)
-	setS(&t.HeadSHA, patch.HeadSHA)
-	setS(&t.PullRequestURL, patch.PullRequestURL)
-	setS(&t.RunID, patch.RunID)
-	setS(&t.ApprovedBy, patch.ApprovedBy)
-	setS(&t.ApprovedSHA, patch.ApprovedSHA)
-	setS(&t.LandedSHA, patch.LandedSHA)
-	setS(&t.HeldReason, patch.HeldReason)
-	setS(&t.ReleaseIntentID, patch.ReleaseIntentID)
-	setS(&t.ReleaseRunID, patch.ReleaseRunID)
-	setS(&t.ReleaseCandidateID, patch.ReleaseCandidateID)
-	setS(&t.ReleaseApprovalID, patch.ReleaseApprovalID)
-	setS(&t.ReleaseApprovedBy, patch.ReleaseApprovedBy)
-	setS(&t.ReleaseCatalogDigest, patch.ReleaseCatalogDigest)
-	if patch.ReleaseRetried != nil {
-		t.ReleaseRetried = *patch.ReleaseRetried
-	}
-	if patch.PublishAttempts != nil {
-		t.PublishAttempts = *patch.PublishAttempts
-	}
-	if patch.OnBoard != nil {
-		t.OnBoard = slices.Clone(*patch.OnBoard)
-	}
-	if patch.LeftOff != nil {
-		t.LeftOff = slices.Clone(*patch.LeftOff)
-	}
-	if patch.Dropped != nil {
-		t.Dropped = slices.Clone(*patch.Dropped)
-	}
-	if patch.PullRequest != nil {
-		t.PullRequest = *patch.PullRequest
-	}
-	if patch.Rebuilds != nil {
-		t.Rebuilds = *patch.Rebuilds
-	}
-	if patch.Retried != nil {
-		t.Retried = *patch.Retried
-	}
-	if patch.Notified != nil {
-		t.Notified = slices.Clone(*patch.Notified)
-	}
-	if patch.UpdatedAt != nil {
-		t.UpdatedAt = *patch.UpdatedAt
-	}
-	s.trains[t.ID] = t
-	s.trainUpdates = append(s.trainUpdates, trainUpdate{Owner: owner, ID: t.ID, Patch: patch})
-	return nil
-}
-
-type trainUpdate struct {
-	Owner, ID string
-	Patch     TrainPatch
-}
-
-func cloneTrain(t Train) Train {
-	t.Requested = slices.Clone(t.Requested)
-	t.OnBoard = slices.Clone(t.OnBoard)
-	t.LeftOff = slices.Clone(t.LeftOff)
-	t.Dropped = slices.Clone(t.Dropped)
-	t.Notified = slices.Clone(t.Notified)
-	return t
 }
 
 // noteFresh records whether a call to method asked for a fresh read. Callers
@@ -705,6 +420,38 @@ func (s *memStore) RunsUnfinishedForPullRequest(_ context.Context, pipelineID st
 			(r.Status == StatusQueued || r.Status == StatusInProgress) {
 			out = append(out, r)
 		}
+	}
+	return out, nil
+}
+
+// RunsUnfinishedForPipelineEvent is pipelineRunsUnfinishedForPipelineEvent:
+// one pipeline's runs of one event that are queued or in progress, in EVERY
+// mode, in progress first and then the most recently queued, one page of a
+// hundred. Mode, trigger and opt-in are the caller's rules, not the read's.
+func (s *memStore) RunsUnfinishedForPipelineEvent(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+	if strings.TrimSpace(pipelineID) == "" || event == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noteFresh(ctx, "RunsUnfinishedForPipelineEvent")
+	if s.failRunsForPipelineEvent != nil {
+		return nil, s.failRunsForPipelineEvent
+	}
+	var out []Run
+	for _, r := range s.runs {
+		if sameID(r.PipelineID, pipelineID) && r.Event == event && (r.Status == StatusQueued || r.Status == StatusInProgress) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Status != out[j].Status {
+			return out[i].Status < out[j].Status // "in_progress" before "queued", as the DSL sorts
+		}
+		return out[i].QueuedAt.After(out[j].QueuedAt)
+	})
+	if len(out) > 100 {
+		out = out[:100]
 	}
 	return out, nil
 }
@@ -1281,6 +1028,17 @@ type fakeGitHub struct {
 	commits map[string]headAnswer
 	trees   map[string]fstest.MapFS
 	compare map[string]compareAnswer
+	// ancestry answers CompareAncestry, keyed "<repository>@<base>...<head>";
+	// a pair it does not hold answers 404, which proves nothing. ancestryErr
+	// is every CompareAncestry call's answer when set; ancestryCalls is each
+	// one asked, "<repository>@<base>...<head>", in order.
+	ancestry      map[string]githubapp.Ancestry
+	ancestryErr   error
+	ancestryCalls []string
+	// branchHeadErr is every BranchHead call's answer when set; branchHeadCalls
+	// is each one asked, "<repository>@<branch>", in order.
+	branchHeadErr   error
+	branchHeadCalls []string
 
 	// pullsErr is every OpenPullRequests call's answer when set.
 	pullsErr error
@@ -1338,6 +1096,7 @@ func newFakeGitHub(t testing.TB) *fakeGitHub {
 		commits:     map[string]headAnswer{},
 		trees:       map[string]fstest.MapFS{},
 		compare:     map[string]compareAnswer{},
+		ancestry:    map[string]githubapp.Ancestry{},
 		commitTrees: map[string]string{},
 	}
 }
@@ -1477,9 +1236,14 @@ func (g *fakeGitHub) BranchHead(ctx context.Context, _, repository, branch strin
 	g.mu.Lock()
 	h, ok := g.heads[repository+"@"+branch]
 	hook := g.onBranchHead
+	g.branchHeadCalls = append(g.branchHeadCalls, repository+"@"+branch)
+	failed := g.branchHeadErr
 	g.mu.Unlock()
 	if hook != nil {
 		hook()
+	}
+	if failed != nil {
+		return "", "", failed
 	}
 	if !ok {
 		return "", "", &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/branches/" + branch}
@@ -1549,6 +1313,60 @@ func (g *fakeGitHub) Compare(ctx context.Context, _, repository, base, head stri
 		return nil, false, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare"}
 	}
 	return slices.Clone(c.Files), c.Complete, nil
+}
+
+func (g *fakeGitHub) CompareAncestry(ctx context.Context, _, repository, base, head string) (githubapp.Ancestry, error) {
+	watchGitHubCall(g.t, ctx, "CompareAncestry")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ancestryCalls = append(g.ancestryCalls, repository+"@"+base+"..."+head)
+	if g.ancestryErr != nil {
+		return githubapp.Ancestry{}, g.ancestryErr
+	}
+	a, ok := g.ancestry[repository+"@"+base+"..."+head]
+	if !ok {
+		return githubapp.Ancestry{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare"}
+	}
+	a.Files = slices.Clone(a.Files)
+	return a, nil
+}
+
+// setAncestor records base as a proper ancestor of head, with the paths
+// between them.
+func (g *fakeGitHub) setAncestor(repository, base, head string, files ...string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ancestry[repository+"@"+base+"..."+head] = githubapp.Ancestry{Ancestor: true, Files: files, Complete: true}
+}
+
+// setNotAncestor records GitHub answering that base is NOT an ancestor of
+// head: a compare that reads, and proves nothing (history rewritten, or a
+// commit of another branch).
+func (g *fakeGitHub) setNotAncestor(repository, base, head string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ancestry[repository+"@"+base+"..."+head] = githubapp.Ancestry{Complete: true}
+}
+
+// setBranchHead is a push to branch on GitHub: its head moves to sha.
+func (g *fakeGitHub) setBranchHead(repository, branch, sha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.heads[repository+"@"+branch] = headAnswer{SHA: sha, Message: "Land " + sha[:min(len(sha), 7)]}
+}
+
+// branchHeadReads is every BranchHead call, in order.
+func (g *fakeGitHub) branchHeadReads() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.branchHeadCalls)
+}
+
+// ancestryReads is every CompareAncestry call, in order.
+func (g *fakeGitHub) ancestryReads() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.ancestryCalls)
 }
 
 func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string) (string, string, error) {
