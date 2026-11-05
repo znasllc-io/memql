@@ -72,6 +72,7 @@ func TestBrandKitJSONRoundTrip(t *testing.T) {
 	kit := testKit(t)
 	sep := " | "
 	kit.Footer.Separator = &sep
+	kit.Logo.OnColour, kit.Logo.Wide = testRectPNG(t, 30, 17), testRectPNG(t, 120, 31)
 	first, err := kit.JSON()
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +97,15 @@ func TestBrandKitJSONRoundTrip(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(first), "{\n  \"theme\"") {
 		t.Fatalf("theme should come first:\n%.60s", first)
+	}
+	// The logo's keys come in the format's order: src, onColour, wide, alt, href.
+	last := -1
+	for _, key := range []string{`"src": "data:`, `"onColour": "data:`, `"wide": "data:`, `"alt": "Northwind"`, `"href": "https://northwind.example"`} {
+		at := strings.Index(string(first), key)
+		if at <= last {
+			t.Fatalf("logo key %s is missing or out of order:\n%.300s", key, first)
+		}
+		last = at
 	}
 }
 
@@ -682,5 +692,174 @@ func TestBrandWarningsFlagsALightSecondaryOnFooterLinks(t *testing.T) {
 		if !found {
 			t.Errorf("no contrast warning for text in %s on %s ending %q", light, white, end)
 		}
+	}
+}
+
+// logoVariantKit is the test kit with a reversed logo for coloured panels and a
+// wide one for headers, each a picture of its own.
+func logoVariantKit(t *testing.T) BrandKit {
+	t.Helper()
+	kit := testKit(t)
+	kit.Logo.OnColour, kit.Logo.Wide = testRectPNG(t, 30, 17), testRectPNG(t, 120, 31)
+	return kit
+}
+
+// logoIn is a layout whose logo sits where the blocks put it, with a footer.
+func logoIn(t *testing.T, blocks string) Document {
+	t.Helper()
+	d, err := Parse([]byte(layoutJSON(blocks + `,{"id":"footer","type":"footer","role":"brand","links":[{"label":"Unsubscribe","href":"{{unsubscribeUrl}}"}]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// appliedLogo is the logo block of layout with kit applied.
+func appliedLogo(t *testing.T, layout Document, kit BrandKit) Block {
+	t.Helper()
+	got, err := ApplyBrand(layout, kit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := findBlock(got.Blocks, SlotLogo)
+	if b == nil {
+		t.Fatal("no logo")
+	}
+	return *b
+}
+
+const logoBlock = `{"id":"logo","type":"image","role":"brand","alt":"Logo","width":200,"height":50}`
+
+func TestApplyBrandUsesOnColourLogoOnAColouredPanel(t *testing.T) {
+	kit := logoVariantKit(t)
+	// Confirmation's logo sits in its panel, a section on the secondary colour.
+	logo := appliedLogo(t, layoutOrFail(t, "builtin:confirmation"), kit)
+	if logo.Src != kit.Logo.OnColour || logo.Alt != kit.Logo.Alt || logo.Href != kit.Logo.Href {
+		t.Fatalf("confirmation logo = %+v, want the reversed logo with the kit's alt and link", logo)
+	}
+	// Any enclosing section or columns on a colour that is not canvas, white or
+	// page, however deep; none of those three, and no container, is not coloured.
+	for _, c := range []struct {
+		name, blocks string
+		reversed     bool
+	}{
+		{"top level", logoBlock, false},
+		{"section of canvas", `{"id":"s","type":"section","background":"canvas","blocks":[` + logoBlock + `]}`, false},
+		{"section of white", `{"id":"s","type":"section","background":"white","blocks":[` + logoBlock + `]}`, false},
+		{"section of page", `{"id":"s","type":"section","background":"page","blocks":[` + logoBlock + `]}`, false},
+		{"section without a background", `{"id":"s","type":"section","blocks":[` + logoBlock + `]}`, false},
+		{"section of primary", `{"id":"s","type":"section","background":"primary","blocks":[` + logoBlock + `]}`, true},
+		{"columns of accent", `{"id":"c","type":"columns","background":"accent","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}`, true},
+		{"plain columns in a coloured section", `{"id":"s","type":"section","background":"secondary","blocks":[{"id":"c","type":"columns","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}]}`, true},
+	} {
+		want := kit.Logo.Src
+		if c.reversed {
+			want = kit.Logo.OnColour
+		}
+		if logo := appliedLogo(t, logoIn(t, c.blocks), kit); logo.Src != want {
+			t.Errorf("%s: want the %s logo", c.name, map[bool]string{true: "reversed", false: "standard"}[c.reversed])
+		}
+	}
+	// Letter's logo sits on the canvas: the standard logo.
+	if logo := appliedLogo(t, layoutOrFail(t, "builtin:letter"), kit); logo.Src != kit.Logo.Src {
+		t.Fatal("letter: want the standard logo")
+	}
+}
+
+func TestApplyBrandUsesWideLogoForABleedHeader(t *testing.T) {
+	kit := logoVariantKit(t)
+	for _, id := range []string{"builtin:article", "builtin:lesson", "builtin:three-reasons", "builtin:side-by-side", "builtin:spotlight"} {
+		logo := appliedLogo(t, layoutOrFail(t, id), kit)
+		if !logo.Bleed || logo.Src != kit.Logo.Wide || logo.Alt != kit.Logo.Alt || logo.Href != kit.Logo.Href {
+			t.Errorf("%s: logo = %+v, want the wide logo with the kit's alt and link", id, logo)
+		}
+	}
+	// A bleed logo takes the wide one even on a coloured panel.
+	bleed := `{"id":"s","type":"section","background":"secondary","blocks":[{"id":"logo","type":"image","role":"brand","alt":"Logo","width":600,"height":155,"bleed":true}]}`
+	if logo := appliedLogo(t, logoIn(t, bleed), kit); logo.Src != kit.Logo.Wide {
+		t.Fatal("a bleed logo on a coloured panel: want the wide logo")
+	}
+}
+
+func TestApplyBrandLogoVariantsFallBackToTheLogo(t *testing.T) {
+	plain := testKit(t)
+	for _, info := range Layouts() {
+		if logo := appliedLogo(t, info.Document, plain); logo.Src != plain.Logo.Src {
+			t.Errorf("%s: a kit without variants must give its logo", info.ID)
+		}
+	}
+	bleed := `{"id":"s","type":"section","background":"secondary","blocks":[{"id":"logo","type":"image","role":"brand","alt":"Logo","width":600,"height":155,"bleed":true}]}`
+	onlyWide := testKit(t)
+	onlyWide.Logo.Wide = testRectPNG(t, 120, 31)
+	onlyReversed := testKit(t)
+	onlyReversed.Logo.OnColour = testRectPNG(t, 30, 17)
+	for _, c := range []struct {
+		name   string
+		layout Document
+		kit    BrandKit
+		want   string
+	}{
+		{"a coloured panel without a reversed logo", layoutOrFail(t, "builtin:confirmation"), onlyWide, onlyWide.Logo.Src},
+		{"a bleed header without a wide logo", layoutOrFail(t, "builtin:article"), onlyReversed, onlyReversed.Logo.Src},
+		{"a bleed header on a coloured panel without a wide logo", logoIn(t, bleed), onlyReversed, onlyReversed.Logo.Src},
+		{"the standard place with both variants", layoutOrFail(t, "builtin:letter"), logoVariantKit(t), testKit(t).Logo.Src},
+	} {
+		if logo := appliedLogo(t, c.layout, c.kit); logo.Src != c.want {
+			t.Errorf("%s: want the kit's logo", c.name)
+		}
+	}
+}
+
+func TestParseBrandKitLogoVariantRules(t *testing.T) {
+	base := logoVariantKit(t)
+	raw, err := base.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, err := ParseBrandKit(raw); err != nil || back.Logo != base.Logo {
+		t.Fatalf("a kit with both variants: %v", err)
+	}
+	// Each variant is held to the rules of every kit picture.
+	for _, field := range []string{"onColour", "wide"} {
+		for _, c := range []struct{ name, src, want string }{
+			{"a Library picture", "artifact:0123456789abcdef0123456789abcdef", "Upload pictures through the Brand page"},
+			{"a web address", "https://x.example/logo.png", "a picture must be a Library file (artifact:) or an embedded PNG, JPEG or GIF"},
+			{"not a raster", "data:image/svg+xml;base64,PHN2Zz4=", ""},
+			{"larger than 1 MiB", testPNG(t, 600, true), "email image exceeds 1 MiB"},
+		} {
+			k := base
+			if field == "onColour" {
+				k.Logo.OnColour = c.src
+			} else {
+				k.Logo.Wide = c.src
+			}
+			raw, err := k.JSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), "logo."+field+": "+c.want) {
+				t.Errorf("%s %s: want an error with %q, got %v", field, c.name, "logo."+field+": "+c.want, err)
+			}
+		}
+	}
+	// Both count toward the kit's pictures: the size a document can carry,
+	// and the warning that leaves an email little room.
+	big := testKit(t)
+	big.Logo.Src, big.Logo.Wide = testPNG(t, 520, true), testPNG(t, 521, true)
+	raw, _ = big.JSON()
+	if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), "Use fewer or smaller pictures") {
+		t.Fatalf("a large logo and a large wide one: %v", err)
+	}
+	warned := testKit(t)
+	warned.Logo.OnColour = testPNG(t, 300, true) // about 270 KiB
+	warned.Logo.Wide = testPNG(t, 301, true)
+	large := 0
+	for _, w := range BrandWarnings(context.Background(), warned) {
+		if w.Code == "pictures_large" {
+			large++
+		}
+	}
+	if large != 1 {
+		t.Fatalf("the logo variants must count toward pictures_large: %d warnings", large)
 	}
 }

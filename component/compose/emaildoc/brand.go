@@ -41,8 +41,10 @@ const brandHeadroom = 128 << 10
 
 const brandUploadHint = "Upload pictures through the Brand page"
 
-// BrandPicture is the logo: a data: picture, its description and where it links.
-type BrandPicture struct{ Src, Alt, Href string }
+// BrandPicture is the logo: a data: picture, its description and where it
+// links, and two optional variants of the picture: OnColour, a reversed logo
+// for a coloured panel, and Wide, a full-width header for a bleed logo.
+type BrandPicture struct{ Src, OnColour, Wide, Alt, Href string }
 
 // BrandSignature is the signature: its parts (a photo, the name as a picture or
 // as text, at most one of NameImage and NameText, and a title), and Picture, the
@@ -82,9 +84,11 @@ type kitFile struct {
 }
 
 type kitLogo struct {
-	Src  string `json:"src"`
-	Alt  string `json:"alt,omitempty"`
-	Href string `json:"href,omitempty"`
+	Src      string `json:"src"`
+	OnColour string `json:"onColour,omitempty"`
+	Wide     string `json:"wide,omitempty"`
+	Alt      string `json:"alt,omitempty"`
+	Href     string `json:"href,omitempty"`
 }
 
 type kitName struct {
@@ -122,7 +126,7 @@ type kitReply struct {
 func (k BrandKit) JSON() ([]byte, error) {
 	file := kitFile{
 		Theme:  k.Theme,
-		Logo:   kitLogo{Src: k.Logo.Src, Alt: k.Logo.Alt, Href: k.Logo.Href},
+		Logo:   kitLogo{Src: k.Logo.Src, OnColour: k.Logo.OnColour, Wide: k.Logo.Wide, Alt: k.Logo.Alt, Href: k.Logo.Href},
 		Follow: k.Follow,
 		Social: k.Social,
 		Footer: kitFooter{Lines: k.Footer.Lines, Links: k.Footer.Links, Separator: k.Footer.Separator},
@@ -152,7 +156,7 @@ func (k BrandKit) JSON() ([]byte, error) {
 
 var (
 	kitKeys      = map[string]bool{"theme": true, "logo": true, "signature": true, "follow": true, "social": true, "footer": true, "reply": true}
-	logoKeys     = map[string]bool{"src": true, "alt": true, "href": true}
+	logoKeys     = map[string]bool{"src": true, "onColour": true, "wide": true, "alt": true, "href": true}
 	sigKeys      = map[string]bool{"photo": true, "name": true, "title": true, "picture": true}
 	nameKeys     = map[string]bool{"src": true, "text": true}
 	footerKeys   = map[string]bool{"lines": true, "links": true, "separator": true}
@@ -258,7 +262,7 @@ func ParseBrandKit(data []byte) (BrandKit, error) {
 	for _, f := range []struct {
 		key string
 		dst *string
-	}{{"src", &kit.Logo.Src}, {"alt", &kit.Logo.Alt}, {"href", &kit.Logo.Href}} {
+	}{{"src", &kit.Logo.Src}, {"onColour", &kit.Logo.OnColour}, {"wide", &kit.Logo.Wide}, {"alt", &kit.Logo.Alt}, {"href", &kit.Logo.Href}} {
 		if *f.dst, err = kitText(logo, f.key, "logo"); err != nil {
 			return BrandKit{}, err
 		}
@@ -271,6 +275,11 @@ func ParseBrandKit(data []byte) (BrandKit, error) {
 	}
 	if problem := kitPicture(kit.Logo.Src); problem != "" {
 		return BrandKit{}, fmt.Errorf("logo: %s", problem)
+	}
+	for _, variant := range []struct{ name, src string }{{"onColour", kit.Logo.OnColour}, {"wide", kit.Logo.Wide}} {
+		if problem := kitPicture(variant.src); problem != "" {
+			return BrandKit{}, fmt.Errorf("logo.%s: %s", variant.name, problem)
+		}
 	}
 	if kit.Logo.Href != "" {
 		if problem := kitHref(kit.Logo.Href, false); problem != "" {
@@ -505,6 +514,46 @@ func tidyColumns(b *Block) {
 	b.Columns = kept
 }
 
+// logoFor is the picture of the kit's logo for a logo slot: the wide header
+// for a bleed logo, else the reversed logo on a coloured panel, else the logo;
+// a variant the kit does not have falls back to the logo.
+func logoFor(logo BrandPicture, bleed, onColour bool) string {
+	switch {
+	case bleed && logo.Wide != "":
+		return logo.Wide
+	case !bleed && onColour && logo.OnColour != "":
+		return logo.OnColour
+	}
+	return logo.Src
+}
+
+// onColouredPanel reports whether the block with the id sits inside a section
+// or columns block whose background is a colour of the brand: anything but
+// canvas, white or page (and none). coloured says whether blocks already sit
+// on one.
+func onColouredPanel(blocks []Block, id string, coloured bool) bool {
+	for _, b := range blocks {
+		if b.ID == id {
+			return coloured
+		}
+		inside := coloured
+		switch b.Background {
+		case "", "canvas", "white", "page":
+		default:
+			inside = inside || b.Type == typeSection || b.Type == typeColumns
+		}
+		if onColouredPanel(b.Blocks, id, inside) {
+			return true
+		}
+		for _, column := range b.Columns {
+			if onColouredPanel(column.Blocks, id, inside) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // compactSignature reports whether a signature slot is the compact form, which
 // a kit's whole picture fills: columns or a section without a background of
 // its own. A band, a slot with a background (Letter's), always shows the parts.
@@ -601,11 +650,13 @@ func pictureShape(src string) (picture, bool) {
 // ApplyBrand writes a kit into a copy of layout: the kit's theme replaces the
 // layout's and each brand slot, found by its id wherever it sits, takes the
 // kit's content. A slot the kit leaves empty is removed, and a kit slot the
-// layout does not have is not used. A text signature name replaces the name's
-// picture with a text block of the same id in the heading font. A kit's whole
-// signature picture fills a compact signature slot in place of the parts (see
-// signWithPicture); a band keeps the parts. Content blocks are never touched.
-// The result is read back through JSON and Parse.
+// layout does not have is not used. The logo slot takes the kit's wide header
+// when it bleeds, its reversed logo on a coloured panel, and the logo
+// elsewhere (logoFor), with the same alt and link. A text signature name
+// replaces the name's picture with a text block of the same id in the heading
+// font. A kit's whole signature picture fills a compact signature slot in place
+// of the parts (see signWithPicture); a band keeps the parts. Content blocks
+// are never touched. The result is read back through JSON and Parse.
 func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
 	if layout.Mode() != ModeLayout {
 		return Document{}, errors.New("this email is custom HTML, so it has no brand slots")
@@ -631,7 +682,10 @@ func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
 			set(b)
 		}
 	}
-	fill(SlotLogo, true, func(b *Block) { b.Src, b.Alt, b.Href = kit.Logo.Src, kit.Logo.Alt, kit.Logo.Href })
+	onColour := onColouredPanel(*blocks, SlotLogo, false)
+	fill(SlotLogo, true, func(b *Block) {
+		b.Src, b.Alt, b.Href = logoFor(kit.Logo, b.Bleed, onColour), kit.Logo.Alt, kit.Logo.Href
+	})
 
 	if s := kit.Signature; s == nil {
 		removeBlock(blocks, SlotSignature)
@@ -746,7 +800,7 @@ func BrandWarnings(ctx context.Context, kit BrandKit) []BrandWarning {
 
 // kitPictureBytes is the size of the kit's distinct pictures once decoded.
 func kitPictureBytes(kit BrandKit) int {
-	srcs := []string{kit.Logo.Src}
+	srcs := []string{kit.Logo.Src, kit.Logo.OnColour, kit.Logo.Wide}
 	if s := kit.Signature; s != nil {
 		srcs = append(srcs, s.Photo, s.NameImage, s.Picture)
 	}
@@ -769,9 +823,10 @@ func kitPictureBytes(kit BrandKit) int {
 }
 
 // kitPictureChars is the length of the pictures as a document writes them: one
-// copy for every place the kit puts a picture.
+// copy for every place the kit puts a picture. Every variant of the logo counts,
+// though a layout carries one of them, so this is an upper bound.
 func kitPictureChars(kit BrandKit) int {
-	n := len(kit.Logo.Src)
+	n := len(kit.Logo.Src) + len(kit.Logo.OnColour) + len(kit.Logo.Wide)
 	if s := kit.Signature; s != nil {
 		n += len(s.Photo) + len(s.NameImage) + len(s.Picture)
 	}
