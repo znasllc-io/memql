@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
-	"unicode/utf8"
+	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -276,20 +277,52 @@ func (rw *runWorld) startWithoutGoal(layoutID string, fileIDs []string) string {
 	return id
 }
 
+// The sentences a failed composition records, which a person reads on the
+// template, on the OS list and as the editor's bar: fixed and short, never a
+// cause's own words.
+const (
+	saidNothingSaved   = "MemQL finished without saving the email."
+	saidAppUnreachable = "Your Claude Code app could not be reached."
+	saidCouldNotFinish = "MemQL could not finish this email."
+	saidComposeBusy    = "Composing is busy right now. Try again in a moment."
+	saidNoUsableFiles  = "None of the attached files can be used."
+	saidUnreadableFile = "A file could not be read from your Library."
+)
+
+// logsTo sends the worker's warnings to a buffer the test reads.
+func (rw *runWorld) logsTo() *syncBuffer {
+	buf := &syncBuffer{}
+	rw.w.logger = slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return buf
+}
+
 func TestRunCompositionMarksFailedWhenNothingIsSubmitted(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		session func(context.Context) (string, error)
 		reason  string
+		cause   string // the cause's own words, logged and never recorded
 	}{
-		{"the composer saved nothing", nil, "MemQL finished without saving the email."},
-		{"the composer failed", func(context.Context) (string, error) {
-			return "", errors.New(`app door "claude-code": the machine went to sleep`)
-		}, `App door "claude-code": the machine went to sleep.`},
+		{"the composer saved nothing", nil, saidNothingSaved, ""},
+		// Cockpit is closed, or the machine is asleep: no app door is open.
+		{"no app door is open", func(context.Context) (string, error) {
+			return "", &memql.AppUnavailable{AppId: "*", Considered: map[string]string{"claude-code": "the machine went to sleep"}}
+		}, saidAppUnreachable, "no app door is open"},
+		{"the route cannot serve the person now", func(context.Context) (string, error) {
+			return "", fmt.Errorf("route: %w", &memql.RouteChoiceError{Code: memql.RouteNotReady, Field: "source", Value: "route:apps", Reason: "no signed-in app"})
+		}, saidAppUnreachable, "no signed-in app"},
+		// A refusal that crossed a wire keeps only its words, which lead with its code.
+		{"a refusal as words", func(context.Context) (string, error) {
+			return "", errors.New(memql.AppRefusalCode + ": no machine can run claude-code; last attempt: dial tcp 10.0.0.7:443: i/o timeout")
+		}, saidAppUnreachable, "dial tcp 10.0.0.7:443"},
+		{"the composer failed otherwise", func(context.Context) (string, error) {
+			return "", errors.New(`app door "claude-code": pq: connection reset by peer`)
+		}, saidCouldNotFinish, "pq: connection reset by peer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rw := newRunWorld(t)
 			rw.withKit()
+			logged := rw.logsTo()
 			copyID := rw.addFile("copy.txt", "text/plain", []byte("Spring is here."))
 			readmeID := rw.addFile("readme.pdf", "application/pdf", []byte("%PDF-1.4"))
 			id := rw.start("builtin:article", []string{copyID, readmeID}, "")
@@ -316,8 +349,67 @@ func TestRunCompositionMarksFailedWhenNothingIsSubmitted(t *testing.T) {
 			if !sameJSON(t, row["document"], before["document"]) || row["status"] != before["status"] {
 				t.Error("failing the composition changed the email")
 			}
+			// The cause is logged with the template, and is nowhere a person
+			// reads it: not on the template, and not in the run's error.
+			if tc.cause != "" {
+				stored, _ := plainJSON(row)
+				if strings.Contains(string(stored), tc.cause) || strings.Contains(err.Error(), tc.cause) {
+					t.Errorf("the cause reached the person: %s", err)
+				}
+				if text := logged.String(); !strings.Contains(text, tc.cause) || !strings.Contains(text, id) {
+					t.Errorf("the cause was not logged with the template: %s", text)
+				}
+			}
 		})
 	}
+
+	t.Run("composing was busy", func(t *testing.T) {
+		rw := newRunWorld(t)
+		id := rw.start("builtin:article", []string{rw.addFile("copy.txt", "text/plain", []byte("Hi."))}, "")
+		setDuration(t, &renderSlotWait, 50*time.Millisecond)
+		holdRenderSlots(t, maxConcurrentRenders)
+		if _, err := rw.run(runContext(runGoal), id); err == nil {
+			t.Fatal("the run succeeded without a render slot")
+		}
+		if c, _ := compositionFromRow(rw.engine.row(id)); c.State != compositionFailed || c.Error != saidComposeBusy {
+			t.Errorf("composition = %s %q", c.State, c.Error)
+		}
+	})
+
+	t.Run("none of the files can be used", func(t *testing.T) {
+		rw := newRunWorld(t)
+		id := rw.start("builtin:article", []string{
+			rw.addFile("readme.pdf", "application/pdf", []byte("%PDF-1.4")), rw.addFile("logo.svg", "image/svg+xml", []byte("<svg/>")),
+		}, "")
+		if _, err := rw.run(runContext(runGoal), id); err == nil {
+			t.Fatal("the run succeeded with nothing to write from")
+		}
+		// The sentence is short; which files, and why, are its notes.
+		c, _ := compositionFromRow(rw.engine.row(id))
+		want := []string{"Left out readme.pdf: not a picture or text file.", "Left out logo.svg: svg is not a picture an email can carry."}
+		if c.State != compositionFailed || c.Error != saidNoUsableFiles || !slices.Equal(c.Notes, want) {
+			t.Errorf("composition = %s %q, notes %q", c.State, c.Error, c.Notes)
+		}
+	})
+
+	t.Run("a file could not be read", func(t *testing.T) {
+		rw := newRunWorld(t)
+		logged := rw.logsTo()
+		copyID := rw.addFile("copy.txt", "text/plain", []byte("Spring is here."))
+		delete(rw.blobs.objects, "library/"+testOwner+"/"+copyID+"/blob") // storage has lost it
+		id := rw.start("builtin:article", []string{copyID}, "")
+		if _, err := rw.run(runContext(runGoal), id); err == nil {
+			t.Fatal("the run succeeded without its file")
+		}
+		c, _ := compositionFromRow(rw.engine.row(id))
+		want := []string{"copy.txt could not be read from your Library. Try again in a moment, or attach it again."}
+		if c.State != compositionFailed || c.Error != saidUnreadableFile || !slices.Equal(c.Notes, want) {
+			t.Errorf("composition = %s %q, notes %q", c.State, c.Error, c.Notes)
+		}
+		if !strings.Contains(logged.String(), copyID) {
+			t.Errorf("the read failure was not logged: %s", logged.String())
+		}
+	})
 
 	t.Run("the run was cancelled", func(t *testing.T) {
 		rw := newRunWorld(t)
@@ -415,6 +507,7 @@ func TestRunCompositionArchivesItsMaterialFiles(t *testing.T) {
 
 	t.Run("when filing fails partway", func(t *testing.T) {
 		rw, id, _ := setup(t)
+		logged := rw.logsTo()
 		rw.filer.failAt = 2
 		_, err := rw.run(runContext(runGoal), id)
 		if code, terminal := workstate.TerminalFailureCode(fmt.Sprint(err)); !terminal || code != workstate.TerminalCompositionFailed {
@@ -428,8 +521,12 @@ func TestRunCompositionArchivesItsMaterialFiles(t *testing.T) {
 			t.Errorf("archived %v, want the files filed so far %v", archived, want)
 		}
 		c, _ := compositionFromRow(rw.engine.row(id))
-		if want := "MemQL could not put copy.txt in its workspace: its Library entry did not appear in time."; c.State != compositionFailed || c.Error != want {
-			t.Errorf("composition = %s %q, want failed %q", c.State, c.Error, want)
+		if c.State != compositionFailed || c.Error != saidCouldNotFinish {
+			t.Errorf("composition = %s %q, want failed %q", c.State, c.Error, saidCouldNotFinish)
+		}
+		// Which file, and why, is the log's to say.
+		if text := logged.String(); !strings.Contains(text, "copy.txt") || !strings.Contains(text, "its Library entry did not appear in time") {
+			t.Errorf("the cause was not logged: %s", text)
 		}
 	})
 }
@@ -538,7 +635,7 @@ func TestRunCompositionNeedsItsLibraryWriter(t *testing.T) {
 	if len(rw.ai.calls()) != 0 {
 		t.Error("the composer was called without its files")
 	}
-	if c, _ := compositionFromRow(rw.engine.row(id)); c.State != compositionFailed || c.Error != errNoMaterialFiler.Error() {
+	if c, _ := compositionFromRow(rw.engine.row(id)); c.State != compositionFailed || c.Error != saidCouldNotFinish {
 		t.Errorf("composition = %s %q", c.State, c.Error)
 	}
 
@@ -555,20 +652,39 @@ func TestRunCompositionNeedsItsLibraryWriter(t *testing.T) {
 	}
 }
 
-func TestCompositionReasonIsASentence(t *testing.T) {
-	for err, want := range map[error]string{
-		errors.New("the machine went to sleep"):     "The machine went to sleep.",
-		errors.New("Composing is busy right now."):  "Composing is busy right now.",
-		fmt.Errorf("wrapped: %w", context.Canceled): "Cancelled",
-		errors.New("  spaced\n out  "):              "Spaced out.",
+// TestCompositionReasonIsAFixedSentence: what a failed composition records is
+// one of a few fixed sentences, each at most ten words, never the cause's own
+// words; the package's own sentences pass through, and the files left out are
+// the notes, not the sentence.
+func TestCompositionReasonIsAFixedSentence(t *testing.T) {
+	unusable := &unusableMaterialError{notes: []string{"Left out a.pdf: not a picture or text file."}}
+	for _, tc := range []struct {
+		err   error
+		want  string
+		notes []string
+	}{
+		{nil, saidNothingSaved, nil},
+		{fmt.Errorf("wrapped: %w", context.Canceled), "Cancelled", nil},
+		{fmt.Errorf("app session: %w", &memql.AppUnavailable{AppId: "*"}), saidAppUnreachable, nil},
+		{fmt.Errorf("%w: no machine is signed in", memql.ErrAppUnavailable), saidAppUnreachable, nil},
+		{&memql.RouteChoiceError{Code: memql.RouteNotReady, Reason: "no signed-in app"}, saidAppUnreachable, nil},
+		{errors.New("route_not_ready: route:apps cannot serve this person right now"), saidAppUnreachable, nil},
+		{errComposeBusy, saidComposeBusy, nil},
+		{errNothingSaved, saidNothingSaved, nil},
+		{fmt.Errorf("material: %w", unusable), saidNoUsableFiles, unusable.notes},
+		{&unreadableMaterialError{name: "copy.txt"}, saidUnreadableFile, []string{"copy.txt could not be read from your Library. Try again in a moment, or attach it again."}},
+		{errors.New("the machine went to sleep"), saidCouldNotFinish, nil},
+		{errors.New("pq: connection reset by peer on goal insert"), saidCouldNotFinish, nil},
+		{context.DeadlineExceeded, saidCouldNotFinish, nil},
+		{errNoComposerLoop, saidCouldNotFinish, nil},
 	} {
-		if got := compositionReason(err); got != want {
-			t.Errorf("compositionReason(%q) = %q, want %q", err, got, want)
+		got, notes := compositionReason(tc.err)
+		if got != tc.want || !slices.Equal(notes, tc.notes) {
+			t.Errorf("compositionReason(%v) = %q %q, want %q %q", tc.err, got, notes, tc.want, tc.notes)
 		}
-	}
-	long := compositionReason(errors.New(strings.Repeat("word ", 400)))
-	if utf8.RuneCountInString(long) > maxCompositionReasonRunes+4 || !strings.HasSuffix(long, "...") {
-		t.Errorf("a long reason is %d runes: %.40q", utf8.RuneCountInString(long), long)
+		if n := len(strings.Fields(got)); n > 10 {
+			t.Errorf("%q is %d words", got, n)
+		}
 	}
 }
 

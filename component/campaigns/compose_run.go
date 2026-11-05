@@ -69,6 +69,18 @@ import (
 // cancellation is not that: the composition records it, and the run answers the
 // cancellation. The archive and the last write use a context the step's
 // cancellation does not reach.
+//
+// # What a person reads
+//
+// Why a composition failed is shown on the template, on the OS list and as the
+// editor's bar, so it is one of a few fixed sentences of at most ten words
+// (compositionReason), as every sentence of a start is (compose_start.go):
+// "Cancelled"; "Your Claude Code app could not be reached." for an app door
+// nobody can reach or a route that cannot serve the person; the package's own
+// short sentences (busy, nothing saved, the material's); and otherwise "MemQL
+// could not finish this email." What is longer than a sentence -- which files
+// were left out, and why -- is the composition's notes. The cause itself is
+// logged with the template, and never shown.
 
 const (
 	// emailComposePrompt is the prompt the composer is handed (dsl/campaigns/prompts.memql).
@@ -91,8 +103,13 @@ const (
 	// compositionCancelled is the reason a cancelled composition records.
 	compositionCancelled = "Cancelled"
 
-	// maxCompositionReasonRunes bounds the reason a failed composition keeps.
-	maxCompositionReasonRunes = 600
+	// reasonAppUnreachable is the reason a composition records when no app
+	// door of the owner's could be reached, or the route could not serve them:
+	// the app is named as the start's refusals name it (errComposeNeedsApp).
+	reasonAppUnreachable = "Your Claude Code app could not be reached."
+
+	// reasonCouldNotFinish is the reason for any other cause.
+	reasonCouldNotFinish = "MemQL could not finish this email."
 
 	// maxComposerSummaryRunes bounds the composer's closing words in the run's answer.
 	maxComposerSummaryRunes = 4000
@@ -376,14 +393,16 @@ func (w *Worker) archiveMaterial(ctx context.Context, owner string, filed []File
 }
 
 // endComposition settles a run's composition once its composer is done (or
-// could not start): a composition still writing for goalID is failed, with
-// cause's reason or, when cause is nil, because nothing was saved; anything
-// else -- done, failed, or started again under another goal -- is its own
-// record and stays. It answers the composition's state and the run's error.
+// could not start): a composition still writing for goalID is failed, with the
+// fixed reason compositionReason gives cause (when cause is nil, because
+// nothing was saved) and the notes it adds; the cause itself is logged.
+// Anything else -- done, failed, or started again under another goal -- is its
+// own record and stays. It answers the composition's state and the run's error.
 func (w *Worker) endComposition(ctx context.Context, t composingTemplate, goalID string, cause error, notes []string) (string, error) {
-	reason := errNothingSaved.Error()
-	if cause != nil {
-		reason = compositionReason(cause)
+	reason, more := compositionReason(cause)
+	notes = append(slices.Clip(notes), more...)
+	if cause != nil && !errors.Is(cause, context.Canceled) && w.logger != nil {
+		w.logger.Warn("campaigns: a composition run ended without its email", "template", t.id, "goal", goalID, "reason", reason, "cause", cause)
 	}
 	failed, state, err := w.failWritingComposition(ctx, t, goalID, reason, notes)
 	if err != nil {
@@ -445,23 +464,48 @@ func (w *Worker) failWritingComposition(ctx context.Context, t composingTemplate
 	return true, compositionFailed, nil
 }
 
-// compositionReason is the sentence a failed composition records for err: a
-// cancellation is "Cancelled"; anything else is the error's own words, begun
-// with a capital letter, ended with a full stop and kept short.
-func compositionReason(err error) string {
-	if errors.Is(err, context.Canceled) {
-		return compositionCancelled
+// compositionReason is the fixed sentence a failed composition records for
+// err, and the notes the failure adds (see the header). nil is a run whose
+// composer saved nothing.
+func compositionReason(err error) (string, []string) {
+	var (
+		unusable   *unusableMaterialError
+		unreadable *unreadableMaterialError
+	)
+	switch {
+	case err == nil:
+		return errNothingSaved.Error(), nil
+	case errors.Is(err, context.Canceled):
+		return compositionCancelled, nil
+	case appUnreachable(err):
+		return reasonAppUnreachable, nil
+	case errors.As(err, &unusable):
+		return errNoUsableMaterial.Error(), slices.Clone(unusable.notes)
+	case errors.As(err, &unreadable):
+		return errMaterialUnreadable.Error(), []string{unreadable.Error()}
 	}
-	text := strings.Join(strings.Fields(err.Error()), " ")
-	if text == "" {
-		return errNothingSaved.Error()
+	// The package's own sentences, short already, say what happened.
+	for _, own := range []error{errComposeBusy, errNothingSaved} {
+		if errors.Is(err, own) {
+			return own.Error(), nil
+		}
 	}
-	first, size := utf8.DecodeRuneInString(text)
-	text = boundedRunes(string(unicode.ToUpper(first))+text[size:], maxCompositionReasonRunes)
-	if !strings.HasSuffix(text, ".") && !strings.HasSuffix(text, "?") && !strings.HasSuffix(text, "!") {
-		text += "."
+	return reasonCouldNotFinish, nil
+}
+
+// appUnreachable reports whether err is an app door nobody could reach or a
+// route that could not serve the person: the engine's refusals, as values or,
+// once they have crossed a wire, as their words, which lead with their code.
+func appUnreachable(err error) bool {
+	var (
+		unavailable *memql.AppUnavailable
+		route       *memql.RouteChoiceError
+	)
+	if errors.As(err, &unavailable) || errors.As(err, &route) || errors.Is(err, memql.ErrAppUnavailable) {
+		return true
 	}
-	return text
+	text := err.Error()
+	return strings.Contains(text, memql.AppRefusalCode) || strings.Contains(text, memql.RouteNotReady)
 }
 
 // boundedRunes is text cut to at most n runes.

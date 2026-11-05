@@ -82,6 +82,12 @@ const (
 var (
 	errTooManyMaterialFiles = fmt.Errorf("An email is composed from at most %d attached files. Attach fewer.", maxMaterialFiles)
 	errComposeBusy          = errors.New("Composing is busy right now. Try again in a moment.")
+
+	// errNoUsableMaterial and errMaterialUnreadable are the reasons a failed
+	// composition records for the two errors below (compositionReason); the
+	// errors' own words, which name the files, are for the composer's tools.
+	errNoUsableMaterial   = errors.New("None of the attached files can be used.")
+	errMaterialUnreadable = errors.New("A file could not be read from your Library.")
 )
 
 // The reasons a file is left out that the archive reader does not give. The
@@ -98,6 +104,21 @@ const (
 	reasonTextTooLarge  = "more than 4 MiB of text"
 	reasonNotAPicture   = "not a PNG, JPEG or GIF picture"
 )
+
+// unusableMaterialError is the answer when files were attached and none of them
+// can be used: notes are what was left out and why.
+type unusableMaterialError struct{ notes []string }
+
+func (e *unusableMaterialError) Error() string {
+	return errNoUsableMaterial.Error() + " " + strings.Join(e.notes, " ")
+}
+
+// unreadableMaterialError is a file of the material storage did not give back.
+type unreadableMaterialError struct{ name string }
+
+func (e *unreadableMaterialError) Error() string {
+	return e.name + " could not be read from your Library. Try again in a moment, or attach it again."
+}
 
 // materialFile is one file of the material, under the name it has in the
 // composer's workspace. ArtifactID is empty here: it is the Library artifact
@@ -182,7 +203,7 @@ func (w *Worker) readMaterial(ctx context.Context, req compositionRequest) (mate
 		}
 	}
 	if len(ids) > 0 && len(r.m.Files) == 0 {
-		return material{}, fmt.Errorf("None of the attached files can be used. %s", strings.Join(r.m.notes(), " "))
+		return material{}, &unusableMaterialError{notes: r.m.notes()}
 	}
 	return r.m, nil
 }
@@ -246,7 +267,7 @@ func (r *materialReader) read(ctx context.Context, fileID string, reference bool
 		if r.w.logger != nil {
 			r.w.logger.Warn("campaigns: a composition's file could not be read", "file", fileID, "error", err)
 		}
-		return fmt.Errorf("%s could not be read from your Library. Try again in a moment, or attach it again.", name)
+		return &unreadableMaterialError{name: name}
 	}
 	if len(data) == 0 {
 		r.skip(name, "empty file")
