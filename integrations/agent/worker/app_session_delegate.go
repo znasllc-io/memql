@@ -73,6 +73,12 @@ const (
 	snapshotPromotionPoll = 100 * time.Millisecond
 )
 
+// appSessionCancelPoll is how often a running session asks whether its run was
+// cancelled (watchRunCancel). A session runs for minutes; a Stop that lands
+// within five seconds is prompt to the person who pressed it, and one read of
+// one row per running session at that rate costs nothing worth weighing.
+const appSessionCancelPoll = 5 * time.Second
+
 // stepExecutor is the narrow half of CockpitAppExecutor this file needs: the
 // app gate, asked with the door's pin before anything is opened, and the run
 // of a step the gate admitted.
@@ -102,6 +108,9 @@ type AppSessionDelegate struct {
 	// index row; fields so a test about the timeout does not take seconds.
 	snapshotWait time.Duration
 	snapshotPoll time.Duration
+	// cancelTicker is the clock the run-cancel watcher reads on; a field so a
+	// test moves five seconds without sleeping them.
+	cancelTicker func(time.Duration) (<-chan time.Time, func())
 }
 
 // NewAppSessionDelegate builds the seam implementation over the executor the
@@ -132,7 +141,14 @@ func newAppSessionDelegateFor(exec stepExecutor, journal *workjournal.Journal, e
 	return &AppSessionDelegate{
 		exec: exec, journal: journal, engine: engine, logger: logger,
 		snapshotWait: snapshotPromotionWait, snapshotPoll: snapshotPromotionPoll,
+		cancelTicker: newCancelTicker,
 	}
+}
+
+// newCancelTicker is the run-cancel watcher's real clock.
+func newCancelTicker(every time.Duration) (<-chan time.Time, func()) {
+	ticker := time.NewTicker(every)
+	return ticker.C, ticker.Stop
 }
 
 var _ memqlengine.AppSessionDelegate = (*AppSessionDelegate)(nil)
@@ -192,7 +208,13 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 		childStep, _ = child.Step(ctx, appSessionStepKey)
 	}
 
-	res, runErr := d.exec.runAdmitted(ctx, planner.ExecutorRequest{
+	// THE SESSION STOPS WITH ITS RUN (watchRunCancel). It runs under a context
+	// of its own so that stopping it stops nothing else: the bookkeeping below
+	// still writes on the caller's.
+	sessionCtx, stopSession := context.WithCancelCause(ctx)
+	defer stopSession(nil)
+	endWatch := d.watchRunCancel(sessionCtx, h, stopSession)
+	res, runErr := d.exec.runAdmitted(sessionCtx, planner.ExecutorRequest{
 		StepId:      h.StepId,
 		RunId:       h.RunId,
 		AgentId:     h.AgentId,
@@ -222,6 +244,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 			"recordingRunId": childRunId,
 		},
 	}, nil)
+	endWatch()
 
 	out := memqlengine.AppSessionOutcome{
 		ChildRunId:       childRunId,
@@ -245,6 +268,18 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	}
 
 	if runErr != nil {
+		// A SESSION ITS RUN'S STOP ENDED is somebody's decision, not a fault.
+		// The error says so the way a model call's does, and still reads as a
+		// cancellation; whatever else the session's own error carried -- a stop
+		// that could hand the step to another app -- is moot once its run has
+		// stopped, so it is not kept. The session's record closes cancelled.
+		var stopped *memqlengine.WorkCancelledError
+		if errors.As(context.Cause(sessionCtx), &stopped) {
+			runErr = fmt.Errorf("%w: %w", stopped, context.Canceled)
+			childStep.Cancelled(ctx, runErr.Error())
+			child.Cancelled(ctx, "", runErr.Error())
+			return out, runErr
+		}
 		runErr = d.completeStop(ctx, owner, childRunId, runErr)
 		childStep.Failed(ctx, "app_session_failed", runErr.Error())
 		child.Failed(ctx, "app_session_failed", runErr.Error())
@@ -257,6 +292,70 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	})
 	child.Succeeded(ctx, map[string]any{"sessionId": out.SessionId})
 	return out, nil
+}
+
+// watchRunCancel stops a session when its run is cancelled, and answers the
+// function that ends the watch.
+//
+// A RUN NOTICES A CANCEL AT ITS NEXT STEP BOUNDARY (component/automations,
+// cancel.go), and a step handed to an app is one step that can run for an
+// hour: without this its boundary is the end of the session, and the app keeps
+// working on a goal somebody closed. So while the session runs, its run's flag
+// is read every appSessionCancelPoll with the read a boundary makes
+// (automations.RunCancelRequested), and a set flag cancels the session's
+// context with the person's Stop as its cause -- which is how a session is
+// stopped: the runner's Wait asks the machine to stop when its caller gives up.
+//
+// THE RUN IS THE ONE THE HANDOVER NAMES, which the router took from the run
+// context. A session that names none has no flag to read, and a node with no
+// engine has nothing to read it through: neither is watched.
+//
+// A READ THAT FAILS IS NOT A STOP, for the reason the boundary's own read fails
+// open: a database hiccup would otherwise stop every running session. It is
+// logged at debug and asked again at the next tick. No lock is held across
+// the read, because there is none: the watcher owns its state alone.
+//
+// The returned function returns only once the watcher has gone, so no
+// goroutine outlives the session it watched.
+func (d *AppSessionDelegate) watchRunCancel(ctx context.Context, h memqlengine.AppSessionHandover, stop context.CancelCauseFunc) (end func()) {
+	runId := strings.TrimSpace(h.RunId)
+	if d.engine == nil || runId == "" {
+		return func() {}
+	}
+	ticks, stopTicks := d.cancelTicker(appSessionCancelPoll)
+	watchCtx, endWatch := context.WithCancel(ctx)
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		defer stopTicks()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticks:
+			}
+			asked, by, err := automations.RunCancelRequested(watchCtx, d.engine, runId)
+			if watchCtx.Err() != nil {
+				return
+			}
+			if err != nil {
+				d.logger.Debug("app session: could not read whether its run was cancelled; asking again at the next tick",
+					"run_id", runId, "step_id", h.StepId, "app", h.AppId, "error", err)
+				continue
+			}
+			if !asked {
+				continue
+			}
+			d.logger.Info("app session: its run was cancelled; stopping the session",
+				"run_id", runId, "step_id", h.StepId, "app", h.AppId, "cancelled_by", by)
+			stop(&memqlengine.WorkCancelledError{By: by})
+			return
+		}
+	}()
+	return func() {
+		endWatch()
+		<-gone
+	}
 }
 
 // completeStop finishes an app's stop with what the journal says it did, or takes the

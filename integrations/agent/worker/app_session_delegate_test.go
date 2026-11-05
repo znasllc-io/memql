@@ -6,7 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -888,4 +892,493 @@ func TestARepairRecordingDoesNotInheritTheReplaysProcedure(t *testing.T) {
 	if strings.Contains(opened[0], "variables:") {
 		t.Errorf("a parent whose only variable is the replay's wrote variables anyway:\n%s", opened[0])
 	}
+}
+
+// TestAppSessionStopsWhenItsRunIsCancelled. Cancelling a goal flags its runs,
+// and a run notices at its next step boundary -- but a step handed to an app is
+// ONE step, and a session can run for an hour, so its boundary is the end of
+// the session. While the session runs, its run's flag is read every five
+// seconds with the read a boundary makes, and a set flag stops the session: the
+// context it was opened under is cancelled, which is how the runner asks the
+// machine to stop.
+func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
+	handover := memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "composeEmail", Prompt: "write the email",
+	}
+
+	t.Run("a cancelled run stops its session within six seconds", func(t *testing.T) {
+		x := startCancelWatch(t, handover)
+		if every := x.clock.waitTicker(t); every != 5*time.Second {
+			t.Fatalf("the watcher reads its run every %v, want every 5s", every)
+		}
+		x.app.waitStarted(t)
+
+		x.run.cancelled.Store(true)
+		for second := 1; second <= 6; second++ {
+			for taken := x.clock.advance(t, time.Second); taken > 0; taken-- {
+				x.run.read(t)
+			}
+		}
+		if at := x.app.waitStopped(t); at > 6*time.Second {
+			t.Fatalf("the app saw its context cancelled %v after its run was, want within 6s", at)
+		}
+
+		end := x.ended(t)
+		var stopped *memqlengine.WorkCancelledError
+		if !errors.As(end.err, &stopped) || stopped.By != "u1" {
+			t.Fatalf("RunStep = %v, want the person's Stop naming who asked", end.err)
+		}
+		if !errors.Is(end.err, context.Canceled) {
+			t.Fatalf("RunStep = %v, want it still to read as a cancellation", end.err)
+		}
+		if end.out.SessionId != "v1:worker:appSession:s1" {
+			t.Fatalf("a stopped session still reports what it was: %+v", end.out)
+		}
+		// THE SESSION'S RECORD SAYS WHY. Its child run and step close cancelled
+		// -- failed would read as a fault for what was somebody's decision --
+		// and the log names the run and who cancelled it.
+		if run, step := x.writes.closed(); run != "cancelled" || step != "cancelled" {
+			t.Fatalf("the session's child run closed %q and its step %q, want both cancelled", run, step)
+		}
+		if !x.log.has(slog.LevelInfo, "its run was cancelled", "run_id", "v1:work:run:r1", "cancelled_by", "u1") {
+			t.Fatalf("nothing logged that the session stopped because its run was cancelled: %v", x.log.messages())
+		}
+		x.clock.requireWatcherGone(t)
+	})
+
+	t.Run("a run nobody cancels lets its session finish, and the watcher goes with it", func(t *testing.T) {
+		x := startCancelWatch(t, handover)
+		x.clock.waitTicker(t)
+		x.app.waitStarted(t)
+
+		reads := 0
+		for second := 1; second <= 20; second++ {
+			for taken := x.clock.advance(t, time.Second); taken > 0; taken-- {
+				if x.run.read(t) {
+					t.Fatal("the fixture's run answered cancelled")
+				}
+				reads++
+			}
+		}
+		if reads != 4 {
+			t.Fatalf("%d reads in 20 seconds, want one every 5 seconds", reads)
+		}
+		// The fourth tick was taken, so the third read was acted on: a session
+		// nobody asked to stop is still running.
+		if err := x.app.ctx.Err(); err != nil {
+			t.Fatalf("the session's context was cancelled with nobody asking: %v", err)
+		}
+		close(x.app.finish)
+		if end := x.ended(t); end.err != nil {
+			t.Fatalf("RunStep: %v", end.err)
+		}
+		if run, step := x.writes.closed(); run != "succeeded" || step != "done" {
+			t.Fatalf("the session's child run closed %q and its step %q, want succeeded and done", run, step)
+		}
+		x.clock.requireWatcherGone(t)
+	})
+
+	t.Run("a read that fails stops nothing and is asked again at the next tick", func(t *testing.T) {
+		x := startCancelWatch(t, handover)
+		x.clock.waitTicker(t)
+		x.app.waitStarted(t)
+
+		x.run.failing.Store(true)
+		for round := 1; round <= 2; round++ {
+			if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
+				t.Fatalf("round %d: the watcher took %d ticks, want 1 -- a failed read must not end the watch", round, taken)
+			}
+			x.run.read(t)
+		}
+		// The second tick was taken, so the first failed read was acted on.
+		if err := x.app.ctx.Err(); err != nil {
+			t.Fatalf("a failed read cancelled the session: %v", err)
+		}
+		if !x.log.has(slog.LevelDebug, "could not read whether its run was cancelled", "run_id", "v1:work:run:r1") {
+			t.Fatalf("a failed read was not logged at debug: %v", x.log.messages())
+		}
+
+		x.run.failing.Store(false)
+		x.run.cancelled.Store(true)
+		if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
+			t.Fatalf("the watcher took %d ticks after two failed reads, want 1", taken)
+		}
+		if !x.run.read(t) {
+			t.Fatal("the third read did not see the run cancelled")
+		}
+		x.app.waitStopped(t)
+		var stopped *memqlengine.WorkCancelledError
+		if end := x.ended(t); !errors.As(end.err, &stopped) {
+			t.Fatalf("RunStep = %v, want the person's Stop", end.err)
+		}
+		x.clock.requireWatcherGone(t)
+	})
+
+	// A stop the app reports while its run is being stopped -- out of usage
+	// partway, say -- would move the step to another app (app_takeover.go).
+	// Once the run is stopped there is no step left to move.
+	t.Run("a session its run stopped hands nothing on to another app", func(t *testing.T) {
+		x := startCancelWatch(t, handover, func(x *cancelWatch) {
+			x.app.stopErr = &memqlengine.AppStoppedMidWork{AppId: "claude-code", Kind: "out_of_usage", SessionId: "v1:worker:appSession:s1"}
+		})
+		x.clock.waitTicker(t)
+		x.app.waitStarted(t)
+
+		x.run.cancelled.Store(true)
+		if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
+			t.Fatalf("the watcher took %d ticks, want 1", taken)
+		}
+		x.run.read(t)
+		x.app.waitStopped(t)
+		end := x.ended(t)
+		var stopped *memqlengine.WorkCancelledError
+		var moved *memqlengine.AppStoppedMidWork
+		if !errors.As(end.err, &stopped) || !errors.Is(end.err, context.Canceled) || errors.As(end.err, &moved) {
+			t.Fatalf("RunStep = %v, want only the person's Stop, read as a cancellation", end.err)
+		}
+	})
+
+	t.Run("a session that belongs to no run starts no watcher", func(t *testing.T) {
+		noRun := handover
+		noRun.RunId = ""
+		x := startCancelWatch(t, noRun)
+		x.app.waitStarted(t)
+		close(x.app.finish)
+		if end := x.ended(t); end.err != nil {
+			t.Fatalf("RunStep: %v", end.err)
+		}
+		if len(x.clock.made) != 0 || len(x.run.reads) != 0 {
+			t.Fatalf("a session with no run started a watcher (%d tickers, %d reads)", len(x.clock.made), len(x.run.reads))
+		}
+	})
+}
+
+// cancelWatch is one RunStep against an app that runs until it is stopped or
+// told to finish, a run whose cancel flag the test sets, and a clock the test
+// moves.
+type cancelWatch struct {
+	clock  *cancelWatchClock
+	run    *watchedRun
+	app    *appUntilStopped
+	log    *sessionLog
+	writes *journalWrites
+	done   chan sessionEnd
+}
+
+type sessionEnd struct {
+	out memqlengine.AppSessionOutcome
+	err error
+}
+
+// startCancelWatch starts the RunStep, after configure has set up anything the
+// session must start with.
+func startCancelWatch(t *testing.T, h memqlengine.AppSessionHandover, configure ...func(*cancelWatch)) *cancelWatch {
+	t.Helper()
+	clock := newCancelWatchClock()
+	x := &cancelWatch{
+		clock:  clock,
+		run:    &watchedRun{runId: h.RunId, reads: make(chan bool, 64)},
+		app:    &appUntilStopped{clock: clock, started: make(chan struct{}), finish: make(chan struct{}), stopped: make(chan time.Duration, 1)},
+		log:    &sessionLog{},
+		writes: &journalWrites{},
+		done:   make(chan sessionEnd, 1),
+	}
+	for _, c := range configure {
+		c(x)
+	}
+	d := newAppSessionDelegateFor(x.app, x.writes.journal(), x.run, slog.New(x.log))
+	d.cancelTicker = clock.ticker
+	go func() {
+		out, err := d.RunStep(context.Background(), h)
+		x.done <- sessionEnd{out, err}
+	}()
+	return x
+}
+
+func (x *cancelWatch) ended(t *testing.T) sessionEnd {
+	t.Helper()
+	select {
+	case end := <-x.done:
+		return end
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunStep did not return once its session ended")
+		return sessionEnd{}
+	}
+}
+
+// cancelWatchClock is the watcher's clock in these tests: the tickers it makes
+// fire only when the test moves it, so five seconds pass without anybody
+// sleeping them.
+type cancelWatchClock struct {
+	mu      sync.Mutex
+	now     time.Duration
+	tickers []*cancelWatchTicker
+	made    chan time.Duration
+}
+
+type cancelWatchTicker struct {
+	every   time.Duration
+	next    time.Duration
+	c       chan time.Time
+	stopped chan struct{}
+}
+
+func newCancelWatchClock() *cancelWatchClock {
+	return &cancelWatchClock{made: make(chan time.Duration, 4)}
+}
+
+// ticker is the delegate's cancelTicker.
+func (c *cancelWatchClock) ticker(every time.Duration) (<-chan time.Time, func()) {
+	tk := &cancelWatchTicker{every: every, c: make(chan time.Time), stopped: make(chan struct{})}
+	c.mu.Lock()
+	tk.next = c.now + every
+	c.tickers = append(c.tickers, tk)
+	c.mu.Unlock()
+	c.made <- every
+	var once sync.Once
+	return tk.c, func() { once.Do(func() { close(tk.stopped) }) }
+}
+
+func (c *cancelWatchClock) elapsed() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+// advance moves the clock on by d and hands every tick that falls due to the
+// watcher, answering how many it took. A tick taken means the watcher has
+// finished with the one before it; a stopped ticker takes none.
+func (c *cancelWatchClock) advance(t *testing.T, d time.Duration) int {
+	t.Helper()
+	type due struct {
+		tk *cancelWatchTicker
+		at time.Duration
+	}
+	var ticks []due
+	c.mu.Lock()
+	c.now += d
+	for _, tk := range c.tickers {
+		for tk.next <= c.now {
+			ticks = append(ticks, due{tk, tk.next})
+			tk.next += tk.every
+		}
+	}
+	c.mu.Unlock()
+	taken := 0
+	for _, tick := range ticks {
+		select {
+		case tick.tk.c <- time.Unix(0, 0).Add(tick.at):
+			taken++
+		case <-tick.tk.stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the watcher did not take its tick at %v", tick.at)
+		}
+	}
+	return taken
+}
+
+func (c *cancelWatchClock) waitTicker(t *testing.T) time.Duration {
+	t.Helper()
+	select {
+	case every := <-c.made:
+		return every
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session started no cancel watcher")
+		return 0
+	}
+}
+
+// requireWatcherGone fails unless every ticker the clock made is stopped
+// already: the watcher stops its ticker as it leaves, and RunStep must not
+// return while it is still there.
+func (c *cancelWatchClock) requireWatcherGone(t *testing.T) {
+	t.Helper()
+	c.mu.Lock()
+	tickers := append([]*cancelWatchTicker(nil), c.tickers...)
+	c.mu.Unlock()
+	if len(tickers) == 0 {
+		t.Fatal("no watcher was started")
+	}
+	for _, tk := range tickers {
+		select {
+		case <-tk.stopped:
+		default:
+			t.Fatal("RunStep returned while its session's cancel watcher was still running")
+		}
+	}
+}
+
+// watchedRun is the session's run as its cancel flag is read: the journal's
+// row for runId, which the test can flip to cancel-requested or make
+// unreadable. It answers only the read a step boundary makes
+// (automations' cancelRequested); every other query reads nothing.
+type watchedRun struct {
+	runId     string
+	cancelled atomic.Bool
+	failing   atomic.Bool
+	// reads carries what each read of the flag answered, in order.
+	reads chan bool
+}
+
+func (r *watchedRun) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	if q != `query workRunById(runId: "`+r.runId+`")` {
+		return nil, nil
+	}
+	if r.failing.Load() {
+		r.reads <- false
+		return nil, errors.New("the database is unavailable")
+	}
+	row := map[string]any{"id": r.runId, "status": "running", "cancelRequested": r.cancelled.Load()}
+	if r.cancelled.Load() {
+		row["cancelledBy"] = "u1"
+	}
+	r.reads <- r.cancelled.Load()
+	return memqlengine.NewResultWithOutput([]any{row}), nil
+}
+
+// read waits for the watcher's next read of the run and answers whether the
+// read saw it cancelled.
+func (r *watchedRun) read(t *testing.T) bool {
+	t.Helper()
+	select {
+	case asked := <-r.reads:
+		return asked
+	case <-time.After(5 * time.Second):
+		t.Fatal("the watcher took its tick and never read its run")
+		return false
+	}
+}
+
+// appUntilStopped stands in for the app session: it runs until the context
+// the delegate opened it under is cancelled -- the runner's Wait then asks the
+// machine to stop -- or until the test lets it finish.
+type appUntilStopped struct {
+	clock   *cancelWatchClock
+	ctx     context.Context
+	started chan struct{}
+	finish  chan struct{}
+	// stopped carries the clock's reading when the app saw its context
+	// cancelled.
+	stopped chan time.Duration
+	// stopErr, when set, is what the app reports on being stopped, in place of
+	// the runner's cancelled wait.
+	stopErr error
+}
+
+func (a *appUntilStopped) admitSession(context.Context, string, memqlengine.AppDoorPin, string) *appGateRefusal {
+	return nil
+}
+
+func (a *appUntilStopped) runAdmitted(ctx context.Context, _ planner.ExecutorRequest, _ planner.ProgressCallback) (planner.ExecutorResult, error) {
+	a.ctx = ctx
+	close(a.started)
+	out := planner.ExecutorResult{Output: map[string]any{"sessionId": "v1:worker:appSession:s1"}}
+	select {
+	case <-ctx.Done():
+		a.stopped <- a.clock.elapsed()
+		if a.stopErr != nil {
+			return out, fmt.Errorf("cockpit-app: claude-code run failed: %w", a.stopErr)
+		}
+		return out, fmt.Errorf("cockpit-app: claude-code run failed: %w", ctx.Err())
+	case <-a.finish:
+		if err := ctx.Err(); err != nil {
+			return out, fmt.Errorf("cockpit-app: claude-code run failed: %w", err)
+		}
+		return out, nil
+	}
+}
+
+func (a *appUntilStopped) waitStarted(t *testing.T) {
+	t.Helper()
+	select {
+	case <-a.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session never started")
+	}
+}
+
+func (a *appUntilStopped) waitStopped(t *testing.T) time.Duration {
+	t.Helper()
+	select {
+	case at := <-a.stopped:
+		return at
+	case <-time.After(5 * time.Second):
+		t.Fatal("the app session is still running after its run was cancelled")
+		return 0
+	}
+}
+
+// closed answers the terminal status the child run and its step were written
+// with, "" for one never closed.
+func (j *journalWrites) closed() (run, step string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, q := range j.queries {
+		for _, status := range []string{"succeeded", "failed", "cancelled"} {
+			if strings.HasPrefix(q, "mutation updateWorkRun(") && strings.Contains(q, `status: "`+status+`"`) {
+				run = status
+			}
+		}
+		for _, status := range []string{"done", "failed", "cancelled"} {
+			if strings.HasPrefix(q, "mutation updateWorkStep(") && strings.Contains(q, `status: "`+status+`"`) {
+				step = status
+			}
+		}
+	}
+	return run, step
+}
+
+// sessionLog keeps the delegate's log records.
+type sessionLog struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (l *sessionLog) Enabled(context.Context, slog.Level) bool { return true }
+
+func (l *sessionLog) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.records = append(l.records, r.Clone())
+	return nil
+}
+
+func (l *sessionLog) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *sessionLog) WithGroup(string) slog.Handler      { return l }
+
+// has reports whether a record at level says words and carries each of the
+// key, value pairs in attrs.
+func (l *sessionLog) has(level slog.Level, words string, attrs ...string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.records {
+		if r.Level != level || !strings.Contains(r.Message, words) {
+			continue
+		}
+		found := map[string]string{}
+		r.Attrs(func(a slog.Attr) bool {
+			found[a.Key] = a.Value.String()
+			return true
+		})
+		matched := true
+		for i := 0; i+1 < len(attrs); i += 2 {
+			if found[attrs[i]] != attrs[i+1] {
+				matched = false
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *sessionLog) messages() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]string, 0, len(l.records))
+	for _, r := range l.records {
+		out = append(out, r.Level.String()+" "+r.Message)
+	}
+	return out
 }

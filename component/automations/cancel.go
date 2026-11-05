@@ -39,6 +39,7 @@ package automations
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -97,6 +98,34 @@ func (j *workJournal) cancelRequested(ctx context.Context, runId string) (asked 
 	if j == nil || runId == "" {
 		return false, ""
 	}
+	asked, by, queryName, err := readCancelRequested(ctx, j.exec, runId)
+	if err != nil {
+		j.warn(queryName, err)
+		return false, ""
+	}
+	return asked, by
+}
+
+// RunCancelRequested is cancelRequested's read for a step that runs WHOLE
+// where no step boundary can see it: an app session on somebody's machine
+// (integrations/agent/worker), which stops on the answer the run's next
+// boundary would give rather than on a second reading of the row. exec is
+// the engine the read goes through, as the journal's own is.
+//
+// IT RETURNS THE READ'S ERROR, and failing open is the caller's: a session
+// watcher logs it and asks again at its next tick. A blank run id, a nil
+// engine and a run with no row all answer false with no error.
+func RunCancelRequested(ctx context.Context, exec journalExecutor, runId string) (asked bool, by string, err error) {
+	if exec == nil || strings.TrimSpace(runId) == "" {
+		return false, "", nil
+	}
+	asked, by, _, err = readCancelRequested(ctx, exec, runId)
+	return asked, by, err
+}
+
+// readCancelRequested is the one read of a run's cancel flag, and the query it
+// made, which a failed read is warned under.
+func readCancelRequested(ctx context.Context, exec journalExecutor, runId string) (asked bool, by, queryName string, err error) {
 	queryName, readCtx := "workRunById", journalContext(ctx)
 	if auth.IsRoleTestContext(ctx) {
 		// A test run belongs to the persona. Its own read preserves the
@@ -104,32 +133,28 @@ func (j *workJournal) cancelRequested(ctx context.Context, runId string) (asked 
 		// Replacing the actor with the journal service while retaining the
 		// test assertion would instead make every poll fail authorization.
 		if err := auth.ValidateRoleTestContext(ctx); err != nil {
-			j.warn("workRunForOwner", err)
-			return false, ""
+			return false, "", "workRunForOwner", err
 		}
 		queryName, readCtx = "workRunForOwner", ctx
 	}
 	call, err := journalArgs(queryName, map[string]any{"runId": runId})
 	if err != nil {
-		j.warn(queryName, err)
-		return false, ""
+		return false, "", queryName, err
 	}
-	res, err := j.exec.Execute(memql.ContextWithFreshRead(readCtx), "query "+call)
+	res, err := exec.Execute(memql.ContextWithFreshRead(readCtx), "query "+call)
 	if err != nil {
-		j.warn(queryName, err)
-		return false, ""
+		return false, "", queryName, err
 	}
 	if err := auth.ValidateRoleTestContext(ctx); err != nil {
-		j.warn(queryName, err)
-		return false, ""
+		return false, "", queryName, err
 	}
 	rows := memql.MaterializeRows(res)
 	if len(rows) == 0 {
-		return false, ""
+		return false, "", queryName, nil
 	}
 	asked, _ = rows[0]["cancelRequested"].(bool)
 	by, _ = rows[0]["cancelledBy"].(string)
-	return asked, by
+	return asked, by, queryName, nil
 }
 
 // cancelStop closes the run as a person's decision rather than as a fault.
