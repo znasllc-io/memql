@@ -183,7 +183,7 @@ func TestEmailInstallationManagedDomainUsesProviderDefault(t *testing.T) {
 	if cfg.Default != "donotreply@11111111-1111-1111-1111-111111111111.azurecomm.net" || cfg.Senders[cfg.Default] != "DoNotReply" {
 		t.Fatalf("wrong actual sender: %+v", cfg)
 	}
-	if ok, err := protocol.ensureSubscription(context.Background(), "ephemeral", p.ClusterID, p, true); !ok || err != nil {
+	if ok, err := protocol.ensureSubscription(context.Background(), "ephemeral", p.ClusterID, p, nil, true); !ok || err != nil {
 		t.Fatalf("group access: %v %v", ok, err)
 	}
 }

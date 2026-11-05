@@ -111,10 +111,13 @@ func azureNotFound(err error) bool {
 
 // Existing resources are reused only when this connection created them. A
 // matching human-readable name alone is never permission to overwrite one.
-func (a *azureProtocol) ensureService(ctx context.Context, token, path, account, location, clusterID string) (bool, error) {
+func (a *azureProtocol) ensureService(ctx context.Context, token, path, account, location, clusterID string, writes *azureWrites) (bool, error) {
 	var resource azureResource
 	err := a.arm(ctx, http.MethodGet, azureVersion(path), token, nil, &resource)
 	if azureNotFound(err) {
+		if !writes.take() {
+			return false, nil
+		}
 		body := map[string]any{"location": "Global", "tags": map[string]string{"memql-organization": account, "memql-cluster": clusterID}, "properties": map[string]any{"dataLocation": location}}
 		if err = a.arm(ctx, http.MethodPut, azureVersion(path), token, body, &resource); err != nil {
 			return false, err
@@ -145,10 +148,16 @@ func azureResourceReady(status string) (bool, error) {
 	}
 }
 
-func (a *azureProtocol) domain(ctx context.Context, token string, plan azurePlan, create bool) (azureResource, error) {
+func (a *azureProtocol) domain(ctx context.Context, token string, plan azurePlan, create bool, writes *azureWrites) (azureResource, error) {
 	var resource azureResource
 	err := a.arm(ctx, http.MethodGet, azureVersion(plan.domainPath()), token, nil, &resource)
 	if azureNotFound(err) && create {
+		if !writes.take() {
+			// This call already made its one create. Report the domain as
+			// still being prepared; the next call creates it.
+			resource.Properties.ProvisioningState = "Creating"
+			return resource, nil
+		}
 		management := "CustomerManaged"
 		if plan.ManagedDomain {
 			management = "AzureManaged"
@@ -215,7 +224,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 		}
 	}
 	for _, path := range []string{plan.emailPath(), plan.communicationPath()} {
-		ready, err := a.ensureService(ctx, token, path, account, plan.DataLocation, plan.ClusterID)
+		ready, err := a.ensureService(ctx, token, path, account, plan.DataLocation, plan.ClusterID, nil)
 		if err != nil {
 			return empty, "", err
 		}
@@ -223,7 +232,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 			return empty, "", fmt.Errorf("Azure is still preparing the email services")
 		}
 	}
-	domain, err := a.domain(ctx, token, plan, false)
+	domain, err := a.domain(ctx, token, plan, false, nil)
 	if err != nil {
 		return empty, "", err
 	}

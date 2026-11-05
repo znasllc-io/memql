@@ -26,7 +26,7 @@ func TestAzureProvisioningDoesNotOverwriteUnrelatedResources(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"id": p.emailPath(), "tags": map[string]string{"memql-organization": "another-client"}, "properties": map[string]string{"dataLocation": "United States", "provisioningState": "Succeeded"}})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 	})
-	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "client", "United States", p.ClusterID); err == nil {
+	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "client", "United States", p.ClusterID, nil); err == nil {
 		t.Fatal("unrelated service accepted")
 	}
 	if writes != 0 {
@@ -113,7 +113,7 @@ func TestAzureProvisioningRefusesSameOrganizationInAnotherCluster(t *testing.T) 
 		body, _ := json.Marshal(map[string]any{"id": p.emailPath(), "tags": map[string]string{"memql-organization": "self", "memql-cluster": "other-cluster"}, "properties": map[string]string{"dataLocation": "United States", "provisioningState": "Succeeded"}})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 	})
-	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "self", "United States", "this-cluster"); err == nil {
+	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "self", "United States", "this-cluster", nil); err == nil {
 		t.Fatal("borrowed another cluster's service")
 	}
 }

@@ -56,7 +56,7 @@ func (a *azureSetup) exportPackage(ctx context.Context, account, organization st
 				return nil, fmt.Errorf("Azure resource ownership does not match this organization")
 			}
 		}
-		resource, err := a.protocol.domain(ctx, session.AccessToken, c.Plan, false)
+		resource, err := a.protocol.domain(ctx, session.AccessToken, c.Plan, false, nil)
 		if err != nil {
 			return nil, err
 		}

@@ -108,7 +108,11 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			if err := a.claimResources(ctx, session.AccountID, plan); err != nil {
 				return err
 			}
-			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan, session.WorkloadClientID != "")
+			// One Azure create or update per call keeps the request short enough
+			// to outlast a proxy's idle timeout. The saved plan and Azure's own
+			// state carry progress; the next check does the next step.
+			writes := &azureWrites{left: 1}
+			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan, writes, session.WorkloadClientID != "")
 			if err != nil {
 				return err
 			}
@@ -118,7 +122,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 				return nil
 			}
 			for _, path := range []string{plan.emailPath(), plan.communicationPath()} {
-				ready, err := a.protocol.ensureService(ctx, session.AccessToken, path, session.AccountID, plan.DataLocation, session.ClusterID)
+				ready, err := a.protocol.ensureService(ctx, session.AccessToken, path, session.AccountID, plan.DataLocation, session.ClusterID, writes)
 				if err != nil {
 					return err
 				}
@@ -128,7 +132,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 					return nil
 				}
 			}
-			resource, err := a.protocol.domain(ctx, session.AccessToken, plan, true)
+			resource, err := a.protocol.domain(ctx, session.AccessToken, plan, true, writes)
 			if err != nil {
 				return err
 			}
@@ -147,7 +151,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			return nil
 		}
 		if action == "domainStatus" || action == "verify" {
-			resource, err := a.protocol.domain(ctx, session.AccessToken, plan, false)
+			resource, err := a.protocol.domain(ctx, session.AccessToken, plan, false, nil)
 			if err != nil {
 				return err
 			}
@@ -161,7 +165,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 						return err
 					}
 				}
-				resource, err = a.protocol.domain(ctx, session.AccessToken, plan, false)
+				resource, err = a.protocol.domain(ctx, session.AccessToken, plan, false, nil)
 				if err != nil {
 					return err
 				}
