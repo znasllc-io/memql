@@ -23,11 +23,19 @@ type releaseBuildView struct {
 	Version       string `json:"version"`
 	Tag           string `json:"tag"`
 	SHA           string `json:"sha"`
-	PipelineID    string `json:"pipelineId"`
-	PipelineRunID string `json:"pipelineRunId,omitempty"`
-	WorkRunID     string `json:"workRunId,omitempty"`
-	CandidateID   string `json:"candidateId,omitempty"`
-	ApprovalID    string `json:"approvalId,omitempty"`
+	Branch        string `json:"branch"`
+	// HeadSHA, LookBack and Newer say how preparation chose SHA when it passed
+	// newer commits on Branch over: the head it started from, how far it would
+	// look, and each newer commit with why it was not released. All three are
+	// empty for a release of the head and for one saved before walks existed.
+	HeadSHA       string               `json:"headSha,omitempty"`
+	LookBack      int                  `json:"lookBack,omitempty"`
+	Newer         []releaseSkippedView `json:"newer"`
+	PipelineID    string               `json:"pipelineId"`
+	PipelineRunID string               `json:"pipelineRunId,omitempty"`
+	WorkRunID     string               `json:"workRunId,omitempty"`
+	CandidateID   string               `json:"candidateId,omitempty"`
+	ApprovalID    string               `json:"approvalId,omitempty"`
 	Catalog       struct {
 		State  string `json:"state"`
 		Digest string `json:"digest,omitempty"`
@@ -39,6 +47,15 @@ type releaseBuildView struct {
 	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
+// releaseSkippedView is one newer commit a release's preparation passed over.
+// state is pending, failed, cancelled or missing (pl.ReleaseSourcePending...).
+type releaseSkippedView struct {
+	SHA        string `json:"sha"`
+	State      string `json:"state"`
+	Check      string `json:"check,omitempty"`
+	Conclusion string `json:"conclusion,omitempty"`
+}
+
 func (i *Integration) buildView(ctx context.Context, r releaseBuildRecord) (releaseBuildView, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
@@ -48,7 +65,13 @@ func (i *Integration) buildView(ctx context.Context, r releaseBuildRecord) (rele
 		return releaseBuildView{}, err
 	}
 	s := r.Selection
-	v := releaseBuildView{IntentID: r.ID, ProfileName: s.ProfileName, Configuration: s.Configuration, Phase: r.Phase, Repository: s.Request.Repository, Component: s.Component, Version: s.Version, Tag: s.Tag, SHA: s.Request.ExpectedSHA, PipelineID: s.Request.PipelineID, CandidateID: r.CandidateID, ReasonCode: r.ReasonCode, Reason: r.Reason, Actions: []string{}, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	v := releaseBuildView{IntentID: r.ID, ProfileName: s.ProfileName, Configuration: s.Configuration, Phase: r.Phase, Repository: s.Request.Repository, Component: s.Component, Version: s.Version, Tag: s.Tag, SHA: s.Request.ExpectedSHA, Branch: s.Request.Branch, Newer: []releaseSkippedView{}, PipelineID: s.Request.PipelineID, CandidateID: r.CandidateID, ReasonCode: r.ReasonCode, Reason: r.Reason, Actions: []string{}, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	if walk := s.Source.Walk; walk != nil {
+		v.HeadSHA, v.LookBack = walk.HeadSHA, walk.LookBack
+		for _, skip := range walk.Newer {
+			v.Newer = append(v.Newer, releaseSkippedView{SHA: skip.SHA, State: skip.State, Check: skip.Check, Conclusion: skip.Conclusion})
+		}
+	}
 	v.Catalog.State = "unavailable"
 	if r.Run != nil {
 		v.PipelineRunID, v.WorkRunID = r.Run.ID, r.Run.WorkRunID

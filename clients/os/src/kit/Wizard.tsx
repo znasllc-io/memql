@@ -143,6 +143,12 @@ export interface WizardProps {
   context?: Record<string, unknown>;
   className?: string;
   /**
+   * "none" puts the flow under the no-dividers rule (DESIGN.md rule 1): its
+   * records stand apart by their spacing rather than a line. A flow moves to
+   * it when it is worked on.
+   */
+  dividers?: "none";
+  /**
    * The arrangement, when it must not be measured: a test has no layout to
    * measure. Left alone it is two panes from `SPLIT_AT` pixels up.
    */
@@ -171,6 +177,7 @@ export function Wizard({
   children,
   context,
   className,
+  dividers,
   layout,
 }: WizardProps) {
   const column = useRef<HTMLElement>(null);
@@ -267,6 +274,7 @@ export function Wizard({
       ref={pane}
       className={className ? `os-deploy-pane os-wizard ${className}` : "os-deploy-pane os-wizard"}
       data-layout={split ? "split" : "stack"}
+      data-os-dividers={dividers}
       data-os-page-context={context ? JSON.stringify(context) : undefined}
     >
       <div className="os-deploy-scroll os-wizard-scroll">

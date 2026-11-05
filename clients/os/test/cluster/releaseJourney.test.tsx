@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
 import { readProfiles } from "../../src/apps/cluster/releases/assembly";
-import { readReleaseBuild, readReleaseBuilds } from "../../src/apps/cluster/releases/journey";
+import { readReleaseBuild, readReleaseBuilds, untestedSource } from "../../src/apps/cluster/releases/journey";
 import { runFromRow } from "../../src/apps/deployables/pipelines/rows";
 import { readTheBar, useFakeDate } from "../readTheBar";
 import { releaseResult } from "./releaseFixtures";
@@ -38,6 +38,45 @@ describe("guided release", () => {
     await screen.findByText("Build engine 0.25.0");
     expect(writes(f).map(c => c.name)).toEqual(["releasePrepareBuild", "releaseStartBuild"]);
     expect(f.state.calls.some(c => ["approve", "publish", "seal"].includes(c.kind))).toBe(false);
+  });
+  it("lets the source be checked again when no recent commit passed its checks", async () => {
+    const f = releaseJourneyFixture("new");
+    f.journey.untestedPrepare = "None of the newest 20 commits on main has passed its required checks: 2 running, 18 untested. Check the source again once a commit's checks pass.";
+    render(<ReleaseBrowser query={f.query} connected />);
+    await selectSource();
+    expect(screen.getByText(/picks the newest of the last 20 commits on main whose checks passed/)).toBeTruthy();
+    await press("Check source");
+    await screen.findByText(f.journey.untestedPrepare);
+    // Nothing was saved, so there is no request to look for and nothing locks.
+    expect(screen.queryByText(/may have been saved/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Read release requests" })).toBeNull();
+    f.journey.untestedPrepare = "";
+    await press("Check source");
+    await screen.findByRole("button", { name: "Start release build" });
+    expect(writes(f).map(c => c.name)).toEqual(["releasePrepareBuild", "releasePrepareBuild"]);
+  });
+  it("shows the commit it released and the newer commits checking the source passed over", async () => {
+    const f = releaseJourneyFixture(); f.skipped();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await screen.findByRole("button", { name: "Start release build" });
+    fireEvent.click(screen.getByRole("button", { name: /^Source / }));
+    await screen.findByText("Newest on main when checked");
+    expect(screen.getByText("ddddddd")).toBeTruthy();
+    const newer = screen.getByRole("list", { name: "Newer commits" });
+    expect(within(newer).getAllByRole("listitem").map(item => item.textContent)).toEqual(["eeeeeeeChecks running", "fffffffChecks failed", "1111111Superseded", "2222222Not tested"]);
+    expect(within(newer).getByTitle("MemQL / memql / push: failure").textContent).toBe("Checks failed");
+    expect(screen.getByText(/newest commit whose checks had passed/)).toBeTruthy();
+    expect(writes(f)).toEqual([]);
+  });
+  it("shows only the revision when the newest commit was released", async () => {
+    const f = releaseJourneyFixture();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await screen.findByRole("button", { name: "Start release build" });
+    fireEvent.click(screen.getByRole("button", { name: /^Source / }));
+    await screen.findByText(/keeps its recorded source/);
+    expect(screen.getByText("ddddddd")).toBeTruthy();
+    expect(screen.queryByText(/when checked/)).toBeNull();
+    expect(screen.queryByRole("list", { name: "Newer commits" })).toBeNull();
   });
   it("finds a saved request after a lost preparation reply without preparing again", async () => {
     const f = releaseJourneyFixture("new"); f.journey.lostPrepareReply = true;
@@ -187,6 +226,36 @@ describe("release progress boundary", () => {
     expect(() => readReleaseBuilds(releaseResult({ intents: [journey.build, journey.build] }))).toThrow(/conflicting/);
     expect(() => readReleaseBuild(releaseResult({ ...journey.build, catalog: { state: "sealed", digest: `sha256:${"7".repeat(64)}` } }))).toThrow(/approval/);
     expect(readReleaseBuild(releaseResult({ ...journey.build, catalog: undefined })).catalog.state).toBe("unavailable");
+  });
+  it("reads how a source was chosen and refuses a history that contradicts it", () => {
+    const f = releaseJourneyFixture(); f.skipped();
+    const chosen = readReleaseBuild(releaseResult(f.journey.build));
+    expect(chosen).toMatchObject({ branch: "main", headSha: "e".repeat(40), lookBack: 20 });
+    expect(chosen.newer.map(c => c.state)).toEqual(["pending", "failed", "cancelled", "missing"]);
+    const older: Record<string, unknown> = { ...f.journey.build };
+    for (const key of ["branch", "headSha", "lookBack", "newer"]) delete older[key];
+    expect(readReleaseBuild(releaseResult(older))).toMatchObject({ branch: "", headSha: "", lookBack: 0, newer: [] });
+    const newer = f.journey.build.newer;
+    for (const broken of [
+      { newer: [{ ...newer[0]!, state: "success" }, ...newer.slice(1)] },
+      { newer: [{ ...newer[0]!, state: "toString" }, ...newer.slice(1)] },
+      { newer: [...newer, { ...newer[1]! }] },
+      { newer: [...newer.slice(0, 3), { ...newer[3]!, sha: "d".repeat(40) }] },
+      { newer: [...newer.slice(0, 3), { ...newer[3]!, sha: "HEAD" }] },
+      { newer: newer.slice(1) },
+      { newer: [] },
+      { headSha: "" },
+      { headSha: "d".repeat(40), newer: [{ ...newer[0]!, sha: "d".repeat(40) }] },
+      { lookBack: 3 },
+      { lookBack: 4 },
+      { lookBack: 2.5 },
+    ]) expect(() => readReleaseBuild(releaseResult({ ...f.journey.build, ...broken }))).toThrow(/newer commits/);
+  });
+  it("tells a source check that found nothing to release from a lost reply", () => {
+    const sentence = "None of the newest 20 commits on main has passed its required checks: 20 untested. Check the source again once a commit's checks pass.";
+    expect(untestedSource(new Error(`releasePrepareBuild: MemQL engine failed to execute query. Details: release_source_untested: ${sentence}`))).toBe(sentence);
+    expect(untestedSource(new Error("Source check reply was lost"))).toBeNull();
+    expect(untestedSource(new Error("not_release_source_untested: a different code"))).toBeNull();
   });
   it("preserves assembly-only profiles and refuses ambiguous build inputs", () => {
     const f = releaseJourneyFixture();

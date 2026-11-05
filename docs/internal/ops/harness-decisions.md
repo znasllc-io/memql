@@ -3137,6 +3137,97 @@ release today and not `pull_request`, so reuse from a push turns on with the eng
 upgrade, and a pull request's results are reused only once that policy admits them.
 This change helps only after it ships in an engine release.
 
+## A release takes the newest commit whose run passed (2026-11-05)
+
+**Trigger.** The owner pushes to `main` directly, and `main`'s required check,
+`MemQL / memql / push`, is reported only by a push run, which takes two to three
+hours. `releasePrepareBuild` released the tip of `main` and refused while the
+tip's run was going, so `main` had to sit still for a release
+([design record](../../superpowers/specs/2026-11-05-owner-pushes-main-design.md), D6).
+The connected workflow is in
+[release-cutting.md](../../public/operate/release-cutting.md#which-commit-a-release-takes).
+
+**Chosen path.** When a release request names no commit, which only preparation's
+first read does, `inspectReleaseBuild` (`component/pipelinerun/release_build.go`)
+asks `WalkReleaseSource` (`component/identity/githubapp/release_source.go`) for
+the newest commit worth proving, then proves that commit with the unchanged
+`ObserveReleaseSource`. The walk reads the head and its rules once, then
+first-parent history from the head (a 100-commit history read, read again from
+any first parent it misses), and examines at most `releaseSourceLookBack` (20)
+commits, listing each one's latest runs per required check name. It takes the
+first commit the proof's own verdict accepts (`releaseCheckVerdict`, shared, so
+the two cannot disagree), and records every newer one as `pending`, `failed`,
+`cancelled` or `missing` (`releaseCheckState`: a commit that can no longer pass
+outranks one that may still). A request bound to a commit never walks, so every
+later gate re-proves the commit the saved release chose.
+
+- **Evidence used.** GitHub's branch head, applied rules and classic protection,
+  first-parent history and latest check runs. Nothing is written.
+- **A merge with no required check at all** is the one commit not passed over: it
+  is offered to the proof, whose merged pull request fallback alone can judge it.
+- **What is recorded.** `pl.ReleaseBuildSource.Walk` (head, bound, newer commits)
+  inside the release's immutable selection, so the digest covers it. Preparation
+  keeps the first, unbound inspection's record and copies it onto the bound
+  inspection's source (`prepareBuildAt`); `selectionWalk` validates it on every
+  read. A walk that passed nothing over records nothing (`Walk` is `omitempty`),
+  so a release of a green head encodes exactly as before.
+- **What survives a retry or a replica change.** Only a saved selection. A
+  refusal saves nothing and the next **Check source** walks afresh. Preparing
+  again while nothing newer has passed takes the same commit and finds the same
+  intent (`buildRequestID` does not cover the walk), so it keeps the first record
+  even when `main` has moved; a newer commit that passed is a new release.
+
+**Alternatives rejected.** Stopping at the first commit that is not green: the
+inner commits of a multi-commit push and superseded heads never pass, so a
+release would stop at nearly every push. Walking every parent (`git log`
+order): it would take a merged branch's commits, which were never `main`.
+Walking on past a pick the proof refuses: the walk read it as green and the
+proof found otherwise, so an older pick would hide why. A history read only as
+long as the look back: a merge of a longer branch would end the walk at the
+merge.
+
+**Fallback and stop conditions.** Nothing green within the bound is the typed
+`pl.ReleaseSourceUntestedError`, which preparation answers as the refusal
+`release_source_untested` with its counts ("2 running, 1 failed, 17 untested").
+Evidence the walk cannot read stops it with an error and picks nothing: a
+truncated or changing listing, a run not bound to its commit and an App, the
+required name reported by another App, two latest runs for one requirement, or a
+history answer that does not start where it asked. A walk whose record does not
+describe its choice (another repository, branch or bound; a pick it passed over)
+is refused before any proof. The walk runs inside preparation's two-minute
+budget, at about one GitHub call per commit examined plus three.
+
+**Invariants.** A release is only ever of a commit `ObserveReleaseSource`
+proved. The recorded newer commits never include the released one.
+
+**Regression tests.** `component/identity/githubapp/release_source_walk_test.go`
+(first parents, the bound, every state, the merge fallback, the re-read, every
+abort, and `TestReleaseCheckStateAgreesWithTheProofsVerdict`);
+`TestReleaseBuildInspectionWalksOnlyWhenUnbound` and its neighbours in
+`component/pipelinerun/release_build_test.go`, with
+`TestReleaseSourceLookBackMatchesTheOS`; `component/pipelines/release_source_walk_test.go`;
+`integrations/release/build_walk_test.go`; and, db-gated,
+`TestReleaseBuildSavesTheWalkThatChoseItsSource`,
+`TestReleaseBuildOfAGreenHeadRecordsNoWalk`,
+`TestReleaseBuildRefusesAnUntestedSourceWithoutSaving` and
+`TestReleaseBuildRefusesAWalkThatPassedItsOwnCommitOver`
+(`integrations/release/build_db_test.go`); the OS journey in
+`clients/os/test/cluster/releaseJourney.test.tsx`.
+
+**Unverified and known limits.** One read-only walk ran against `znasllc-io/memql`
+on 2026-11-04, outside the engine and with a person's GitHub token rather than the
+App's: it passed over a running head and a failed commit and took the next one,
+which the proof accepted (2.7 s for the walk, 2.5 s for the proof). No walk has
+run inside an engine, so the installation token's reach to the history read is
+assumed from the proof's own GraphQL read, which it already makes. The tests use
+a fake hub. An intermediate `--no-ff` merge with no run, inside a multi-commit
+push, is offered to the merged pull request fallback, which refuses it, so
+preparation reports that refusal until a newer commit passes. An engine from
+before this change decodes saved journals strictly and refuses a release whose
+walk passed a commit over, and the release list that reads it: during a rolling
+upgrade until the old replicas are gone, and after rolling the engine back for
+as long as such a release is among those the list reads.
+
 ## A release publishes in one call (2026-11-01)
 
 `cockpit/v0.21.1` (41 files, 736 MB, engine 0.31.9, 2026-10-30) could not finish
