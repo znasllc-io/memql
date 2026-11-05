@@ -1,0 +1,18 @@
+Join us for an evening of making
+
+When: Thursday 12 March, 6:30 pm
+
+Where: 1 Example Street, Springfield
+
+Come along for an hour of good company. Spaces are limited, so please let us know if you can join.
+
+Reserve a place
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

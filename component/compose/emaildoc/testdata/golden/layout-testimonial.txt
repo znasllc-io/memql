@@ -1,0 +1,18 @@
+"It does exactly what it promises, and it is a pleasure to use."
+
+Alex Example
+
+Read more stories
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

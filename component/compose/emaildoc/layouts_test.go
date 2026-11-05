@@ -33,6 +33,13 @@ var builtinCatalog = []struct {
 	{"builtin:product-focus", "Product focus", "One product with its picture beside its name, text and button, and a quote below.", "Meet the Acme Max", "Built for the bigger jobs."},
 	{"builtin:offer", "Offer", "A headline, a short text, a highlighted code, one button, small print and social links.", "A little something for you", "Use your code at checkout."},
 	{"builtin:newsletter", "Newsletter", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links.", "This month at Acme", "Three stories worth a read."},
+	{"builtin:steps", "Steps", "A headline, a short introduction and two to six numbered steps, each with a title and text, with a button and a reply.", "How to get started", "A few simple steps to begin."},
+	{"builtin:picture-steps", "Picture steps", "A headline and two to four rows, each with a picture beside its text.", "Follow along, step by step", "See how it works, one picture at a time."},
+	{"builtin:questions", "Questions", "A headline, a short introduction and two to six questions, each with its answer, with a reply.", "Your questions, answered", "The answers you asked for."},
+	{"builtin:event", "Event", "A picture, a headline, a tinted box with when and where, a short text and one button.", "You are invited", "Save the date."},
+	{"builtin:testimonial", "Testimonial", "A highlighted quote, the person who said it with a photo, one button and social links.", "What our customers say", "A few kind words."},
+	{"builtin:review-request", "Review request", "A headline, a product picture, a short text and one button.", "How did we do?", "Tell us what you think."},
+	{"builtin:thank-you", "Thank you", "A headline, a short text, a tinted box of tips, a reply and a signature.", "Thank you", "We are glad you are here."},
 }
 
 // builtinTheme is the neutral example brand's palette and fonts, which the
@@ -277,9 +284,16 @@ var builtinRoles = map[string]string{
 	"builtin:product-launch": "logo=brand product=content eyebrow=content headline=content features=content cta=content social=brand footer=brand",
 	"builtin:product-grid": "logo=brand headline=content intro=content row=content product-a-picture=content product-a-name=content product-a-line=content product-a-button=content " +
 		"product-b-picture=content product-b-name=content product-b-line=content product-b-button=content social=brand footer=brand",
-	"builtin:product-focus": "logo=brand focus=content focus-picture=content focus-name=content focus-text=content focus-button=content quote=content footer=brand",
-	"builtin:offer":         "logo=brand offer-headline=content offer-text=content code=content cta=content fine-print=content social=brand footer=brand",
-	"builtin:newsletter":    "logo=brand intro=content story=content story-picture=content story-title=content story-excerpt=content story-link=content social=brand footer=brand",
+	"builtin:product-focus":  "logo=brand focus=content focus-picture=content focus-name=content focus-text=content focus-button=content quote=content footer=brand",
+	"builtin:offer":          "logo=brand offer-headline=content offer-text=content code=content cta=content fine-print=content social=brand footer=brand",
+	"builtin:newsletter":     "logo=brand intro=content story=content story-picture=content story-title=content story-excerpt=content story-link=content social=brand footer=brand",
+	"builtin:steps":          "logo=brand headline=content intro=content step=content step-number=content step-title=content step-text=content cta=content reply=brand reply-heading=brand reply-button=brand reply-note=brand footer=brand",
+	"builtin:picture-steps":  "logo=brand headline=content row=content row-picture=content row-text=content footer=brand",
+	"builtin:questions":      "logo=brand headline=content intro=content qa=content qa-question=content qa-answer=content reply=brand reply-heading=brand reply-button=brand reply-note=brand footer=brand",
+	"builtin:event":          "logo=brand picture=content headline=content details=content details-when=content details-where=content text=content cta=content footer=brand",
+	"builtin:testimonial":    "logo=brand quote=content person=content person-photo=content person-name=content cta=content social=brand footer=brand",
+	"builtin:review-request": "logo=brand headline=content product=content text=content cta=content footer=brand",
+	"builtin:thank-you":      "logo=brand headline=content text=content tips=content tips-title=content tips-text=content reply=brand reply-heading=brand reply-button=brand reply-note=brand signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand footer=brand",
 }
 
 func TestLayoutsSplitBrandAndContent(t *testing.T) {
@@ -358,6 +372,13 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 		"builtin:newsletter": "image_missing:logo image_missing:story-picture link_missing:story-link " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:steps":          "image_missing:logo link_missing:cta link_missing:reply-button link_missing:footer",
+		"builtin:picture-steps":  "image_missing:logo image_missing:row-picture link_missing:footer",
+		"builtin:questions":      "image_missing:logo link_missing:reply-button link_missing:footer",
+		"builtin:event":          "image_missing:logo image_missing:picture link_missing:cta link_missing:footer",
+		"builtin:testimonial":    "image_missing:logo image_missing:person-photo link_missing:cta link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:review-request": "image_missing:logo image_missing:product link_missing:cta link_missing:footer",
+		"builtin:thank-you":      "image_missing:logo link_missing:reply-button image_missing:signature-photo image_missing:signature-name link_missing:footer",
 	}
 	for _, info := range Layouts() {
 		t.Run(info.ID, func(t *testing.T) {

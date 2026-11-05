@@ -1,0 +1,24 @@
+Thank you
+
+We are grateful for your order. It means a great deal to a small team like ours.
+
+Getting the most from it
+
+A few simple tips to help you enjoy it from the first day.
+
+Got a question about this?
+
+Write to us
+
+We read every reply.
+
+Founder of Acme
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

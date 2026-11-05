@@ -1,0 +1,192 @@
+{
+  "subject": "What our customers say",
+  "preheader": "A few kind words.",
+  "layout": "builtin:testimonial",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "quote",
+      "type": "highlight",
+      "role": "content",
+      "padding": [
+        32,
+        24,
+        24,
+        24
+      ],
+      "text": "\"It does exactly what it promises, and it is a pleasure to use.\"",
+      "size": 21.3,
+      "lineHeight": 28,
+      "gap": 0,
+      "color": "accent",
+      "background": "tint",
+      "italic": true,
+      "font": "body"
+    },
+    {
+      "id": "person",
+      "type": "columns",
+      "role": "content",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "maxWidth": 360,
+      "columns": [
+        {
+          "width": 24,
+          "blocks": [
+            {
+              "id": "person-photo",
+              "type": "image",
+              "role": "content",
+              "padding": [
+                0,
+                0,
+                24,
+                0
+              ],
+              "alt": "Photo",
+              "width": 64,
+              "height": 64
+            }
+          ]
+        },
+        {
+          "width": 72,
+          "blocks": [
+            {
+              "id": "person-name",
+              "type": "text",
+              "role": "content",
+              "padding": [
+                20,
+                0,
+                24,
+                12
+              ],
+              "text": "Alex Example",
+              "size": 16,
+              "lineHeight": 24,
+              "align": "left",
+              "weight": 700
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "type": "button",
+      "role": "content",
+      "padding": [
+        8,
+        0,
+        16,
+        0
+      ],
+      "size": 20.4,
+      "color": "accent",
+      "width": 306,
+      "label": "Read more stories",
+      "paddingY": 11
+    },
+    {
+      "id": "social",
+      "type": "social",
+      "role": "brand",
+      "padding": [
+        0,
+        24,
+        15,
+        24
+      ],
+      "links": [
+        {
+          "network": "Instagram",
+          "href": ""
+        },
+        {
+          "network": "YouTube",
+          "href": ""
+        },
+        {
+          "network": "LinkedIn",
+          "href": ""
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME\n123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ],
+      "lineGap": 16
+    }
+  ]
+}

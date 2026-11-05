@@ -1114,7 +1114,7 @@ export interface ComposeMaterializeArgs {
   format: string;
   /** email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent. */
   outputKind?: string;
-  /** builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
+  /** one of the built-in layouts (builtin:<name>), or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
   layoutId?: string;
   /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
@@ -1606,7 +1606,7 @@ QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInbox
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
 };
 
-/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId. */
+/** The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId. */
 export interface EmailLayoutsArgs {
   accountId: string;
   includeArchived?: boolean;

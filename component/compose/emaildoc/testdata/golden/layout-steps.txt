@@ -1,0 +1,26 @@
+How to get started
+
+Follow these steps and you will be up and running in minutes.
+
+1
+
+Create your account
+
+It takes a minute and needs only your email address.
+
+Get started
+
+Got a question about this?
+
+Write to us
+
+We read every reply.
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

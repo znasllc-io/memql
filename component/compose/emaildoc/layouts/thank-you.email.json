@@ -1,0 +1,246 @@
+{
+  "subject": "Thank you",
+  "preheader": "We are glad you are here.",
+  "layout": "builtin:thank-you",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "headline",
+      "type": "heading",
+      "role": "content",
+      "padding": [
+        32,
+        24,
+        8,
+        24
+      ],
+      "text": "Thank you",
+      "size": 26.7,
+      "lineHeight": 29.37,
+      "color": "primary",
+      "align": "center",
+      "weight": 700,
+      "font": "heading"
+    },
+    {
+      "id": "text",
+      "type": "text",
+      "role": "content",
+      "padding": [
+        8,
+        40,
+        24,
+        40
+      ],
+      "text": "We are grateful for your order. It means a great deal to a small team like ours.",
+      "size": 16,
+      "lineHeight": 24,
+      "align": "center"
+    },
+    {
+      "id": "tips",
+      "type": "section",
+      "role": "content",
+      "background": "tint",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "tips-title",
+          "type": "heading",
+          "role": "content",
+          "padding": [
+            0,
+            0,
+            8,
+            0
+          ],
+          "text": "Getting the most from it",
+          "size": 21.3,
+          "lineHeight": 24,
+          "color": "primary",
+          "align": "center",
+          "weight": 700,
+          "font": "heading"
+        },
+        {
+          "id": "tips-text",
+          "type": "text",
+          "role": "content",
+          "padding": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "text": "A few simple tips to help you enjoy it from the first day.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "id": "reply",
+      "type": "section",
+      "role": "brand",
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "reply-heading",
+          "type": "heading",
+          "padding": [
+            0,
+            0,
+            5.35,
+            0
+          ],
+          "text": "Got a question about this?",
+          "size": 21.3,
+          "lineHeight": 21.3,
+          "color": "secondary",
+          "italic": true,
+          "weight": 700
+        },
+        {
+          "id": "reply-button",
+          "type": "button",
+          "size": 20.3,
+          "color": "primary",
+          "width": 305,
+          "label": "Write to us",
+          "paddingY": 8
+        },
+        {
+          "id": "reply-note",
+          "type": "text",
+          "text": "We read every reply.",
+          "size": 12,
+          "lineHeight": 22.4,
+          "align": "center",
+          "italic": true
+        }
+      ]
+    },
+    {
+      "id": "signature",
+      "type": "columns",
+      "role": "brand",
+      "inset": [
+        0,
+        39.81606744178767,
+        0,
+        39.81606744178767
+      ],
+      "maxWidth": 473,
+      "columns": [
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-photo",
+              "type": "image",
+              "alt": "Founder photo",
+              "width": 183,
+              "height": 191
+            }
+          ]
+        },
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-space",
+              "type": "spacer",
+              "height": 70.4
+            },
+            {
+              "id": "signature-name",
+              "type": "image",
+              "alt": "Founder signature",
+              "width": 184,
+              "height": 32
+            },
+            {
+              "id": "signature-title",
+              "type": "text",
+              "text": "Founder of Acme",
+              "size": 14,
+              "lineHeight": 16,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME\n123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ],
+      "lineGap": 16
+    }
+  ]
+}

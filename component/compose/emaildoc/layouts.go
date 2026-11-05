@@ -79,6 +79,13 @@ var builtinLayouts = [...]struct {
 	{"builtin:product-focus", "Product focus", "One product with its picture beside its name, text and button, and a quote below.", "Products", []string{"quote"}, nil},
 	{"builtin:offer", "Offer", "A headline, a short text, a highlighted code, one button, small print and social links.", "Promotions", []string{"fine-print"}, nil},
 	{"builtin:newsletter", "Newsletter", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links.", "News", nil, map[string]RepeatRange{"story": {Min: 1, Max: 3}}},
+	{"builtin:steps", "Steps", "A headline, a short introduction and two to six numbered steps, each with a title and text, with a button and a reply.", "Guides", []string{"cta"}, map[string]RepeatRange{"step": {Min: 2, Max: 6}}},
+	{"builtin:picture-steps", "Picture steps", "A headline and two to four rows, each with a picture beside its text.", "Guides", nil, map[string]RepeatRange{"row": {Min: 2, Max: 4}}},
+	{"builtin:questions", "Questions", "A headline, a short introduction and two to six questions, each with its answer, with a reply.", "Guides", []string{"intro"}, map[string]RepeatRange{"qa": {Min: 2, Max: 6}}},
+	{"builtin:event", "Event", "A picture, a headline, a tinted box with when and where, a short text and one button.", "Events", []string{"text"}, nil},
+	{"builtin:testimonial", "Testimonial", "A highlighted quote, the person who said it with a photo, one button and social links.", "Feedback", nil, nil},
+	{"builtin:review-request", "Review request", "A headline, a product picture, a short text and one button.", "Feedback", nil, nil},
+	{"builtin:thank-you", "Thank you", "A headline, a short text, a tinted box of tips, a reply and a signature.", "Feedback", nil, nil},
 }
 
 // Layouts lists the built-in layouts in the order of the catalogue, which
