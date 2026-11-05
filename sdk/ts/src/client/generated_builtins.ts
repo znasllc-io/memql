@@ -1367,7 +1367,7 @@ export interface CreateGoalArgs {
   accountIds?: string[];
   /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
   ceilings?: Record<string, unknown>;
-  /** The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown. */
+  /** The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer, email. Empty when unknown. */
   requestedVia?: string;
 }
 

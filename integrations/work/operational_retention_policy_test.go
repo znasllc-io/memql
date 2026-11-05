@@ -128,6 +128,7 @@ func TestRetentionPredicatesSelectOnlyWhatTheirConceptsDeclare(t *testing.T) {
 		{goalConcept, "requestedVia", []string{"pipeline"}, map[string]string{
 			"": notAPipelines, "api": notAPipelines, "ask": notAPipelines, "nexus": notAPipelines,
 			"responsibility": notAPipelines, "library": notAPipelines, "materializer": notAPipelines, "agent": notAPipelines,
+			"email": notAPipelines,
 		}},
 		{goalConcept, "origin", []string{"system"}, map[string]string{
 			"user":           "a person's goal, never the driver's",

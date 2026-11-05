@@ -80,7 +80,7 @@ builtin createGoal {
   input         object   @description("The typed input object: the shape the chosen template's args declare.")
   accountIds    []string @description("Optional account tags -- a record of who the work is for, never a visibility scope.")
   ceilings      object   @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
-  requestedVia  string   @description("The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.")
+  requestedVia  string   @description("The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer, email. Empty when unknown.")
 }
 
 /// Ask before moving a Computer-selected goal to the Workbench. No work executes until approval.

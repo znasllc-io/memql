@@ -1835,7 +1835,7 @@ type CreateGoalArgs struct {
 	AccountIds []string
 	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
 	Ceilings map[string]any
-	// The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer. Empty when unknown.
+	// The surface the goal arrived through: api, ask, nexus, responsibility, library, materializer, email. Empty when unknown.
 	RequestedVia string
 }
 

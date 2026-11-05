@@ -312,10 +312,10 @@ func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any,
 // error names the concept; refusing at the door names the argument.
 func validRequestedVia(v string) error {
 	switch v {
-	case "", "api", "ask", "nexus", "responsibility", "library", "materializer", "agent":
+	case "", "api", "ask", "nexus", "responsibility", "library", "materializer", "agent", "email":
 		return nil
 	}
-	return fmt.Errorf("work: requestedVia %q is not one of api, ask, nexus, responsibility, library, materializer, agent", v)
+	return fmt.Errorf("work: requestedVia %q is not one of api, ask, nexus, responsibility, library, materializer, agent, email", v)
 }
 
 // goalRouting is the routing choice a goal owned by owner, opened on ctx,

@@ -8986,6 +8986,7 @@
           "agent",
           "api",
           "ask",
+          "email",
           "library",
           "materializer",
           "nexus",

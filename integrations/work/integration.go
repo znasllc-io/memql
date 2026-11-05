@@ -340,7 +340,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"input":           "object -- the typed input object the chosen template's args declare",
 				"accountIds":      "[]string -- account tags; a record of who the work is for, never a visibility scope",
 				"ceilings":        "object -- {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents}; a zero is 'unset', never 'nothing allowed'",
-				"requestedVia":    "string -- api | ask | nexus | responsibility | library | materializer; empty when unknown",
+				"requestedVia":    "string -- api | ask | nexus | responsibility | library | materializer | email; empty when unknown",
 				"source":          "string -- human-chosen source or route; child goals inherit their parent's choice",
 				"level":           "string -- fast | strong | reasoning",
 				"destination":     "string -- auto | workbench | computer; child goals inherit the parent destination",
