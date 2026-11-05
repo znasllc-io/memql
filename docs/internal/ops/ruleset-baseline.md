@@ -42,28 +42,81 @@ baseline exists so that "quietly" stops being a property the repository has.
 
 ---
 
-## Direct pushes to `main` (2026-11-02)
+## Only the owner moves `main`, and pull requests are off (2026-11-05)
+
+On 2026-11-05 the owner asked for `main` to be theirs alone, with no pull
+requests, on the repositories that matter: `memql`, `memql-znas`,
+`memql-project` and `memql-fylo`. On `memql-fylo`, Jesus Mendivil
+(`jmendivilznas`), its main developer, moves `main` too
+([design record](../../superpowers/specs/2026-11-05-owner-pushes-main-design.md)).
+`memql-casera` (no pipeline, no recent commits) and `memql-cockpit` (its own
+pull-request rules; Cockpit's source now lives in `memql/cockpit`) were left as
+they were.
+
+Each repository holds two rulesets, because a bypass covers every rule in its
+ruleset:
+
+| Repository | `default branch` ruleset | Required check | Bypass, mode `always` | `no force push` ruleset (no bypass) |
+|---|---|---|---|---|
+| `memql` | `26357803` | `MemQL / memql / push` (App 4822538) | user `znas-io` (31381226) | `26357817` |
+| `memql-znas` | `21184523` | none | user `znas-io` | `26357708` |
+| `memql-project` | `26357878` | none | user `znas-io` | `26357902` |
+| `memql-fylo` | `26357929` | none | users `znas-io` and `jmendivilznas` (276168321) | `26357936` |
+
+Every `default branch` ruleset carries `deletion`, `non_fast_forward`,
+`required_status_checks` and `update`. Every repository has
+`has_pull_requests: false`.
+
+- **`update` (Restrict updates) is what makes it "only the owner".** Only a
+  bypass actor can move `main`. Before it, anyone with write access could push a
+  commit that carried the required check, and on the three repositories whose
+  check list is empty, any commit at all. Write access still covers Jesus on
+  every repository and the apps that hold `contents: write`; they can push other
+  branches, but not `main`.
+- **The bypass names users, not a role.** It used to be the repository admin
+  role, which meant anyone ever made an admin. GitHub accepts a single user as a
+  bypass actor since May 2026. A bypass follows the account, so every session
+  that runs under the owner's GitHub login bypasses too.
+- **`required_status_checks` stays although the owner bypasses it.** Release
+  preparation reads the check it names to find the newest commit whose full
+  push run passed. On `memql` that is `MemQL / memql / push`, the check only a
+  push to `main` produces. The other three name none; the audit warns about it,
+  and a release from them is refused until their push check is added.
+- **Nobody force-pushes or deletes `main`**, the owner included: `no force push`
+  has no bypass at all.
+- **Pull requests are off.** The Pull requests tab is hidden and nobody can open
+  one. Existing pull requests are hidden, not closed or deleted, and their
+  branches stay. Dependabot proposes updates as pull requests, so dependency
+  bumps are now pushed by the owner. When pull requests were turned off,
+  `memql-znas#297` (Jesus's znas.io release 3) was still open; its branch
+  `epic/znas-io-release-3-services-memql` remains and can be merged into `main`
+  by the owner.
+
+The `ruleset-drift` job asserts `memql`'s `26357803`, `update` included, and
+`ruleset-no-force-push` asserts `26357817`. Neither reads bypass actors: the
+public API it uses does not return them.
+
+**To undo**, the 2026-11-05 configuration's previous state was the 2026-11-02 one
+below: re-send each `default branch` ruleset with its rules minus `update` and
+`bypass_actors` set to `[{"actor_id": 5, "actor_type": "RepositoryRole",
+"bypass_mode": "always"}]` (a ruleset `PUT` replaces the whole rules array, so
+send every rule), and `PATCH` the repository with `has_pull_requests: true`.
+
+## Direct pushes to `main` (2026-11-02, superseded on 2026-11-05)
 
 The owner removed the pull request requirement on `memql`, `memql-znas`,
 `memql-project` and `memql-fylo` on 2026-11-02, so a change lands by pushing to
 `main` ([design record](../../superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
 On `memql` the rulesets were recreated, which is why their ids changed. Each
-repository now holds two, because a bypass covers every rule in its ruleset:
+repository then held two:
 
 | Ruleset on `memql` | Rules | Bypass |
 |---|---|---|
 | `26357803`, `default branch` | `deletion`, `non_fast_forward`, `required_status_checks` | repository admin, always |
 | `26357817`, `no force push` | `deletion`, `non_fast_forward` | none |
 
-An admin, which is what every session runs as, can push to `main` past the required
-check, and nobody can force-push it or delete it. Both are asserted, by the
-`ruleset-drift` and `ruleset-no-force-push` jobs.
-
-**Open, and warned about on every audit:** the required check rule names no check on
-any of the four, so GitHub requires none. The train's code still requires a passing run,
-but `scripts/release/release-engine.sh` refuses to publish until the rule names exactly
-one. Add `MemQL / memql`, `MemQL / znas` and `MemQL / memql-project`, from the app
-`memql-for-znas-llc` (4822538). `memql-fylo` has no pipeline reporting a check yet.
+An admin could push to `main` past the required check, and nobody could
+force-push it or delete it.
 
 ## Ruleset 16630577 — `default` (replaced, 2026-11-02)
 
