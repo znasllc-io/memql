@@ -301,10 +301,12 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 // cancel.go), and a step handed to an app is one step that can run for an
 // hour: without this its boundary is the end of the session, and the app keeps
 // working on a goal somebody closed. So while the session runs, its run's flag
-// is read every appSessionCancelPoll with the read a boundary makes
-// (automations.RunCancelRequested), and a set flag cancels the session's
-// context with the person's Stop as its cause -- which is how a session is
-// stopped: the runner's Wait asks the machine to stop when its caller gives up.
+// is read with the read a boundary makes (automations.RunCancelRequested): once
+// as the session starts, so a run stopped while its step waited for a machine
+// stops its session at once, and every appSessionCancelPoll after. A set flag
+// cancels the session's context with the person's Stop as its cause, which is
+// how a session is stopped: the runner's Wait asks the machine to stop when
+// its caller gives up.
 //
 // THE RUN IS THE ONE THE HANDOVER NAMES, which the router took from the run
 // context. A session that names none has no flag to read, and a node with no
@@ -329,27 +331,25 @@ func (d *AppSessionDelegate) watchRunCancel(ctx context.Context, h memqlengine.A
 		defer close(gone)
 		defer stopTicks()
 		for {
+			asked, by, err := automations.RunCancelRequested(watchCtx, d.engine, runId)
+			if watchCtx.Err() != nil {
+				return
+			}
+			switch {
+			case err != nil:
+				d.logger.Debug("app session: could not read whether its run was cancelled; asking again at the next tick",
+					"run_id", runId, "step_id", h.StepId, "app", h.AppId, "error", err)
+			case asked:
+				d.logger.Info("app session: its run was cancelled; stopping the session",
+					"run_id", runId, "step_id", h.StepId, "app", h.AppId, "cancelled_by", by)
+				stop(&memqlengine.WorkCancelledError{By: by})
+				return
+			}
 			select {
 			case <-watchCtx.Done():
 				return
 			case <-ticks:
 			}
-			asked, by, err := automations.RunCancelRequested(watchCtx, d.engine, runId)
-			if watchCtx.Err() != nil {
-				return
-			}
-			if err != nil {
-				d.logger.Debug("app session: could not read whether its run was cancelled; asking again at the next tick",
-					"run_id", runId, "step_id", h.StepId, "app", h.AppId, "error", err)
-				continue
-			}
-			if !asked {
-				continue
-			}
-			d.logger.Info("app session: its run was cancelled; stopping the session",
-				"run_id", runId, "step_id", h.StepId, "app", h.AppId, "cancelled_by", by)
-			stop(&memqlengine.WorkCancelledError{By: by})
-			return
 		}
 	}()
 	return func() {

@@ -420,6 +420,22 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			if stopped {
 				return result, &runCancelled{}
 			}
+			// A RUN WITH NO OWNING GOAL HAS NO OWNED STOP RECEIPT, and a step
+			// that runs whole elsewhere fails in flight when somebody stops its
+			// run: an app session stops on its run's flag
+			// (integrations/agent/worker). So the flag is read again, as the
+			// next boundary would read it. A stopped run is not a failed step,
+			// and a retry would only start the stopped work again. The row
+			// decides, not the error, whose type a remote hop does not keep.
+			if asked, by := run.journal.cancelRequested(ctx, exec.ID); asked {
+				if result != nil {
+					e.recordStep(ctx, run, step, result)
+				}
+				if failure := requiredJournalError(ctx); failure != nil {
+					return result, failure
+				}
+				return result, &runCancelled{by: by}
+			}
 		}
 		if result != nil && !isHumanWait(err) && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead

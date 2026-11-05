@@ -267,8 +267,12 @@ func TestDelegateStampsNothingWithoutAChildRun(t *testing.T) {
 	if out.ChildRunId != "" {
 		t.Fatalf("ChildRunId = %q with no journal", out.ChildRunId)
 	}
-	if len(stamper.queries) != 0 {
-		t.Fatalf("nothing may be stamped when there is no child run: %v", stamper.queries)
+	// A stamp is a write. The session's read of its run's cancel flag is not
+	// one (TestAppSessionStopsWhenItsRunIsCancelled).
+	for _, q := range stamper.queries {
+		if strings.HasPrefix(q, "mutation ") {
+			t.Fatalf("nothing may be stamped when there is no child run: %v", stamper.queries)
+		}
 	}
 }
 
@@ -897,10 +901,10 @@ func TestARepairRecordingDoesNotInheritTheReplaysProcedure(t *testing.T) {
 // TestAppSessionStopsWhenItsRunIsCancelled. Cancelling a goal flags its runs,
 // and a run notices at its next step boundary -- but a step handed to an app is
 // ONE step, and a session can run for an hour, so its boundary is the end of
-// the session. While the session runs, its run's flag is read every five
-// seconds with the read a boundary makes, and a set flag stops the session: the
-// context it was opened under is cancelled, which is how the runner asks the
-// machine to stop.
+// the session. While the session runs, its run's flag is read as it starts and
+// every five seconds after, with the read a boundary makes, and a set flag
+// stops the session: the context it was opened under is cancelled, which is
+// how the runner asks the machine to stop.
 func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 	handover := memqlengine.AppSessionHandover{
 		ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "composeEmail", Prompt: "write the email",
@@ -912,6 +916,9 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 			t.Fatalf("the watcher reads its run every %v, want every 5s", every)
 		}
 		x.app.waitStarted(t)
+		if x.run.read(t) {
+			t.Fatal("the session's first read saw its run stopped before anybody stopped it")
+		}
 
 		x.run.cancelled.Store(true)
 		for second := 1; second <= 6; second++ {
@@ -950,6 +957,9 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 		x := startCancelWatch(t, handover)
 		x.clock.waitTicker(t)
 		x.app.waitStarted(t)
+		if x.run.read(t) {
+			t.Fatal("the fixture's run answered cancelled")
+		}
 
 		reads := 0
 		for second := 1; second <= 20; second++ {
@@ -961,7 +971,7 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 			}
 		}
 		if reads != 4 {
-			t.Fatalf("%d reads in 20 seconds, want one every 5 seconds", reads)
+			t.Fatalf("%d reads in 20 seconds after the first, want one every 5 seconds", reads)
 		}
 		// The fourth tick was taken, so the third read was acted on: a session
 		// nobody asked to stop is still running.
@@ -979,18 +989,16 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 	})
 
 	t.Run("a read that fails stops nothing and is asked again at the next tick", func(t *testing.T) {
-		x := startCancelWatch(t, handover)
+		x := startCancelWatch(t, handover, func(x *cancelWatch) { x.run.failing.Store(true) })
 		x.clock.waitTicker(t)
 		x.app.waitStarted(t)
 
-		x.run.failing.Store(true)
-		for round := 1; round <= 2; round++ {
-			if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
-				t.Fatalf("round %d: the watcher took %d ticks, want 1 -- a failed read must not end the watch", round, taken)
-			}
-			x.run.read(t)
+		x.run.read(t)
+		if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
+			t.Fatalf("the watcher took %d ticks after a failed read, want 1 -- a failed read must not end the watch", taken)
 		}
-		// The second tick was taken, so the first failed read was acted on.
+		x.run.read(t)
+		// The tick was taken, so the first failed read was acted on.
 		if err := x.app.ctx.Err(); err != nil {
 			t.Fatalf("a failed read cancelled the session: %v", err)
 		}
@@ -1023,6 +1031,7 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 		})
 		x.clock.waitTicker(t)
 		x.app.waitStarted(t)
+		x.run.read(t)
 
 		x.run.cancelled.Store(true)
 		if taken := x.clock.advance(t, 5*time.Second); taken != 1 {
@@ -1036,6 +1045,30 @@ func TestAppSessionStopsWhenItsRunIsCancelled(t *testing.T) {
 		if !errors.As(end.err, &stopped) || !errors.Is(end.err, context.Canceled) || errors.As(end.err, &moved) {
 			t.Fatalf("RunStep = %v, want only the person's Stop, read as a cancellation", end.err)
 		}
+	})
+
+	// A run stopped before its session opened -- while the step waited for a
+	// machine, say -- must not get five seconds of work: the read the session
+	// starts with stops it, before any tick.
+	t.Run("a session opened on an already-stopped run stops at once", func(t *testing.T) {
+		x := startCancelWatch(t, handover, func(x *cancelWatch) { x.run.cancelled.Store(true) })
+		x.clock.waitTicker(t)
+		x.app.waitStarted(t)
+		if !x.run.read(t) {
+			t.Fatal("the session's first read did not see its run stopped")
+		}
+		if at := x.app.waitStopped(t); at != 0 {
+			t.Fatalf("the app saw its context cancelled at %v, want at once", at)
+		}
+		end := x.ended(t)
+		var stopped *memqlengine.WorkCancelledError
+		if !errors.As(end.err, &stopped) || !errors.Is(end.err, context.Canceled) {
+			t.Fatalf("RunStep = %v, want the person's Stop, read as a cancellation", end.err)
+		}
+		if run, step := x.writes.closed(); run != "cancelled" || step != "cancelled" {
+			t.Fatalf("the session's child run closed %q and its step %q, want both cancelled", run, step)
+		}
+		x.clock.requireWatcherGone(t)
 	})
 
 	t.Run("a session that belongs to no run starts no watcher", func(t *testing.T) {
@@ -1244,7 +1277,7 @@ func (r *watchedRun) read(t *testing.T) bool {
 	case asked := <-r.reads:
 		return asked
 	case <-time.After(5 * time.Second):
-		t.Fatal("the watcher took its tick and never read its run")
+		t.Fatal("the watcher did not read its run")
 		return false
 	}
 }

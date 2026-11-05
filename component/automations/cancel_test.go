@@ -1,12 +1,14 @@
 package automations
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -262,5 +264,90 @@ func TestInFlightStopCannotBeRetriedOrSwallowedByContinue(t *testing.T) {
 	execution, err := e.Execute(context.Background(), automation, "test")
 	if err != nil || execution.Status != "cancelled" || steps.calls != 1 {
 		t.Fatalf("Stop retried or swallowed: calls=%d status=%s error=%v", steps.calls, execution.Status, err)
+	}
+}
+
+// stoppedMidStepRegistry stands in for a step stopped from outside while it
+// ran: an app session, which stops when its run is cancelled
+// (integrations/agent/worker). The step fails, and its error is only text, as
+// a remote hop delivers it.
+type stoppedMidStepRegistry struct{ calls int }
+
+func (r *stoppedMidStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	r.calls++
+	now := time.Now()
+	err := errors.New(`function "campaignRunComposition" execution failed: cancelled: the person asked this work to stop: context canceled`)
+	return &StepResult{StepId: step.ID, Status: "failed", Error: err.Error(), StartedAt: now, CompletedAt: now}, err
+}
+
+// A RUN WITH NO OWNING GOAL STOPS WHEN A STEP FAILS ON ITS STOP. Its step's
+// app session stops when somebody stops the run, so the step fails in flight
+// -- and a run with no owning goal has no owned Stop receipt
+// (finishOwnedStop) to say why. Read as a failure, retry(n) would open a new
+// session on the stopped run for every attempt, and the run would be reported
+// failed. The flag is read again instead: the step runs once, the run closes
+// cancelled by the person who asked, and nothing reports a failure. The row
+// decides, not the error, whose type a remote hop does not keep.
+func TestANonGoalRunWhoseStepFailsWhileCancelledClosesCancelledWithoutRetrying(t *testing.T) {
+	// The first read is the run's first boundary; the second is the failed
+	// step's.
+	rec := &cancelAnsweringExecutor{flags: []bool{false, true}}
+	steps := &stoppedMidStepRegistry{}
+	bus := events.NewBus()
+	lifecycle := captureLifecycle(t, bus)
+	var logged bytes.Buffer
+	e := NewExecutor(ExecutorOptions{StepRegistry: steps, EventBus: bus, Logger: capturingLogger(&logged)})
+	e.journal = newWorkJournal(rec, nil)
+	automation := threeStepAutomation()
+	automation.Steps[0].RetryCount = 3
+
+	exec, err := e.Execute(context.Background(), automation, "test")
+	if steps.calls != 1 {
+		t.Fatalf("the stopped step ran %d times, want once: each retry would start the stopped work again", steps.calls)
+	}
+	if err != nil {
+		t.Fatalf("a run somebody stopped is not an error: %v", err)
+	}
+	if exec.Status != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", exec.Status)
+	}
+	name, args := argsOf(t, rec.calls[len(rec.calls)-1])
+	if name != "updateWorkRun" || args["status"] != "cancelled" || args["cancelledBy"] != "u-alice" {
+		t.Fatalf("the run did not close cancelled by the person who asked: %s %v", name, args)
+	}
+	// automation.failed has one publisher, handleAutomationError, which logs
+	// the failure first and in this goroutine: its absence is certain.
+	if strings.Contains(logged.String(), "automation execution failed") {
+		t.Fatalf("the stopped run was reported as failed:\n%s", logged.String())
+	}
+	lifecycle.waitFor(t, events.TopicAutomationStepFailed, 1)
+	if failed := lifecycle.topic(events.TopicAutomationFailed); len(failed) != 0 {
+		t.Fatalf("the stopped run published automation.failed: %v", failed)
+	}
+}
+
+// THE NEGATIVE CONTROL for the read above: a step that fails on a run nobody
+// stopped is still a failure, retried as its retry(n) says, and so is one whose
+// flag cannot be read -- the read fails open, as the boundary's does.
+func TestANonGoalRunWhoseStepFailsUnstoppedIsRetriedAndFails(t *testing.T) {
+	for name, rec := range map[string]*cancelAnsweringExecutor{
+		"nobody stopped it":      {flags: []bool{false}},
+		"its flag is unreadable": {failReads: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			steps := &stoppedMidStepRegistry{}
+			e := NewExecutor(ExecutorOptions{StepRegistry: steps})
+			e.journal = newWorkJournal(rec, nil)
+			automation := threeStepAutomation()
+			automation.Steps[0].RetryCount = 3
+
+			exec, err := e.Execute(context.Background(), automation, "test")
+			if steps.calls != 4 {
+				t.Fatalf("the failed step ran %d times, want 4: one attempt and its three retries", steps.calls)
+			}
+			if err == nil || exec.Status != "failed" {
+				t.Fatalf("a failed step on a run nobody stopped: status %q, error %v; want failed", exec.Status, err)
+			}
+		})
 	}
 }

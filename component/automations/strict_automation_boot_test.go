@@ -259,7 +259,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 194 -> 195: pipelineComputePlacementPolicy, the Fleet/cloud placement policy.
 // 195 -> 196: agentWorkOutcomeRecovery, the bounded inference-only reporting
 // conversion policy.
-const shippedAutomationCount = 196
+// 196 -> 197: composeEmailRun, the email composition's one-step run on the
+// Apps route (campaigns, 2026-11-05).
+const shippedAutomationCount = 197
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
