@@ -48,8 +48,12 @@ Deleted from the engine, the DSL, MemQL OS, the docs and production's settings:
 - the express departure;
 - standing approval;
 - "Publish by itself", "Deploy by itself" and **Deploy newest release**;
-- the `MEMQL_PIPELINES_TRAINS` and `MEMQL_RELEASE_INSTALLATION_OVERLAY`
-  settings.
+- the `MEMQL_PIPELINES_TRAINS` setting, and the run-admission field
+  `allowTrainRuns`, which an engine without trains refuses.
+
+`MEMQL_RELEASE_INSTALLATION_OVERLAY` stays: it predates trains and backs Cluster >
+Updates installation proposals. Only the deploy's "pin from the catalog" path
+inside it is removed.
 
 The deploy goes with the trains because of how it lands a release. It commits
 the pin to a branch of the installation repository, verifies the rollout, and

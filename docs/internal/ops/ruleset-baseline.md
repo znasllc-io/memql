@@ -226,15 +226,19 @@ gh api repos/znasllc-io/memql/rulesets/16630577 \
   --jq '.rules[] | select(.type=="required_status_checks" or .type=="merge_queue")'
 ```
 
-### Release trains replace the merge queue (2026-10-27)
+### Release trains replace the merge queue (2026-10-27, trains removed 2026-11-05)
+
+History: release trains were removed on 2026-11-05 with pull requests switched
+off ([above](#only-the-owner-moves-main-and-pull-requests-are-off-2026-11-05)),
+so nothing below is current. It records why the merge queue left.
 
 **Decided by the owner on 2026-10-27** (design record
 `docs/superpowers/specs/2026-10-27-release-trains-design.md`, sections 8 and
 12). Every pull request here is the owner's own, so none can be approved and
 each merged through the bypass, which skips the queue: the queue batched
 nothing. A release train now batches instead, and the owner's approval of the
-App-authored train pull request is the review that lands it
-([pipelines.md](../../public/operate/pipelines.md#release-trains)).
+App-authored train pull request is the review that lands it (the trains
+section of pipelines.md, since removed).
 
 **The fast phase (2026-10-28, owner-approved, ended the same day).** The
 required context was **`MemQL / memql / push`** (App 4822538) instead of
