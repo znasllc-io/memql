@@ -89,3 +89,58 @@ it("does not reopen work after the person starts a new conversation during its l
   const opening = session.openWork("r"); session.newConversation(); resolve({id:"old",title:"Old"}); await opening;
   expect(session.getSnapshot().selectedId).toBeNull(); expect(read).not.toHaveBeenCalled(); session.dispose();
 });
+
+const wire = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="${fill}"/></svg>`;
+const layouts = { id: "lq", text: "Which layout?", kind: "choice" as const, presentation: "layouts" as const, options: [
+  { value: "builtin:article", label: "Article", wireframe: wire("#aaa") },
+  { value: "builtin:steps", label: "Steps", wireframe: wire("#bbb") },
+  { value: "builtin:blank", label: "Plain" },
+] };
+const dataAddress = (svg: string) => `data:image/svg+xml;base64,${btoa(svg)}`;
+
+it("layout choices draw their wireframes", async () => {
+  const answer = vi.fn(async () => {});
+  const { container } = render(<AskQuestion question={layouts} onAnswer={answer} />);
+  const cards = screen.getAllByRole("button", { name: /Article|Steps|Plain/ });
+  expect(cards).toHaveLength(3);
+  const images = container.querySelectorAll("img");
+  expect(images).toHaveLength(2);
+  expect(images[0]!.getAttribute("src")).toBe(dataAddress(layouts.options[0]!.wireframe!));
+  expect(images[0]!.getAttribute("alt")).toBe("");
+  expect(cards[0]!.querySelector("img")).toBe(images[0]!);
+  // A layout with no drawing keeps the card's shape: the mat, empty.
+  expect(cards[2]!.querySelector(".os-ask-layout-mat")).toBeTruthy();
+  expect(cards[2]!.querySelector("img")).toBeNull();
+  expect(screen.getByRole("textbox", { name: "Your answer" })).toBeTruthy();
+  fireEvent.click(cards[1]!);
+  expect(cards[1]!.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+  await waitFor(() => expect(answer).toHaveBeenCalledExactlyOnceWith({ value: "builtin:steps" }));
+});
+
+it("a plain choice is unchanged", () => {
+  const { container } = render(<AskQuestion question={question} onAnswer={vi.fn(async () => {})} />);
+  expect(container.querySelectorAll("img")).toHaveLength(0);
+  expect(container.querySelector(".os-ask-layout-mat")).toBeNull();
+  expect(container.querySelector(".os-ask-question-options")?.className).toBe("os-ask-question-options");
+});
+
+it("never draws a wireframe on a question that is not a layouts choice", () => {
+  const stray = { ...question, options: [{ value: "a", label: "A", wireframe: wire("#ccc") }] };
+  const { container } = render(<AskQuestion question={stray} onAnswer={vi.fn(async () => {})} />);
+  expect(container.querySelectorAll("img")).toHaveLength(0);
+  expect(container.innerHTML).not.toContain("<rect");
+  expect(container.innerHTML).not.toContain("base64");
+});
+
+it("keeps a hostile wireframe inside its data address", () => {
+  const hostile = `<svg xmlns="http://www.w3.org/2000/svg"><script>window.pwned=1</script><image href="https://evil.test/x"/></svg>"><img src=x onerror=alert(1)>☃`;
+  const { container } = render(<AskQuestion question={{ ...layouts, options: [{ value: "builtin:x", label: "X", wireframe: hostile }] }} onAnswer={vi.fn(async () => {})} />);
+  expect(container.querySelectorAll("img")).toHaveLength(1);
+  expect(container.querySelector("script")).toBeNull();
+  expect(container.querySelector("[onerror]")).toBeNull();
+  const src = container.querySelector("img")!.getAttribute("src")!;
+  expect(src.startsWith("data:image/svg+xml;base64,")).toBe(true);
+  expect(decodeURIComponent(escape(atob(src.split(",")[1]!)))).toBe(hostile);
+  expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
+});

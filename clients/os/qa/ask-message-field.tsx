@@ -5,11 +5,15 @@ import { routeOptionsFrom } from "../src/ask/askRoute";
 import type { UploadHandle, UploadProvider, UploadResult } from "../src/items/upload";
 import { applyPackStyles } from "../src/themes/registry";
 import "../src/styles/index.css";
+// The server's own drawings, read as text from the golden files; never pasted here.
+import article from "../../../component/compose/emaildoc/testdata/golden/wireframe-article.svg?raw";
+import steps from "../../../component/compose/emaildoc/testdata/golden/wireframe-steps.svg?raw";
+import letter from "../../../component/compose/emaildoc/testdata/golden/wireframe-letter.svg?raw";
 
 // Synthetic source-only fixture for Ask's message field (routes design, "Ask's
 // message field"). No live connection, upload or model call.
 //
-//   ?scene=empty | multiline | attachments | picker | not-ready | apps | workbench
+//   ?scene=empty | layouts | multiline | attachments | picker | not-ready | apps | workbench
 //   &mode=light|dark  &narrow=1  &widget=1
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "empty";
@@ -26,7 +30,14 @@ const routes = routeOptionsFrom({ routes: [
   { id: "r2", name: "Out of credits", kind: "custom", scope: "personal", ready: scene !== "not-ready", reason: "No local model reachable" },
 ] });
 
-const turns: AskTurn[] = scene === "empty" ? [] : [{
+const layoutQuestion = { id: "q-layouts", text: "Which layout fits this email?", kind: "choice" as const, presentation: "layouts" as const, options: [
+  { label: "Article", value: "builtin:article", wireframe: article },
+  { label: "Steps", value: "builtin:steps", wireframe: steps },
+  { label: "Letter", value: "builtin:letter", wireframe: letter },
+] };
+const turns: AskTurn[] = scene === "empty" ? [] : scene === "layouts" ? [{
+  id: "t1", prompt: "Write the email for our spring sale.", answer: "", state: "waiting", startedAt: new Date(Date.now() - 60000).toISOString(), activity: [], question: layoutQuestion,
+}] : [{
   id: "t1", prompt: "What changed in the onboarding deck since last week?", answer: "Three slides changed: pricing, the roadmap and the team page.", state: "done", startedAt: new Date(Date.now() - 120000).toISOString(), activity: [],
   attachments: scene === "attachments" ? [{ artifactId: "a0", fileId: "f0", name: "onboarding-deck.pdf" }] : undefined,
 }];

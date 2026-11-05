@@ -104,7 +104,7 @@ export interface AskTurn {
   activity: AskActivity[];
   error?: string;
 }
-export interface AskQuestion { choiceOnly?: boolean; resumeAnswer?: Record<string, unknown>; id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[]; optional?: boolean; continued?: boolean }
+export interface AskQuestion { choiceOnly?: boolean; resumeAnswer?: Record<string, unknown>; id: string; text: string; kind: "text" | "choice" | "multi"; /** "layouts" on a choice of email layouts; absent otherwise. */ presentation?: "layouts"; /** `wireframe` is the server's SVG drawing, on a layouts choice only. */ options: { value: string; label: string; wireframe?: string }[]; optional?: boolean; continued?: boolean }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
 export interface ApprovalDiscussion {
   conversationId: string;
