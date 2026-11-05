@@ -36,6 +36,14 @@ describe("the email preview", () => {
     expect(document.querySelector("pre")?.textContent).toBe("Hello, in text");
   });
 
+  it("shows an email with no text part as its formatted self alone, with no tab bar", () => {
+    // A brand's preview (Task 24) is drawn as HTML only: a Plain text view would be empty.
+    render(<Preview html={HTML} />);
+    expect(screen.queryByRole("navigation", { name: "Preview" })).toBeNull();
+    expect(screen.getByTitle("Email preview").getAttribute("sandbox")).toBe(PREVIEW_SANDBOX);
+    expect(document.querySelector("pre")).toBeNull();
+  });
+
   it("shows a message with only text as text, with nothing to switch between", () => {
     render(<Preview html="" text="Just words" />);
     expect(screen.queryByRole("navigation", { name: "Preview" })).toBeNull();

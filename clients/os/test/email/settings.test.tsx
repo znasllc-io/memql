@@ -95,7 +95,7 @@ describe("Email settings", () => {
     expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
     // One Head on the page: the subjects are headings beneath it.
     expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(1);
-    for (const subject of ["Sending domain", "Senders", "Testing", "Package"]) {
+    for (const subject of ["Sending domain", "Senders", "Brand", "Testing", "Package"]) {
       expect(await screen.findAllByRole("heading", { level: 4, name: subject })).toHaveLength(1);
     }
     // Preferences are a group, named by its legend, not a fifth heading.
@@ -179,6 +179,7 @@ describe("Email settings", () => {
               feeds={feeds}
               recordFeeds={recordFeeds}
               writes={writes}
+              uploads={{ upload: vi.fn() }}
               settings={settings}
               update={(patch) => setSettings((held) => ({ ...held, ...patch }))}
               request={requests.settings}

@@ -999,6 +999,45 @@ export function renderFromRow(row: Row): EmailRender {
 }
 
 // ---------------------------------------------------------------------------
+// An organization's brand kit (Task 24)
+// ---------------------------------------------------------------------------
+
+/** An organization's brand kit as saved (brandKitFull): the kit, and its revision, the row's createdAt. */
+export interface BrandKitRecord {
+  kit: Record<string, unknown>;
+  revision: string;
+}
+
+export function brandKitFromRow(row: Row): BrandKitRecord {
+  const flat = flatten(row);
+  return { kit: rowObject(flat, "kit") ?? {}, revision: rowString(flat, "createdAt") };
+}
+
+/** Something a kit does that is allowed but worth knowing: a pair of colours under WCAG AA, or pictures that leave an email little room. */
+export interface BrandWarning {
+  code: string;
+  message: string;
+}
+
+/** What `campaignBrandPreview` answers: a built-in layout drawn in the kit, and the kit's warnings. Never saved. */
+export interface BrandPreview {
+  html: string;
+  warnings: BrandWarning[];
+}
+
+export function brandPreviewFromRow(row: Row): BrandPreview {
+  const flat = flatten(row);
+  const warnings = Array.isArray(flat["warnings"]) ? (flat["warnings"] as unknown[]) : [];
+  return {
+    html: rowString(flat, "html"),
+    warnings: warnings
+      .filter((warning): warning is Row => warning !== null && typeof warning === "object" && !Array.isArray(warning))
+      .map((warning) => ({ code: rowString(warning, "code"), message: rowString(warning, "message") }))
+      .filter((warning) => warning.message !== ""),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Sender identities
 // ---------------------------------------------------------------------------
 

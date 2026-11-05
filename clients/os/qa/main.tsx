@@ -2335,15 +2335,24 @@ function App() {
 // judging has something below the fold. `?at=<text>` finds the first element
 // whose text starts with it and scrolls it to the top, after the virtual clock
 // has let the reads land -- so a section reached by scrolling can be captured
-// without a driver attached.
+// without a driver attached. On a view reached by pressing (`click`), it waits
+// for the presses, so it scrolls the page they opened.
 const at = new URLSearchParams(window.location.search).get("at") ?? "";
-if (at !== "") {
+function scrollToAt(after: number) {
+  if (at === "") return;
   window.setTimeout(() => {
     const target = Array.from(document.querySelectorAll<HTMLElement>("h3, h4, .os-subhead")).find(
       (el) => (el.textContent ?? "").trim().startsWith(at),
     );
-    target?.scrollIntoView({ block: "start" });
-  }, 2500);
+    if (!target) return;
+    // The page's own scroller, not every box around it: `scrollIntoView` also
+    // scrolls a window frame that clips what overflows it, and the capture then
+    // shows a window with its trail row scrolled away.
+    let scroller = target.parentElement;
+    while (scroller && !(/(auto|scroll)/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
+    if (scroller) scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    else target.scrollIntoView({ block: "start" });
+  }, after);
 }
 
 // A ONE-SHOT CAPTURE CANNOT CLICK EITHER, and a <details> is shut until
@@ -2388,6 +2397,7 @@ clicks.forEach((label, i) => {
     target?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   }, 2500 + i * 1200);
 });
+scrollToAt(2500 + clicks.length * 1200);
 
 const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
 document.documentElement.setAttribute("data-theme", mode);

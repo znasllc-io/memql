@@ -336,6 +336,13 @@ report scene supplies a browser File to the upload port. No scene sends email.
 - Inbox: `email-inbox`, `email-inbox-empty`, `email-inbox-external`, `email-message`.
 - Settings: `email-settings`, `email-settings-member`, `email-settings-single`,
   `email-sender`. The member fixture verifies that actions follow access.
+- Brand: `email-settings-brand` (the Brand row; add `&at=Senders` to bring it into
+  a narrow capture), `email-brand` (a whole kit, its preview beside the editor),
+  `email-brand-warnings` (pale colours, so the preview lists contrast warnings)
+  and `email-brand-empty` (no kit yet: neutral colours, no preview until a logo).
+  The pictures are neutral placeholders (`emailBrandSeeds.ts`), and the preview is
+  a stand-in that draws the kit as the article layout does. Add
+  `&at=Footer` to capture the footer's links.
 
 Capture all scenes at 1400 and 520 pixels, light and dark. Check one heading,
 one pinned action bar, readable copy and keyboard focus. Rendering fixtures do

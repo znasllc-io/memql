@@ -23,6 +23,8 @@ import {
   TEMPLATE_CONCEPT,
   audienceFromRow,
   authoredAutomationsFrom,
+  brandKitFromRow,
+  brandPreviewFromRow,
   campaignFromRow,
   layoutFromRow,
   layoutRecordFromRow,
@@ -31,6 +33,8 @@ import {
   statsFromPayload,
   templateRecordFromRow,
   type AuthoredAutomationsState,
+  type BrandKitRecord,
+  type BrandPreview,
   type CampaignStats,
   type EmailRender,
   type LayoutRecord,
@@ -1278,6 +1282,47 @@ export function useEmailRender(document: Record<string, unknown> | null, account
     };
   }, [query, document, accountId]);
   return useLastAnswer(useReading<EmailRender | null>(null, read, [read]));
+}
+
+/**
+ * An organization's brand kit (`brandKitForAccount`), or null when it has none
+ * yet. One reading per organization, which the Settings row and the Brand page
+ * share: a save asks it again, and the row follows.
+ */
+export function useBrandKit(accountId: string): Reading<BrandKitRecord | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || accountId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.brandKitForAccount({ accountId }, { signal })).rows()[0];
+      return row === undefined ? null : brandKitFromRow(row);
+    };
+  }, [query, accountId]);
+  return useReading<BrandKitRecord | null>(null, read, [read]);
+}
+
+/** The layout a brand is previewed on: an article, which carries every brand part. */
+export const BRAND_PREVIEW_LAYOUT = "builtin:article";
+
+/**
+ * A brand kit drawn on a built-in layout before it is saved
+ * (`campaignBrandPreview`), with the kit's warnings. Drawn again when the kit
+ * does -- the same kit is the same object, so the page decides when (it waits
+ * for the person to stop changing it) -- and the last email drawn stays on
+ * screen while the next is on its way. No kit, nothing asked.
+ */
+export function useBrandPreview(accountId: string, kit: Record<string, unknown> | null): Reading<BrandPreview | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || accountId === "" || kit === null) return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.campaignBrandPreview({ accountId, kit, layoutId: BRAND_PREVIEW_LAYOUT }, { signal })).rows()[0];
+      return row === undefined ? null : brandPreviewFromRow(row);
+    };
+  }, [query, accountId, kit]);
+  return useLastAnswer(useReading<BrandPreview | null>(null, read, [read]));
 }
 
 /**

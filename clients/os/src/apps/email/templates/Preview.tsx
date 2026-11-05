@@ -30,7 +30,11 @@ const VIEWS: readonly (readonly [View, string])[] = [
 export function Preview({ html, text, loading = false, failed = null }: {
   /** The email's HTML; "" for one that has only text, which is then all there is to show. */
   html: string;
-  text: string;
+  /**
+   * The text part a send carries. Absent for a preview drawn as HTML alone (a
+   * brand's, Task 24): there is then one view, and no tab bar for it.
+   */
+  text?: string;
   /** Nothing to show yet: the frame's shape stands in its place. */
   loading?: boolean;
   /** Drawn in the frame's place when the email could not be rendered. */
@@ -41,14 +45,14 @@ export function Preview({ html, text, loading = false, failed = null }: {
 
   if (failed !== null && failed !== undefined && failed !== false) return <>{failed}</>;
   // A message with only text has nothing to format.
-  if (!loading && html === "") return <pre className="email-preview-text">{text}</pre>;
+  if (!loading && html === "") return text === undefined ? null : <pre className="email-preview-text">{text}</pre>;
 
   return (
     <>
-      <LocalTabs label="Preview" value={view} onChange={setView} options={VIEWS} />
+      {text === undefined ? null : <LocalTabs label="Preview" value={view} onChange={setView} options={VIEWS} />}
       {loading ? (
         <ContentSkeleton kind="detail" label="Loading the preview" />
-      ) : view === "formatted" ? (
+      ) : view === "formatted" || text === undefined ? (
         <iframe title="Email preview" className="email-preview-frame" sandbox={PREVIEW_SANDBOX} referrerPolicy="no-referrer" srcDoc={document} />
       ) : (
         <pre className="email-preview-text">{text}</pre>

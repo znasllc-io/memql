@@ -816,6 +816,38 @@ export function useRetryComposition(): CompositionAct {
   return useComposition("campaignRetryComposition");
 }
 
+// ---------------------------------------------------------------------------
+// An organization's brand kit (Task 24)
+// ---------------------------------------------------------------------------
+
+export interface SaveBrandKitState extends WriteState, MayBeLost {
+  /** Save the kit; the revision it has now, or "" when it was not saved. */
+  save: (accountId: string, kit: Record<string, unknown>, expectedRevision: string) => Promise<string>;
+}
+
+/**
+ * Saving an organization's brand kit, held to the revision the page read
+ * (`expectedRevision`: the kit row's createdAt, and "" when the organization
+ * has none yet). A kit saved somewhere else since is refused in the engine's
+ * words and nothing is written. Saving the same kit again answers with the
+ * revision it already has, so a save whose answer was lost is safe to repeat.
+ * The answer's warnings are the preview's, which the page already shows.
+ */
+export function useSaveBrandKit(): SaveBrandKitState {
+  const write = useWrite(async (query, accountId: string, kit: Record<string, unknown>, expectedRevision: string) => {
+    const row = flatten((await query.campaignSaveBrandKit({ accountId, kit, expectedRevision })).rows()[0] ?? {});
+    if (typeof row.revision !== "string" || row.revision === "") throw new Error("The cluster did not confirm the save.");
+    return row.revision;
+  }, "");
+  return {
+    busy: write.busy,
+    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveBrandKit"),
+    lost: write.lost,
+    reset: write.reset,
+    save: (accountId, kit, expectedRevision) => write.call(accountId, kit, expectedRevision),
+  };
+}
+
 /** A template or a layout put away or brought back: the busy/error pair, and whether the answer was lost. */
 export interface LifecycleState extends WriteState, MayBeLost {}
 

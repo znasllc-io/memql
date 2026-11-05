@@ -237,6 +237,7 @@ function EmailSections({
             feeds={feeds}
             recordFeeds={recordFeeds}
             writes={writes}
+            uploads={uploadProvider}
             settings={settings}
             update={updateSettings}
             request={requests.settings}
