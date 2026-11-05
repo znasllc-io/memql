@@ -72,16 +72,21 @@ export const PREVIEW_POLICY = "default-src 'none'; style-src 'unsafe-inline'; im
 const DEFAULTS = "body{margin:0;padding:16px;font:15px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}img{max-width:100%}pre{white-space:pre-wrap}";
 
 /**
- * Two empty marks a preview can carry, at the start and at the end of the
- * email, for a page that keeps one part of it in view (the Brand page). The
- * page reaches the frame only by asking it to go to one of them (a fragment
- * of its own document), never its document; the email's own ids never take
- * these names.
+ * The end-first container, for a page that keeps the END of the email in view
+ * (the Brand page, for the groups whose part sits at the bottom). The email's
+ * body content goes inside one scroll box laid out as a reversed column, which
+ * browsers open at its end: no script, and the page never moves the frame (a
+ * frame navigated to a fragment address makes browser automation refuse the
+ * whole page). The box has one child, so the email keeps its own order.
  */
-export const PREVIEW_MARKS = { start: "email-preview-start", end: "email-preview-end" } as const;
+export const END_FIRST_CLASS = "email-preview-end-first";
+const END_FIRST_CSS =
+  `html,body{height:100%}body{box-sizing:border-box;overflow:hidden}` +
+  `.${END_FIRST_CLASS}{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column-reverse}` +
+  `.${END_FIRST_CLASS}>div{flex:none}`;
 
 /** Keep an email readable as it is sent, without running it or loading anything it names. */
-export function emailPreview(html: string, { marks = false }: { marks?: boolean } = {}): string {
+export function emailPreview(html: string, { end = false }: { end?: boolean } = {}): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   // The email's style blocks, wherever they stood (an email's are in its head),
@@ -109,12 +114,13 @@ export function emailPreview(html: string, { marks = false }: { marks?: boolean 
   }
   keepAttributes(doc.body);
 
-  if (marks) {
-    const names: readonly string[] = Object.values(PREVIEW_MARKS);
-    for (const element of [...doc.body.querySelectorAll("[id]")]) if (names.includes(element.id)) element.removeAttribute("id");
-    const mark = (name: string) => Object.assign(doc.createElement("a"), { id: name });
-    doc.body.prepend(mark(PREVIEW_MARKS.start));
-    doc.body.append(mark(PREVIEW_MARKS.end));
+  if (end) {
+    const box = doc.createElement("div");
+    box.className = END_FIRST_CLASS;
+    const inner = doc.createElement("div");
+    inner.append(...doc.body.childNodes);
+    box.append(inner);
+    doc.body.append(box);
   }
 
   return (
@@ -123,6 +129,7 @@ export function emailPreview(html: string, { marks = false }: { marks?: boolean 
     '<meta name="referrer" content="no-referrer">' +
     `<style>${DEFAULTS}</style>` +
     styles.map((css) => `<style>${css}</style>`).join("") +
+    (end ? `<style>${END_FIRST_CSS}</style>` : "") +
     "</head>" +
     doc.body.outerHTML +
     "</html>"

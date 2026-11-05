@@ -100,6 +100,8 @@ async function save(connection: Conn) {
 // The row in Settings
 // ---------------------------------------------------------------------------
 
+const END_FIRST = "email-preview-end-first";
+
 describe("Brand in Settings", () => {
   it("is one row after Senders, set up, with no act in it, and it opens the Brand page", async () => {
     const conn = fakeConnection({ brandKits: [kitRow()] });
@@ -338,46 +340,53 @@ describe("The Brand page's preview", () => {
     }
   });
 
-  it("asks the preview for the part being edited: the end for the footer, the start for the colours, and stops when the person reaches in", async () => {
-    // A browser shows a sandboxed srcdoc frame as an opaque window: its address
-    // cannot be read, and the page may still ask it to move to a fragment.
+  it("keeps the part being edited in view without ever navigating the frame: the end for the footer, the start for the colours, and stops when the person reaches in", async () => {
+    // A frame at a fragment address makes browser automation refuse the whole
+    // page, so the page must never move the frame: it only changes what the
+    // frame is given (the end-first container for the end groups).
     const replace = vi.fn();
     const opaque = { location: { get href(): string { throw new DOMException("Blocked a frame from accessing a cross-origin frame.", "SecurityError"); }, replace } };
     const opaqueWindow = vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(opaque as unknown as Window);
+    const doc = () => (screen.getByTitle("Email preview") as HTMLIFrameElement).getAttribute("srcdoc") ?? "";
     try {
-      const conn = fakeConnection({ brandKits: [kitRow()] });
+      // The email echoes the footer, so each edit is a new email.
+      const conn = fakeConnection({
+        brandKits: [kitRow()],
+        brandPreview: (args) => ({ html: `<p>${JSON.stringify((args.kit as { footer?: { lines?: string[] } } | undefined)?.footer?.lines ?? [])}</p>`, warnings: [] }),
+      });
       await openBrand(conn);
-      const frame = await screen.findByTitle("Email preview");
-      fireEvent.load(frame);
-      replace.mockClear();
+      await screen.findByTitle("Email preview");
+      expect(doc()).not.toContain(END_FIRST);
 
       const footer = region("Footer");
       const lines = within(footer).getByLabelText("Footer lines");
       fireEvent.focus(lines);
-      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-end");
-      // Moving within the footer is not entering it again.
-      const calls = replace.mock.calls.length;
+      await waitFor(() => expect(doc()).toContain(END_FIRST));
+      // Moving within the footer is not entering it again: the frame is not redrawn.
+      const before = doc();
       fireEvent.focus(within(footer).getByLabelText("Label of the unsubscribe link"), { relatedTarget: lines });
-      expect(replace.mock.calls.length).toBe(calls);
+      expect(doc()).toBe(before);
 
       // A new email drawn while the footer is edited is kept at its end.
       fireEvent.change(lines, { target: { value: "Acme, 2 Main Street" } });
       await waitFor(() => expect(previewKit(conn).footer.lines).toEqual(["Acme, 2 Main Street"]));
-      replace.mockClear();
-      fireEvent.load(screen.getByTitle("Email preview"));
-      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-end");
+      await waitFor(() => expect(doc()).toContain("Acme, 2 Main Street"));
+      expect(doc()).toContain(END_FIRST);
 
-      // Once the person reaches into the frame, a new email does not move it.
+      // Once the person reaches into the frame, a new email is theirs: it opens at its top.
       fireEvent.pointerEnter(screen.getByTitle("Email preview"));
-      replace.mockClear();
       fireEvent.change(lines, { target: { value: "Acme, 3 Main Street" } });
-      await waitFor(() => expect(previewKit(conn).footer.lines).toEqual(["Acme, 3 Main Street"]));
-      fireEvent.load(screen.getByTitle("Email preview"));
-      expect(replace).not.toHaveBeenCalled();
+      await waitFor(() => expect(doc()).toContain("Acme, 3 Main Street"));
+      expect(doc()).not.toContain(END_FIRST);
 
       // Entering another group asks again: the colours are at the start.
       fireEvent.focus(screen.getByLabelText("Primary"), { relatedTarget: lines });
-      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-start");
+      await waitFor(() => expect(doc()).not.toContain(END_FIRST));
+      // ...and the footer again is at the end.
+      fireEvent.focus(lines, { relatedTarget: screen.getByLabelText("Primary") });
+      await waitFor(() => expect(doc()).toContain(END_FIRST));
+
+      expect(replace).not.toHaveBeenCalled();
     } finally {
       opaqueWindow.mockRestore();
     }

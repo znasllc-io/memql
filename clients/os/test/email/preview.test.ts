@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PREVIEW_MARKS, emailPreview } from "../../src/apps/email/preview";
+import { emailPreview } from "../../src/apps/email/preview";
 
 describe("email preview isolation", () => {
 	 it("shows embedded raster assets without allowing remote or executable images", () => {
@@ -187,21 +187,24 @@ describe("email preview isolation", () => {
   });
 });
 
-describe("the marks a page keeps a part of the email in view by", () => {
-  it("stand empty at the email's start and end only when asked for, and no id of the email's takes their names", () => {
-    const html = '<html><body><p id="email-preview-end">Mine</p><p id="intro">Hello</p></body></html>';
-    const plain = new DOMParser().parseFromString(emailPreview(html), "text/html");
-    expect(plain.getElementById(PREVIEW_MARKS.start)).toBeNull();
-    // Without marks, the email keeps its own ids as they are.
-    expect(plain.getElementById("email-preview-end")?.textContent).toBe("Mine");
+describe("the end-first container a page keeps the end of the email in view by", () => {
+  const html = '<html><body style="background:#eee"><p id="intro">Hello</p><p>Bye</p></body></html>';
 
-    const marked = new DOMParser().parseFromString(emailPreview(html, { marks: true }), "text/html");
-    const start = marked.getElementById(PREVIEW_MARKS.start)!;
-    const end = marked.getElementById(PREVIEW_MARKS.end)!;
-    expect(marked.body.firstElementChild).toBe(start);
-    expect(marked.body.lastElementChild).toBe(end);
-    expect([start.textContent, end.textContent]).toEqual(["", ""]);
-    expect(marked.querySelectorAll(`#${PREVIEW_MARKS.end}`)).toHaveLength(1);
-    expect(marked.getElementById("intro")?.textContent).toBe("Hello");
+  it("wraps the email in a scroll box that starts at its end, only when asked for, and runs no script", () => {
+    const plain = emailPreview(html);
+    expect(plain).not.toContain("email-preview-end-first");
+
+    const end = emailPreview(html, { end: true });
+    const doc = new DOMParser().parseFromString(end, "text/html");
+    const box = doc.querySelector(".email-preview-end-first")!;
+    expect(box).not.toBeNull();
+    expect(doc.querySelector("style")?.textContent ?? "").not.toBe("");
+    expect(end).toContain("flex-direction:column-reverse");
+    // The email keeps its order and its content inside the one inner child.
+    expect(box.children).toHaveLength(1);
+    expect(box.firstElementChild?.textContent).toBe("HelloBye");
+    expect(doc.body.getAttribute("style")).toBe("background:#eee");
+    expect(doc.querySelector("script")).toBeNull();
+    expect(doc.getElementById("intro")?.textContent).toBe("Hello");
   });
 });
