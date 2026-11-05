@@ -4088,6 +4088,35 @@ These source regressions do not establish live Fleet availability, installed
 policy activation or a completed Fleet-to-cloud CI journey; those require
 separate verification against the selected deployment.
 
+**Activation for the engine's own pipeline (2026-11-05).**
+- *Trigger.* The owner saw a push run on 0.31.16 put its checks and tests on the
+  cluster, and asked for the Fleet first with the cluster as the backup. No
+  manifest step was `pool`, and the installation's resolver still named the
+  profile without the `computePlacement` role.
+- *Path.* The installation selected its fleet-first profile first (memql-znas
+  `e680ccf`: 60 s for Fleet capacity, then cloud fallback, default retries). Then
+  `memql-package.yaml` marked 23 steps `pool`: `go-checks`, both vulnerability
+  scans, both gitleaks steps, `fuzz`, `os-checks`, the editor and Linux editor-host
+  lanes, `mcp-conformance`, `proving`, `gate-inputs`, the ruleset audits, the CodeQL
+  analyses and the SBOM. The order matters: under a policy without the role a
+  `pool` step is Fleet-only and never falls back.
+- *What stays `cluster`, and why.* `verification: true` steps, because release
+  reuse and carry-forward accept only cluster evidence
+  (`component/pipelines/verification.go`). Dropping their flag would move them but
+  cost every push its carry-forward and every release its reuse, so moving them
+  waits on the owner's decision about Fleet evidence. Release output (images,
+  release files, Cockpit release builds, fixtures), so a published artifact is
+  built on the cluster. Steps with a repository token or SARIF upload, so no
+  credential leaves the cluster.
+- *Invariant.* A `pool` step carries no verification flag, credential or image
+  build: `TestEngineManifestCompilesForEveryOpening` and
+  `TestEngineManifestRequiresConsentForMacEditorHosts`, with the reviewed contract
+  in `test/fixtures/pipelines/delivery-after-bootstrap.yaml`.
+- *Not yet verified.* No push run has completed under the new placement. Linux
+  container capacity on the Fleet was one machine (CyberPC) on 2026-11-05. The
+  cost guard still writes version-1 admission, so a cost hold still stops Fleet
+  work too.
+
 Fleet CI owns the host build lock exclusively against workspaces and local
 builds. Local model calls take no part in it, by the owner's decision of
 2026-11-02. The fleet-first work had a call take the lock shared, so a call

@@ -497,8 +497,15 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					}
 					continue
 				}
-				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
-					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
+				// A portable step is a Linux amd64 container: a Workbench Job, or
+				// the Fleet-first pool, which starts it on an owner's machine when
+				// one is free within the compute policy's wait and otherwise runs
+				// the same Workbench Job (memql-package.yaml's header).
+				if (step.Placement != pipelines.PlacementCluster && step.Placement != pipelines.PlacementPool) || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
+					t.Errorf("step %s must use a Linux amd64 container on the cluster or the pool: %+v", step.Key, step)
+				}
+				if step.Placement == pipelines.PlacementPool && (step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
+					t.Errorf("pool step %s must carry no verification flag or credential: %+v", step.Key, step)
 				}
 				if len(step.Needs) > 0 {
 					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)
@@ -868,7 +875,12 @@ func engineSetMinus(a, b []string) []string {
 }
 
 // Mac editor hosts, Linux installer fixtures and the external public-site
-// probe require fleet consent. Other portable checks stay in cluster containers.
+// probe require fleet consent. Other portable checks run in containers: on the
+// cluster, or through the Fleet-first pool (the owner's decision, 2026-11-05;
+// memql-package.yaml's header). A pool step may start on an owner's machine, so
+// it carries no credential, no image build and no verification flag: reusable
+// verification is cluster-only (component/pipelines/verification.go), and a
+// credential must not leave the cluster for a placement the policy chooses.
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
@@ -900,7 +912,13 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 				}
 				continue
 			}
-			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
+			switch pipelines.PlacementOf(step) {
+			case pipelines.PlacementCluster:
+			case pipelines.PlacementPool:
+				if step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "" || step.ImageBuild != nil || step.SARIF != nil || step.RepositoryChange != nil {
+					t.Errorf("pool check %s must carry no verification flag, credential, image build or external effect: %+v", step.Name, step)
+				}
+			default:
 				t.Errorf("portable check %s requires a host", step.Name)
 			}
 		}

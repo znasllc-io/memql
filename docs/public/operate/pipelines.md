@@ -1856,6 +1856,13 @@ A `verification: true` step cannot be `pool`: reusable verification requires
 `placement: cluster`, so such a step is refused with `pipeline_step_invalid`.
 Retries need no activation: the deploy turns them on with the portable limits.
 
+The engine repository's own `memql-package.yaml` took the second step on
+2026-11-05. Its portable checks that carry no credential, image build,
+verification flag or release output are `pool`; its `verification: true` steps,
+its release builds and its credentialed steps stay `cluster`. A `pool` step
+under an installed policy without the `computePlacement` role is Fleet-only and
+never falls back, so select that policy before marking any step `pool`.
+
 ## The check run
 
 Each run writes one check run of its own on its commit, and one per step

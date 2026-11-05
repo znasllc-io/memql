@@ -194,7 +194,7 @@ pipeline:
         # The saved event base survives the replica hop and supplies the
         # authoring-surface comparison; a first push has no predecessor.
         - name: go-checks
-          placement: cluster
+          placement: pool
           timeout: 30m
           run: |
             set -eu
@@ -378,7 +378,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: go-vulnerabilities
-          placement: cluster
+          placement: pool
           timeout: 30m
           # govulncheck over every module holds the whole program in memory:
           # at the namespace default (4 GiB) the kernel killed it at 4.2 GB
@@ -406,7 +406,7 @@ pipeline:
             fi
             test "$status" -eq 0
         - name: npm-vulnerabilities
-          placement: cluster
+          placement: pool
           timeout: 30m
           artifacts: [.memql-security/npm]
           run: |
@@ -427,7 +427,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: cluster
+          placement: pool
           timeout: 30m
           cpuMilli: 3000
           memoryMiB: 6144
@@ -500,7 +500,7 @@ pipeline:
         # holds no test behind it. None of the three packages imports
         # component/identity/web, so it needs no stylesheet.
         - name: fuzz
-          placement: cluster
+          placement: pool
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -511,7 +511,7 @@ pipeline:
             go test ./test/conformance -run '^FuzzParse$' -fuzz '^FuzzParse$' -fuzztime=40s
         # ci.yml os-checks. Network setup may retry; tests run once.
         - name: os-checks
-          placement: cluster
+          placement: pool
           # The full UI suite can exceed the default 20-minute deadline on
           # shared runners; retain time for its typecheck and production build.
           timeout: 30m
@@ -564,7 +564,7 @@ pipeline:
             dockerfile: deploy/db-image/Dockerfile
             target: verified
         - name: editor-site
-          placement: cluster
+          placement: pool
           when: { bucket: editor-site }
           # Native-published toolchain includes Chromium's system libraries.
           image: ghcr.io/znasllc-io/memql-toolchain@sha256:a62b53491fbd9cfd4bbfdf9612bfb1776d9fc9d42aab7ceceac3a0a18a17a8bb
@@ -575,7 +575,7 @@ pipeline:
           artifacts: [editors/vscode/site/dist, editors/vscode/site/artifacts]
           run: bash scripts/ci/editor-site.sh
         - name: editor-packages
-          placement: cluster
+          placement: pool
           when: { bucket: editors }
           timeout: 30m
           artifacts: [.memql-editor]
@@ -598,31 +598,31 @@ pipeline:
         - name: vscode-desktop-linux-1-91-0
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
         - name: vscode-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop stable
         - name: productivity-web-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-web stable
         - name: productivity-desktop-linux-1-91-0
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
         - name: productivity-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
-          placement: cluster
+          placement: pool
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: productivity-web-darwin-stable
@@ -672,7 +672,7 @@ pipeline:
             make viewkit-typecheck
             make viewkit-test
         - name: mcp-conformance
-          placement: cluster
+          placement: pool
           services: [postgres]
           timeout: 30m
           run: |
@@ -691,7 +691,7 @@ pipeline:
             go test -count=1 -timeout=600s -v ./test/conformance/...
             go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
         - name: proving
-          placement: cluster
+          placement: pool
           services: [postgres]
           timeout: 30m
           artifacts: [.memql-proving]
@@ -815,7 +815,7 @@ pipeline:
       on: [pull_request, push, manual]
       steps:
         - name: gate-inputs
-          placement: cluster
+          placement: pool
           when: { bucket: gates }
           # Its siblings' 30m and twice ci.yml's 300s package bound. ci.yml set
           # RUN_GATES=true here, which skips component/architecture's call
@@ -914,7 +914,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: ruleset-drift
-          placement: cluster
+          placement: pool
           caches: []
           cpuMilli: 250
           memoryMiB: 256
@@ -923,7 +923,7 @@ pipeline:
             set -eu
             RULESET_DRIFT_PUBLIC_API=1 bash scripts/ci/ruleset-drift.sh
         - name: ruleset-no-force-push
-          placement: cluster
+          placement: pool
           caches: []
           cpuMilli: 250
           memoryMiB: 256
@@ -959,7 +959,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: cluster
+          placement: pool
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           # Restart scanners after each commit: large historical patches
@@ -986,7 +986,7 @@ pipeline:
             set -eu
             python3 scripts/ci/scorecard-scan.py --output-dir=.memql-security/scorecard
         - name: codeql-go
-          placement: cluster
+          placement: pool
           memoryMiB: 6144
           # Measured ARM64 security-extended analysis takes over two hours,
           # including SARIF paths. The operator's run ceiling must also cover it.
@@ -996,7 +996,7 @@ pipeline:
             set -eu
             python3 scripts/ci/codeql-scan.py --language=go --ram=3072 --output-dir=.memql-security/codeql-go
         - name: codeql-javascript
-          placement: cluster
+          placement: pool
           memoryMiB: 6144
           timeout: 45m
           artifacts: [.memql-security/codeql-javascript]
@@ -1004,7 +1004,7 @@ pipeline:
             set -eu
             python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=5120 --threads=1 --output-dir=.memql-security/codeql-javascript
         - name: codeql-python
-          placement: cluster
+          placement: pool
           timeout: 45m
           artifacts: [.memql-security/codeql-python]
           run: |
@@ -1018,7 +1018,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: sbom
-          placement: cluster
+          placement: pool
           timeout: 60m
           artifacts: [.memql-security/sbom]
           run: |
