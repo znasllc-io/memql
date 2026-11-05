@@ -262,6 +262,13 @@ func (p *sessionProvider) run(
 	if len(tools) > 0 && (scope.AgentID == "" || scope.AgentRole == "" || run.RunId != p.req.RunId || run.StepKey != p.req.StepId || run.OwnerUserId != actingUser) {
 		return AppSessionOutcome{}, fmt.Errorf("app session: delegated tools require the original owned run and agent context")
 	}
+	// The step's files, for the cockpit to pull into the workspace
+	// (session_inputs.go). Only with tools: that is the handover the check
+	// above has just held to the owned run and its acting agent.
+	var inputs []string
+	if len(tools) > 0 {
+		inputs = SessionInputsFromContext(ctx)
+	}
 	var out AppSessionOutcome
 	var err error
 	var excluded []string
@@ -312,6 +319,7 @@ func (p *sessionProvider) run(
 			Tools:          tools,
 			ToolScope:      scope,
 			ResponseSchema: schema,
+			Inputs:         inputs,
 			Pin:            p.req.Pin,
 			TakingOverFrom: stopped,
 		})
