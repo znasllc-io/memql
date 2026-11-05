@@ -800,3 +800,68 @@ func TestBrandKitCapabilitiesAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+// TestBrandWarningsAreWorkedOutOncePerKit: the warnings render every built-in
+// layout, in a render slot previews and saves share, so they are worked out
+// once for a kit and remembered: the Brand page previews one kit on the layout
+// that shows the part being edited, and saves it after. They are remembered by
+// the whole kit, since more than its colours and fonts decides them: which
+// parts it has (a reply, a follow line), and the links and emphasis in its
+// words.
+func TestBrandWarningsAreWorkedOutOncePerKit(t *testing.T) {
+	computed := 0
+	compute := computeBrandWarnings
+	computeBrandWarnings = func(ctx context.Context, kit emaildoc.BrandKit) []emaildoc.BrandWarning {
+		computed++
+		return compute(ctx, kit)
+	}
+	t.Cleanup(func() { computeBrandWarnings = compute })
+	forgetBrandWarnings(t)
+
+	bw := newBrandWorld(t)
+	kit := testBrandKit(t)
+	part(kit, "theme")["secondary"] = "#55b9bd" // white on a light teal: warnings to remember
+	var answers []brandAnswer
+	for _, layout := range []string{"builtin:article", "builtin:letter", "builtin:confirmation"} {
+		answer, err := bw.preview(kit, map[string]any{"layoutId": layout})
+		if err != nil {
+			t.Fatal(err)
+		}
+		answers = append(answers, answer)
+	}
+	answers = append(answers, bw.saved(kit, ""))
+	if computed != 1 {
+		t.Errorf("the warnings were worked out %d times for one kit", computed)
+	}
+	if len(answers[0].Warnings) == 0 {
+		t.Fatal("a low-contrast kit answered no warnings")
+	}
+	for _, answer := range answers[1:] {
+		if !sameJSON(t, answer.Warnings, answers[0].Warnings) {
+			t.Errorf("warnings %v, want %v", answer.Warnings, answers[0].Warnings)
+		}
+	}
+
+	// Another kit is another answer, worked out again: words alone can change
+	// it, as a follow line in the accent colour does.
+	part(kit, "theme")["secondary"] = "#2f4f4f"
+	if _, err := bw.preview(kit, nil); err != nil {
+		t.Fatal(err)
+	}
+	kit["follow"] = "Read more on [our blog](https://acme.example/blog)"
+	if _, err := bw.preview(kit, nil); err != nil {
+		t.Fatal(err)
+	}
+	if computed != 3 {
+		t.Errorf("after two other kits the warnings were worked out %d times, want 3", computed)
+	}
+}
+
+// forgetBrandWarnings starts the test with no warnings remembered, and leaves
+// none behind it.
+func forgetBrandWarnings(t *testing.T) {
+	t.Helper()
+	held := brandWarningMemory
+	brandWarningMemory = &warningMemory{size: 64, kept: map[string][]emaildoc.BrandWarning{}}
+	t.Cleanup(func() { brandWarningMemory = held })
+}

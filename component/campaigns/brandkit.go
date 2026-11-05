@@ -3,13 +3,17 @@ package campaigns
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -118,7 +122,7 @@ func (w *Worker) handleSaveBrandKit(ctx context.Context, args map[string]any, _ 
 	kit, err := w.fillKitPictures(ctx, sent)
 	var warnings []emaildoc.BrandWarning
 	if err == nil {
-		warnings = emaildoc.BrandWarnings(ctx, kit)
+		warnings = brandWarnings(ctx, kit)
 	}
 	release()
 	if err != nil {
@@ -309,7 +313,7 @@ func (w *Worker) handleBrandPreview(ctx context.Context, args map[string]any, _ 
 		return nil, err
 	}
 	return resultNode("campaignBrandPreview", map[string]any{
-		"html": result.HTML, "warnings": brandWarningList(emaildoc.BrandWarnings(ctx, kit)),
+		"html": result.HTML, "warnings": brandWarningList(brandWarnings(ctx, kit)),
 	})
 }
 
@@ -504,4 +508,68 @@ func parseKit(data []byte) (emaildoc.BrandKit, error) {
 		return emaildoc.BrandKit{}, errBrandTooLarge
 	}
 	return kit, err
+}
+
+// computeBrandWarnings works out a kit's warnings: every built-in layout
+// rendered with the kit applied. A test counts it.
+var computeBrandWarnings = emaildoc.BrandWarnings
+
+// brandWarningMemory is the warnings of the kits worked out last, by the
+// digest of the whole kit, for every caller on the node: they depend on the
+// kit and nothing else.
+var brandWarningMemory = &warningMemory{size: 64, kept: map[string][]emaildoc.BrandWarning{}}
+
+// brandWarnings is emaildoc.BrandWarnings, worked out once for a kit and
+// remembered: they render every built-in layout, in a render slot that
+// previews and saves share, and the Brand page previews one kit on the layout
+// that shows the part being edited, then saves it. They are remembered by the
+// whole kit, pictures included, not by its theme alone: which parts the kit has
+// (a reply, a follow line, a signature as text or as a picture) and the links
+// and emphasis in its words decide which text is drawn on which colour. A
+// computation whose ctx ended may have skipped layouts, and is not remembered.
+func brandWarnings(ctx context.Context, kit emaildoc.BrandKit) []emaildoc.BrandWarning {
+	raw, err := kit.JSON()
+	if err != nil {
+		return computeBrandWarnings(ctx, kit)
+	}
+	sum := sha256.Sum256(raw)
+	key := hex.EncodeToString(sum[:])
+	if warnings, ok := brandWarningMemory.get(key); ok {
+		return warnings
+	}
+	warnings := computeBrandWarnings(ctx, kit)
+	if ctx.Err() == nil {
+		brandWarningMemory.put(key, warnings)
+	}
+	return slices.Clone(warnings)
+}
+
+// warningMemory keeps the warnings of up to size kits, forgetting the one kept
+// longest first.
+type warningMemory struct {
+	mu    sync.Mutex
+	size  int
+	order []string
+	kept  map[string][]emaildoc.BrandWarning
+}
+
+func (m *warningMemory) get(key string) ([]emaildoc.BrandWarning, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	warnings, ok := m.kept[key]
+	return slices.Clone(warnings), ok
+}
+
+func (m *warningMemory) put(key string, warnings []emaildoc.BrandWarning) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.kept[key]; ok {
+		return
+	}
+	if len(m.order) >= m.size {
+		delete(m.kept, m.order[0])
+		m.order = m.order[1:]
+	}
+	m.order = append(m.order, key)
+	m.kept[key] = slices.Clone(warnings)
 }
