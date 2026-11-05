@@ -30,7 +30,7 @@ Taken with the owner on 2026-11-04.
 | How composition runs | A tool-using **harness step that runs whole in Claude Code** on the Apps route, checks its own render, and submits | The only option in which the model sees the pictures without leaving the Apps route (a separate vision call is never re-routed by a route choice, `docs/public/operate/ai-routing.md`); it checks its own work; it reuses app sessions and memQL's MCP tools |
 | Model route | **Apps only**, "for now". No fallback to local models | Owner direction |
 | Publishing | A run never publishes; it leaves drafts | Publishing stays an explicit human action |
-| Creating layouts | Not offered for now. "Save as layout" and the OS Layouts list are hidden | Owner direction; the grid holds the built-in layouts |
+| Creating layouts | Not offered for now. "Save as layout" and the OS Layouts list are hidden (revised: see Planning revisions) | Owner direction; the grid holds the built-in layouts |
 | How the picker shows layouts | A grid of wireframes, grouped by category | Owner direction |
 
 ## 1. Layouts
@@ -232,7 +232,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 
 ### 3.6 Watching and cancelling
 
-- Ask shows the goal's activity, and "View work" opens it in Nexus. VS Code shows the banner; the OS shows the mark.
+- Ask shows the goal's activity, and "View work" opens it in Nexus (revised: see Planning revisions). VS Code shows the banner; the OS shows the mark.
 - **Cancel** (VS Code or Nexus) cancels the goal and stops the session. `composition.state` becomes `failed`, with "cancelled" as the error, and the draft stays as the brand-applied layout.
 
 ## 4. Pictures, limits, failures and safety
@@ -265,8 +265,8 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 | `integrations/compose` | The hardened ZIP reader reused with composition's limits; the Materializer's `email_template` output and `emailContentInstructions` retired |
 | `integrations/agent`, `integrations/work`, `app` | The `composeEmail` step and its MCP tools; the `emailCompose` prompt; goals with `route:apps` and `requestedVia: email` |
 | `component/memql`, `cockpit/internal/worker/appsession` | Handover inputs from the step's files; ZIP unpacking in the workspace by the hardened rules |
-| `editors/productivity` | New email page (wireframe grid, files, reference picture, the two buttons); the editor's writing banner, read-only state, live refresh and Cancel; "Save as layout" hidden; the one-path-create tests updated |
-| `clients/os` | Email → Settings → Brand; Writing and failed marks with Retry in Templates; the Layouts list hidden; Ask showing the layout suggestion's wireframes |
+| `editors/productivity` | New email page (wireframe grid, files, reference picture, the two buttons); the editor's writing banner, read-only state, live refresh and Cancel; "Save as layout" hidden (revised: see Planning revisions); the one-path-create tests updated |
+| `clients/os` | Email → Settings → Brand; Writing and failed marks with Retry in Templates; the Layouts list hidden (revised: see Planning revisions); Ask showing the layout suggestion's wireframes |
 | Docs | Public docs for composing emails and brand kits; `campaign-sending.md` and `memql-os.md` updated; the 2026-10-11 specs marked as superseded where section 9 says |
 
 ## 6. Testing and acceptance
@@ -297,7 +297,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 **Clients:**
 
 - **VS Code.** The grid shows wireframes and calls `emailRender` for none of them. Both buttons open a template at once. The banner, the read-only state, the refresh in place and Cancel all work.
-- **OS.** The Brand page; the Writing and failed marks and Retry; the Layouts list and "Save as layout" hidden.
+- **OS.** The Brand page; the Writing and failed marks and Retry; the Layouts list and "Save as layout" hidden (revised: see Planning revisions).
 - **Ask.** Attachments reach the session. The flow goes suggestion, confirmation, then composition.
 
 **Acceptance on real material**, with B's material: (revised: see Planning revisions)
@@ -367,4 +367,9 @@ Written 2026-11-05, when the build was done. These are the ways the build differ
 18. **Brand in the OS.** It is a page opened from a Brand row in Settings, with Save in its ActionBar. It is not an inline section.
 19. **The OS Templates page.** It follows a composition through the live Templates feed, read again every 2 seconds while any template is writing.
 20. **Start failures.** A composition whose goal could not start still opens its template, and the editor offers Retry.
-21. **The Materializer refuses emails.** A request for one gets "Emails are made in the Email app." The old email output, its layout code and the clients' email choices were removed, along with the OS Layouts hooks and helpers that nothing used any more. The OS keeps reading layouts, only to name the layout a template was made from.
+21. **The Materializer refuses emails.** A request for one gets "Emails are made in the Email app." The old email output, its layout code and the clients' email choices were removed, along with the OS Layouts hooks and helpers that nothing used any more. The OS keeps reading layouts, only to name the layout a template was made from. So "Save as layout" and the OS Layouts list were removed, not hidden. `campaignSaveLayout` still works through the API.
+22. **Ask and the composition's goal.** The composition's goal is not linked to the Ask conversation that started it. Ask shows its own turn, and its "View work" opens that turn, not the composition's goal in Nexus. The template's Writing mark, in the OS and in VS Code, is where the writing is followed.
+23. **A person's save ends a failure.** A person's save or publish of a template whose composition failed ends the failure: the composition becomes `done`, and keeps its request, error and notes as the record. Neither client then marks it Failed or offers Retry. A retry keeps the revision the composition began from (`baseRevision`, recorded by a start that failed too), so a retry over a template somebody changed since saves MemQL's version beside it as `<name> (MemQL's version)`, never over it.
+24. **Only the person who asked can retry.** The request records who asked (`requestedBy`). A retry reads the request's files as whoever runs it, so a retry by anyone else is refused with "Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files." Nothing is asked or written. The OS shows Retry only to the person who asked. VS Code does not know who is signed in, so it shows the server's sentence. Anyone who can write the template can still cancel it.
+25. **Fixed failure reasons.** A failed composition records one of a few fixed sentences of at most ten words: "Cancelled"; "Your Claude Code app could not be reached." for an app door nobody can reach or a route that cannot serve the person; the package's own short sentences (busy, nothing saved, no usable files, a file that could not be read); otherwise "MemQL could not finish this email." Which files were left out, and why, is in the notes. The cause is logged with the template id and never shown.
+26. **The Brand preview shows the part being edited.** The page previews the kit on a layout that has the part in focus: Article for the colours, fonts, reply, footer and full-width header; Letter for the logo picture, its description and link, the signature and the social links with the follow line; Confirmation for the logo on coloured panels. Article has no follow line, social links or coloured panel, so one layout could not show every part.

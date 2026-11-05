@@ -131,8 +131,8 @@ it can have MemQL write the words for you.
    only. The look comes from the organization's [brand kit](#brand-kits).
 3. Give the email a name.
 4. To have MemQL write it, describe the email. You can also attach files:
-   pictures, ZIPs and text files, up to 64 files and 16 MiB. You can add a
-   picture of how the finished email should look.
+   pictures, ZIPs and text files, up to 64 files and 16 MiB together. You can
+   add a picture of how the finished email should look.
 5. Choose one of two buttons.
 
 - **Start from the layout** makes the template at once, with the brand kit
@@ -152,9 +152,20 @@ finishes, the new email replaces the content in place. In the OS, the template
 shows **Writing** in Email, Templates. Open it there to see the same message,
 the time, and **Cancel**.
 
-If the writing stops, the template shows **Failed** with the reason, and a
+If the writing stops, the template shows **Failed** with a short reason, and a
 **Retry** button. Retry starts again with the layout, description and files you
 gave. The draft stays as the brand-applied layout until a run succeeds.
+
+- Only the person who asked MemQL to write the email can retry it, since the
+  files it reads are theirs. Anyone else is told to use New email with their
+  own files, and the OS shows Retry only to the person who asked.
+- Anyone who can write the template can cancel it. A colleague's Cancel marks
+  the email **Failed** at once; the writing on the owner's machine stops at its
+  next step.
+- If you finish the email yourself, saving or publishing it ends the failure:
+  the template no longer shows **Failed** or **Retry**.
+- A retry never writes over a change. If the template changed since the writing
+  began, MemQL's email is saved beside it as `<name> (MemQL's version)`.
 
 Write it needs two things. Without them it refuses, and nothing is created.
 
@@ -187,9 +198,12 @@ and at most 1 MiB for each picture and 1 MiB of pictures in all. If your
 material is more than that, MemQL chooses fewer pictures and names the ones it
 left out. It does not shrink or convert pictures. The picture of the finished
 email is guidance only. It goes in the email only if your description asks for
-it. Files of other types are named in the summary and left out. A ZIP can hold
-up to 256 files and 64 MiB once unpacked. It cannot hold paths that leave the
-ZIP, ZIPs inside ZIPs, or links.
+it. Files of other types are named in the summary and left out. The attached
+files are read up to 16 MiB together; a file past that is left out and named. A
+ZIP can hold up to 256 files and 64 MiB once unpacked. A file inside it that
+cannot be used, such as a picture over 24 million pixels or a ZIP inside the
+ZIP, is left out and named, and the rest of the ZIP is used. A ZIP with a path
+that leaves it, or a link, is left out whole.
 
 If you edit the template while MemQL is writing, MemQL does not overwrite your
 changes. It saves its version as a new template beside yours, named
@@ -202,6 +216,8 @@ changes. It saves its version as a new template beside yours, named
 | Some files cannot be used | They are named in the summary. MemQL continues without them. It stops only when nothing usable is left |
 | MemQL cannot fix every issue | It submits anyway. The draft lists the issues |
 | You cancel, or the machine sleeps or quits | The template shows **Failed**, with the reason and **Retry** |
+| Claude Code cannot be reached while it writes | **Failed**: "Your Claude Code app could not be reached." Open Cockpit, then **Retry** |
+| Anything else stops it | **Failed**: "MemQL could not finish this email." The cause is in the cluster's log |
 | The writing could not start | The template is still made and opens, and the editor offers **Retry** |
 
 #### From Ask
@@ -245,14 +261,18 @@ A kit holds:
 Only the theme, logo and footer are required. A part you leave empty is left
 out of the email.
 
-Pictures are PNG, JPEG or GIF. You can use a picture from the Library that you
-uploaded. MemQL reads it as you and stores a copy in the kit, so everyone in
-the organization can use it.
+Pictures are PNG, JPEG or GIF, up to 1 MiB each. You can use a picture from
+the Library that you uploaded. MemQL reads it as you and stores a copy in the
+kit, so everyone in the organization can use it. A picture that could not be
+read because storage did not answer says so, and saving again is the way on.
 
 To set up a kit, go to Email, Settings, and open the **Brand** row for the
 organization. The page has the colours, fonts, pictures, footer, follow line
-and reply, with a live preview. Choose **Save** in the action bar. Warnings
-show beside the preview. They never block a save:
+and reply, with a live preview. The preview shows the part you are editing, on
+a layout that has it: Article for the colours, fonts, reply, footer and
+full-width header; Letter for the logo, the signature and the social links;
+Confirmation for the logo on coloured panels. Choose **Save** in the action
+bar. Warnings show beside the preview. They never block a save:
 
 - a text and background colour pair that falls under WCAG 2 AA contrast;
 - pictures that together are over 512 KiB.
@@ -310,8 +330,9 @@ keeps the `artifact:` reference, and the saved HTML has the picture embedded
 MemQL ships 24 built-in layouts, from **Confirmation**, **Letter**, **Article**
 and **Spotlight** to patterns such as newsletters, steps, offers and events.
 They are structure only, and take their look from the organization's
-[brand kit](#brand-kits). You cannot create layouts. Layouts an organization
-saved earlier stay in the database, and templates made from them keep working.
+[brand kit](#brand-kits). The Email app and the editor no longer save layouts;
+`campaignSaveLayout` still works through the API. Layouts an organization saved
+earlier stay in the database, and templates made from them keep working.
 
 - `emailLayouts({accountId, includeArchived?})` lists what the organization can
   start from: the built-in layouts, then its own. Each row is
