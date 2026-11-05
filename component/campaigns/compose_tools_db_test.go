@@ -46,7 +46,7 @@ func TestComposeSubmitThroughTheRealTemplateWrites(t *testing.T) {
 	submit := func(id string) map[string]any {
 		t.Helper()
 		nodes, err := w.workers[1].handleComposeSubmit(w.owner, map[string]any{
-			"templateId": id, "composition": map[string]any{
+			"templateId": id, "goalId": "goal-" + w.suffix, "composition": map[string]any{
 				"subject": "Spring is here", "preheader": "Three things to plant.",
 				"content": []any{map[string]any{"id": "intro", "text": "The days are longer."}}, "drop": []any{"highlight"},
 			},

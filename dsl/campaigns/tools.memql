@@ -5,9 +5,10 @@
 // context, render a composition until it reads right, submit it. Each is a
 // builtin of the campaigns integration (component/campaigns/compose_tools.go).
 //
-// templateId is @autoInjected on every one: the run stamps the template it
-// writes, and the central validator drops any value the model supplies, so a
-// session only ever writes its own template. The session never sends a whole
+// templateId and goalId are @autoInjected on every one: the run stamps the
+// template it writes and its own goal, and the central validator drops any value
+// the model supplies, so a session only ever writes its own template, and only
+// while its own run is the composition that is writing. The session never sends a whole
 // document, only a composition; the server rebuilds the email from the layout
 // and the organization's brand kit, so the brand's pictures never pass through
 // the model.
@@ -29,6 +30,7 @@
 @executionTime("fast")
 tool emailComposeContext {
   templateId  string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+  goalId      string  @autoInjected @description("The goal of the composition run. Server-stamped by the run; the central validator drops any value the model supplies.")
 }
 
 /// Check a composition without saving it. Send {subject, preheader, content, drop,
@@ -47,6 +49,7 @@ tool emailComposeContext {
 @executionTime("fast")
 tool emailComposeRender {
   templateId   string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+  goalId       string  @autoInjected @description("The goal of the composition run. Server-stamped by the run; the central validator drops any value the model supplies.")
   composition  object! @description("{subject, preheader, content: [{id, text, label, href, alt, image}], drop: [id], repeat: {id: copies}}. Pictures are named by handle. Never a whole email document.")
 }
 
@@ -60,5 +63,6 @@ tool emailComposeRender {
 @executionTime("fast")
 tool emailComposeSubmit {
   templateId   string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+  goalId       string  @autoInjected @description("The goal of the composition run. Server-stamped by the run; the central validator drops any value the model supplies.")
   composition  object! @description("The composition last rendered: {subject, preheader, content, drop, repeat}, as emailComposeRender takes it.")
 }

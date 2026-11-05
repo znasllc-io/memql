@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"path"
@@ -52,18 +53,35 @@ import (
 //
 // # What it may cost
 //
-// Every tool call of a run reads the material again, and a request can name
-// sixty-four files. Each file is read up to maxMaterialFileBytes, and all that
-// is kept, together, up to maxMaterialBytes; past that a file is left out with
-// a reason instead of a node holding gigabytes for one composition.
+// Every tool call of a run reads the material again (nothing is kept between
+// calls), and one read can hold a few hundred MiB at its peak: the files kept,
+// the data URIs of their pictures, a download in flight and a ZIP being
+// unpacked. So the material is read in a render slot (acquireRenderSlot), the
+// same few a preview or a save renders in, held by the tools for their whole
+// call: a node holds no more material at once than it renders emails. Within a
+// read: a request names at most maxMaterialFiles files; each is read up to
+// maxMaterialFileBytes; a picture whose Library row is larger than an email can
+// carry is left out before it is read (the picture of the finished email is
+// read up to the per-file limit, being guidance); and all that is kept,
+// together, is at most maxMaterialBytes, past which a file is left out with a
+// reason.
 
 const (
+	// maxMaterialFiles is the most files a request names (the picture of the
+	// finished email aside): what can be attached.
+	maxMaterialFiles = 64
+
 	// maxMaterialFileBytes is the most of one attached file that is read.
 	maxMaterialFileBytes = 64 << 20
 
 	// maxMaterialBytes is the most the files kept from one request hold
 	// together: what one ZIP may unpack to.
 	maxMaterialBytes = 64 << 20
+)
+
+var (
+	errTooManyMaterialFiles = fmt.Errorf("An email is composed from at most %d attached files. Attach fewer.", maxMaterialFiles)
+	errComposeBusy          = errors.New("Composing is busy right now. Try again in a moment.")
 )
 
 // The reasons a file is left out that the archive reader does not give. The
@@ -112,25 +130,58 @@ func (m material) notes() []string {
 	return notes
 }
 
-// compositionMaterial reads the files of a request, then its picture of the
-// finished email, as the caller. A file named twice is read once. When files
-// were attached and none of them can be used there is nothing to write from,
-// and the answer is an error that names each one and why.
+// compositionMaterial reads a request's material in a render slot of its own,
+// for a caller that holds none (a run, before its session starts). The tools
+// hold one slot for their whole call and read with readMaterial inside it.
 func (w *Worker) compositionMaterial(ctx context.Context, req compositionRequest) (material, error) {
-	r := &materialReader{w: w, m: material{Handles: map[string]string{}}, taken: map[string]bool{}}
-	reference := bare(strings.TrimSpace(req.ReferenceFileID))
+	release, err := acquireComposeSlot(ctx)
+	if err != nil {
+		return material{}, err
+	}
+	defer release()
+	return w.readMaterial(ctx, req)
+}
+
+// acquireComposeSlot takes a render slot for reading a composition's material
+// (and, for a tool, the render that follows), or says composing is busy.
+func acquireComposeSlot(ctx context.Context) (func(), error) {
+	release, err := acquireRenderSlot(ctx)
+	if errors.Is(err, errPreviewBusy) {
+		return nil, errComposeBusy
+	}
+	return release, err
+}
+
+// readMaterial reads the files of a request, then its picture of the finished
+// email, as the caller; the caller holds a render slot. A file named twice is
+// read once, and a request naming more than maxMaterialFiles is refused before
+// anything is read. When files were attached and none of them can be used there
+// is nothing to write from, and the answer is an error that names each one and
+// why.
+func (w *Worker) readMaterial(ctx context.Context, req compositionRequest) (material, error) {
+	var ids []string // the attached files in order, then the picture of the finished email
 	seen := map[string]bool{}
-	for _, id := range append(append([]string(nil), req.FileIDs...), reference) {
-		id = bare(strings.TrimSpace(id))
-		if id == "" || seen[id] {
-			continue
+	for _, id := range req.FileIDs {
+		if id = bare(strings.TrimSpace(id)); id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
 		}
-		seen[id] = true
+	}
+	if len(ids) > maxMaterialFiles {
+		return material{}, errTooManyMaterialFiles
+	}
+	reference := bare(strings.TrimSpace(req.ReferenceFileID))
+	if reference != "" && !seen[reference] {
+		ids = append(ids, reference)
+	}
+
+	r := &materialReader{w: w, m: material{Handles: map[string]string{}}, taken: map[string]bool{}}
+	for _, id := range ids {
 		if err := r.read(ctx, id, id == reference); err != nil {
 			return material{}, err
 		}
 	}
-	if len(seen) > 0 && len(r.m.Files) == 0 {
+	if len(ids) > 0 && len(r.m.Files) == 0 {
 		return material{}, fmt.Errorf("None of the attached files can be used. %s", strings.Join(r.m.notes(), " "))
 	}
 	return r.m, nil
@@ -181,6 +232,10 @@ func (r *materialReader) read(ctx context.Context, fileID string, reference bool
 		return nil
 	case integer(row, "size") > maxMaterialFileBytes:
 		r.skip(name, reasonFileTooLarge)
+		return nil
+	case kind == kindPicture && !reference && integer(row, "size") > emaildoc.MaxImageBytes:
+		// It could only be left out once read (keepPicture); the row says so first.
+		r.skip(name, reasonPictureTooBig)
 		return nil
 	}
 	data, err := r.w.readBlobUpTo(ctx, str(row, "blobUrl"), str(row, "ownerUserId"), maxMaterialFileBytes)

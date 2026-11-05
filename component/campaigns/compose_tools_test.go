@@ -171,7 +171,7 @@ func (cw *composeWorld) addFile(name, mime string, data []byte) string {
 // is recorded with the revision the composition starts from.
 func (cw *composeWorld) start(layoutID string, fileIDs []string, reference string) string {
 	cw.t.Helper()
-	c := composition{GoalID: "goal-1", State: "writing", StartedAt: templateNow,
+	c := composition{GoalID: composeGoal, State: "writing", StartedAt: templateNow,
 		Request: compositionRequest{LayoutID: layoutID, Name: "Spring news", Description: "Tell them about spring.", FileIDs: fileIDs, ReferenceFileID: reference}}
 	id, revision, _, err := cw.w.createTemplateFromLayout(importCtx(), templateOrg, "Spring news", layoutID, &c)
 	if err != nil {
@@ -198,11 +198,21 @@ func (cw *composeWorld) setState(id, state string) {
 	}
 }
 
+// composeGoal is the goal start gives a composition, which the run stamps on
+// every tool call as goalId.
+const composeGoal = "goal-1"
+
 // tool runs one of the three handlers as the cluster's first test user, with
-// the template the run stamps as templateId, and decodes the node it answers.
+// the template and the goal the run stamps, and decodes the node it answers.
 func (cw *composeWorld) tool(name, templateID string, c map[string]any) (map[string]any, error) {
 	cw.t.Helper()
-	args := map[string]any{"templateId": templateID}
+	return cw.toolFor(name, templateID, composeGoal, c)
+}
+
+// toolFor is tool with the goal a session stamps given.
+func (cw *composeWorld) toolFor(name, templateID, goalID string, c map[string]any) (map[string]any, error) {
+	cw.t.Helper()
+	args := map[string]any{"templateId": templateID, "goalId": goalID}
 	if c != nil {
 		args["composition"] = c
 	}
@@ -707,19 +717,30 @@ func TestComposeCopyNameFitsTheNameLimit(t *testing.T) {
 	}
 }
 
+// Every tool, not only submit, works for a composition that is writing: one
+// that finished or was cancelled reads and renders nothing more.
 func TestComposeSubmitRefusedUnlessWriting(t *testing.T) {
 	for _, state := range []string{"done", "failed"} {
-		cw := newComposeWorld(t)
-		cw.withKit()
-		id := cw.start("builtin:article", nil, "")
-		cw.setState(id, state)
-		writes := len(cw.engine.writes())
-		_, err := cw.tool("submit", id, articleComposition(""))
-		if !errors.Is(err, errCompositionNotWriting) || err.Error() != composeNotWriting {
-			t.Errorf("%s: err = %v", state, err)
-		}
-		if len(cw.engine.writes()) != writes {
-			t.Errorf("%s: a refused submit wrote something", state)
+		for _, tool := range []string{"context", "render", "submit"} {
+			cw := newComposeWorld(t)
+			cw.withKit()
+			id := cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", previewPNG(t, 6, 4))}, "")
+			cw.setState(id, state)
+			writes := len(cw.engine.writes())
+			var c map[string]any
+			if tool != "context" {
+				c = articleComposition("")
+			}
+			_, err := cw.tool(tool, id, c)
+			if !errors.Is(err, errCompositionNotWriting) || err.Error() != composeNotWriting {
+				t.Errorf("%s %s: err = %v", state, tool, err)
+			}
+			if len(cw.engine.writes()) != writes {
+				t.Errorf("%s %s: a refused call wrote something", state, tool)
+			}
+			if limited, unbounded := cw.blobs.reads(); limited+unbounded != 0 {
+				t.Errorf("%s %s: the material was read", state, tool)
+			}
 		}
 	}
 
@@ -785,14 +806,18 @@ func TestComposeSubmitNeverPublishes(t *testing.T) {
 }
 
 func TestComposeToolsRefuseAnotherOwnersTemplate(t *testing.T) {
+	// set answers the template and the goal the call is stamped with.
 	setups := []struct {
 		name string
 		want string
-		set  func(cw *composeWorld) string
+		set  func(cw *composeWorld) (string, string)
 	}{
-		{"nothing stamped", composeNoTemplate, func(cw *composeWorld) string { return "" }},
-		{"a template the caller cannot see", composeMissing, func(cw *composeWorld) string { return "t-unseen" }},
-		{"another organization's template", composeNoOrg, func(cw *composeWorld) string {
+		{"no template stamped", composeNoTemplate, func(cw *composeWorld) (string, string) { return "", composeGoal }},
+		{"no goal stamped", composeNoTemplate, func(cw *composeWorld) (string, string) {
+			return cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", previewPNG(cw.t, 6, 4))}, ""), ""
+		}},
+		{"a template the caller cannot see", composeMissing, func(cw *composeWorld) (string, string) { return "t-unseen", composeGoal }},
+		{"another organization's template", composeNoOrg, func(cw *composeWorld) (string, string) {
 			c := sampleComposition()
 			object, _ := c.object()
 			cw.engine.rows["t-other"] = map[string]any{
@@ -800,19 +825,19 @@ func TestComposeToolsRefuseAnotherOwnersTemplate(t *testing.T) {
 				"accountId": "v1:accounts:account:other-org", "name": "Theirs", "composition": object,
 				"createdAt": templateStored.Format(time.RFC3339Nano), "status": "draft",
 			}
-			return "t-other"
+			return "t-other", c.GoalID
 		}},
-		{"no write permission in the organization", templateNeeds, func(cw *composeWorld) string {
+		{"no write permission in the organization", templateNeeds, func(cw *composeWorld) (string, string) {
 			id := cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", previewPNG(cw.t, 6, 4))}, "")
 			cw.engine.capable = func(string, string, string) bool { return false }
-			return id
+			return id, composeGoal
 		}},
-		{"a template MemQL is not writing", composeNotComposing, func(cw *composeWorld) string {
+		{"a template MemQL is not writing", composeNotComposing, func(cw *composeWorld) (string, string) {
 			id, _, _, err := cw.w.createTemplateFromLayout(importCtx(), templateOrg, "Plain", "builtin:article", nil)
 			if err != nil {
 				cw.t.Fatal(err)
 			}
-			return id
+			return id, composeGoal
 		}},
 	}
 	for _, setup := range setups {
@@ -820,13 +845,13 @@ func TestComposeToolsRefuseAnotherOwnersTemplate(t *testing.T) {
 			t.Run(setup.name+"/"+tool, func(t *testing.T) {
 				cw := newComposeWorld(t)
 				cw.withKit()
-				id := setup.set(cw)
+				id, goal := setup.set(cw)
 				writes := len(cw.engine.writes())
 				var c map[string]any
 				if tool != "context" {
 					c = articleComposition("")
 				}
-				_, err := cw.tool(tool, id, c)
+				_, err := cw.toolFor(tool, id, goal, c)
 				if err == nil || err.Error() != setup.want {
 					t.Fatalf("err = %v, want %q", err, setup.want)
 				}
@@ -852,6 +877,98 @@ func TestComposeToolsAuthorizeByOrganizationNotByLastWriter(t *testing.T) {
 	cw.must("context", id, nil)
 	cw.must("render", id, articleComposition(compose.EmailAssetHandle(hero)))
 	cw.must("submit", id, articleComposition(compose.EmailAssetHandle(hero)))
+}
+
+// A session whose run was cancelled, still talking after the composition was
+// retried under a new goal, acts on nothing: every tool holds the call to the
+// goal of the composition that is writing.
+func TestComposeToolsRefuseAStaleGoal(t *testing.T) {
+	for _, tool := range []string{"context", "render", "submit"} {
+		cw := newComposeWorld(t)
+		cw.withKit()
+		hero := previewPNG(t, 6, 4)
+		id := cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", hero)}, "")
+		retried, _ := compositionFromRow(cw.engine.row(id))
+		retried.GoalID = "goal-2"
+		if _, err := cw.w.writeComposition(importCtx(), templateOrg, id, retried); err != nil {
+			t.Fatal(err)
+		}
+		writes := len(cw.engine.writes())
+		var c map[string]any
+		if tool != "context" {
+			c = articleComposition(compose.EmailAssetHandle(hero))
+		}
+		_, err := cw.toolFor(tool, id, composeGoal, c)
+		if !errors.Is(err, errCompositionNotWriting) || err.Error() != composeNotWriting {
+			t.Errorf("%s with the old goal: err = %v", tool, err)
+		}
+		if len(cw.engine.writes()) != writes {
+			t.Errorf("%s with the old goal wrote something", tool)
+		}
+		if limited, unbounded := cw.blobs.reads(); limited+unbounded != 0 {
+			t.Errorf("%s with the old goal read the material", tool)
+		}
+		// The retried run's own session is answered, its goal written either way.
+		if _, err := cw.toolFor(tool, id, "v1:work:goal:goal-2", c); err != nil {
+			t.Errorf("%s with the new goal: %v", tool, err)
+		}
+	}
+}
+
+func TestComposeMaterialReadsAtMost64Files(t *testing.T) {
+	cw := newComposeWorld(t)
+	hero := cw.addFile("hero.png", "image/png", previewPNG(t, 6, 4))
+	ids := []string{hero}
+	for len(ids) < maxMaterialFiles {
+		ids = append(ids, fmt.Sprintf("gone-%d", len(ids)))
+	}
+	// 64 files, a repeated one and the picture of the finished email are read.
+	m, err := cw.w.compositionMaterial(importCtx(), compositionRequest{FileIDs: append(ids, hero), ReferenceFileID: cw.addFile("finished.png", "image/png", previewPNG(t, 7, 9))})
+	if err != nil || len(m.Files) != 2 {
+		t.Fatalf("64 files: %d kept, %v", len(m.Files), err)
+	}
+	before := len(cw.engine.calls("query libraryFileById"))
+	_, err = cw.w.compositionMaterial(importCtx(), compositionRequest{FileIDs: append(ids, "one-more")})
+	if err == nil || err.Error() != "An email is composed from at most 64 attached files. Attach fewer." {
+		t.Errorf("65 files: %v", err)
+	}
+	if after := len(cw.engine.calls("query libraryFileById")); after != before {
+		t.Errorf("65 files: %d Library reads before the refusal", after-before)
+	}
+}
+
+// A call reads its material and renders in ONE of the render slots previews
+// and saves take: none is read while every slot is taken, and a submit with a
+// single slot free never needs a second.
+func TestComposeToolsTakeOneRenderSlot(t *testing.T) {
+	cw := newComposeWorld(t)
+	cw.withKit()
+	hero := previewPNG(t, 6, 4)
+	id := cw.start("builtin:article", []string{cw.addFile("hero.png", "image/png", hero)}, "")
+	setDuration(t, &renderSlotWait, 50*time.Millisecond)
+
+	holdRenderSlots(t, maxConcurrentRenders)
+	for _, tool := range []string{"context", "render", "submit"} {
+		var c map[string]any
+		if tool != "context" {
+			c = articleComposition(compose.EmailAssetHandle(hero))
+		}
+		if _, err := cw.tool(tool, id, c); err == nil || err.Error() != "Composing is busy right now. Try again in a moment." {
+			t.Errorf("%s with every slot taken: %v", tool, err)
+		}
+	}
+	if limited, unbounded := cw.blobs.reads(); limited+unbounded != 0 {
+		t.Error("the material was read without a slot")
+	}
+
+	<-renderSlots // one slot free; the cleanup takes it back
+	t.Cleanup(func() { renderSlots <- struct{}{} })
+	cw.must("context", id, nil)
+	cw.must("render", id, articleComposition(compose.EmailAssetHandle(hero)))
+	cw.must("submit", id, articleComposition(compose.EmailAssetHandle(hero)))
+	if _, held := cw.gate.snapshot(); held != 0 || len(renderSlots) != maxConcurrentRenders-1 {
+		t.Errorf("after the calls: %d gates and %d slots held", held, len(renderSlots))
+	}
 }
 
 func TestComposeMaterialLeavesOutWhatItCannotUse(t *testing.T) {
@@ -915,15 +1032,16 @@ func TestComposeMaterialLeavesOutWhatItCannotUse(t *testing.T) {
 	}
 	// Each file is read as the caller, and with a limit. Storage is not asked
 	// for a file left out for what it is, where it is or how large its row says
-	// it is: only hero, broken, empty, bad.zip, big, latin1, bundle.zip and the
-	// reference are read.
+	// it is, a picture larger than an email can carry included (big.png): only
+	// hero, broken, empty, bad.zip, latin1, bundle.zip and the reference, which
+	// is read however large, are read.
 	for _, c := range cw.engine.fakeEngine.calls {
 		if strings.HasPrefix(c.query, "query libraryFileById") && c.actorID != testOwner {
 			t.Errorf("a Library read ran as %q", c.actorID)
 		}
 	}
-	if limited, unbounded := cw.blobs.reads(); limited != 8 || unbounded != 0 {
-		t.Errorf("storage reads: %d limited, %d without a limit; want 8 and 0", limited, unbounded)
+	if limited, unbounded := cw.blobs.reads(); limited != 7 || unbounded != 0 {
+		t.Errorf("storage reads: %d limited, %d without a limit; want 7 and 0", limited, unbounded)
 	}
 }
 
@@ -1008,7 +1126,8 @@ func TestComposeToolsLoadWithTheirBuiltins(t *testing.T) {
 		if got.Handler == nil || got.Handler.Type != "function" || got.Handler.FunctionName != builtin {
 			t.Errorf("%s handler = %+v, want function %s", tool, got.Handler, builtin)
 		}
-		if !slices.Equal(got.RequiresAgentRole, []string{"specialist"}) || !slices.Equal(got.AutoInjectedFields, []string{"templateId"}) {
+		stamped := slices.Sorted(slices.Values(got.AutoInjectedFields))
+		if !slices.Equal(got.RequiresAgentRole, []string{"specialist"}) || !slices.Equal(stamped, []string{"goalId", "templateId"}) {
 			t.Errorf("%s: roles %v, stamped %v", tool, got.RequiresAgentRole, got.AutoInjectedFields)
 		}
 		fn, err := eng.Functions().Get(builtin)

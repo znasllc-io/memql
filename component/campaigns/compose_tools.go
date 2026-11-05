@@ -39,14 +39,24 @@ import (
 //
 // # Which template, and who may
 //
-// Every tool takes the template from templateId, which the tool declares
-// @autoInjected: the run stamps it, and the central validator drops a value the
-// model supplies. The template is read under the caller, and the caller must be
-// able to use its organization (requireOrganization) and write templates in it
-// (mayWriteTemplates); the template must carry a composition. The row's
-// ownerUserId is NOT consulted: every save restamps it as the last writer, so a
-// colleague's save would otherwise lock the composer out. Context and render
-// read only; submit also needs the composition to be writing.
+// Every tool takes the template from templateId and the run from goalId, both
+// of which the tool declares @autoInjected: the run stamps them, and the
+// central validator drops a value the model supplies. The template is read
+// under the caller, and the caller must be able to use its organization
+// (requireOrganization) and write templates in it (mayWriteTemplates). Then the
+// template must carry a composition that is writing, and the call's goal must
+// be that composition's: a session that was cancelled, and is still talking
+// after the composition was retried under a new goal, acts on nothing. The
+// row's ownerUserId is NOT consulted: every save restamps it as the last
+// writer, so a colleague's save would otherwise lock the composer out.
+//
+// # What a call may cost
+//
+// A call holds one render slot (acquireComposeSlot) from the moment it reads
+// the material until it has rendered: the material and the render are the
+// heavy part, and the slots are the ones previews and saves render in, so a node
+// holds no more of them at once than it renders emails. Submit gives its slot
+// back before it takes the template's lock.
 //
 // # Submit
 //
@@ -85,10 +95,12 @@ type composingTemplate struct {
 }
 
 // composingTemplate reads the template a call names and checks that the caller
-// may compose it: see the header.
+// may compose it, and that this call's run is the composition that is writing:
+// see the header.
 func (w *Worker) composingTemplate(ctx context.Context, args map[string]any) (composingTemplate, error) {
 	id := bare(strings.TrimSpace(argString(args, "templateId")))
-	if id == "" || !templateIDPattern.MatchString(id) || callerUserID(ctx) == "" {
+	goalID := strings.TrimSpace(argString(args, "goalId"))
+	if id == "" || !templateIDPattern.MatchString(id) || goalID == "" || callerUserID(ctx) == "" {
 		return composingTemplate{}, errComposeNoTemplate
 	}
 	rows, err := w.store.rows(ctx, call("query", "templateById", arg{"templateId", id}))
@@ -112,7 +124,18 @@ func (w *Worker) composingTemplate(ctx context.Context, args map[string]any) (co
 	if !ok {
 		return composingTemplate{}, errNotComposing
 	}
+	// Finished, cancelled, or started again under another goal since this
+	// session's run began.
+	if c.State != compositionWriting || !sameGoal(c.GoalID, goalID) {
+		return composingTemplate{}, errCompositionNotWriting
+	}
 	return composingTemplate{id: id, accountID: accountID, name: str(rows[0], "name"), composition: c}, nil
+}
+
+// sameGoal reports whether a composition's goal and a call's are one goal,
+// whichever of the two is written bare.
+func sameGoal(composed, called string) bool {
+	return composed != "" && bare(composed) == bare(called)
 }
 
 // handleComposeContext implements integration.campaigns.composeContext.
@@ -122,7 +145,12 @@ func (w *Worker) handleComposeContext(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	m, err := w.compositionMaterial(ctx, t.composition.Request)
+	release, err := acquireComposeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	m, err := w.readMaterial(ctx, t.composition.Request)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +173,12 @@ func (w *Worker) handleComposeRender(ctx context.Context, args map[string]any, _
 	if err != nil {
 		return nil, err
 	}
-	m, err := w.compositionMaterial(ctx, t.composition.Request)
+	release, err := acquireComposeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	m, err := w.readMaterial(ctx, t.composition.Request)
 	if err != nil {
 		return nil, err
 	}
@@ -153,13 +186,9 @@ func (w *Worker) handleComposeRender(ctx context.Context, args map[string]any, _
 	if err != nil {
 		return nil, err
 	}
-	release, err := acquireRenderSlot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	// The composed email holds data: pictures only (the kit's and the
-	// material's), so the render reads nothing from the Library.
+	// In the slot the material was read in. The composed email holds data:
+	// pictures only (the kit's and the material's), so the render reads nothing
+	// from the Library.
 	result, err := emaildoc.Render(ctx, doc, nil, emaildoc.RenderOptions{Preview: true})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
@@ -182,9 +211,6 @@ func (w *Worker) handleComposeSubmit(ctx context.Context, args map[string]any, _
 	if err != nil {
 		return nil, err
 	}
-	if t.composition.State != compositionWriting {
-		return nil, errCompositionNotWriting
-	}
 	if w.templateGate == nil {
 		return nil, errTemplateGateUnavailable
 	}
@@ -192,27 +218,42 @@ func (w *Worker) handleComposeSubmit(ctx context.Context, args map[string]any, _
 	if err != nil {
 		return nil, err
 	}
-	m, err := w.compositionMaterial(ctx, t.composition.Request)
+	rendered, notes, err := w.renderComposed(ctx, t, c)
 	if err != nil {
 		return nil, err
 	}
-	doc, _, err := w.composeDocument(ctx, t, c, m)
-	if err != nil {
-		return nil, err
-	}
-	// Rendered as any template is saved, before the lock (template.go, "Render
-	// first, lock after").
-	rendered, err := w.renderTemplate(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc})
-	if err != nil {
-		return nil, err
-	}
-	templateID, revision, err := w.saveComposed(ctx, t, rendered, m.notes())
+	templateID, revision, err := w.saveComposed(ctx, t, rendered, notes)
 	if err != nil {
 		return nil, err
 	}
 	return resultNode("campaignComposeSubmitted", map[string]any{
 		"templateId": templateID, "revision": revision.UTC().Format(time.RFC3339Nano), "issues": rendered.issues,
 	})
+}
+
+// renderComposed reads the material, composes the email and renders it as any
+// template is saved, in ONE render slot that it gives back before the template
+// is locked (template.go, "Render first, lock after"). It answers the rendering
+// and the notes on what was left out; the material itself is not kept.
+func (w *Worker) renderComposed(ctx context.Context, t composingTemplate, c emaildoc.Composition) (*renderedTemplate, []string, error) {
+	release, err := acquireComposeSlot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer release()
+	m, err := w.readMaterial(ctx, t.composition.Request)
+	if err != nil {
+		return nil, nil, err
+	}
+	doc, _, err := w.composeDocument(ctx, t, c, m)
+	if err != nil {
+		return nil, nil, err
+	}
+	rendered, err := w.renderInSlot(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc})
+	if err != nil {
+		return nil, nil, err
+	}
+	return rendered, m.notes(), nil
 }
 
 // saveComposed writes the composed email over the template and the composition

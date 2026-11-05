@@ -442,6 +442,13 @@ func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (*rend
 		return nil, err
 	}
 	defer releaseSlot()
+	return w.renderInSlot(ctx, req)
+}
+
+// renderInSlot is renderTemplate for a caller that already holds a render slot
+// for the work around the render (a composition's submit, which reads its
+// material in the same slot), so that one call never holds two.
+func (w *Worker) renderInSlot(ctx context.Context, req templateRequest) (*renderedTemplate, error) {
 	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
