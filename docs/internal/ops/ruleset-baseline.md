@@ -88,7 +88,7 @@ Every `default branch` ruleset carries `deletion`, `non_fast_forward`,
   one. Existing pull requests are hidden, not closed or deleted, and their
   branches stay. Dependabot proposes updates as pull requests, so dependency
   bumps are now pushed by the owner. When pull requests were turned off,
-  `memql-znas#297` (Jesus's znas.io release 3) was still open; its branch
+  `memql-znas#297` (Jesus's website release 3) was still open; its branch
   `epic/znas-io-release-3-services-memql` remains and can be merged into `main`
   by the owner.
 
