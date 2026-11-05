@@ -12,7 +12,8 @@ import (
 // that was left out and why.
 //
 // The object is {goalId, state, startedAt, finishedAt, error, request:
-// {layoutId, name, description, fileIds, referenceFileId}, baseRevision, notes}.
+// {layoutId, name, description, fileIds, referenceFileId, requestedBy},
+// baseRevision, notes}.
 // state is writing, done or failed; the times are RFC3339 and empty when not
 // yet known. notes is never null.
 
@@ -20,6 +21,9 @@ type compositionRequest struct {
 	LayoutID, Name, Description string
 	FileIDs                     []string
 	ReferenceFileID             string
+	// RequestedBy is the bare id of the person who asked: the one person who
+	// may retry the composition (compose_start.go).
+	RequestedBy string
 }
 
 type composition struct {
@@ -47,6 +51,7 @@ type requestWire struct {
 	Description     string   `json:"description"`
 	FileIDs         []string `json:"fileIds"`
 	ReferenceFileID string   `json:"referenceFileId"`
+	RequestedBy     string   `json:"requestedBy"`
 }
 
 func compositionTime(t time.Time) string {
@@ -70,7 +75,7 @@ func (c composition) object() (map[string]any, error) {
 		StartedAt: compositionTime(c.StartedAt), FinishedAt: compositionTime(c.FinishedAt), BaseRevision: compositionTime(c.BaseRevision),
 		Request: requestWire{
 			LayoutID: c.Request.LayoutID, Name: c.Request.Name, Description: c.Request.Description,
-			FileIDs: orEmpty(c.Request.FileIDs), ReferenceFileID: c.Request.ReferenceFileID,
+			FileIDs: orEmpty(c.Request.FileIDs), ReferenceFileID: c.Request.ReferenceFileID, RequestedBy: c.Request.RequestedBy,
 		},
 		Notes: orEmpty(c.Notes),
 	}
@@ -105,7 +110,7 @@ func compositionFromRow(row map[string]any) (composition, bool) {
 		StartedAt: templateTime(wire.StartedAt), FinishedAt: templateTime(wire.FinishedAt), BaseRevision: templateTime(wire.BaseRevision),
 		Request: compositionRequest{
 			LayoutID: wire.Request.LayoutID, Name: wire.Request.Name, Description: wire.Request.Description,
-			FileIDs: wire.Request.FileIDs, ReferenceFileID: wire.Request.ReferenceFileID,
+			FileIDs: wire.Request.FileIDs, ReferenceFileID: wire.Request.ReferenceFileID, RequestedBy: wire.Request.RequestedBy,
 		},
 		Notes: wire.Notes,
 	}, true

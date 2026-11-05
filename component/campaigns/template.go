@@ -394,12 +394,25 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
 		}
 		// A save does not touch the composition: the stored one is written back
-		// explicitly, not left to an omitted argument.
+		// explicitly, not left to an omitted argument. Except that a person's
+		// save or publish ends a composition that failed: the email is theirs
+		// now, so nothing offers to write it again (a retry would write over
+		// their work). It is done from this moment, and keeps what was asked,
+		// why it failed and what it left out.
 		content.composition = storedTemplate(row).composition
+		var ended bool
+		if c, has := compositionFromRow(row); has && c.State == compositionFailed {
+			c.State, c.FinishedAt = compositionDone, w.nowUTC()
+			object, err := c.object()
+			if err != nil {
+				return nil, err
+			}
+			content.composition, ended = object, true
+		}
 		same = sameTemplate(row, content)
 		// The same content already saved, or published, answers with the receipt
 		// it already has. This also makes an autosave of unchanged bytes inert.
-		if same && current == target {
+		if same && current == target && !ended {
 			return templateReceipt(req.templateID, prior, target, issues)
 		}
 	}

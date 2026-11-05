@@ -89,12 +89,27 @@ import (
 //
 // # Retrying
 //
-// Only a failed composition can be retried, with the same checks as a start
-// (organization, brand kit, an app). The composition is written as writing
-// again with the request it recorded, from now, with no goal, no error and no
-// notes, and in step with the template as it is now; then a new goal is opened
-// and recorded as a start's is. A run of the old goal that is still talking is
+// Only a failed composition can be retried, only by the person who asked for it
+// (the request records them as requestedBy), and with the same checks as a start
+// (organization, brand kit, an app). A retry reads the files the request names
+// as whoever runs it, so a colleague's retry would read the colleague's own
+// Library into a template the author can read; it is refused with a sentence,
+// before anything is asked or written. Cancelling stays open to every writer.
+//
+// The composition is written as writing again with the request it recorded,
+// from now, with no goal, no error and no notes; then a new goal is opened and
+// recorded as a start's is. A run of the old goal that is still talking is
 // refused by every tool, which holds a call to the goal the composition names.
+//
+// A retry keeps the revision the composition began from (its baseRevision).
+// Every write of the composition alone keeps that revision in step with the
+// template while nobody else changes it (rewriteComposition), so a retry over a
+// draft nobody touched writes in place. A template somebody changed since --
+// saved or published while MemQL wrote, or changed after a start that failed --
+// is theirs, and the retried run's email is saved beside it as "<name> (MemQL's
+// version)" (compose_tools.go), never over it. A person's own save or publish of
+// a failed composition's template ends the failure instead (template.go), so
+// there is nothing to retry.
 
 const (
 	// maxComposeDescriptionChars bounds what a composition is asked to write:
@@ -104,6 +119,10 @@ const (
 	// compositionGoalCancelReason is why the goal of a cancelled composition
 	// closed, as the goal records it.
 	compositionGoalCancelReason = "cancelled by person"
+
+	// compositionGoalStartFailedReason is why a goal that opened for a
+	// composition that could not start closed, as the goal records it.
+	compositionGoalStartFailedReason = "the composition could not start"
 )
 
 var (
@@ -116,6 +135,7 @@ var (
 	errComposeUnavailable   = errors.New("MemQL can't write emails on this server. Ask your administrator.")
 	errNothingToCancel      = errors.New("MemQL is not writing this email, so there is nothing to cancel.")
 	errRetryNeedsFailed     = errors.New("Only an email MemQL could not finish can be retried.")
+	errRetryNotYours        = errors.New("Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files.")
 
 	// errNoGoalOpened is logged, never shown: the goal starter answered
 	// without an error and without a goal.
@@ -133,6 +153,7 @@ func (w *Worker) handleComposeEmail(ctx context.Context, args map[string]any, _ 
 	if err != nil {
 		return nil, err
 	}
+	req.RequestedBy = bare(callerUserID(ctx))
 	if err := w.requireOrganization(ctx, accountID); err != nil {
 		return nil, err
 	}
@@ -283,7 +304,7 @@ func (w *Worker) openCompositionGoal(ctx context.Context, starter GoalStarter, s
 		err = errNoGoalOpened
 	}
 	if err != nil {
-		return w.failStart(settle, s, err)
+		return w.failStart(settle, s, goalID, err)
 	}
 	c, revision, ours, err := w.recordGoal(settle, s, goalID)
 	state := c.State
@@ -295,7 +316,7 @@ func (w *Worker) openCompositionGoal(ctx context.Context, starter GoalStarter, s
 		}
 		revision, state = s.base, compositionWriting
 	case !ours:
-		w.stopGoal(settle, goalID)
+		w.stopGoal(settle, goalID, compositionGoalCancelReason)
 	}
 	return resultNode("campaignCompositionStarted", map[string]any{
 		"templateId": s.templateID, "goalId": goalID, "revision": revision.UTC().Format(time.RFC3339Nano), "state": state,
@@ -338,13 +359,17 @@ func (w *Worker) recordGoal(ctx context.Context, s compositionStart, goalID stri
 
 // failStart fails the composition s began because its goal could not be
 // opened. The cause is logged and never shown: the composition records, and
-// the answer says, errComposeCouldNotStart. It answers
-// campaignCompositionFailedToStart {templateId, revision, state, error}, naming
-// the draft the start kept, so that a client opens it (where the person can
-// retry) rather than making another.
-func (w *Worker) failStart(ctx context.Context, s compositionStart, cause error) ([]memorynodes.MemoryNode, error) {
+// the answer says, errComposeCouldNotStart. The composition records the
+// revision it began from, as a start that opened its goal does (recordGoal),
+// so that a retry after somebody changed the template is not taken for one
+// over the template as it began. A goal the work runtime answered together with
+// the error (opened, its run not started) is stopped: nothing will use it. It
+// answers campaignCompositionFailedToStart {templateId, revision, state,
+// error}, naming the draft the start kept, so that a client opens it (where the
+// person can retry) rather than making another.
+func (w *Worker) failStart(ctx context.Context, s compositionStart, goalID string, cause error) ([]memorynodes.MemoryNode, error) {
 	if w.logger != nil {
-		w.logger.Warn("campaigns: a composition's goal could not be opened", "template", s.templateID, "error", cause)
+		w.logger.Warn("campaigns: a composition's goal could not be opened", "template", s.templateID, "goal", goalID, "error", cause)
 	}
 	reason := errComposeCouldNotStart.Error()
 	c, revision, err := w.updateComposition(ctx, s.accountID, s.templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
@@ -352,8 +377,14 @@ func (w *Worker) failStart(ctx context.Context, s compositionStart, cause error)
 			return false, nil
 		}
 		c.State, c.Error, c.FinishedAt = compositionFailed, reason, w.nowUTC()
+		if c.BaseRevision.IsZero() {
+			c.BaseRevision = s.base
+		}
 		return true, nil
 	})
+	if goalID != "" {
+		w.stopGoal(ctx, goalID, compositionGoalStartFailedReason)
+	}
 	state := c.State
 	if err != nil {
 		// It stays writing with no goal, until a person cancels it.
@@ -389,7 +420,7 @@ func (w *Worker) handleCancelComposition(ctx context.Context, args map[string]an
 	defer cancel()
 	stopped := map[string]bool{}
 	if seen.GoalID != "" {
-		w.stopGoal(settle, seen.GoalID)
+		w.stopGoal(settle, seen.GoalID, compositionGoalCancelReason)
 		stopped[bare(seen.GoalID)] = true
 	}
 	var writingFor string
@@ -407,7 +438,7 @@ func (w *Worker) handleCancelComposition(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	if writingFor != "" && !stopped[bare(writingFor)] {
-		w.stopGoal(settle, writingFor)
+		w.stopGoal(settle, writingFor, compositionGoalCancelReason)
 	}
 	return resultNode("campaignCompositionCancelled", map[string]any{
 		"templateId": templateID, "revision": revision.UTC().Format(time.RFC3339Nano), "state": c.State,
@@ -426,8 +457,12 @@ func (w *Worker) handleRetryComposition(ctx context.Context, args map[string]any
 		return nil, err
 	}
 	accountID := bare(str(row, "accountId"))
-	if c, has := compositionFromRow(row); !has || c.State != compositionFailed {
+	c, has := compositionFromRow(row)
+	if !has || c.State != compositionFailed {
 		return nil, errRetryNeedsFailed
+	}
+	if !askedBy(ctx, c) {
+		return nil, errRetryNotYours
 	}
 	starter, err := w.readyToCompose(ctx, accountID)
 	if err != nil {
@@ -437,12 +472,16 @@ func (w *Worker) handleRetryComposition(ctx context.Context, args map[string]any
 	started := w.nowUTC().Truncate(time.Microsecond)
 	s := compositionStart{templateID: templateID, accountID: accountID, startedAt: started}
 	_, revision, err := w.updateComposition(ctx, accountID, templateID, func(c *composition, has bool, row map[string]any) (bool, error) {
-		if !has || c.State != compositionFailed {
+		switch {
+		case !has || c.State != compositionFailed:
 			return false, errRetryNeedsFailed
+		case !askedBy(ctx, *c):
+			return false, errRetryNotYours
 		}
+		// The revision it began from stays (see the header): a template
+		// somebody changed since gets MemQL's version beside it.
 		c.State, c.Error, c.GoalID, c.Notes = compositionWriting, "", "", nil
 		c.StartedAt, c.FinishedAt = started, time.Time{}
-		c.BaseRevision = templateTime(row["createdAt"])
 		s.name, s.layoutID = str(row, "name"), c.Request.LayoutID
 		return true, nil
 	})
@@ -451,6 +490,14 @@ func (w *Worker) handleRetryComposition(ctx context.Context, args map[string]any
 	}
 	s.base = revision
 	return w.openCompositionGoal(ctx, starter, s)
+}
+
+// askedBy reports whether the caller is the person who asked for the
+// composition, whichever way either id is written. A composition that does
+// not say who asked is nobody's.
+func askedBy(ctx context.Context, c composition) bool {
+	asker := bare(strings.TrimSpace(c.Request.RequestedBy))
+	return asker != "" && asker == bare(strings.TrimSpace(callerUserID(ctx)))
 }
 
 // compositionTemplateArg is the template a cancel or a retry names.
@@ -522,11 +569,11 @@ func (w *Worker) updateComposition(ctx context.Context, accountID, templateID st
 	return c, revision, nil
 }
 
-// stopGoal asks a composition's goal to stop, as the caller. It never fails the
-// call that asks: the composition is the record, and once it is not writing no
-// tool of that goal's run can write to the template, so a goal that will not
-// stop keeps only a session whose tools are refused.
-func (w *Worker) stopGoal(ctx context.Context, goalID string) {
+// stopGoal asks a composition's goal to stop, as the caller, for reason. It
+// never fails the call that asks: the composition is the record, and once it is
+// not writing no tool of that goal's run can write to the template, so a goal
+// that will not stop keeps only a session whose tools are refused.
+func (w *Worker) stopGoal(ctx context.Context, goalID, reason string) {
 	_, canceller, _ := w.compositionGoals()
 	if canceller == nil {
 		if w.logger != nil {
@@ -534,7 +581,7 @@ func (w *Worker) stopGoal(ctx context.Context, goalID string) {
 		}
 		return
 	}
-	if err := canceller.CancelGoal(ctx, goalID, compositionGoalCancelReason); err != nil && w.logger != nil {
+	if err := canceller.CancelGoal(ctx, goalID, reason); err != nil && w.logger != nil {
 		w.logger.Warn("campaigns: a composition's goal could not be cancelled; its tools refuse it all the same", "goal", goalID, "error", err)
 	}
 }

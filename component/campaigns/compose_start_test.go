@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/compose"
@@ -43,6 +44,8 @@ const (
 	composeUnavailable   = "MemQL can't write emails on this server. Ask your administrator."
 	composeStartFailed   = "MemQL could not start writing this email. Try again in a moment."
 	composeAppsUnknown   = "MemQL could not check your apps right now. Try again in a moment."
+	composeNotYours      = "Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files."
+	composeStartStop     = "the composition could not start"
 
 	// rawCause is what a stand-in for the work runtime or the app doors fails
 	// with: infrastructure's words, which a person must never read.
@@ -309,6 +312,60 @@ func (sw *startWorld) compositionOf(templateID string) composition {
 	return c
 }
 
+// colleagueCtx is a call from another member of the organization, who may
+// write its templates.
+func colleagueCtx() context.Context {
+	return auth.ContextWithUserActor(context.Background(), "colleague-1")
+}
+
+// storedDocument is the template's stored document, as a copy a person can
+// change.
+func (sw *startWorld) storedDocument(templateID string) map[string]any {
+	sw.t.Helper()
+	raw, err := json.Marshal(sw.engine.row(templateID)["document"])
+	if err != nil {
+		sw.t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		sw.t.Fatal(err)
+	}
+	return doc
+}
+
+// personSaves saves content over the template as a person does in the editor
+// (campaignSaveTemplate), held to the revision the template has now.
+func (sw *startWorld) personSaves(ctx context.Context, templateID string, content map[string]any, action string) (savedTemplate, error) {
+	sw.t.Helper()
+	row := sw.engine.row(templateID)
+	nodes, err := sw.w.handleSaveTemplate(ctx, map[string]any{
+		"templateId": templateID, "accountId": templateOrg, "name": str(row, "name"), "content": content,
+		"expectedRevision": templateTime(row["createdAt"]).UTC().Format(time.RFC3339Nano), "action": action,
+	}, 0)
+	if err != nil {
+		return savedTemplate{}, err
+	}
+	return decodeSaved(sw.t, nodes), nil
+}
+
+// failedByItsRun starts a composition whose run saves nothing, so that it ends
+// failed with the files it left out noted. It answers the template and the
+// failed composition.
+func (sw *startWorld) failedByItsRun() (string, composition) {
+	sw.t.Helper()
+	copyID := sw.addFile("copy.txt", "text/plain", []byte("Spring is here."))
+	readmeID := sw.addFile("readme.pdf", "application/pdf", []byte("%PDF-1.4"))
+	id, goal := sw.mustCompose(composeArgs(func(a map[string]any) { a["fileIds"] = []any{copyID, readmeID} }))
+	if _, err := sw.run(runContext(goal), id); err == nil || !strings.Contains(err.Error(), compositionFailedCode) {
+		sw.t.Fatalf("the run: err = %v", err)
+	}
+	failed := sw.compositionOf(id)
+	if failed.State != compositionFailed || failed.Error == "" || len(failed.Notes) == 0 {
+		sw.t.Fatalf("the run left %s %q with notes %v", failed.State, failed.Error, failed.Notes)
+	}
+	return id, failed
+}
+
 // nothingDone fails the test when anything was written or a goal was started.
 func (sw *startWorld) nothingDone(t *testing.T, what string) {
 	t.Helper()
@@ -495,8 +552,9 @@ func TestComposeEmailCreatesWritingTemplateAndStartsGoal(t *testing.T) {
 	if c.State != compositionWriting || !sameGoal(c.GoalID, goal) || !c.StartedAt.Equal(templateNow) || c.Error != "" || !c.FinishedAt.IsZero() {
 		t.Errorf("composition = %+v", c)
 	}
+	// The request names the person who asked: a retry is theirs alone.
 	want := compositionRequest{LayoutID: "builtin:article", Name: "Spring news", Description: "Tell them about spring.",
-		FileIDs: []string{heroID, copyID}, ReferenceFileID: referenceID}
+		FileIDs: []string{heroID, copyID}, ReferenceFileID: referenceID, RequestedBy: testOwner}
 	if !sameJSON(t, c.Request, want) {
 		t.Errorf("request = %+v, want %+v", c.Request, want)
 	}
@@ -588,6 +646,12 @@ func TestComposeEmailMarksFailedWhenGoalCannotStart(t *testing.T) {
 	if c.State != compositionFailed || c.Error != composeStartFailed || c.GoalID != "" || !c.FinishedAt.Equal(templateNow) {
 		t.Errorf("composition = %s %q goal %q finished %v", c.State, c.Error, c.GoalID, c.FinishedAt)
 	}
+	// It records the revision it started from, in step with the template, so
+	// that a retry after somebody changed the template is not taken for one
+	// over the template as it was.
+	if revision := templateTime(rows[0]["createdAt"]); !c.BaseRevision.Equal(revision) {
+		t.Errorf("base revision %v, row %v", c.BaseRevision, revision)
+	}
 	// The cause is logged, and nowhere a person reads it: not in the answer,
 	// not anywhere on the template.
 	answered, _ := plainJSON(out)
@@ -624,6 +688,47 @@ func TestComposeEmailMarksFailedWhenGoalCannotStart(t *testing.T) {
 		t.Fatalf("%d templates", len(rows))
 	} else if c, _ := compositionFromRow(rows[0]); c.State != compositionFailed || c.Error != composeStartFailed {
 		t.Errorf("an empty goal left the composition %s %q", c.State, c.Error)
+	}
+}
+
+// The work runtime can open a goal and then fail to start its run, and answer
+// both the goal and the error. The start fails the composition as for any goal
+// that cannot open, and stops that goal: nothing will use it, and it would
+// otherwise stay open.
+func TestComposeEmailStopsAGoalThatOpenedHalfway(t *testing.T) {
+	sw := newStartWorld(t)
+	sw.withKit()
+	logged := sw.logs()
+	sw.w.SetCompositionGoals(goalStarterFunc(func(context.Context, CompositionGoal) (string, error) {
+		return " v1:work:goal:half-open ", errors.New(rawCause)
+	}), sw.canceller, sw.apps)
+	// The composition never names that goal: the state the canceller reads is
+	// the one template's.
+	sw.canceller.state = func(string) string {
+		for _, row := range sw.engine.rowsNow() {
+			c, _ := compositionFromRow(row)
+			return c.State
+		}
+		return ""
+	}
+	nodes, err := sw.w.handleComposeEmail(importCtx(), composeArgs(), 0)
+	if err != nil {
+		t.Fatalf("a goal that opened halfway is answered, not refused: %v", err)
+	}
+	kind, out := startAnswer(t, nodes)
+	id := str(out, "templateId")
+	if kind != "campaignCompositionFailedToStart" || str(out, "state") != compositionFailed || str(out, "error") != composeStartFailed {
+		t.Errorf("answer = %s %v", kind, out)
+	}
+	if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != composeStartFailed || c.GoalID != "" {
+		t.Errorf("composition = %s %q goal %q", c.State, c.Error, c.GoalID)
+	}
+	cancelled := sw.canceller.snapshot()
+	if len(cancelled) != 1 || !sameGoal(cancelled[0].goalID, "half-open") || cancelled[0].reason != composeStartStop || cancelled[0].state != compositionFailed {
+		t.Errorf("cancelled = %+v, want the goal that opened, stopped once the composition is failed", cancelled)
+	}
+	if !strings.Contains(logged.String(), rawCause) {
+		t.Error("the cause was not logged")
 	}
 }
 
@@ -943,12 +1048,6 @@ func TestRetryCompositionStartsNewGoalWithRecordedRequest(t *testing.T) {
 	if failed.State != compositionFailed || len(failed.Notes) == 0 {
 		t.Fatalf("the first run left %s with notes %v", failed.State, failed.Notes)
 	}
-	// The person edited the draft by hand meanwhile: a retry composes over it,
-	// in place, rather than beside it.
-	edited := templateNow.Add(30 * time.Minute)
-	sw.engine.edit(id, func(row map[string]any) {
-		row["subject"], row["createdAt"] = "Edited by hand", edited.Format(time.RFC3339Nano)
-	})
 
 	later := templateNow.Add(time.Hour)
 	sw.w.now = func() time.Time { return later }
@@ -997,6 +1096,334 @@ func TestRetryCompositionStartsNewGoalWithRecordedRequest(t *testing.T) {
 	}
 	if done := sw.compositionOf(id); done.State != compositionDone || !sameGoal(done.GoalID, second) || len(sw.engine.rowsNow()) != 1 {
 		t.Errorf("after the retried run: %s goal %q, %d templates", done.State, done.GoalID, len(sw.engine.rowsNow()))
+	}
+}
+
+// A retry over a draft nobody changed since the failure writes the email in
+// place, however the composition failed: its run saved nothing, its goal could
+// not start, or a person cancelled it.
+func TestRetryOnAnUntouchedFailedDraftWritesInPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail func(sw *startWorld) string
+	}{
+		{"the run saved nothing", func(sw *startWorld) string {
+			id, _ := sw.failedByItsRun()
+			return id
+		}},
+		{"the goal could not start", func(sw *startWorld) string {
+			sw.starter.fail = errors.New(rawCause)
+			nodes, err := sw.w.handleComposeEmail(importCtx(), composeArgs(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, out := startAnswer(t, nodes)
+			sw.starter.fail = nil
+			return str(out, "templateId")
+		}},
+		{"a person cancelled it", func(sw *startWorld) string {
+			id, _ := sw.mustCompose(composeArgs())
+			if _, err := sw.cancel(id); err != nil {
+				t.Fatal(err)
+			}
+			return id
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sw := newStartWorld(t)
+			sw.withKit()
+			id := tc.fail(sw)
+			if c := sw.compositionOf(id); c.State != compositionFailed {
+				t.Fatalf("composition = %s", c.State)
+			}
+			sw.w.now = func() time.Time { return templateNow.Add(time.Hour) }
+			out, err := sw.retry(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c := sw.compositionOf(id); !c.BaseRevision.Equal(templateTime(sw.engine.row(id)["createdAt"])) {
+				t.Errorf("the retried composition is not in step with the template it did not change: base %v", c.BaseRevision)
+			}
+			sw.ai.session = sw.submitting(articleComposition(""))
+			if _, err := sw.run(runContext(str(out, "goalId")), id); err != nil {
+				t.Fatalf("the retried run: %v", err)
+			}
+			row := sw.engine.row(id)
+			if done := sw.compositionOf(id); done.State != compositionDone || len(sw.engine.rowsNow()) != 1 || str(row, "subject") != "Spring is here" {
+				t.Errorf("after the retried run: %s, %d templates, subject %q", done.State, len(sw.engine.rowsNow()), str(row, "subject"))
+			}
+		})
+	}
+}
+
+// A retry never writes over a person's work. When the template changed since
+// the composition began -- a person saved and published it while MemQL wrote,
+// or another writer changed it after the start failed -- the retry keeps the
+// revision the composition began from, so the retried run's email is saved
+// beside the template as "<name> (MemQL's version)", and the template keeps the
+// person's content and status.
+func TestRetryAfterAChangeToTheTemplateSavesACopy(t *testing.T) {
+	ready := readyConfirmation(t)
+	for _, tc := range []struct {
+		name   string
+		change func(sw *startWorld) string
+		status string
+	}{
+		{"a person published their own email while MemQL wrote", func(sw *startWorld) string {
+			id, goal := sw.mustCompose(composeArgs())
+			for _, action := range []string{"save", "publish"} {
+				if _, err := sw.personSaves(importCtx(), id, ready, action); err != nil {
+					t.Fatalf("%s: %v", action, err)
+				}
+			}
+			if c := sw.compositionOf(id); c.State != compositionWriting {
+				t.Fatalf("a save while MemQL writes changed the composition: %s", c.State)
+			}
+			// The run then saves nothing, and the composition fails.
+			if _, err := sw.run(runContext(goal), id); err == nil {
+				t.Fatal("the run succeeded")
+			}
+			return id
+		}, "ready"},
+		{"another writer changed it after the goal could not start", func(sw *startWorld) string {
+			sw.starter.fail = errors.New(rawCause)
+			nodes, err := sw.w.handleComposeEmail(importCtx(), composeArgs(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, out := startAnswer(t, nodes)
+			sw.starter.fail = nil
+			id := str(out, "templateId")
+			sw.engine.edit(id, func(row map[string]any) {
+				row["subject"], row["createdAt"] = "Edited by hand", templateNow.Add(30*time.Minute).Format(time.RFC3339Nano)
+			})
+			return id
+		}, "draft"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sw := newStartWorld(t)
+			sw.withKit()
+			id := tc.change(sw)
+			if c := sw.compositionOf(id); c.State != compositionFailed {
+				t.Fatalf("composition = %s %q", c.State, c.Error)
+			}
+			theirs := sw.engine.row(id)
+
+			sw.w.now = func() time.Time { return templateNow.Add(time.Hour) }
+			out, err := sw.retry(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c := sw.compositionOf(id); c.State != compositionWriting || c.BaseRevision.Equal(templateTime(sw.engine.row(id)["createdAt"])) {
+				t.Fatalf("the retry took the changed template for the one it began from: %s base %v", c.State, c.BaseRevision)
+			}
+			sw.ai.session = sw.submitting(articleComposition(""))
+			if _, err := sw.run(runContext(str(out, "goalId")), id); err != nil {
+				t.Fatalf("the retried run: %v", err)
+			}
+
+			rows := sw.engine.rowsNow()
+			if len(rows) != 2 {
+				t.Fatalf("%d templates, want the person's and MemQL's version", len(rows))
+			}
+			original := sw.engine.row(id)
+			for _, field := range []string{"subject", "status", "htmlBody", "textBody", "layoutId"} {
+				if str(original, field) != str(theirs, field) {
+					t.Errorf("the retry changed the template's %s: %q, was %q", field, str(original, field), str(theirs, field))
+				}
+			}
+			if !sameJSON(t, original["document"], theirs["document"]) || str(original, "status") != tc.status {
+				t.Errorf("the template lost the person's email: status %q", str(original, "status"))
+			}
+			var copied map[string]any
+			for _, row := range rows {
+				if bare(str(row, "id")) != id {
+					copied = row
+				}
+			}
+			if str(copied, "name") != composeCopyName || str(copied, "subject") != "Spring is here" || str(copied, "status") != "draft" {
+				t.Errorf("MemQL's version: name %q subject %q status %q", str(copied, "name"), str(copied, "subject"), str(copied, "status"))
+			}
+			if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != composeChanged {
+				t.Errorf("the template's composition = %s %q", c.State, c.Error)
+			}
+		})
+	}
+}
+
+// A person's save or publish of a template whose composition failed ends the
+// failure: the email is theirs now, so neither client marks it Failed or offers
+// Retry. The composition is done from that moment, and keeps what was asked,
+// why it failed and the files it left out, as the record of what happened.
+func TestAPersonsSaveOrPublishEndsAFailedComposition(t *testing.T) {
+	t.Run("a save of the person's own changes", func(t *testing.T) {
+		sw := newStartWorld(t)
+		sw.withKit()
+		id, failed := sw.failedByItsRun()
+		later := templateNow.Add(time.Hour)
+		sw.w.now = func() time.Time { return later }
+		edited := sw.storedDocument(id)
+		edited["subject"] = "Finished by hand"
+		saved, err := sw.personSaves(importCtx(), id, edited, "save")
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := sw.engine.row(id)
+		if str(row, "subject") != "Finished by hand" || str(row, "status") != "draft" || saved.Revision != templateTime(row["createdAt"]).UTC().Format(time.RFC3339Nano) {
+			t.Errorf("the save: subject %q status %q, receipt %+v", str(row, "subject"), str(row, "status"), saved)
+		}
+		c := sw.compositionOf(id)
+		if c.State != compositionDone || !c.FinishedAt.Equal(later) {
+			t.Errorf("composition = %s finished %v, want done at %v", c.State, c.FinishedAt, later)
+		}
+		if c.Error != failed.Error || !slices.Equal(c.Notes, failed.Notes) || !sameJSON(t, c.Request, failed.Request) || c.GoalID != failed.GoalID || !c.StartedAt.Equal(failed.StartedAt) {
+			t.Errorf("the record of what happened changed: %+v, was %+v", c, failed)
+		}
+		// Nothing failed is left to retry, and a retry writes and starts nothing.
+		writes, goals := len(sw.engine.writes()), len(sw.starter.snapshot())
+		if _, err := sw.retry(id); err == nil || err.Error() != composeNotFailed {
+			t.Errorf("a retry after the save: err = %v", err)
+		}
+		if len(sw.engine.writes()) != writes || len(sw.starter.snapshot()) != goals {
+			t.Error("the refused retry wrote or started something")
+		}
+	})
+
+	t.Run("a save of the draft as it is", func(t *testing.T) {
+		sw := newStartWorld(t)
+		sw.withKit()
+		id, _ := sw.failedByItsRun()
+		if _, err := sw.personSaves(importCtx(), id, sw.storedDocument(id), "save"); err != nil {
+			t.Fatal(err)
+		}
+		if c := sw.compositionOf(id); c.State != compositionDone {
+			t.Errorf("composition = %s", c.State)
+		}
+		// Saved again as it is, nothing more is written.
+		writes := len(sw.engine.writes())
+		if _, err := sw.personSaves(importCtx(), id, sw.storedDocument(id), "save"); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(sw.engine.writes()); n != writes {
+			t.Errorf("an unchanged save wrote %d versions", n-writes)
+		}
+	})
+
+	t.Run("a publish", func(t *testing.T) {
+		sw := newStartWorld(t)
+		sw.withKit()
+		id := sw.start("builtin:article", nil, "")
+		ready := readyConfirmation(t)
+		if _, err := sw.personSaves(importCtx(), id, ready, "save"); err != nil {
+			t.Fatal(err)
+		}
+		ended := sw.compositionOf(id)
+		ended.State, ended.Error, ended.FinishedAt = compositionFailed, "MemQL finished without saving the email.", templateNow
+		if _, err := sw.w.writeComposition(importCtx(), templateOrg, id, ended); err != nil {
+			t.Fatal(err)
+		}
+		later := templateNow.Add(time.Hour)
+		sw.w.now = func() time.Time { return later }
+		published, err := sw.personSaves(importCtx(), id, ready, "publish")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if published.Status != "ready" || str(sw.engine.row(id), "status") != "ready" {
+			t.Errorf("publish answered %+v, row %q", published, str(sw.engine.row(id), "status"))
+		}
+		if c := sw.compositionOf(id); c.State != compositionDone || !c.FinishedAt.Equal(later) || c.Error != ended.Error {
+			t.Errorf("composition = %s %q finished %v", c.State, c.Error, c.FinishedAt)
+		}
+	})
+
+	t.Run("a refused save leaves it failed", func(t *testing.T) {
+		sw := newStartWorld(t)
+		sw.withKit()
+		id, failed := sw.failedByItsRun()
+		edited := sw.storedDocument(id)
+		edited["subject"] = "Finished by hand"
+		args := map[string]any{"templateId": id, "accountId": templateOrg, "name": "Spring news", "content": edited,
+			"expectedRevision": templateNow.Add(-time.Hour).Format(time.RFC3339Nano), "action": "save"}
+		if _, err := sw.w.handleSaveTemplate(importCtx(), args, 0); err == nil || err.Error() != templateChanged {
+			t.Fatalf("a save of an old revision: err = %v", err)
+		}
+		if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != failed.Error {
+			t.Errorf("composition = %s %q", c.State, c.Error)
+		}
+	})
+
+	t.Run("archive and restore are not edits", func(t *testing.T) {
+		sw := newStartWorld(t)
+		sw.withKit()
+		id, _ := sw.failedByItsRun()
+		for _, action := range []string{"archive", "restore"} {
+			row := sw.engine.row(id)
+			if _, err := sw.w.handleSaveTemplate(importCtx(), map[string]any{"templateId": id, "accountId": templateOrg,
+				"expectedRevision": templateTime(row["createdAt"]).UTC().Format(time.RFC3339Nano), "action": action}, 0); err != nil {
+				t.Fatalf("%s: %v", action, err)
+			}
+		}
+		if c := sw.compositionOf(id); c.State != compositionFailed {
+			t.Errorf("composition = %s", c.State)
+		}
+	})
+}
+
+// Only the person who asked MemQL to write an email can retry it: a retry reads
+// the files the request names as whoever runs it, so a colleague's retry would
+// read the colleague's own Library into a template the author can read, and
+// cannot read the author's files anyway. A colleague's retry changes nothing
+// and says why; anyone who may write the template can still cancel it.
+func TestRetryCompositionIsTheRequestersAlone(t *testing.T) {
+	sw := newStartWorld(t)
+	sw.withKit()
+	id, _ := sw.mustCompose(composeArgs())
+	if got := sw.compositionOf(id).Request.RequestedBy; got != testOwner {
+		t.Errorf("requested by %q, want the caller %q", got, testOwner)
+	}
+
+	// A colleague cancels it.
+	if _, err := sw.w.handleCancelComposition(colleagueCtx(), map[string]any{"templateId": id}, 0); err != nil {
+		t.Fatalf("a colleague's cancel: %v", err)
+	}
+	if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != compositionCancelled {
+		t.Fatalf("composition = %s %q", c.State, c.Error)
+	}
+
+	// A colleague's retry is refused, before anything is asked or written.
+	writes, goals, asked := len(sw.engine.writes()), len(sw.starter.snapshot()), len(sw.apps.askedAbout())
+	if _, err := sw.w.handleRetryComposition(colleagueCtx(), map[string]any{"templateId": id}, 0); err == nil || err.Error() != composeNotYours {
+		t.Fatalf("a colleague's retry: err = %v", err)
+	}
+	if len(sw.engine.writes()) != writes || len(sw.starter.snapshot()) != goals || len(sw.apps.askedAbout()) != asked {
+		t.Error("a colleague's retry wrote, started or asked something")
+	}
+	if c := sw.compositionOf(id); c.State != compositionFailed {
+		t.Errorf("composition = %s", c.State)
+	}
+
+	// The person who asked retries it, however their id is written, and it is
+	// still theirs.
+	asker := auth.ContextWithUserActor(context.Background(), "v1:identity:user:"+testOwner)
+	nodes, err := sw.w.handleRetryComposition(asker, map[string]any{"templateId": id}, 0)
+	if err != nil {
+		t.Fatalf("the requester's retry: %v", err)
+	}
+	if kind, out := startAnswer(t, nodes); kind != "campaignCompositionStarted" || str(out, "state") != compositionWriting {
+		t.Errorf("answer = %s %v", kind, out)
+	}
+	if got := sw.compositionOf(id).Request.RequestedBy; got != testOwner {
+		t.Errorf("after the retry, requested by %q", got)
+	}
+
+	// A composition that does not say who asked is nobody's to retry.
+	unsaid := sw.compositionOf(id)
+	unsaid.State, unsaid.Error, unsaid.Request.RequestedBy = compositionFailed, compositionCancelled, ""
+	if _, err := sw.w.writeComposition(importCtx(), templateOrg, id, unsaid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sw.retry(id); err == nil || err.Error() != composeNotYours {
+		t.Errorf("a retry of a composition nobody is named for: err = %v", err)
 	}
 }
 
