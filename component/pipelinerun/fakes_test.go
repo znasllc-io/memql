@@ -1281,6 +1281,9 @@ type fakeGitHub struct {
 	commits map[string]headAnswer
 	trees   map[string]fstest.MapFS
 	compare map[string]compareAnswer
+	// ancestry answers CompareAncestry, keyed "<repository>@<base>...<head>";
+	// a pair it does not hold answers 404, which proves nothing.
+	ancestry map[string]githubapp.Ancestry
 
 	// pullsErr is every OpenPullRequests call's answer when set.
 	pullsErr error
@@ -1338,6 +1341,7 @@ func newFakeGitHub(t testing.TB) *fakeGitHub {
 		commits:     map[string]headAnswer{},
 		trees:       map[string]fstest.MapFS{},
 		compare:     map[string]compareAnswer{},
+		ancestry:    map[string]githubapp.Ancestry{},
 		commitTrees: map[string]string{},
 	}
 }
@@ -1549,6 +1553,26 @@ func (g *fakeGitHub) Compare(ctx context.Context, _, repository, base, head stri
 		return nil, false, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare"}
 	}
 	return slices.Clone(c.Files), c.Complete, nil
+}
+
+func (g *fakeGitHub) CompareAncestry(ctx context.Context, _, repository, base, head string) (githubapp.Ancestry, error) {
+	watchGitHubCall(g.t, ctx, "CompareAncestry")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	a, ok := g.ancestry[repository+"@"+base+"..."+head]
+	if !ok {
+		return githubapp.Ancestry{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare"}
+	}
+	a.Files = slices.Clone(a.Files)
+	return a, nil
+}
+
+// setAncestor records base as a proper ancestor of head, with the paths
+// between them.
+func (g *fakeGitHub) setAncestor(repository, base, head string, files ...string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ancestry[repository+"@"+base+"..."+head] = githubapp.Ancestry{Ancestor: true, Files: files, Complete: true}
 }
 
 func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string) (string, string, error) {

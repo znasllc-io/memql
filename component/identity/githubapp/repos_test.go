@@ -209,6 +209,81 @@ func TestCompareListsChangedPathsAndSaysWhenItIsComplete(t *testing.T) {
 	}
 }
 
+// CompareAncestry proves ancestry or answers false: a push run supersedes a
+// waiting run, and carries a verified step forward, only from a commit that is
+// provably an ancestor of the one it runs (component/pipelinerun).
+func TestCompareAncestryProvesAnAncestorAndNothingElse(t *testing.T) {
+	const base = "1111111111111111111111111111111111111111"
+	const other = "2222222222222222222222222222222222222222"
+	now := time.Now().UTC()
+	endpoint := "/repos/acme/widget/compare/" + base + "..." + headSHA
+	reply := func(status string, ahead, behind int, baseCommit, mergeBase string) string {
+		return fmt.Sprintf(`{"status":%q,"ahead_by":%d,"behind_by":%d,"base_commit":{"sha":%q},"merge_base_commit":{"sha":%q},"files":[
+			{"filename":"component/a/a.go","status":"modified"},
+			{"filename":"component/b/moved.go","previous_filename":"component/c/moved.go","status":"renamed"}]}`,
+			status, ahead, behind, baseCommit, mergeBase)
+	}
+	cases := []struct {
+		name     string
+		body     string
+		ancestor bool
+	}{
+		{"a proper ancestor", reply("ahead", 3, 0, base, base), true},
+		{"a sibling: the branches diverged", reply("diverged", 2, 1, base, other), false},
+		{"ahead, but GitHub names another merge base", reply("ahead", 2, 0, base, other), false},
+		{"head is behind base", reply("behind", 0, 2, base, headSHA), false},
+		{"ahead by nothing", reply("ahead", 0, 0, base, base), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := newHub().json(endpoint, http.StatusOK, tc.body)
+			c := testClient(t, hub, &now)
+			a, err := c.CompareAncestry(context.Background(), installToken, "acme", "widget", base, headSHA)
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if a.Ancestor != tc.ancestor || a.Identical {
+				t.Fatalf("ancestor=%v identical=%v, want ancestor=%v", a.Ancestor, a.Identical, tc.ancestor)
+			}
+			if got := strings.Join(a.Files, ","); got != "component/a/a.go,component/b/moved.go,component/c/moved.go" || !a.Complete {
+				t.Fatalf("files %s complete=%v", got, a.Complete)
+			}
+		})
+	}
+
+	t.Run("the same commit is identical, not an ancestor", func(t *testing.T) {
+		hub := newHub().json("/repos/acme/widget/compare/"+headSHA+"..."+headSHA, http.StatusOK,
+			`{"status":"identical","ahead_by":0,"behind_by":0,"base_commit":{"sha":"`+headSHA+`"},"merge_base_commit":{"sha":"`+headSHA+`"},"files":[]}`)
+		c := testClient(t, hub, &now)
+		a, err := c.CompareAncestry(context.Background(), installToken, "acme", "widget", headSHA, headSHA)
+		if err != nil || !a.Identical || a.Ancestor || len(a.Files) != 0 || !a.Complete {
+			t.Fatalf("%+v %v", a, err)
+		}
+	})
+
+	t.Run("an abbreviated hash is refused before any request", func(t *testing.T) {
+		hub := newHub()
+		c := testClient(t, hub, &now)
+		if _, err := c.CompareAncestry(context.Background(), installToken, "acme", "widget", "1111111", headSHA); err == nil {
+			t.Fatal("an abbreviated base cannot be compared with the merge base GitHub names")
+		}
+		if n := len(hub.seen()); n != 0 {
+			t.Fatalf("%d requests made", n)
+		}
+	})
+
+	t.Run("300 files is an incomplete list", func(t *testing.T) {
+		body := strings.Replace(compareBody(300, "+x\n"), `"ahead_by":1,`,
+			`"ahead_by":1,"behind_by":0,"base_commit":{"sha":"`+base+`"},"merge_base_commit":{"sha":"`+base+`"},`, 1)
+		hub := newHub().json(endpoint, http.StatusOK, body)
+		c := testClient(t, hub, &now)
+		a, err := c.CompareAncestry(context.Background(), installToken, "acme", "widget", base, headSHA)
+		if err != nil || !a.Ancestor || a.Complete || len(a.Files) != 300 {
+			t.Fatalf("ancestor=%v complete=%v files=%d err=%v", a.Ancestor, a.Complete, len(a.Files), err)
+		}
+	})
+}
+
 func TestCommitForRefResolvesARefToItsCommit(t *testing.T) {
 	now := time.Now().UTC()
 	// A release commit can touch a great many files, and this endpoint lists
@@ -446,6 +521,7 @@ func TestTheBearerCallsAnswerNotConfiguredOnANilClient(t *testing.T) {
 	_, checks["OpenPullRequests"] = c.OpenPullRequests(ctx, installToken, "acme", "widget")
 	_, checks["PullRequest"] = c.PullRequest(ctx, installToken, "acme", "widget", 7)
 	_, _, checks["Compare"] = c.Compare(ctx, installToken, "acme", "widget", "a", "b")
+	_, checks["CompareAncestry"] = c.CompareAncestry(ctx, installToken, "acme", "widget", headSHA, headSHA)
 	_, _, checks["CommitForRef"] = c.CommitForRef(ctx, installToken, "acme", "widget", "main")
 	_, checks["Tarball"] = c.Tarball(ctx, installToken, "acme", "widget", headSHA)
 	_, _, checks["ScopedInstallationToken"] = c.ScopedInstallationToken(ctx, 42, []string{"widget"}, map[string]string{"contents": "read"})

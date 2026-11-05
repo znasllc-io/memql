@@ -255,6 +255,12 @@ type GitHub interface {
 	PullRequestHead(ctx context.Context, token, repository string, number int) (githubapp.PullRequestHead, error)
 	// Compare answers complete=false when GitHub stopped listing (300+).
 	Compare(ctx context.Context, token, repository, base, head string) (files []string, complete bool, err error)
+	// CompareAncestry is Compare with the history read as well: whether base
+	// is a proper ancestor of head. A push run supersedes a waiting run, and
+	// carries a verified step forward, only from a proven ancestor, because a
+	// three-dot compare from a commit that is not one leaves out that commit's
+	// own changes. A failed read proves nothing and decides nothing.
+	CompareAncestry(ctx context.Context, token, repository, base, head string) (githubapp.Ancestry, error)
 	CommitForRef(ctx context.Context, token, repository, ref string) (sha, message string, err error)
 	// CommitTree is the hash of the git tree one exact commit records. A failure
 	// costs a run its reuse, never its checks (driver.go, readTreeHash).
