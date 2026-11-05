@@ -877,6 +877,12 @@ func defaultRoutingRules() []RoutingRule {
 		// one; archiving and restoring are updates. No automation triggers on it.
 		{Pattern: "graph.node.created.v1:campaigns:emailLayout", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:emailLayout", TargetType: ""},
+		// An organization's brand kit, one row per organization. It is saved on
+		// whichever bff replica the front door picked and read by the Brand page
+		// in Email Settings, which may be talking to the other one; each save
+		// after the first is an update. No automation triggers on it.
+		{Pattern: "graph.node.created.v1:campaigns:brandKit", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:brandKit", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:senderIdentity", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:senderIdentity", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:emailRule", TargetType: ""},

@@ -136,6 +136,22 @@ query emailLayout emailLayoutsForAccount {
   shape     emailLayoutFull
 }
 
+/// An organization's brand kit and its revision (createdAt), for the Brand page in Email Settings,
+/// the revision check campaignSaveBrandKit makes before it writes, and the templates made with the
+/// kit. An organization has one kit; newest first and one row, so a stray duplicate can never make
+/// a save ambiguous. The concept's account tier answers an organization the caller is not in as one
+/// with no kit.
+@actor
+query brandKit brandKitForAccount {
+  args {
+    accountId  string!
+  }
+  filter    row => row.accountId == args.accountId
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     brandKitFull
+}
+
 /// Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which
 /// is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a
 /// filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the

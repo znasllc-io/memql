@@ -337,6 +337,34 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything. */
+export interface CampaignBrandPreviewArgs {
+  /** The organization the kit is for. You need read access to its data. */
+  accountId: string;
+  /** The brand kit, as campaignSaveBrandKit takes it. */
+  kit: Record<string, unknown>;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article. */
+  layoutId?: string;
+}
+
+export function buildCampaignBrandPreview(args: CampaignBrandPreviewArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("kit: " + renderMemQLValue(args.kit));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "builtin campaignBrandPreview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignBrandPreview(args: CampaignBrandPreviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignBrandPreview = function (this: QueryClient, args: CampaignBrandPreviewArgs = {} as CampaignBrandPreviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignBrandPreview", buildCampaignBrandPreview(args), opts);
+};
+
 /** Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter. */
 export interface CampaignConfigureNewsletterArgs {
   siteId: string;
@@ -584,6 +612,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClient, args: CampaignRetryNewsletterWelcomeArgs = {} as CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
+};
+
+/** Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change. */
+export interface CampaignSaveBrandKitArgs {
+  /** The organization the kit is for; an organization has one kit. */
+  accountId: string;
+  /** The brand kit: {theme, logo, signature, follow, social, footer, reply}. */
+  kit: Record<string, unknown>;
+  /** Exact createdAt from brandKitForAccount; empty only when creating. */
+  expectedRevision?: string;
+}
+
+export function buildCampaignSaveBrandKit(args: CampaignSaveBrandKitArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("kit: " + renderMemQLValue(args.kit));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSaveBrandKit(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveBrandKit(args: CampaignSaveBrandKitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveBrandKit = function (this: QueryClient, args: CampaignSaveBrandKitArgs = {} as CampaignSaveBrandKitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveBrandKit", buildCampaignSaveBrandKit(args), opts);
 };
 
 /** Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on. */

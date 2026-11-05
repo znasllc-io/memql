@@ -268,6 +268,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		// the template an organization published from one Library file; both
 		// ids are the caller's, so both are awkward.
 		{"templateForSource", func() error { _, _, err := store.TemplateForSource(ctx, awkward, awkward); return err }},
+
+		// an organization's brand kit (its writes are rendered with RenderCall
+		// and parsed in brandkit_test.go).
+		{"brandKitForAccount", func() error { _, _, err := store.BrandKitForAccount(ctx, awkward); return err }},
 	}
 
 	before := 0

@@ -400,6 +400,43 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignBrandPreview -- Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything.
+type CampaignBrandPreviewArgs struct {
+	// The organization the kit is for. You need read access to its data.
+	AccountId string
+	// The brand kit, as campaignSaveBrandKit takes it.
+	Kit map[string]any
+	// A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article.
+	LayoutId string
+}
+
+// CampaignBrandPreview calls the engine builtin campaignBrandPreview.
+func (qc *QueryClient) CampaignBrandPreview(ctx context.Context, args CampaignBrandPreviewArgs) (*Result, error) {
+	call := CampaignBrandPreviewBuild(args)
+	return qc.executeNamed(ctx, "campaignBrandPreview", call)
+}
+
+func CampaignBrandPreviewBuild(args CampaignBrandPreviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignBrandPreview(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kit: ")
+	b.WriteString(renderMemQLValue(args.Kit))
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
 type CampaignConfigureNewsletterArgs struct {
 	SiteId           string
@@ -717,6 +754,43 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	}
 	b.WriteString("expectedRevision: ")
 	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveBrandKit -- Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change.
+type CampaignSaveBrandKitArgs struct {
+	// The organization the kit is for; an organization has one kit.
+	AccountId string
+	// The brand kit: {theme, logo, signature, follow, social, footer, reply}.
+	Kit map[string]any
+	// Exact createdAt from brandKitForAccount; empty only when creating.
+	ExpectedRevision string
+}
+
+// CampaignSaveBrandKit calls the engine builtin campaignSaveBrandKit.
+func (qc *QueryClient) CampaignSaveBrandKit(ctx context.Context, args CampaignSaveBrandKitArgs) (*Result, error) {
+	call := CampaignSaveBrandKitBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveBrandKit", call)
+}
+
+func CampaignSaveBrandKitBuild(args CampaignSaveBrandKitArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveBrandKit(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kit: ")
+	b.WriteString(renderMemQLValue(args.Kit))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
 	b.WriteString(")")
 	return b.String()
 }

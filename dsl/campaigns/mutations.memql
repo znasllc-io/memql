@@ -260,6 +260,51 @@ mutation emailLayout updateEmailLayout {
     }
   }
 }
+
+/// Internal brand kit creation after the organization, permission and revision checks in
+/// campaignSaveBrandKit, under the id made from the organization. actor.userId still stamps the
+/// first writer as the owner, but caller scoping alone cannot serialize a creation retry, enforce
+/// the server-assigned revision or keep the kit's Library pictures readable by every member; the
+/// capability reads them under the caller and stores them as data: pictures.
+@actor
+@serverOnly
+mutation brandKit createBrandKit {
+  args {
+    brandKitId   string!
+    accountId    string!
+    kit          object!
+    versionTime  datetime!
+  }
+  insert {
+    accept { accountId, kit }
+    stamp {
+      id: args.brandKitId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Internal brand kit update. The capability locks and checks the read revision first, and the
+/// organization stays as it was created. actor.userId scoping cannot prevent an authorized editor
+/// overwriting a concurrent edit; campaignSaveBrandKit checks that.
+@actor
+@serverOnly
+mutation brandKit updateBrandKit {
+  args {
+    brandKitId   string!
+    kit          object!
+    versionTime  datetime!
+  }
+  update {
+    accept { kit }
+    stamp {
+      id: args.brandKitId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+    }
+  }
+}
 // The name is at most 200 characters and a fromName at most 100, because the view-in-browser link of
 // every message carries them. They are declared that way on the concept, and the engine's write guard
 // (component/memql/campaign_name_guard.go) is what states the refusal, in a sentence. They are not

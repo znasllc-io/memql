@@ -1882,6 +1882,28 @@ QueryClient.prototype.bookingHours = function (this: QueryClient, args: BookingH
   return this.executeNamed("bookingHours", buildBookingHours(args), opts);
 };
 
+/** An organization's brand kit and its revision (createdAt), for the Brand page in Email Settings, the revision check campaignSaveBrandKit makes before it writes, and the templates made with the kit. An organization has one kit; newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers an organization the caller is not in as one with no kit. */
+// Bound concept: v1:campaigns:brandKit (machine-readable: BoundConcepts["brandKitForAccount"] in generated_concepts.ts).
+export interface BrandKitForAccountArgs {
+  accountId: string;
+}
+
+export function buildBrandKitForAccount(args: BrandKitForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query brandKitForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    brandKitForAccount(args: BrandKitForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.brandKitForAccount = function (this: QueryClient, args: BrandKitForAccountArgs = {} as BrandKitForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("brandKitForAccount", buildBrandKitForAccount(args), opts);
+};
+
 /** Get a single calendar event by node id. Self-scoped: the `row.ownerUserId == actor.userId` predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view. */
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.ts).
 export interface CalendarEventByIdArgs {

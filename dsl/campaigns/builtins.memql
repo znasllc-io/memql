@@ -261,6 +261,24 @@ builtin emailRender {
   sample     object   @description("Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).")
 }
 
+@description("Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change.")
+@sdk
+@executor("integration.campaigns.saveBrandKit")
+builtin campaignSaveBrandKit {
+  accountId         string!  @description("The organization the kit is for; an organization has one kit.")
+  kit               object!  @description("The brand kit: {theme, logo, signature, follow, social, footer, reply}.")
+  expectedRevision  string   @description("Exact createdAt from brandKitForAccount; empty only when creating.")
+}
+
+@description("Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything.")
+@sdk
+@executor("integration.campaigns.brandPreview")
+builtin campaignBrandPreview {
+  accountId  string!  @description("The organization the kit is for. You need read access to its data.")
+  kit        object!  @description("The brand kit, as campaignSaveBrandKit takes it.")
+  layoutId   string   @description("A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article.")
+}
+
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
 @sdk
 @executor("integration.campaigns.configureSeries")

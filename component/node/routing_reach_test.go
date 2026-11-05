@@ -127,6 +127,7 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:campaigns:audience", []string{"created", "updated"}, "the OS Campaigns app's Audiences section"},
 		{"v1:campaigns:template", []string{"created", "updated"}, "the OS Campaigns app's Templates section"},
 		{"v1:campaigns:emailLayout", []string{"created", "updated"}, "the layout picker in the Email app and the VS Code New email page"},
+		{"v1:campaigns:brandKit", []string{"created", "updated"}, "the Brand page in Email Settings"},
 		{"v1:campaigns:senderIdentity", []string{"created", "updated"}, "the sender-identity picker and its verification state"},
 		{"v1:campaigns:emailRule", []string{"created", "updated"}, "the event-email rules surface"},
 

@@ -30,6 +30,7 @@ func TestACampaignsWorkerWithNoGatePoolNamesTheWiringItLacks(t *testing.T) {
 			"progress":        func() error { _, err := w.progressGate(context.Background(), "k"); return err },
 			"single send":     func() error { _, err := w.singleSendGate(context.Background(), "k"); return err },
 			"template":        func() error { _, err := w.templateGate(context.Background(), "k"); return err },
+			"brand":           func() error { _, err := w.brandGate(context.Background(), "k"); return err },
 		}
 		for gate, take := range gates {
 			err := take()

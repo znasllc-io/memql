@@ -143,6 +143,7 @@ type Worker struct {
 	testGate     func(context.Context, string) (func(), error)
 	templateGate func(context.Context, string) (func(), error)
 	layoutGate   func(context.Context, string) (func(), error)
+	brandGate    func(context.Context, string) (func(), error)
 	// singleSendGate holds the receipt lock and verifies ownership before an attempt.
 	singleSendGate     func(context.Context, string) (gateHold, error)
 	journeyGate        func(context.Context, string) (gateHold, error)
@@ -301,6 +302,10 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 		},
 		layoutGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-layout:"+key)
+		},
+		// Keyed by the organization: it has one kit.
+		brandGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "campaign-brand:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,

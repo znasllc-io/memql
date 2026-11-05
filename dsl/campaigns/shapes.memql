@@ -106,6 +106,17 @@ shape emailLayout emailLayoutFull {
   row.createdAt
 }
 
+/// Full brand kit projection: the kit and its revision (createdAt). Backs brandKitForAccount: the
+/// Brand page's read and the revision check campaignSaveBrandKit makes before it writes.
+@row
+shape brandKit brandKitFull {
+  row.id
+  ownerUserId
+  accountId
+  kit
+  row.createdAt
+}
+
 /// Full campaign projection: the authoring fields plus the send-state fields. The send-state half is
 /// written by updateCampaignProgress (dsl/campaigns/mutations.memql), the sending engine's progress
 /// writer (memql#3348).

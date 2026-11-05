@@ -1840,6 +1840,28 @@ func BookingHoursBuild(args BookingHoursArgs) string {
 	return b.String()
 }
 
+// BrandKitForAccount -- An organization's brand kit and its revision (createdAt), for the Brand page in Email Settings, the revision check campaignSaveBrandKit makes before it writes, and the templates made with the kit. An organization has one kit; newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers an organization the caller is not in as one with no kit.
+//
+// Bound concept: v1:campaigns:brandKit (machine-readable: BoundConcepts["brandKitForAccount"] in generated_concepts.go).
+type BrandKitForAccountArgs struct {
+	AccountId string
+}
+
+// BrandKitForAccount calls the engine query brandKitForAccount.
+func (qc *QueryClient) BrandKitForAccount(ctx context.Context, args BrandKitForAccountArgs) (*Result, error) {
+	call := BrandKitForAccountBuild(args)
+	return qc.executeNamed(ctx, "brandKitForAccount", call)
+}
+
+func BrandKitForAccountBuild(args BrandKitForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query brandKitForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the `row.ownerUserId == actor.userId` predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.go).
