@@ -297,7 +297,7 @@ func TestContentSlotsListOnlyContentBlocks(t *testing.T) {
 	for _, slot := range slots {
 		ids = append(ids, slot.ID)
 	}
-	if want := []string{"banner", "intro", "highlight", "article"}; !reflect.DeepEqual(ids, want) {
+	if want := []string{"banner", "lead", "intro", "highlight", "article", "closing-title", "closing-text"}; !reflect.DeepEqual(ids, want) {
 		t.Fatalf("article slots = %v, want %v", ids, want)
 	}
 	byID := map[string]Slot{}

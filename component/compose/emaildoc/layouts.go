@@ -61,7 +61,8 @@ var builtinLayouts = [...]struct {
 }{
 	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription.", "Welcome", nil, nil},
 	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links.", "Letters", nil, nil},
-	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature.", "Articles", []string{"highlight"}, nil},
+	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature.", "Articles",
+		[]string{"lead", "highlight", "closing", "footer-rule"}, nil},
 	{"builtin:lesson", "Lesson", "A banner, a tinted lesson that ends on its takeaway, a promotion beside a picture, and social links.", "Articles", []string{"highlight", "promo-rule"}, nil},
 	{"builtin:three-reasons", "Three reasons", "A banner, a row of icons, a tinted body of titled reasons with a closing line, and a signature.", "Articles",
 		[]string{"icons", "closing"}, map[string]RepeatRange{"reason": {Min: 2, Max: 4}}},

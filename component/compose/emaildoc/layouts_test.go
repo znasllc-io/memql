@@ -230,15 +230,17 @@ func roleList(blocks []Block, container string) []string {
 // Appendix B lists them: brand blocks keep their content when a person or the
 // model fills a layout, content blocks are what gets written.
 var builtinRoles = map[string]string{
-	"builtin:confirmation": "panel=content top=brand logo=brand rule-top=brand headline=content subhead=content hero=content confirm=content note=content rule-bottom=brand footer=brand",
+	"builtin:confirmation": "panel=content top=brand logo=brand rule-top=brand headline=content subhead=content hero=content confirm=content note=content rule-bottom=brand footer=brand " +
+		"panel-end=brand panel-end-space=brand",
 	"builtin:letter": "logo=brand letter=content headline=content body=content cta=content " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
 		"rule-1=brand promo=content promo-space=content promo-title=content promo-text=content promo-picture=content " +
 		"follow=brand social=brand rule-2=brand footer=brand",
-	"builtin:article": "logo=brand banner=content body=content intro=content highlight=content article=content " +
+	"builtin:article": "logo=brand banner=content body=content lead=content intro=content highlight=content article=content " +
+		"closing=content closing-title=content closing-text=content " +
 		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
-		"rule=brand footer=brand",
+		"footer-rule=content rule=brand footer=brand",
 	"builtin:lesson": "logo=brand banner=content body=content intro=content article=content highlight=content promo-rule=content rule=brand " +
 		"promo=content promo-space=content promo-title=content promo-text=content promo-picture=content " +
 		"follow=brand social=brand rule-2=brand footer=brand",
@@ -472,11 +474,11 @@ func TestLayoutCatalogueMetadata(t *testing.T) {
 
 func TestLayoutMetaReturnsACopy(t *testing.T) {
 	l, ok := LayoutMeta("builtin:article")
-	if !ok || l.Category != "Articles" || !slices.Equal(l.Optional, []string{"highlight"}) {
+	if !ok || l.Category != "Articles" || !slices.Equal(l.Optional, []string{"lead", "highlight", "closing", "footer-rule"}) {
 		t.Fatalf("article meta = %+v, %v", l, ok)
 	}
 	l.Optional[0] = "changed"
-	if again, _ := LayoutMeta("builtin:article"); again.Optional[0] != "highlight" {
+	if again, _ := LayoutMeta("builtin:article"); again.Optional[0] != "lead" {
 		t.Error("LayoutMeta shares its slices with the catalogue")
 	}
 	if _, ok := LayoutMeta("builtin:nope"); ok {

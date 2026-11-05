@@ -52,6 +52,17 @@
       "maxWidth": 502,
       "blocks": [
         {
+          "id": "lead",
+          "type": "heading",
+          "role": "content",
+          "text": "Small changes, calmer mornings",
+          "size": 17.3,
+          "lineHeight": 20.76,
+          "color": "primary",
+          "weight": 700,
+          "font": "body"
+        },
+        {
           "id": "intro",
           "type": "text",
           "role": "content",
@@ -65,10 +76,16 @@
           "id": "highlight",
           "type": "highlight",
           "role": "content",
+          "padding": [
+            0,
+            0,
+            3.89,
+            0
+          ],
           "text": "The fix that works most often:\nmake one decision the night before.",
           "size": 17.3,
-          "lineHeight": 24.65,
-          "gap": 0
+          "lineHeight": 20.76,
+          "gap": 3.89
         },
         {
           "id": "article",
@@ -79,6 +96,44 @@
           "lineHeight": 19.2,
           "listLineHeight": 17.64,
           "align": "left"
+        },
+        {
+          "id": "closing",
+          "type": "columns",
+          "role": "content",
+          "columns": [
+            {
+              "width": 100,
+              "blocks": [
+                {
+                  "id": "closing-title",
+                  "type": "text",
+                  "padding": [
+                    0,
+                    0,
+                    0,
+                    0
+                  ],
+                  "text": "One decision tonight, an easier morning tomorrow.",
+                  "size": 14.7,
+                  "lineHeight": 19.2,
+                  "color": "accent",
+                  "align": "center",
+                  "weight": 700
+                },
+                {
+                  "id": "closing-text",
+                  "type": "text",
+                  "text": "Try it this week and tell us how it went.",
+                  "size": 14.7,
+                  "lineHeight": 19.2,
+                  "color": "primary",
+                  "align": "center",
+                  "italic": true
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -176,9 +231,21 @@
       ]
     },
     {
-      "id": "rule",
-      "type": "divider",
-      "role": "brand"
+      "id": "footer-rule",
+      "type": "columns",
+      "role": "content",
+      "columns": [
+        {
+          "width": 100,
+          "blocks": [
+            {
+              "id": "rule",
+              "type": "divider",
+              "role": "brand"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "footer",

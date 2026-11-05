@@ -82,22 +82,28 @@
         0
       ],
       "background": "secondary",
+      "inset": [
+        29.5,
+        0,
+        29.5,
+        0
+      ],
       "maxWidth": 600,
       "columns": [
         {
-          "width": 56,
+          "width": 44,
           "blocks": [
             {
               "id": "signature-photo",
               "type": "image",
               "alt": "Founder photo",
-              "width": 204,
-              "height": 214
+              "width": 256,
+              "height": 236
             }
           ]
         },
         {
-          "width": 41.33,
+          "width": 53.33,
           "blocks": [
             {
               "id": "signature-space",
@@ -182,8 +188,8 @@
       "type": "heading",
       "role": "brand",
       "text": "Follow us",
-      "size": 20,
-      "lineHeight": 20,
+      "size": 18.7,
+      "lineHeight": 18.7,
       "color": "primary",
       "italic": true,
       "weight": 700,

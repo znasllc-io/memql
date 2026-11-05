@@ -18,7 +18,14 @@
     {
       "id": "panel",
       "type": "section",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
       "background": "secondary",
+      "cellPadding": 0,
       "blocks": [
         {
           "id": "top",
@@ -96,6 +103,12 @@
           "id": "rule-bottom",
           "type": "divider",
           "role": "brand",
+          "padding": [
+            0,
+            0,
+            16,
+            0
+          ],
           "color": "primary"
         }
       ]
@@ -104,15 +117,9 @@
       "id": "footer",
       "type": "footer",
       "role": "brand",
-      "padding": [
-        0,
-        0,
-        24,
-        0
-      ],
       "size": 14.7,
       "lineHeight": 22.4,
-      "gap": 38.4,
+      "gap": 16,
       "color": "muted",
       "linkColor": "secondary",
       "background": "white",
@@ -149,8 +156,33 @@
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
       ],
-      "lineGap": 16,
-      "after": 22.4
+      "lineGap": 16
+    },
+    {
+      "id": "panel-end",
+      "type": "section",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "background": "secondary",
+      "inset": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "cellPadding": 0,
+      "blocks": [
+        {
+          "id": "panel-end-space",
+          "type": "spacer",
+          "height": 24
+        }
+      ]
     }
   ]
 }

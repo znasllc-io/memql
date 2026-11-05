@@ -78,6 +78,12 @@
       "id": "social",
       "type": "social",
       "role": "brand",
+      "padding": [
+        0,
+        24,
+        15,
+        24
+      ],
       "links": [
         {
           "network": "Instagram",

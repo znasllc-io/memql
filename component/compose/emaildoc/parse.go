@@ -660,7 +660,7 @@ const (
 
 // misplaced says why a block of this type cannot sit in this container. A
 // section is a top-level band, columns sit at the top level or in a section, a
-// footer is the last thing in the email, and nothing else nests.
+// footer sits at the top level, and nothing else nests.
 func misplaced(in container, typ string) string {
 	switch {
 	case typ == typeFooter && in != inTop:
