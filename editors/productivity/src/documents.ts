@@ -45,8 +45,25 @@ export interface OpenDocument {
   resource: Resource; lease: ConnectionLease; content: Uint8Array; mime: string;
   sourceId: string; kind: string; version: number; revision?: string;
   template?: { name: string; accountId: string; status: string };
+  /** A template MemQL wrote (or is writing) from a description; the others have none. */
+  composition?: Composition;
   /** The organizations a Library file is labelled with (artifacts only; empty when it has none). */
   accountIds?: string[];
+}
+/** What the editor needs of a template's composition: whether MemQL is still writing it, since when, and the cluster's sentence when it failed. */
+export interface Composition { state: "writing" | "done" | "failed"; startedAt: string; error: string }
+/** A composition as the cluster keeps it on a template row, or nothing for a template that has none or one in a state this editor does not know. */
+export function readComposition(value: unknown): Composition | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const state = row.state;
+  if (state !== "writing" && state !== "done" && state !== "failed") return undefined;
+  return { state, startedAt: typeof row.startedAt === "string" ? row.startedAt : "", error: typeof row.error === "string" ? row.error : "" };
+}
+/** Whether the file system answers Readonly for an opened document: not a file, a generated output or a template, or a template MemQL is writing. */
+export function isReadOnly(doc: OpenDocument): boolean {
+  if (doc.kind === "campaign_template" && doc.composition?.state === "writing") return true;
+  return !["file", "generated_output", "campaign_template"].includes(doc.kind);
 }
 const text = (row: Record<string, unknown>, field: string) => typeof row[field] === "string" ? row[field] as string : "";
 /** What a template opens as: its document when it has one, else the custom email its bodies make, written as every email file is. */
@@ -88,7 +105,8 @@ export class Documents {
       if (!revision) throw new Error("The cluster did not return the template revision.");
       const content = new TextEncoder().encode(templateText(row));
       return { resource, lease, content, mime: "application/json", sourceId: resource.id, kind: "campaign_template", version: 0, revision,
-        template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") } };
+        template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") },
+        ...(readComposition(row.composition) ? { composition: readComposition(row.composition) } : {}) };
     }
     const artifact = (await this.api.execute(lease, "libraryArtifactById", buildLibraryArtifactById({ artifactId: resource.id })))[0];
     if (!artifact || artifact.archived) throw new UserInputError("File not found or unavailable to your account.");

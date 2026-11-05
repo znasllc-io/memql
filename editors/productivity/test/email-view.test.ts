@@ -362,46 +362,18 @@ test("issues mark their blocks and select them when clicked", () => {
 test("the action bar shows the host's state and acts, with the one button last", () => {
   const f = fixture();
   f.send({ type: "document", version: 1, email: article });
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   assert.equal(f.el("bar-state").textContent, "Draft");
   assert.equal(f.el("bar-state").getAttribute("role"), "status");
   assert.ok(f.el("bar").classList.contains("bar"));
   const acts = [...f.el("bar-acts").querySelectorAll("button")];
-  assert.deepEqual(acts.map(act => act.textContent), ["Save as layout", "Publish"]);
-  assert.deepEqual(acts.map(act => act.classList.contains("primary")), [false, true]);
+  assert.deepEqual(acts.map(act => act.textContent), ["Open Source", "Publish"]);
+  assert.deepEqual(acts.map(act => act.classList.contains("primary")), [false, true], "only the last act is the button");
   assert.ok(acts[0]!.classList.contains("text-act"));
   acts[1]!.click();
   acts[1]!.click();
   assert.deepEqual(f.messages.filter(m => m.type === "act"), [{ type: "act", act: "publish" }], "a double click acts once");
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
-  f.el("bar-acts").querySelector("button")!.click();
-  assert.equal(f.visible("bar-form"), true);
-  assert.equal(f.visible("bar-acts"), false);
-  const name = f.el("layout-name") as HTMLInputElement;
-  assert.equal(name.value, "Welcome");
-  assert.equal(f.doc.activeElement, name);
-  f.type(name, "Monthly letter");
-  f.key(name, "Enter");
-  assert.deepEqual(f.messages.at(-1), { type: "saveLayout", name: "Monthly letter" });
-  assert.equal(f.visible("bar-form"), false);
-  assert.equal(f.visible("bar-acts"), true);
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Monthly letter" });
-  const count = f.messages.length;
-  f.el("bar-acts").querySelector("button")!.click();
-  assert.equal((f.el("layout-name") as HTMLInputElement).value, "Monthly letter");
-  f.key(f.el("layout-name"), "Escape");
-  assert.equal(f.visible("bar-form"), false);
-  assert.equal(f.visible("bar-acts"), true);
-  assert.equal(f.doc.activeElement, f.el("bar-acts").querySelector("button"), "focus goes back to the act");
-  assert.equal(f.messages.length, count, "Escape sends nothing");
-  // A blank name is refused in place.
-  f.el("bar-acts").querySelector("button")!.click();
-  f.type("layout-name", "   ");
-  f.key(f.el("layout-name"), "Enter");
-  assert.equal(f.messages.length, count);
-  assert.equal(f.el("bar-notice").textContent, EMAIL_COPY.host.layoutNameInvalid);
-  f.el("layout-cancel").click();
-  assert.equal(f.visible("bar-form"), false);
+  assert.equal(f.doc.getElementById("bar-form"), null, "there is no layout name to ask for");
   // A busy state shows the spinner and no acts; acts arrive in the host's order with their own styles.
   f.send({ type: "bar", state: C.publishing, acts: [] });
   assert.ok(f.el("bar-state").classList.contains("busy"));
@@ -412,10 +384,40 @@ test("the action bar shows the host's state and acts, with the one button last",
   f.dom.window.close();
 });
 
+test("while MemQL writes, the bar says so with the time, the inspector is closed and Cancel is the only act", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  f.send({ type: "bar", state: "Draft", acts: ["publish"] });
+  assert.equal(f.visible("bar-meta"), false, "no time to show");
+  assert.equal(f.el("inspector").hasAttribute("inert"), false);
+  f.send({ type: "bar", state: C.writing, acts: ["cancel"], meta: "2 min", writing: true });
+  assert.equal(f.el("bar-state").textContent, "MemQL is writing this email");
+  assert.ok(f.el("bar-state").classList.contains("busy"), "the spinner");
+  assert.equal(f.el("bar-meta").textContent, "2 min");
+  assert.equal(f.visible("bar-meta"), true);
+  assert.equal(f.el("inspector").hasAttribute("inert"), true, "nothing in the inspector can be changed");
+  const acts = [...f.el("bar-acts").querySelectorAll("button")];
+  assert.deepEqual(acts.map(act => act.textContent), ["Cancel"]);
+  acts[0]!.click();
+  assert.deepEqual(f.messages.at(-1), { type: "act", act: "cancel" });
+  // The time moves with the host's next bar; the same bar writes nothing again.
+  f.send({ type: "bar", state: C.writing, acts: ["cancel"], meta: "3 min", writing: true });
+  assert.equal(f.el("bar-meta").textContent, "3 min");
+  // Failed: the sentence, no spinner, no time, and Retry as the button, last.
+  f.send({ type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+  assert.equal(f.el("bar-state").textContent, "Cancelled");
+  assert.ok(!f.el("bar-state").classList.contains("busy"));
+  assert.equal(f.visible("bar-meta"), false);
+  assert.equal(f.el("inspector").hasAttribute("inert"), false);
+  const failed = [...f.el("bar-acts").querySelectorAll("button")];
+  assert.deepEqual(failed.map(act => [act.textContent, act.classList.contains("primary")]), [["Publish", false], ["Retry", true]]);
+  f.dom.window.close();
+});
+
 test("a failed act shows one notice above the bar until the next act", () => {
   const f = fixture();
   f.send({ type: "document", version: 1, email: article });
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   f.send({ type: "problem", problem: { message: "Couldn’t publish the email. Try again.", reference: "tools-4f7c2a" } });
   const notice = f.el("bar-notice");
   assert.equal(f.visible("bar-notice"), true);
@@ -681,7 +683,7 @@ test("picture acts post the block and the action, and Remove is absent without a
 
 test("every document message reports what was shown", () => {
   const f = fixture();
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  f.send({ type: "bar", state: "Draft", acts: ["publish"] });
   f.send({ type: "document", version: 3, email: article });
   assert.deepEqual(f.messages.at(-1), { type: "shown", version: 3, subject: "Hello", state: "Draft", blocks: 4 });
   f.send({ type: "bar", state: "Not connected", acts: ["connect"] });
@@ -866,7 +868,7 @@ test("colours, alignment and the brand switch send at once", () => {
 test("the page is the static editor: every id the view and the host use, and only the email copy", () => {
   const html = emailPage({ title: "Welcome.email.json", script: "https://file+.vscode-resource.test/out/emailView.js", nonce: "abc123" });
   const doc = new JSDOM(html).window.document;
-  for (const id of ["view-design", "view-source", "width-desktop", "width-mobile", "width-plain", "preview", "skeleton", "plain", "preview-notice", "subject", "preheader", "organization-row", "organization", "issues", "outline", "block", "block-title", "move-up", "move-down", "add-after", "add-menu", "remove-block", "theme", "samples", "custom-note", "bar", "bar-state", "bar-acts", "bar-form", "layout-name", "layout-cancel", "layout-save", "bar-notice", "frame-a", "frame-b",
+  for (const id of ["view-design", "view-source", "width-desktop", "width-mobile", "width-plain", "preview", "skeleton", "plain", "preview-notice", "subject", "preheader", "organization-row", "organization", "issues", "outline", "block", "block-title", "move-up", "move-down", "add-after", "add-menu", "remove-block", "theme", "samples", "custom-note", "bar", "bar-state", "bar-meta", "bar-acts", "bar-notice", "frame-a", "frame-b",
     "field-text", "field-label", "field-href", "field-alt", "field-src", "field-color", "field-background", "field-align", "field-height", "field-title", "field-links", "field-lines", "field-html", "field-brand"]) {
     assert.ok(doc.getElementById(id), id);
   }
@@ -992,7 +994,7 @@ test("no host update takes focus while the editor's window is elsewhere", () => 
   tagged.blocks[2]!.label = "Hi {{fields.zeta}}";
   tagged.blocks[1]!.blocks![0]!.text = "Hello";
   f.send({ type: "document", version: 1, email: tagged });
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   const unfocused = (what: string, update: () => void) => {
     f.away();
     const before = f.focuses.length;
@@ -1006,7 +1008,7 @@ test("no host update takes focus while the editor's window is elsewhere", () => 
   unfocused("an outline row", () => f.send({ type: "document", version: 2, email: tagged }));
   // A focused act, drawn again by a bar with other acts.
   f.el("bar-acts").querySelectorAll<HTMLElement>("button")[1]!.focus();
-  unfocused("an act", () => f.send({ type: "bar", state: "Unsaved changes", acts: ["publish"] }));
+  unfocused("an act", () => f.send({ type: "bar", state: "Unsaved changes", acts: ["openSource", "publish"] }));
   // A focused sample value, moved when a merge tag that sorts before it arrives.
   f.el("samples").querySelector<HTMLInputElement>("input")!.focus();
   const twoTags = clone(tagged);
@@ -1081,27 +1083,22 @@ test("a restored selection stays in the page state until its block arrives, and 
 test("the action bar keeps what has not changed, takes a new act after a context, and gives the focus to its state after an act", () => {
   const f = fixture();
   f.send({ type: "document", version: 1, email: article });
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   const words = f.el("bar-state").firstChild;
   const buttons = [...f.el("bar-acts").children];
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   assert.equal(f.el("bar-state").firstChild, words, "the live region is not written again");
   assert.deepEqual([...f.el("bar-acts").children], buttons, "the acts stay the same buttons");
-  f.send({ type: "bar", state: "Changes since publishing", acts: ["saveLayout", "publish"] });
+  f.send({ type: "bar", state: "Changes since publishing", acts: ["openSource", "publish"] });
   assert.equal(f.el("bar-state").textContent, "Changes since publishing");
   assert.deepEqual([...f.el("bar-acts").children], buttons);
-  f.send({ type: "bar", state: "Published to Acme Co", acts: ["saveLayout"] });
+  f.send({ type: "bar", state: "Published to Acme Co", acts: ["openSource"] });
   assert.deepEqual([...f.el("bar-acts").children], [buttons[0]]);
   // After an act that hides itself, the focus is on the state, not lost to the page.
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  f.send({ type: "bar", state: "Draft", acts: ["openSource", "publish"] });
   const publish = f.el("bar-acts").querySelectorAll<HTMLElement>("button")[1]!;
   publish.focus();
   publish.click();
-  assert.equal(f.doc.activeElement, f.el("bar-state"));
-  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
-  f.el("bar-acts").querySelector<HTMLElement>("button")!.click();
-  f.key(f.el("layout-name"), "Enter");
-  assert.deepEqual(f.messages.at(-1), { type: "saveLayout", name: "Welcome" });
   assert.equal(f.doc.activeElement, f.el("bar-state"));
   // A context answers an act too: a cancelled Connect leaves the next click working.
   f.send({ type: "bar", state: "Not connected", acts: ["connect"] });

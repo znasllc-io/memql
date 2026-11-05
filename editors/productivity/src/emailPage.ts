@@ -85,13 +85,12 @@ const STYLES = [
   `.disclosure>summary{display:list-item}.disclosure[open]>summary{margin-bottom:8px}.disclosure-body{display:flex;flex-direction:column;gap:12px}`,
   `.colours{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px}.colours label{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:34px;font-size:12px;color:var(--vscode-descriptionForeground);cursor:pointer}`,
   `input[type=color]{flex:none;width:44px;height:28px;padding:2px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px;background:var(--vscode-input-background);cursor:pointer}input[type=color]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}`,
-  // The action bar's inline layout name, and the one notice line above the bar.
-  `.bar-form{display:flex;flex:1;align-items:center;justify-content:flex-end;gap:8px;min-width:0}.bar-form label{font-size:13px;color:var(--vscode-descriptionForeground);white-space:nowrap}.bar-form input{max-width:280px}`,
+  // The time MemQL has been writing, beside the bar's state; an inspector closed to edits while it writes; and the one notice line above the bar.
+  `.bar-state{flex:0 1 auto}.bar-meta{flex:1;min-width:0;font-size:13px;color:var(--vscode-descriptionForeground);white-space:nowrap}.bar-meta[hidden]{display:none}.inspector[inert]{opacity:.55}`,
   `.bar-notice{flex:none;padding:8px 16px;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-editor-background)}`,
   // A narrow window: the inspector becomes a sheet under the preview, above the action bar.
   `@media(max-width:999px){.workspace{flex-direction:column}.inspector{width:auto;height:44vh;gap:24px;padding:12px 16px 24px;border-left:0;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-editorWidget-background,var(--vscode-editor-background))}}`,
-  // Below 600 pixels the layout name's label is for screen readers alone: the field keeps its name.
-  `@media(max-width:600px){.toolbar{padding:8px}.bar-form label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}`,
+  `@media(max-width:600px){.toolbar{padding:8px}}`,
 ].join("\n");
 
 /** The Design page of an `*.email.json` file. `script` is the view script's address and `nonce` the page's script nonce. */
@@ -131,7 +130,6 @@ ${textField("theme-bodyFont", C.bodyFont, `<input ${described("theme-bodyFont")}
 </aside>
 </div>
 <div id="bar-notice" class="notice bar-notice" role="alert" hidden></div>
-<footer id="bar" class="bar"><span id="bar-state" class="bar-state" role="status" aria-live="polite" tabindex="-1"></span><div id="bar-acts" class="bar-acts"></div>
-<div id="bar-form" class="bar-form" hidden><label for="layout-name">${escape(C.layoutName)}</label><input id="layout-name" autocomplete="off"><button type="button" id="layout-cancel" class="text-act">${escape(C.cancel)}</button><button type="button" id="layout-save" class="primary">${escape(C.saveLayoutConfirm)}</button></div></footer>`;
+<footer id="bar" class="bar"><span id="bar-state" class="bar-state" role="status" aria-live="polite" tabindex="-1"></span><span id="bar-meta" class="bar-meta" hidden></span><div id="bar-acts" class="bar-acts"></div></footer>`;
   return pageShell({ title: options.title, nonce: options.nonce, script: options.script, styles: BASE_STYLES + "\n" + STYLES, body });
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { changePDF } from "../src/pdf.js";
-import { Documents, isZip, newEmailResource, resourceFrom } from "../src/documents.js";
+import { Documents, isReadOnly, isZip, newEmailResource, resourceFrom } from "../src/documents.js";
 import { UserInputError } from "../src/problems.js";
 import { readEmail } from "../src/emailDocument.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -274,4 +274,25 @@ test("annotation deletion sends both IDs and requires a confirmed receipt", asyn
   await assert.rejects(files.removeAnnotation(doc, "annotation-id"), /Deletion was not confirmed/);
   assert.equal(calls, 3);
   assert.equal(new TextDecoder().decode(doc.content), "Source");
+});
+
+test("a template reads its composition, and a template being written is read-only", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 1 };
+  const composition = { goalId: "g1", state: "writing", startedAt: "2026-11-04T10:00:00Z", finishedAt: "", error: "", notes: ["a"] };
+  let row: Record<string, unknown> = { id: "t9", name: "Welcome", accountId: "client-org", status: "draft", createdAt: "2026-11-04T09:59:00Z", document: { subject: "Hi", blocks: [] }, composition };
+  const api = { connect: async () => lease, execute: async (_lease: unknown, name: string, call: string) => {
+    assert.equal(name, "templateById"); assert.match(call, /t9/); return [row];
+  } } as unknown as EditorConnectionAPI;
+  const documents = new Documents(api);
+  const writing = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
+  assert.deepEqual(writing.composition, { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "" });
+  assert.equal(isReadOnly(writing), true);
+  row = { ...row, composition: { ...composition, state: "failed", error: "Cancelled" } };
+  const failed = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
+  assert.deepEqual(failed.composition, { state: "failed", startedAt: "2026-11-04T10:00:00Z", error: "Cancelled" });
+  assert.equal(isReadOnly(failed), false, "the next stat answers writable again");
+  row = { ...row, composition: undefined };
+  const plain = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
+  assert.equal(plain.composition, undefined);
+  assert.equal(isReadOnly(plain), false);
 });

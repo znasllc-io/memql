@@ -129,9 +129,9 @@ const STATES: ReadonlySet<string> = new Set([
   "published",
   "changed",
   "publishing",
-  "savingLayout",
   "savingCopy",
-  "layoutSaved",
+  "writing",
+  "writeFailed",
 ]);
 
 // ---------------------------------------------------------------------------

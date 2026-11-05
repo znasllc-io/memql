@@ -1,5 +1,5 @@
-// What the email editor asks of the cluster about an email's organization, its publication and its
-// layouts, apart from VS Code so each rule can be tested alone. The editor's host supplies the ports.
+// What the email editor asks of the cluster about an email's organization and its publication,
+// and what the bar says of both, apart from VS Code so each rule can be tested alone. The editor's host supplies the ports.
 //
 // ORGANIZATION. An email belongs to an organization, and the editor needs it before its first
 // preview (emailRender asks for one), so Publish never has to ask. It is resolved from what the
@@ -11,14 +11,15 @@
 // cluster finds it by the file (templateForSource, and campaignSaveTemplate's sourceArtifactId).
 // Publishing therefore needs no local record of which template a file became: a response that was
 // lost is recovered by asking the cluster again, and the first save of a file cannot make a second
-// template. The only record kept is the id of a layout that is being created (see saveLayout).
+// template.
 
 import {
-  buildCampaignSaveLayout, buildCampaignSaveTemplate, buildClientAccountsAll, buildCompositionForOutputFile,
-  buildEmailLayouts, buildSetArtifactAccounts, buildTemplateById, buildTemplateForSource,
+  buildCampaignSaveTemplate, buildClientAccountsAll, buildCompositionForOutputFile,
+  buildSetArtifactAccounts, buildTemplateById, buildTemplateForSource,
 } from "@znasllc-io/memql-sdk-core/client";
 import { EMAIL_COPY, fill } from "./emailCopy.js";
-import { isLayoutEmail, type EmailDocument } from "./emailDocument.js";
+import type { Composition } from "./documents.js";
+import type { EmailDocument } from "./emailDocument.js";
 import { UserInputError } from "./problems.js";
 
 const C = EMAIL_COPY.editor;
@@ -139,43 +140,71 @@ export async function templateFor(target: EmailTarget, organization: Organizatio
 // -- The action bar -----------------------------------------------------------
 
 /** The acts the bar can offer. The page keeps the same list (emailView.ts) and a test holds the two together. */
-export type BarAct = "connect" | "openSource" | "saveToMemQL" | "saveLayout" | "publish";
+export type BarAct = "connect" | "openSource" | "saveToMemQL" | "publish" | "cancel" | "retry";
 
 export interface BarInput {
   connected: boolean; domain?: string; invalid: boolean; local: boolean; organization?: Organization;
-  mode: "layout" | "custom"; dirty: boolean; issues: number; template?: TemplateState; unchanged: boolean;
-  busy?: "publish" | "layout" | "copy"; layoutSaved?: boolean;
+  dirty: boolean; issues: number; template?: TemplateState; unchanged: boolean;
+  busy?: "publish" | "copy";
+  /** MemQL's writing of this email, with the time it is read at (a clock is no business of a pure function). */
+  composition?: Composition & { now: number };
 }
+
+/** What the bar shows: the state in words, the acts, and for an email MemQL is writing, how long it has been and that the page is closed. */
+export interface Bar { state: string; acts: BarAct[]; meta?: string; writing?: true }
+
+const MINUTE = 60_000;
+
+/** How long ago `since` was, in short words: "Just started", "2 min", "1 h 5 min". Nothing when there is no start time to count from. */
+export function elapsed(since: string, now: number): string | undefined {
+  const start = Date.parse(since);
+  if (Number.isNaN(start)) return undefined;
+  const minutes = Math.max(0, Math.floor((now - start) / MINUTE));
+  if (minutes < 1) return C.justStarted;
+  if (minutes < 60) return fill(C.minutes, { minutes });
+  const hours = Math.floor(minutes / 60), rest = minutes % 60;
+  return rest === 0 ? fill(C.hours, { hours }) : fill(C.hoursMinutes, { hours, minutes: rest });
+}
+
+/** The most acts a bar offers (rule 12). */
+const MOST_ACTS = 3;
 
 /**
  * What the email's action bar says and offers: the state in words and the acts that are legal in it, and no others.
  * The first row that fits wins:
- *   busy, not connected, unreadable, no organization, on this computer, issues, unsaved changes,
- *   published and unchanged, published and changed, otherwise a draft.
- * Save as layout is offered only for a layout (custom HTML cannot be one). A layout that has just been saved replaces the
- * state of the last five rows, which is what the host shows for a few seconds.
+ *   busy, not connected, MemQL writing, unreadable, no organization, on this computer, then
+ *   issues, unsaved changes, published and unchanged, published and changed, otherwise a draft.
+ * While MemQL writes the email the page is closed to edits and the only act is Cancel. After a failure the state is the
+ * cluster's sentence as it gave it, and Retry joins the acts the email would have had, as the button last; where that
+ * would be more than three acts, Retry goes first and the two the email needs most stay.
  */
-export function editorBar(input: BarInput): { state: string; acts: BarAct[] } {
+export function editorBar(input: BarInput): Bar {
   if (input.busy === "publish") return { state: C.publishing, acts: [] };
-  if (input.busy === "layout") return { state: C.savingLayout, acts: [] };
   if (input.busy === "copy") return { state: C.savingCopy, acts: [] };
   if (!input.connected) return { state: input.local || !input.domain ? C.notConnected : fill(C.notConnectedTo, { domain: input.domain }), acts: ["connect"] };
+  const composition = input.composition;
+  if (composition?.state === "writing") {
+    const meta = elapsed(composition.startedAt, composition.now);
+    return { state: C.writing, acts: ["cancel"], ...(meta === undefined ? {} : { meta }), writing: true };
+  }
   if (input.invalid) return { state: C.unreadable, acts: ["openSource"] };
   if (!input.organization) return { state: C.chooseOrganization, acts: [] };
   if (input.local) return { state: C.local, acts: ["saveToMemQL"] };
-  const layout: BarAct[] = input.mode === "layout" ? ["saveLayout"] : [];
   const ready = input.template?.status === "ready";
   let state: string;
   let acts: BarAct[];
-  if (input.issues > 0) { state = input.issues === 1 ? C.issuesOne : fill(C.issuesMany, { count: input.issues }); acts = [...layout]; }
-  else if (input.dirty) { state = C.unsaved; acts = [...layout, "publish"]; }
-  else if (ready && input.unchanged) { state = fill(C.published, { organization: input.organization.name }); acts = [...layout]; }
-  else if (ready) { state = C.changed; acts = [...layout, "publish"]; }
-  else { state = C.draft; acts = [...layout, "publish"]; }
-  return { state: input.layoutSaved ? C.layoutSaved : state, acts };
+  if (input.issues > 0) { state = input.issues === 1 ? C.issuesOne : fill(C.issuesMany, { count: input.issues }); acts = []; }
+  else if (input.dirty) { state = C.unsaved; acts = ["publish"]; }
+  else if (ready && input.unchanged) { state = fill(C.published, { organization: input.organization.name }); acts = []; }
+  else if (ready) { state = C.changed; acts = ["publish"]; }
+  else { state = C.draft; acts = ["publish"]; }
+  if (composition?.state === "failed") {
+    return { state: composition.error || C.writeFailed, acts: acts.length + 1 > MOST_ACTS ? ["retry", ...acts.slice(-(MOST_ACTS - 1))] : [...acts, "retry"] };
+  }
+  return { state, acts };
 }
 
-// -- Publishing and layouts ---------------------------------------------------
+// -- Publishing ---------------------------------------------------
 
 export interface PublishInput {
   /**
@@ -191,28 +220,16 @@ export interface PublishInput {
   stillCurrent: () => boolean;
 }
 
-/** `key` names the email for the record of a layout that is being created: the same key retries the same layout. */
-export interface SaveLayoutInput { target: EmailTarget; organization: Organization; email: EmailDocument; name: string; key: string }
-
 type FileTarget = Extract<EmailTarget, { kind: "file" }>;
 type TemplateTarget = Extract<EmailTarget, { kind: "template" }>;
 
 const LOCAL_PUBLISH = "A local email is published from MemQL. Save it to MemQL first.";
 const NO_TEMPLATE_ID = "The cluster did not return the template id.";
 const NO_TEMPLATE_REVISION = "The cluster did not return the template revision.";
-const NO_LAYOUT_REVISION = "The cluster did not return the layout revision.";
 const SAVE_UNCONFIRMED = "The cluster did not confirm the saved email. Retry to recover it.";
 const PUBLISH_UNCONFIRMED = "The cluster did not confirm that the email is published. Retry to recover it.";
-const LAYOUT_UNCONFIRMED = "The cluster did not confirm the saved layout. Retry to recover it.";
 
-/** The page memento key for the id of a layout that is being created; the host's key for the email is appended. */
-const PENDING_LAYOUT = "memql.emailLayoutPending:";
-/** An id the cluster accepts for a layout (the same set it accepts for a template). */
-const ID = /^[A-Za-z0-9_-]{1,160}$/;
 const FILE_SUFFIX = /\.email\.json$/i;
-/** A layout name is one line of at most this many characters, counted as the cluster counts them (code points). */
-const MAX_LAYOUT_NAME = 200;
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** The template made from a file is named after the file, without the suffix. */
 function templateName(fileName: string): string {
@@ -311,54 +328,5 @@ export class EmailPublisher {
     target.status = live.status;
     target.revision = live.revision;
     return { templateId: live.templateId, status: live.status, revision: live.revision, document: snapshot(email) };
-  }
-
-  /**
-   * Saves the email as one of the organization's layouts. Only a layout can be one (custom HTML cannot), under a name of one
-   * line and up to 200 characters. The layout this email already made is updated, at the revision it was listed at: it is found
-   * by the file it was saved from, or by the id kept for it. A new layout is created under an id that is kept until the cluster
-   * has answered, so a response that was lost retries the same layout and never makes a second one, and an email changed in
-   * the meantime updates the layout the lost creation made instead of being refused for it. `key` names the email for that record.
-   */
-  async saveLayout(input: SaveLayoutInput): Promise<{ layoutId: string; revision: string }> {
-    if (!isLayoutEmail(input.email)) throw new UserInputError(H.noLayoutForHtml);
-    const name = input.name.trim();
-    if (name === "" || CONTROL.test(name) || [...name].length > MAX_LAYOUT_NAME) throw new UserInputError(H.layoutNameInvalid);
-    return this.singleFlight(JSON.stringify(["layout", input.key]), () => this.saveLayoutNow(input, name));
-  }
-
-  private async saveLayoutNow(input: SaveLayoutInput, name: string): Promise<{ layoutId: string; revision: string }> {
-    const { target, organization } = input;
-    const pending = PENDING_LAYOUT + input.key;
-    const document = { ...input.email };
-    const source = target.kind === "file" ? target.artifactId : undefined;
-    const kept = this.ports.state.get<string>(pending);
-    const keptId = typeof kept === "string" && ID.test(kept) ? kept : undefined;
-    // The layout this email already made is found by its file or, for an email that has none (a template opened as a file), by the
-    // id kept for it: a creation whose answer was lost may have reached the cluster, and a save that named no revision could never
-    // update it. The id in a row is the bare layoutId, never the opaque one.
-    const existing = source === undefined && keptId === undefined ? undefined
-      : (await this.ports.execute("emailLayouts", buildEmailLayouts({ accountId: organization.id })))
-        .find(row => text(row, "layoutId") !== "" && (text(row, "layoutId") === keptId || (source !== undefined && text(row, "sourceArtifactId") === source)));
-    let call: string;
-    if (existing) {
-      const revision = text(existing, "revision");
-      if (!revision) throw new Error(NO_LAYOUT_REVISION);
-      call = buildCampaignSaveLayout({
-        layoutId: text(existing, "layoutId"), accountId: organization.id, name, description: text(existing, "description"),
-        document, sourceArtifactId: source, expectedRevision: revision, action: "save",
-      });
-    } else {
-      const layoutId = keptId ?? globalThis.crypto.randomUUID();
-      if (layoutId !== kept) await this.ports.state.update(pending, layoutId);
-      call = buildCampaignSaveLayout({
-        layoutId, accountId: organization.id, name, document, ...(source === undefined ? {} : { sourceArtifactId: source }), expectedRevision: "", action: "save",
-      });
-    }
-    const row = (await this.ports.execute("campaignSaveLayout", call))[0];
-    const layoutId = text(row, "layoutId"), revision = text(row, "revision");
-    if (row?.saved !== true || !layoutId || !revision) throw new Error(LAYOUT_UNCONFIRMED);
-    if (this.ports.state.get(pending) !== undefined) await this.ports.state.update(pending, undefined);
-    return { layoutId, revision };
   }
 }

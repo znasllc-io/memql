@@ -13,8 +13,8 @@ const C = EMAIL_COPY.editor;
 const ACME = { id: "acme", name: "Acme Co" };
 const CONNECTED = { type: "context", connected: true, organization: ACME, choices: [] };
 
-type Act = "connect" | "openSource" | "saveToMemQL" | "saveLayout" | "publish";
-const bar = (state: string, acts: Act[], layoutName?: string) => ({ type: "bar", state, acts, ...(layoutName ? { layoutName } : {}) });
+type Act = "connect" | "openSource" | "saveToMemQL" | "publish" | "cancel" | "retry";
+const bar = (state: string, acts: Act[], more: { meta?: string; writing?: true } = {}) => ({ type: "bar", state, acts, ...more });
 const restore = (state: Record<string, unknown>) => ({ type: "restore", state });
 const shown = (fixture: EmailFixture) => ({ type: "document", version: 1, email: fixture.document });
 const rendered = (fixture: EmailFixture) => ({ type: "render", seq: 1, html: fixture.html, text: fixture.text, subject: fixture.subject, issues: fixture.issues });
@@ -26,7 +26,7 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
   const spotlight = email(fixtures, "spotlight-finished");
   const custom = email(fixtures, "custom");
   const page = (title: string, messages: readonly unknown[], then?: Then) => withHostMessages(emailPage({ title, script: "email-view.js", nonce: GALLERY_NONCE }), messages, then);
-  const draft = bar(C.draft, ["saveLayout", "publish"], "Calmer mornings");
+  const draft = bar(C.draft, ["publish"]);
 
   return [
     {
@@ -45,13 +45,25 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
       id: "email-issues",
       group: GROUP,
       title: "An issue: the Confirmation’s hero picture still to choose",
-      render: () => page("Please confirm.email.json", [restore({ width: "desktop", selected: "hero" }), CONNECTED, bar(C.issuesOne, ["saveLayout"], "Please confirm"), shown(heroMissing), rendered(heroMissing)], { reveal: "hero", show: "#field-src" }),
+      render: () => page("Please confirm.email.json", [restore({ width: "desktop", selected: "hero" }), CONNECTED, bar(C.issuesOne, []), shown(heroMissing), rendered(heroMissing)], { reveal: "hero", show: "#field-src" }),
     },
     {
       id: "email-published",
       group: GROUP,
       title: "Published, with the theme open",
-      render: () => page("A note from our founder.email.json", [restore({ width: "desktop", themeOpen: true }), CONNECTED, bar(fill(C.published, { organization: ACME.name }), ["saveLayout"], "A note from our founder"), shown(letter), rendered(letter)], { show: "#theme" }),
+      render: () => page("A note from our founder.email.json", [restore({ width: "desktop", themeOpen: true }), CONNECTED, bar(fill(C.published, { organization: ACME.name }), []), shown(letter), rendered(letter)], { show: "#theme" }),
+    },
+    {
+      id: "email-writing",
+      group: GROUP,
+      title: "MemQL is writing: the draft is read-only, the time shows, Cancel is the only act",
+      render: () => page("Calmer mornings.email.json", [restore({ width: "desktop", selected: "intro" }), CONNECTED, bar(C.writing, ["cancel"], { meta: "2 min", writing: true }), shown(article), rendered(article)], { reveal: "intro" }),
+    },
+    {
+      id: "email-write-failed",
+      group: GROUP,
+      title: "The writing was cancelled: the sentence, Publish and Retry",
+      render: () => page("Calmer mornings.email.json", [restore({ width: "desktop", selected: "intro" }), CONNECTED, bar("Cancelled", ["publish", "retry"]), shown(article), rendered(article)], { reveal: "intro" }),
     },
     {
       id: "email-custom",

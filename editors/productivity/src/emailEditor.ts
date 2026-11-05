@@ -17,7 +17,7 @@
 //
 // THE BAR. The state and the acts are editorBar's (emailPublish.ts), from what this host knows: the connection, whether
 // the text can be read, the organization, the render's issues (a refused render counts as one), whether the email is
-// saved and what the cluster published. Publishing and saving a layout run through EmailPublisher, one flight per email,
+// saved and what the cluster published. Publishing runs through EmailPublisher, one flight per email,
 // and never open a tab. Every act the page sends is answered with the bar, or with a problem. While the organization and
 // the template are being found for a connection, the bar is not sent at all, rather than one that would be wrong.
 //
@@ -25,15 +25,17 @@
 // userMessage takes out of its frames).
 
 import * as vscode from "vscode";
-import { buildEmailLayouts, buildEmailRender, buildLibraryArtifactForFile, buildLibraryFilesForOwner } from "@znasllc-io/memql-sdk-core/client";
+import {
+  buildCampaignCancelComposition, buildCampaignRetryComposition, buildEmailRender, buildLibraryArtifactForFile, buildLibraryFilesForOwner, buildTemplateById,
+} from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
-import { resourceFrom, type Documents, type OpenDocument } from "./documents.js";
+import { readComposition, resourceFrom, type Composition, type Documents, type OpenDocument } from "./documents.js";
 import { EMAIL_COPY } from "./emailCopy.js";
 import { addedBlockId, editEmail, findBlock, isLayoutEmail, minimalEdit, readEmail, sameEmail, sampleKeys, writeEmail, type EmailDocument, type EmailEdit } from "./emailDocument.js";
 import { emailPage } from "./emailPage.js";
 import {
   chooseOrganization, editorBar, EmailPublisher, issuesOf, PublishBlocked, resolveOrganization, templateFor,
-  type BarAct, type EmailIssue, type EmailTarget, type Organization, type PublishPorts, type TemplateState,
+  type Bar, type EmailIssue, type EmailTarget, type Organization, type PublishPorts, type TemplateState,
 } from "./emailPublish.js";
 import { reportProblem, UserInputError } from "./problems.js";
 import { showProblem } from "./problemUI.js";
@@ -46,16 +48,14 @@ const OPERATION = H.operations;
 const VIEW_TYPE = "memql.productivity.email";
 /** The page state of one email (ViewState, and the organization chosen for it), by its address. */
 const PAGE_STATE = "memql.emailView:";
-/** EmailPublisher's record of a layout being created (emailPublish.ts); the key this host gives it follows. */
-const LAYOUT_PENDING = "memql.emailLayoutPending:";
 /** A change or a new sample value is rendered once the person has paused this long. */
 const PAUSE = 300;
-/** How long the bar says that a layout was saved. */
-const SAVED_FOR = 4000;
+/** How often the cluster is asked whether MemQL has finished writing the email. */
+const POLL = 2000;
 /** The largest picture an email may carry (MaxImageBytes in component/compose/emaildoc). */
 const MAX_PICTURE_BYTES = 1024 * 1024;
 const EMAIL_FILE = /\.email\.json$/i;
-/** A bare id the cluster gives a file, a picture or a layout. */
+/** A bare id the cluster gives a file or a picture. */
 const ID = /^[A-Za-z0-9_-]{1,160}$/;
 /** The pictures an email can carry, by the extensions the upload dialog offers. */
 const PICTURE_TYPES: Readonly<Record<string, string>> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif" };
@@ -137,6 +137,8 @@ interface Host {
   readonly api: EditorConnectionAPI;
   readonly files: Documents;
   readonly load: (uri: vscode.Uri) => Promise<OpenDocument>;
+  /** Reloads the document in place from the cluster (false when the person has edits of their own). */
+  readonly refresh: (document: vscode.TextDocument) => Promise<boolean>;
   show(mode: "design" | "source" | "split", uri?: vscode.Uri): Promise<void>;
   activated(panel: EmailPanel): void;
   shown(panel: EmailPanel, shown: Shown): void;
@@ -150,9 +152,10 @@ export class EmailEditor implements vscode.CustomTextEditorProvider {
   private readonly shownBy = new Map<string, { panel: EmailPanel; shown: Shown }>();
   private readonly host: Host;
 
-  constructor(context: vscode.ExtensionContext, private readonly api: EditorConnectionAPI, files: Documents, load: (uri: vscode.Uri) => Promise<OpenDocument>) {
+  constructor(context: vscode.ExtensionContext, private readonly api: EditorConnectionAPI, files: Documents, load: (uri: vscode.Uri) => Promise<OpenDocument>,
+    refresh: (document: vscode.TextDocument) => Promise<boolean> = async () => false) {
     this.host = {
-      context, api, files, load,
+      context, api, files, load, refresh,
       show: (mode, uri) => this.show(mode, uri),
       activated: panel => { this.active = panel; },
       shown: (panel, shown) => { this.shownBy.set(panel.document.uri.toString(), { panel, shown }); },
@@ -283,11 +286,11 @@ class EmailPanel {
   private opened?: OpenDocument;
   /** The template a Library file was published as. A template resource reads its own from `opened`. */
   private template?: TemplateState;
-  /** The name of the layout this email was saved as, when there is one. */
-  private layoutName?: string;
-  private busy?: "publish" | "layout" | "copy";
-  private layoutSaved = false;
-  private layoutTimer?: ReturnType<typeof setTimeout>;
+  /** MemQL's writing of this email, when a template says it has one: as the cluster last said. */
+  private composition?: Composition;
+  /** The next look at whether MemQL has finished, while it has not. */
+  private pollTimer?: ReturnType<typeof setTimeout>;
+  private busy?: "publish" | "copy";
   private renderTimer?: ReturnType<typeof setTimeout>;
   /** The last render: its issues, or that the cluster refused it. */
   private rendered?: { issues: EmailIssue[]; refused: boolean };
@@ -319,7 +322,8 @@ class EmailPanel {
   private dispose(): void {
     this.disposed = true;
     if (this.renderTimer !== undefined) clearTimeout(this.renderTimer);
-    if (this.layoutTimer !== undefined) clearTimeout(this.layoutTimer);
+    if (this.pollTimer !== undefined) clearTimeout(this.pollTimer);
+    this.pollTimer = undefined;
     for (const subscription of this.subscriptions) subscription.dispose();
     this.host.closed(this);
   }
@@ -353,14 +357,13 @@ class EmailPanel {
     this.organization = undefined;
     this.choices = [];
     this.template = undefined;
-    this.layoutName = undefined;
     this.rendered = undefined;
     this.failed = undefined;
     void this.resolve();
   }
 
   /**
-   * The organization, the template and the layout of the email, found on the connection in use; then a render, and the bar.
+   * The organization and the template of the email, found on the connection in use; then a render, and the bar.
    * Without the organization nothing can be said, so a failure to find it leaves the bar as it was and the problem in words.
    * A failure to find what is published is told too, and the bar then offers Publish rather than say the email is published.
    */
@@ -390,11 +393,11 @@ class EmailPanel {
     }
     await this.postContext();
     void this.render();
-    let template: TemplateState | undefined, layoutName: string | undefined;
+    let template: TemplateState | undefined;
     const organization = this.organization;
     if (organization) {
       try {
-        [template, layoutName] = await Promise.all([templateFor(target, organization, this.session.ports), this.layoutNamed(target, organization)]);
+        template = await templateFor(target, organization, this.session.ports);
       } catch (error) {
         if (stale()) return;
         await this.problem(error, OPERATION.published);
@@ -402,8 +405,9 @@ class EmailPanel {
     }
     if (stale()) return;
     this.template = template;
-    this.layoutName = layoutName;
     this.known = key;
+    this.composition = this.opened?.resource.kind === "templates" ? this.opened.composition : undefined;
+    this.watching();
     await this.postBar();
   });
 
@@ -414,30 +418,8 @@ class EmailPanel {
     return targetOf(this.opened);
   }
 
-  /** The name of the layout this email was saved as: found by the file it was saved from, or by the id kept for one being made. */
-  private async layoutNamed(target: EmailTarget, organization: Organization): Promise<string | undefined> {
-    if (target.kind === "local" || !this.layoutEmail()) return undefined;
-    const kept = this.host.context.workspaceState.get<unknown>(LAYOUT_PENDING + this.layoutKey(organization));
-    const keptId = typeof kept === "string" && ID.test(kept) ? kept : undefined;
-    if (target.kind !== "file" && keptId === undefined) return undefined;
-    // A row may come without its document (documentOmitted): the name is all this needs.
-    const rows = await this.session.ports.execute("emailLayouts", buildEmailLayouts({ accountId: organization.id }));
-    const row = rows.find(row => text(row, "layoutId") !== "" && (text(row, "layoutId") === keptId || (target.kind === "file" && text(row, "sourceArtifactId") === target.artifactId)));
-    return text(row, "name") || undefined;
-  }
-
-  /** The key EmailPublisher keeps a layout being made under: the email and the organization it is saved for. */
-  private layoutKey(organization: Organization): string {
-    return JSON.stringify([this.document.uri.toString(), organization.id]);
-  }
-
   private email(): EmailDocument | undefined {
     try { return readEmail(this.document.getText()); } catch { return undefined; }
-  }
-
-  private layoutEmail(): boolean {
-    const email = this.email();
-    return email !== undefined && isLayoutEmail(email);
   }
 
   // -- The page state -----------------------------------------------------------------------------------------
@@ -514,26 +496,24 @@ class EmailPanel {
    */
   private postBar(force = false): Promise<void> {
     if (this.disposed || (!this.busy && !this.isKnown())) return Promise.resolve();
-    const { state, acts } = this.bar();
-    const message = { type: "bar", state, acts, ...(acts.includes("saveLayout") ? { layoutName: this.layoutName ?? nameOf(this.document.uri).replace(EMAIL_FILE, "") } : {}) };
+    const message = { type: "bar", ...this.bar() };
     const key = JSON.stringify(message);
     if (!force && key === this.lastBar) return Promise.resolve();
     this.lastBar = key;
     return this.post(message);
   }
 
-  private bar(): { state: string; acts: BarAct[] } {
+  private bar(): Bar {
     const email = this.email();
     const template = this.templateState();
     const fromTemplate = this.opened?.resource.kind === "templates";
     return editorBar({
       connected: this.lease() !== undefined, domain: this.domain, invalid: email === undefined, local: this.document.uri.scheme !== "memql-file",
       organization: this.organization && { id: this.organization.id, name: this.organizationName(this.organization) },
-      mode: email !== undefined && !isLayoutEmail(email) ? "custom" : "layout",
       dirty: this.document.isDirty, issues: this.issueCount(), template,
       // A template is its own content; a Library file is unchanged while it says what the cluster published.
       unchanged: template !== undefined && (fromTemplate ? !this.document.isDirty : email !== undefined && template.document !== undefined && sameEmail(email, template.document)),
-      busy: this.busy, layoutSaved: this.layoutSaved,
+      busy: this.busy, ...(this.composition ? { composition: { ...this.composition, now: Date.now() } } : {}),
     });
   }
 
@@ -567,12 +547,12 @@ class EmailPanel {
     try {
       switch (message.type) {
         case "ready": await this.ready(); break;
-        case "edit": await this.edit(message.op); break;
+        // While MemQL writes the email the document is read-only: the page's edits and pictures are ignored, not refused.
+        case "edit": if (!this.isWriting()) await this.edit(message.op); break;
         case "viewState": await this.viewState(message.state); break;
         case "act": await this.act(message.act); break;
-        case "saveLayout": await this.saveLayout(message.name); break;
         case "organization": await this.choose(message.id); break;
-        case "picture": await this.picture(message.block, message.action); break;
+        case "picture": if (!this.isWriting()) await this.picture(message.block, message.action); break;
         case "mode": if (message.mode === "source" || message.mode === "split") await this.host.show(message.mode, this.document.uri); break;
         case "shown":
           if (typeof message.version === "number" && typeof message.subject === "string" && typeof message.state === "string" && typeof message.blocks === "number") {
@@ -757,10 +737,14 @@ class EmailPanel {
 
   private async act(act: unknown): Promise<void> {
     try {
+      // While MemQL writes, the only act is Cancel.
+      if (this.isWriting() && act !== "cancel") return;
       if (act === "connect") await this.connect();
       else if (act === "openSource") await this.host.show("source", this.document.uri);
       else if (act === "saveToMemQL") await this.saveToMemQL();
       else if (act === "publish") await this.publish();
+      else if (act === "cancel") await this.composing("cancel");
+      else if (act === "retry") await this.composing("retry");
     } catch (error) {
       await this.problem(error, OPERATION.view);
     } finally {
@@ -834,28 +818,72 @@ class EmailPanel {
     await this.postBar();
   }
 
-  private async saveLayout(name: unknown): Promise<void> {
-    const organization = this.organization;
-    try {
-      if (this.busy || !organization || !this.lease() || typeof name !== "string") return;
-      this.busy = "layout";
-      await this.postBar();
-      try {
-        const target = await this.target();
-        await this.session.publisher.saveLayout({ target, organization, email: readEmail(this.document.getText()), name, key: this.layoutKey(organization) });
-        this.layoutName = name.trim();
-        this.layoutSaved = true;
-        if (this.layoutTimer !== undefined) clearTimeout(this.layoutTimer);
-        this.layoutTimer = setTimeout(() => { this.layoutSaved = false; void this.postBar(); }, SAVED_FOR);
-      } finally {
-        this.busy = undefined;
-      }
-    } catch (error) {
-      await this.problem(error, OPERATION.layout);
-    } finally {
-      await this.postBar(true);
-    }
+  // -- MemQL writing the email --------------------------------------------------------------------------------------
+
+  private isWriting(): boolean {
+    return this.composition?.state === "writing";
   }
+
+  /** The template MemQL writes, when this email is one. */
+  private writtenTemplate(): string | undefined {
+    return this.opened?.resource.kind === "templates" ? this.opened.sourceId : undefined;
+  }
+
+  /** Stops the writing (Cancel) or starts it again (Retry), then reads what the cluster says now. A refusal is told in the cluster's words. */
+  private async composing(act: "cancel" | "retry"): Promise<void> {
+    const templateId = this.writtenTemplate(), lease = this.lease();
+    if (templateId === undefined || !lease) return;
+    try {
+      if (act === "cancel") await this.host.api.execute(lease, "campaignCancelComposition", buildCampaignCancelComposition({ templateId }));
+      else await this.host.api.execute(lease, "campaignRetryComposition", buildCampaignRetryComposition({ templateId }));
+    } catch (error) {
+      await this.problem(error, act === "cancel" ? OPERATION.cancel : OPERATION.write);
+    }
+    // The answer of either call says only that it was asked: the composition is read again for what is so.
+    await this.sync();
+  }
+
+  /** While MemQL is writing, looks again in a moment. One look is waiting or running at a time, and none once the page is gone. */
+  private watching(): void {
+    if (this.disposed || this.pollTimer !== undefined || !this.isWriting()) return;
+    this.pollTimer = setTimeout(() => { this.pollTimer = undefined; void this.sync().catch(() => undefined); }, POLL);
+  }
+
+  /**
+   * Reads the template's composition from the cluster. When its state changed the document is reloaded in place, as the
+   * Markdown editor reloads a revision (the file system then answers writable, or read-only, to match), and the bar says
+   * what is so. A look that cannot be made is made again in a moment, for as long as MemQL was last said to be writing.
+   */
+  private readonly sync = refreshQueue(async current => {
+    const lease = this.lease(), templateId = this.writtenTemplate();
+    if (this.disposed || !lease || templateId === undefined) return;
+    let composition: Composition | undefined;
+    try {
+      const row = (await this.host.api.execute(lease, "templateById", buildTemplateById({ templateId })))[0];
+      if (this.disposed || !current()) return;
+      if (row === undefined) { this.watching(); return; }
+      composition = readComposition(row.composition);
+    } catch {
+      if (!this.disposed && current()) this.watching();
+      return;
+    }
+    const before = this.composition;
+    const moved = before?.state !== composition?.state || before?.error !== composition?.error;
+    this.composition = composition;
+    if (!this.isWriting() && this.pollTimer !== undefined) { clearTimeout(this.pollTimer); this.pollTimer = undefined; }
+    if (moved) {
+      try {
+        await this.host.refresh(this.document);
+        if (this.disposed) return;
+        this.opened = await this.host.load(this.document.uri);
+      } catch (error) {
+        if (!this.disposed) await this.problem(error, OPERATION.view);
+      }
+      if (this.disposed) return;
+    }
+    await this.postBar();
+    this.watching();
+  });
 
   /**
    * A local email goes to MemQL as the person has it: saved, uploaded under its own name, labelled with its organization,
