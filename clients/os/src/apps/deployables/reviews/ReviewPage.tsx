@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { History } from "lucide-react";
 
-import { Button, Caption, ChoiceStack, Fact, Facts, Head, Notice, Panel, RecordListSkeleton, Subhead, TextArea, useNow } from "../../../kit";
+import { Button, Caption, ChoiceStack, ContentSkeleton, Details, DetailsSection, Fact, Facts, Head, Notice, Subhead, TextArea, useNow } from "../../../kit";
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { formatMoment } from "../../../kit/format";
@@ -9,6 +10,7 @@ import { deployedByLabel, type NameOf } from "../people";
 import {
   ACT_LABEL,
   actionDone,
+  ratingWords,
   reasonLabel,
   reasonsFor,
   reviewName,
@@ -18,10 +20,13 @@ import {
   type ReviewDecision,
   type ReviewRow,
 } from "./model";
+import { ReviewsPane } from "./ReviewsPane";
 import { useReviewDetail, type ReviewWrites } from "./useReviews";
 
 // ONE REVIEW: the words as the writer sent them, who wrote them, every
-// decision on them, and the acts this person may take on them now.
+// decision on them, and the acts this person may take on them now -- open,
+// named sections the way Fleet draws a machine's Details, with no box around
+// any of them.
 //
 // THE ACTS ARE THE ENGINE'S (reviewsGet answers the ones it would accept), and
 // the bar carries ONE button: the act that moves the review on -- Publish while
@@ -76,7 +81,7 @@ export function ReviewPage({ reviewId, writes, nameOf, viewerUserId, trail, back
   writes: ReviewWrites;
   nameOf: NameOf;
   viewerUserId: string;
-  /** The trail down to Reviews (or to the decision log): the review is added after it. */
+  /** The trail down to the view the review was opened from: the review is added after it. */
   trail: readonly Breadcrumb[];
   back: { label: string; onSelect: () => void };
 }) {
@@ -91,6 +96,7 @@ export function ReviewPage({ reviewId, writes, nameOf, viewerUserId, trail, back
   const review = value?.review ?? null;
   const name = review ? reviewName(review) : "Review";
   const head = <Head navigationKey={`review:${reviewId}`} title={name} breadcrumbs={[...trail, { label: name }]} back={back} />;
+  const context = { page: "Review", reviewId, state: review?.state ?? "" };
 
   const close = () => {
     setStep(null);
@@ -118,17 +124,13 @@ export function ReviewPage({ reviewId, writes, nameOf, viewerUserId, trail, back
 
   if (review === null) {
     return (
-      <section className="os-action-pane">
-        <div className="os-action-body os-app-stack">
-          {head}
-          {detail.state === "failed" ? (
-            <Notice tone="error" sentence={detail.error || "This review could not be read."}><Button onClick={detail.reread}>Try again</Button></Notice>
-          ) : (
-            <RecordListSkeleton label="Reading the review" rows={2} />
-          )}
-        </div>
-        <ActionBar state="" tone="busy" />
-      </section>
+      <ReviewsPane heading={head} bar={<ActionBar state="" tone={detail.state === "failed" ? "none" : "busy"} />} context={context}>
+        {detail.state === "failed" ? (
+          <Notice tone="error" sentence={detail.error || "This review could not be read."}><Button onClick={detail.reread}>Try again</Button></Notice>
+        ) : (
+          <ContentSkeleton label="Reading the review" kind="detail" />
+        )}
+      </ReviewsPane>
     );
   }
 
@@ -151,41 +153,45 @@ export function ReviewPage({ reviewId, writes, nameOf, viewerUserId, trail, back
   const barDetail = review.state === "waiting"
     ? `for ${waitedFor(review.createdAt, now)}`
     : last !== null ? `${formatMoment(last.at)} by ${who(last.decidedBy)}` : undefined;
+  const bar = <ActionBar state={stateLabel(review.state)} detail={barDetail} tone={barTone} acts={barActs} scope={`review:${reviewId}:${step ?? ""}`} />;
 
   return (
-    <section className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Review", reviewId, state: review.state })}>
-      <div className="os-action-body os-app-stack">
-        {head}
-        {writes.refusal ? <Notice tone="error" sentence={writes.refusal} /> : null}
-        {value !== null && !value.moderates ? <Caption>You can read this review. The store&rsquo;s own people decide it.</Caption> : null}
-        {step !== null ? (
-          <Panel label={ACT_LABEL[step]}>
-            {/* The words stay in view: a reason is chosen against them. */}
-            <ReviewText review={review} />
-            <Subhead>{question(step)}</Subhead>
-            <Caption>{stepNote(step)}</Caption>
-            {reasons.length > 0 ? (
-              <ChoiceStack name={`review-reason-${step}`} label="Reason" voice="prose" value={reason} onChange={setReason}
-                options={reasons.map((r) => ({ value: r.value, label: r.label, description: r.means }))} />
-            ) : null}
-            <TextArea id={`review-note-${reviewId}`} label="Note" rows={3} value={note} onChange={setNote}
-              placeholder={step === "erase" ? "How the request arrived (optional)" : "A note for the log (optional)"} />
-          </Panel>
-        ) : (
-          <>
-            <Panel label="The review">
-              <ReviewText review={review} />
-              <Facts>
-                <Fact label="Product" value={review.productHandle} mono />
-                <Fact label="Rating" value={review.rating ? `${review.rating} of 5` : "None given"} />
-                <Fact label="Writer" value={review.authorName || (review.state === "erased" ? "Erased" : "No name given")} />
-                {review.authorEmail ? <Fact label="Email" value={review.authorEmail} copyValue={review.authorEmail} /> : null}
-                <Fact label="Verified buyer" value={review.verifiedBuyer ? "Yes: written through their order's link" : "No"} />
-                <Fact label="Sent" value={formatMoment(review.createdAt)} />
-                <Fact label="Revision" value={review.revision > 1 ? `${review.revision}: edited after it was first sent` : "1"} />
-              </Facts>
-            </Panel>
-            <Subhead meta={value?.decisions.length ? String(value.decisions.length) : undefined}>Decisions</Subhead>
+    <ReviewsPane heading={head} bar={bar} context={context}>
+      {writes.refusal ? <Notice tone="error" sentence={writes.refusal} /> : null}
+      {value !== null && !value.moderates ? <Caption>You can read this review. The store&rsquo;s own people decide it.</Caption> : null}
+      {/* THE WORDS STAY IN VIEW, a step open or not: a reason is chosen
+          against them. The headline is the page's title, so it is not said
+          again above the text. */}
+      <ReviewText review={review} />
+      {step !== null ? (
+        <div className="os-review-step" aria-label={ACT_LABEL[step]} role="group">
+          <Subhead>{question(step)}</Subhead>
+          <Caption>{stepNote(step)}</Caption>
+          {reasons.length > 0 ? (
+            <ChoiceStack name={`review-reason-${step}`} label="Reason" voice="prose" value={reason} onChange={setReason}
+              options={reasons.map((r) => ({ value: r.value, label: r.label, description: r.means }))} />
+          ) : null}
+          <TextArea id={`review-note-${reviewId}`} label="Note" rows={3} value={note} onChange={setNote}
+            placeholder={step === "erase" ? "How the request arrived (optional)" : "A note for the log (optional)"} />
+        </div>
+      ) : (
+        <Details>
+          <DetailsSection title="Review">
+            <Facts>
+              <Fact label="Product" value={review.productHandle} copyValue={review.productHandle} />
+              <Fact label="Rating" value={ratingWords(review.rating)} />
+              <Fact label="Sent" value={formatMoment(review.createdAt)} />
+              <Fact label="Revision" value={review.revision > 1 ? `${review.revision}, edited after it was first sent` : "1"} />
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Writer">
+            <Facts>
+              <Fact label="Name" value={review.authorName || (review.state === "erased" ? "Erased" : "No name given")} />
+              {review.authorEmail ? <Fact label="Email" value={review.authorEmail} copyValue={review.authorEmail} /> : null}
+              <Fact label="Verified buyer" value={review.verifiedBuyer ? "Yes, written through their order's link" : "No"} />
+            </Facts>
+          </DetailsSection>
+          <DetailsSection title="Decisions">
             {value?.decisions.length ? (
               <RecordList as="ul" label="Decisions on this review">
                 {value.decisions.map((d) => <DecisionRow key={d.id} decision={d} who={who} current={review.revision} />)}
@@ -193,11 +199,10 @@ export function ReviewPage({ reviewId, writes, nameOf, viewerUserId, trail, back
             ) : (
               <Caption>No decision yet. It is not on the site until somebody publishes it.</Caption>
             )}
-          </>
-        )}
-      </div>
-      <ActionBar state={stateLabel(review.state)} detail={barDetail} tone={barTone} acts={barActs} scope={`review:${reviewId}:${step ?? ""}`} />
-    </section>
+          </DetailsSection>
+        </Details>
+      )}
+    </ReviewsPane>
   );
 }
 
@@ -205,25 +210,21 @@ function ReviewText({ review }: { review: ReviewRow }) {
   if (review.state === "erased" && review.title === "" && review.body === "") {
     return <Caption>The writer&rsquo;s data was erased on request.</Caption>;
   }
-  return (
-    <blockquote className="os-review-text">
-      {review.title ? <strong>{review.title}</strong> : null}
-      {review.body ? <p>{review.body}</p> : null}
-    </blockquote>
-  );
+  return review.body ? <blockquote className="os-review-text"><p>{review.body}</p></blockquote> : null;
 }
 
 function DecisionRow({ decision, who, current }: { decision: ReviewDecision; who: (userId: string) => string; current: number }) {
   const named = `${actionDone(decision.action)}${decision.reason ? `: ${reasonLabel(decision.reason)}` : ""}`;
+  const earlier = decision.revision !== current;
   return (
     <RecordRow
+      icon={<History size={18} aria-hidden />}
       name={named}
       secondary={decision.note || undefined}
-      state={formatMoment(decision.at)}
-      tone="muted"
-      dim={decision.revision !== current}>
+      trailing={<span className="os-caption">{formatMoment(decision.at)}</span>}
+      dim={earlier}>
       <span>by {who(decision.decidedBy)}</span>
-      <span>{decision.revision !== current ? `on revision ${decision.revision}` : `revision ${decision.revision}`}</span>
+      <span>{earlier ? `on revision ${decision.revision}` : `revision ${decision.revision}`}</span>
     </RecordRow>
   );
 }

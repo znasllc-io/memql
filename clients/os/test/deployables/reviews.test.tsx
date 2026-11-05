@@ -112,26 +112,46 @@ describe("the Reviews icon", () => {
   });
 });
 
+const tabs = () => within(screen.getByRole("navigation", { name: "Review views" })).getAllByRole("button");
+const tab = (name: string) => within(screen.getByRole("navigation", { name: "Review views" })).getByRole("button", { name });
+
+describe("the review views", () => {
+  it("are tabs under the Reviews heading, the way Fleet shows a machine's, with Waiting open first", async () => {
+    await openReviews();
+    expect(tabs().map((t) => t.textContent)).toEqual(["Waiting", "Published", "Decision log", "Settings"]);
+    expect(tab("Waiting").getAttribute("aria-current")).toBe("page");
+    // The views are tabs now: no icon in the heading opens them, and no filter row stands over the list.
+    expect(screen.queryByRole("button", { name: "Review settings" })).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+});
+
 describe("the queue", () => {
-  it("lists what waits, oldest first as the engine answered, with how long each has waited and every filter's count", async () => {
+  it("lists what waits, oldest first as the engine answered, with how long each has waited", async () => {
     const connection = await openReviews();
     expect(connection.callsNamed("reviewsList")[0]).toContain('storeId: "store-live"');
     expect(connection.callsNamed("reviewsList")[0]).toContain('siteId: "site-shop"');
-    const list = await screen.findByRole("list", { name: "Reviews" });
+    expect(connection.callsNamed("reviewsList")[0]).toContain('state: "waiting"');
+    const list = await screen.findByRole("list", { name: "Waiting reviews" });
     const rows = within(list).getAllByRole("button");
     expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["Open review Works", "Open review Easy to use"]);
     expect(within(list).getByText("5 days")).toBeTruthy();
     expect(within(list).getByText("3 days")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "Waiting, 2" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("radio", { name: "Published, 5" })).toBeTruthy();
+    expect(within(list).getAllByText("4 of 5")).toHaveLength(2);
+    expect(within(list).getAllByText("Dana, verified buyer")).toHaveLength(2);
+    // The tab says Waiting once; no row says it again.
+    expect(within(list).queryByText("Waiting")).toBeNull();
     expect(bar().textContent).toContain("2 waiting");
   });
 
-  it("asks the engine for the filter chosen, and says so when it holds nothing", async () => {
+  it("shows what is published on its own tab, and says so when nothing is", async () => {
     const connection = await openReviews();
-    await click(screen.getByRole("radio", { name: "Removed, 0" }));
-    await waitFor(() => expect(connection.callsNamed("reviewsList").some((c) => c.includes('state: "removed"'))).toBe(true));
-    expect(await screen.findByText("No published review was removed.")).toBeTruthy();
+    await click(tab("Published"));
+    await waitFor(() => expect(connection.callsNamed("reviewsList").some((c) => c.includes('state: "published"'))).toBe(true));
+    expect(tab("Published").getAttribute("aria-current")).toBe("page");
+    const empty = await screen.findByRole("region", { name: "Nothing published" });
+    expect(within(empty).getByText(/A review appears here once somebody publishes it/)).toBeTruthy();
+    expect(bar().textContent).toContain("Nothing published");
   });
 
   it("tells the cluster's operators they read the reviews and the store's people decide them", async () => {
@@ -229,21 +249,46 @@ describe("the decision log", () => {
       log: { decisions: [{ id: "d9", reviewId: REVIEW.id, action: "decline", reason: "profanity", decidedBy: "u-me", at: "2026-11-03T10:00:00Z", revision: 2, reviewState: "declined", productHandle: "floss-picks", title: "Easy to use" }], total: 1, next: "" } as unknown as Row,
     });
     const connection = await openReviews(seed);
-    await click(screen.getByRole("button", { name: "Decision log" }));
-    expect(await screen.findByRole("heading", { name: "Decision log" })).toBeTruthy();
-    expect(connection.callsNamed("reviewsDecisionLog")[0]).toContain('storeId: "store-live"');
+    await click(tab("Decision log"));
+    expect(tab("Decision log").getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(connection.callsNamed("reviewsDecisionLog")[0]).toContain('storeId: "store-live"'));
     const entry = await screen.findByRole("button", { name: "Open the review: Declined: Profanity" });
     expect(within(entry).getByText("by you")).toBeTruthy();
+    expect(within(entry).getByText("“Easy to use” on floss-picks")).toBeTruthy();
+    // A decision's row says what was decided; the review's own state is said on the review.
+    expect(within(entry).queryByText("Declined")).toBeNull();
     await click(entry);
     expect(await screen.findByRole("heading", { name: "Easy to use" })).toBeTruthy();
   });
 });
 
 describe("the settings", () => {
+  it("are the last tab, and offer the store's export", async () => {
+    // The file is handed over the way a download link would; jsdom has no
+    // object URLs and navigates nowhere, so both are stood in for here.
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    const created = vi.fn(() => "blob:reviews");
+    URL.createObjectURL = created;
+    URL.revokeObjectURL = vi.fn();
+    const clicked = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    try {
+      const connection = await openReviews();
+      await click(tab("Settings"));
+      await click(await screen.findByRole("button", { name: "Export reviews" }));
+      await waitFor(() => expect(connection.callsNamed("reviewsExportStore")).toHaveLength(1));
+      expect(connection.callsNamed("reviewsExportStore")[0]).toContain('storeId: "store-live"');
+      await waitFor(() => expect(created).toHaveBeenCalledTimes(1));
+      expect(clicked).toHaveBeenCalledTimes(1);
+    } finally {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+      clicked.mockRestore();
+    }
+  });
+
   it("shows what is in force and saves only what changed", async () => {
     const connection = await openReviews();
-    await click(screen.getByRole("button", { name: "Review settings" }));
-    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    await click(tab("Settings"));
     const lifetime = (await screen.findByLabelText("Days a review link stays open")) as HTMLInputElement;
     expect(lifetime.value).toBe("14");
     // Only the owner, or an operator, names who approves removals.
@@ -264,15 +309,15 @@ describe("the settings", () => {
   it("lets only the cluster's operators name the mailbox requests leave from", async () => {
     // A moderator sees the sender and cannot change it.
     await openReviews();
-    await click(screen.getByRole("button", { name: "Review settings" }));
+    await click(tab("Settings"));
     expect(((await screen.findByLabelText("Request sender")) as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/Only the cluster's operators choose the mailbox/)).toBeTruthy();
+    expect(screen.getByText(/Only the cluster.s operators choose the mailbox/)).toBeTruthy();
   });
 
   it("saves the sender an operator names", async () => {
     const seed = reviewsSeed({ settings: { exists: true, settings: { linkLifetimeDays: 14, requestDelayDays: 14 }, may: { edit: true, nameApprover: true, nameSender: true }, viewer: { moderates: false, approvesRemovals: false } } as unknown as Row });
     const connection = await openReviews(seed);
-    await click(screen.getByRole("button", { name: "Review settings" }));
+    await click(tab("Settings"));
     const sender = (await screen.findByLabelText("Request sender")) as HTMLInputElement;
     expect(sender.disabled).toBe(false);
     await typeInto(sender, "si-house");
@@ -284,7 +329,7 @@ describe("the settings", () => {
 
   it("offers no Save for days out of range, and says what is wrong", async () => {
     await openReviews();
-    await click(screen.getByRole("button", { name: "Review settings" }));
+    await click(tab("Settings"));
     await typeInto((await screen.findByLabelText("Days a review link stays open")) as HTMLInputElement, "0");
     expect(await screen.findByText(/a whole number from 1 to 365/)).toBeTruthy();
     expect(barButtons()).toEqual(["Discard"]);

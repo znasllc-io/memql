@@ -20,14 +20,8 @@ export type ReviewAct = "publish" | "decline" | "askToFix" | "escalate" | "remov
 const STATES: readonly ReviewState[] = ["waiting", "published", "declined", "removed", "erased"];
 const ACTS: readonly ReviewAct[] = ["publish", "decline", "askToFix", "escalate", "remove", "erase"];
 
-/** The filters, in the order a moderator works: what waits first. */
-export const FILTERS: readonly { value: ReviewFilter; label: string }[] = [
-  { value: "waiting", label: "Waiting" },
-  { value: "published", label: "Published" },
-  { value: "declined", label: "Declined" },
-  { value: "removed", label: "Removed" },
-  { value: "all", label: "All" },
-];
+/** The filters reviewsList counts reviews under. */
+const COUNTED: readonly ReviewFilter[] = ["waiting", "published", "declined", "removed", "all"];
 
 export interface ReviewDecision {
   id: string;
@@ -190,8 +184,8 @@ export function reviewFrom(row: Row | null): ReviewRow {
 export function reviewPageFrom(row: Row | null): ReviewPage {
   const counts: Partial<Record<ReviewFilter, number>> = {};
   const raw = object(row, "counts");
-  for (const f of FILTERS) {
-    if (raw !== null && raw[f.value] !== undefined) counts[f.value] = whole(raw, f.value);
+  for (const f of COUNTED) {
+    if (raw !== null && raw[f] !== undefined) counts[f] = whole(raw, f);
   }
   return {
     reviews: list(row, "reviews").map(reviewFrom).filter((r) => r.id !== ""),
@@ -354,13 +348,13 @@ export function stateLabel(state: ReviewState | ""): string {
   }
 }
 
-/** What a filter holding nothing says. */
+/** What a list holding nothing says beneath its title: what would be there, not that nothing is. */
 export function emptyFilterSentence(filter: ReviewFilter): string {
   switch (filter) {
     case "waiting":
-      return "Nothing is waiting. New reviews appear here until somebody publishes or declines them.";
+      return "New reviews appear here until somebody publishes or declines them.";
     case "published":
-      return "No review is published.";
+      return "A review appears here once somebody publishes it, and stays until it is removed.";
     case "declined":
       return "No review was declined.";
     case "removed":
@@ -379,6 +373,17 @@ export function reviewName(review: Pick<ReviewRow, "title" | "body" | "state">):
   const body = review.body.trim().replace(/\s+/g, " ");
   if (body === "") return review.state === "erased" ? "Erased on request" : "Untitled review";
   return body.length > 60 ? `${body.slice(0, 59).trimEnd()}…` : body;
+}
+
+/** "4 of 5", or "No rating" when the writer gave none. */
+export function ratingWords(rating: number): string {
+  return rating > 0 ? `${rating} of 5` : "No rating";
+}
+
+/** Who wrote it, in plain words: "Dana, verified buyer", "No name given". */
+export function writerWords(review: Pick<ReviewRow, "authorName" | "verifiedBuyer" | "state">): string {
+  const name = review.authorName.trim() || (review.state === "erased" ? "Erased" : "No name given");
+  return review.verifiedBuyer ? `${name}, verified buyer` : name;
 }
 
 /** "3 days", "5 hours", "a few minutes": how long something has waited. */

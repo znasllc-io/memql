@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { Button, Caption, Field, Head, Input, Notice, Panel, RecordListSkeleton, Switch } from "../../../kit";
+import { Button, Caption, ContentSkeleton, Details, DetailsSection, Input, Notice, SettingRow, Switch } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
-import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import type { Reading } from "../../../cluster/reading";
 import { deployedByLabel, type NameOf } from "../people";
 import type { ReviewSettings, ReviewSettingsValues } from "./model";
+import { ReviewsPane } from "./ReviewsPane";
 import type { ReviewWrites } from "./useReviews";
 
-// A STORE'S REVIEW SETTINGS, edited in place with the store's part
-// (packs/reviewspack/settings.go). What is in force is the engine's answer,
-// defaults applied; a change is sent as only what changed, and the engine
-// merges it into the store's one settings row.
+// A STORE'S REVIEW SETTINGS, the last of its Reviews tabs, laid out as Fleet
+// lays out a machine's Settings (DESIGN.md, "Details and settings content"):
+// a heading beside each group, a muted name beside each control. Edited in
+// place with the store's part (packs/reviewspack/settings.go). What is in force
+// is the engine's answer, defaults applied; a change is sent as only what
+// changed, and the engine merges it into the store's one settings row.
 //
 // WHO MAY CHANGE WHAT IS THE ENGINE'S TOO (reviewsSettings' `may`): a store
 // with no settings is set up by the cluster's operators, and only the store's
@@ -71,13 +73,13 @@ export function settingsChanges(from: ReviewSettingsValues, draft: Draft, may: {
   return { changes, problem: "" };
 }
 
-export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, trail, back }: {
+export function ReviewSettingsView({ heading, settings, writes, nameOf, viewerUserId }: {
+  /** The Reviews heading and its tabs. */
+  heading: ReactNode;
   settings: Reading<ReviewSettings>;
   writes: ReviewWrites;
   nameOf: NameOf;
   viewerUserId: string;
-  trail: readonly Breadcrumb[];
-  back: { label: string; onSelect: () => void };
 }) {
   const value = settings.value;
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -86,20 +88,16 @@ export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, tra
     if (value !== null) setDraft(draftOf(value.values));
   }, [value]);
 
-  const head = <Head navigationKey="review-settings" title="Settings" breadcrumbs={[...trail, { label: "Settings" }]} back={back} />;
+  const context = { page: "Review settings" };
   if (value === null || draft === null) {
     return (
-      <section className="os-action-pane">
-        <div className="os-action-body os-app-stack">
-          {head}
-          {settings.state === "failed" ? (
-            <Notice tone="error" sentence={settings.error || "The settings could not be read."}><Button onClick={settings.reread}>Try again</Button></Notice>
-          ) : (
-            <RecordListSkeleton label="Reading the settings" rows={3} />
-          )}
-        </div>
-        <ActionBar state="" tone="busy" />
-      </section>
+      <ReviewsPane heading={heading} bar={<ActionBar state="" tone={settings.state === "failed" ? "none" : "busy"} />} context={context}>
+        {settings.state === "failed" ? (
+          <Notice tone="error" sentence={settings.error || "The settings could not be read."}><Button onClick={settings.reread}>Try again</Button></Notice>
+        ) : (
+          <ContentSkeleton label="Reading the settings" kind="form" />
+        )}
+      </ReviewsPane>
     );
   }
 
@@ -107,6 +105,7 @@ export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, tra
   const { changes, problem } = settingsChanges(value.values, draft, value.may);
   const dirty = Object.keys(changes).length > 0 || problem !== "";
   const saving = writes.busy === "settings";
+  const exporting = writes.busy === "export";
   const set = <K extends keyof Draft>(key: K) => (next: Draft[K]) => setDraft((d) => (d === null ? d : { ...d, [key]: next }));
   const approverName = draft.removalApproverUserId.trim() === "" ? "" : deployedByLabel(draft.removalApproverUserId.trim(), viewerUserId, nameOf);
 
@@ -115,56 +114,86 @@ export function ReviewSettingsPage({ settings, writes, nameOf, viewerUserId, tra
     await writes.saveSettings(changes);
   }
 
+  async function exportReviews() {
+    const file = await writes.exportStore();
+    if (file !== null) download(file.fileName, file.json);
+  }
+
   const acts: Act[] = canEdit && dirty
     ? [
         { label: "Discard", text: true, onAct: () => setDraft(draftOf(value.values)) },
         ...(problem === "" ? [{ label: "Save", tone: "primary" as const, busy: saving, onAct: () => void save() }] : []),
       ]
     : [];
+  const bar = <ActionBar state={saving ? "Saving" : dirty ? "Unsaved changes" : value.exists ? "Saved" : "Not set up"} tone={saving ? "busy" : dirty ? "paused" : "none"} acts={acts} />;
 
   return (
-    <section className="os-action-pane os-review-settings" data-os-page-context={JSON.stringify({ page: "Review settings" })}>
-      <div className="os-action-body os-app-stack">
-        {head}
-        {!value.exists ? (
-          <Notice sentence="This store's reviews are not set up yet." next={canEdit ? "Saving these settings sets them up." : "The cluster's operators set them up; after that, the store's people can change them here."} />
-        ) : null}
-        {writes.refusal ? <Notice tone="error" sentence={writes.refusal} /> : null}
-        {problem !== "" ? <Notice tone="warn" sentence={problem} /> : null}
-        <Panel label="On the site">
-          <Switch checked={draft.publicDisplay} disabled={!canEdit} onChange={set("publicDisplay")}>Show published reviews on the site</Switch>
-          <Caption>Only reviews somebody published are ever shown. Off, the site shows none.</Caption>
-        </Panel>
-        <Panel label="Asking buyers">
-          <Switch checked={draft.requestsEnabled} disabled={!canEdit} onChange={set("requestsEnabled")}>Ask every buyer for a review</Switch>
-          <Field label="Days after an order before asking">
-            <Input id="review-request-delay" label="Days after an order before asking" value={draft.requestDelayDays} disabled={!canEdit} onChange={set("requestDelayDays")} />
-          </Field>
-          <Field label="Days a review link stays open">
-            <Input id="review-link-lifetime" label="Days a review link stays open" value={draft.linkLifetimeDays} disabled={!canEdit} onChange={set("linkLifetimeDays")} />
-          </Field>
-          <Field label="Request email template">
-            <Input id="review-request-template" label="Request email template" code value={draft.requestTemplateId} disabled={!canEdit} onChange={set("requestTemplateId")} placeholder="A Campaigns template id" />
-          </Field>
-          <Field label="Request sender">
-            <Input id="review-request-sender" label="Request sender" code value={draft.requestSenderIdentityId} disabled={!canEdit || !value.may.nameSender} onChange={set("requestSenderIdentityId")} placeholder="A Campaigns sender identity id" />
-          </Field>
-          <Caption>Each paid product of a paid order gets its own link, sent once. A link stays open until its review is published or it expires, and the buyer can change their review through it until then.{value.may.nameSender ? "" : " Only the cluster's operators choose the mailbox requests leave from."}</Caption>
-        </Panel>
-        <Panel label="Moderation">
-          <Field label="Email when a review is waiting">
-            <Input id="review-notify-email" label="Email when a review is waiting" value={draft.notifyEmail} disabled={!canEdit} onChange={set("notifyEmail")} placeholder="moderators@example.com" />
-          </Field>
-          <Field label="Owner who approves removals">
-            <Input id="review-removal-approver" label="Owner who approves removals" code value={draft.removalApproverUserId} disabled={!canEdit || !value.may.nameApprover} onChange={set("removalApproverUserId")} placeholder="A person's user id" />
-          </Field>
-          <Caption>
-            {approverName !== "" ? `${approverName === "you" ? "You are" : `${approverName} is`} the one person who can remove a published review or erase a writer's data. ` : "Nobody can remove a published review until an owner is named. "}
-            {value.may.nameApprover ? "" : "Only that owner, or the cluster's operators, can name someone else."}
-          </Caption>
-        </Panel>
+    <ReviewsPane heading={heading} bar={bar} context={context}>
+      {!value.exists ? (
+        <Notice sentence="This store's reviews are not set up yet." next={canEdit ? "Saving these settings sets them up." : "The cluster's operators set them up; after that, the store's people can change them here."} />
+      ) : null}
+      {writes.refusal ? <Notice tone="error" sentence={writes.refusal} /> : null}
+      {problem !== "" ? <Notice tone="warn" sentence={problem} /> : null}
+      <div className="os-review-settings">
+        <Details>
+          <DetailsSection title="On the site">
+            <SettingRow label="Published reviews">
+              <Switch checked={draft.publicDisplay} disabled={!canEdit} onChange={set("publicDisplay")}>Show published reviews on the site</Switch>
+              <Caption>Only reviews somebody published are ever shown. Off, the site shows none.</Caption>
+            </SettingRow>
+          </DetailsSection>
+          <DetailsSection title="Asking buyers">
+            <SettingRow label="Review requests">
+              <Switch checked={draft.requestsEnabled} disabled={!canEdit} onChange={set("requestsEnabled")}>Ask every buyer for a review</Switch>
+              <Caption>Each paid product of a paid order gets its own link, sent once.</Caption>
+            </SettingRow>
+            <SettingRow label="Days before asking">
+              <Input id="review-request-delay" label="Days after an order before asking" value={draft.requestDelayDays} disabled={!canEdit} onChange={set("requestDelayDays")} />
+            </SettingRow>
+            <SettingRow label="Days a link stays open">
+              <Input id="review-link-lifetime" label="Days a review link stays open" value={draft.linkLifetimeDays} disabled={!canEdit} onChange={set("linkLifetimeDays")} />
+              <Caption>The buyer can change their review through the link until it is published or the link expires.</Caption>
+            </SettingRow>
+            <SettingRow label="Email template">
+              <Input id="review-request-template" label="Request email template" code value={draft.requestTemplateId} disabled={!canEdit} onChange={set("requestTemplateId")} placeholder="A Campaigns template id" />
+            </SettingRow>
+            <SettingRow label="Sent from">
+              <Input id="review-request-sender" label="Request sender" code value={draft.requestSenderIdentityId} disabled={!canEdit || !value.may.nameSender} onChange={set("requestSenderIdentityId")} placeholder="A Campaigns sender identity id" />
+              {value.may.nameSender ? null : <Caption>Only the cluster&rsquo;s operators choose the mailbox requests leave from.</Caption>}
+            </SettingRow>
+          </DetailsSection>
+          <DetailsSection title="Moderation">
+            <SettingRow label="Email when one waits">
+              <Input id="review-notify-email" label="Email when a review is waiting" value={draft.notifyEmail} disabled={!canEdit} onChange={set("notifyEmail")} placeholder="moderators@example.com" />
+            </SettingRow>
+            <SettingRow label="Removal approver">
+              <Input id="review-removal-approver" label="Owner who approves removals" code value={draft.removalApproverUserId} disabled={!canEdit || !value.may.nameApprover} onChange={set("removalApproverUserId")} placeholder="A person's user id" />
+              <Caption>
+                {approverName !== "" ? `${approverName === "you" ? "You are" : `${approverName} is`} the one person who can remove a published review or erase a writer's data.` : "Nobody can remove a published review until an owner is named."}
+                {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
+              </Caption>
+            </SettingRow>
+          </DetailsSection>
+          <DetailsSection title="Data">
+            <SettingRow label="Export">
+              <div><Button tone="quiet" busy={exporting} onClick={() => void exportReviews()}>Export reviews</Button></div>
+              <Caption>Every review of this store and every decision on it, as one file.</Caption>
+            </SettingRow>
+          </DetailsSection>
+        </Details>
       </div>
-      <ActionBar state={saving ? "Saving" : dirty ? "Unsaved changes" : value.exists ? "Saved" : "Not set up"} tone={saving ? "busy" : dirty ? "paused" : "none"} acts={acts} />
-    </section>
+    </ReviewsPane>
   );
+}
+
+/** Hands the browser a file, the way a download link would. */
+function download(fileName: string, json: string) {
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

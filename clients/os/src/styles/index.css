@@ -1800,6 +1800,16 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 :is(.os-record-row, .os-record-entry) + :is(.os-record-row, .os-record-entry),
 .os-record-list > li + li,
 .os-livelist-row:has(.os-record-row) + .os-livelist-row:has(.os-record-row) { border-top: 1px solid var(--os-line); }
+/* A SURFACE WITHOUT DIVIDERS (the owner, 2026-11-04: horizontal dividers
+ * "look pretty terrible" and crowd the page). A surface that has moved to that
+ * rule sets `data-os-dividers="none"` on its root, and its records stand apart
+ * by their own spacing instead: a little air between rows, and the hover wash
+ * that shows a whole row is one target. Surfaces move to it as they are
+ * worked on (DESIGN.md rule 1). */
+[data-os-dividers="none"] :is(.os-record-row, .os-record-entry) + :is(.os-record-row, .os-record-entry),
+[data-os-dividers="none"] .os-record-list > li + li,
+[data-os-dividers="none"] .os-livelist-row:has(.os-record-row) + .os-livelist-row:has(.os-record-row) { border-top: 0; }
+[data-os-dividers="none"] .os-record-list { display: grid; gap: 4px; }
 .os-record-actions:empty { display: none; }
 .os-record-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 4px 10px 12px; }
 .os-record-entry[data-actions="compact"] { grid-template-columns: minmax(0, 1fr) auto; }
