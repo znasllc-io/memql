@@ -261,7 +261,7 @@ export interface Reason {
  */
 export const REASONS: readonly Reason[] = [
   { value: "spam_or_advertising", label: "Spam or advertising", means: "Promotes another business or product, contains links, or repeats promotional text." },
-  { value: "profanity", label: "Profanity", means: "Uses a word on the store's approved profanity list. Mild frustration is not profanity." },
+  { value: "profanity", label: "Profanity", means: "A term on the store's profanity list, used offensively: whole words and phrases only, never letters inside a harmless word. A deliberate misspelling is judged in context. Mild frustration is not profanity." },
   { value: "harassing_or_obscene", label: "Harassing, threatening or obscene", means: "Threats, personal attacks on identifiable people, or sexual content." },
   { value: "discriminatory", label: "Discriminatory", means: "Attacks people for their race, gender, sexuality, ethnicity, religion, disability or another intrinsic characteristic." },
   { value: "personal_information", label: "Personal information", means: "Contact details, other people's full names, or anything that identifies a child. An order number on its own is not." },

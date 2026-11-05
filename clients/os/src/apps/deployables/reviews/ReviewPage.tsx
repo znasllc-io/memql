@@ -62,7 +62,7 @@ function question(act: ReviewAct): string {
 function stepNote(act: ReviewAct): string {
   switch (act) {
     case "decline":
-      return "A low rating, a harsh tone or a bad experience is never a reason. The writer can change their review through their link while it is open, and it then waits again.";
+      return "The same standards apply to every star rating: a low rating, a harsh tone or a bad experience is never a reason, and criticism of taste, results, packaging, shipping, price or service is publishable. When in doubt, publish. The writer can change their review through their link while it is open, and it then waits again.";
     case "askToFix":
       return "The review stays waiting, and nothing is sent: contact the writer yourself and say what to change. Their link lets them change it while it is open.";
     case "remove":
