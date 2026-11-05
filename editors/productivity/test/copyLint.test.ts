@@ -116,7 +116,7 @@ const STATES: ReadonlySet<string> = new Set([
   "chooseLayout",
   "nameIt",
   "ready",
-  "writing",
+  "starting",
   "failed",
   "layoutsFailed",
   "noOrganization",

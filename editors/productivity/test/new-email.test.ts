@@ -7,9 +7,13 @@ import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/conn
 import type { DocumentDictation } from "../src/dictation.js";
 const link = "memql-file://client.example/new-email/client-org/New%20email";
 const lease: ConnectionLease = { domain: "client.example", name: "Client", generation: 1 };
-const draftKey = "memql.newEmail.draft:" + link, pendingKey = "memql.newEmail.pending:" + link;
-const article = { id: "builtin:article", name: "Article", kind: "builtin", document: { subject: "Hello", blocks: [] } };
-const write = { type: "write", layoutId: article.id, name: "Autumn welcome.email.json", description: "A short welcome." };
+const draftKey = "memql.newEmail.draft:" + link;
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
+const row = (id: string, name: string, category: string, kind = "builtin") => ({ id, kind, name, category, description: `${name} layout`, wireframe: SVG, document: { subject: "Hello", blocks: [] } });
+const article = row("builtin:article", "Article", "Articles");
+const welcome = row("builtin:welcome", "Welcome note", "Welcome");
+const write = { type: "write", layoutId: article.id, name: "Autumn welcome", description: "A short welcome." };
+const refusal = "MemQL engine failed to execute query. Details: Add a brand kit before writing an email.";
 type Answer = (call: string) => Promise<Record<string, unknown>[]> | Record<string, unknown>[];
 async function fixture(options: { state?: Map<string, any>; connected?: boolean; page?: NewEmail; answers?: Record<string, Answer> } = {}) {
   const state = options.state ?? new Map<string, any>();
@@ -18,9 +22,9 @@ async function fixture(options: { state?: Map<string, any>; connected?: boolean;
   const memento = { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { if (value === undefined) state.delete(key); else state.set(key, structuredClone(value)); } };
   const answers: Record<string, Answer> = {
     clientAccountsAll: () => [{ id: "client-org", name: "Client", status: "active" }, { id: "other-org", name: "Other", status: "active" }],
-    emailLayouts: () => [article], emailRender: () => [{ html: "<p>Hello</p>" }],
-    composeMaterialize: () => [{ compositionId: "c1" }], compositionById: () => [{ status: "ready", outputFileId: "f1", name: "Autumn welcome" }],
-    libraryArtifactForFile: () => [{ id: "a1", title: "Autumn welcome.email.json" }], composeCancel: () => [{ cancelled: true }], ...options.answers,
+    emailLayouts: () => [article, welcome, row("org:mine", "Mine", "Saved", "organization")], emailRender: () => { throw new Error("emailRender must not be called"); },
+    campaignCreateTemplateFromLayout: () => [{ templateId: "t-1", revision: 1, status: "draft", saved: true, issues: [] }],
+    campaignComposeEmail: () => [{ templateId: "t-2", goalId: "g-1", revision: 1, state: "writing" }], ...options.answers,
   };
   let receive!: (message: any) => Promise<void>, closed!: () => void;
   const panel = { viewColumn: 1, dispose: () => { if (!disposed) { disposed = true; closed(); } }, onDidDispose: (fn: () => void) => { closed = fn; return { dispose() {} }; },
@@ -36,56 +40,66 @@ async function fixture(options: { state?: Map<string, any>; connected?: boolean;
   return { receive, messages, calls, state, opened, uploads, page, dispose: () => panel.dispose(), answers, get disposed() { return disposed; }, get connects() { return connects; } };
 }
 
-test("Write it creates once with the chosen layout, organization and references", async () => {
-  const state = new Map([[draftKey, { organizationId: "client-org", references: [{ fileId: "logo", label: "logo.png", kind: "picture", include: true }, { fileId: "brief", label: "brief.md", kind: "file", include: false }] }]]);
+test("start creates the template from the layout and opens it", async () => {
+  const f = await fixture(); await Promise.all([f.receive({ ...write, type: "start" }), f.receive({ ...write, type: "start" })]);
+  const calls = f.calls.filter(c => c.name === "campaignCreateTemplateFromLayout"); assert.equal(calls.length, 1);
+  assert.equal(calls[0].call, 'builtin campaignCreateTemplateFromLayout(accountId: "client-org", name: "Autumn welcome", layoutId: "builtin:article")');
+  assert.equal(f.calls.some(c => c.name === "campaignComposeEmail"), false);
+  assert.deepEqual(f.opened.map(([command, uri, view]) => [command, uri.toString(), view]), [["vscode.openWith", "memql-file://client.example/templates/t-1/Autumn%20welcome.email.json", "memql.productivity.email"]]);
+  assert.equal(f.disposed, true); assert.equal(f.state.has(draftKey), false);
+});
+test("write starts a composition with files and the reference picture", async () => {
+  const state = new Map([[draftKey, { organizationId: "client-org", references: [{ fileId: "logo", label: "logo.png", kind: "picture" }, { fileId: "brief", label: "brief.md", kind: "file" }], reference: { fileId: "mock", label: "mock.png", kind: "picture" } }]]);
   const f = await fixture({ state }); await Promise.all([f.receive(write), f.receive(write)]);
-  const starts = f.calls.filter(c => c.name === "composeMaterialize"); assert.equal(starts.length, 1);
-  for (const pattern of [/layoutId: "builtin:article"/, /accountIds: \["client-org"\]/, /name: "Autumn welcome"/, /statement: "A short welcome."/, /outputKind: "email_template"/, /format: "json"/, /requestId: "/, /includeImages: true[^}]*ref: "logo"/]) assert.match(starts[0].call, pattern);
-  assert.doesNotMatch(starts[0].call.match(/\{[^{}]*ref: "brief"[^{}]*\}/)![0], /includeImages/);
-  assert.deepEqual(f.opened.map(([command, uri, view]) => [command, uri.toString(), view]), [["vscode.openWith", "memql-file://client.example/artifacts/a1/Autumn%20welcome.email.json", "memql.productivity.email"]]);
-  assert.equal(f.disposed, true); assert.equal(f.state.has(pendingKey), false); assert.equal(f.state.has(draftKey), false);
+  const calls = f.calls.filter(c => c.name === "campaignComposeEmail"); assert.equal(calls.length, 1);
+  assert.equal(calls[0].call, 'builtin campaignComposeEmail(accountId: "client-org", name: "Autumn welcome", layoutId: "builtin:article", description: "A short welcome.", fileIds: ["logo", "brief"], referenceFileId: "mock")');
+  assert.deepEqual(f.opened.map(([command, uri, view]) => [command, uri.toString(), view]), [["vscode.openWith", "memql-file://client.example/templates/t-2/Autumn%20welcome.email.json", "memql.productivity.email"]]);
+  assert.equal(f.disposed, true); assert.equal(f.state.has(draftKey), false);
 });
-test("Start from the layout sends neither description nor references", async () => {
-  const f = await fixture(); await f.receive({ ...write, type: "start" }); assert.doesNotMatch(f.calls.find(c => c.name === "composeMaterialize")!.call, /statement:|sources:/);
+test("write without a picture sends no referenceFileId", async () => {
+  const f = await fixture(); await f.receive(write);
+  assert.doesNotMatch(f.calls.find(c => c.name === "campaignComposeEmail")!.call, /referenceFileId/);
 });
-test("a confirmed failed composition keeps the draft and retry gets a fresh request", async () => {
-  const f = await fixture({ answers: { compositionById: () => [{ status: "failed", errorMessage: "Could not write." }] } });
-  await f.receive(write); await f.receive(write); const starts = f.calls.filter(c => c.name === "composeMaterialize");
-  assert.notEqual(starts[0].call.match(/requestId: "([^"]+)"/)![1], starts[1].call.match(/requestId: "([^"]+)"/)![1]);
-  assert.equal(f.state.get(draftKey).description, write.description); assert.equal(f.state.has(pendingKey), false); assert.equal(f.messages.at(-1).type, "failed"); f.dispose();
+test("a composition that could not start still opens the template", async () => {
+  const f = await fixture({ answers: { campaignComposeEmail: () => [{ templateId: "t-3", revision: 1, state: "failed", error: "No model" }] } });
+  await f.receive(write); assert.equal(f.opened.length, 1); assert.match(f.opened[0][1].toString(), /templates\/t-3\//); assert.equal(f.disposed, true);
 });
-test("a lost creation response survives reload and resends the identical request", async () => {
-  const f = await fixture({ answers: { composeMaterialize: () => { throw new Error("Connection lost"); } } }); await f.receive(write);
-  const original = f.calls.find(c => c.name === "composeMaterialize")!.call; assert.ok(f.state.get(pendingKey)); f.dispose();
-  const reopened = await fixture({ state: f.state }); assert.equal(reopened.calls.find(c => c.name === "composeMaterialize")!.call, original); assert.equal(reopened.opened.length, 1); assert.equal(reopened.disposed, true);
+test("a refused write shows the server's sentence and keeps the page and the draft", async () => {
+  const f = await fixture({ answers: { campaignComposeEmail: () => { throw new Error(refusal); } } });
+  await f.receive(write); const last = f.messages.at(-1);
+  assert.equal(last.type, "failed"); assert.equal(last.problem.message, "Add a brand kit before writing an email.");
+  assert.equal(f.opened.length, 0); assert.equal(f.disposed, false); assert.equal(f.state.get(draftKey).description, write.description);
+  await f.receive(write); assert.equal(f.calls.filter(c => c.name === "campaignComposeEmail").length, 2, "the person can try again"); f.dispose();
 });
-test("closing stops following without cancelling; reopening follows and opens once", async () => {
-  let resolve!: (rows: Record<string, unknown>[]) => void; const reading = new Promise<Record<string, unknown>[]>(done => { resolve = done; });
-  const f = await fixture({ answers: { compositionById: () => reading } }); const run = f.receive(write);
-  while (!f.calls.some(c => c.name === "compositionById")) await new Promise(done => setTimeout(done, 5));
-  f.dispose(); resolve([{ status: "ready", outputFileId: "f1" }]); await run;
-  assert.equal(f.calls.some(c => c.name === "composeCancel"), false); assert.equal(f.opened.length, 0);
-  const reopened = await fixture({ state: f.state }); assert.equal(reopened.calls.some(c => c.name === "composeMaterialize"), false); assert.equal(reopened.opened.length, 1);
+test("setup renders no email and lists the built-in layouts with their wireframes", async () => {
+  const f = await fixture(); assert.equal(f.calls.some(c => c.name === "emailRender" || c.name === "emailLayoutById"), false);
+  const setup = f.messages.find(m => m.type === "setup" && m.connected);
+  assert.deepEqual(setup.layouts, [article, welcome].map(({ id, name, category, description, wireframe }) => ({ id, name, category, description, wireframe })));
+  assert.equal(f.messages.some(m => m.type === "thumbnail"), false); f.dispose();
 });
-test("Cancel cancels the composition and keeps the draft", async () => {
-  const f = await fixture({ answers: { compositionById: () => [{ status: "composing" }] } }); const run = f.receive(write);
-  while (!f.calls.some(c => c.name === "composeMaterialize")) await new Promise(done => setTimeout(done, 1));
-  await f.receive({ type: "cancel" }); await run; assert.equal(f.calls.filter(c => c.name === "composeCancel").length, 1);
-  assert.equal(f.messages.at(-1).type, "idle"); assert.equal(f.state.get(draftKey).name, write.name); f.dispose();
+test("a layout the list does not hold is refused and nothing is created", async () => {
+  const f = await fixture(); await f.receive({ ...write, layoutId: "org:mine" });
+  assert.equal(f.calls.some(c => c.name === "campaignComposeEmail"), false); assert.equal(f.messages.at(-1).type, "failed");
+});
+test("write needs a description; start does not", async () => {
+  const f = await fixture(); await f.receive({ ...write, description: "  " });
+  assert.equal(f.calls.some(c => c.name === "campaignComposeEmail"), false); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.descriptionRequired);
+  await f.receive({ ...write, type: "start", description: "" }); assert.equal(f.opened.length, 1);
+});
+test("the finished-email picture takes one PNG, JPEG or GIF, separate from the files", async () => {
+  const f = await fixture(); let name = "mock.png";
+  Object.assign(vscode.window, { showQuickPick: async () => EMAIL_COPY.host.fromComputer, showOpenDialog: async () => [vscode.Uri.file(`/tmp/${name}`)] });
+  Object.assign(vscode.workspace.fs, { stat: async () => ({ size: 1 }), readFile: async () => new Uint8Array([1]) });
+  name = "mock.md"; await f.receive({ type: "attachReference" }); assert.equal(f.uploads.length, 0); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.pictureType);
+  name = "mock.png"; await f.receive({ type: "attachReference" }); assert.equal(f.uploads.length, 1);
+  assert.deepEqual(f.messages.at(-1), { type: "reference", item: { label: "mock.png" } }); assert.equal(f.state.get(draftKey).reference.fileId, "upload-1");
+  assert.equal(f.state.get(draftKey).references.length, 0);
+  await f.receive({ type: "clearReference" }); assert.deepEqual(f.messages.at(-1), { type: "reference", item: null }); assert.equal(f.state.get(draftKey).reference, undefined); f.dispose();
 });
 test("the page connects only when asked and the command opens the remembered organization", async () => {
   const f = await fixture({ connected: false }); assert.equal(f.connects, 0); assert.equal(f.calls.length, 0); assert.equal(f.messages.at(-1).connected, false);
   await assert.rejects(f.page.open(), { message: EMAIL_COPY.host.connectFirst }); await f.receive({ type: "connect" }); assert.equal(f.connects, 1);
   f.state.set("memql.newEmail.organization:client.example", "other-org"); await f.page.open(); assert.equal(f.opened.at(-1)![1].toString(), "memql-file://client.example/new-email/other-org/New%20email"); f.dispose();
-});
-test("organization changes render in the new context; omitted documents read by bare row id", async () => {
-  const f = await fixture({ answers: { emailLayouts: () => [{ ...article, id: "org:opaque", layoutId: "bare-row", kind: "organization", document: undefined, documentOmitted: true }], emailLayoutById: () => [{ document: article.document }] } });
-  assert.match(f.calls.find(c => c.name === "emailLayoutById")!.call, /layoutId: "bare-row"/);
-  await f.receive({ type: "organization", id: "other-org" }); assert.equal(f.calls.filter(c => c.name === "emailRender").length, 2); assert.match(f.calls.filter(c => c.name === "emailRender").at(-1)!.call, /accountId: "other-org"/);
-  await f.receive({ ...write, layoutId: "org:opaque" }); assert.match(f.calls.find(c => c.name === "composeMaterialize")!.call, /layoutId: "org:opaque"/);
-});
-test("a refused thumbnail gets an empty image and remains selectable", async () => {
-  const f = await fixture({ answers: { emailRender: () => { throw new Error("Unavailable image"); } } }); assert.deepEqual(f.messages.find(m => m.type === "thumbnail"), { type: "thumbnail", id: article.id, html: "" }); await f.receive({ ...write, type: "start" }); assert.equal(f.opened.length, 1);
 });
 test("reference uploads validate the entire selection before uploading anything", async () => {
   const f = await fixture(); let names = Array.from({ length: 65 }, (_, i) => `file-${i}.md`), size = 1;
@@ -95,22 +109,6 @@ test("reference uploads validate the entire selection before uploading anything"
   names = ["good.md", "bad.exe"]; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 0); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.unsupported);
   names = ["brief.md"]; size = 17 * 1024 * 1024; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 0); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.tooLarge);
   size = 1; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 1); assert.equal(f.state.get(draftKey).references[0].fileId, "upload-1"); f.dispose();
-});
-
-
-test("replacing a page during creation shares its in-flight start", async () => {
-  let resolve!: (rows: Record<string, unknown>[]) => void;
-  const start = new Promise<Record<string, unknown>[]>(done => { resolve = done; });
-  const f = await fixture({ answers: { composeMaterialize: () => start } });
-  const run = f.receive(write);
-  while (!f.calls.some(call => call.name === "composeMaterialize")) await new Promise(done => setTimeout(done, 1));
-  const replacing = fixture({ state: f.state, page: f.page });
-  await new Promise(done => setTimeout(done, 5));
-  assert.equal(f.calls.filter(call => call.name === "composeMaterialize").length, 1);
-  resolve([{ compositionId: "c1" }]); await run;
-  const replacement = await replacing;
-  assert.equal(replacement.opened.length, 1); assert.equal(replacement.disposed, true);
-  assert.equal(f.calls.filter(call => call.name === "composeMaterialize").length, 1);
 });
 
 
