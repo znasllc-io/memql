@@ -1024,7 +1024,7 @@ func TestComposeMaterialLeavesOutWhatItCannotUse(t *testing.T) {
 		"Left out bundle__brochure.pdf: not a picture or text file.",
 		"Left out file-gone: it is not in your Library.",
 		"Left out old.png: it is archived.",
-		"Left out huge.png: it is larger than 64 MiB.",
+		"Left out huge.png: it is larger than 16 MiB.",
 		"Left out pending.png: its contents are not stored yet.",
 	}
 	if notes := m.notes(); !slices.Equal(notes, wantNotes) {
@@ -1042,6 +1042,97 @@ func TestComposeMaterialLeavesOutWhatItCannotUse(t *testing.T) {
 	}
 	if limited, unbounded := cw.blobs.reads(); limited != 7 || unbounded != 0 {
 		t.Errorf("storage reads: %d limited, %d without a limit; want 7 and 0", limited, unbounded)
+	}
+}
+
+// The attached files are at most 16 MiB together, as the New email page
+// attaches them, decided from what their Library rows say before storage is
+// asked for any: a file that would take them past it is left out, and the
+// files after it are still taken while they fit. The picture of the finished
+// email is not one of them. What storage gives back is held to the same
+// budget, so a row that says less than its file holds takes nothing past it.
+// A ZIP may still unpack to 64 MiB.
+func TestComposeMaterialTakesAtMost16MiBOfAttachedFiles(t *testing.T) {
+	cw := newComposeWorld(t)
+	rowSays := func(id string, size int) { cw.engine.libraryFiles[id]["size"] = size }
+	one := cw.addFile("one.txt", "text/plain", []byte("One."))
+	two := cw.addFile("two.txt", "text/plain", []byte("Two."))
+	three := cw.addFile("three.txt", "text/plain", []byte("Three."))
+	four := cw.addFile("four.txt", "text/plain", []byte("Four."))
+	rowSays(one, 7<<20)
+	rowSays(two, 7<<20)
+	rowSays(three, 3<<20) // past 16 MiB with the two before it
+	reference := cw.addFile("finished.png", "image/png", previewPNG(t, 8, 8))
+	rowSays(reference, 15<<20)
+
+	m, err := cw.w.compositionMaterial(importCtx(), compositionRequest{LayoutID: "builtin:article", FileIDs: []string{one, two, three, four}, ReferenceFileID: reference})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, f := range m.Files {
+		kept = append(kept, f.Workspace)
+	}
+	if want := []string{"one.txt", "two.txt", "four.txt", "finished.png"}; !slices.Equal(kept, want) {
+		t.Errorf("kept %v, want %v", kept, want)
+	}
+	if notes, want := m.notes(), []string{"Left out three.txt: the attached files together are larger than 16 MiB."}; !slices.Equal(notes, want) {
+		t.Errorf("notes = %q, want %q", notes, want)
+	}
+	// Storage was asked for the files that fit by their rows, and never for
+	// more than 16 MiB at a time.
+	cw.blobs.mu.Lock()
+	limits := slices.Clone(cw.blobs.limits)
+	cw.blobs.mu.Unlock()
+	if len(limits) != 4 {
+		t.Errorf("storage reads %d, want one, two, four and the reference", len(limits))
+	}
+	for _, limit := range limits {
+		if limit > 16<<20 {
+			t.Errorf("a read with a limit of %d bytes", limit)
+		}
+	}
+
+	// Rows that say less than their files hold: what storage gives back counts.
+	cw = newComposeWorld(t)
+	five := cw.addFile("five.txt", "text/plain", []byte(strings.Repeat("five ", 9<<18))) // 11.25 MiB
+	six := cw.addFile("six.txt", "text/plain", []byte(strings.Repeat("six! ", 1<<20)))   // 5 MiB
+	seven := cw.addFile("seven.txt", "text/plain", []byte("Seven."))
+	rowSays(five, 10)
+	rowSays(six, 10)
+	m, err = cw.w.compositionMaterial(importCtx(), compositionRequest{LayoutID: "builtin:article", FileIDs: []string{five, six, seven}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"Left out five.txt: more than 4 MiB of text.",
+		"Left out six.txt: the attached files together are larger than 16 MiB.",
+	}
+	if notes := m.notes(); !slices.Equal(notes, want) || len(m.Files) != 1 || m.Files[0].Workspace != "seven.txt" {
+		t.Errorf("notes = %q, files %d", notes, len(m.Files))
+	}
+}
+
+// A composition reads data URIs only for the pictures it puts in the email:
+// the material keeps every picture an email could carry by its handle, and
+// the email is made from the handles the composition names.
+func TestComposeImagesAreOnlyThePicturesTheCompositionUses(t *testing.T) {
+	hero, other := previewPNG(t, 6, 4), previewPNG(t, 5, 5)
+	m := material{Handles: map[string]materialPicture{
+		compose.EmailAssetHandle(hero):  {mime: "image/png", data: hero},
+		compose.EmailAssetHandle(other): {mime: "image/png", data: other},
+	}}
+	banner := compose.EmailAssetHandle(hero)
+	images := m.images(emaildoc.Composition{Content: []emaildoc.ContentItem{{ID: "banner", Image: &banner}, {ID: "intro"}}})
+	if len(images) != 1 || images[banner] != dataURI("image/png", hero) {
+		t.Errorf("images = %d entries, want the banner's alone", len(images))
+	}
+	if images := m.images(emaildoc.Composition{}); len(images) != 0 {
+		t.Errorf("a composition with no pictures got %d", len(images))
+	}
+	missing := "memql-asset:nothing"
+	if images := m.images(emaildoc.Composition{Content: []emaildoc.ContentItem{{ID: "banner", Image: &missing}}}); len(images) != 0 {
+		t.Errorf("a handle the material does not have got %d", len(images))
 	}
 }
 

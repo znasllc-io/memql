@@ -54,25 +54,42 @@ import (
 // # What it may cost
 //
 // Every tool call of a run reads the material again (nothing is kept between
-// calls), and one read can hold a few hundred MiB at its peak: the files kept,
-// the data URIs of their pictures, a download in flight and a ZIP being
-// unpacked. So the material is read in a render slot (acquireRenderSlot), the
+// calls). So the material is read in a render slot (acquireRenderSlot), the
 // same few a preview or a save renders in, held by the tools for their whole
 // call: a node holds no more material at once than it renders emails. Within a
-// read: a request names at most maxMaterialFiles files; each is read up to
-// maxMaterialFileBytes; a picture whose Library row is larger than an email can
-// carry is left out before it is read (the picture of the finished email is
-// read up to the per-file limit, being guidance); and all that is kept,
-// together, is at most maxMaterialBytes, past which a file is left out with a
-// reason.
+// read, the spec's limits:
+//
+//   - a request names at most maxMaterialFiles files;
+//   - the attached files are at most maxAttachedBytes together, as the New
+//     email page attaches them. It is decided from what their Library rows say,
+//     every row read before storage is asked for any file: a file that would
+//     take them past it is left out with a reason, and the files after it are
+//     still taken while they fit. What storage then gives back is held to the
+//     same budget, so a row that says less than its file holds takes nothing
+//     past it. The picture of the finished email is not one of them; it is read
+//     up to the same per-file limit, being guidance;
+//   - a picture whose Library row is larger than an email can carry is left out
+//     before it is read;
+//   - all that is kept, a ZIP's members unpacked, is at most maxMaterialBytes,
+//     past which a file is left out with a reason.
+//
+// A picture is kept as its bytes. Its data URI is made only when a composition
+// puts it in the email (material.images), never for every picture of every read.
 
 const (
 	// maxMaterialFiles is the most files a request names (the picture of the
 	// finished email aside): what can be attached.
 	maxMaterialFiles = 64
 
-	// maxMaterialFileBytes is the most of one attached file that is read.
-	maxMaterialFileBytes = 64 << 20
+	// maxAttachedBytes is the most the attached files hold together, as their
+	// Library rows say and as storage gives them back: what the New email page
+	// lets a person attach.
+	maxAttachedBytes = 16 << 20
+
+	// maxMaterialFileBytes is the most of one file that is read: one attached
+	// file is never more than all of them, and the picture of the finished
+	// email is read up to the same.
+	maxMaterialFileBytes = maxAttachedBytes
 
 	// maxMaterialBytes is the most the files kept from one request hold
 	// together: what one ZIP may unpack to.
@@ -97,8 +114,9 @@ const (
 	reasonNotInLibrary  = "it is not in your Library"
 	reasonArchived      = "it is archived"
 	reasonNoContents    = "its contents are not stored yet"
-	reasonFileTooLarge  = "it is larger than 64 MiB"
-	reasonMaterialFull  = "the attached files together are larger than 64 MiB"
+	reasonFileTooLarge  = "it is larger than 16 MiB"
+	reasonAttachedFull  = "the attached files together are larger than 16 MiB"
+	reasonMaterialFull  = "what the attached files unpack to is larger than 64 MiB"
 	reasonPictureTooBig = "a picture over 1 MiB, more than an email can carry"
 	reasonPixels        = "a picture over 24 million pixels"
 	reasonTextTooLarge  = "more than 4 MiB of text"
@@ -133,13 +151,40 @@ type materialFile struct {
 type material struct {
 	Files []materialFile
 	// Handles maps the handle of each picture an email can carry
-	// ("memql-asset:<sha256>", compose.EmailAssetHandle) to its data URI.
-	Handles map[string]string
+	// ("memql-asset:<sha256>", compose.EmailAssetHandle) to the picture.
+	Handles map[string]materialPicture
 	// Skipped is every file left out, under its workspace name, with why.
 	Skipped []compose.SkippedMember
 	// Reference is the workspace name of the picture of the finished email,
 	// or "".
 	Reference string
+}
+
+// materialPicture is a picture of the material an email can carry, as its
+// bytes: its data URI is made when a composition uses it (images).
+type materialPicture struct {
+	mime string
+	data []byte
+}
+
+// images maps each handle c puts in the email to its picture's data URI, for
+// emaildoc.Compose: only the pictures the email carries are encoded. A handle
+// the material does not have is left out, and Compose refuses it by name.
+func (m material) images(c emaildoc.Composition) map[string]string {
+	images := map[string]string{}
+	for _, item := range c.Content {
+		if item.Image == nil {
+			continue
+		}
+		handle := strings.TrimSpace(*item.Image)
+		if _, done := images[handle]; done {
+			continue
+		}
+		if p, ok := m.Handles[handle]; ok {
+			images[handle] = "data:" + p.mime + ";base64," + base64.StdEncoding.EncodeToString(p.data)
+		}
+	}
+	return images
 }
 
 // notes are the sentences a finished run records for what it left out.
@@ -176,9 +221,11 @@ func acquireComposeSlot(ctx context.Context) (func(), error) {
 // readMaterial reads the files of a request, then its picture of the finished
 // email, as the caller; the caller holds a render slot. A file named twice is
 // read once, and a request naming more than maxMaterialFiles is refused before
-// anything is read. When files were attached and none of them can be used there
-// is nothing to write from, and the answer is an error that names each one and
-// why.
+// anything is read. Every file's Library row is read, and what is left out for
+// what its row says decided (the attached files' budget among it), before
+// storage is asked for any. What was left out is noted in the files' order.
+// When files were attached and none of them can be used there is nothing to
+// write from, and the answer is an error that names each one and why.
 func (w *Worker) readMaterial(ctx context.Context, req compositionRequest) (material, error) {
 	var ids []string // the attached files in order, then the picture of the finished email
 	seen := map[string]bool{}
@@ -196,9 +243,30 @@ func (w *Worker) readMaterial(ctx context.Context, req compositionRequest) (mate
 		ids = append(ids, reference)
 	}
 
-	r := &materialReader{w: w, m: material{Handles: map[string]string{}}, taken: map[string]bool{}}
+	r := &materialReader{w: w, m: material{Handles: map[string]materialPicture{}}, taken: map[string]bool{}}
+	planned := make([]plannedFile, 0, len(ids))
+	attached := 0 // what the rows of the attached files to be read say they hold
 	for _, id := range ids {
-		if err := r.read(ctx, id, id == reference); err != nil {
+		p, err := r.plan(ctx, id, id == reference)
+		if err != nil {
+			return material{}, err
+		}
+		p.attached = seen[id]
+		if p.skip == "" && p.attached {
+			if size := integer(p.row, "size"); attached+size > maxAttachedBytes {
+				p.skip = reasonAttachedFull
+			} else {
+				attached += size
+			}
+		}
+		planned = append(planned, p)
+	}
+	for _, p := range planned {
+		if p.skip != "" {
+			r.skip(p.name, p.skip)
+			continue
+		}
+		if err := r.read(ctx, p); err != nil {
 			return material{}, err
 		}
 	}
@@ -210,76 +278,94 @@ func (w *Worker) readMaterial(ctx context.Context, req compositionRequest) (mate
 
 // materialReader builds one request's material.
 type materialReader struct {
-	w     *Worker
-	m     material
-	taken map[string]bool // workspace names, lower-cased
-	held  int             // bytes kept so far
+	w        *Worker
+	m        material
+	taken    map[string]bool // workspace names, lower-cased
+	held     int             // bytes kept so far
+	attached int             // bytes storage gave back for the attached files
 }
 
-// read reads one Library file under the caller and keeps what can be used of
-// it. Only a failure to read storage, or a cancelled ctx, is an error.
-func (r *materialReader) read(ctx context.Context, fileID string, reference bool) error {
+// plannedFile is one file of a request as its Library row says it is: what it
+// is, and why it is left out (skip) when its row is enough to tell, before
+// storage is asked for it.
+type plannedFile struct {
+	id, name  string
+	row       map[string]any
+	kind      int
+	reference bool // the picture of the finished email
+	attached  bool // one of the attached files, held to their budget
+	skip      string
+}
+
+// plan reads one Library file's row under the caller, and says what is to be
+// done with it. Only a failure to read the row, or a cancelled ctx, is an error.
+func (r *materialReader) plan(ctx context.Context, fileID string, reference bool) (plannedFile, error) {
 	rows, err := r.w.store.rows(ctx, call("query", "libraryFileById", arg{"fileId", fileID}))
 	if err != nil {
-		return err
+		return plannedFile{}, err
 	}
 	if len(rows) == 0 {
-		r.skip(fileID, reasonNotInLibrary)
-		return nil
+		return plannedFile{id: fileID, name: fileID, reference: reference, skip: reasonNotInLibrary}, nil
 	}
 	row := rows[0]
-	name := strings.TrimSpace(str(row, "name"))
-	if name == "" {
-		name = fileID
+	p := plannedFile{id: fileID, name: strings.TrimSpace(str(row, "name")), row: row, reference: reference}
+	if p.name == "" {
+		p.name = fileID
 	}
 	// What a file is decides by its name, as for a ZIP member, so a file that
 	// cannot be used costs no read of storage.
-	kind := materialKind(name, str(row, "mimeType"))
+	p.kind = materialKind(p.name, str(row, "mimeType"))
 	switch {
 	case boolean(row, "archived"):
-		r.skip(name, reasonArchived)
-		return nil
-	case reference && kind != kindPicture:
-		r.skip(name, reasonNotAPicture)
-		return nil
-	case kind == kindSVG:
-		r.skip(name, "svg is not a picture an email can carry")
-		return nil
-	case kind == kindOther:
-		r.skip(name, "not a picture or text file")
-		return nil
+		p.skip = reasonArchived
+	case reference && p.kind != kindPicture:
+		p.skip = reasonNotAPicture
+	case p.kind == kindSVG:
+		p.skip = "svg is not a picture an email can carry"
+	case p.kind == kindOther:
+		p.skip = "not a picture or text file"
 	case strings.TrimSpace(str(row, "blobUrl")) == "":
-		r.skip(name, reasonNoContents)
-		return nil
+		p.skip = reasonNoContents
 	case integer(row, "size") > maxMaterialFileBytes:
-		r.skip(name, reasonFileTooLarge)
-		return nil
-	case kind == kindPicture && !reference && integer(row, "size") > emaildoc.MaxImageBytes:
+		p.skip = reasonFileTooLarge
+	case p.kind == kindPicture && !reference && integer(row, "size") > emaildoc.MaxImageBytes:
 		// It could only be left out once read (keepPicture); the row says so first.
-		r.skip(name, reasonPictureTooBig)
-		return nil
+		p.skip = reasonPictureTooBig
 	}
-	data, err := r.w.readBlobUpTo(ctx, str(row, "blobUrl"), str(row, "ownerUserId"), maxMaterialFileBytes)
+	return p, nil
+}
+
+// read reads one planned file from storage and keeps what can be used of it.
+// Only a failure to read storage, or a cancelled ctx, is an error.
+func (r *materialReader) read(ctx context.Context, p plannedFile) error {
+	data, err := r.w.readBlobUpTo(ctx, str(p.row, "blobUrl"), str(p.row, "ownerUserId"), maxMaterialFileBytes)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		if r.w.logger != nil {
-			r.w.logger.Warn("campaigns: a composition's file could not be read", "file", fileID, "error", err)
+			r.w.logger.Warn("campaigns: a composition's file could not be read", "file", p.id, "error", err)
 		}
-		return &unreadableMaterialError{name: name}
+		return &unreadableMaterialError{name: p.name}
+	}
+	if p.attached {
+		if r.attached+len(data) > maxAttachedBytes {
+			r.skip(p.name, reasonAttachedFull)
+			return nil
+		}
+		r.attached += len(data)
 	}
 	if len(data) == 0 {
-		r.skip(name, "empty file")
+		r.skip(p.name, "empty file")
 		return nil
 	}
-	switch kind {
+	switch p.kind {
 	case kindArchive:
-		r.addArchive(name, data)
+		r.addArchive(p.name, data)
 	case kindPicture:
-		r.addPicture(name, data, reference)
+		r.addPicture(p.name, data, p.reference)
 	case kindText:
-		r.addText(name, data)
+		r.addText(p.name, data)
 	}
 	return nil
 }
@@ -355,7 +441,7 @@ func (r *materialReader) keepPicture(workspace, mime string, data []byte, refere
 		return
 	}
 	if embeddable {
-		r.m.Handles[compose.EmailAssetHandle(data)] = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+		r.m.Handles[compose.EmailAssetHandle(data)] = materialPicture{mime: mime, data: data}
 	}
 	if reference {
 		r.m.Reference = name

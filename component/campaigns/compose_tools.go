@@ -450,7 +450,7 @@ func (w *Worker) composeDocument(ctx context.Context, t composingTemplate, c ema
 	if err != nil {
 		return emaildoc.Document{}, nil, err
 	}
-	doc, err := emaildoc.Compose(layout, info, c, m.Handles)
+	doc, err := emaildoc.Compose(layout, info, c, m.images(c))
 	if err != nil {
 		return emaildoc.Document{}, nil, err
 	}
@@ -583,7 +583,7 @@ func (w *Worker) composeContext(ctx context.Context, t composingTemplate, m mate
 		if config, _, err := image.DecodeConfig(bytes.NewReader(f.Data)); err == nil {
 			picture.Width, picture.Height = config.Width, config.Height
 		}
-		if handle := compose.EmailAssetHandle(f.Data); m.Handles[handle] != "" {
+		if handle := compose.EmailAssetHandle(f.Data); m.Handles[handle].mime != "" {
 			picture.Handle = handle
 		}
 		pictures = append(pictures, picture)
