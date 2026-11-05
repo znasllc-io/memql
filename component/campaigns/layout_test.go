@@ -820,8 +820,9 @@ func TestEmailLayoutsBoundsDocumentsAndKeepsEveryLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := nodePayloads(t, nodes)
-	if len(rows) != 16 {
-		t.Fatalf("a large list lost layouts: got %d rows, want 16", len(rows))
+	builtins := len(emaildoc.Layouts())
+	if len(rows) != builtins+12 {
+		t.Fatalf("a large list lost layouts: got %d rows, want %d", len(rows), builtins+12)
 	}
 	used, omitted := 0, 0
 	for i, row := range rows {
@@ -844,7 +845,7 @@ func TestEmailLayoutsBoundsDocumentsAndKeepsEveryLayout(t *testing.T) {
 			}
 			used += len(data)
 		}
-		if i < 4 && row["kind"] != "builtin" {
+		if i < builtins && row["kind"] != "builtin" {
 			t.Fatal("large lists changed the built-in layout order")
 		}
 	}

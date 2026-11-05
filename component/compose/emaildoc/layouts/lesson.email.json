@@ -1,0 +1,234 @@
+{
+  "subject": "Why small habits stick",
+  "preheader": "A two-minute lesson for busy weeks.",
+  "layout": "builtin:lesson",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "banner",
+      "type": "image",
+      "role": "content",
+      "padding": [
+        24,
+        24,
+        16,
+        24
+      ],
+      "alt": "Lesson banner",
+      "width": 552,
+      "height": 191
+    },
+    {
+      "id": "body",
+      "type": "section",
+      "role": "content",
+      "background": "tint",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "intro",
+          "type": "text",
+          "role": "content",
+          "text": "Most new habits don't fail for lack of willpower. They fail because they ask for too much, too soon.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "listLineHeight": 17.64,
+          "align": "left"
+        },
+        {
+          "id": "article",
+          "type": "text",
+          "role": "content",
+          "text": "***A habit is easier to keep when it is:***\n\n- **Small.** Two minutes a day is easier to start than twenty.\n- **Tied to something you already do.** After the kettle, before the school run.\n\nStart with one. Keep it for a week, then add the next.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "listLineHeight": 17.64,
+          "align": "left"
+        },
+        {
+          "id": "highlight",
+          "type": "highlight",
+          "role": "content",
+          "text": "Small and steady beats big and rare.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "gap": 0,
+          "color": "accent",
+          "background": "tint",
+          "font": "body"
+        }
+      ]
+    },
+    {
+      "id": "promo-rule",
+      "type": "columns",
+      "role": "content",
+      "columns": [
+        {
+          "width": 100,
+          "blocks": [
+            {
+              "id": "rule",
+              "type": "divider",
+              "role": "brand"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "promo",
+      "type": "columns",
+      "role": "content",
+      "maxWidth": 552,
+      "columns": [
+        {
+          "width": 50.28,
+          "blocks": [
+            {
+              "id": "promo-space",
+              "type": "spacer",
+              "height": 56
+            },
+            {
+              "id": "promo-title",
+              "type": "heading",
+              "text": "Let's learn!",
+              "size": 40,
+              "lineHeight": 40,
+              "color": "primary",
+              "weight": 700,
+              "letterSpacing": "-0.032em"
+            },
+            {
+              "id": "promo-text",
+              "type": "text",
+              "text": "One short lesson a week, with something to try at home.",
+              "size": 18.7,
+              "lineHeight": 18.7,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "width": 46.82,
+          "blocks": [
+            {
+              "id": "promo-picture",
+              "type": "image",
+              "alt": "Our guide",
+              "width": 193,
+              "height": 210
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "follow",
+      "type": "heading",
+      "role": "brand",
+      "text": "Follow us for tips and ideas",
+      "size": 18.7,
+      "lineHeight": 18.7,
+      "color": "primary",
+      "italic": true,
+      "weight": 700,
+      "letterSpacing": "-0.032em"
+    },
+    {
+      "id": "social",
+      "type": "social",
+      "role": "brand",
+      "links": [
+        {
+          "network": "Instagram",
+          "href": ""
+        },
+        {
+          "network": "YouTube",
+          "href": ""
+        },
+        {
+          "network": "LinkedIn",
+          "href": ""
+        }
+      ]
+    },
+    {
+      "id": "rule-2",
+      "type": "divider",
+      "role": "brand"
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME",
+        "123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ]
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import (
 )
 
 // builtinCatalog is the catalogue of the plan's Appendix B, in the order
-// Layouts lists it: the four built-in layouts with the words that name and
+// Layouts lists it: the built-in layouts with the words that name and
 // describe them, and the subject and preheader each one carries.
 var builtinCatalog = []struct {
 	id, name, description, subject, preheader string
@@ -18,11 +18,14 @@ var builtinCatalog = []struct {
 	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription.", "Please confirm your subscription", "One click and you're on the list."},
 	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links.", "A note from our founder", "Why we started, and what comes next."},
 	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature.", "Three small changes for calmer mornings", "Pick one and try it tomorrow."},
+	{"builtin:lesson", "Lesson", "A banner, a tinted lesson that ends on its takeaway, a promotion beside a picture, and social links.", "Why small habits stick", "A two-minute lesson for busy weeks."},
+	{"builtin:three-reasons", "Three reasons", "A banner, a row of icons, a tinted body of titled reasons with a closing line, and a signature.", "Three choices we made on purpose", "What goes into every Acme tool, and why."},
+	{"builtin:side-by-side", "Side by side", "A banner, a tinted introduction, two cards side by side and closing lines, with a signature.", "Two sizes, made for different jobs", "Find the one that fits your home."},
 	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button.", "Meet Ace", "Our guide to getting the small things done."},
 }
 
 // builtinTheme is the neutral example brand's palette and fonts, which the
-// four layouts share: a grey scale, so the layouts are structure and a brand
+// built-in layouts share: a grey scale, so the layouts are structure and a brand
 // kit supplies the colour.
 var builtinTheme = Theme{
 	Page: "#f1f1f1", Canvas: "#ffffff", Primary: "#2f2f2f", Secondary: "#595959", Accent: "#3d3d3d",
@@ -235,6 +238,21 @@ var builtinRoles = map[string]string{
 		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
 		"rule=brand footer=brand",
+	"builtin:lesson": "logo=brand banner=content body=content intro=content article=content highlight=content promo-rule=content rule=brand " +
+		"promo=content promo-space=content promo-title=content promo-text=content promo-picture=content " +
+		"follow=brand social=brand rule-2=brand footer=brand",
+	"builtin:three-reasons": "logo=brand banner=content icons=content icon-1=content icon-2=content icon-3=content " +
+		"body=content lead=content reason=content reason-title=content reason-text=content closing=content " +
+		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
+		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
+		"rule=brand footer=brand",
+	"builtin:side-by-side": "logo=brand banner=content body=content intro=content statement=content " +
+		"cards=content card-a-icon=content card-a-title=content card-a-subtitle=content card-a-text=content " +
+		"card-b-icon=content card-b-title=content card-b-subtitle=content card-b-text=content " +
+		"closing=content closing-title=content closing-text=content " +
+		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
+		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
+		"rule=brand footer=brand",
 	"builtin:spotlight": "logo=brand spotlight=content message-box=content message=content cta=content social=brand footer=brand",
 }
 
@@ -289,6 +307,12 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 			"image_missing:promo-picture link_missing:social link_missing:social link_missing:social link_missing:footer",
 		"builtin:article": "image_missing:logo image_missing:banner link_missing:reply-button image_missing:signature-photo image_missing:signature-name " +
 			"link_missing:footer",
+		"builtin:lesson": "image_missing:logo image_missing:banner image_missing:promo-picture " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:three-reasons": "image_missing:logo image_missing:banner image_missing:icon-1 image_missing:icon-2 image_missing:icon-3 " +
+			"link_missing:reply-button image_missing:signature-photo image_missing:signature-name link_missing:footer",
+		"builtin:side-by-side": "image_missing:logo image_missing:banner image_missing:card-a-icon image_missing:card-b-icon " +
+			"link_missing:reply-button image_missing:signature-photo image_missing:signature-name link_missing:footer",
 		"builtin:spotlight": "image_missing:logo image_missing:spotlight link_missing:cta " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 	}
