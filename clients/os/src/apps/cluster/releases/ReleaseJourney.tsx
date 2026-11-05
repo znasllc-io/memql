@@ -6,8 +6,8 @@ import type { Stop, StopState } from "../../../kit/Rail";
 import type { Act } from "../../../kit/ActionBar";
 import { formatMoment } from "../../../kit/format";
 import { pipelineFromRow, runFromRow, type RunRow } from "../../deployables/pipelines/rows";
-import { runOutcome, stageWord } from "../../deployables/pipelines/words";
-import { buildCall, buildTitle, buildWord, currentStep, readReleaseBuild, type BuildAction, type JourneyStep, type ReleaseBuild } from "./journey";
+import { runOutcome, shortSha, stageWord } from "../../deployables/pipelines/words";
+import { buildCall, buildTitle, buildWord, currentStep, readReleaseBuild, skippedWord, type BuildAction, type JourneyStep, type ReleaseBuild } from "./journey";
 import { readCandidate, readTargets, matchingTarget } from "./model";
 import { ReviewDetails, type ReleaseQueries } from "./ReleasesSection";
 import { useReleaseRead } from "./useReleaseRead";
@@ -87,7 +87,7 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
   }
   const steps: Stop[] = [
     { id: "release", name: "Release", sentence: "Choose what to release", answer: build?.profileName, state: state("release"), body: build ? <Facts><Fact label="Release" value={build.profileName} /><Fact label="Component" value={build.component} /></Facts> : null },
-    { id: "source", name: "Source", sentence: "Check the reviewed source", answer: build?.repository, state: state("source"), body: build ? <><Facts><Fact label="Repository" value={build.repository} copyValue={build.repository} /><Fact label="Recorded" value={formatMoment(build.createdAt)} copyValue={build.createdAt} /></Facts><Caption>This release keeps its recorded source. A newer change on the repository does not replace it.</Caption><References build={build} /></> : null },
+    { id: "source", name: "Source", sentence: "Check the reviewed source", answer: build?.repository, state: state("source"), body: build ? <SourceDetails build={build} /> : null },
     { id: "version", name: "Version", sentence: "Confirm the release version", answer: build?.version || undefined, state: state("version"), body: build ? <>
       <Facts><Fact label="Version" value={build.version || "Unavailable"} /><Fact label="Tag" value={build.tag || "Unavailable"} copyValue={build.tag || undefined} /></Facts>
       {build.reasonCode === "version_prepare_required" ? <Caption>Prepare a normal version change in this repository, have it reviewed and merged, then check the new source in a new release request. The existing tag will not be moved.</Caption> : <Caption>Starting the build creates or verifies the tag at this source revision and runs the full release checks. It does not approve, publish or install a release.</Caption>}
@@ -132,10 +132,29 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
     else if (open === "build" && build?.pipelineRunId && onOpenRun) acts.push({ label: "Open build details", onAct: () => onOpenRun(build.pipelineRunId) });
     if (confirmation) acts[0] = { label: "Cancel", text: true, onAct: () => confirm(null) };
   }
-  return <Wizard icon={<PackageCheck size={26} />} title="Cut release" label="Cut release steps" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={id => { setStep(id as JourneyStep); confirm(null); }} acts={acts}
+  return <Wizard icon={<PackageCheck size={26} />} title="Cut release" label="Cut release steps" dividers="none" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={id => { setStep(id as JourneyStep); confirm(null); }} acts={acts}
     status={{ word: busy ? busy === "approve" ? "Recording approval" : busy === "publish" ? "Publishing release" : busy === "start" ? "Starting release build" : "Checking interrupted release" : !available ? "Disconnected" : !intent.fresh ? "Release status unavailable" : build ? sealed ? "In release catalog" : buildWord(build) : "Release unavailable", detail: consequence, tone: busy || (intent.fresh && build && ["tagging", "building", "publishing"].includes(build.phase)) ? "busy" : "none" }}
     notices={<>{!available ? <Notice sentence="Disconnected. The saved release is kept; no action is repeated on reconnect." /> : null}{!build && available && !intent.error ? <ContentSkeleton label="Reading release progress" /> : null}{intent.error || candidate.error || targets.error ? <Notice tone="error" sentence={intent.error || candidate.error || targets.error} /> : null}{build?.reason ? <Notice tone={build.phase === "blocked" || build.phase === "uncertain" ? "warn" : "info"} sentence={build.reason} /> : null}{candidate.value && !exactCandidate ? <Notice tone="error" sentence="The release candidate does not match this request’s source and version." /> : null}{error ? <Notice tone="error" sentence={error} next="The request may have completed. Read its status before trying again." /> : null}</>}
   />;
+}
+
+// Which commit is released, and when checking the source passed newer commits
+// over, the newest one then and why each newer one was not released. The
+// check that decided is on the state's hover: every row would name the same
+// one, so the row does not.
+function SourceDetails({ build }: { build: ReleaseBuild }) {
+  const skipped = build.newer.length > 0, branch = build.branch || "the branch";
+  return <>
+    <Facts>
+      <Fact label="Repository" value={build.repository} copyValue={build.repository} />
+      {build.sha ? <Fact label="Revision" value={shortSha(build.sha)} mono copyValue={build.sha} /> : null}
+      {skipped ? <Fact label={`Newest on ${branch} when checked`} value={shortSha(build.headSha)} mono copyValue={build.headSha} /> : null}
+      <Fact label="Recorded" value={formatMoment(build.createdAt)} copyValue={build.createdAt} />
+    </Facts>
+    {skipped ? <><Subhead>Newer commits</Subhead><RecordList as="ul" label="Newer commits" density="compact">{build.newer.map(commit => <RecordRow key={commit.sha} name={<span className="os-mono">{shortSha(commit.sha)}</span>} state={skippedWord(commit.state)} tone={commit.state === "failed" ? "warn" : "muted"} stateTitle={[commit.check, commit.conclusion].filter(Boolean).join(": ") || undefined} />)}</RecordList></> : null}
+    <Caption>{skipped ? "This release is the newest commit whose checks had passed. It keeps its recorded source: a newer change on the repository does not replace it." : "This release keeps its recorded source. A newer change on the repository does not replace it."}</Caption>
+    <References build={build} />
+  </>;
 }
 
 function References({ build }: { build: ReleaseBuild }) {

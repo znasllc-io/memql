@@ -3,6 +3,8 @@ package release
 import (
 	"errors"
 	"fmt"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 // refusals.go -- the typed vocabulary a cut refuses in.
@@ -128,7 +130,26 @@ const (
 	// and the error is shown. A check that cannot reach the registry knows
 	// nothing about whether the images exist.
 	CodeRegistryCheckFailed = "registry_check_failed"
+
+	// CodeReleaseSourceUntested -- the saved build flow's preparation
+	// (releasePrepareBuild, not the legacy cut above) looked back along the
+	// default branch's newest commits and none had passed its required checks:
+	// some still running, some failed, superseded or never tested
+	// (component/pipelines.ReleaseSourceUntestedError). NOTHING WAS SAVED, which
+	// is why it is a code: unlike an interrupted preparation, there is no
+	// request to look for, and checking the source again is the whole answer
+	// once a run passes. The message counts what the walk found.
+	CodeReleaseSourceUntested = "release_source_untested"
 )
+
+// untestedSource answers a walk that found nothing to release as
+// release_source_untested, in words that say what it found and what to do.
+func untestedSource(e *pl.ReleaseSourceUntestedError) *Refusal {
+	if len(e.Walk.Newer) == 1 {
+		return refuse(CodeReleaseSourceUntested, "The newest commit on %s has not passed its required checks (%s). Check the source again once a commit's checks pass.", e.Branch, e.Walk.Summary())
+	}
+	return refuse(CodeReleaseSourceUntested, "None of the newest %d commits on %s has passed its required checks: %s. Check the source again once a commit's checks pass.", len(e.Walk.Newer), e.Branch, e.Walk.Summary())
+}
 
 // refuse builds a Refusal.
 func refuse(code, format string, args ...any) *Refusal {

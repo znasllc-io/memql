@@ -247,11 +247,24 @@ func leaseStale(r Run, now time.Time) bool {
 // (this node's result cache may hold a row another replica has since
 // claimed), and when claimable the write of driverNodeId and
 // driverHeartbeatAt. It answers the claimed row, or false when the run is
-// finished, gone, or another replica's.
+// finished, gone, another replica's, or held: by the operator's admission, or
+// behind the push run that holds its pipeline's push lane (push_lane.go).
+//
+// Whether the run is a push-lane member is decided first, with no gate held
+// (pushLaneMember): it evaluates the run's saved policy snapshot, which is more
+// than a gated section should do, and it rests on fields a run never changes.
 func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, bool, error) {
+	return i.claimInLane(ctx, d, runID, i.pushLaneMember(ctx, d, runID))
+}
+
+// claimInLane is claim with the run's push-lane membership already decided
+// (claimAndDrive decides it once, and keeps it for the hand-off after the
+// drive concludes).
+func (i *Integration) claimInLane(ctx context.Context, d Deps, runID string, laneMember bool) (Run, bool, error) {
 	var (
 		claimed Run
 		ok      bool
+		holder  string
 	)
 	err := i.driverGate(ctx, d, RunGateKey(runID), func(gctx context.Context) error {
 		r, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), runID)
@@ -262,8 +275,29 @@ func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, boo
 		if !claimable(*r, d.NodeID, now) {
 			return nil
 		}
+		// THE PUSH LANE (push_lane.go, design record 2026-11-05 D4). A lane
+		// run that has not started is held while another push run of its
+		// pipeline executes: no write at all, so it stays queued with no
+		// driver and its time limit, which counts from its start, has not
+		// begun. The lane is read fresh, under this run's gate and no other:
+		// two runs claimed at the same instant on two replicas can both find
+		// it free and both start, which costs a runner and nothing else. A
+		// STARTED run is never held -- a takeover after a lost replica must
+		// not wait on the lane -- and neither is a run asked to stop. A lane
+		// that cannot be read is not a free lane: the claim fails, and
+		// recovery tries again. Before admission, so a held run never asks it.
+		if laneMember && notStarted(*r) {
+			held, err := pushLaneHolder(gctx, d, *r, now)
+			if err != nil {
+				return fmt.Errorf("pipelines: the push lane could not be read; run remains queued: %w", err)
+			}
+			if held != "" {
+				holder = held
+				return nil
+			}
+		}
 		if r.Status == StatusQueued && r.StartedAt.IsZero() && !r.CancelRequested && d.AdmitRun != nil {
-			allowed, err := d.AdmitRun(now, IsTrainRun(*r))
+			allowed, err := d.AdmitRun(now)
 			if err != nil {
 				return fmt.Errorf("pipelines: new run admission is unavailable; run remains queued: %w", err)
 			}
@@ -282,6 +316,13 @@ func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, boo
 		claimed, ok = *r, true
 		return nil
 	})
+	if holder != "" {
+		// Debug: every agent replica hears a run's created event and tries
+		// it, and recovery leaves a held run to its lane, so this is said once
+		// per replica per opening, never every minute.
+		d.Logger.Debug("pipelines: another push run of the pipeline holds the push lane; this one waits until it finishes",
+			"component", "pipelinerun", logger.Subject(RunConcept, bareID(runID)), "holder", holder)
+	}
 	return claimed, ok, err
 }
 

@@ -148,13 +148,6 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection",
 			"The pipeline DSL could not select stages for this run: %v.", err)
 	}
-	if len(run.OnlyStages) > 0 {
-		narrowed, err := pipelines.NarrowStages(stageSelection, run.OnlyStages)
-		if err != nil {
-			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection", "%v", err)
-		}
-		stageSelection = narrowed
-	}
 
 	var changed []string
 	changedKnown := false
@@ -169,6 +162,9 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		Timings:        p.Timings,
 		StageSelection: &stageSelection,
 	}
+	// Kept for carryForward, which reads the change since an earlier push through
+	// this same block and graph before the work run opens.
+	dr.planSpec, dr.planGraph = spec, nil
 	selectionFull := false
 	if pipelines.NeedsSelector(spec) {
 		graph, err := pipelines.ScanGoTree(tree)
@@ -176,6 +172,7 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			return pipelines.Plan{}, pipelines.Refuse(packages.CodeSourceUnreadable, "",
 				"The Go sources of %s at %s could not be read: %v.", p.Repository, shortSHA(run.SHA), err)
 		}
+		dr.planGraph = graph
 		var full, testInputs []string
 		if spec.Select != nil {
 			full = spec.Select.Full

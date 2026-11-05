@@ -17,6 +17,7 @@ import (
 // adapters cannot accidentally advertise a proof they do not implement.
 type releaseBuildGitHub interface {
 	ObserveReleaseSource(context.Context, string, string, string, string) (githubapp.ReleaseSourceEvidence, error)
+	WalkReleaseSource(context.Context, string, string, string, int) (githubapp.ReleaseSourceWalk, error)
 }
 
 func (g *packagesGitHub) ObserveReleaseSource(ctx context.Context, token, repository, branch, selected string) (githubapp.ReleaseSourceEvidence, error) {
@@ -25,6 +26,14 @@ func (g *packagesGitHub) ObserveReleaseSource(ctx context.Context, token, reposi
 		return githubapp.ReleaseSourceEvidence{}, err
 	}
 	return c.ObserveReleaseSource(ctx, token, owner, repo, branch, selected)
+}
+
+func (g *packagesGitHub) WalkReleaseSource(ctx context.Context, token, repository, branch string, lookBack int) (githubapp.ReleaseSourceWalk, error) {
+	c, owner, repo, err := g.target(repository)
+	if err != nil {
+		return githubapp.ReleaseSourceWalk{}, err
+	}
+	return c.WalkReleaseSource(ctx, token, owner, repo, branch, lookBack)
 }
 
 func validReleaseCommit(sha string) bool {
@@ -105,42 +114,6 @@ func (i *Integration) InspectReleaseBuild(ctx context.Context, r pipelines.Relea
 	return source, err
 }
 
-// InspectReleaseBuildAt selects a named commit rather than the branch's head: a train
-// tags the commit its run tested, and main's head, pushed to directly, has no check of
-// its own (design record 2026-11-02-nightly-release-from-main-design.md, D5). It answers
-// the request bound to that commit, and what a bound request is checked against is the
-// same as for a person's selection.
-func (i *Integration) InspectReleaseBuildAt(ctx context.Context, r pipelines.ReleaseBuildRequest, sha string) (pipelines.ReleaseBuildRequest, pipelines.ReleaseBuildSource, error) {
-	empty := pipelines.ReleaseBuildSource{}
-	if !validReleaseCommit(sha) {
-		return r, empty, errors.New("release build requires an exact selected commit")
-	}
-	if err := validateBuildRequest(r, false); err != nil {
-		return r, empty, err
-	}
-	d := i.snapshot()
-	p, err := releaseBuildPipeline(ctx, d, r)
-	if err != nil {
-		return r, empty, err
-	}
-	provider, ok := d.GitHub.(releaseBuildGitHub)
-	if !ok {
-		return r, empty, errors.New("release source verification is unavailable")
-	}
-	token, err := releaseBuildToken(ctx, d, p)
-	if err != nil {
-		return r, empty, err
-	}
-	proof, err := provider.ObserveReleaseSource(ctx, token, p.Repository, p.DefaultBranch, sha)
-	if err != nil {
-		return r, empty, err
-	}
-	r.ExpectedSHA, r.SourceID, r.CredentialID = sha, p.PackageID, p.CredentialID
-	r.InstallationID, r.RepositoryID = p.InstallationID, proof.RepositoryID
-	source, err := i.InspectReleaseBuild(ctx, r)
-	return r, source, err
-}
-
 func (i *Integration) inspectReleaseBuild(ctx context.Context, r pipelines.ReleaseBuildRequest) (pipelines.ReleaseBuildSource, Pipeline, string, error) {
 	empty := pipelines.ReleaseBuildSource{}
 	if err := validateBuildRequest(r, false); err != nil {
@@ -159,17 +132,32 @@ func (i *Integration) inspectReleaseBuild(ctx context.Context, r pipelines.Relea
 	if err != nil {
 		return empty, p, "", err
 	}
-	proof, err := provider.ObserveReleaseSource(ctx, token, p.Repository, p.DefaultBranch, r.ExpectedSHA)
+	// Trigger: the request names no commit, which only release preparation's
+	// first read does (every later read is bound to the commit it saved). The
+	// walk chooses the newest commit whose required checks passed, and the
+	// proof below judges that choice exactly as it judges a named commit. A
+	// refused pick is answered with the proof's refusal, never by walking on:
+	// the walk read it as green (or as a merge only the proof can judge) and
+	// the proof found otherwise, so an older pick would hide why, and a retry
+	// walks again from the evidence as it then stands.
+	chosen, walked := r.ExpectedSHA, int64(0)
+	var walk *pipelines.ReleaseSourceWalk
+	if chosen == "" {
+		if chosen, walk, walked, err = walkReleaseSource(ctx, provider, token, p); err != nil {
+			return empty, p, "", err
+		}
+	}
+	proof, err := provider.ObserveReleaseSource(ctx, token, p.Repository, p.DefaultBranch, chosen)
 	if err != nil {
 		return empty, p, "", err
 	}
-	if proof.Repository != p.Repository || proof.Branch != p.DefaultBranch || proof.RepositoryID <= 0 || r.RepositoryID != 0 && proof.RepositoryID != r.RepositoryID || !validReleaseCommit(proof.SHA) || !validReleaseCommit(proof.HeadSHA) || !validReleaseCommit(proof.TreeSHA) || !validReleaseCommit(proof.ProofSHA) || r.ExpectedSHA != "" && proof.SHA != r.ExpectedSHA || len(proof.Checks) == 0 {
+	if proof.Repository != p.Repository || proof.Branch != p.DefaultBranch || proof.RepositoryID <= 0 || r.RepositoryID != 0 && proof.RepositoryID != r.RepositoryID || walked != 0 && proof.RepositoryID != walked || !validReleaseCommit(proof.SHA) || !validReleaseCommit(proof.HeadSHA) || !validReleaseCommit(proof.TreeSHA) || !validReleaseCommit(proof.ProofSHA) || proof.SHA != chosen || len(proof.Checks) == 0 {
 		return empty, p, "", errors.New("release verification returned a different or incomplete source")
 	}
 	if proof.ProofSHA != proof.SHA && proof.ProofPullRequest <= 0 || proof.ProofSHA == proof.SHA && proof.ProofPullRequest != 0 {
 		return empty, p, "", errors.New("release check proof does not identify its source")
 	}
-	out := pipelines.ReleaseBuildSource{OwnerUserID: bareID(p.OwnerUserID), PipelineID: p.ID, SourceID: p.PackageID, CredentialID: p.CredentialID, Repository: p.Repository, Branch: p.DefaultBranch, HeadSHA: proof.HeadSHA, SHA: proof.SHA, TreeSHA: proof.TreeSHA, ProofSHA: proof.ProofSHA, InstallationID: p.InstallationID, RepositoryID: proof.RepositoryID, ProofPullRequest: proof.ProofPullRequest}
+	out := pipelines.ReleaseBuildSource{OwnerUserID: bareID(p.OwnerUserID), PipelineID: p.ID, SourceID: p.PackageID, CredentialID: p.CredentialID, Repository: p.Repository, Branch: p.DefaultBranch, HeadSHA: proof.HeadSHA, SHA: proof.SHA, TreeSHA: proof.TreeSHA, ProofSHA: proof.ProofSHA, InstallationID: p.InstallationID, RepositoryID: proof.RepositoryID, ProofPullRequest: proof.ProofPullRequest, Walk: walk}
 	for _, check := range proof.Checks {
 		if check.Context == "" || check.AppID <= 0 || check.SHA != proof.ProofSHA || check.Status != "completed" || check.Conclusion != "success" {
 			return empty, p, "", errors.New("required release check is not bound and successful")
@@ -253,6 +241,54 @@ func existingReleaseBuild(ctx context.Context, d Deps, p Pipeline, r pipelines.R
 // Attempt numbers strictly decrease along a chain, so it also bounds the
 // chain's length and rules out a cycle.
 const maxReleaseAttempts = 50
+
+// releaseSourceLookBack bounds how many commits of the default branch's
+// first-parent history release preparation examines, the one it chooses
+// included. A full push run takes two to three hours and the owner may push
+// several times while one runs, so the newest green commit is usually a
+// handful of commits back; 20 covers several hours of pushes. The cost is about one
+// GitHub call per commit examined plus three (the head, its rules, the
+// history), inside preparation's two-minute budget (integrations/release
+// prepareBuild). Further back than that, the release would be of work old
+// enough that the person should look at why nothing since has passed, which is
+// what the refusal release_source_untested says.
+const releaseSourceLookBack = 20
+
+// walkReleaseSource asks GitHub for the newest commit worth proving and checks
+// what it answers before believing any of it: the repository, branch and bound
+// it was asked about, and a record of the commits it passed over that starts at
+// the head and never names the commit it chose. It returns the chosen commit,
+// the record to save with it (nil when the head itself was chosen, so that
+// source encodes as before), and the repository id the walk read, which the
+// proof must match. A walk that chose nothing is the typed
+// ReleaseSourceUntestedError, carrying what it found.
+func walkReleaseSource(ctx context.Context, provider releaseBuildGitHub, token string, p Pipeline) (string, *pipelines.ReleaseSourceWalk, int64, error) {
+	w, err := provider.WalkReleaseSource(ctx, token, p.Repository, p.DefaultBranch, releaseSourceLookBack)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	if w.Repository != p.Repository || w.Branch != p.DefaultBranch || w.RepositoryID <= 0 || w.LookBack != releaseSourceLookBack || !validReleaseCommit(w.HeadSHA) || w.Pick != "" && !validReleaseCommit(w.Pick) {
+		return "", nil, 0, errors.New("release source walk returned a different or incomplete history")
+	}
+	record := pipelines.ReleaseSourceWalk{HeadSHA: w.HeadSHA, LookBack: w.LookBack}
+	for _, skip := range w.Newer {
+		record.Newer = append(record.Newer, pipelines.ReleaseSourceSkip{SHA: skip.SHA, State: skip.State, Check: skip.Check, Conclusion: skip.Conclusion})
+	}
+	if len(record.Newer) == 0 {
+		// Nothing passed over: the walk chose the head, or it examined nothing.
+		if w.Pick == "" || w.Pick != w.HeadSHA {
+			return "", nil, 0, errors.New("release source walk passed over commits it did not record")
+		}
+		return w.Pick, nil, w.RepositoryID, nil
+	}
+	if err := record.Validate(w.Pick); err != nil {
+		return "", nil, 0, err
+	}
+	if w.Pick == "" {
+		return "", nil, 0, &pipelines.ReleaseSourceUntestedError{Branch: p.DefaultBranch, Walk: record}
+	}
+	return w.Pick, &record, w.RepositoryID, nil
+}
 
 // releaseAttemptChain follows latest's rerunOf links through byID back to
 // attempt 1 and returns the earlier attempts, newest first. Every link must

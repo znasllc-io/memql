@@ -259,7 +259,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 194 -> 195: pipelineComputePlacementPolicy, the Fleet/cloud placement policy.
 // 195 -> 196: agentWorkOutcomeRecovery, the bounded inference-only reporting
 // conversion policy.
-const shippedAutomationCount = 196
+// 196 -> 195: tickPipelineTrains, with release trains (owner decision
+// 2026-11-05); measured by the strict loader.
+const shippedAutomationCount = 195
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

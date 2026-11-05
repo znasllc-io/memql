@@ -6,7 +6,16 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fixedClockClient is a test client whose clock reads one fixed instant, so
+// a listing's request and its pagination do not depend on when it ran.
+func fixedClockClient(t *testing.T, hub *fakeHub) *Client {
+	t.Helper()
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	return testClient(t, hub, &now)
+}
 
 // A driver taking over a run, a cancel and recovery find the step checks a
 // run already has by listing the commit's check runs: every attempt, across
@@ -31,7 +40,7 @@ func TestCheckRunsForCommitListsEveryPage(t *testing.T) {
 		}
 		return http.StatusOK, `{"total_count":103,"check_runs":[` + strings.Join(runs, ",") + `]}`
 	})
-	got, err := trainTestClient(t, hub).CheckRunsForCommit(context.Background(), "tok", "acme", "widget", "abc123")
+	got, err := fixedClockClient(t, hub).CheckRunsForCommit(context.Background(), "tok", "acme", "widget", "abc123")
 	if err != nil {
 		t.Fatalf("CheckRunsForCommit: %v", err)
 	}

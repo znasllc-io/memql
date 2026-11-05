@@ -12,8 +12,7 @@ import (
 // after its run's check and adds its stage and step, so it always has more
 // segments than any context a ruleset names (CheckRunName and its event
 // suffixes, IndependentReviewCheckName): a step check cannot satisfy a
-// required context, a train's boarding check or a release source, all of
-// which ask for an exact name.
+// required context or a release source, both of which ask for an exact name.
 
 // StepCheckName is a step's check run name: its run's check name, then the
 // step's stage and name -- MemQL / memql / tests / go-unit #2. GitHub lists a

@@ -58,7 +58,9 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
-	// V11 binds the run's head branch to its train/cloud admission class.
+	// V11 carries the run's head branch, which selected the release-train
+	// admission class until trains were removed (2026-11-05). It decides nothing
+	// now and stays in the creation definition, so the action is unchanged.
 	// V10 carries declared checkout history; an older runner must not silently
 	// substitute a shallow clone. V9 separated resource admission from execution
 	// start so a queued Job does not spend its step timeout before admission.

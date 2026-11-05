@@ -53,10 +53,7 @@ type Opening struct {
 	RerunOf string
 	// FailedOnly is a person's "Re-run failed": the new attempt runs only
 	// what RerunOf did not pass.
-	FailedOnly bool
-	// Stages limits the run to these manifest stages. A native caller's alone: a
-	// deploy's verification must not start what else a manual run would.
-	Stages           []string
+	FailedOnly       bool
 	DeliveryID       string
 	InboundRequestID string
 	// beforeCreate is a native caller's final local source/lease fence. It
@@ -106,12 +103,14 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 // create, not for a mint. When GitHub refuses the create (403) or no token
 // could be had, the run opens anyway with checkRunState saying so.
 //
-// A pull request's new head SUPERSEDES the pull request's earlier runs
-// (supersede.go): they are read before the gate, while the new run does not
-// exist yet, and asked to stop once the gate is released -- and only when
-// GitHub, asked then, names this opening's commit as the pull request's head.
-// The head read is a call to GitHub and each ask takes that run's own gate and
-// may write its check run, so neither happens under the open gate.
+// A pull request's new head SUPERSEDES the pull request's earlier runs, and a
+// push to the default branch, where the installation opted into the push lane,
+// the waiting push runs it covers (supersede.go): they are read before the
+// gate, while the new run does not exist yet, and asked to stop once the gate
+// is released -- and only when GitHub, asked then, names this opening's commit
+// as the head. The head read is a call to GitHub and each ask takes that run's
+// own gate and may write its check run, so neither happens under the open
+// gate.
 func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o Opening, token string) (OpenResult, error) {
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
@@ -174,9 +173,6 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		}
 		if mode == "" {
 			mode = m
-			if trainRunsWhole(ctx, d, o, p.Repository) {
-				mode = pipelines.ModeFull
-			}
 		}
 	}
 	if mode != pipelines.ModeFull && mode != pipelines.ModeAffected {
@@ -215,11 +211,12 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	}
 	runs := runsOf(keyed, p.ID)
 	// R37 (supersede.go): a run a newer push superseded does not answer its
-	// own head coming back. Whether this commit IS the pull request's head
-	// again is asked of GitHub here -- before the gate, and only when the
-	// key's newest attempt is such a run -- and the gated read reuses the
-	// answer rather than asking under the gate. The answer is about THAT
-	// attempt (headBackFor names it), and frees no other.
+	// own head coming back. Whether this commit IS the head again -- the pull
+	// request's, or for a push the default branch's -- is asked of GitHub here
+	// -- before the gate, and only when the key's newest attempt is such a run
+	// -- and the gated read reuses the answer rather than asking under the
+	// gate. The answer is about THAT attempt (headBackFor names it), and frees
+	// no other.
 	var tokenErr error
 	headBackFor := ""
 	if superseded, ok := supersededNewest(ordinaryRuns(runs), o); ok {
@@ -246,10 +243,11 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		token, tokenErr = checkRunToken(ctx, d, p)
 	}
 	// Before the run exists, so a run another opener creates meanwhile is
-	// never this opening's to stop (supersede.go).
+	// never this opening's to stop (supersede.go). A push is asked under the
+	// policy its run is opened with: the push lane is that policy's opt-in.
 	var earlier []Run
 	if o.Qualification == nil {
-		earlier = supersedable(ctx, d, p, o, mode)
+		earlier = supersedable(ctx, d, p, o, mode, policy)
 	}
 
 	// Refresh mutable provider/source authority after policy capture and before
@@ -348,7 +346,6 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			// Only a re-run can carry anything over: an attempt a delivery
 			// or the poll opened has nothing before it to carry from.
 			RerunFailedOnly:  o.FailedOnly && o.isRerun(),
-			OnlyStages:       append([]string(nil), o.Stages...),
 			DeliveryID:       strings.TrimSpace(o.DeliveryID),
 			InboundRequestID: bareID(o.InboundRequestID),
 			PullRequest:      o.PullRequest,
@@ -462,12 +459,13 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		}
 	}
 	if err == nil && result.Opened {
-		// The gate is released: only now may GitHub be asked for the pull
-		// request's head and a run be asked to stop. A failed mint is no token.
+		// The gate is released: only now may GitHub be asked for the head --
+		// the pull request's, or the default branch's for a push -- and a run
+		// be asked to stop. A failed mint is no token.
 		if tokenErr != nil {
 			token = ""
 		}
-		i.supersede(ctx, d, result.Run, earlier, token)
+		i.supersede(ctx, d, p, result.Run, earlier, token)
 	}
 	return result, err
 }

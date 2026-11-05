@@ -53,10 +53,17 @@ type carriedStep struct {
 	evidenceRun     string
 	treeFingerprint string
 	blocked         bool
+	// carriedFrom: a push carried the step forward from evidenceRun, an earlier
+	// push that executed it at another commit, and records that commit
+	// (component/pipelinerun/carry.go). The row a push writes for it.
+	carriedFrom map[string]any
 }
 
 // skipReason is what the plan declared for a step it did not run.
 func (s carriedStep) skipReason() string {
+	if s.carriedFrom != nil {
+		return "Inputs unchanged since " + s.carriedFrom["sha"].(string)[:7] + "; verified in run " + s.evidenceRun + "."
+	}
 	if s.evidenceRun != "" {
 		return "Verified on the same source tree in run " + s.evidenceRun + "."
 	}
@@ -193,6 +200,9 @@ func (f *carriedDB) run(spec carriedRunSpec) (string, string) {
 		}
 		if s.treeFingerprint != "" {
 			call["treeFingerprint"] = s.treeFingerprint
+		}
+		if s.carriedFrom != nil {
+			call["carriedFrom"] = s.carriedFrom
 		}
 		decls = append(decls, workjournal.StepDecl{Key: key, Kind: workjournal.KindDeterministic, StepType: "exec", Call: call})
 	}

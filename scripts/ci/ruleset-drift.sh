@@ -109,20 +109,28 @@ EXPECTED_ENFORCEMENT="${RULESET_DRIFT_ENFORCEMENT:-active}"
 # Keep it sorted; the comparison is set-based but a sorted list keeps diffs
 # readable and stops two people adding the same rule twice.
 #
-# merge_queue is NOT asserted (2026-10-27): release trains batch what the
-# queue batched, and switching main to trains removes the rule (design record
-# docs/superpowers/specs/2026-10-27-release-trains-design.md, section 8). It
-# is still present until that switch, and a present rule this list does not
-# name is neither drift nor a gap, so the audit passes on both sides of the
-# switch. Restoring the queue as a fallback means adding it back here.
+# merge_queue and pull_request are NOT asserted: a change lands by the owner
+# pushing to main, and pull requests are switched off on the repository
+# (2026-11-05, design record
+# docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md). A present rule
+# this list does not name is neither drift nor a gap.
 #
-# pull_request is NOT asserted (2026-11-02): a change lands by pushing to main
-# (design record docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md),
-# so nothing requires one any more.
+# update (GitHub's "Restrict updates") IS asserted (2026-11-05): it is the rule
+# that makes the owner, the ruleset's only bypass actor, the only account that
+# can move main. Without it, anyone with write access could push a commit
+# carrying a green required check, and on the repositories whose required
+# check list is empty, any commit at all. Losing it is silent: pushes keep
+# working for the owner, so nothing but this audit would notice.
+#
+# required_status_checks stays although the owner bypasses it on every push:
+# release preparation reads the App-bound check it names
+# (component/identity/githubapp/release_source.go) to decide which commit has
+# passed its full run, so the rule is what a release is gated on.
 EXPECTED=(
     deletion
     non_fast_forward
     required_status_checks
+    update
 )
 # Overridable so the tests can drive the warn path with a synthetic baseline,
 # and so this can be pointed at another ruleset (memql#3837) without a second
@@ -197,10 +205,10 @@ function main() {
     # A required_status_checks rule that names no check requires nothing, and its
     # membership reads exactly like one that does. It warns rather than fails: it
     # is how the rulesets were saved on 2026-11-02, and a check that is red every
-    # day is a check people mute. The release script refuses to publish until it
-    # names one.
+    # day is a check people mute. Release preparation refuses until it names one,
+    # because the check it names is how a release finds a tested commit.
     if have required_status_checks ${actual[@]+"${actual[@]}"} && [[ -z "${actual_checks}" ]]; then
-        echo "WARN: required_status_checks on ruleset ${RULESET_ID} names no check, so GitHub requires none. Add the pipeline's own check, MemQL / <name>, from its GitHub App." >&2
+        echo "WARN: required_status_checks on ruleset ${RULESET_ID} names no check, so GitHub requires none and no release can find a tested commit. Add the pipeline's push check, MemQL / <name> / push, from its GitHub App." >&2
         warned=$((warned + 1))
     fi
 

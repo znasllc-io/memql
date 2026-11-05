@@ -55,11 +55,6 @@ func (i *Integration) buildPipeline() (ReleaseBuildPipeline, error) {
 }
 
 func (i *Integration) prepareBuild(ctx context.Context, name, pipelineID, expected string) (releaseBuildRecord, error) {
-	return i.prepareBuildAt(ctx, name, pipelineID, expected, "")
-}
-
-// prepareBuildAt saves a release of selected, or of the branch's head when it is empty.
-func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expected, selected string) (releaseBuildRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var record releaseBuildRecord
@@ -85,15 +80,25 @@ func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expe
 	b := profile.Build
 	component := profile.Components[0]
 	request := pl.ReleaseBuildRequest{PipelineID: pipelineID, Repository: component.Repository, Branch: b.Branch}
-	var source pl.ReleaseBuildSource
-	if selected != "" {
-		request, source, err = pipeline.InspectReleaseBuildAt(ctx, request, selected)
-	} else {
-		source, err = pipeline.InspectReleaseBuild(ctx, request)
+	// The first, unbound inspection chooses the commit: the newest on the
+	// branch whose required checks passed. It walks back from the head
+	// (pipelinerun walkReleaseSource) and records the newer commits it passed
+	// over; the bound inspection below re-proves the commit it chose.
+	source, err := pipeline.InspectReleaseBuild(ctx, request)
+	var untested *pl.ReleaseSourceUntestedError
+	if errors.As(err, &untested) {
+		// Nothing within the look back passed, so nothing is saved: the person's
+		// next step is to check the source again once a run passes, and the
+		// code tells MemQL OS there is no interrupted request to look for.
+		return record, untestedSource(untested)
 	}
 	if err != nil {
 		return record, err
 	}
+	// How the first inspection chose its commit. The bound inspection below
+	// re-proves that commit and walks nothing, so the record is carried over
+	// rather than read again; validate checks it against the commit it chose.
+	walk := source.Walk
 	if source.OwnerUserID != owner || source.PipelineID != pipelineID || source.Repository != component.Repository || source.Branch != b.Branch || !candidateSourceCommit(source.SHA) {
 		return record, errors.New("release source does not match the selected owner and profile")
 	}
@@ -134,6 +139,7 @@ func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expe
 	if err != nil {
 		return record, err
 	}
+	source.Walk = walk
 	selection := releaseBuildSelection{Owner: owner, ProfileName: name, Configuration: configuration, Request: request, Source: source, Version: version, Tag: plan.Tag, Component: b.Component, RunAlias: b.Run, Plan: recipes.plan, Workflow: recipes.workflow, Publication: recipes.publication}
 	key, err := buildRequestID(selection)
 	if err != nil {

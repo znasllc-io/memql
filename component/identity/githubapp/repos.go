@@ -171,19 +171,92 @@ func (c *Client) Compare(ctx context.Context, bearer, owner, repo, base, head st
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
 		return nil, false, errors.New("a compare needs a base and a head")
 	}
-	var payload struct {
-		Files []struct {
-			Filename         string `json:"filename"`
-			PreviousFilename string `json:"previous_filename"`
-		} `json:"files"`
-	}
-	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head)
-	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &payload, largeBody); err != nil {
+	payload, err := c.compare(ctx, bearer, owner, repo, base, head)
+	if err != nil {
 		return nil, false, err
 	}
-	seen := make(map[string]bool, len(payload.Files))
-	files = make([]string, 0, len(payload.Files))
-	for _, f := range payload.Files {
+	return payload.paths(), len(payload.Files) < compareFileLimit, nil
+}
+
+// Ancestry is what a compare says about two commits' history as well as about
+// their files.
+type Ancestry struct {
+	// Ancestor is true when base is a PROPER ancestor of head: GitHub answered
+	// status "ahead" with behind_by 0, and named base itself as both the
+	// compare's base commit and the merge base. Only then is Files the change
+	// from base to head. A compare is three-dot, a diff from the merge base,
+	// so for a base that is not an ancestor (history rewritten, a sibling
+	// branch) the list would leave out the base's own changes.
+	Ancestor bool
+	// Identical is true when base and head are the same commit.
+	Identical bool
+	// Files are the paths that differ, a rename contributing both of its paths.
+	Files []string
+	// Complete is false at 300 files, where GitHub stops listing.
+	Complete bool
+}
+
+// CompareAncestry reads the same compare as Compare and also answers whether
+// base is an ancestor of head. Two decisions rest on it: a push run superseding
+// a waiting run of an older commit of the same branch, and a push run carrying
+// forward a verified step from an earlier commit (component/pipelinerun). Both
+// must refuse anything but a proven ancestor, so a stale read, a rewritten
+// history or a commit on another branch never cancels work or stands in for it.
+//
+// Base and head must be whole commit hashes: the merge base GitHub names is
+// compared with base exactly, and an abbreviated base could never prove it.
+func (c *Client) CompareAncestry(ctx context.Context, bearer, owner, repo, base, head string) (Ancestry, error) {
+	if !commitTreeHash.MatchString(base) || !commitTreeHash.MatchString(head) {
+		return Ancestry{}, errors.New("an ancestry compare needs two whole commit hashes")
+	}
+	payload, err := c.compare(ctx, bearer, owner, repo, base, head)
+	if err != nil {
+		return Ancestry{}, err
+	}
+	a := Ancestry{Files: payload.paths(), Complete: len(payload.Files) < compareFileLimit}
+	switch {
+	case payload.Status == "identical" && payload.AheadBy == 0 && payload.BehindBy == 0 && base == head:
+		a.Identical = true
+	case payload.Status == "ahead" && payload.AheadBy > 0 && payload.BehindBy == 0 &&
+		payload.BaseCommit.SHA == base && payload.MergeBaseCommit.SHA == base:
+		a.Ancestor = true
+	}
+	return a, nil
+}
+
+// comparePayload is the part of GitHub's compare reply that Compare and
+// CompareAncestry read.
+type comparePayload struct {
+	Status     string `json:"status"`
+	AheadBy    int    `json:"ahead_by"`
+	BehindBy   int    `json:"behind_by"`
+	BaseCommit struct {
+		SHA string `json:"sha"`
+	} `json:"base_commit"`
+	MergeBaseCommit struct {
+		SHA string `json:"sha"`
+	} `json:"merge_base_commit"`
+	Files []struct {
+		Filename         string `json:"filename"`
+		PreviousFilename string `json:"previous_filename"`
+	} `json:"files"`
+}
+
+func (c *Client) compare(ctx context.Context, bearer, owner, repo, base, head string) (comparePayload, error) {
+	var payload comparePayload
+	endpoint := repoEndpoint(owner, repo) + "/compare/" + escapePath(base) + "..." + escapePath(head)
+	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &payload, largeBody); err != nil {
+		return comparePayload{}, err
+	}
+	return payload, nil
+}
+
+// paths is every changed path once, a rename contributing the path it left
+// and the path it joined.
+func (p comparePayload) paths() []string {
+	seen := make(map[string]bool, len(p.Files))
+	files := make([]string, 0, len(p.Files))
+	for _, f := range p.Files {
 		for _, name := range []string{f.Filename, f.PreviousFilename} {
 			if name != "" && !seen[name] {
 				seen[name] = true
@@ -191,7 +264,7 @@ func (c *Client) Compare(ctx context.Context, bearer, owner, repo, base, head st
 			}
 		}
 	}
-	return files, len(payload.Files) < compareFileLimit, nil
+	return files
 }
 
 // CommitForRef answers the commit a ref names, and its message

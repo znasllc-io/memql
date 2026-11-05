@@ -122,11 +122,7 @@ type fakeRepo struct {
 	tags              map[string]string // "tags/<name>" -> sha
 	commits           map[string]bool   // the commits a tarball exists for
 	changed           []string          // every compare's answer
-	// A train's GitHub: the files each commit holds, and its pull requests.
-	commitFiles map[string]map[string][]byte
-	trainPRs    map[int]*fakeTrainPR
-	nextPR      int
-	files       fstest.MapFS
+	files             fstest.MapFS
 }
 
 // checkWrite is one check-run write, as GitHub received it.
@@ -420,6 +416,21 @@ func (h githubAt) Compare(_ context.Context, token, repository, base, head strin
 		return nil, false, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare/" + base + "..." + head}
 	}
 	return slices.Clone(r.changed), true, nil
+}
+
+// CompareAncestry proves nothing. The fake holds commits and no history, so it
+// cannot show one commit an ancestor of another: a push here never supersedes a
+// waiting push run (component/pipelinerun/supersede.go) and never carries a step
+// forward (component/pipelinerun/carry.go). A compare that proves nothing is
+// GitHub's 404, which the driver reads as "no source" and never as a failure.
+func (h githubAt) CompareAncestry(_ context.Context, token, repository, base, head string) (githubapp.Ancestry, error) {
+	g := h.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, err := g.repo(token, repository); err != nil {
+		return githubapp.Ancestry{}, err
+	}
+	return githubapp.Ancestry{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare/" + base + "..." + head}
 }
 
 func (h githubAt) CommitTree(_ context.Context, _, _, _ string) (string, error) {

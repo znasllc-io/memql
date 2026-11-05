@@ -12,13 +12,14 @@
 # running at all. A team absorbs that: another member reviews. It also survives
 # the org growing, which a list of usernames does not.
 
-# RELEASE TRAINS GIVE EVERY PATH TO THE OWNER (2026-10-29, the switch in
-# docs/internal/ops/ruleset-baseline.md, step 2). Pull requests no longer
-# merge one at a time: a train lands them through ONE App-authored pull
-# request, which the owner can approve because they did not author it. So
-# only the owner's review should count, and the catch-all moves from
-# human-developers to human-lead-developers, today the owner alone. It stays
-# a team for the reason above.
+# EVERY PATH BELONGS TO THE OWNER. The catch-all moved from human-developers
+# to human-lead-developers, today the owner alone, on 2026-10-29, when release
+# trains landed pull requests through one App-authored pull request the owner
+# approved (docs/internal/ops/ruleset-baseline.md). Trains were removed on
+# 2026-11-05: the owner pushes to `main`, with pull requests off
+# (docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md), so any pull
+# request that does arrive is still the owner's to review. It stays a team for
+# the reason above.
 *                        @znasllc-io/human-lead-developers
 
 # CI / workflows / supply-chain
