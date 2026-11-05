@@ -337,29 +337,35 @@ native assembly and publication contract. Deployment composition remains in
 
 MemQL uses a single long-lived branch: `main`.
 
-1. **A change lands by pushing to `main`, with no pull request and no CI of its
-   own** (the owner's decision, 2026-11-02; design record
-   [2026-11-02](docs/superpowers/specs/2026-11-02-nightly-release-from-main-design.md)).
-   Pull `main`, write the change and its tests, run the tests of what you touched,
-   pull again and resolve any conflict yourself, then push: the session that wrote
-   the change is the one that knows how to merge it. Work that is not ready stays
-   on a branch of its own. **Never force-push:** a ruleset with no bypass refuses
-   it, on `memql`, `memql-znas`, `memql-project` and `memql-fylo` alike.
+1. **A change lands by the owner pushing to `main`; pull requests are off** (the
+   owner's decision, 2026-11-05; design record
+   [2026-11-05](docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md)).
+   On `memql`, `memql-znas`, `memql-project` and `memql-fylo`, only the owner's
+   account can move `main` (`memql-fylo` also admits its main developer), so a
+   session pushes as the owner. Pull `main`, write the change and its tests, run
+   the tests of what you touched, pull again and resolve any conflict yourself,
+   then push: the session that wrote the change is the one that knows how to
+   merge it. Work that is not ready stays on a branch of its own. **Never
+   force-push:** a ruleset with no bypass refuses it, the owner included.
 
-   **Nothing tests `main` until the release does,** so a broken `main` stops every
-   session and the night's release. Fix it or revert it at once, whoever broke it.
-   Until production's delivery policy declines it (design record, D6), each push
-   also starts a full run, so push finished work, not every commit.
+   **Every push to `main` runs the full pipeline, and nothing tests a change
+   before it lands,** so a broken `main` stops every session and every release.
+   Fix it or revert it at once, whoever broke it. Where the installation opts in,
+   as production does, a burst of pushes runs the newest commit (a newer push
+   supersedes the push runs waiting behind the one executing), and a push run
+   reuses an ancestor's verified step whose inputs did not change, at most 24
+   hours old. Push finished work, not every commit.
 
-2. **A release leaves once a day, and by hand.** Where a repository sets
-   `source: main` in `MEMQL_PIPELINES_TRAINS`
-   ([pipelines.md](docs/public/operate/pipelines.md#releasing-from-main)), a train
-   branches off `main`, runs everything, and lands by the owner's approval or by
-   itself. A failure re-runs its failed steps once and then holds for a person, who
-   pushes the fix to the train's branch. Forks and Dependabot still use pull
-   requests, which a person merges once their check is green;
-   `scripts/dev/merge-as-owner.sh` remains for that. A session never reviews or
-   approves a pull request: it acts on GitHub under the owner's account.
+2. **Releases and deploys are done by hand; there are no release trains**
+   (removed 2026-11-05). A release is prepared in MemQL OS (Pipelines > Releases >
+   Cut release) from the newest commit on `main` whose `MemQL / memql / push` check
+   passed, looking back up to 20 commits, so `main` need not sit still; only a
+   cluster owner can cut one ([release-cutting.md](docs/public/operate/release-cutting.md)).
+   Deploying to the production installation follows memql-znas `docs/instance.md`,
+   "Releasing and deploying by hand": pin, sync, verify, and roll back by reverting
+   the pin. With pull requests off, Dependabot cannot propose updates; dependency
+   bumps are pushed like any other change. A session never reviews or approves a
+   pull request: it acts on GitHub under the owner's account.
 3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
    the DSL.** For Go seams, wire contracts, gRPC messages and env vars: fix
    MemQL and the consumer at once and delete what is no longer needed. The
