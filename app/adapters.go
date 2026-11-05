@@ -357,6 +357,14 @@ func (a *CampaignsEngineAdapter) OrganizationCapable(ctx context.Context, accoun
 	return a.Engine.OrganizationCapable(ctx, account, verb, resource)
 }
 
+// InvokeAIChatWithFilteredTools is the engine's bounded tool loop, for the one
+// campaigns step that calls a model: an email composition run
+// (component/campaigns/compose_run.go), whose call on the Apps route is one
+// app session that takes the step whole.
+func (a *CampaignsEngineAdapter) InvokeAIChatWithFilteredTools(ctx context.Context, templateID string, data map[string]any, toolNames []string) (string, error) {
+	return a.Engine.InvokeAIChatWithFilteredTools(ctx, templateID, data, toolNames)
+}
+
 // campaignEmailSender resolves the email sender off the integration
 // registry at SEND time (memql#3348), mirroring outbound.EmailTransport:
 // on a booting node the plug-in registry may not be populated yet, so a

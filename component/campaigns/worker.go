@@ -206,6 +206,12 @@ type Worker struct {
 	digestSweepEvery time.Duration
 	sweepDoneCh      chan struct{}
 
+	// materialFiler files an email composition's material in its owner's
+	// Library for the composer's session (compose_run.go), installed by the
+	// application where object storage is resolved. Nil means this node cannot
+	// run a composition that has files. Guarded by mu.
+	materialFiler MaterialFiler
+
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	startOnce   sync.Once

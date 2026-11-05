@@ -78,6 +78,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "composeContext", Description: "What a running email composition writes into: its layout, brand slots, material pictures and picture budget. Saves nothing.", Handler: w.handleComposeContext},
 		{Name: "composeRender", Description: "Render a running email composition in its brand-applied layout, with its issues. Saves nothing.", Handler: w.handleComposeRender},
 		{Name: "composeSubmit", Description: "Save a running email composition as its template's draft and finish it. Never publishes.", Handler: w.handleComposeSubmit},
+		{Name: "runComposition", Description: "Run an email composition, the step of the composeEmailRun template: file its material, hand it with three tools to the email composer on the Apps route, and settle the composition when the composer is done. Never publishes.", Handler: w.handleRunComposition},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
