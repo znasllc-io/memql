@@ -8,7 +8,7 @@
   - **B**: Fylo's eleven emails (Welcome 1 and 2, Stage B 1 to 9) composed with A, carried to production with D, and wired into their audience, sender and journeys.
   - **C**: creating a template from the OS without waiting, and autosave into the template.
 - **Builds on:** `2026-10-11-email-layouts-automations-design.md` (the email document, the four built-in layouts, journeys) and `2026-10-11-materializer-front-door-design.md` (whose ruling for emails this spec changes; see section 9).
-- **Deadline context:** Fylo's engagement closes 2026-11-20. A and D should be live on os.memql.znas.io by about 2026-11-13, leaving B a week.
+- **Deadline context:** Fylo's engagement closes 2026-11-20. A and D should be live on the production installation by about 2026-11-13, leaving B a week.
 
 ## In plain terms
 
@@ -319,7 +319,7 @@ The material stays outside the repository, as that harness requires.
 
 ## 7. Delivery
 
-- The work ships in an engine release; os.memql.znas.io is upgraded to it through memql-znas, as its other engine bumps are.
+- The work ships in an engine release; the production installation is upgraded to it through its instance repository, as its other engine bumps are.
 - Target: in production by about 2026-11-13, beside D, so B has a week before 2026-11-20.
 
 ## 8. Not in A
