@@ -2842,10 +2842,26 @@ Cluster > Updates, including `proposeOverlay` and
 
 **Stored rows.** No production row is purged. The three concepts are retired in
 the concept-field ledger with waivers: nothing registers or writes them any
-more, so their rows are inert history. `onlyStages` is stripped from
-`v1:pipelines:run` by `20261105043000_pipelines_run_only_stages_retired`,
-because a run row still carrying it would refuse its next write once the field
-is no longer declared.
+more, so their rows are inert history. `v1:pipelines:run.onlyStages` is retired
+with a waiver too. A run row still carrying it would refuse its next write once
+the field is no longer declared, but its only writer was the automatic deploy's
+verification run, and production never ran an automatic deploy: on 2026-11-05 it
+held no `v1:pipelines:pipelineDeployment` row and none of its newest 50 runs
+carried the key.
+
+0.31.15 shipped a repairing migration instead,
+`20261105043000_pipelines_run_only_stages_retired`, and 0.31.16 withdrew it
+before production ran it. Its one `UPDATE` tests `payload ? 'onlyStages'`, which
+reads every stored run version; a run rewrites itself on each 30 s lease renewal
+at about 76 KB a version, so production held an estimated 150,000 to 250,000 of
+them. The migration pool keeps pgdriver's 10 s read deadline, and a statement cut
+off there keeps the runner's lock (memql#5604), the stranding
+`database-reliability.md` in the installation repository records for 2026-10-30;
+every retry would have scanned again and stranded it again. A database that ran
+0.31.15 keeps the migration in its ledger; nothing reads that row, and the waiver
+holds there as everywhere. A retirement on a concept with a long history that
+does need repair is a batched Go migration, as
+`20260921000000_module_readiness_history_collapse.go` is.
 
 **The head branch stays on the step wire.** `StepRequest.HeadBranch` and
 `StepRun.HeadBranch` selected the train admission class; they now decide

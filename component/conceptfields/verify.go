@@ -93,6 +93,13 @@ func (r Result) Problem() string {
 				"   WHERE concept = '<concept>' AND payload ? '<field>'` --\n" +
 				"and every version, because a row's history is its versions.\n" +
 				"20260908010000_cluster_status_retired.up.sql is the worked example.\n\n" +
+				"That one statement must finish inside the migration pool's 10 s read deadline on the\n" +
+				"LARGEST installation, or the runner keeps its lock and every retry strands it again\n" +
+				"(memql#5604). `payload ? '<field>'` reads every stored version, so measure the concept's\n" +
+				"history first: a concept rewritten every few seconds (v1:pipelines:run renews its lease\n" +
+				"every 30 s) needs a batched Go migration such as\n" +
+				"20260921000000_module_readiness_history_collapse.go, or a waiver when nothing wrote the\n" +
+				"field there.\n\n" +
 				"A waiver is for a retirement that genuinely needs no migration: nothing ever wrote the\n" +
 				"field, or the concept itself is gone. Write the reason; a no-op migration in the\n" +
 				"migrations directory would be a lie told to whoever reads it next.\n")
