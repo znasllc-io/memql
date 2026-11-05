@@ -22,10 +22,11 @@ var builtinCatalog = []struct {
 }
 
 // builtinTheme is the neutral example brand's palette and fonts, which the
-// four layouts share; the Confirmation puts its second colour on the canvas.
+// four layouts share: a grey scale, so the layouts are structure and a brand
+// kit supplies the colour.
 var builtinTheme = Theme{
-	Page: "#eef0f3", Canvas: "#ffffff", Primary: "#1f5f8b", Secondary: "#5b8fb9", Accent: "#d2322d",
-	Tint: "#f6f4ef", Text: "#1c1c1c", Muted: "#696e77", HeadingFont: "Georgia", BodyFont: "Arial",
+	Page: "#f1f1f1", Canvas: "#ffffff", Primary: "#2f2f2f", Secondary: "#595959", Accent: "#3d3d3d",
+	Tint: "#f5f5f5", Text: "#1c1c1c", Muted: "#666666", HeadingFont: "Georgia", BodyFont: "Arial",
 }
 
 func TestLayoutsCatalog(t *testing.T) {
@@ -153,12 +154,8 @@ func TestLayoutsAreNeutral(t *testing.T) {
 	for _, info := range Layouts() {
 		d := info.Document
 		t.Run(info.ID, func(t *testing.T) {
-			wantTheme := builtinTheme
-			if info.ID == "builtin:confirmation" {
-				wantTheme.Canvas = builtinTheme.Secondary
-			}
-			if d.Theme != wantTheme {
-				t.Errorf("theme: want %+v, got %+v", wantTheme, d.Theme)
+			if d.Theme != builtinTheme {
+				t.Errorf("theme: want %+v, got %+v", builtinTheme, d.Theme)
 			}
 			if d.Theme.HeadingFont != "Georgia" || d.Theme.BodyFont != "Arial" || d.Theme.WebFonts {
 				t.Errorf("fonts must be Georgia and Arial with no web font link, got %q and %q (webFonts %v)", d.Theme.HeadingFont, d.Theme.BodyFont, d.Theme.WebFonts)
@@ -229,16 +226,16 @@ func roleList(blocks []Block, container string) []string {
 // Appendix B lists them: brand blocks keep their content when a person or the
 // model fills a layout, content blocks are what gets written.
 var builtinRoles = map[string]string{
-	"builtin:confirmation": "top=brand logo=brand rule-top=brand headline=content subhead=content hero=content confirm=content note=content rule-bottom=brand footer=brand",
+	"builtin:confirmation": "panel=content top=brand logo=brand rule-top=brand headline=content subhead=content hero=content confirm=content note=content rule-bottom=brand footer=brand",
 	"builtin:letter": "logo=brand letter=content headline=content body=content cta=content " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
-		"rule-1=brand promo=brand promo-space=brand promo-title=brand promo-text=brand promo-picture=brand " +
+		"rule-1=brand promo=content promo-space=content promo-title=content promo-text=content promo-picture=content " +
 		"follow=brand social=brand rule-2=brand footer=brand",
 	"builtin:article": "logo=brand banner=content body=content intro=content highlight=content article=content " +
-		"question=brand question-more=brand ask=content " +
+		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
 		"rule=brand footer=brand",
-	"builtin:spotlight": "logo=brand spotlight=content message-box=content message=content cta=content follow=brand social=brand footer=brand",
+	"builtin:spotlight": "logo=brand spotlight=content message-box=content message=content cta=content social=brand footer=brand",
 }
 
 func TestLayoutsSplitBrandAndContent(t *testing.T) {
@@ -273,13 +270,8 @@ func TestLayoutsSplitBrandAndContent(t *testing.T) {
 		})
 	}
 	confirmation, _ := Layout("builtin:confirmation")
-	var confirm *Block
-	for i := range confirmation.Blocks {
-		if confirmation.Blocks[i].ID == "confirm" {
-			confirm = &confirmation.Blocks[i]
-		}
-	}
-	if confirm == nil || confirm.Type != typeButton || confirm.Href != TagConfirmURL {
+	confirm := blockByID(t, confirmation, "confirm")
+	if confirm.Type != typeButton || confirm.Href != TagConfirmURL {
 		t.Fatalf("the confirmation button must link to %s, got %+v", TagConfirmURL, confirm)
 	}
 }
@@ -295,7 +287,7 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 		"builtin:confirmation": "image_missing:logo image_missing:hero link_missing:footer",
 		"builtin:letter": "image_missing:logo link_missing:cta image_missing:signature-photo image_missing:signature-name " +
 			"image_missing:promo-picture link_missing:social link_missing:social link_missing:social link_missing:footer",
-		"builtin:article": "image_missing:logo image_missing:banner link_missing:ask image_missing:signature-photo image_missing:signature-name " +
+		"builtin:article": "image_missing:logo image_missing:banner link_missing:reply-button image_missing:signature-photo image_missing:signature-name " +
 			"link_missing:footer",
 		"builtin:spotlight": "image_missing:logo image_missing:spotlight link_missing:cta " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",

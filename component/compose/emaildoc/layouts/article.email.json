@@ -3,14 +3,14 @@
   "preheader": "Pick one and try it tomorrow.",
   "layout": "builtin:article",
   "theme": {
-    "page": "#eef0f3",
+    "page": "#f1f1f1",
     "canvas": "#ffffff",
-    "primary": "#1f5f8b",
-    "secondary": "#5b8fb9",
-    "accent": "#d2322d",
-    "tint": "#f6f4ef",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
     "text": "#1c1c1c",
-    "muted": "#696e77",
+    "muted": "#666666",
     "headingFont": "Georgia",
     "bodyFont": "Arial"
   },
@@ -83,36 +83,38 @@
       ]
     },
     {
-      "id": "question",
-      "type": "heading",
+      "id": "reply",
+      "type": "section",
       "role": "brand",
-      "text": "Got a question about this?",
-      "size": 21.3,
-      "lineHeight": 10.65,
-      "color": "primary",
-      "italic": true,
-      "weight": 700
-    },
-    {
-      "id": "question-more",
-      "type": "heading",
-      "role": "brand",
-      "text": "Write to us.",
-      "size": 21.3,
-      "lineHeight": 10.65,
-      "color": "secondary",
-      "italic": true,
-      "weight": 700
-    },
-    {
-      "id": "ask",
-      "type": "button",
-      "role": "content",
-      "size": 20.3,
-      "color": "primary",
-      "width": 305,
-      "label": "Ask our team",
-      "paddingY": 11
+      "blocks": [
+        {
+          "id": "reply-heading",
+          "type": "heading",
+          "text": "Got a question about this?",
+          "size": 21.3,
+          "lineHeight": 24,
+          "color": "primary",
+          "italic": true,
+          "weight": 700
+        },
+        {
+          "id": "reply-button",
+          "type": "button",
+          "size": 20.3,
+          "color": "primary",
+          "width": 305,
+          "label": "Write to us",
+          "paddingY": 11
+        },
+        {
+          "id": "reply-note",
+          "type": "text",
+          "text": "We read every reply.",
+          "size": 14,
+          "lineHeight": 16,
+          "align": "center"
+        }
+      ]
     },
     {
       "id": "signature",
