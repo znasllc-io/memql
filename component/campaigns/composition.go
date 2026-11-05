@@ -114,7 +114,10 @@ func compositionFromRow(row map[string]any) (composition, bool) {
 // writeComposition replaces a template's composition and nothing else: a new
 // row version, under the template's lock, that writes the stored content back
 // as it is (the status included). It answers the new revision.
-func (w *Worker) writeComposition(ctx context.Context, templateID string, c composition) (time.Time, error) {
+//
+// It authorizes for itself: the stored template must belong to accountID, and
+// the caller must be able to write templates in it (mayWriteTemplates).
+func (w *Worker) writeComposition(ctx context.Context, accountID, templateID string, c composition) (time.Time, error) {
 	object, err := c.object()
 	if err != nil {
 		return time.Time{}, err
@@ -133,6 +136,12 @@ func (w *Worker) writeComposition(ctx context.Context, templateID string, c comp
 	}
 	if len(rows) == 0 {
 		return time.Time{}, errTemplateNotFound
+	}
+	if !sameOrganization(accountID, str(rows[0], "accountId")) {
+		return time.Time{}, errTemplateOrgMoved
+	}
+	if !w.mayWriteTemplates(ctx, accountID) {
+		return time.Time{}, errTemplateNeedsWrite
 	}
 	prior := templateTime(rows[0]["createdAt"])
 	if prior.IsZero() {

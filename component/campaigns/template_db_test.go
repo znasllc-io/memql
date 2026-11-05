@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -902,5 +903,67 @@ func TestAStoredDraftTooLargeToSendIsToldFromATextEmail(t *testing.T) {
 			t.Errorf("%s: html %d bytes, expects HTML %v, lacks its HTML %v; want html %v, expects %v, lacks %v",
 				c.name, len(tmpl.HTMLBody), tmpl.ExpectsHTML, tmpl.lacksItsHTML(), c.wantHTML, c.wantExpects, c.wantLacks)
 		}
+	}
+}
+
+// A save keeps the template's composition as stored (the engine is shown it
+// written back), and a save that read the template before the composition was
+// written holds a stale revision.
+func TestASaveKeepsTheCompositionAndAStaleRevisionIsRefused(t *testing.T) {
+	w := newLayoutWorld(t)
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Composed client")
+	fresh := memql.ContextWithFreshRead(w.owner)
+
+	composed := composition{
+		GoalID: "goal-" + w.suffix, State: "writing", StartedAt: time.Now().UTC().Truncate(time.Millisecond),
+		Request: compositionRequest{LayoutID: "builtin:article", Name: "Spring", Description: "Spring news", FileIDs: []string{"f1"}},
+		Notes:   []string{"menu.xlsx was left out because it holds no readable text."},
+	}
+	id, created, _, err := w.workers[0].createTemplateFromLayout(w.owner, account, "Composed", "builtin:article", &composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() map[string]any {
+		rows, err := w.workers[1].store.rows(fresh, call("query", "templateById", arg{"templateId", id}))
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("templateById: %v %v", rows, err)
+		}
+		return rows[0]
+	}
+	if got, ok := compositionFromRow(read()); !ok || got.GoalID != composed.GoalID {
+		t.Fatalf("composition after create = %+v %v", got, ok)
+	}
+
+	composed.State = "done"
+	written, err := w.workers[0].writeComposition(w.owner, account, id, composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A save whose revision was read before the composition landed is refused.
+	doc := readyConfirmation(t)
+	_, err = w.workers[1].handleSaveTemplate(w.owner, map[string]any{
+		"templateId": id, "accountId": account, "name": "Composed", "content": doc,
+		"expectedRevision": created.Format(time.RFC3339Nano), "action": "save",
+	}, 0)
+	if !errors.Is(err, errTemplateChanged) {
+		t.Fatalf("a stale save: err = %v", err)
+	}
+
+	// A save at the current revision, with new content, leaves the composition.
+	if _, err := w.workers[1].handleSaveTemplate(w.owner, map[string]any{
+		"templateId": id, "accountId": account, "name": "Renamed", "content": doc,
+		"expectedRevision": written.Format(time.RFC3339Nano), "action": "save",
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	row := read()
+	if str(row, "name") != "Renamed" {
+		t.Fatalf("the save did not land: %v", str(row, "name"))
+	}
+	got, ok := compositionFromRow(row)
+	if !ok || got.State != "done" || got.GoalID != composed.GoalID || len(got.Notes) != 1 || len(got.Request.FileIDs) != 1 {
+		t.Errorf("composition after the save = %+v %v", got, ok)
 	}
 }

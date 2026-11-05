@@ -393,6 +393,9 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 		if content.sourceArtifactID == "" {
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
 		}
+		// A save does not touch the composition: the stored one is written back
+		// explicitly, not left to an omitted argument.
+		content.composition = storedTemplate(row).composition
 		same = sameTemplate(row, content)
 		// The same content already saved, or published, answers with the receipt
 		// it already has. This also makes an autosave of unchanged bytes inert.

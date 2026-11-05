@@ -183,7 +183,7 @@ func TestWriteCompositionKeepsTheContent(t *testing.T) {
 
 	done := start
 	done.State, done.FinishedAt = "done", templateNow.Add(time.Minute)
-	revision, err := tw.w.writeComposition(importCtx(), id, done)
+	revision, err := tw.w.writeComposition(importCtx(), templateOrg, id, done)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,51 @@ func TestWriteCompositionKeepsTheContent(t *testing.T) {
 	if !held {
 		t.Errorf("the template lock was not taken: %v", tw.gate.keys)
 	}
-	if _, err := tw.w.writeComposition(importCtx(), "missing", done); err == nil {
+	if _, err := tw.w.writeComposition(importCtx(), templateOrg, "missing", done); err == nil {
 		t.Error("a missing template was written")
+	}
+}
+
+func TestWriteCompositionIsRefusedForAnotherOrganizationOrWithoutPermission(t *testing.T) {
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	c := sampleComposition()
+	id, _, _, err := tw.w.createTemplateFromLayout(importCtx(), templateOrg, "Spring news", "builtin:article", &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes := len(tw.engine.writes())
+	if _, err := tw.w.writeComposition(importCtx(), "other-org", id, c); !errors.Is(err, errTemplateOrgMoved) {
+		t.Errorf("another organization: err = %v", err)
+	}
+	tw.engine.capable = func(string, string, string) bool { return false }
+	if _, err := tw.w.writeComposition(importCtx(), templateOrg, id, c); !errors.Is(err, errTemplateNeedsWrite) {
+		t.Errorf("without permission: err = %v", err)
+	}
+	if len(tw.engine.writes()) != writes {
+		t.Error("a refused write wrote something")
+	}
+}
+
+func TestASaveWritesTheStoredCompositionBack(t *testing.T) {
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	c := sampleComposition()
+	id, _, _, err := tw.w.createTemplateFromLayout(importCtx(), templateOrg, "Spring news", "builtin:confirmation", &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := tw.engine.fakeEngine.template
+	revision := row["createdAt"].(string)
+	args := saveTemplateArgs(readyConfirmation(t), func(a map[string]any) {
+		a["templateId"], a["expectedRevision"] = id, revision
+	})
+	if _, err := tw.save(args); err != nil {
+		t.Fatal(err)
+	}
+	last := tw.engine.writes()
+	_, written := parseRenderedCall(last[len(last)-1].query)
+	if _, named := written["composition"].(map[string]any); !named {
+		t.Errorf("the save did not name the composition: %v", written["composition"])
 	}
 }
