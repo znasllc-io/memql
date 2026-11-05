@@ -80,10 +80,14 @@ const DEFAULTS = "body{margin:0;padding:16px;font:15px/1.6 system-ui,sans-serif;
  * whole page). The box has one child, so the email keeps its own order.
  */
 export const END_FIRST_CLASS = "email-preview-end-first";
+// A reversed column starts at its end, which is what a long email needs. A
+// short one would sit at the bottom with blank space above it; the auto
+// margin on its start side takes that space, so it sits at the top. When the
+// email overflows there is no free space and the margin is zero.
 const END_FIRST_CSS =
   `html,body{height:100%}body{box-sizing:border-box;overflow:hidden}` +
   `.${END_FIRST_CLASS}{box-sizing:border-box;height:100%;overflow:auto;display:flex;flex-direction:column-reverse}` +
-  `.${END_FIRST_CLASS}>div{flex:none}`;
+  `.${END_FIRST_CLASS}>div{flex:none;margin-bottom:auto}`;
 
 /** Keep an email readable as it is sent, without running it or loading anything it names. */
 export function emailPreview(html: string, { end = false }: { end?: boolean } = {}): string {
