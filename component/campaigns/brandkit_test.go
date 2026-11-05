@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -65,6 +66,9 @@ type brandEngine struct {
 	// kits is each organization's stored kit as brandKitForAccount answers it,
 	// keyed by the bare organization id the query is called with.
 	kits map[string]map[string]any
+	// failLibrary, when set, is what the Library's two named reads fail with:
+	// the database not answering.
+	failLibrary error
 }
 
 func (e *brandEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -81,6 +85,9 @@ func (e *brandEngine) Execute(ctx context.Context, q string) (any, error) {
 		}
 		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query libraryArtifactById"), strings.HasPrefix(q, "query libraryFileById"):
+		if e.failLibrary != nil {
+			return nil, e.failLibrary
+		}
 		if e.pictureOwner != "" {
 			if ac, _ := auth.AccessFromContext(ctx); ac == nil || ac.UserId != e.pictureOwner {
 				return rowsEnvelope(nil), nil
@@ -526,6 +533,49 @@ func TestSaveBrandKitStoresArtifactPicturesAsData(t *testing.T) {
 	}
 	if writes := other.engine.writes(); len(writes) != 0 {
 		t.Fatalf("it wrote %+v", writes)
+	}
+}
+
+// A picture that cannot be read just now -- storage or the database did not
+// answer -- says so, and that trying again is the way on. It is not a picture
+// to choose again, which is what a picture that is not a PNG, JPEG or GIF of up
+// to 1 MiB of the caller's own is told. Nothing is written either way, and the
+// cause is never shown.
+func TestSaveBrandKitTellsATransientPictureReadApart(t *testing.T) {
+	const (
+		justNow = "logo.wide: the picture could not be read just now. Try again."
+		choose  = "logo.wide: the picture could not be read. Choose a PNG, JPEG or GIF of up to 1 MiB that you uploaded"
+		cause   = "dial tcp 10.0.0.9:443: i/o timeout"
+	)
+	for _, tc := range []struct {
+		name  string
+		setup func(bw *brandWorld)
+		want  string
+	}{
+		{"storage did not answer", func(bw *brandWorld) { bw.blobs.err = errors.New(cause) }, justNow},
+		{"the database did not answer", func(bw *brandWorld) { bw.engine.failLibrary = errors.New(cause) }, justNow},
+		{"somebody else's upload", func(bw *brandWorld) { bw.engine.pictureOwner = "someone-else" }, choose},
+		{"not a picture an email can carry", func(bw *brandWorld) {
+			bw.blobs.objects["library/"+testOwner+"/file-wide-art/wide-art"] = []byte("not a picture")
+		}, choose},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bw := newBrandWorld(t)
+			bw.addPicture("wide-art", previewPNG(t, 6, 2))
+			tc.setup(bw)
+			kit := testBrandKit(t)
+			part(kit, "logo")["wide"] = "artifact:wide-art"
+			_, err := bw.save(kit, "")
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if strings.Contains(err.Error(), cause) {
+				t.Error("the cause reached the person")
+			}
+			if writes := bw.engine.writes(); len(writes) != 0 {
+				t.Fatalf("it wrote %+v", writes)
+			}
+		})
 	}
 }
 

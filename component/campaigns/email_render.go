@@ -351,10 +351,15 @@ func (a artifactImages) ResolveImage(ctx context.Context, artifactID string) (em
 	return image, err
 }
 
+// errPictureUnreachable marks a picture that could not be read because the
+// database or storage did not answer, which another try may get past; every
+// other failure of read is the picture's own.
+var errPictureUnreachable = errors.New("the Library or its storage did not answer")
+
 func (a artifactImages) read(ctx context.Context, artifactID string) (emaildoc.Image, error) {
 	ref, refusal, err := a.w.store.LibraryFileForArtifact(ctx, artifactID)
 	if err != nil {
-		return emaildoc.Image{}, err
+		return emaildoc.Image{}, fmt.Errorf("%w: %w", errPictureUnreachable, err)
 	}
 	if refusal != "" {
 		return emaildoc.Image{}, errors.New(refusal)
@@ -374,6 +379,9 @@ func (a artifactImages) read(ctx context.Context, artifactID string) (emaildoc.I
 	}
 	data, err := a.w.readBlobUpTo(ctx, ref.BlobURL, ref.OwnerUserID, emaildoc.MaxImageBytes)
 	if err != nil {
+		if !errors.Is(err, errBlobNoLocation) && !errors.Is(err, errBlobNotOwners) {
+			err = fmt.Errorf("%w: %w", errPictureUnreachable, err)
+		}
 		return emaildoc.Image{}, fmt.Errorf("reading file %q: %w", ref.FileID, err)
 	}
 	if err := compose.EmailImageData(data, ref.MimeType); err != nil {

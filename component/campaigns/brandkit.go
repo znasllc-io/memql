@@ -477,6 +477,11 @@ func (w *Worker) fillKitPictures(ctx context.Context, sent sentKit) (emaildoc.Br
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return emaildoc.BrandKit{}, ctxErr
 				}
+				// Storage or the database not answering is no reason to choose
+				// another picture; the cause is logged by ResolveImage.
+				if errors.Is(err, errPictureUnreachable) {
+					return emaildoc.BrandKit{}, fmt.Errorf("%s: the picture could not be read just now. Try again.", p.field)
+				}
 				return emaildoc.BrandKit{}, fmt.Errorf("%s: the picture could not be read. Choose a PNG, JPEG or GIF of up to 1 MiB that you uploaded", p.field)
 			}
 			uri = "data:" + picture.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(picture.Data)
