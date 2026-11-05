@@ -220,6 +220,9 @@ test("a published document compares equal despite key order and omitted empty va
   assert.ok(!sameEmail(gapped, ungapped));
   assert.ok(!sameEmail(readEmail(layout([{ id: "f", type: "footer", separator: "" }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }),
     "an empty separator is not the same as the default separator");
+  // A footer's lineGap is a plain number in the engine: 0 is written as no lineGap at all.
+  assert.ok(sameEmail(readEmail(layout([{ id: "f", type: "footer", lineGap: 0 }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }));
+  assert.ok(!sameEmail(readEmail(layout([{ id: "f", type: "footer", lineGap: 16 }])), { subject: "Hello", preheader: "Soon", layout: "builtin:article", theme, blocks: [{ id: "f", type: "footer" }] }));
   // A custom email: the engine always writes htmlBody, even when it is empty.
   assert.ok(sameEmail(readEmail('{"subject":"Plain","textBody":"Hello","htmlBody":""}'), { subject: "Plain", textBody: "Hello", htmlBody: "" }));
   assert.ok(sameEmail(readEmail('{"subject":"Plain","textBody":"Hello","htmlBody":""}'), { subject: "Plain", textBody: "Hello" }));
@@ -752,7 +755,7 @@ const everyBlock = (): unknown[] => [
   ] },
   { id: "follow", type: "social", ...edges, title: "Follow us", links: [{ network: "Example", href: "https://example.com/x", icon: "artifact:icon-1", width: 32 }, { network: "Mail", href: "mailto:hello@example.com" }], maxWidth: 300, gap: 8 },
   { id: "raw", type: "html", ...edges, html: "<p>Hello</p>" },
-  { id: "fine", type: "footer", ...edges, links: [{ label: "Unsubscribe", href: "{{unsubscribeUrl}}" }, { label: "Plain", href: "" }], lines: ["Acme Inc.", "1 Example Street"], background: "page", inset: [16, 16, 16, 16], maxWidth: 560, cellPadding: 8, size: 12, lineHeight: 18, letterSpacing: "0.01em", color: "muted", linkColor: "primary", separator: " | ", gap: 4, after: 8, font: "base" },
+  { id: "fine", type: "footer", ...edges, links: [{ label: "Unsubscribe", href: "{{unsubscribeUrl}}" }, { label: "Plain", href: "" }], lines: ["Acme Inc.\n1 Example Street", "Privacy"], lineGap: 16, background: "page", inset: [16, 16, 16, 16], maxWidth: 560, cellPadding: 8, size: 12, lineHeight: 18, letterSpacing: "0.01em", color: "muted", linkColor: "primary", separator: " | ", gap: 4, after: 8, font: "base" },
 ];
 
 test("the kitchen-sink document uses every key of every block type", () => {
@@ -904,6 +907,8 @@ const edgeCases: [string, Record<string, unknown>, Record<string, unknown>][] = 
   ["eight social links", { id: "x", type: "social", links: Array.from({ length: 8 }, () => ({ network: "n" })) }, { id: "x", type: "social", links: Array.from({ length: 9 }, () => ({ network: "n" })) }],
   ["twelve footer lines", { id: "x", type: "footer", lines: Array.from({ length: 12 }, () => "l".repeat(300)) }, { id: "x", type: "footer", lines: ["l".repeat(301)] }],
   ["separator", { id: "x", type: "footer", separator: "s".repeat(40) }, { id: "x", type: "footer", separator: "s".repeat(41) }],
+  ["footer line gap", { id: "x", type: "footer", lineGap: 200 }, { id: "x", type: "footer", lineGap: 201 }],
+  ["footer line gap in whole pixels", { id: "x", type: "footer", lineGap: 16 }, { id: "x", type: "footer", lineGap: 16.5 }],
   ["id", { id: "a".repeat(64), type: "divider" }, { id: "a".repeat(65), type: "divider" }],
   ["social network", { id: "x", type: "social", links: [{ network: "n".repeat(40) }] }, { id: "x", type: "social", links: [{ network: "n".repeat(41) }] }],
   ["footer link label", { id: "x", type: "footer", links: [{ label: "l".repeat(80) }] }, { id: "x", type: "footer", links: [{ label: "l".repeat(81) }] }],

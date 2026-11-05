@@ -159,7 +159,8 @@ type Block struct {
 	Columns        []Column    `json:"columns,omitempty"`
 	Title          string      `json:"title,omitempty"`
 	Links          []Link      `json:"links,omitempty"`
-	Lines          []string    `json:"lines,omitempty"`
+	Lines          []string    `json:"lines,omitempty"`   // footer: one paragraph each; a line break inside one breaks its line
+	LineGap        int         `json:"lineGap,omitempty"` // footer: pixels between the paragraphs of Lines; 0 writes them as one paragraph
 	Separator      *string     `json:"separator,omitempty"`
 	After          float64     `json:"after,omitempty"`
 	HTML           string      `json:"html,omitempty"` // as the author wrote it; Render splices safeMarkup(HTML), never HTML itself

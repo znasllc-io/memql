@@ -287,12 +287,21 @@ const heightField: Field = {
 listen(heightField);
 
 const linesControl = byId<HTMLTextAreaElement>("field-lines");
+/** Whether the selected footer spaces its lines as paragraphs (a lineGap): then a blank line, not a line break, starts the next entry. */
+const paragraphed = (): boolean => { const gap = selectedBlock()?.lineGap; return typeof gap === "number" && gap > 0; };
 const linesField: Field = {
   control: linesControl, notice: byId("field-lines-notice"), typed: true, key: blockKey("lines"),
-  // An empty line at the end is not a line of the footer (the engine would count it toward the twelve).
-  read: () => { const lines = linesControl.value.split("\n"); while (lines.length && lines[lines.length - 1] === "") lines.pop(); return lines; },
+  // An empty line at the end is not a line of the footer (the engine would count it toward the twelve). With a lineGap an
+  // entry is a paragraph, which may hold line breaks: paragraphs are told apart by the blank line between them.
+  read: () => {
+    const lines = paragraphed()
+      ? linesControl.value.split(/\n[ \t]*\n/).map(line => line.replace(/^\n+|\n+$/g, "")).filter(line => line !== "")
+      : linesControl.value.split("\n");
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    return lines;
+  },
   current: () => { const lines = selectedBlock()?.lines; return Array.isArray(lines) ? lines : []; },
-  show: value => { linesControl.value = (Array.isArray(value) ? value : []).map(str).join("\n"); },
+  show: value => { linesControl.value = (Array.isArray(value) ? value : []).map(str).join(paragraphed() ? "\n\n" : "\n"); },
   edit: fieldEdit("lines"),
   check: value => {
     const lines = value as string[];

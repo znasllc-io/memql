@@ -56,7 +56,7 @@ export const BLOCK_NAMES: Readonly<Record<BlockType, string>> = {
 const BLOCK_KEY_ORDER = [
   "id", "type", "role", "padding", "text", "size", "lineHeight", "listLineHeight", "gap", "color", "textColor", "linkColor", "background", "align",
   "italic", "weight", "font", "letterSpacing", "src", "alt", "width", "height", "href", "bleed", "label", "paddingY", "inset", "maxWidth",
-  "cellPadding", "stackBelow", "blocks", "columns", "title", "links", "lines", "separator", "after", "html",
+  "cellPadding", "stackBelow", "blocks", "columns", "title", "links", "lines", "lineGap", "separator", "after", "html",
 ] as const;
 const THEME_KEY_ORDER = ["page", "canvas", "primary", "secondary", "accent", "tint", "text", "muted", "headingFont", "bodyFont", "webFonts"] as const;
 /** Both modes in one list: each mode's keys keep the engine's order inside it. */
@@ -79,7 +79,7 @@ const OWN_FIELDS: Readonly<Record<BlockType, string>> = {
   section: "background inset maxWidth cellPadding blocks",
   columns: "background inset maxWidth gap stackBelow columns",
   social: "title links maxWidth gap",
-  footer: "links lines background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
+  footer: "links lines lineGap background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
   html: "html",
 };
 
@@ -548,7 +548,7 @@ export function editEmail(doc: EmailDocument, edit: EmailEdit): EmailDocument {
 // -- Comparing and inspecting -------------------------------------------------
 
 /** Keys the engine writes without a pointer and leaves out at zero (Go omitempty on a plain number). */
-const ZERO_IS_ABSENT: ReadonlySet<string> = new Set(["size", "lineHeight", "listLineHeight", "weight", "width", "height", "paddingY", "maxWidth", "stackBelow", "after"]);
+const ZERO_IS_ABSENT: ReadonlySet<string> = new Set(["size", "lineHeight", "listLineHeight", "weight", "width", "height", "paddingY", "maxWidth", "stackBelow", "after", "lineGap"]);
 
 /**
  * A value in the form two copies of the same email share: keys sorted, and
@@ -652,7 +652,8 @@ function fieldSchema(type: BlockType, field: string): Schema {
     case "blocks": return { type: "array", maxItems: 300, items: ref("block") };
     case "columns": return { type: "array", minItems: 1, maxItems: 4, items: ref("column") };
     case "links": return { type: "array", minItems: type === "social" ? 1 : 0, maxItems: 8, items: ref(type === "social" ? "socialLink" : "footerLink") };
-    case "lines": return { type: "array", maxItems: 12, items: { type: "string", maxLength: 300 } };
+    case "lines": return { type: "array", maxItems: 12, items: { type: "string", maxLength: 300 }, description: "One paragraph each. A line break inside one breaks its line." };
+    case "lineGap": return { type: "integer", minimum: 0, maximum: 200, description: "Pixels between the paragraphs of lines. Without it they are one paragraph, a line each." };
     case "separator": return { type: "string", maxLength: 40 };
     case "html": return { type: "string", maxLength: 65536 };
     default: throw new Error(`The email schema has no definition for the block field "${field}"`);

@@ -86,14 +86,21 @@
       "id": "reply",
       "type": "section",
       "role": "brand",
+      "cellPadding": 0,
       "blocks": [
         {
           "id": "reply-heading",
           "type": "heading",
+          "padding": [
+            0,
+            0,
+            5.35,
+            0
+          ],
           "text": "Got a question about this?",
           "size": 21.3,
-          "lineHeight": 24,
-          "color": "primary",
+          "lineHeight": 21.3,
+          "color": "secondary",
           "italic": true,
           "weight": 700
         },
@@ -104,15 +111,16 @@
           "color": "primary",
           "width": 305,
           "label": "Write to us",
-          "paddingY": 11
+          "paddingY": 8
         },
         {
           "id": "reply-note",
           "type": "text",
           "text": "We read every reply.",
-          "size": 14,
-          "lineHeight": 16,
-          "align": "center"
+          "size": 12,
+          "lineHeight": 22.4,
+          "align": "center",
+          "italic": true
         }
       ]
     },
@@ -179,7 +187,7 @@
       "size": 14.7,
       "lineHeight": 22.4,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -210,11 +218,11 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
-      ]
+      ],
+      "lineGap": 16
     }
   ]
 }

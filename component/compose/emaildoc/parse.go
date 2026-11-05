@@ -85,7 +85,7 @@ var (
 			"section":   "background inset maxWidth cellPadding blocks",
 			"columns":   "background inset maxWidth gap stackBelow columns",
 			"social":    "title links maxWidth gap",
-			"footer":    "links lines background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
+			"footer":    "links lines lineGap background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
 			"html":      "html",
 		}
 		keys := make(map[string]map[string]bool, len(own))
@@ -932,6 +932,9 @@ func blockProblem(b *Block) string {
 			return err.Error()
 		}
 	case typeFooter:
+		if b.LineGap < 0 || b.LineGap > 200 {
+			return rangeMessage("lineGap", 0, 200)
+		}
 		if len(b.Lines) > 12 {
 			return "a footer can have at most 12 lines"
 		}

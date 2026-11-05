@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 )
@@ -43,9 +44,11 @@ const brandUploadHint = "Upload pictures through the Brand page"
 // BrandPicture is the logo: a data: picture, its description and where it links.
 type BrandPicture struct{ Src, Alt, Href string }
 
-// BrandSignature is the signature band: a photo, the name as a picture or as
-// text (at most one of NameImage and NameText) and a title.
-type BrandSignature struct{ Photo, NameImage, NameText, Title string }
+// BrandSignature is the signature: its parts (a photo, the name as a picture or
+// as text, at most one of NameImage and NameText, and a title), and Picture, the
+// whole signature drawn as one picture. A kit may hold the parts, the picture
+// or both.
+type BrandSignature struct{ Photo, NameImage, NameText, Title, Picture string }
 
 // BrandFooter is the footer's lines, links and the separator between links.
 type BrandFooter struct {
@@ -90,9 +93,10 @@ type kitName struct {
 }
 
 type kitSignature struct {
-	Photo string   `json:"photo,omitempty"`
-	Name  *kitName `json:"name,omitempty"`
-	Title string   `json:"title,omitempty"`
+	Photo   string   `json:"photo,omitempty"`
+	Name    *kitName `json:"name,omitempty"`
+	Title   string   `json:"title,omitempty"`
+	Picture string   `json:"picture,omitempty"`
 }
 
 type kitFooter struct {
@@ -124,7 +128,7 @@ func (k BrandKit) JSON() ([]byte, error) {
 		Footer: kitFooter{Lines: k.Footer.Lines, Links: k.Footer.Links, Separator: k.Footer.Separator},
 	}
 	if s := k.Signature; s != nil {
-		sig := &kitSignature{Photo: s.Photo, Title: s.Title}
+		sig := &kitSignature{Photo: s.Photo, Title: s.Title, Picture: s.Picture}
 		switch {
 		case s.NameImage != "":
 			sig.Name = &kitName{Src: s.NameImage}
@@ -149,7 +153,7 @@ func (k BrandKit) JSON() ([]byte, error) {
 var (
 	kitKeys      = map[string]bool{"theme": true, "logo": true, "signature": true, "follow": true, "social": true, "footer": true, "reply": true}
 	logoKeys     = map[string]bool{"src": true, "alt": true, "href": true}
-	sigKeys      = map[string]bool{"photo": true, "name": true, "title": true}
+	sigKeys      = map[string]bool{"photo": true, "name": true, "title": true, "picture": true}
 	nameKeys     = map[string]bool{"src": true, "text": true}
 	footerKeys   = map[string]bool{"lines": true, "links": true, "separator": true}
 	replyKeys    = map[string]bool{"heading": true, "button": true, "note": true}
@@ -324,6 +328,12 @@ func parseKitSignature(raw json.RawMessage) (*BrandSignature, error) {
 	if problem := kitPicture(s.Photo); problem != "" {
 		return nil, fmt.Errorf("signature photo: %s", problem)
 	}
+	if s.Picture, err = kitText(fields, "picture", "signature"); err != nil {
+		return nil, err
+	}
+	if problem := kitPicture(s.Picture); problem != "" {
+		return nil, fmt.Errorf("signature picture: %s", problem)
+	}
 	name, ok, err := kitObject(fields["name"], "signature.name", nameKeys)
 	if err != nil {
 		return nil, err
@@ -495,12 +505,107 @@ func tidyColumns(b *Block) {
 	b.Columns = kept
 }
 
+// compactSignature reports whether a signature slot is the compact form, which
+// a kit's whole picture fills: columns or a section without a background of
+// its own. A band, a slot with a background (Letter's), always shows the parts.
+func compactSignature(slot *Block) bool {
+	return (slot.Type == typeColumns || slot.Type == typeSection) && slot.Background == ""
+}
+
+// signWithPicture fills a compact signature slot with the kit's whole picture:
+// the slot's blocks become one image, signature-picture, at the slot's full
+// content width. That is the width the slot has in the email: its inset and
+// maximum width framed the parts and are dropped (a section keeps its inset,
+// its margin, and loses its cell padding), so the picture spans what the slot
+// spans inside its padding, 552 pixels where it sits in the email's column.
+// The picture is as tall as its shape makes it at that width, and is named for
+// the title, else the name written as text, else "Signature". blocks is the
+// whole document, which says where the slot sits.
+func signWithPicture(blocks []Block, slot *Block, s *BrandSignature) {
+	width, pad, _ := slotRoom(blocks, canvasWidth, false, slot.ID)
+	slot.MaxWidth = 0
+	if slot.Type == typeColumns {
+		slot.Inset = nil
+	} else {
+		width = roomInside(width, pad, lengthsOr(slot.Inset, [4]float64{0, 24, 0, 24}))
+		pad = [4]float64{}
+		zero := 0.0
+		slot.CellPadding = &zero
+	}
+	w := int(math.Max(1, math.Min(canvasWidth, math.Floor(width-pad[1]-pad[3]))))
+	alt := "Signature"
+	switch {
+	case s.Title != "":
+		alt = s.Title
+	case s.NameText != "":
+		alt = s.NameText
+	}
+	h := float64((w + 1) / 2)
+	if pic, ok := pictureShape(s.Picture); ok {
+		h = float64(pic.scaledHeight(w))
+	}
+	picture := Block{ID: "signature-picture", Type: typeImage, Src: s.Picture, Alt: alt, Width: w, Height: h}
+	if slot.Type == typeColumns {
+		slot.Columns = []Column{{Width: 100, Blocks: []Block{picture}}}
+	} else {
+		slot.Blocks = []Block{picture}
+	}
+}
+
+// slotRoom finds the block with the id in blocks, which are written width
+// pixels wide (in a section or a column when inside), and returns the width it
+// is written in and its padding there, measured as the renderer measures them
+// (rows, section and columns).
+func slotRoom(blocks []Block, width float64, inside bool, id string) (float64, [4]float64, bool) {
+	for n, b := range blocks {
+		pad := padding(b, inside, inside && n == len(blocks)-1)
+		if b.ID == id {
+			return width, pad, true
+		}
+		switch b.Type {
+		case typeSection:
+			room := roomInside(width, pad, lengthsOr(b.Inset, [4]float64{0, 24, 0, 24}))
+			inner := math.Min(orNumber(b.MaxWidth, room), room) - 2*lengthOr(b.CellPadding, 24)
+			if w, p, ok := slotRoom(b.Blocks, inner, true, id); ok {
+				return w, p, true
+			}
+		case typeColumns:
+			room := roomInside(width, pad, lengthsOr(b.Inset, [4]float64{}))
+			content := math.Min(orNumber(b.MaxWidth, room), room)
+			for _, column := range b.Columns {
+				inner := math.Floor(column.Width*content/100) - 2*lengthOr(column.CellPadding, 0)
+				if w, p, ok := slotRoom(column.Blocks, inner, true, id); ok {
+					return w, p, true
+				}
+			}
+		}
+	}
+	return 0, [4]float64{}, false
+}
+
+// pictureShape reads the natural size of an embedded picture, as the renderer
+// reads it; ok is false for anything else.
+func pictureShape(src string) (picture, bool) {
+	prefix, encoded, found := strings.Cut(strings.TrimSpace(src), ",")
+	if !found || !strings.HasPrefix(prefix, "data:image/") || !strings.HasSuffix(prefix, ";base64") {
+		return picture{}, false
+	}
+	data, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return picture{}, false
+	}
+	pic := raster(strings.TrimSuffix(strings.TrimPrefix(prefix, "data:"), ";base64"), data, src)
+	return pic, pic.uri != "" && pic.width > 0
+}
+
 // ApplyBrand writes a kit into a copy of layout: the kit's theme replaces the
 // layout's and each brand slot, found by its id wherever it sits, takes the
 // kit's content. A slot the kit leaves empty is removed, and a kit slot the
 // layout does not have is not used. A text signature name replaces the name's
-// picture with a text block of the same id in the heading font. Content
-// blocks are never touched. The result is read back through JSON and Parse.
+// picture with a text block of the same id in the heading font. A kit's whole
+// signature picture fills a compact signature slot in place of the parts (see
+// signWithPicture); a band keeps the parts. Content blocks are never touched.
+// The result is read back through JSON and Parse.
 func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
 	if layout.Mode() != ModeLayout {
 		return Document{}, errors.New("this email is custom HTML, so it has no brand slots")
@@ -530,6 +635,8 @@ func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
 
 	if s := kit.Signature; s == nil {
 		removeBlock(blocks, SlotSignature)
+	} else if slot := findBlock(*blocks, SlotSignature); slot != nil && s.Picture != "" && compactSignature(slot) {
+		signWithPicture(*blocks, slot, s)
 	} else {
 		title := findBlock(*blocks, "signature-title")
 		fill("signature-photo", s.Photo != "", func(b *Block) { b.Src = s.Photo })
@@ -641,7 +748,7 @@ func BrandWarnings(ctx context.Context, kit BrandKit) []BrandWarning {
 func kitPictureBytes(kit BrandKit) int {
 	srcs := []string{kit.Logo.Src}
 	if s := kit.Signature; s != nil {
-		srcs = append(srcs, s.Photo, s.NameImage)
+		srcs = append(srcs, s.Photo, s.NameImage, s.Picture)
 	}
 	for _, l := range kit.Social {
 		srcs = append(srcs, l.Icon)
@@ -666,7 +773,7 @@ func kitPictureBytes(kit BrandKit) int {
 func kitPictureChars(kit BrandKit) int {
 	n := len(kit.Logo.Src)
 	if s := kit.Signature; s != nil {
-		n += len(s.Photo) + len(s.NameImage)
+		n += len(s.Photo) + len(s.NameImage) + len(s.Picture)
 	}
 	for _, l := range kit.Social {
 		n += len(l.Icon)

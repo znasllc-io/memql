@@ -1143,6 +1143,23 @@ test("a problem forgets the selection, the add and the removal it answered", () 
   f.dom.window.close();
 });
 
+test("the lines field of a footer with a lineGap shows its paragraphs apart and keeps the line breaks inside them", () => {
+  const f = fixture();
+  const footed = { ...clone(article), blocks: [{ id: "foot", type: "footer", lineGap: 16, lines: ["Acme Co\nMain Street", "Privacy"], links: [] }, { id: "plain", type: "footer", lines: ["Acme Co", "Main Street"], links: [] }] };
+  f.send({ type: "document", version: 1, email: footed });
+  f.select("foot");
+  const lines = f.el("field-lines") as HTMLTextAreaElement;
+  assert.equal(lines.value, "Acme Co\nMain Street\n\nPrivacy", "a blank line between paragraphs, a line break inside one");
+  lines.focus(); f.type(lines, "Acme Co\nMain Street\n\nPrivacy\n \n\n\nTerms\n\n"); lines.blur();
+  assert.deepEqual(f.edits().at(-1), { kind: "field", block: "foot", field: "lines", value: ["Acme Co\nMain Street", "Privacy", "Terms"] });
+  // Without a lineGap each line is an entry, as it always was.
+  f.select("plain");
+  assert.equal(lines.value, "Acme Co\nMain Street");
+  lines.focus(); f.type(lines, "Acme Co\nMain Street\nTerms"); lines.blur();
+  assert.deepEqual(f.edits().at(-1), { kind: "field", block: "plain", field: "lines", value: ["Acme Co", "Main Street", "Terms"] });
+  f.dom.window.close();
+});
+
 test("the lines field sends no trailing empty lines, and sample values are not moved when nothing changed", () => {
   const f = fixture();
   const footed = { ...clone(article), blocks: [{ id: "foot", type: "footer", lines: ["Acme Co"], links: [] }, { id: "zeta", type: "heading", text: "Hi {{fields.zeta}}" }] };

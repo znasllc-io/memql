@@ -1136,7 +1136,14 @@
                 "items": {
                   "type": "string",
                   "maxLength": 300
-                }
+                },
+                "description": "One paragraph each. A line break inside one breaks its line."
+              },
+              "lineGap": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 200,
+                "description": "Pixels between the paragraphs of lines. Without it they are one paragraph, a line each."
               },
               "separator": {
                 "type": "string",

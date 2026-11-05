@@ -652,9 +652,12 @@ func (r *renderer) socialLink(block string, link Link, room float64) error {
 // (a pipe with four spaces either side by default) and, under them, its lines.
 // Its text is 14 pixels on 22 by default, the lines muted and the links in
 // the secondary colour, gap pixels below the links and after below the lines
-// (none by default). A link without an address (or with one that breaks the
-// link rule) is its words alone, underlined like the others, and is reported
-// as link_missing, as a button or a social link without one is.
+// (none by default). Each entry of the lines is a paragraph, lineGap pixels
+// above the next; without a lineGap they are one paragraph, an entry to a
+// line. A line break inside an entry breaks its line. A link without an
+// address (or with one that breaks the link rule) is its words alone,
+// underlined like the others, and is reported as link_missing, as a button or
+// a social link without one is.
 func (r *renderer) footer(b Block, pad [4]float64) error {
 	size, lineHeight := number(orNumber(b.Size, 14)), number(orNumber(b.LineHeight, 22))
 	style := emphasis(400, false, b.LetterSpacing) + r.fontFamily(b.Font, "base")
@@ -688,8 +691,15 @@ func (r *renderer) footer(b Block, pad [4]float64) error {
 				}
 				out.WriteString(`</td></tr>`)
 			}
-			if len(b.Lines) > 0 {
-				out.WriteString(`<tr><td dir="ltr" style="color:` + r.colour(b.Color, "muted") + `;font-size:` + size + `px;` + style + `white-space:pre-wrap;text-align:center;padding:0px 0px ` + number(b.After) + `px;line-height:` + lineHeight + `px;mso-line-height-alt:` + lineHeight + `px">`)
+			// The lines: without a lineGap one paragraph, the entries joined by
+			// line breaks, as footers have always been written; with one, each
+			// entry a paragraph of its own, lineGap pixels above the next. A
+			// line break inside an entry breaks its line either way.
+			paragraph := func(bottom float64) {
+				out.WriteString(`<tr><td dir="ltr" style="color:` + r.colour(b.Color, "muted") + `;font-size:` + size + `px;` + style + `white-space:pre-wrap;text-align:center;padding:0px 0px ` + number(bottom) + `px;line-height:` + lineHeight + `px;mso-line-height-alt:` + lineHeight + `px">`)
+			}
+			if len(b.Lines) > 0 && b.LineGap <= 0 {
+				paragraph(b.After)
 				for i, line := range b.Lines {
 					if i > 0 {
 						out.WriteString(`<br>`)
@@ -700,6 +710,19 @@ func (r *renderer) footer(b Block, pad [4]float64) error {
 					}
 				}
 				out.WriteString(`</td></tr>`)
+			}
+			if len(b.Lines) > 0 && b.LineGap > 0 {
+				for i, line := range b.Lines {
+					bottom := float64(b.LineGap)
+					if i == len(b.Lines)-1 {
+						bottom = b.After
+					}
+					paragraph(bottom)
+					out.WriteString(escapeText(line) + `</td></tr>`)
+					if err := r.grown(); err != nil {
+						return err
+					}
+				}
 			}
 			out.WriteString(`</tbody></table>`)
 			return nil

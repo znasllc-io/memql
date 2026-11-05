@@ -220,7 +220,7 @@
       "size": 14.7,
       "lineHeight": 22.4,
       "color": "muted",
-      "linkColor": "primary",
+      "linkColor": "secondary",
       "background": "white",
       "font": "base",
       "letterSpacing": "-0.025em",
@@ -251,11 +251,11 @@
         }
       ],
       "lines": [
-        "ACME",
-        "123 Example Street, Springfield",
+        "ACME\n123 Example Street, Springfield",
         "You're receiving this email because you signed up for updates from Acme.",
         "© 2026 Acme"
-      ]
+      ],
+      "lineGap": 16
     }
   ]
 }

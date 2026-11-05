@@ -157,7 +157,9 @@ func TestEveryLayoutStaysWithinPictureBudgetWithAFullKit(t *testing.T) {
 		t.Run(info.ID, func(t *testing.T) {
 			kit := testKit(t)
 			kit.Logo.Src = testPNG(t, 4, false)
-			kit.Signature = &BrandSignature{Photo: testPNG(t, 5, false), NameImage: testPNG(t, 6, false), Title: "Founder"}
+			// The parts for a band and the whole picture for a compact slot:
+			// either way no email carries more than six of the kit's pictures.
+			kit.Signature = &BrandSignature{Photo: testPNG(t, 5, false), NameImage: testPNG(t, 6, false), Title: "Founder", Picture: testRectPNG(t, 40, 12)}
 			kit.Social = []Link{
 				{Network: "Instagram", Href: "https://instagram.com/x", Icon: testPNG(t, 7, false)},
 				{Network: "YouTube", Href: "https://youtube.com/x", Icon: testPNG(t, 8, false)},

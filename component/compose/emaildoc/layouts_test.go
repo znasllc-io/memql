@@ -3,6 +3,7 @@ package emaildoc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -487,5 +488,36 @@ func TestBrandSlotsOrder(t *testing.T) {
 	want := []string{"logo", "signature", "follow", "social", "footer", "reply"}
 	if got := BrandSlots(); !slices.Equal(got, want) {
 		t.Errorf("BrandSlots = %v", got)
+	}
+}
+
+// TestReplySlotIsTheSameInEveryLayout pins that the reply section, a brand
+// slot, is drawn alike wherever a built-in layout has one, at the measurements
+// of the series the layouts were taken from: a kit's reply should look the same
+// in every email of an account.
+func TestReplySlotIsTheSameInEveryLayout(t *testing.T) {
+	var first []byte
+	var firstID string
+	count := 0
+	for _, info := range Layouts() {
+		b := findBlock(info.Document.Blocks, SlotReply)
+		if b == nil {
+			continue
+		}
+		count++
+		data, err := json.Marshal(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if first == nil {
+			first, firstID = data, info.ID
+			continue
+		}
+		if !bytes.Equal(data, first) {
+			t.Errorf("%s draws its reply unlike %s:\n%s\n%s", info.ID, firstID, data, first)
+		}
+	}
+	if count < 3 {
+		t.Fatalf("want a reply in Article, Three reasons and Side by side, got %d layouts with one", count)
 	}
 }

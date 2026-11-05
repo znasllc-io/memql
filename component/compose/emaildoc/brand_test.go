@@ -391,3 +391,228 @@ func TestApplyBrandPartialSignaturesStayValid(t *testing.T) {
 		t.Fatal("an empty signature should be removed")
 	}
 }
+
+// testRectPNG is a solid PNG of w by h pixels: a picture with a shape of its own.
+func testRectPNG(t *testing.T, w, h int) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: 200, G: 90, B: 40, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// compactSignatureLayouts are the built-in layouts whose signature slot has no
+// background of its own: the compact form, which a whole picture can fill.
+var compactSignatureLayouts = []string{"builtin:article", "builtin:three-reasons", "builtin:side-by-side"}
+
+func TestApplyBrandCompactSignatureUsesWholePicture(t *testing.T) {
+	picture := testRectPNG(t, 300, 90) // 10 to 3
+	kit := testKit(t)
+	kit.Signature.Picture = picture
+	for _, id := range compactSignatureLayouts {
+		t.Run(id, func(t *testing.T) {
+			got, err := ApplyBrand(layoutOrFail(t, id), kit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			band := findBlock(got.Blocks, SlotSignature)
+			if band == nil || band.Type != typeColumns || band.Role != roleBrand || band.Inset != nil || band.MaxWidth != 0 ||
+				len(band.Columns) != 1 || band.Columns[0].Width != 100 || len(band.Columns[0].Blocks) != 1 {
+				t.Fatalf("want the slot holding one column of the whole width, got %+v", band)
+			}
+			// The whole picture at the slot's full content width (the email's
+			// 552 pixels inside the slot's padding), as tall as its shape makes
+			// it, and named for the title.
+			want := Block{ID: "signature-picture", Type: typeImage, Src: picture, Alt: "Founder of Northwind", Width: 552, Height: 166}
+			if pic := band.Columns[0].Blocks[0]; !reflect.DeepEqual(pic, want) {
+				t.Fatalf("picture block:\n got %+v\nwant %+v", pic, want)
+			}
+			for _, part := range []string{"signature-photo", "signature-space", "signature-name", "signature-title"} {
+				if hasID(got.Blocks, part) {
+					t.Errorf("the part %s stayed beside the whole picture", part)
+				}
+			}
+			r, err := Render(context.Background(), got, nil, RenderOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(r.HTML, `<img src="`+picture+`" width="552" height="166" alt="Founder of Northwind"`) {
+				t.Fatal("the picture is not drawn 552 pixels wide and 166 high")
+			}
+			for _, issue := range r.Issues {
+				if issue.Block == "signature-picture" {
+					t.Errorf("the signature picture is reported: %+v", issue)
+				}
+			}
+		})
+	}
+	// The picture is named for the title, else the name written as text,
+	// else "Signature".
+	for _, c := range []struct {
+		sig  BrandSignature
+		want string
+	}{
+		{BrandSignature{Picture: picture, NameText: "Sam Rivera", Title: "Founder"}, "Founder"},
+		{BrandSignature{Picture: picture, NameText: "Sam Rivera"}, "Sam Rivera"},
+		{BrandSignature{Picture: picture, NameImage: testPNG(t, 6, false)}, "Signature"},
+		{BrandSignature{Picture: picture}, "Signature"},
+	} {
+		k := testKit(t)
+		sig := c.sig
+		k.Signature = &sig
+		got, err := ApplyBrand(layoutOrFail(t, "builtin:article"), k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if b := findBlock(got.Blocks, "signature-picture"); b == nil || b.Alt != c.want {
+			t.Errorf("%+v: want the alt %q, got %+v", c.sig, c.want, b)
+		}
+	}
+	// Without a picture nothing changes: the slot keeps its parts.
+	plain, err := ApplyBrand(layoutOrFail(t, "builtin:article"), testKit(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasID(plain.Blocks, "signature-picture") || findBlock(plain.Blocks, "signature-photo") == nil || findBlock(plain.Blocks, SlotSignature).Inset == nil {
+		t.Fatal("a kit without a picture must keep the parts and the slot as the layout has them")
+	}
+}
+
+func TestApplyBrandBandSignatureKeepsParts(t *testing.T) {
+	kit := testKit(t)
+	kit.Signature.Picture = testRectPNG(t, 300, 90)
+	got, err := ApplyBrand(layoutOrFail(t, "builtin:letter"), kit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasID(got.Blocks, "signature-picture") {
+		t.Fatal("a band, a signature slot with a background of its own, must not take the whole picture")
+	}
+	band := findBlock(got.Blocks, SlotSignature)
+	if band == nil || band.Background != "secondary" || len(band.Columns) != 2 {
+		t.Fatalf("band = %+v", band)
+	}
+	if b := findBlock(got.Blocks, "signature-photo"); b == nil || b.Src != kit.Signature.Photo {
+		t.Fatalf("photo = %+v", b)
+	}
+	if b := findBlock(got.Blocks, "signature-name"); b == nil || b.Src != kit.Signature.NameImage {
+		t.Fatalf("name = %+v", b)
+	}
+	if b := findBlock(got.Blocks, "signature-title"); b == nil || b.Text != "Founder of Northwind" {
+		t.Fatalf("title = %+v", b)
+	}
+	// A kit with the whole picture and no parts leaves a band nothing to show.
+	kit.Signature = &BrandSignature{Picture: testRectPNG(t, 300, 90)}
+	if got, err = ApplyBrand(layoutOrFail(t, "builtin:letter"), kit); err != nil {
+		t.Fatal(err)
+	}
+	if hasID(got.Blocks, SlotSignature) {
+		t.Fatal("a band without parts to show must be removed")
+	}
+}
+
+func TestParseBrandKitSignaturePictureRules(t *testing.T) {
+	picture := testRectPNG(t, 300, 90)
+	base := testKit(t)
+	// The whole picture alone is a signature, and beside the parts it is kept
+	// with them; both survive the kit's JSON.
+	for _, sig := range []BrandSignature{
+		{Picture: picture},
+		{Photo: base.Signature.Photo, NameImage: base.Signature.NameImage, Title: "Founder", Picture: picture},
+	} {
+		k := base
+		s := sig
+		k.Signature = &s
+		raw, err := k.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), `"picture": "data:image/png;base64,`) {
+			t.Fatalf("the picture is not written as signature.picture:\n%.400s", raw)
+		}
+		back, err := ParseBrandKit(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(*back.Signature, sig) {
+			t.Fatalf("round trip: got %+v, want %+v", *back.Signature, sig)
+		}
+	}
+	// It is held to the rules of every kit picture.
+	for _, c := range []struct{ name, src, want string }{
+		{"a Library picture", "artifact:0123456789abcdef0123456789abcdef", "signature picture: Upload pictures through the Brand page"},
+		{"a web address", "https://x.example/sign.png", "signature picture: "},
+		{"not a raster", "data:image/svg+xml;base64,PHN2Zz4=", "signature picture: "},
+		{"larger than 1 MiB", testPNG(t, 600, true), "signature picture: email image exceeds 1 MiB"},
+	} {
+		k := base
+		k.Signature = &BrandSignature{Picture: c.src}
+		raw, err := k.JSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want an error containing %q, got %v", c.name, c.want, err)
+		}
+	}
+	// It counts toward the kit's pictures: the size a document can carry,
+	// and the warning that leaves an email little room.
+	big := base
+	big.Logo.Src = testPNG(t, 520, true)
+	big.Signature = &BrandSignature{Picture: testPNG(t, 521, true)}
+	raw, err := big.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), "Use fewer or smaller pictures") {
+		t.Fatalf("two large pictures, the signature's one of them: %v", err)
+	}
+	warned := base
+	warned.Signature = &BrandSignature{Picture: testPNG(t, 300, true)} // about 270 KiB
+	warned.Logo.Src = testPNG(t, 301, true)
+	large := 0
+	for _, w := range BrandWarnings(context.Background(), warned) {
+		if w.Code == "pictures_large" {
+			large++
+		}
+	}
+	if large != 1 {
+		t.Fatalf("the signature picture must count toward pictures_large: %d warnings", large)
+	}
+}
+
+// TestParseBrandKitFooterLinesMayBreak pins that an entry of a kit's footer
+// lines is a paragraph that may hold line breaks, the 300 characters counted
+// per entry, and that applied to a layout each entry stays one entry.
+func TestParseBrandKitFooterLinesMayBreak(t *testing.T) {
+	kit := testKit(t)
+	address := "NORTHWIND\n1 Harbour Road\n" + strings.Repeat("a", 300-len("NORTHWIND\n1 Harbour Road\n"))
+	kit.Footer.Lines = []string{address, "Privacy"}
+	raw, err := kit.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseBrandKit(raw)
+	if err != nil {
+		t.Fatalf("an entry of 300 characters with line breaks: %v", err)
+	}
+	got, err := ApplyBrand(layoutOrFail(t, "builtin:lesson"), back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := findBlock(got.Blocks, SlotFooter); b == nil || !reflect.DeepEqual(b.Lines, []string{address, "Privacy"}) {
+		t.Fatalf("footer lines = %+v", b)
+	}
+	kit.Footer.Lines = []string{address + "a"}
+	raw, _ = kit.JSON()
+	if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), "footer: line 1 is longer than 300 characters") {
+		t.Fatalf("301 characters in one entry: %v", err)
+	}
+}
