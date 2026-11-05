@@ -75,6 +75,9 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "renderEmail", Description: "Render an email document for preview, embedding the pictures the caller can read. Saves and sends nothing.", Handler: w.handleRenderEmail},
 		{Name: "saveBrandKit", Description: "Save an organization's brand kit on the reviewed revision, answering its contrast and size warnings.", Handler: w.handleSaveBrandKit},
 		{Name: "brandPreview", Description: "Render a built-in layout with a brand kit for preview, with the kit's warnings. Saves nothing.", Handler: w.handleBrandPreview},
+		{Name: "composeContext", Description: "What a running email composition writes into: its layout, brand slots, material pictures and picture budget. Saves nothing.", Handler: w.handleComposeContext},
+		{Name: "composeRender", Description: "Render a running email composition in its brand-applied layout, with its issues. Saves nothing.", Handler: w.handleComposeRender},
+		{Name: "composeSubmit", Description: "Save a running email composition as its template's draft and finish it. Never publishes.", Handler: w.handleComposeSubmit},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",

@@ -1,0 +1,64 @@
+// tools.memql -- the tools of an email composition run.
+//
+// A composition runs whole in Claude Code as the per-user email composer agent
+// (role specialist), and these three tools are the ones it is given: read the
+// context, render a composition until it reads right, submit it. Each is a
+// builtin of the campaigns integration (component/campaigns/compose_tools.go).
+//
+// templateId is @autoInjected on every one: the run stamps the template it
+// writes, and the central validator drops any value the model supplies, so a
+// session only ever writes its own template. The session never sends a whole
+// document, only a composition; the server rebuilds the email from the layout
+// and the organization's brand kit, so the brand's pictures never pass through
+// the model.
+
+/// Start here, once. Answers the email you are writing and what you write it from:
+/// the layout's blocks in order (id, type, role, sizes and example words), the
+/// optional blocks you may drop, the repeatable blocks with how many copies they
+/// allow, the content slots you write to, the brand slots the organization's kit
+/// fills (never write into a brand block), the description of the email, the
+/// organization's name, and the material: every file by its name in your workspace,
+/// every picture with its handle, type, bytes and size, the picture of the finished
+/// email (reference: guidance for the content and its order, not a picture for the
+/// email unless the description asks for it), the files left out and why, and how
+/// many pictures and bytes the brand leaves for yours. Then read the text files in
+/// your workspace and use their words word for word, look at the pictures and the
+/// reference, write a composition and check it with emailComposeRender.
+@handler(type="function", name="campaignComposeContext")
+@requiresAgentRole("specialist")
+@executionTime("fast")
+tool emailComposeContext {
+  templateId  string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+}
+
+/// Check a composition without saving it. Send {subject, preheader, content, drop,
+/// repeat}: content is a list of {id, text, label, href, alt, image} for the content
+/// slots (text for heading, text and highlight blocks; label and href for buttons;
+/// image, alt and href for pictures, where image is a picture's handle); drop lists
+/// the optional blocks to leave out; repeat says how many copies of a repeatable
+/// block to make, named id, id-2, id-3 and so on. Keep every link tag such as
+/// {{confirmUrl}} as the layout has it, and leave a link empty when the material
+/// gives none. Answers the subject, the HTML with each picture shown as its handle,
+/// the plain text, the issues (code, block, message) and the slots the composition
+/// writes. Fix what the issues say and what differs from the reference picture, and
+/// render again: at most five renders in all. Then submit with emailComposeSubmit.
+@handler(type="function", name="campaignComposeRender")
+@requiresAgentRole("specialist")
+@executionTime("fast")
+tool emailComposeRender {
+  templateId   string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+  composition  object! @description("{subject, preheader, content: [{id, text, label, href, alt, image}], drop: [id], repeat: {id: copies}}. Pictures are named by handle. Never a whole email document.")
+}
+
+/// Save the composition as the template's draft and finish. Send the composition you
+/// last rendered, never a whole document. Issues you could not fix within five
+/// renders may stay: the draft lists them, and a person fixes them and publishes it.
+/// Nothing here publishes. Call it once, at the end. Answers {templateId, revision,
+/// issues}.
+@handler(type="function", name="campaignComposeSubmit")
+@requiresAgentRole("specialist")
+@executionTime("fast")
+tool emailComposeSubmit {
+  templateId   string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
+  composition  object! @description("The composition last rendered: {subject, preheader, content, drop, repeat}, as emailComposeRender takes it.")
+}

@@ -288,6 +288,33 @@ builtin campaignCreateTemplateFromLayout {
   layoutId   string!  @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
 }
 
+// ---- The tools of an email composition run (dsl/campaigns/tools.memql) ----
+//
+// NOT @sdk: a composition run calls them through its three emailCompose* tools,
+// which stamp templateId from the run. A call reaches the template only with
+// template write permission in its organization, and only while it carries a
+// composition; submit also needs the composition to be writing.
+
+@description("The context of a running email composition: the template's built-in layout with the organization's brand kit applied (each block's id, type, role, sizes and example words; the optional ids; the repeat ranges; the content slots at their minimum), the brand slots the kit fills, the attached files by their names in the composer's workspace with each picture's handle, type, bytes, width and height, the picture of the finished email, the files left out and why, the picture budget the brand leaves, the request's description and the organization's name. Holds no picture's bytes. Saves nothing.")
+@executor("integration.campaigns.composeContext")
+builtin campaignComposeContext {
+  templateId  string!  @description("The template being composed.")
+}
+
+@description("Render a composition of a running email composition: the raw built-in layout with the organization's current brand kit applied and the composition written in, its pictures resolved from their handles, rendered as a preview. Answers {subject, html, text, issues: [{code, block, message}], slots}; the HTML shows each picture as its handle. A composition the layout refuses is answered with the sentence that says why. Saves nothing.")
+@executor("integration.campaigns.composeRender")
+builtin campaignComposeRender {
+  templateId   string!  @description("The template being composed.")
+  composition  object!  @description("{subject, preheader, content: [{id, text, label, href, alt, image}], drop: [id], repeat: {id: copies}}; image is a picture's handle.")
+}
+
+@description("Submit a running email composition: the composition is written into the raw built-in layout with the organization's current brand kit and saved as the template's draft, and the composition is done, with each file left out named in its notes, in one revision. When the template changed since the composition began, the email is saved as a new draft beside it, \"<name> (MemQL's version)\", and the original's composition fails with where it went. Refused unless the composition is writing. Never publishes. Answers {templateId, revision, issues}.")
+@executor("integration.campaigns.composeSubmit")
+builtin campaignComposeSubmit {
+  templateId   string!  @description("The template being composed.")
+  composition  object!  @description("The composition last rendered, as campaignComposeRender takes it.")
+}
+
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
 @sdk
 @executor("integration.campaigns.configureSeries")

@@ -118,10 +118,6 @@ func compositionFromRow(row map[string]any) (composition, bool) {
 // It authorizes for itself: the stored template must belong to accountID, and
 // the caller must be able to write templates in it (mayWriteTemplates).
 func (w *Worker) writeComposition(ctx context.Context, accountID, templateID string, c composition) (time.Time, error) {
-	object, err := c.object()
-	if err != nil {
-		return time.Time{}, err
-	}
 	if w.templateGate == nil {
 		return time.Time{}, errTemplateGateUnavailable
 	}
@@ -143,15 +139,35 @@ func (w *Worker) writeComposition(ctx context.Context, accountID, templateID str
 	if !w.mayWriteTemplates(ctx, accountID) {
 		return time.Time{}, errTemplateNeedsWrite
 	}
-	prior := templateTime(rows[0]["createdAt"])
+	return w.rewriteComposition(ctx, templateID, rows[0], c)
+}
+
+// rewriteComposition is writeComposition's write, for a caller that holds the
+// template's lock and has read row, the stored version, fresh under it.
+//
+// A composition's baseRevision is the revision of the template it started
+// from, and submitting holds the template to it (compose_tools.go). A write of
+// the composition alone changes nothing a person wrote, so when the composition
+// was in step with the row (its baseRevision is the row's revision), it stays
+// in step: the new revision becomes its baseRevision. One that started from an
+// older revision does not catch up over somebody else's write.
+func (w *Worker) rewriteComposition(ctx context.Context, templateID string, row map[string]any, c composition) (time.Time, error) {
+	prior := templateTime(row["createdAt"])
 	if prior.IsZero() {
 		return time.Time{}, errTemplateNoRevision
 	}
-	content := storedTemplate(rows[0])
-	content.composition = object
 	revision := w.templateRevision(prior)
+	if c.BaseRevision.Equal(prior) {
+		c.BaseRevision = revision
+	}
+	object, err := c.object()
+	if err != nil {
+		return time.Time{}, err
+	}
+	content := storedTemplate(row)
+	content.composition = object
 	values := content.values(templateID, revision)
-	values["status"] = str(rows[0], "status")
+	values["status"] = str(row, "status")
 	if err := w.writeTemplate(ctx, "updateTemplate", values); err != nil {
 		return time.Time{}, err
 	}
