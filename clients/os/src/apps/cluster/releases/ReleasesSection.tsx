@@ -12,13 +12,12 @@ import { useReleaseRead } from "./useReleaseRead";
 import { PrepareRelease } from "./PrepareRelease";
 import { StartRelease } from "./StartRelease";
 import { ReleaseJourney, type ReleaseNavigation } from "./ReleaseJourney";
-import { ReleaseTrainPanel, type TrainQueries } from "./ReleaseTrainPanel";
 import { buildCall, buildTitle, buildWord, readReleaseBuilds, type ReleaseBuildQueries } from "./journey";
 import { readProfiles } from "./assembly";
 import type { RunRow } from "../../deployables/pipelines/rows";
 import "./releases.css";
 
-export type ReleaseQueries = TrainQueries & Pick<QueryClient, "releaseCandidates" | "releaseGetCandidate" | "releaseCandidatePublications" | "releaseCandidateConfiguration" | "releaseCandidateProfiles" | "releaseCandidateTargets" | "releaseApproveCandidate" | "releaseRetireCandidate" | "releasePublishCandidate" | "releasePrepareCandidate" | "releaseCandidateDrafts" | "releaseCreateCandidateDraft" | "releasePromoteCandidateDraft" | "releaseAssembleCandidate" | "releaseAssembleProfileCandidate" | "releaseSealPublishedCandidate" | "pipelineRunsForOwner"> & ReleaseBuildQueries;
+export type ReleaseQueries = Pick<QueryClient, "releaseCandidates" | "releaseGetCandidate" | "releaseCandidatePublications" | "releaseCandidateConfiguration" | "releaseCandidateProfiles" | "releaseCandidateTargets" | "releaseApproveCandidate" | "releaseRetireCandidate" | "releasePublishCandidate" | "releasePrepareCandidate" | "releaseCandidateDrafts" | "releaseCreateCandidateDraft" | "releasePromoteCandidateDraft" | "releaseAssembleCandidate" | "releaseAssembleProfileCandidate" | "releaseSealPublishedCandidate" | "pipelineRunsForOwner"> & ReleaseBuildQueries;
 
 interface ReleaseViewProps extends ReleaseNavigation { visible?: boolean; runs?: readonly RunRow[]; runsFresh?: boolean; openRequest?: { intentId: string; revision: number } }
 
@@ -63,7 +62,6 @@ export function ReleaseBrowser({ query, connected, visible = true, openRequest, 
   return <div className="os-cluster os-release-list" ref={list}>
     <Head title="Releases">{available ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
     {!available ? <Notice sentence="Disconnected. Releases will update when the cluster reconnects." /> : null}
-    <ReleaseTrainPanel query={query} connected={connected} visible={showingList} />
     <ReadFailure error={page.error} retry={page.retry} />
     <ReadFailure error={builds.error} retry={builds.retry} />
     <ReadFailure error={profiles.error} retry={profiles.retry} />

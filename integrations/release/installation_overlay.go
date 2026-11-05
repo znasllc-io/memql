@@ -137,18 +137,16 @@ func (i *Integration) handleInstallationPropose(ctx context.Context, args map[st
 		return nil, err
 	}
 	r := overlayRequest{asString(args["installationId"]), asString(args["requestId"]), asString(args["candidateId"]), asString(args["catalogDigest"]), asString(args["expectedBaseRevision"])}
-	stored, err := i.proposeOverlay(ctx, cfg, r, false)
+	stored, err := i.proposeOverlay(ctx, cfg, r)
 	if err != nil {
 		return nil, err
 	}
 	return resultNode("installationProposal", stored.Record.ID, stored.summary())
 }
 
-// proposeOverlay runs the proposal recipe for one request. With fromCatalog the
-// publication is read from the signed catalog rather than through a receiving
-// installation: a deploy names a release this same cluster published and its pin, not
-// another installation's receipt of it.
-func (i *Integration) proposeOverlay(ctx context.Context, cfg overlayConfiguration, r overlayRequest, fromCatalog bool) (savedOverlay, error) {
+// proposeOverlay runs the proposal recipe for one request, reading the
+// publication through the receiving installation.
+func (i *Integration) proposeOverlay(ctx context.Context, cfg overlayConfiguration, r overlayRequest) (savedOverlay, error) {
 	var none savedOverlay
 	if r.InstallationID != cfg.InstallationID || !installationIdentifier.MatchString(r.RequestID) || !stringsHasDigest(r.CandidateID) || !stringsHasDigest(r.CatalogDigest) || !installationCommit.MatchString(r.ExpectedBaseRevision) {
 		return none, errors.New("installation proposal requires exact candidate, base and request identities")
@@ -157,7 +155,7 @@ func (i *Integration) proposeOverlay(ctx context.Context, cfg overlayConfigurati
 	if err != nil {
 		return none, err
 	}
-	s := &overlayScope{integration: i, db: db, configuration: cfg, request: r, owner: cfg.OwnerUserID, fromCatalog: fromCatalog}
+	s := &overlayScope{integration: i, db: db, configuration: cfg, request: r, owner: cfg.OwnerUserID}
 	s.id = overlayHash([]string{s.owner, r.InstallationID, r.RequestID})
 	prior, err := s.load(ctx, s.id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -233,7 +231,6 @@ func (i *Integration) handleInstallationProposalObserve(ctx context.Context, arg
 }
 
 type overlayScope struct {
-	fromCatalog       bool
 	integration       *Integration
 	db                *sql.DB
 	configuration     overlayConfiguration
@@ -302,15 +299,11 @@ func (s *overlayScope) read(ctx context.Context, args map[string]any) (any, erro
 	if err := s.gate(ctx, args); err != nil {
 		return nil, err
 	}
-	var source installation.PublicationSource
-	var err error
-	if s.fromCatalog {
-		source, err = s.catalogPublication(ctx)
-	} else if host := s.integration.installation.Load(); host != nil {
-		source, err = host.PublicationSource(ctx, s.request.InstallationID, s.request.CandidateID, s.request.CatalogDigest)
-	} else {
-		err = errors.New("installation overlay proposals are not configured")
+	host := s.integration.installation.Load()
+	if host == nil {
+		return nil, errors.New("installation overlay proposals are not configured")
 	}
+	source, err := host.PublicationSource(ctx, s.request.InstallationID, s.request.CandidateID, s.request.CatalogDigest)
 	if err != nil {
 		return nil, err
 	}
@@ -320,31 +313,6 @@ func (s *overlayScope) read(ctx context.Context, args map[string]any) (any, erro
 	s.source = &source
 	return nil, nil
 }
-
-// catalogPublication is the publication as this cluster's signed catalog holds it.
-// The whole repository is its source path: the overlay's own file list, bound in
-// advance by the operator, is what limits what it may touch.
-func (s *overlayScope) catalogPublication(ctx context.Context) (installation.PublicationSource, error) {
-	var out installation.PublicationSource
-	_, cfg, trust, err := s.integration.catalog(ctx)
-	if err != nil {
-		return out, err
-	}
-	_, verified, err := readCatalog(ctx, s.db, s.request.CandidateID, cfg.Publisher, trust)
-	if err != nil {
-		return out, err
-	}
-	if verified.Digest() != s.request.CatalogDigest {
-		return out, errors.New("installation publication changed")
-	}
-	return installation.PublicationSource{
-		InstallationID: s.configuration.InstallationID,
-		RepositoryURL:  "https://github.com/" + s.configuration.Repository,
-		Path:           ".",
-		Publication:    verified,
-	}, nil
-}
-
 func (s *overlayScope) build(ctx context.Context, args map[string]any) (any, error) {
 	if err := s.gate(ctx, args); err != nil {
 		return nil, err

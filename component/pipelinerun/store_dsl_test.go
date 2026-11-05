@@ -176,53 +176,6 @@ func everyStoreCall(s Store, value string) []struct {
 		{"UpdateChannel (clearing)", func() error {
 			return s.UpdateChannel(ctx, value, value, ChannelPatch{SecretRef: ptr(""), Recipients: ptr([]string(nil))})
 		}},
-		{"LatestTrain", func() error { _, err := s.LatestTrain(ctx, value); return err }},
-		{"TrainsSince", func() error { _, err := s.TrainsSince(ctx, value, now); return err }},
-		{"CreateTrain (every field)", func() error {
-			return s.CreateTrain(ctx, value, Train{
-				ID: value, OwnerUserID: value, AccountID: value, PipelineID: value, Repository: value, Branch: value,
-				Departure: value, State: value, Requested: []int{7, 9},
-				OnBoard: []TrainCar{{Number: 7, Title: value, SHA: value, URL: value}}, LeftOff: []pipelines.TrainSkip{{Number: 9, Reason: value}},
-				Dropped: []TrainCar{{Number: 8, SHA: value, Reason: value}}, Version: value, BaseSHA: value, HeadSHA: value,
-				PullRequest: 42, PullRequestURL: value, RunID: value, Notified: []string{value}, DepartedAt: now, UpdatedAt: now,
-			})
-		}},
-		{"UpdateTrain (every field)", func() error {
-			return s.UpdateTrain(ctx, value, value, TrainPatch{
-				State: ptr(value), Version: ptr(value), BaseSHA: ptr(value), HeadSHA: ptr(value), PullRequestURL: ptr(value), RunID: ptr(value),
-				ApprovedBy: ptr(value), ApprovedSHA: ptr(value), LandedSHA: ptr(value), HeldReason: ptr(value),
-				OnBoard: ptr([]TrainCar{{Number: 7, Title: value}}), Dropped: ptr([]TrainCar{}), LeftOff: ptr([]pipelines.TrainSkip{{Number: 9, Reason: value}}),
-				PullRequest: ptr(42), Rebuilds: ptr(1), Retried: ptr(true), Notified: ptr([]string{value}), UpdatedAt: ptr(now),
-			})
-		}},
-		{"LastLandedTrain", func() error { _, err := s.LastLandedTrain(ctx, value); return err }},
-		{"UpdateTrain (a release's fields)", func() error {
-			return s.UpdateTrain(ctx, value, value, TrainPatch{
-				ReleaseIntentID: ptr(value), ReleaseRunID: ptr(value), ReleaseCandidateID: ptr(value), ReleaseApprovalID: ptr(value),
-				ReleaseApprovedBy: ptr(value), ReleaseCatalogDigest: ptr(value), ReleaseRetried: ptr(true), PublishAttempts: ptr(2),
-			})
-		}},
-		{"Standing", func() error { _, err := s.Standing(ctx, value); return err }},
-		{"SetStanding (every field)", func() error {
-			return s.SetStanding(ctx, value, TrainStanding{ID: value, AccountID: value, PipelineID: value, Repository: value,
-				Release: true, Deploy: true, Authority: map[string]any{"roleCeiling": value}, SetAt: now})
-		}},
-		{"LatestDeployment", func() error { _, err := s.LatestDeployment(ctx, value); return err }},
-		{"CreateDeployment (every field)", func() error {
-			return s.CreateDeployment(ctx, value, Deployment{ID: value, AccountID: value, PipelineID: value, Repository: value, Version: value, Tag: value,
-				SHA: value, CandidateID: value, CatalogDigest: value, TrainID: value, Trigger: value, RequestedBy: value, Authority: map[string]any{"roleCeiling": value},
-				Guards: []pipelines.DeployGuard{{Code: value, Detail: value}}, Acknowledged: true, State: value, InstallRepository: value, Reason: value,
-				StateSince: now, RequestedAt: now, UpdatedAt: now})
-		}},
-		{"UpdateDeployment (every field)", func() error {
-			return s.UpdateDeployment(ctx, value, value, DeploymentPatch{
-				State: ptr(value), RequestedBy: ptr(value), Trigger: ptr(value), ProposalID: ptr(value), PullRequestURL: ptr(value), BaseSHA: ptr(value),
-				PinSHA: ptr(value), LandedSHA: ptr(value), RunID: ptr(value), Reason: ptr(value), ResumedBy: ptr(value),
-				Guards: ptr([]pipelines.DeployGuard{{Code: value, Detail: value}}), Acknowledged: ptr(true), Authority: ptr(map[string]any{"roleCeiling": value}),
-				PullRequest: ptr(42), Step: ptr(1), Applications: ptr([]DeploymentApplication{{Name: value, UID: value, Previous: value, Request: value, Rollback: value, StartedAt: now}}),
-				ResumedAt: ptr(now), StateSince: ptr(now), UpdatedAt: ptr(now), Notified: ptr([]string{value}),
-			})
-		}},
 		{"StageNotification (to a secret)", func() error {
 			return s.StageNotification(ctx, NotificationRequest{
 				RequestID: value, Medium: "webhook", TargetSecret: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,

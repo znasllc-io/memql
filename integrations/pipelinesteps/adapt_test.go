@@ -28,7 +28,7 @@ func testRequest() pl.StepRequest {
 		SHA:            testSHA,
 		Mode:           pl.ModeAffected,
 		Event:          pl.EventPullRequest,
-		HeadBranch:     "train/2026-10-28-1",
+		HeadBranch:     "claude/badge",
 		Version:        testSHA,
 		InstallationID: 42,
 		Compute:        pl.ComputeCluster,

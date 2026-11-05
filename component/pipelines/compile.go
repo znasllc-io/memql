@@ -40,24 +40,6 @@ type StageSelection struct {
 	Included []string
 }
 
-// NarrowStages limits a selection to the named stages, keeping the manifest's order. A
-// name the event did not select is refused rather than dropped: a verification that
-// quietly ran nothing would read as passing.
-func NarrowStages(selection StageSelection, only []string) (StageSelection, error) {
-	for _, name := range only {
-		if !slices.Contains(selection.Included, name) {
-			return StageSelection{}, fmt.Errorf("this run is limited to stage %q, which the manifest does not select for it", name)
-		}
-	}
-	out := StageSelection{Included: make([]string, 0, len(only))}
-	for _, name := range selection.Included {
-		if slices.Contains(only, name) {
-			out.Included = append(out.Included, name)
-		}
-	}
-	return out, nil
-}
-
 // Plan is a compiled pipeline: the stages one run executes, in order. It
 // becomes one work goal with one v1:work:step per Step (D7).
 type Plan struct {

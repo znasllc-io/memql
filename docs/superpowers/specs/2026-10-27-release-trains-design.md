@@ -1,7 +1,7 @@
 ---
 title: Release trains -- pull requests collect, are tested together once, and reach main only with the owner's approval
 audience: internal
-status: draft
+status: historical
 area: operate
 sinceVersion: 0.31.3
 owner: znas
@@ -9,6 +9,11 @@ owner: znas
 
 # Release trains
 
+> Historical: shipped in 0.31.3 and removed on 2026-11-05, when the owner
+> began pushing to `main` with pull requests off and releasing and deploying by
+> hand ([the owner pushes to main](2026-11-05-owner-pushes-main-design.md), D2);
+> kept for rationale.
+>
 > **Followed by** [a nightly release from main](2026-11-02-nightly-release-from-main-design.md)
 > (2026-11-02): a repository can release from main with no pull requests on board.
 

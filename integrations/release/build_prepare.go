@@ -55,11 +55,6 @@ func (i *Integration) buildPipeline() (ReleaseBuildPipeline, error) {
 }
 
 func (i *Integration) prepareBuild(ctx context.Context, name, pipelineID, expected string) (releaseBuildRecord, error) {
-	return i.prepareBuildAt(ctx, name, pipelineID, expected, "")
-}
-
-// prepareBuildAt saves a release of selected, or of the branch's head when it is empty.
-func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expected, selected string) (releaseBuildRecord, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var record releaseBuildRecord
@@ -85,12 +80,7 @@ func (i *Integration) prepareBuildAt(ctx context.Context, name, pipelineID, expe
 	b := profile.Build
 	component := profile.Components[0]
 	request := pl.ReleaseBuildRequest{PipelineID: pipelineID, Repository: component.Repository, Branch: b.Branch}
-	var source pl.ReleaseBuildSource
-	if selected != "" {
-		request, source, err = pipeline.InspectReleaseBuildAt(ctx, request, selected)
-	} else {
-		source, err = pipeline.InspectReleaseBuild(ctx, request)
-	}
+	source, err := pipeline.InspectReleaseBuild(ctx, request)
 	if err != nil {
 		return record, err
 	}

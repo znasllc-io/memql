@@ -1,10 +1,13 @@
 # Nightly release from main: code lands without a pull request, and one automatic release a day carries it to production
 
 - **Date:** 2026-11-02
-- **Status:** built. The owner's decisions below were made in chat on 2026-11-02, one
-  question at a time. The owner asked for the work to be built overnight, ahead of
-  reading this record, so it has not had the usual written review. Section 2 says
-  which decisions are the owner's and which are this record's.
+- **Status:** removed. The train machinery this record built was deleted on 2026-11-05
+  ([the owner pushes to main](2026-11-05-owner-pushes-main-design.md), D2): the owner
+  pushes to `main` with pull requests off, and releases and deploys by hand. This record
+  is kept as history. It was built from the owner's decisions below, made in chat on
+  2026-11-02, one question at a time. The owner asked for the work to be built
+  overnight, ahead of reading this record, so it has not had the usual written review.
+  Section 2 says which decisions are the owner's and which are this record's.
 - **What it is:** a change lands by pushing to `main`. Once a day, at a quiet hour, or
   whenever someone starts one by hand, a release branches off `main`, runs the whole
   pipeline, and, when it passes, cuts a version and deploys it. A failed deploy rolls
