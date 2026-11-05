@@ -71,7 +71,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		// order, and then the organization's own, newest first. A builtin's nodes
 		// are keyed by id, which sorts them; the flag is what keeps this order.
 		{Name: "emailLayouts", Description: "List the email layouts an organization can start from: the built-in layouts, then its own.", Handler: w.handleEmailLayouts, PreserveOrder: true},
-		{Name: "layoutCatalogue", Description: "List the built-in email layouts with their category, outline and wireframe.", Handler: w.handleLayoutCatalogue, PreserveOrder: true},
+		{Name: "layoutCatalogue", Description: "List the built-in email layouts with their category and outline.", Handler: w.handleLayoutCatalogue, PreserveOrder: true},
 		{Name: "renderEmail", Description: "Render an email document for preview, embedding the pictures the caller can read. Saves and sends nothing.", Handler: w.handleRenderEmail},
 		{Name: "saveBrandKit", Description: "Save an organization's brand kit on the reviewed revision, answering its contrast and size warnings.", Handler: w.handleSaveBrandKit},
 		{Name: "brandPreview", Description: "Render a built-in layout with a brand kit for preview, with the kit's warnings. Saves nothing.", Handler: w.handleBrandPreview},

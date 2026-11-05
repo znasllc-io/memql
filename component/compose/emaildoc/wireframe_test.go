@@ -1,6 +1,7 @@
 package emaildoc
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -80,15 +81,41 @@ func TestWireframeIsDeterministic(t *testing.T) {
 	}
 }
 
+// TestLayoutsWireframeGolden pins each built-in layout's picker drawing,
+// BuiltinWireframe, to its golden.
 func TestLayoutsWireframeGolden(t *testing.T) {
 	for _, info := range Layouts() {
 		name := strings.TrimPrefix(info.ID, "builtin:")
 		t.Run(name, func(t *testing.T) {
-			doc, err := ExpandToMinimum(info.Document, info)
+			svg, err := BuiltinWireframe(info.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkGolden(t, "wireframe-"+name+".svg", Wireframe(doc))
+			checkGolden(t, "wireframe-"+name+".svg", svg)
 		})
+	}
+}
+
+// TestBuiltinWireframeDrawsTheMinimumForm: a picker shows a layout in its
+// smallest form, so Steps, whose steps start at two, is drawn with two; and an
+// id that names no built-in layout is refused as one.
+func TestBuiltinWireframeDrawsTheMinimumForm(t *testing.T) {
+	info, _ := LayoutMeta("builtin:steps")
+	doc, _ := Layout("builtin:steps")
+	expanded, err := ExpandToMinimum(doc, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Wireframe(expanded) == Wireframe(doc) {
+		t.Fatal("the minimum form of steps draws like the bare layout; the test proves nothing")
+	}
+	got, err := BuiltinWireframe("builtin:steps")
+	if err != nil || got != Wireframe(expanded) {
+		t.Fatalf("steps drawn as %.60q (%v), want its minimum form", got, err)
+	}
+	for _, id := range []string{"builtin:nope", "steps", "org:abc123", ""} {
+		if _, err := BuiltinWireframe(id); !errors.Is(err, ErrNotBuiltinLayout) {
+			t.Errorf("%q answered %v, want ErrNotBuiltinLayout", id, err)
+		}
 	}
 }

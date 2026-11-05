@@ -1056,8 +1056,8 @@ func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
 		if row["id"] != info.ID || row["name"] != info.Name || row["category"] != info.Category || row["description"] != info.Description {
 			t.Errorf("row %d = %v", i, row)
 		}
-		if wf, _ := row["wireframe"].(string); !strings.HasPrefix(wf, "<svg") {
-			t.Errorf("%s: wireframe = %.40q", info.ID, wf)
+		if _, present := row["wireframe"]; present {
+			t.Errorf("%s: catalogue row carries a wireframe; its reader is a model, and people see wireframes in emailLayouts", info.ID)
 		}
 		outline, _ := row["outline"].(string)
 		if outline == "" || strings.Contains(outline, "\n") {
@@ -1087,22 +1087,15 @@ func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
 	}
 }
 
+// TestLayoutWireframesDrawTheMinimumForm: the layout grid draws each built-in
+// layout as every picker does (emaildoc.BuiltinWireframe), in its smallest
+// form, so Steps shows its two steps.
 func TestLayoutWireframesDrawTheMinimumForm(t *testing.T) {
-	var info emaildoc.LayoutInfo
-	for _, l := range emaildoc.Layouts() {
-		if l.ID == "builtin:steps" {
-			info = l
-		}
-	}
-	if info.ID == "" {
-		t.Fatal("builtin:steps is not a built-in layout")
-	}
-	expanded, err := emaildoc.ExpandToMinimum(info.Document, info)
+	steps, err := emaildoc.BuiltinWireframe("builtin:steps")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := emaildoc.Wireframe(expanded)
-	if want == emaildoc.Wireframe(info.Document) {
+	if raw, _ := emaildoc.Layout("builtin:steps"); steps == emaildoc.Wireframe(raw) {
 		t.Fatal("the minimum form of steps draws like the bare layout; the test proves nothing")
 	}
 	w, _, _ := layoutFixture(t)
@@ -1110,22 +1103,22 @@ func TestLayoutWireframesDrawTheMinimumForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalogue, err := w.handleLayoutCatalogue(importCtx(), map[string]any{}, 0)
-	if err != nil {
-		t.Fatal(err)
+	drawn := 0
+	for _, row := range nodePayloads(t, list) {
+		if row["kind"] != "builtin" {
+			continue
+		}
+		id, _ := row["id"].(string)
+		want, err := emaildoc.BuiltinWireframe(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row["wireframe"] != want {
+			t.Errorf("%s: the grid's wireframe is not the layout's picker drawing", id)
+		}
+		drawn++
 	}
-	for name, nodes := range map[string][]memorynodes.MemoryNode{"emailLayouts": list, "catalogue": catalogue} {
-		found := false
-		for _, row := range nodePayloads(t, nodes) {
-			if row["id"] == "builtin:steps" {
-				found = true
-				if row["wireframe"] != want {
-					t.Errorf("%s: steps wireframe is not the minimum form", name)
-				}
-			}
-		}
-		if !found {
-			t.Errorf("%s: no steps row", name)
-		}
+	if drawn != len(emaildoc.Layouts()) {
+		t.Errorf("emailLayouts drew %d built-in layouts, want %d", drawn, len(emaildoc.Layouts()))
 	}
 }

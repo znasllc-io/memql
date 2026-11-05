@@ -42,3 +42,14 @@ func TestHarnessFleetToolsSurviveBundleNameCollisions(t *testing.T) {
 	_, _, ok := adapter.ToolCallee("testproduct.workerHost")
 	require.False(t, ok, "explicit qualification must not be redirected")
 }
+
+// TestCognitionEngineAdapterAnswersWhichAgentsMayCallATool: owned work offers
+// a tool only on a turn whose acting agent it admits, and asks the replier's
+// engine adapter. The adapter answers a tool's @requiresAgentRole through the
+// same harness binding execution uses, and nothing for a tool it does not have.
+func TestCognitionEngineAdapterAnswersWhichAgentsMayCallATool(t *testing.T) {
+	adapter := &CognitionEngineAdapter{Engine: procedureTestEngine(t)}
+	require.Equal(t, []string{"assistant"}, adapter.ToolAgentRoles("startEmailComposition"))
+	require.ElementsMatch(t, []string{"assistant", "specialist"}, adapter.ToolAgentRoles("workerHost"), "a harness tool resolves through its binding")
+	require.Empty(t, adapter.ToolAgentRoles("noSuchTool"))
+}

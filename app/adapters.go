@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/integrations/email"
+	"slices"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -198,6 +199,22 @@ func (a *CognitionEngineAdapter) ToolDefinitionsForNames(names []string) []commo
 		bound[n] = memql.HarnessToolBinding(name)
 	}
 	return a.Engine.ToolDefinitionsForNames(bound)
+}
+
+// ToolAgentRoles answers the agent roles that may call a tool -- its
+// @requiresAgentRole -- and none when any agent may or the engine has no such
+// tool. Owned work offers a tool only on a turn whose acting agent it admits
+// (integrations/agent work_execution.go); the adapter exists because the tool
+// registry is on the concrete *MemQLEngine.
+func (a *CognitionEngineAdapter) ToolAgentRoles(tool string) []string {
+	if a == nil || a.Engine == nil || a.Engine.Tools() == nil {
+		return nil
+	}
+	t, err := a.Engine.Tools().Get(memql.HarnessToolBinding(tool))
+	if err != nil || t == nil {
+		return nil
+	}
+	return slices.Clone(t.RequiresAgentRole)
 }
 
 func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {

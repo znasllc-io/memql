@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"slices"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -47,11 +48,14 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	}
 	// Repository requests use the installed bounded tools and their existing
 	// role/authority gates. Function discovery does not enumerate tool aliases.
-	// So do email compositions: Ask's assistant lists the layouts, asks which
-	// with requestUserFeedback and starts one (dsl/campaigns/tools.memql);
-	// both tools are the assistant's alone.
+	// So do email compositions (dsl/campaigns/tools.memql): Ask's assistant
+	// lists the layouts, asks which with requestUserFeedback and starts one.
+	// Each tool is offered only on a turn whose acting agent it admits
+	// (offeredToRole), so a specialist's turn is offered neither email tool,
+	// which only an assistant may call.
+	role := actingAgentRole(data)
 	for _, name := range []string{"discoverCapabilities", "executeCapability", "consultWorkKnowledge", "artifactSearch", "recallMemory", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost", "inspectRepositoryAuthority", "requestRepositoryChange", "repositoryChangeRequestStatus", "listRepositoryChangeRequests", "emailLayoutCatalogue", "startEmailComposition"} {
-		if r.engine != nil && !slices.Contains(out, name) && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
+		if r.engine != nil && !slices.Contains(out, name) && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 && r.offeredToRole(name, role) {
 			out = append(out, name)
 		}
 	}
@@ -63,4 +67,34 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 		assistant["tools"] = out
 	}
 	return out
+}
+
+// AgentRoleGates answers the agent roles that may call a tool -- its
+// @requiresAgentRole -- and none when any agent may. app's engine adapter
+// answers it, and owned work offers its tools by it (scopeWorkExecution).
+type AgentRoleGates interface {
+	ToolAgentRoles(tool string) []string
+}
+
+// actingAgentRole is the role of the turn's acting agent, as prepareTurn's
+// prompt data carries it from msg.ActingAgent (buildPromptData); "" when the
+// turn names none.
+func actingAgentRole(data map[string]any) string {
+	assistant, _ := data["assistant"].(map[string]any)
+	role, _ := assistant["role"].(string)
+	return strings.TrimSpace(role)
+}
+
+// offeredToRole reports whether owned work offers a tool on a turn whose
+// acting agent has the role: not when the tool's @requiresAgentRole names other
+// roles only, since the tool gate refuses every such call. A tool without the
+// annotation is offered, and so is every tool on a turn whose role is unknown
+// or by an engine that cannot say, as before: the gate still judges each call.
+func (r *Replier) offeredToRole(tool, role string) bool {
+	gates, ok := r.engine.(AgentRoleGates)
+	if !ok || role == "" {
+		return true
+	}
+	roles := gates.ToolAgentRoles(tool)
+	return len(roles) == 0 || slices.Contains(roles, role)
 }

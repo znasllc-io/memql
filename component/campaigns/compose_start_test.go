@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -1204,20 +1205,11 @@ func TestAskCompositionToolsLoadWithTheirBuiltins(t *testing.T) {
 		if err := json.Unmarshal(got.InputSchema, &schema); err != nil {
 			t.Fatal(err)
 		}
-		declared := slices.Sorted(func(yield func(string) bool) {
-			for name := range schema.Properties {
-				if !yield(name) {
-					return
-				}
-			}
-		})
-		taken := []string{}
+		declared := slices.Sorted(maps.Keys(schema.Properties))
+		var taken []string
 		if fn.BuiltinArgs != nil {
-			for name := range fn.BuiltinArgs.Properties {
-				taken = append(taken, name)
-			}
+			taken = slices.Sorted(maps.Keys(fn.BuiltinArgs.Properties))
 		}
-		slices.Sort(taken)
 		if !slices.Equal(declared, taken) {
 			t.Errorf("%s declares %v; %s takes %v", tc.tool, declared, tc.builtin, taken)
 		}

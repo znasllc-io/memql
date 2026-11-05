@@ -45,11 +45,25 @@ func TestWorkExecutionRequiresThePersistedOwnerContext(t *testing.T) {
 	}
 }
 
+// roleGatedWorkEngine is repositoryWorkEngine answering, as app's engine
+// adapter does, the agent roles each tool admits.
+type roleGatedWorkEngine struct{ repositoryWorkEngine }
+
+func (e roleGatedWorkEngine) ToolAgentRoles(name string) []string {
+	tool, err := e.native.Tools().Get(name)
+	if err != nil || tool == nil {
+		return nil
+	}
+	return tool.RequiresAgentRole
+}
+
 // TestOwnedWorkOffersTheEmailCompositionToolsToTheAssistant: Ask's goals are
 // owned work, and an assistant's own tools come from its skills, so the two
 // email composition tools are offered with the rest of owned work's installed
-// tools -- the shipped ones, each once -- and keep their gate: the assistant
-// may call them, a specialist and a person over MCP may not.
+// tools -- the shipped ones, each once -- on a turn whose acting agent may call
+// them. They are the assistant's: a specialist's turn is offered neither,
+// while a tool both roles may call is offered on both. A turn that names no
+// acting role keeps the list as it was; the tool gate judges each call.
 func TestOwnedWorkOffersTheEmailCompositionToolsToTheAssistant(t *testing.T) {
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
@@ -61,20 +75,47 @@ func TestOwnedWorkOffersTheEmailCompositionToolsToTheAssistant(t *testing.T) {
 	if err = e.Init(concept.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
-	r := newTestReplier(repositoryWorkEngine{native: e})
+	r := newTestReplier(roleGatedWorkEngine{repositoryWorkEngine{native: e}})
 	base := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "owner", Role: auth.RoleWriter})
 	ctx := common.ContextWithRun(base, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
-	data := map[string]any{"assistant": map[string]any{}}
-	names := r.scopeWorkExecution(ctx, data, []string{"startEmailComposition"})
-	for _, name := range []string{"emailLayoutCatalogue", "startEmailComposition", "requestUserFeedback"} {
-		if count := countToolName(names, name); count != 1 {
-			t.Fatalf("owned Work tool %s count=%d in %v", name, count, names)
+	email := []string{"emailLayoutCatalogue", "startEmailComposition"}
+	for _, tc := range []struct {
+		role  string
+		email int // how many times each email tool is offered
+	}{
+		{"assistant", 1},
+		{"specialist", 0},
+		{"", 1},
+	} {
+		assistant := map[string]any{}
+		if tc.role != "" {
+			assistant["role"] = tc.role
 		}
+		data := map[string]any{"assistant": assistant}
+		names := r.scopeWorkExecution(ctx, data, []string{"recall"})
+		for _, name := range email {
+			if count := countToolName(names, name); count != tc.email {
+				t.Errorf("acting role %q: %s offered %d times in %v, want %d", tc.role, name, count, names, tc.email)
+			}
+		}
+		for _, name := range []string{"requestUserFeedback", "discoverCapabilities", "recall"} {
+			if count := countToolName(names, name); count != 1 {
+				t.Errorf("acting role %q: %s offered %d times in %v, want once", tc.role, name, count, names)
+			}
+		}
+		if !slices.Equal(assistant["tools"].([]string), names) {
+			t.Errorf("acting role %q: rendered assistant does not receive the same tool names", tc.role)
+		}
+	}
+	// An assistant whose own tools already hold one is offered it once.
+	names := r.scopeWorkExecution(ctx, map[string]any{"assistant": map[string]any{"role": "assistant"}}, []string{"startEmailComposition"})
+	if countToolName(names, "startEmailComposition") != 1 {
+		t.Errorf("startEmailComposition offered %d times in %v, want once", countToolName(names, "startEmailComposition"), names)
+	}
+	for _, name := range email {
 		if len(e.ToolDefinitionsForNames([]string{name})) != 1 {
 			t.Fatalf("%s has no model-visible contract", name)
 		}
-	}
-	for _, name := range []string{"emailLayoutCatalogue", "startEmailComposition"} {
 		tool := e.Tools().LookupIndex()[name]
 		if tool == nil {
 			t.Fatalf("missing shipped tool %s", name)
@@ -87,8 +128,5 @@ func TestOwnedWorkOffersTheEmailCompositionToolsToTheAssistant(t *testing.T) {
 				t.Fatalf("%s lost its assistant-only gate", name)
 			}
 		}
-	}
-	if !slices.Equal(data["assistant"].(map[string]any)["tools"].([]string), names) {
-		t.Fatal("rendered assistant does not receive the same tool names")
 	}
 }

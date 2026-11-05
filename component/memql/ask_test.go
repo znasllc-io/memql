@@ -396,10 +396,12 @@ func TestAskQuestionCarriesPresentation(t *testing.T) {
 	}
 }
 
-// TestRequestUserFeedbackTakesALayoutPresentation: the tool offers a
-// presentation, "layouts" or none, and its builtin takes the field. A builtin
-// refuses every argument it does not declare, so a tool field the builtin
-// lacked would refuse each layout choice before it reached the work runtime.
+// TestRequestUserFeedbackTakesALayoutPresentation: the tool offers one
+// presentation, "layouts", and leaving it out is a plain question: an explicit
+// empty value is not offered, since a builtin refuses an empty optional
+// string. Its builtin takes the field. A builtin refuses every argument it does
+// not declare, so a tool field the builtin lacked would refuse each layout
+// choice before it reached the work runtime.
 func TestRequestUserFeedbackTakesALayoutPresentation(t *testing.T) {
 	e := sharedDblessEngine(t)
 	tool, err := e.Tools().Get("requestUserFeedback")
@@ -411,7 +413,7 @@ func TestRequestUserFeedbackTakesALayoutPresentation(t *testing.T) {
 		Required []string `json:"required"`
 	}
 	require.NoError(t, json.Unmarshal(tool.InputSchema, &schema))
-	require.Equal(t, []string{"", "layouts"}, schema.Properties["presentation"].Enum)
+	require.Equal(t, []string{"layouts"}, schema.Properties["presentation"].Enum)
 	require.NotContains(t, schema.Required, "presentation")
 
 	fn, err := e.Functions().Get("requestUserFeedback")

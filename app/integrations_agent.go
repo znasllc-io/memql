@@ -50,6 +50,11 @@ func (a *App) integrationsAgent() {
 	a.Logger.Info("agent integration providers registered")
 }
 
+// Owned work offers a tool only on a turn whose acting agent it admits, and
+// asks the replier's engine which agents a tool admits; an adapter that lost
+// the method would offer every tool on every turn again, so it is held here.
+var _ agent.AgentRoleGates = (*CognitionEngineAdapter)(nil)
+
 // setupAgentReplier constructs the agent reply pipeline and installs it on
 // the gRPC server so AgentGenerateTurnMsg is dispatched through it.
 // Called from transportAgent after transportBase() has constructed the

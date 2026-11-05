@@ -253,7 +253,7 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 		if err != nil {
 			return nil, err
 		}
-		wireframe, err := builtinWireframe(info)
+		wireframe, err := emaildoc.BuiltinWireframe(info.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -369,16 +369,6 @@ func (s *Store) eachEmailLayoutForAccount(ctx context.Context, accountID string,
 	return errors.New("campaigns: emailLayoutsForAccount: this organization has more layouts than can be listed")
 }
 
-// builtinWireframe draws a built-in layout in its smallest form, so a layout
-// whose repeatable blocks must appear more than once shows that minimum.
-func builtinWireframe(info emaildoc.LayoutInfo) (string, error) {
-	doc, err := emaildoc.ExpandToMinimum(info.Document, info)
-	if err != nil {
-		return "", fmt.Errorf("layout %s: %w", info.ID, err)
-	}
-	return emaildoc.Wireframe(doc), nil
-}
-
 // documentWireframe draws an organization layout from its stored document as
 // it is. A document that no longer parses gets no drawing; its row still lists.
 func documentWireframe(document any) string {
@@ -394,19 +384,17 @@ func documentWireframe(document any) string {
 }
 
 // handleLayoutCatalogue lists the built-in layouts for an assistant choosing
-// one: name, category, description, a one-line outline of the blocks and a
-// wireframe. It reads no organization data, so it needs no organization.
+// one: name, category, description and a one-line outline of the blocks. No
+// wireframe: its reader is a model, and a person sees each layout's wireframe
+// where one is shown to them (emailLayouts, and the options of a choice of
+// layouts in Ask). It reads no organization data, so it needs no organization.
 func (w *Worker) handleLayoutCatalogue(_ context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	builtins := emaildoc.Layouts()
 	rows := make([]map[string]any, 0, len(builtins))
 	for _, info := range builtins {
-		wireframe, err := builtinWireframe(info)
-		if err != nil {
-			return nil, err
-		}
 		rows = append(rows, map[string]any{
 			"id": info.ID, "name": info.Name, "category": info.Category, "description": info.Description,
-			"outline": layoutOutline(info), "wireframe": wireframe,
+			"outline": layoutOutline(info),
 		})
 	}
 	return resultRows("layoutCatalogue", rows)

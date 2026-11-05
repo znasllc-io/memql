@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -30,16 +31,18 @@ func (i *Integration) AskFeedbackWithPolicy(ctx context.Context, owner, runID, q
 // AskFeedbackPresented is AskFeedbackWithPolicy with how the question is shown:
 // presentation "" shows it as words, and workstate.FeedbackPresentationLayouts
 // as a choice of built-in email layouts -- kind choice, every option's value a
-// layout id -- which Ask shows as the layouts' wireframes.
+// layout id, stored as the exact id it names -- which Ask shows as the
+// layouts' wireframes.
 //
 // A WIREFRAME IS THE SERVER'S TO DRAW. One a caller put on an option is dropped
 // whatever the presentation, so a model never puts a picture of its own in
 // front of a person; a choice of layouts gets each layout's wireframe drawn
-// here. The drawings ride the stored options alone. The question's subject --
-// what an answer is checked against and what the question's id is hashed from
-// -- holds the options as asked, so a question with no presentation is stored
-// byte for byte as it always was, and a choice of layouts keeps its id however
-// its layouts come to be drawn.
+// here, as every picker draws it (emaildoc.BuiltinWireframe). The drawings ride
+// the stored options alone. The question's subject -- what an answer is
+// checked against and what the question's id is hashed from -- holds the
+// options as asked, so a question with no presentation is stored byte for byte
+// as it always was, and a choice of layouts keeps its id however its layouts
+// come to be drawn.
 func (i *Integration) AskFeedbackPresented(ctx context.Context, owner, runID, question, kind, presentation string, options []map[string]any, expires time.Time, optional bool) (string, error) {
 	if strings.TrimSpace(question) == "" || len(question) > 8000 {
 		return "", fmt.Errorf("feedback needs a concise, nonempty question")
@@ -80,58 +83,56 @@ func (i *Integration) AskFeedbackPresented(ctx context.Context, owner, runID, qu
 // optionWireframe is the key of an option's wireframe: an SVG the server drew.
 const optionWireframe = "wireframe"
 
-// presentedOptions answers a question's options as asked -- the caller's, less
-// any wireframe -- and as shown: for a choice of layouts, each with its
-// layout's wireframe; otherwise as asked. The caller's options are not changed,
-// and options with no wireframe to drop are asked as given.
+// presentedOptions answers a question's options as asked and as shown. Asked
+// are the caller's, less any wireframe. For a choice of layouts each value is
+// the exact layout id it names, its surrounding space trimmed, so an answer
+// carries an id campaignComposeEmail takes as it is, and each shown option has
+// that layout's wireframe; otherwise the shown options are the asked ones. The
+// caller's options are not changed.
 func presentedOptions(kind, presentation string, options []map[string]any) (asked, shown []map[string]any, err error) {
 	switch presentation {
 	case "":
+		asked = withoutWireframes(options)
+		return asked, asked, nil
 	case workstate.FeedbackPresentationLayouts:
 		if kind != "choice" {
 			return nil, nil, fmt.Errorf("a choice of layouts must be kind choice")
 		}
 	default:
-		return nil, nil, fmt.Errorf("feedback presentation must be empty or %s", workstate.FeedbackPresentationLayouts)
+		return nil, nil, fmt.Errorf("feedback presentation must be %s, or left out", workstate.FeedbackPresentationLayouts)
 	}
-	asked = options
-	if slices.ContainsFunc(options, func(option map[string]any) bool { _, drawn := option[optionWireframe]; return drawn }) {
-		asked = make([]map[string]any, len(options))
-		for n, option := range options {
-			asked[n] = maps.Clone(option)
-			delete(asked[n], optionWireframe)
+	asked = make([]map[string]any, len(options))
+	shown = make([]map[string]any, len(options))
+	for n, option := range options {
+		id := rowString(option, "value")
+		wireframe, err := emaildoc.BuiltinWireframe(id)
+		if errors.Is(err, emaildoc.ErrNotBuiltinLayout) {
+			return nil, nil, fmt.Errorf("%w; offer the layout ids emailLayoutCatalogue lists", err)
 		}
-	}
-	if presentation == "" {
-		return asked, asked, nil
-	}
-	shown = make([]map[string]any, len(asked))
-	for n, option := range asked {
-		wireframe, err := layoutWireframe(rowString(option, "value"))
 		if err != nil {
 			return nil, nil, err
 		}
-		shown[n] = maps.Clone(option)
+		asked[n] = maps.Clone(option)
+		delete(asked[n], optionWireframe)
+		asked[n]["value"] = id
+		shown[n] = maps.Clone(asked[n])
 		shown[n][optionWireframe] = wireframe
 	}
 	return asked, shown, nil
 }
 
-// layoutWireframe draws the built-in layout with the id as the layout grid
-// draws it (component/campaigns layout.go, builtinWireframe): in its smallest
-// form, so a layout whose repeatable blocks must appear more than once shows
-// them so, and Ask's choice matches the grid.
-func layoutWireframe(id string) (string, error) {
-	info, known := emaildoc.LayoutMeta(id)
-	doc, built := emaildoc.Layout(id)
-	if !known || !built {
-		return "", fmt.Errorf("%q is not a built-in layout; offer the layout ids emailLayoutCatalogue lists", id)
+// withoutWireframes is the options less any wireframe a caller put on them:
+// the options as given when there is none to drop.
+func withoutWireframes(options []map[string]any) []map[string]any {
+	if !slices.ContainsFunc(options, func(option map[string]any) bool { _, drawn := option[optionWireframe]; return drawn }) {
+		return options
 	}
-	expanded, err := emaildoc.ExpandToMinimum(doc, info)
-	if err != nil {
-		return "", fmt.Errorf("layout %s cannot be drawn: %w", id, err)
+	out := make([]map[string]any, len(options))
+	for n, option := range options {
+		out[n] = maps.Clone(option)
+		delete(out[n], optionWireframe)
 	}
-	return emaildoc.Wireframe(expanded), nil
+	return out
 }
 
 func (i *Integration) AskComputerScope(ctx context.Context, owner, runID string, subject map[string]any) (string, error) {

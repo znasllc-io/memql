@@ -768,7 +768,7 @@ func CampaignImportRecipientsBuild(args CampaignImportRecipientsArgs) string {
 	return b.String()
 }
 
-// CampaignLayoutCatalogue -- The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId.
+// CampaignLayoutCatalogue -- The built-in email layouts, for an assistant choosing one: rows are {id, name, category, description, outline}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The rows carry no drawing; emailLayouts gives a person each layout's wireframe. Needs no organization. The id is opaque: pass it as layoutId to campaignComposeEmail or campaignCreateTemplateFromLayout.
 type CampaignLayoutCatalogueArgs struct {
 }
 

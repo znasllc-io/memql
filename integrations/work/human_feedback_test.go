@@ -174,21 +174,15 @@ func askingRun(t *testing.T) (*Integration, *recordingEngine, context.Context) {
 	return i, eng, ctx
 }
 
-// gridWireframe is a built-in layout drawn as the layout grid draws it: at its
-// minimum, so a layout whose repeatable blocks must appear more than once
-// shows them so.
+// gridWireframe is a built-in layout as every picker draws it: the layout
+// grid, and a choice of layouts in Ask (emaildoc.BuiltinWireframe).
 func gridWireframe(t *testing.T, id string) string {
 	t.Helper()
-	info, known := emaildoc.LayoutMeta(id)
-	doc, built := emaildoc.Layout(id)
-	if !known || !built {
-		t.Fatalf("%s is not a built-in layout", id)
-	}
-	expanded, err := emaildoc.ExpandToMinimum(doc, info)
+	svg, err := emaildoc.BuiltinWireframe(id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return emaildoc.Wireframe(expanded)
+	return svg
 }
 
 // storedOptions are the options a question was stored with, as maps.
@@ -253,16 +247,19 @@ func TestFeedbackLayoutsPresentationRequiresBuiltinLayoutIDs(t *testing.T) {
 // TestFeedbackLayoutsPresentationAddsServerWireframes: the server draws each
 // layout option's wireframe as the layout grid draws it; a wireframe the model
 // supplied is dropped and replaced, and the labels stay as the model wrote them.
-// The question itself -- what the answer is checked against and what its id is
-// hashed from -- holds the model's options without any drawing.
+// Each value is stored as the exact layout id it names, so the answer that
+// comes back is one campaignComposeEmail takes as it is. The question itself --
+// what the answer is checked against and what its id is hashed from -- holds
+// the model's options without any drawing.
 func TestFeedbackLayoutsPresentationAddsServerWireframes(t *testing.T) {
 	i, eng, ctx := askingRun(t)
 	forged := `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`
 	options := []map[string]any{
 		{"label": "Article, closest to your notes", "value": "builtin:article", "wireframe": forged},
 		{"label": "Steps", "value": "builtin:steps"},
-		{"label": "Letter", "value": "builtin:letter", "wireframe": ""},
+		{"label": "Letter", "value": " builtin:letter ", "wireframe": ""},
 	}
+	ids := []string{"builtin:article", "builtin:steps", "builtin:letter"}
 
 	id, err := i.AskFeedbackPresented(ctx, "u-alice", "r1", "Which layout should the email use?", "choice", "layouts", options, time.Time{}, false)
 	if err != nil {
@@ -278,15 +275,14 @@ func TestFeedbackLayoutsPresentationAddsServerWireframes(t *testing.T) {
 		t.Fatalf("stored %d options, want %d", len(stored), len(options))
 	}
 	for n, option := range stored {
-		value, _ := options[n]["value"].(string)
-		if option["value"] != value || option["label"] != options[n]["label"] {
-			t.Errorf("option %d stored as %v, want the model's label and value", n, option)
+		if option["value"] != ids[n] || option["label"] != options[n]["label"] {
+			t.Errorf("option %d stored as %v, want the model's label and the layout id %s", n, option, ids[n])
 		}
-		if option["wireframe"] != gridWireframe(t, value) {
-			t.Errorf("option %s carries %q, want the server's wireframe of the layout", value, option["wireframe"])
+		if option["wireframe"] != gridWireframe(t, ids[n]) {
+			t.Errorf("option %s carries %q, want the server's wireframe of the layout", ids[n], option["wireframe"])
 		}
 		if len(option) != 3 {
-			t.Errorf("option %s stored with %v, want label, value and wireframe", value, option)
+			t.Errorf("option %s stored with %v, want label, value and wireframe", ids[n], option)
 		}
 	}
 	if raw, _ := emaildoc.Layout("builtin:steps"); stored[1]["wireframe"] == emaildoc.Wireframe(raw) {
@@ -297,15 +293,21 @@ func TestFeedbackLayoutsPresentationAddsServerWireframes(t *testing.T) {
 	if subject["presentation"] != "layouts" {
 		t.Errorf("subject %v does not say the choice is of layouts", subject)
 	}
-	for _, option := range storedOptions(t, subject, "options") {
+	for n, option := range storedOptions(t, subject, "options") {
 		if _, drawn := option["wireframe"]; drawn {
 			t.Errorf("the question's own option %v carries a drawing; it is hashed into the question's id", option)
 		}
+		if option["value"] != ids[n] {
+			t.Errorf("the question's own option %v, want the layout id %s", option, ids[n])
+		}
+	}
+	if err := validateFeedbackAnswer(subject, "answered", map[string]any{"value": "builtin:letter"}); err != nil {
+		t.Errorf("the answer naming the padded layout's id was refused: %v", err)
 	}
 	if approval["artifactHash"] != workstate.ArtifactHash(subject) {
 		t.Error("the question's hash is not its subject's")
 	}
-	if options[0]["wireframe"] != forged || len(options[1]) != 2 {
+	if options[0]["wireframe"] != forged || len(options[1]) != 2 || options[2]["value"] != " builtin:letter " {
 		t.Error("the caller's options were changed")
 	}
 }

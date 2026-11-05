@@ -1,10 +1,34 @@
 package emaildoc
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
 )
+
+// ErrNotBuiltinLayout is BuiltinWireframe's answer for an id that names no
+// built-in layout.
+var ErrNotBuiltinLayout = errors.New("not a built-in layout")
+
+// BuiltinWireframe draws the built-in layout with the id as every picker shows
+// it -- the layout grid, and a choice of layouts in Ask: in its smallest form
+// (ExpandToMinimum), so a layout whose repeatable blocks must appear more than
+// once shows them so. An id that names no built-in layout is
+// ErrNotBuiltinLayout.
+func BuiltinWireframe(id string) (string, error) {
+	info, known := LayoutMeta(id)
+	doc, built := Layout(id)
+	if !known || !built {
+		return "", fmt.Errorf("%q is %w", id, ErrNotBuiltinLayout)
+	}
+	expanded, err := ExpandToMinimum(doc, info)
+	if err != nil {
+		return "", fmt.Errorf("layout %s: %w", id, err)
+	}
+	return Wireframe(expanded), nil
+}
 
 // Wireframe draws the structure of a layout-mode document as an SVG: grey
 // outlines and bars, with no colour, no words and no pictures, so that a small
