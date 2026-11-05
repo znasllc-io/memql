@@ -73,11 +73,18 @@ var builtinLayouts = [...]struct {
 	{"builtin:greeting", "Greeting", "A full-width picture, a short message and a signature.", "Letters", nil, nil},
 	{"builtin:announcement", "Announcement", "A banner, a headline, a short text, one button and social links.", "Announcements", nil, nil},
 	{"builtin:video", "Video", "A headline, a video picture that links to the video, a short text, one button and social links.", "Announcements", nil, nil},
+	{"builtin:product-launch", "Product launch", "A product picture, a headline with a short line above it, a list of features, one button and social links.", "Products", []string{"eyebrow"}, nil},
+	{"builtin:product-grid", "Product grid", "A headline, a short introduction and rows of two products, each with a picture, name, line and button, with social links.", "Products",
+		[]string{"intro"}, map[string]RepeatRange{"row": {Min: 1, Max: 2}}},
+	{"builtin:product-focus", "Product focus", "One product with its picture beside its name, text and button, and a quote below.", "Products", []string{"quote"}, nil},
+	{"builtin:offer", "Offer", "A headline, a short text, a highlighted code, one button, small print and social links.", "Promotions", []string{"fine-print"}, nil},
+	{"builtin:newsletter", "Newsletter", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links.", "News", nil, map[string]RepeatRange{"story": {Min: 1, Max: 3}}},
 }
 
-// Layouts lists the built-in layouts in the order of the catalogue:
-// Confirmation, Letter, Article, Lesson, Three reasons, Side by side and
-// Spotlight.
+// Layouts lists the built-in layouts in the order of the catalogue, which
+// groups them loosely by use (a confirmation and letters first, then articles,
+// products, announcements, promotions and news); each entry's Category says
+// where a picker files it.
 //
 // Each is a ready-made layout-mode document in a neutral example brand
 // ("Acme", Georgia and Arial, a small blue and grey palette with a red

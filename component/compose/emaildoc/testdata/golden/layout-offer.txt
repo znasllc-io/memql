@@ -1,0 +1,22 @@
+10% off your first order
+
+Thank you for joining us. Use this code at checkout to save on anything in the shop.
+
+WELCOME10
+
+Shop now
+
+One use per customer. Offer ends 31 December.
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

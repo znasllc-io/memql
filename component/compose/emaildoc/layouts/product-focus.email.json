@@ -1,0 +1,188 @@
+{
+  "subject": "Meet the Acme Max",
+  "preheader": "Built for the bigger jobs.",
+  "layout": "builtin:product-focus",
+  "theme": {
+    "page": "#f1f1f1",
+    "canvas": "#ffffff",
+    "primary": "#2f2f2f",
+    "secondary": "#595959",
+    "accent": "#3d3d3d",
+    "tint": "#f5f5f5",
+    "text": "#1c1c1c",
+    "muted": "#666666",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "focus",
+      "type": "columns",
+      "role": "content",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "inset": [
+        0,
+        24,
+        0,
+        24
+      ],
+      "maxWidth": 552,
+      "columns": [
+        {
+          "width": 47,
+          "blocks": [
+            {
+              "id": "focus-picture",
+              "type": "image",
+              "padding": [
+                24,
+                0,
+                16,
+                0
+              ],
+              "alt": "Product picture",
+              "width": 260,
+              "height": 300
+            }
+          ]
+        },
+        {
+          "width": 47,
+          "blocks": [
+            {
+              "id": "focus-name",
+              "type": "heading",
+              "padding": [
+                48,
+                0,
+                12,
+                0
+              ],
+              "text": "The Acme Max",
+              "size": 26.7,
+              "lineHeight": 29.37,
+              "color": "primary",
+              "align": "left",
+              "weight": 700,
+              "font": "heading"
+            },
+            {
+              "id": "focus-text",
+              "type": "text",
+              "padding": [
+                0,
+                0,
+                16,
+                0
+              ],
+              "text": "Sturdy and comfortable, ready for the longer jobs. Built for workshops and weekend projects.",
+              "size": 16,
+              "lineHeight": 24,
+              "align": "left"
+            },
+            {
+              "id": "focus-button",
+              "type": "button",
+              "role": "content",
+              "padding": [
+                0,
+                0,
+                24,
+                0
+              ],
+              "size": 16,
+              "color": "accent",
+              "align": "left",
+              "width": 200,
+              "label": "Learn more",
+              "paddingY": 9
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "quote",
+      "type": "highlight",
+      "role": "content",
+      "padding": [
+        16,
+        24,
+        24,
+        24
+      ],
+      "text": "The best tool we have ever owned.",
+      "size": 17.3,
+      "lineHeight": 20.76,
+      "gap": 0,
+      "color": "accent",
+      "background": "tint",
+      "italic": true,
+      "font": "body"
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME\n123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ],
+      "lineGap": 16
+    }
+  ]
+}

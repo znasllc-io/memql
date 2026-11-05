@@ -1,0 +1,20 @@
+Here is what we have been working on, and a few things we think you will enjoy.
+
+A story worth reading
+
+A short excerpt that tells the reader what the story is about and why it matters.
+
+Read more
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

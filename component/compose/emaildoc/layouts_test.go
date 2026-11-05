@@ -28,6 +28,11 @@ var builtinCatalog = []struct {
 	{"builtin:greeting", "Greeting", "A full-width picture, a short message and a signature.", "Warm wishes from all of us", "A small hello."},
 	{"builtin:announcement", "Announcement", "A banner, a headline, a short text, one button and social links.", "Something new at Acme", "Here is what is changing."},
 	{"builtin:video", "Video", "A headline, a video picture that links to the video, a short text, one button and social links.", "Watch: a short introduction", "Two minutes, start to finish."},
+	{"builtin:product-launch", "Product launch", "A product picture, a headline with a short line above it, a list of features, one button and social links.", "Meet the new Acme Mini", "Small, sturdy and ready today."},
+	{"builtin:product-grid", "Product grid", "A headline, a short introduction and rows of two products, each with a picture, name, line and button, with social links.", "Our favourites this season", "Four tools worth a look."},
+	{"builtin:product-focus", "Product focus", "One product with its picture beside its name, text and button, and a quote below.", "Meet the Acme Max", "Built for the bigger jobs."},
+	{"builtin:offer", "Offer", "A headline, a short text, a highlighted code, one button, small print and social links.", "A little something for you", "Use your code at checkout."},
+	{"builtin:newsletter", "Newsletter", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links.", "This month at Acme", "Three stories worth a read."},
 }
 
 // builtinTheme is the neutral example brand's palette and fonts, which the
@@ -267,8 +272,14 @@ var builtinRoles = map[string]string{
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand footer=brand",
 	"builtin:greeting": "logo=brand picture=content message=content " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand footer=brand",
-	"builtin:announcement": "logo=brand hero=content headline=content text=content cta=content social=brand footer=brand",
-	"builtin:video":        "logo=brand headline=content video=content text=content cta=content social=brand footer=brand",
+	"builtin:announcement":   "logo=brand hero=content headline=content text=content cta=content social=brand footer=brand",
+	"builtin:video":          "logo=brand headline=content video=content text=content cta=content social=brand footer=brand",
+	"builtin:product-launch": "logo=brand product=content eyebrow=content headline=content features=content cta=content social=brand footer=brand",
+	"builtin:product-grid": "logo=brand headline=content intro=content row=content product-a-picture=content product-a-name=content product-a-line=content product-a-button=content " +
+		"product-b-picture=content product-b-name=content product-b-line=content product-b-button=content social=brand footer=brand",
+	"builtin:product-focus": "logo=brand focus=content focus-picture=content focus-name=content focus-text=content focus-button=content quote=content footer=brand",
+	"builtin:offer":         "logo=brand offer-headline=content offer-text=content code=content cta=content fine-print=content social=brand footer=brand",
+	"builtin:newsletter":    "logo=brand intro=content story=content story-picture=content story-title=content story-excerpt=content story-link=content social=brand footer=brand",
 }
 
 func TestLayoutsSplitBrandAndContent(t *testing.T) {
@@ -337,6 +348,15 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 		"builtin:announcement": "image_missing:logo image_missing:hero link_missing:cta " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 		"builtin:video": "image_missing:logo image_missing:video link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:product-launch": "image_missing:logo image_missing:product link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:product-grid": "image_missing:logo image_missing:product-a-picture link_missing:product-a-button image_missing:product-b-picture link_missing:product-b-button " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:product-focus": "image_missing:logo image_missing:focus-picture link_missing:focus-button link_missing:footer",
+		"builtin:offer": "image_missing:logo link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:newsletter": "image_missing:logo image_missing:story-picture link_missing:story-link " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 	}
 	for _, info := range Layouts() {
