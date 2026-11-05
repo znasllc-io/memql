@@ -261,6 +261,17 @@ type runDriver struct {
 	// It is bound into each command step's recovery definition (definitionOf) and
 	// copied into each command step's request (request).
 	computePlacement *pipelines.ComputePlacementPolicy
+	// planSpec and planGraph are the pipeline block and the Go import graph the
+	// plan was compiled from (readPlan): what carryForward reads the change
+	// between an earlier push's commit and this one through, with the same
+	// pinned policies a pull request's selection uses. planGraph is nil when no
+	// step selects packages. The drive's goroutine only.
+	planSpec  *pipelines.Spec
+	planGraph *pipelines.Graph
+	// evidenceRelation caches whether the installed evidenceReuse template
+	// declares `relation` (evidenceAsksRelation): nil until it is first asked.
+	// The drive's goroutine only.
+	evidenceRelation *bool
 	stages           []stageTracks
 	tracks           []*stepTrack
 	// abandonedInFlight: this drive ends steps a previous driver handed to
@@ -791,6 +802,16 @@ func (dr *runDriver) releaseChainFresh(ctx context.Context) (bool, error) {
 // images and files on an attempt the candidate cannot cover. Candidate
 // coverage proves each carried release pass against the attempt that executed
 // it (integrations/release/candidate_carried.go).
+//
+// OUTSIDE A RELEASE, A STEP THE ATTEMPT TOOK FROM ANOTHER RUN RUNS AGAIN: one it
+// reused at its commit, or carried forward from an earlier push (carry.go). Its
+// pass is that other run's receipt, held to the 24-hour window from that run's
+// finish when the attempt was planned. A re-run can be opened days later, and
+// carrying the skip into it would stretch the pass past the window with nothing
+// executed, a chain the window exists to stop. A release keeps carrying such a
+// step: its re-run carries nothing once its first attempt is a day old
+// (releaseChainFresh), and candidate coverage proves the reuse against its
+// source at the attempt that made it.
 func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, release bool) {
 	// Report publications bind the producing run, so a new attempt must produce
 	// its own scanner artifacts instead of carrying a skip from an older run.
@@ -815,6 +836,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int, releas
 			continue
 		}
 		if release && releaseProducer(t.step, row) {
+			continue
+		}
+		if !release && row.EvidenceRunID != "" {
 			continue
 		}
 		passed := row.Status == WorkStepDone
@@ -877,8 +901,14 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 		if t.tree != "" {
 			call["treeFingerprint"] = t.tree
 		}
+		if t.carry != "" {
+			call["carryFingerprint"] = t.carry
+		}
 		if t.evidenceRunID != "" {
 			call["evidenceRunId"] = t.evidenceRunID
+		}
+		if t.carriedFrom != nil {
+			call["carriedFrom"] = t.carriedFrom.call()
 		}
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)
@@ -989,8 +1019,11 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 		// rows say: a takeover that dropped evidenceRunId, or recomputed a
 		// fingerprint from a slice the timing table has moved since, would leave
 		// a release that candidate coverage refuses as no longer matching its
-		// declared execution.
+		// declared execution. What a push carried forward comes back the same
+		// way, from the row and never from deciding again (carryForward): GitHub
+		// may no longer prove the ancestry, or a newer push may have finished.
 		t.verification, t.tree, t.evidenceRunID = row.VerificationFingerprint, row.TreeFingerprint, row.EvidenceRunID
+		t.carry, t.carriedFrom = row.CarryFingerprint, row.CarriedFrom
 		records, _ := attemptsFromBinding(row.Binding)
 		t.setAttempts(records)
 		switch {
@@ -1079,7 +1112,9 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			// step from a carried one.
 			verification:  row.VerificationFingerprint,
 			tree:          row.TreeFingerprint,
+			carry:         row.CarryFingerprint,
 			evidenceRunID: row.EvidenceRunID,
+			carriedFrom:   row.CarriedFrom,
 			attempt:       max(row.Attempt, 1),
 			state:         StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
@@ -1212,9 +1247,19 @@ type stepTrack struct {
 	attempt      int
 	definition   string
 	verification string
-	// tree is the step's fingerprint across commits (treeFingerprintOf).
-	tree          string
+	// tree is the step's fingerprint across commits of one tree
+	// (treeFingerprintOf).
+	tree string
+	// carry is the step's fingerprint across commits of the pipeline
+	// (carryFingerprintOf): declared on every verification step, so a later push
+	// can carry the step forward from this run's receipt (carry.go).
+	carry         string
 	evidenceRunID string
+	// carriedFrom is the receipt a push carried this step forward from, nil for
+	// any other step. Decided once, before the work run opens (carryForward), and
+	// restored from the step's row by a takeover (resume, adoptRows), never
+	// decided again.
+	carriedFrom *carriedFrom
 	// sent: the rows say the attempt t names is running and record no outcome
 	// for it -- a previous driver handed it to the runner, which may still be
 	// at it. Re-sent as a recovery of that same attempt (RecoverOnly) when the
@@ -1306,6 +1351,7 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 				definition:   dr.definitionOf(step),
 				verification: dr.verificationOf(step),
 				tree:         dr.treeFingerprintOf(step),
+				carry:        dr.carryFingerprintOf(step),
 				state:        StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
 			}
 			st.tracks = append(st.tracks, t)

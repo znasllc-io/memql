@@ -106,18 +106,35 @@ these hold:
 - The affected selection between that commit and this one leaves the step or
   slice untouched.
 
-The check run lists the step as reused, naming the run it came from.
+The check run lists the step as passed, *Inputs unchanged since \<commit\>;
+verified in run \<id\>*, naming the run that executed it.
+
+**The opt-in.** It is off until the installed `evidenceReuse` template declares a
+`relation` argument. A template that declares it is told how each source relates
+to the run: `commit`, `tree` (a release's same-tree source) or `ancestor`. One that
+does not is asked what it always was, and never about an ancestor. The portable
+default declares none.
 
 **The bounds.**
 - Only directly completed receipts carry forward, so every step executes for real
   at least once a day while `main` moves.
 - A step that reads more than its tree (`checkoutHistory`) never carries
-  forward.
-- Release preparation proves each reused step against the run it came from, as
-  it already does for same-tree reuse.
+  forward. A whole-tree step (no packages, no bucket) carries only when the tree
+  did not change.
+- A push compares itself with at most four earlier pushes, newest first, each
+  proven an ancestor by GitHub with the change listed whole.
+- A release never stands on a carried receipt. It reuses only executed receipts,
+  so it executes every step the push of its tree carried, all its shards; and
+  candidate coverage refuses a carried row named as evidence.
+- A failed-only re-run of a push runs a carried or reused step again rather than
+  carrying the skip past the window.
+- This repository's manifest puts what `go-tests` and `db-tests` run and read
+  beside `go test` under `select.full`, and runs `gate-inputs` on every push.
 
-The implementation details are in the change itself and in
-[pipelines.md](../../public/operate/pipelines.md#reusing-verification-evidence).
+The implementation details are in the change itself
+(`component/pipelinerun/carry.go`), in
+[pipelines.md](../../public/operate/pipelines.md#carrying-a-verified-step-forward-on-the-default-branch)
+and in the [harness decision map](../../internal/ops/harness-decisions.md#a-push-carries-a-verified-step-forward-2026-11-05).
 
 ### D6. A release is prepared from the newest commit whose run passed
 

@@ -881,7 +881,12 @@ Afterwards:
   refused `pipeline_nothing_to_rerun`. GitHub's own re-request of the run's
   check re-runs it whole; a re-request of a [step's check](#a-check-per-step)
   re-runs what did not pass when the run failed, and the whole run when it
-  passed. **In a release** a failed-only re-run also runs again every step that
+  passed. **Outside a release** a failed-only re-run also runs again every step
+  the original reused from another run or carried forward from an earlier push
+  ([Carrying a verified step forward](#carrying-a-verified-step-forward-on-the-default-branch)),
+  because its pass stands on that run's receipt and age. **In a release** a
+  failed-only re-run keeps carrying what its attempt reused, and runs again
+  every step that
   produces artifacts (one that declares `artifacts` or an image build, or whose
   earlier receipt named any), so every artifact a candidate pins comes from the
   attempt it names. It carries nothing once the release's first attempt was
@@ -1257,7 +1262,9 @@ fingerprint, command definition and package slice. Evidence older than 24 hours
 is refused. Scheduled scans and explicit retries always execute. Artifact
 production and publication always retain their own receipts; a reused test does
 not stand in for either. For every event but a release, equal trees with different
-commit hashes are checked separately.
+commit hashes are checked separately. A push to the default branch can also carry
+a step forward from an earlier push whose change since left it untouched
+([below](#carrying-a-verified-step-forward-on-the-default-branch)).
 
 **A release compares trees instead.** A merge commit of an up-to-date pull request
 has its head's tree, so a release may reuse that run's checks though the commits
@@ -1270,6 +1277,100 @@ release is never replaced: 0.31.4 and 0.31.5 were lost to skips the proof refuse
 what always runs. A failed release recovers by re-running its failed steps, which
 carries passes inside the release's own attempt chain
 ([release-cutting.md](release-cutting.md#recover-a-failed-build)).
+
+#### Carrying a verified step forward on the default branch
+
+Every push to the default branch opens a full run, which would otherwise execute
+every verification step again, even after a push that touched one package. A push
+**carries a step forward** instead: it skips the step, or one slice of a sharded
+step, as `pipeline_passed_earlier` when an earlier push executed it and the change
+since then leaves it untouched. All of this must hold:
+
+- The run is a push's first attempt, in `full` mode, on the pipeline's default
+  branch. A re-run, a pull request, a merge group, a release and a scheduled scan
+  never carry forward.
+- The source is an earlier push run of the same pipeline, owner, repository and
+  branch. It succeeded, was never asked to stop, ran under the same policy version,
+  and finished at most 24 hours before the decision. The run compares itself with
+  at most four such pushes that the policy admits, newest first.
+- GitHub proves the source's commit a proper ancestor of the push's commit and
+  lists the change between them in full. A compare that fails, a commit that is
+  not an ancestor (rewritten history, another branch) or a change of 300 paths or
+  more carries nothing from that source.
+- The change, read the way an affected pull request reads its own, leaves the step
+  untouched. The reading uses the Go import graph at the push's commit,
+  `select.full`, `select.testInputs`, the buckets and the installed selection
+  policies ([Which packages a step tests](#which-packages-a-step-tests)). Either no
+  package of the slice is reached by the change, the step's `when` bucket is not
+  selected, or the tree did not change at all. A step that selects no packages and
+  names no bucket reads the whole tree, and a `packages: all` step tests every
+  package whatever changed, so each carries only when nothing changed. A change
+  that selects every package carries nothing.
+- The source **executed** the step over exactly the slice's packages: a passing
+  command with no artifacts, under the same definition. The definition is the engine
+  revision, the policy version, the owner, pipeline and repository, the compute, the
+  domain and the whole step: command, image digest, services, key, shard and
+  packages. A step the source itself carried or reused is never a source, so a pass
+  is never carried from a carry. **Every step executes for real at least once every
+  24 hours** while the branch moves.
+- A step that declares `checkoutHistory` reads more than its tree and never
+  carries.
+
+A shard's slice follows the timing table, which moves. So a push takes the source's
+split when the source's shards hold exactly the packages the plan selected, as a
+release does, and the slices the push runs cover what the carried ones do not.
+
+**It is off until an installation turns it on.** The installed `evidenceReuse`
+template must declare a `relation` argument. A template that declares it is told,
+for every source it is asked about, how that source relates to the run: `commit`
+(the same commit), `tree` (a release's source with the same tree) or `ancestor` (an
+earlier push this one would carry from). A template that does not declare it is
+asked exactly what it always was, and never about an ancestor. The portable default
+declares none. An installation that wants carry-forward, and keeps its current
+answers for the other two relations, writes:
+
+```memql
+@template
+automation installationEvidenceReuse {
+  args { event string! sourceEvent string! sourceMode string! ageSeconds int! relation string! }
+  return args.relation == "ancestor"
+    ? args.event == "push" && args.sourceEvent == "push" && args.sourceMode == "full"
+    : args.sourceEvent == "push" || args.sourceEvent == "merge_group"
+}
+```
+
+Bind it to the `evidenceReuse` role in the installed resolver
+([The block's keys](#the-blocks-keys)). The second branch is an example: keep what
+the installation already answers. The 24-hour bound is the engine's and a policy
+can only shorten it, for example with `args.ageSeconds <= 21600`.
+
+**What the run shows.** A carried step's check reads *Passed: Inputs unchanged since
+3f9c2ab; verified in run \<id\>.*, naming the commit and the run that executed it.
+Its step row records `carriedFrom`: that run, its work run, its commit and tree, and
+the paths GitHub listed between the two commits. The decision is made once, before
+the run's work opens. A replica that takes the run over restores it from the rows
+and never decides again.
+
+**A failed-only re-run of a push** runs again every step its original carried
+forward or reused from another run. The pass stands on that other run's receipt
+and age, and a re-run opened days later would otherwise stretch it past 24 hours.
+
+**A release executes what a push carried.** A release reuses only steps a run
+executed ([What a release reuses](release-cutting.md#what-a-release-reuses)). When
+the push of its tree carried any slice of a step, the release executes the whole
+step, all of its shards. Candidate coverage also refuses a carried step named as
+evidence. A release never stands on a carry.
+
+**The remaining risk is the selection's**, which pull requests have relied on. The
+import graph sees Go source, `select.full`, the buckets and the declared test
+inputs, and nothing else. It cannot see a test that reads another package's files
+by path, or a script a step runs. A repository bounds that in its manifest. Put the
+scripts and files that a narrowing verification step runs and reads under
+`select.full`. Run the tests that read the repository by path on every push, in a
+step that declares no verification. MemQL's own repository does both: its
+`select.full` names `scripts/identity/build-css.sh`, the `lib.sh` it sources,
+`brand/**` (which it compiles into an embedded stylesheet), and `db-tests`' runner
+and budgets, and its `gates` stage runs `gate-inputs` on every push.
 
 ### Recovery and maintenance
 
@@ -1547,6 +1648,12 @@ disguise, and it fails nothing.
 - **A packages step with nothing selected** is skipped `pipeline_not_affected`:
   *No affected Go packages.*, or *No db-gated packages are affected.* under
   `only: db-gated`.
+- **A verification step another run already verified** is skipped
+  `pipeline_passed_earlier`, saying which run:
+  [reused](#reusing-verification-evidence) at the same commit or tree, or, on a
+  push to the default branch,
+  [carried forward](#carrying-a-verified-step-forward-on-the-default-branch) from
+  an earlier push whose change since left it untouched.
 
 ### Which packages a step tests
 
@@ -2166,8 +2273,10 @@ name, so a run's steps sit together, stage by stage.
 A failed-only re-run writes no check for a step it carries over: the attempt
 that passed it already shows it passed on that commit, and a *Skipped* check of
 the same name would replace the pass. A step that reused another run's
-verification at the commit shows a pass that says where it was verified; its
-name carries its own run's event, so nothing of the other run's is replaced. A
+verification at the commit, or that a push carried forward from an earlier push
+([Carrying a verified step forward](#carrying-a-verified-step-forward-on-the-default-branch)),
+shows a pass that says where it was verified; its name carries its own run's
+event, so nothing of the other run's is replaced. A
 driver that takes a run over on another replica finds the step checks the run
 already has by their external id, `<run id>:<step key>`, and moves them rather
 than creating a second check of each name.
@@ -2411,7 +2520,7 @@ failed and no step reported why
 | `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
-| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages. Or the installed policy reused another run's receipt: a full run at this commit, or for a release, a run of the same source tree ([Reusing verification evidence](#reusing-verification-evidence)) | Nothing |
+| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages. Or the installed policy reused another run's receipt: a full run at this commit, or for a release, a run of the same source tree ([Reusing verification evidence](#reusing-verification-evidence)). Or a push carried it forward from an earlier push that executed it, whose change since left it untouched ([Carrying a verified step forward](#carrying-a-verified-step-forward-on-the-default-branch)) | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout

@@ -1629,6 +1629,8 @@ func workStepFromRow(row map[string]any) WorkStep {
 		s.VerificationFingerprint = rowString(call, "verificationFingerprint")
 		s.TreeFingerprint = rowString(call, "treeFingerprint")
 		s.EvidenceRunID = bareID(rowString(call, "evidenceRunId"))
+		s.CarryFingerprint = rowString(call, "carryFingerprint")
+		s.CarriedFrom = carriedFromCall(call["carriedFrom"])
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
 		s.Packages = rowStrings(call, "packages")

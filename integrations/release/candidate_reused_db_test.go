@@ -165,6 +165,45 @@ func TestReusedReceiptRefusals(t *testing.T) {
 	}
 }
 
+// A push that carried a step forward from an earlier push stands for no release
+// (component/pipelinerun/carry.go; design record 2026-11-05, D5). Its row is a
+// pipeline_passed_earlier skip naming the earlier push that executed the step at
+// another commit, and coverage refuses it both ways a candidate could reach it:
+// named as the candidate's own evidence, where only a full release reuses another
+// run's receipt; and as the same-tree source a release reused, where only a receipt
+// the source executed counts. The release runner never plans the second
+// (reuseGroup), and the proof holds even if it did.
+func TestACarriedForwardStepStandsForNoRelease(t *testing.T) {
+	earlierCommit := strings.Repeat("5", 40)
+	carriedForward := func(f *carriedDB, now time.Time) (string, string) {
+		earlier, earlierWork := f.run(carriedRunSpec{event: "push", mode: "full", sha: earlierCommit, runKey: id.NewShortId(), succeeded: true, tree: otherTree,
+			queuedAt: now.Add(-3 * time.Hour), finishedAt: now.Add(-2 * time.Hour), steps: map[string]carriedStep{"test.full": reusedPass()}})
+		step := carriedStep{definition: sourceDefinition, packages: reusedPackages, evidenceRun: earlier, treeFingerprint: reusedFingerprint,
+			carriedFrom: map[string]any{"pipelineRunId": earlier, "workRunId": earlierWork, "sha": earlierCommit, "treeHash": otherTree, "changedPaths": []string{"engine/other.go"}}}
+		return f.run(carriedRunSpec{event: "push", mode: "full", sha: reusedPullCommit, runKey: id.NewShortId(), succeeded: true, tree: reusedTree,
+			queuedAt: now.Add(-2 * time.Hour), startedAt: now.Add(-2 * time.Hour), finishedAt: now.Add(-time.Hour),
+			steps: map[string]carriedStep{"build.image": image, "test.full": step}})
+	}
+	t.Run("named as the candidate's evidence", func(t *testing.T) {
+		f := newCarriedDB(t)
+		_, work := carriedForward(f, time.Now())
+		got, err := f.coverage(work)
+		if err == nil || !strings.Contains(err.Error(), "test.full") || !strings.Contains(err.Error(), "only a full release") {
+			t.Fatalf("got %+v, %v; want a refusal of test.full: only a full release reuses another run's receipt", got, err)
+		}
+	})
+	t.Run("as the source a release reused", func(t *testing.T) {
+		f := newCarriedDB(t)
+		now := time.Now()
+		push, _ := carriedForward(f, now)
+		_, work := f.release(now, reusedOf(push), nil)
+		got, err := f.coverage(work)
+		if err == nil || !strings.Contains(err.Error(), "test.full") || !strings.Contains(err.Error(), "executed, artifact-free") {
+			t.Fatalf("got %+v, %v; want a refusal of test.full: only an executed receipt counts", got, err)
+		}
+	})
+}
+
 // Another pipeline's run of one tree stands for nothing here, whatever it passed.
 func TestReusedReceiptRefusesAnotherPipeline(t *testing.T) {
 	f := newCarriedDB(t)

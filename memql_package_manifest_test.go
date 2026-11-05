@@ -344,7 +344,7 @@ func compileEngineCadence(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 }
 
 // Every event that opens a run compiles with no refusal, into its stages in the
-// order written (the gates stage for a pull request only), every step in the
+// order written (the gates stage for a pull request and a push only), every step in the
 // toolchain image on the fleet, the db step beside its Postgres; and each
 // opening runs, skips and leaves out what the manifest says it does.
 func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
@@ -356,6 +356,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", "secrets-current", manifestStageTests, "installer-smoke"}
+	pushStages := []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "inventory"}
 	pullRequestStages := []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates, "installer-smoke", "dependency-proposal", "dependency-proposal-write"}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -372,11 +373,13 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// graph says.
 		runs, skips, absent []string
 	}{
-		// A full run tests every package in go-tests, the gate packages among
-		// them, so the gates stage is absent, as ci.yml runs that step only on a
-		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: append(slices.Clone(fullStages), "inventory"),
-			runs: every, absent: []string{manifestStepGateInputs}},
+		// A push may carry a go-tests slice forward from an earlier push
+		// (component/pipelinerun/carry.go), and the gate packages read files the
+		// import graph does not see, so a push runs the gates as a pull request
+		// does. A merge group and a release test every package in go-tests, the
+		// gate packages among them, so the gates stage is absent there.
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: pushStages,
+			runs: append(slices.Clone(every), manifestStepGateInputs)},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a release", event: pipelines.EventRelease, stages: []string{manifestStageChecks, "cockpit", "delivery-artifacts", "vulnerabilities", manifestStageTests, "inventory", "cockpit-release", "release-files", "build-tools", "images"},
