@@ -79,7 +79,7 @@ test("choosing a layout and a name makes it ready; a description adds Write it",
   assert.equal(f.barState(), C.chooseLayout);
   assert.deepEqual(f.acts(), []);
   assert.equal(f.el("layouts").getAttribute("role"), "radiogroup");
-  assert.equal(f.named(f.el("layouts")), C.layout);
+  assert.equal(f.el("layouts").getAttribute("aria-label"), C.layout);
   assert.deepEqual(f.cards().map(card => f.named(card)), ["Confirmation", "Letter", "Article", "Spotlight"]);
   assert.deepEqual(f.cards().map(card => f.named(card, "aria-describedby")), BUILTINS.map(layout => layout.description));
   // Groups are quiet headings, in the engine's category order.
@@ -186,6 +186,7 @@ test("each card draws the server's wireframe as an image and never as markup", (
   // A layout with no wireframe draws a name only, and one without an id or a name is not listed.
   f.send(setup({ layouts: [{ id: "a", name: "Plain", category: "Letters" }, { id: "", name: "No id" }, { id: "b" }, 5] }));
   assert.deepEqual(f.cards().map(card => f.named(card)), ["Plain"]);
+  assert.ok(f.cards()[0]!.querySelector(".thumb"), "the mat stays");
   assert.equal(f.cards()[0]!.querySelector("img"), null);
   f.dom.window.close();
 });
@@ -206,31 +207,44 @@ test("the grid groups layouts by category in the engine's order; an unknown cate
   f.dom.window.close();
 });
 
-test("the layout cards keep their size: 168 pixel columns from the left, each wireframe shown 168 wide in a 168 by 218 window", () => {
+test("every card is a tinted mat round a drawing in one portrait frame; the grid fills the width", () => {
   const f = fixture();
   const style = (element: Element) => f.dom.window.getComputedStyle(element);
   const flat = (value: string) => value.replace(/\s+/g, "");
-  // The loading shapes and the cards: the same fixed tracks, never stretched.
   f.send(setup());
-  for (const grid of [f.el("placeholders"), f.el("groups").querySelector(".cards")!]) {
+  // The loading shapes and the cards share the grid: columns that fill the width, a 16 pixel gap.
+  for (const grid of [f.el("placeholders").querySelector(".cards")!, f.el("groups").querySelector(".cards")!]) {
     const css = style(grid);
     assert.equal(css.display, "grid");
-    assert.equal(flat(css.getPropertyValue("grid-template-columns")), "repeat(auto-fill,168px)");
+    assert.equal(flat(css.getPropertyValue("grid-template-columns")), "repeat(auto-fill,minmax(150px,1fr))");
     assert.equal(css.getPropertyValue("gap"), "16px");
-    assert.equal(css.getPropertyValue("justify-content"), "start", "left aligned");
   }
-  const thumb = style(f.card("builtin:article").querySelector(".thumb")!);
-  assert.deepEqual([thumb.width, thumb.height], ["168px", "218px"]);
-  const tile = style(f.el("placeholders").querySelector(".tile")!);
-  assert.deepEqual([tile.width, tile.height], ["168px", "218px"], "the loading shape is a card's size too");
-  // Straight edges, no boxes: the cards and their shapes are not rounded, and the chosen one is marked by an underline and a soft fill.
   const css = f.doc.querySelector("style")!.textContent!;
+  // The mat: theme colours only, no border, padding round the drawing; the same frame for every card (4:5), contain, top and centre.
+  assert.match(css, /\.thumb,\.tile\{aspect-ratio:4\/5;overflow:hidden;padding:9px;border-radius:0;background:color-mix\(in srgb,var\(--vscode-editor-foreground\) 6%,transparent\)\}/);
+  assert.match(css, /\.thumb img\{[^}]*width:100%;height:100%;object-fit:contain;object-position:top center\}/);
+  const cards = css.slice(css.indexOf(".cards{"), css.indexOf(".loading-group"));
+  assert.doesNotMatch(cards, /#fff|#ffffff|border:|border-(top|bottom):/i, "no hard-coded colour and no border on the cards");
+  assert.doesNotMatch(css, /\.card[^{]*\{[^}]*font-weight/, "the chosen name is marked by colour, not weight: its width does not move");
+  // Straight edges; the chosen card: soft accent fill on the mat, the accent colour and underline on the name.
   assert.match(css, /\.card\{[^}]*border-radius:0/);
-  assert.match(css, /\.tile\{[^}]*border-radius:0/);
-  assert.match(css, /\.card\[aria-checked="true"\]\{background:color-mix/);
-  assert.match(css, /\.card\[aria-checked="true"\] \.card-name\{[^}]*box-shadow:inset 0 -2px 0 var\(--vscode-focusBorder\)/);
+  assert.match(css, /\.card\[aria-checked="true"\] \.thumb\{background:color-mix\(in srgb,var\(--vscode-focusBorder\) 24%,transparent\)\}/);
+  assert.match(css, /\.card\[aria-checked="true"\] \.card-name\{color:var\(--vscode-textLink-foreground\);box-shadow:inset 0 -2px 0 var\(--vscode-focusBorder\)\}/);
+  // A dark editor gets the drawing inverted, in one block.
+  assert.match(css, /body\.vscode-dark \.thumb img,body\.vscode-high-contrast:not\(\.vscode-high-contrast-light\) \.thumb img\{filter:invert\(\.82\)\}/);
   assert.match(css, /\.bar\{border-top:0\}/, "no divider above the bar");
   assert.match(css, /\.bar-notice\{padding:8px 16px;background:var\(--vscode-editor-background\)\}/, "none above the problem either");
+  // Loading is the loaded page's shape: heading bars and card-shaped mats, in groups, with no words.
+  const loading = f.el("placeholders");
+  assert.equal(loading.querySelectorAll(".loading-group").length, 3);
+  assert.equal(loading.querySelectorAll(".heading-bar").length, 3);
+  assert.ok(loading.querySelectorAll(".tile").length >= 8);
+  assert.equal(loading.textContent, "");
+  // A layout with no drawing keeps the card's shape: the mat, empty.
+  f.send(setup({ layouts: [{ id: "a", name: "Plain", category: "Letters" }] }));
+  assert.ok(f.card("a").querySelector(".thumb"));
+  assert.equal(f.card("a").querySelector("img"), null);
+  assert.equal(f.doc.getElementById("layout-label"), null, "no label above the first heading");
   f.dom.window.close();
 });
 

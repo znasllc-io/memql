@@ -64,6 +64,15 @@ test("a composition that could not start still opens the template", async () => 
   const f = await fixture({ answers: { campaignComposeEmail: () => [{ templateId: "t-3", revision: 1, state: "failed", error: "No model" }] } });
   await f.receive(write); assert.equal(f.opened.length, 1); assert.match(f.opened[0][1].toString(), /templates\/t-3\//); assert.equal(f.disposed, true);
 });
+test("a template that could not be opened is opened again, never made twice", async () => {
+  const f = await fixture(); let fail = true;
+  Object.assign(vscode.commands, { executeCommand: async (...args: any[]) => { if (fail) throw new Error("no editor"); f.opened.push(args); } });
+  await f.receive({ ...write, type: "start" });
+  assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.openFailed); assert.equal(f.disposed, false);
+  fail = false; await f.receive({ ...write, type: "start" });
+  assert.equal(f.calls.filter(c => c.name === "campaignCreateTemplateFromLayout").length, 1);
+  assert.equal(f.opened.length, 1); assert.match(f.opened[0][1].toString(), /templates\/t-1\//); assert.equal(f.disposed, true);
+});
 test("a refused write shows the server's sentence and keeps the page and the draft", async () => {
   const f = await fixture({ answers: { campaignComposeEmail: () => { throw new Error(refusal); } } });
   await f.receive(write); const last = f.messages.at(-1);

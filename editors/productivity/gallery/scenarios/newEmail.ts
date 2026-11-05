@@ -1,44 +1,52 @@
 // The New email page: choosing how an email starts, and the states around that.
-// The grid is the engine's built-in layouts, grouped by category, each drawn as a
-// wireframe. The server draws the real ones; the gallery has no server, so it draws
-// a plain stand-in from each layout's blocks, in the same style (a white page of
-// grey bars). The wording and the grouping are the page's own.
+// The grid is the engine's 24 built-in layouts, grouped by category, each drawn as
+// the server's own wireframe (the golden files of component/compose/emaildoc). The
+// wording and the grouping are the page's own.
+
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { GALLERY_NONCE, type Scenario } from "../../../vscode/gallery/harness.js";
 import { newEmailPage } from "../../src/newEmailPage.js";
-import { email, withHostMessages, type EmailFixture, type Fixtures, type Then } from "../fixtures.js";
+import { withHostMessages, type Fixtures, type Then } from "../fixtures.js";
 
 const GROUP = "New email";
 const DOMAIN = "memql.localhost";
 const ACME = { id: "acme", name: "Acme Co" };
 const LABS = { id: "acme-labs", name: "Acme Labs" };
 
-/** The shape of a block as a bar: its height and how much of the width it takes. */
-const BARS: Record<string, [number, number]> = { image: [120, 1], heading: [28, 0.7], text: [64, 1], highlight: [56, 0.8], button: [36, 0.4], divider: [2, 1], spacer: [16, 0], section: [64, 1], columns: [80, 1], social: [24, 0.4], footer: [40, 0.6], html: [64, 1] };
+/** Where the real wireframes are: the engine's golden files, drawn by the server's own code (emaildoc.Wireframe). */
+const GOLDEN = path.resolve(process.cwd(), "../../component/compose/emaildoc/testdata/golden");
 
-/** A stand-in for the server's wireframe: grey bars on a white page, one per block. */
-function wireframe(fixture: EmailFixture): string {
-  let y = 24;
-  const bars: string[] = [];
-  for (const block of fixture.document.blocks ?? []) {
-    const [height, width] = BARS[String((block as { type?: string }).type)] ?? [40, 1];
-    if (width > 0) bars.push(`<rect x="${(600 - 520 * width) / 2}" y="${y}" width="${520 * width}" height="${height}" rx="2" fill="#e3e5e8"/>`);
-    y += height + 16;
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 ${y + 24}" width="600" height="${y + 24}"><rect width="600" height="${y + 24}" fill="#ffffff"/>${bars.join("")}</svg>`;
-}
-
-/** The built-in layouts the grid shows: the engine's four, and a few more of the same shapes in other categories. */
-const LAYOUTS: { from: string; id: string; name: string; category: string; description: string }[] = [
-  { from: "confirmation", id: "builtin:confirmation", name: "Confirm your address", category: "Welcome", description: "Asks a new subscriber to confirm their address." },
-  { from: "letter", id: "builtin:letter", name: "Personal letter", category: "Letters", description: "A personal note with a signature." },
-  { from: "article", id: "builtin:article", name: "Article", category: "Articles", description: "A banner, a headline, the story and a button." },
-  { from: "article", id: "builtin:weekly", name: "Weekly digest", category: "Articles", description: "Several stories under one banner." },
-  { from: "spotlight", id: "builtin:spotlight", name: "Spotlight", category: "Promotions", description: "One offer, front and centre." },
-  { from: "spotlight", id: "builtin:sale", name: "Sale", category: "Promotions", description: "A deadline and a discount." },
-  { from: "letter", id: "builtin:news", name: "Company news", category: "News", description: "What changed this month." },
-  { from: "article", id: "builtin:guide", name: "How-to guide", category: "Guides", description: "Steps for getting started." },
-  { from: "confirmation", id: "builtin:invite", name: "Event invitation", category: "Events", description: "The date, the place and a button to reply." },
+/**
+ * The 24 built-in layouts as the server lists them: id (without "builtin:"), name, category and description, copied from the
+ * catalogue in component/compose/emaildoc/layouts.go (builtinLayouts). The wireframe of each is its golden file, wireframe-<id>.svg.
+ */
+const CATALOGUE: [string, string, string, string][] = [
+  ["confirmation", "Confirmation", "Welcome", "A welcome on your brand colour with one button that confirms the subscription."],
+  ["letter", "Letter", "Letters", "A personal note with a signature band, a promotion and social links."],
+  ["article", "Article", "Articles", "A banner, a tinted article body with a highlighted statement, and a signature."],
+  ["lesson", "Lesson", "Articles", "A banner, a tinted lesson that ends on its takeaway, a promotion beside a picture, and social links."],
+  ["three-reasons", "Three reasons", "Articles", "A banner, a row of icons, a tinted body of titled reasons with a closing line, and a signature."],
+  ["side-by-side", "Side by side", "Products", "A banner, a tinted introduction, two cards side by side and closing lines, with a signature."],
+  ["spotlight", "Spotlight", "Announcements", "One large picture, a short message and one button."],
+  ["welcome-tour", "Welcome tour", "Welcome", "A banner, a short introduction, one to three benefits with icons, a button and social links."],
+  ["plain-note", "Plain note", "Letters", "A greeting and a few paragraphs of plain text, with a signature."],
+  ["greeting", "Greeting", "Letters", "A full-width picture, a short message and a signature."],
+  ["announcement", "Announcement", "Announcements", "A banner, a headline, a short text, one button and social links."],
+  ["video", "Video", "Announcements", "A headline, a video picture that links to the video, a short text, one button and social links."],
+  ["product-launch", "Product launch", "Products", "A product picture, a headline with a short line above it, a list of features, one button and social links."],
+  ["product-grid", "Product grid", "Products", "A headline, a short introduction and rows of two products, each with a picture, name, line and button, with social links."],
+  ["product-focus", "Product focus", "Products", "One product with its picture beside its name, text and button, and a quote below."],
+  ["offer", "Offer", "Promotions", "A headline, a short text, a highlighted code, one button, small print and social links."],
+  ["newsletter", "Newsletter", "News", "A short introduction and one to three stories, each with a picture, title, excerpt and link, with social links."],
+  ["steps", "Steps", "Guides", "A headline, a short introduction and two to six numbered steps, each with a title and text, with a button and a reply."],
+  ["picture-steps", "Picture steps", "Guides", "A headline and two to four rows, each with a picture beside its text."],
+  ["questions", "Questions", "Guides", "A headline, a short introduction and two to six questions, each with its answer, with a reply."],
+  ["event", "Event", "Events", "A picture, a headline, a tinted box with when and where, a short text and one button."],
+  ["testimonial", "Testimonial", "Feedback", "A highlighted quote, the person who said it with a photo, one button and social links."],
+  ["review-request", "Review request", "Feedback", "A headline, a product picture, a short text and one button."],
+  ["thank-you", "Thank you", "Feedback", "A headline, a short text, a tinted box of tips, a reply and a signature."],
 ];
 
 /** The draft a person left: Article, a name and a description. */
@@ -50,7 +58,8 @@ const DRAFT = {
 };
 
 export function scenarios(fixtures: Fixtures): Scenario[] {
-  const layouts = LAYOUTS.map(layout => ({ id: layout.id, name: layout.name, category: layout.category, description: layout.description, wireframe: wireframe(email(fixtures, layout.from)) }));
+  void fixtures;
+  const layouts = CATALOGUE.map(([id, name, category, description]) => ({ id: `builtin:${id}`, name, category, description, wireframe: fs.readFileSync(path.join(GOLDEN, `wireframe-${id}.svg`), "utf8") }));
   const setup = (extra: Record<string, unknown> = {}) => ({
     type: "setup", connected: true, domain: DOMAIN, organizations: [ACME], organizationId: ACME.id, layouts, dictation: true, ...extra,
   });

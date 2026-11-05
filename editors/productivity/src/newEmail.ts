@@ -26,6 +26,8 @@ interface Reference { fileId: string; label: string; kind: "picture" | "bundle" 
 /** `reference` is the picture of the finished email: one picture, apart from the material files in `references`. */
 interface Draft { organizationId?: string; layoutId?: string; name?: string; description?: string; references: Reference[]; reference?: Reference }
 class PageClosed extends Error {}
+/** The template was made, but the editor would not open it. */
+class OpenFailed extends Error { constructor(cause: unknown) { super("The template could not be opened.", { cause }); } }
 
 export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.CustomDocument> {
   private readonly shown = new Map<string, { state: string; loading: boolean }>();
@@ -91,11 +93,15 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
         if (epoch === generation && !(error instanceof PageClosed)) await post({ type: "layoutsFailed", problem: reportProblem(error, H.operations.layouts, connection) });
       }
     };
+    // The template made by the last act, kept while it could not be opened: the next act opens it rather than making another.
+    let made: { templateId: string; name: string; organizationId: string } | undefined;
     const open = async (templateId: string, name: string, organizationId: string) => {
       const file = /\.email\.json$/i.test(name) ? name : name + ".email.json";
       const uri = vscode.Uri.from({ scheme: "memql-file", authority: domain, path: `/templates/${templateId}/${file.replace(/[\\/]/g, "_")}` });
       resourceFrom(uri.toString());
-      await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.email", { viewColumn: panel.viewColumn, preview: false });
+      try { await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.email", { viewColumn: panel.viewColumn, preview: false }); }
+      catch (error) { made = { templateId, name, organizationId }; throw new OpenFailed(error); }
+      made = undefined;
       await this.context.workspaceState.update(DRAFT + link, undefined);
       await this.context.globalState.update(ORGANIZATION + domain, organizationId);
       panel.dispose();
@@ -106,6 +112,7 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
       if (!connection) { await setup(); return; }
       running = true;
       try {
+        if (made) { await open(made.templateId, made.name, made.organizationId); return; }
         const organizationId = draft.organizationId;
         if (!organizationId || !choices.some(choice => choice.id === organizationId)) throw new UserInputError(H.addOrganization);
         const layoutId = text(message, "layoutId");
@@ -126,7 +133,7 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
         // A composition that could not start still made the template: the editor shows that and offers Retry.
         await open(templateId, name, organizationId);
       } catch (error) {
-        if (!disposed && !(error instanceof PageClosed)) await post({ type: "failed", problem: reportProblem(error, H.operations.write, connection) });
+        if (!disposed && !(error instanceof PageClosed)) await post({ type: "failed", problem: error instanceof OpenFailed ? { message: H.openFailed } : reportProblem(error, H.operations.write, connection) });
       } finally { running = false; }
     };
     const references = async (problem?: unknown) => post({ type: "references", items: draft.references, ...(problem ? { problem: reportProblem(problem, H.operations.references, lease()) } : {}) });
@@ -194,6 +201,8 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
             break;
           case "draft":
             if (!running && message.draft && typeof message.draft === "object") {
+              // A changed request is a new one: the template made for the last is left as it is.
+              made = undefined;
               for (const key of ["name", "description", "layoutId"] as const) if (typeof message.draft[key] === "string") draft[key] = message.draft[key];
               await keep();
             }
