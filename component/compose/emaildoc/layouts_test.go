@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -412,5 +413,63 @@ func TestLayoutFilesAreCanonical(t *testing.T) {
 		if canonical, err := d.JSON(); err != nil || !bytes.Equal(canonical, data) {
 			t.Errorf("%s is not in canonical form (write it with Document.JSON; err %v)", name, err)
 		}
+	}
+}
+
+// requireContentBlock fails unless the layout holds a block with the id whose
+// role is content.
+func requireContentBlock(t *testing.T, l LayoutInfo, id string) {
+	t.Helper()
+	found := false
+	eachBlock(l.Document.Blocks, roleContent, func(b *Block, role string) {
+		if b.ID == id && role == roleContent {
+			found = true
+		}
+	})
+	if !found {
+		t.Errorf("%s: %s is not a content block", l.ID, id)
+	}
+}
+
+func TestLayoutCatalogueMetadata(t *testing.T) {
+	for _, l := range Layouts() {
+		if !slices.Contains(LayoutCategories, l.Category) {
+			t.Errorf("%s: category %q", l.ID, l.Category)
+		}
+		for _, id := range l.Optional {
+			requireContentBlock(t, l, id)
+		}
+		for id, r := range l.Repeat {
+			requireContentBlock(t, l, id)
+			if r.Min < 1 || r.Max < r.Min || r.Max > 6 {
+				t.Errorf("%s: %s range %+v", l.ID, id, r)
+			}
+		}
+		eachBlock(l.Document.Blocks, "", func(b *Block, role string) {
+			if slices.Contains(BrandSlots(), b.ID) && role != "brand" {
+				t.Errorf("%s: slot %s is %s", l.ID, b.ID, role)
+			}
+		})
+	}
+}
+
+func TestLayoutMetaReturnsACopy(t *testing.T) {
+	l, ok := LayoutMeta("builtin:article")
+	if !ok || l.Category != "Articles" || !slices.Equal(l.Optional, []string{"highlight"}) {
+		t.Fatalf("article meta = %+v, %v", l, ok)
+	}
+	l.Optional[0] = "changed"
+	if again, _ := LayoutMeta("builtin:article"); again.Optional[0] != "highlight" {
+		t.Error("LayoutMeta shares its slices with the catalogue")
+	}
+	if _, ok := LayoutMeta("builtin:nope"); ok {
+		t.Error("unknown id found")
+	}
+}
+
+func TestBrandSlotsOrder(t *testing.T) {
+	want := []string{"logo", "signature", "follow", "social", "footer", "reply"}
+	if got := BrandSlots(); !slices.Equal(got, want) {
+		t.Errorf("BrandSlots = %v", got)
 	}
 }

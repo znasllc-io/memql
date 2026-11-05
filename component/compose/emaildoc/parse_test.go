@@ -1709,3 +1709,16 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestParseAcceptsHyphenatedBuiltinLayoutIDs(t *testing.T) {
+	for _, id := range []string{"builtin:three-reasons", "builtin:a", "builtin:side-by-side"} {
+		if !builtinPattern.MatchString(id) {
+			t.Errorf("%s refused", id)
+		}
+	}
+	for _, id := range []string{"builtin:Three", "builtin:-x", "builtin:x-", "builtin:" + strings.Repeat("a", 41)} {
+		if builtinPattern.MatchString(id) {
+			t.Errorf("%s accepted", id)
+		}
+	}
+}

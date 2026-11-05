@@ -2,6 +2,8 @@ package emaildoc
 
 import (
 	"embed"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -20,15 +22,47 @@ type LayoutInfo struct {
 	Name        string // "Confirmation"
 	Description string
 	Document    Document // Layout field equals ID
+
+	// Category is the group a picker files the layout under: one of LayoutCategories.
+	Category string
+	// Optional lists the ids of content blocks a person may leave out.
+	Optional []string
+	// Repeat maps the id of a content block to how many times it may appear.
+	Repeat map[string]RepeatRange
+}
+
+// RepeatRange is how many copies of a repeatable content block a layout allows.
+type RepeatRange struct{ Min, Max int }
+
+// LayoutCategories are the groups layouts are filed under, in the order a picker shows them.
+var LayoutCategories = []string{"Welcome", "Letters", "Articles", "Announcements", "Products", "Promotions", "News", "Guides", "Events", "Feedback"}
+
+// The ids of the brand blocks every layout keeps for the organization's brand kit.
+const (
+	SlotLogo      = "logo"
+	SlotSignature = "signature"
+	SlotFollow    = "follow"
+	SlotSocial    = "social"
+	SlotFooter    = "footer"
+	SlotReply     = "reply"
+)
+
+// BrandSlots lists the brand slot ids: logo, signature, follow, social, footer and reply.
+func BrandSlots() []string {
+	return []string{SlotLogo, SlotSignature, SlotFollow, SlotSocial, SlotFooter, SlotReply}
 }
 
 // builtinLayouts is the catalogue, in the order Layouts lists it. An id is
 // "builtin:" and the name of the file in layouts/ that holds the document.
-var builtinLayouts = [...]struct{ id, name, description string }{
-	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription."},
-	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links."},
-	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature."},
-	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button."},
+var builtinLayouts = [...]struct {
+	id, name, description, category string
+	optional                        []string
+	repeat                          map[string]RepeatRange
+}{
+	{"builtin:confirmation", "Confirmation", "A welcome on your brand colour with one button that confirms the subscription.", "Welcome", nil, nil},
+	{"builtin:letter", "Letter", "A personal note with a signature band, a promotion and social links.", "Letters", nil, nil},
+	{"builtin:article", "Article", "A banner, a tinted article body with a highlighted statement, and a signature.", "Articles", []string{"highlight"}, nil},
+	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button.", "Announcements", nil, nil},
 }
 
 // Layouts lists the built-in layouts: Confirmation, Letter, Article and
@@ -63,10 +97,32 @@ var builtinLayouts = [...]struct{ id, name, description string }{
 func Layouts() []LayoutInfo {
 	verifyLayouts()
 	list := make([]LayoutInfo, len(builtinLayouts))
-	for i, entry := range builtinLayouts {
-		list[i] = LayoutInfo{ID: entry.id, Name: entry.name, Description: entry.description, Document: layoutDocument(entry.id)}
+	for i := range builtinLayouts {
+		list[i] = layoutInfo(i, true)
 	}
 	return list
+}
+
+// LayoutMeta returns the catalogue entry of the built-in layout with the id,
+// without its document, as a copy the caller may change. ok is false for any
+// other id.
+func LayoutMeta(id string) (LayoutInfo, bool) {
+	for i, entry := range builtinLayouts {
+		if entry.id == id {
+			return layoutInfo(i, false), true
+		}
+	}
+	return LayoutInfo{}, false
+}
+
+func layoutInfo(i int, withDocument bool) LayoutInfo {
+	entry := builtinLayouts[i]
+	info := LayoutInfo{ID: entry.id, Name: entry.name, Description: entry.description, Category: entry.category,
+		Optional: slices.Clone(entry.optional), Repeat: maps.Clone(entry.repeat)}
+	if withDocument {
+		info.Document = layoutDocument(entry.id)
+	}
+	return info
 }
 
 // Layout returns the built-in layout with the id "builtin:<name>", as a

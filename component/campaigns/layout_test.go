@@ -732,7 +732,13 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 	for _, r := range rows {
 		ids = append(ids, str(r, "id"))
 	}
-	if want := "builtin:confirmation, builtin:letter, builtin:article, builtin:spotlight, org:l1"; strings.Join(ids, ", ") != want {
+	var wantIDs []string
+	for _, l := range emaildoc.Layouts() {
+		wantIDs = append(wantIDs, l.ID)
+	}
+	builtinCount := len(wantIDs)
+	wantIDs = append(wantIDs, "org:l1")
+	if want := strings.Join(wantIDs, ", "); strings.Join(ids, ", ") != want {
 		t.Fatalf("ids = %s\nwant %s", strings.Join(ids, ", "), want)
 	}
 	for i, n := range nodes {
@@ -741,7 +747,7 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 		}
 	}
 
-	for _, row := range rows[:4] {
+	for _, row := range rows[:builtinCount] {
 		if row["kind"] != "builtin" || row["status"] != "active" || str(row, "name") == "" || str(row, "description") == "" {
 			t.Errorf("built-in row = %v", row)
 		}
@@ -759,7 +765,7 @@ func TestEmailLayoutsListsBuiltinsFirst(t *testing.T) {
 		}
 	}
 
-	org := rows[4]
+	org := rows[builtinCount]
 	if org["layoutId"] != "l1" || org["kind"] != "organization" || org["name"] != "Acme letter" || org["status"] != "active" ||
 		org["sourceArtifactId"] != "art-1" || org["revision"] != layoutStored.Format(time.RFC3339Nano) || org["description"] != "A personal note with a signature band." {
 		t.Fatalf("organization row = %v", org)
@@ -787,7 +793,8 @@ func TestEmailLayoutsIncludesArchivedOnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := nodePayloads(t, nodes)
-	if len(rows) != 6 || rows[4]["id"] != "org:l1" || rows[5]["id"] != "org:l2" || rows[5]["status"] != "archived" {
+	n := len(emaildoc.Layouts())
+	if len(rows) != n+2 || rows[n]["id"] != "org:l1" || rows[n+1]["id"] != "org:l2" || rows[n+1]["status"] != "archived" {
 		t.Fatalf("rows = %v", rows)
 	}
 	reads := engine.calls("query emailLayoutsForAccount")

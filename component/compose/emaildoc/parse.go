@@ -105,7 +105,7 @@ var (
 	hexPattern      = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 	fontPattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 -]{0,39}$`)
 	spacingPattern  = regexp.MustCompile(`^-?[0-9]{1,2}(\.[0-9]{1,3})?em$`)
-	builtinPattern  = regexp.MustCompile(`^builtin:[a-z]{1,40}$`)
+	builtinPattern  = regexp.MustCompile(`^builtin:[a-z](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
 	orgPattern      = regexp.MustCompile(`^org:[A-Za-z0-9_-]{1,160}$`)
 	artifactPattern = regexp.MustCompile(`^artifact:[A-Za-z0-9_-]{1,160}$`)
 )
