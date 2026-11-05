@@ -268,13 +268,15 @@ and the installation's delivery policy does not name it. Its GitHub controls
 ## Rollout
 
 1. GitHub controls (D1). Done 2026-11-05.
-2. The engine change ships in the release after 0.31.15:
+2. The engine change ships in 0.31.15, which had been prepared on `main` but not
+   cut when this change landed:
    - trains deleted (D2);
    - coalescing (D4), carry-forward (D5) and the newest-green walk (D6);
    - docs.
 
-   It is pushed only after 0.31.15's release run has started, because a push
-   adds a full run to the shared queue.
+   Production's release tooling is the old one until 0.31.15 is installed: it
+   releases only `main`'s tip, so 0.31.15 is cut once the change's own push run
+   has passed.
 3. Installation (`memql-znas`):
    - the delivery policy's supersession, reuse and train comments;
    - `docs/instance.md`;
