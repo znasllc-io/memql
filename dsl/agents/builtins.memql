@@ -197,11 +197,12 @@ builtin ai {
 
 @executor("integration.agents.requestUserFeedback")
 @args(profile="object")
-@description("Raise a v1:work:approval of kind feedback against the active run, carrying the question {question, kind, options?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the person's answer resumes the run.")
+@description("Raise a v1:work:approval of kind feedback against the active run, carrying the question {question, kind, options?, presentation?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the person's answer resumes the run. presentation layouts is a choice of built-in email layouts, which the server draws as their wireframes.")
 builtin requestUserFeedback {
   question     string!
   kind         string!
   options      []object
+  presentation string
   timeoutAt    string
   optional     bool
   agentId      string!

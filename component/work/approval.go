@@ -154,6 +154,12 @@ func FeedbackApproval(runId, stepKey, question string, options []map[string]any,
 	return a
 }
 
+// FeedbackPresentationLayouts is how a choice of built-in email layouts is
+// shown: each option's value is a layout id, and the server, never the model,
+// draws each option's wireframe for Ask to show (integrations/work
+// human_feedback.go). A question with no presentation is shown as words.
+const FeedbackPresentationLayouts = "layouts"
+
 // The two answers a failure-path question offers (FailureApproval). They are
 // option VALUES rather than decisions: a feedback approval is decided
 // `answered`, and which answer was chosen rides the answer object -- so the

@@ -1,4 +1,5 @@
-// tools.memql -- the tools of an email composition run.
+// tools.memql -- the tools of an email composition run, and the two Ask's
+// assistant starts one with (at the end of this file).
 //
 // A composition runs whole in Claude Code as the per-user email composer agent
 // (role specialist), and these three tools are the ones it is given: read the
@@ -65,4 +66,56 @@ tool emailComposeSubmit {
   templateId   string  @autoInjected @description("The template this composition writes. Server-stamped by the composition run; the central validator drops any value the model supplies.")
   goalId       string  @autoInjected @description("The goal of the composition run. Server-stamped by the run; the central validator drops any value the model supplies.")
   composition  object! @description("The composition last rendered: {subject, preheader, content, drop, repeat}, as emailComposeRender takes it.")
+}
+
+// ---- Ask: choosing a layout, then starting the composition ----
+//
+// A question asked inside a Claude Code session ends that session, and only an
+// agent turn resumes when the person answers, so Ask's assistant chooses the
+// layout in its own turn: it lists the layouts, asks the person with
+// requestUserFeedback (presentation layouts, which Ask shows as the wireframes
+// the server draws), and starts the composition with the layout chosen. Neither
+// tool stamps anything: the composition is the signed-in person's, as Write it
+// on the New email page is, and campaignComposeEmail checks their organization,
+// its brand kit and their apps itself. Both are offered on every owned Ask goal
+// (integrations/agent work_execution.go).
+
+/// Start here when the person asks for an email to be written. Lists the built-in email
+/// layouts as rows {id, name, category, description, outline, wireframe}: the outline is
+/// the layout's blocks in order, and the wireframe is a drawing for the person, not for
+/// you. Choose the layout closest to what the person described and to the names of the
+/// files they attached, and two alternatives. Then ask with requestUserFeedback: kind
+/// choice, presentation layouts, one option per layout {label: its name, value: its id},
+/// the closest first. Ask shows each option as its wireframe. When the person answers,
+/// call startEmailComposition with the id they chose. If it is not clear which of the
+/// person's organizations the email is for, ask that first, as a choice of their
+/// organizations.
+@handler(type="function", name="campaignLayoutCatalogue")
+@requiresAgentRole("assistant")
+@executionTime("fast")
+tool emailLayoutCatalogue {}
+
+/// Start MemQL writing the email the person asked for, once they have chosen its layout
+/// (emailLayoutCatalogue, then requestUserFeedback with presentation layouts). Send the
+/// layout id they chose, the organization the email is for, a short name, the person's
+/// own words about the email as the description, and the fileId of every file they
+/// attached for it. MemQL makes the draft at once and writes it in Claude Code on the
+/// person's own machine; this answers {templateId, goalId, revision, state} without
+/// waiting. The email is not written yet, so never say it is: say MemQL is writing it,
+/// and that the draft is already in Email > Templates and in VS Code, marked as being
+/// written, and fills in when MemQL finishes. An answer with an error kept the draft but
+/// could not start writing it: say so, and that it can be retried from the draft. A
+/// refusal says what the person should do (set up the organization's brand in Email,
+/// Settings, Brand; open Cockpit with Claude Code signed in): pass it on as it is. Nothing
+/// is published.
+@handler(type="function", name="campaignComposeEmail")
+@requiresAgentRole("assistant")
+@executionTime("fast")
+tool startEmailComposition {
+  accountId        string!  @description("The id of the organization the email is for. When the person belongs to more than one and it is not clear which, ask which first.")
+  name             string!  @description("A short name for the email's template, up to 200 characters, from what the person asked for.")
+  layoutId         string!  @description("The id of the layout the person chose: the value of their answer to the layouts question.")
+  description      string!  @description("The person's own words about the email, as they wrote them, in 1 to 8000 characters. Add nothing they did not say: the words in the attached files are used as they are.")
+  fileIds          array!   @description("The fileId (not the artifactId) of every file the person attached for this email: pictures, ZIPs and text files, at most 64. An empty list when there are none.")
+  referenceFileId  string   @description("The fileId of an attached picture the person says shows how the finished email should look. Omit it otherwise; never send an empty string.")
 }

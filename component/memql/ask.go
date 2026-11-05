@@ -53,14 +53,20 @@ type AskTurn struct {
 }
 
 type AskQuestion struct {
-	ChoiceOnly   bool             `json:"choiceOnly,omitempty"`
-	ResumeAnswer map[string]any   `json:"resumeAnswer,omitempty"`
-	Optional     bool             `json:"optional,omitempty"`
-	Continued    bool             `json:"continued,omitempty"`
-	ID           string           `json:"id"`
-	Text         string           `json:"text"`
-	Kind         string           `json:"kind"`
-	Options      []map[string]any `json:"options"`
+	ChoiceOnly   bool           `json:"choiceOnly,omitempty"`
+	ResumeAnswer map[string]any `json:"resumeAnswer,omitempty"`
+	Optional     bool           `json:"optional,omitempty"`
+	Continued    bool           `json:"continued,omitempty"`
+	ID           string         `json:"id"`
+	Text         string         `json:"text"`
+	Kind         string         `json:"kind"`
+	// Presentation is how the question is shown: absent for words, "layouts"
+	// for a choice of built-in email layouts (work.FeedbackPresentationLayouts).
+	Presentation string `json:"presentation,omitempty"`
+	// Options are {label, value}; on a choice of layouts each also carries
+	// the wireframe the server drew for it, an SVG document, and on no other
+	// question does an option carry one.
+	Options []map[string]any `json:"options"`
 }
 
 // AskRoute is the conversation's source choice for one turn, as the wire

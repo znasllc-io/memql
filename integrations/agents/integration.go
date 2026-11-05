@@ -454,6 +454,7 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 //	args["question"]    string  required -- what to ask the user
 //	args["kind"]        string  required -- choice / text / multi
 //	args["options"]     array   optional -- [{label, value}] for choice / multi
+//	args["presentation"] string optional -- "layouts": a choice of built-in email layouts
 //	args["timeoutAt"]   string  optional -- RFC3339 auto-pause deadline
 //	args["agentId"]     string  required -- auto-stamped by the streaming loop
 //	args["ownerUserId"] string  required -- auto-stamped by the streaming loop
@@ -514,12 +515,13 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	}
 
 	approvalId, err := goals.RaiseFeedbackApproval(ctx, ownerUserId, FeedbackApproval{
-		RunId:     runId,
-		Question:  question,
-		Kind:      kind,
-		Options:   options,
-		ExpiresAt: expiresAt,
-		Optional:  args["optional"] == true,
+		RunId:        runId,
+		Question:     question,
+		Kind:         kind,
+		Presentation: strings.TrimSpace(asString(args["presentation"])),
+		Options:      options,
+		ExpiresAt:    expiresAt,
+		Optional:     args["optional"] == true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("requestUserFeedback: raise approval: %w", err)

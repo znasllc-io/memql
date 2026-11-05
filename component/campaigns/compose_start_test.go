@@ -1153,3 +1153,82 @@ func TestComposeStartBuiltinsLoadAsSDKBuiltins(t *testing.T) {
 		}
 	}
 }
+
+// TestAskCompositionToolsLoadWithTheirBuiltins: Ask's assistant reaches the
+// layout catalogue and the start of a composition through two tools of its
+// own, each the assistant's alone. Each declares exactly the fields its builtin
+// takes -- a field the builtin does not take is refused on every call, and one
+// it requires that the tool does not declare could never be sent -- and stamps
+// none: a composition started from Ask is the signed-in person's, as Write it
+// is.
+func TestAskCompositionToolsLoadWithTheirBuiltins(t *testing.T) {
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	eng, err := memql.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.Logger = quietLogger()
+	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
+		t.Fatalf("engine init: %v", err)
+	}
+	if err := eng.RegisterIntegration(newTestWorker(t, &fakeEngine{}, &recordingSender{})); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.AuditIntegrationExecutors(); err != nil {
+		t.Fatalf("executor audit: %v", err)
+	}
+	for _, tc := range []struct{ tool, builtin, executor string }{
+		{"emailLayoutCatalogue", "campaignLayoutCatalogue", "integration.campaigns.layoutCatalogue"},
+		{"startEmailComposition", "campaignComposeEmail", "integration.campaigns.composeEmail"},
+	} {
+		got, err := eng.Tools().Get(tc.tool)
+		if err != nil {
+			t.Fatalf("tool %s: %v", tc.tool, err)
+		}
+		if got.Handler == nil || got.Handler.Type != "function" || got.Handler.FunctionName != tc.builtin {
+			t.Errorf("%s handler = %+v, want function %s", tc.tool, got.Handler, tc.builtin)
+		}
+		if !slices.Equal(got.RequiresAgentRole, []string{"assistant"}) || len(got.AutoInjectedFields) != 0 {
+			t.Errorf("%s: roles %v, stamped %v; want the assistant's, stamping nothing", tc.tool, got.RequiresAgentRole, got.AutoInjectedFields)
+		}
+		fn, err := eng.Functions().Get(tc.builtin)
+		if err != nil || fn == nil || !fn.IsBuiltin() || fn.Executor != tc.executor {
+			t.Fatalf("builtin %s: %+v %v", tc.builtin, fn, err)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(got.InputSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		declared := slices.Sorted(func(yield func(string) bool) {
+			for name := range schema.Properties {
+				if !yield(name) {
+					return
+				}
+			}
+		})
+		taken := []string{}
+		if fn.BuiltinArgs != nil {
+			for name := range fn.BuiltinArgs.Properties {
+				taken = append(taken, name)
+			}
+		}
+		slices.Sort(taken)
+		if !slices.Equal(declared, taken) {
+			t.Errorf("%s declares %v; %s takes %v", tc.tool, declared, tc.builtin, taken)
+		}
+		var required []string
+		if fn.BuiltinArgs != nil {
+			required = slices.Clone(fn.BuiltinArgs.Required)
+		}
+		slices.Sort(required)
+		slices.Sort(schema.Required)
+		if !slices.Equal(schema.Required, required) {
+			t.Errorf("%s requires %v; %s requires %v", tc.tool, schema.Required, tc.builtin, required)
+		}
+	}
+}

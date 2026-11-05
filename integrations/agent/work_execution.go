@@ -47,7 +47,10 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	}
 	// Repository requests use the installed bounded tools and their existing
 	// role/authority gates. Function discovery does not enumerate tool aliases.
-	for _, name := range []string{"discoverCapabilities", "executeCapability", "consultWorkKnowledge", "artifactSearch", "recallMemory", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost", "inspectRepositoryAuthority", "requestRepositoryChange", "repositoryChangeRequestStatus", "listRepositoryChangeRequests"} {
+	// So do email compositions: Ask's assistant lists the layouts, asks which
+	// with requestUserFeedback and starts one (dsl/campaigns/tools.memql);
+	// both tools are the assistant's alone.
+	for _, name := range []string{"discoverCapabilities", "executeCapability", "consultWorkKnowledge", "artifactSearch", "recallMemory", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost", "inspectRepositoryAuthority", "requestRepositoryChange", "repositoryChangeRequestStatus", "listRepositoryChangeRequests", "emailLayoutCatalogue", "startEmailComposition"} {
 		if r.engine != nil && !slices.Contains(out, name) && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
 			out = append(out, name)
 		}

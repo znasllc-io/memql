@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/memql"
@@ -108,5 +109,69 @@ func TestHumanFeedbackDBTwoReplicasAskOnceResumeAndRestoreCompletedTools(t *test
 	restored, err := engines[1].RestoreWorkContinuation(runCtx, []common.ChatMessage{{Role: "user", Content: "[Recorded answer for this question] PDF"}})
 	if err != nil || len(restored) != 4 || restored[2].Content != saved[2].Content || restored[3].Content != "[Recorded answer for this question] PDF" {
 		t.Fatalf("completed effect or answer lost crossing replica: %+v %v", restored, err)
+	}
+}
+
+// TestFeedbackDBLayoutChoiceStoresWireframesAndTakesALayoutAnswer: against the
+// real approval concept, a choice of layouts is stored with the server's
+// wireframes on its options and its presentation on its subject, the person's
+// answer naming one layout is accepted and resumes the run, and asking the same
+// question again -- as a resumed turn does -- finds that answered question
+// rather than raising another.
+func TestFeedbackDBLayoutChoiceStoresWireframesAndTakesALayoutAnswer(t *testing.T) {
+	db, bff, _, _ := compileDB(t)
+	owner := canonicalUser("compile-alice")
+	person, cancel := context.WithTimeout(actorCtx(owner), 20*time.Second)
+	defer cancel()
+	nodes, err := bff.handleCreateGoal(person, map[string]any{"statement": "Write the welcome email", "input": map[string]any{}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := decodeReply(t, nodes)
+	runID, goalID := receipt["runId"].(string), receipt["goalId"].(string)
+	pool := workHeadsPeer(t, db)
+	peer := New(dispatchDBEngine(t, pool), testLogger(), func() *bun.DB { return pool })
+	peer.SetGateDB(testGates(t))
+	if err = peer.store().updateRun(person, runID, map[string]any{"status": "running", "automationName": "test"}); err != nil {
+		t.Fatal(err)
+	}
+	runCtx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "reason", Mode: common.RunModeLive})
+	options := []map[string]any{{"label": "Confirmation", "value": "builtin:confirmation"}, {"label": "Steps", "value": "builtin:steps", "wireframe": "<svg/>"}}
+	ask := func() (string, error) {
+		return peer.AskFeedbackPresented(runCtx, owner, runID, "Which layout should the email use?", "choice", "layouts", options, time.Time{}, false)
+	}
+
+	id, err := ask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := peer.store().pendingApprovalsForOwner(memql.ContextWithFreshRead(person))
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("expected the one question, got %v %v", pending, err)
+	}
+	raw, err := json.Marshal(pending[0]["options"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored []map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil || len(stored) != 2 {
+		t.Fatalf("stored options %v", stored)
+	}
+	for n, option := range stored {
+		value, _ := options[n]["value"].(string)
+		if option["value"] != value || option["wireframe"] != gridWireframe(t, value) {
+			t.Errorf("stored option %d as %v, want %s with the server's wireframe", n, option, value)
+		}
+	}
+	if subject, _ := pending[0]["subject"].(map[string]any); subject["presentation"] != "layouts" {
+		t.Errorf("stored subject %v does not say the choice is of layouts", subject)
+	}
+
+	nodes, err = peer.handleDecideApproval(person, map[string]any{"approvalId": id, "decision": "answered", "answer": map[string]any{"value": "builtin:steps"}}, 0)
+	if err != nil || decodeReply(t, nodes)["runResumed"] != true {
+		t.Fatalf("a layout answer did not resume the run: %v %v", nodes, err)
+	}
+	if again, err := ask(); err != nil || again != id {
+		t.Fatalf("asking again raised %s (%v), want the answered question %s", again, err, id)
 	}
 }
