@@ -203,3 +203,75 @@ func TestEveryLayoutStaysWithinPictureBudgetWithAFullKit(t *testing.T) {
 		})
 	}
 }
+
+func layoutInfoByID(t *testing.T, id string) LayoutInfo {
+	t.Helper()
+	for _, info := range Layouts() {
+		if info.ID == id {
+			return info
+		}
+	}
+	t.Fatalf("no layout %s", id)
+	return LayoutInfo{}
+}
+
+func TestExpandToMinimumRepeatsToMin(t *testing.T) {
+	info := layoutInfoByID(t, "builtin:steps")
+	out, err := ExpandToMinimum(info.Document, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, b := range out.Blocks {
+		order = append(order, b.ID)
+	}
+	if got := strings.Join(order, ","); !strings.Contains(got, "step,step-2,") || strings.Contains(got, "step-3") {
+		t.Fatalf("order %s", got)
+	}
+	for _, id := range []string{"step", "step-number", "step-title", "step-text", "step-2", "step-number-2", "step-title-2", "step-text-2"} {
+		blockByID(t, out, id)
+	}
+
+	plain, plainInfo := repeatLayout(t)
+	same, err := ExpandToMinimum(plain, plainInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := plain.JSON()
+	b, _ := same.JSON()
+	if string(a) != string(b) {
+		t.Fatalf("a Min of 1 changed the document")
+	}
+}
+
+func TestComposeAbsentRepeatMeansMinimum(t *testing.T) {
+	info := layoutInfoByID(t, "builtin:steps")
+	out, err := Compose(info.Document, info, Composition{Subject: "S"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockByID(t, out, "step")
+	blockByID(t, out, "step-2")
+	for _, b := range out.Blocks {
+		if b.ID == "step-3" {
+			t.Fatal("a third step appeared")
+		}
+	}
+}
+
+func TestComposeSlotsAbsentRepeatMeansMinimum(t *testing.T) {
+	info := layoutInfoByID(t, "builtin:steps")
+	slots, err := ComposeSlots(info.Document, info, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, id := range slotIDs(slots) {
+		if strings.HasSuffix(id, "-2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no second step in %v", slotIDs(slots))
+	}
+}

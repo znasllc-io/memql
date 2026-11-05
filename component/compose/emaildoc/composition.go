@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 )
@@ -47,6 +48,14 @@ func Compose(layout Document, info LayoutInfo, c Composition, images map[string]
 	return Merge(shaped, Content{Subject: c.Subject, Preheader: c.Preheader, Blocks: c.Content}, images)
 }
 
+// ExpandToMinimum returns a copy of layout with every repeatable block
+// repeated to its minimum, with the ids Compose gives the copies. A minimum
+// of one changes nothing. A composition that leaves a repeatable block out of
+// Repeat starts from this form.
+func ExpandToMinimum(layout Document, info LayoutInfo) (Document, error) {
+	return shape(layout, info, nil, nil)
+}
+
 // ComposeSlots lists the content blocks of layout once drop and repeat are
 // applied, so a writer is shown the ids a composition may write to, the
 // copies of a repeated block included.
@@ -86,6 +95,19 @@ func shape(layout Document, info LayoutInfo, drop []string, repeat map[string]in
 			return Document{}, fmt.Errorf("the draft both dropped and repeated %s", id)
 		}
 	}
+	// A repeatable block the draft does not mention counts as its minimum.
+	for id, rng := range info.Repeat {
+		if _, said := repeat[id]; !said && !slices.Contains(drop, id) && rng.Min > 1 {
+			if repeat == nil {
+				repeat = map[string]int{}
+			} else {
+				repeat = maps.Clone(repeat)
+			}
+			repeat[id] = rng.Min
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
 	raw, err := layout.JSON()
 	if err != nil {
 		return Document{}, err

@@ -84,7 +84,11 @@ func TestLayoutsWireframeGolden(t *testing.T) {
 	for _, info := range Layouts() {
 		name := strings.TrimPrefix(info.ID, "builtin:")
 		t.Run(name, func(t *testing.T) {
-			checkGolden(t, "wireframe-"+name+".svg", Wireframe(info.Document))
+			doc, err := ExpandToMinimum(info.Document, info)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkGolden(t, "wireframe-"+name+".svg", Wireframe(doc))
 		})
 	}
 }
