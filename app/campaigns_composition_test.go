@@ -101,14 +101,14 @@ func TestCompositionGoalStarterUsesAppsRouteChosenByOwner(t *testing.T) {
 	}
 }
 
-// fakeAppDoors stands in for the provider registry's AppDoors.
+// fakeAppDoors stands in for the app-inference seam's Doors.
 type fakeAppDoors struct {
 	doors []memqlengine.AppDoor
 	err   error
 	asked []string
 }
 
-func (f *fakeAppDoors) AppDoors(_ context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
+func (f *fakeAppDoors) Doors(_ context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
 	f.asked = append(f.asked, actingUserId)
 	return f.doors, f.err
 }
