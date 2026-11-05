@@ -73,6 +73,7 @@ const STYLES = [
   // The selected row keeps its mark under the pointer: its rule is as specific as the hover's and comes after it. A high
   // contrast theme has no selection background, so the row is outlined there; the outline gives way to the focus ring.
   `.outline [role=treeitem][aria-selected=true]{background:var(--vscode-list-inactiveSelectionBackground)}.outline [role=treeitem][aria-selected=true]:not(:focus-visible){outline:1px solid var(--vscode-contrastActiveBorder,transparent);outline-offset:-1px}.outline [role=treeitem]:focus-visible{outline-offset:-2px}.row-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dot{flex:none;width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--vscode-errorForeground)}`,
+  `.note-list{display:flex;flex-direction:column;gap:4px;margin:0;padding:0;list-style:none}`,
   `.issue-list{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}.issue-list .text-act{justify-content:flex-start;width:100%;padding:6px 0;text-align:left}.issue-line{display:block;padding:6px 0}`,
   // The selected block: its name and acts, then its fields.
   `.block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.block-acts{position:relative;display:flex;gap:2px}`,
@@ -107,6 +108,7 @@ export function emailPage(options: { title: string; script: string; nonce: strin
 <div id="frames" class="frames away"><iframe id="frame-a" class="front" sandbox="allow-same-origin" title="${escape(C.emailPreview)}"></iframe><iframe id="frame-b" sandbox="allow-same-origin" title="${escape(C.emailPreview)}"></iframe></div>
 </main>
 <aside id="inspector" class="inspector">
+<section id="notes" class="group muted" hidden><ul id="note-list" class="note-list"></ul></section>
 <section id="email-group" class="group" hidden><h2 class="subhead">${escape(C.email)}</h2>
 ${textField("subject", C.subject, `<input ${described("subject")} autocomplete="off">`)}
 ${textField("preheader", C.preheader, `<input ${described("preheader")} autocomplete="off">`)}

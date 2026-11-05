@@ -50,15 +50,26 @@ export interface OpenDocument {
   /** The organizations a Library file is labelled with (artifacts only; empty when it has none). */
   accountIds?: string[];
 }
-/** What the editor needs of a template's composition: whether MemQL is still writing it, since when, and the cluster's sentence when it failed. */
-export interface Composition { state: "writing" | "done" | "failed"; startedAt: string; error: string }
+/**
+ * What the editor needs of a template's composition: whether MemQL is still writing it, since when, the cluster's sentence
+ * when it failed, and its notes: one sentence for each file it left out, and why.
+ */
+export interface Composition { state: "writing" | "done" | "failed"; startedAt: string; error: string; notes: string[] }
 /** A composition as the cluster keeps it on a template row, or nothing for a template that has none or one in a state this editor does not know. */
 export function readComposition(value: unknown): Composition | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
   const state = row.state;
   if (state !== "writing" && state !== "done" && state !== "failed") return undefined;
-  return { state, startedAt: typeof row.startedAt === "string" ? row.startedAt : "", error: typeof row.error === "string" ? row.error : "" };
+  const notes = Array.isArray(row.notes) ? row.notes.filter((note): note is string => typeof note === "string" && note !== "") : [];
+  return { state, startedAt: typeof row.startedAt === "string" ? row.startedAt : "", error: typeof row.error === "string" ? row.error : "", notes };
+}
+/**
+ * A person's save or publish of a template whose composition failed ends the failure, as the cluster does: the email is
+ * theirs, so nothing offers to write it again. The reason and the notes stay. Anything else is left as it is.
+ */
+export function endedByAPerson(composition: Composition | undefined): Composition | undefined {
+  return composition?.state === "failed" ? { ...composition, state: "done" } : composition;
 }
 /** Whether the file system answers Readonly for an opened document: not a file, a generated output or a template, or a template MemQL is writing. */
 export function isReadOnly(doc: OpenDocument): boolean {
@@ -233,6 +244,7 @@ export class Documents {
       if (!result?.saved || typeof result.revision !== "string") throw new Error("The cluster did not confirm the saved template revision.");
       document.revision = result.revision;
       document.template.status = "draft";
+      document.composition = endedByAPerson(document.composition);
     } else if (document.kind === "file") {
       document.version = await this.api.uploadVersion(document.lease, document.resource.id, document.resource.name,
         document.mime || "application/octet-stream", content, document.version);

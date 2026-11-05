@@ -41,7 +41,7 @@ export const EMAIL_COPY = {
     issuesOne: "Fix 1 issue to publish", issuesMany: "Fix {count} issues to publish",
     unsaved: "Unsaved changes", draft: "Draft", published: "Published to {organization}", changed: "Changes since publishing",
     publishing: "Publishing", savingCopy: "Saving to MemQL",
-    writing: "MemQL is writing this email", writeFailed: "Couldn’t write this email", retry: "Retry",
+    writing: "MemQL is writing this email", writeFailed: "Couldn’t write this email", unreachable: "Can’t reach MemQL", retry: "Retry",
     justStarted: "Just started", minutes: "{minutes} min", hours: "{hours} h", hoursMinutes: "{hours} h {minutes} min",
     connect: "Connect", openSource: "Open Source", saveToMemQL: "Save to MemQL", publish: "Publish", cancel: "Cancel",
     renderFailed: "Couldn’t show this email.", invalidJson: "This email has invalid JSON. Open Source and correct its formatting.",

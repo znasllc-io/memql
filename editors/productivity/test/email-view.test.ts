@@ -414,6 +414,30 @@ test("while MemQL writes, the bar says so with the time, the inspector is closed
   f.dom.window.close();
 });
 
+test("what MemQL left out shows once, quietly, at the top of the inspector, and goes when there is none", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  assert.equal(f.visible("notes"), false, "nothing to say");
+  const notes = ["Left out brochure.pdf: not a picture or text file.", "Left out logo.svg: svg is not a picture an email can carry."];
+  f.send({ type: "notes", notes });
+  assert.equal(f.visible("notes"), true);
+  assert.deepEqual([...f.el("note-list").querySelectorAll("li")].map(item => item.textContent), notes);
+  assert.equal(f.el("notes").getAttribute("role"), null, "not an alert");
+  assert.ok(f.el("notes").classList.contains("muted"));
+  assert.equal(f.el("inspector").firstElementChild, f.el("notes"), "first in the inspector");
+  // Said once: the same notes again leave the list as it is.
+  const items = [...f.el("note-list").children];
+  f.send({ type: "notes", notes });
+  assert.deepEqual([...f.el("note-list").children], items);
+  assert.ok(!f.el("bar").textContent?.includes("brochure.pdf"), "never on the bar");
+  // Text is text: a note is never markup.
+  f.send({ type: "notes", notes: ["Left out <b>x</b>.png: not a valid picture."] });
+  assert.equal(f.el("note-list").querySelector("b"), null);
+  f.send({ type: "notes", notes: [] });
+  assert.equal(f.visible("notes"), false);
+  f.dom.window.close();
+});
+
 test("a failed act shows one notice above the bar until the next act", () => {
   const f = fixture();
   f.send({ type: "document", version: 1, email: article });
@@ -868,7 +892,7 @@ test("colours, alignment and the brand switch send at once", () => {
 test("the page is the static editor: every id the view and the host use, and only the email copy", () => {
   const html = emailPage({ title: "Welcome.email.json", script: "https://file+.vscode-resource.test/out/emailView.js", nonce: "abc123" });
   const doc = new JSDOM(html).window.document;
-  for (const id of ["view-design", "view-source", "width-desktop", "width-mobile", "width-plain", "preview", "skeleton", "plain", "preview-notice", "subject", "preheader", "organization-row", "organization", "issues", "outline", "block", "block-title", "move-up", "move-down", "add-after", "add-menu", "remove-block", "theme", "samples", "custom-note", "bar", "bar-state", "bar-meta", "bar-acts", "bar-notice", "frame-a", "frame-b",
+  for (const id of ["view-design", "view-source", "width-desktop", "width-mobile", "width-plain", "preview", "skeleton", "plain", "preview-notice", "subject", "preheader", "organization-row", "organization", "issues", "outline", "block", "block-title", "move-up", "move-down", "add-after", "add-menu", "remove-block", "theme", "samples", "custom-note", "notes", "note-list", "bar", "bar-state", "bar-meta", "bar-acts", "bar-notice", "frame-a", "frame-b",
     "field-text", "field-label", "field-href", "field-alt", "field-src", "field-color", "field-background", "field-align", "field-height", "field-title", "field-links", "field-lines", "field-html", "field-brand"]) {
     assert.ok(doc.getElementById(id), id);
   }

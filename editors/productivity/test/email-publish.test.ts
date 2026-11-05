@@ -199,7 +199,7 @@ const BASE: BarInput = { connected: true, domain: "client.example", invalid: fal
 const READY: TemplateState = { templateId: "t1", status: "ready", revision: "r1" };
 const bar = (change: Partial<BarInput>) => editorBar({ ...BASE, ...change });
 const NOW = Date.parse("2026-11-04T10:30:00Z");
-const composition = (state: "writing" | "done" | "failed", startedAt: string, error = ""): NonNullable<BarInput["composition"]> => ({ state, startedAt, error, now: NOW });
+const composition = (state: "writing" | "done" | "failed", startedAt: string, error = ""): NonNullable<BarInput["composition"]> => ({ state, startedAt, error, notes: [], now: NOW });
 
 test("the action bar follows the email's state", () => {
   // 1. Busy: the work in words, no acts, whatever else is true.
@@ -292,6 +292,16 @@ test("the bar says MemQL is writing, with how long, and offers only Cancel", () 
   assert.deepEqual(bar({ dirty: true, issues: 3, template: READY, unchanged: false, composition: composition("writing", "2026-11-04T10:29:30Z") }).acts, ["cancel"]);
   // Not connected, Cancel could not be sent: Connect comes first.
   assert.deepEqual(bar({ connected: false, composition: composition("writing", "2026-11-04T10:29:30Z") }).acts, ["connect"]);
+});
+
+test("while MemQL writes and the cluster cannot be reached, the bar says so and keeps Cancel", () => {
+  const writing = { template: { templateId: "t1", status: "draft", revision: "r1" }, composition: composition("writing", "2026-11-04T10:00:00Z") };
+  assert.deepEqual(bar({ ...writing, unreachable: true }), { state: "Can’t reach MemQL", acts: ["cancel"], writing: true });
+  assert.ok("Can’t reach MemQL".split(" ").length <= 6);
+  // Reached again, it is writing as before, with how long.
+  assert.deepEqual(bar({ ...writing, unreachable: false }), { state: "MemQL is writing this email", acts: ["cancel"], meta: "30 min", writing: true });
+  // Only while writing: a finished or failed email is its own state.
+  assert.deepEqual(bar({ composition: composition("done", "2026-11-04T10:00:00Z"), unreachable: true }), { state: "Draft", acts: ["publish"] });
 });
 
 test("a failed composition shows the cluster's sentence and offers Retry beside the usual acts", () => {

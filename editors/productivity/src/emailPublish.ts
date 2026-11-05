@@ -148,6 +148,8 @@ export interface BarInput {
   busy?: "publish" | "copy";
   /** MemQL's writing of this email, with the time it is read at (a clock is no business of a pure function). */
   composition?: Composition & { now: number };
+  /** While MemQL writes, the cluster has not answered the last few looks at the composition. */
+  unreachable?: boolean;
 }
 
 /** What the bar shows: the state in words, the acts, and for an email MemQL is writing, how long it has been and that the page is closed. */
@@ -174,7 +176,8 @@ const MOST_ACTS = 3;
  * The first row that fits wins:
  *   busy, not connected, MemQL writing, unreadable, no organization, on this computer, then
  *   issues, unsaved changes, published and unchanged, published and changed, otherwise a draft.
- * While MemQL writes the email the page is closed to edits and the only act is Cancel. After a failure the state is the
+ * While MemQL writes the email the page is closed to edits and the only act is Cancel; when the cluster has not answered
+ * the last few looks, the bar says it cannot reach MemQL instead of how long. After a failure the state is the
  * cluster's sentence as it gave it, and Retry joins the acts the email would have had, as the button last; where that
  * would be more than three acts, Retry goes first and the two the email needs most stay.
  */
@@ -184,6 +187,7 @@ export function editorBar(input: BarInput): Bar {
   if (!input.connected) return { state: input.local || !input.domain ? C.notConnected : fill(C.notConnectedTo, { domain: input.domain }), acts: ["connect"] };
   const composition = input.composition;
   if (composition?.state === "writing") {
+    if (input.unreachable) return { state: C.unreachable, acts: ["cancel"], writing: true };
     const meta = elapsed(composition.startedAt, composition.now);
     return { state: C.writing, acts: ["cancel"], ...(meta === undefined ? {} : { meta }), writing: true };
   }

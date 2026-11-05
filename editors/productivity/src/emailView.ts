@@ -78,6 +78,7 @@ const fieldRows = Array.from(blockGroup.querySelectorAll<HTMLElement>("[data-fie
 const customNote = byId("custom-note"), customWords = byId("custom-words");
 const theme = byId<HTMLDetailsElement>("theme"), samplesBox = byId<HTMLDetailsElement>("samples"), sampleFields = byId("sample-fields");
 const barState = byId("bar-state"), barMeta = byId("bar-meta"), barActs = byId("bar-acts"), barNotice = byId("bar-notice"), inspector = byId("inspector");
+const notesGroup = byId("notes"), noteList = byId("note-list");
 
 // -- What the page knows -------------------------------------------------------
 
@@ -1123,6 +1124,14 @@ function onBar(message: Record<string, unknown>): void {
   drawBar();
 }
 
+/** What MemQL left out of the email, and why: said once, quietly, at the top of the inspector; nothing when there is none. */
+function onNotes(message: Record<string, unknown>): void {
+  const notes = (Array.isArray(message.notes) ? message.notes : []).filter((note): note is string => typeof note === "string" && note !== "");
+  notesGroup.hidden = notes.length === 0;
+  if (same(Array.from(noteList.children, item => item.textContent ?? ""), notes)) return;
+  noteList.replaceChildren(...notes.map(note => textElement("li", note)));
+}
+
 function onSelect(message: Record<string, unknown>): void {
   if (typeof message.block !== "string") return;
   const focusField = awaitingAdd;
@@ -1143,6 +1152,7 @@ window.addEventListener("message", event => {
     case "renderFailed": onRenderFailed(message); break;
     case "context": onContext(message); break;
     case "bar": onBar(message); break;
+    case "notes": onNotes(message); break;
     case "restore": restore(asViewState(message.state)); break;
     case "select": onSelect(message); break;
     case "problem":

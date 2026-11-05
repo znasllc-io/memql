@@ -29,7 +29,7 @@ import {
   buildCampaignCancelComposition, buildCampaignRetryComposition, buildEmailRender, buildLibraryArtifactForFile, buildLibraryFilesForOwner, buildTemplateById,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
-import { readComposition, resourceFrom, type Composition, type Documents, type OpenDocument } from "./documents.js";
+import { endedByAPerson, readComposition, resourceFrom, type Composition, type Documents, type OpenDocument } from "./documents.js";
 import { EMAIL_COPY } from "./emailCopy.js";
 import { addedBlockId, editEmail, findBlock, isLayoutEmail, minimalEdit, readEmail, sameEmail, sampleKeys, writeEmail, type EmailDocument, type EmailEdit } from "./emailDocument.js";
 import { emailPage } from "./emailPage.js";
@@ -52,6 +52,8 @@ const PAGE_STATE = "memql.emailView:";
 const PAUSE = 300;
 /** How often the cluster is asked whether MemQL has finished writing the email. */
 const POLL = 2000;
+/** After this many looks in a row the cluster did not answer, the bar says it cannot reach MemQL (and keeps looking). */
+const MAX_FAILED_LOOKS = 5;
 /** The largest picture an email may carry (MaxImageBytes in component/compose/emaildoc). */
 const MAX_PICTURE_BYTES = 1024 * 1024;
 const EMAIL_FILE = /\.email\.json$/i;
@@ -290,6 +292,10 @@ class EmailPanel {
   private composition?: Composition;
   /** The next look at whether MemQL has finished, while it has not. */
   private pollTimer?: ReturnType<typeof setTimeout>;
+  /** The looks in a row the cluster did not answer. */
+  private failedLooks = 0;
+  /** The notes last sent to the page, so that they are said once. */
+  private lastNotes = "";
   private busy?: "publish" | "copy";
   private renderTimer?: ReturnType<typeof setTimeout>;
   /** The last render: its issues, or that the cluster refused it. */
@@ -310,7 +316,7 @@ class EmailPanel {
     this.seen = this.connectionKey();
     this.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === this.document) this.changed(); }),
-      vscode.workspace.onDidSaveTextDocument(saved => { if (saved === this.document) void this.postBar(); }),
+      vscode.workspace.onDidSaveTextDocument(saved => { if (saved === this.document) this.saved(); }),
       this.host.api.onDidChange(() => this.connectionChanged()),
       this.panel.onDidChangeViewState(() => { if (this.panel.active) this.host.activated(this); }),
       this.panel.webview.onDidReceiveMessage(message => this.receive(message)),
@@ -359,6 +365,7 @@ class EmailPanel {
     this.template = undefined;
     this.rendered = undefined;
     this.failed = undefined;
+    this.failedLooks = 0;
     void this.resolve();
   }
 
@@ -409,6 +416,7 @@ class EmailPanel {
     this.composition = this.opened?.resource.kind === "templates" ? this.opened.composition : undefined;
     this.watching();
     await this.postBar();
+    await this.postNotes();
   });
 
   /** What the email is to the publisher. Reading a MemQL file's record is for a connected email only: it would connect. */
@@ -494,6 +502,18 @@ class EmailPanel {
    * The bar, unless it would say what it said last (`force` sends it anyway: an act is answered by it). While what the
    * bar depends on is being found for a new connection, nothing is sent.
    */
+  /**
+   * What MemQL left out of the email, and why: the composition's notes, sent to the page once (it shows them quietly beside
+   * the email, never on the bar), and again only when they change. `force` sends them anyway, to a page that has just loaded.
+   */
+  private postNotes(force = false): Promise<void> {
+    const notes = this.composition?.notes ?? [];
+    const key = JSON.stringify(notes);
+    if (this.disposed || (!force && key === this.lastNotes)) return Promise.resolve();
+    this.lastNotes = key;
+    return this.post({ type: "notes", notes });
+  }
+
   private postBar(force = false): Promise<void> {
     if (this.disposed || (!this.busy && !this.isKnown())) return Promise.resolve();
     const message = { type: "bar", ...this.bar() };
@@ -514,6 +534,7 @@ class EmailPanel {
       // A template is its own content; a Library file is unchanged while it says what the cluster published.
       unchanged: template !== undefined && (fromTemplate ? !this.document.isDirty : email !== undefined && template.document !== undefined && sameEmail(email, template.document)),
       busy: this.busy, ...(this.composition ? { composition: { ...this.composition, now: Date.now() } } : {}),
+      unreachable: this.failedLooks >= MAX_FAILED_LOOKS,
     });
   }
 
@@ -575,6 +596,7 @@ class EmailPanel {
     this.lastBar = "";
     await this.postContext();
     await this.postBar(true);
+    if (this.isKnown()) await this.postNotes(true);
     await this.postDocument();
     if (this.isKnown()) void this.render();
     else void this.resolve();
@@ -788,6 +810,8 @@ class EmailPanel {
         // The template's next save expects the revision the publication left.
         opened.revision = result.revision;
         opened.template.status = result.status;
+        // A person's publish ends a failed composition, as the cluster does.
+        this.endFailure();
       } else this.template = result;
       this.failed = undefined;
     } catch (error) {
@@ -822,6 +846,19 @@ class EmailPanel {
 
   private isWriting(): boolean {
     return this.composition?.state === "writing";
+  }
+
+  /** The email was saved: a template's save ends a failed composition, as the cluster does; then the bar says what is so. */
+  private saved(): void {
+    this.endFailure();
+    void this.postBar();
+  }
+
+  /** A person saved or published a template whose composition failed: the failure is over (the email is theirs). */
+  private endFailure(): void {
+    if (this.opened?.resource.kind !== "templates" || this.composition?.state !== "failed") return;
+    this.composition = endedByAPerson(this.composition);
+    this.opened.composition = this.composition;
   }
 
   /** The template MemQL writes, when this email is one. */
@@ -861,10 +898,15 @@ class EmailPanel {
     try {
       const row = (await this.host.api.execute(lease, "templateById", buildTemplateById({ templateId })))[0];
       if (this.disposed || !current()) return;
+      this.failedLooks = 0;
       if (row === undefined) { this.watching(); return; }
       composition = readComposition(row.composition);
     } catch {
-      if (!this.disposed && current()) this.watching();
+      if (this.disposed || !current()) return;
+      // The cluster did not answer: looked at again in a moment; after a few in a row, the bar says so.
+      this.failedLooks++;
+      if (this.failedLooks >= MAX_FAILED_LOOKS) await this.postBar();
+      this.watching();
       return;
     }
     const before = this.composition;
@@ -882,6 +924,7 @@ class EmailPanel {
       if (this.disposed) return;
     }
     await this.postBar();
+    await this.postNotes();
     this.watching();
   });
 

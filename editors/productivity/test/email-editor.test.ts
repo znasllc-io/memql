@@ -827,12 +827,12 @@ test("an organization chosen on the page is kept: as the file's label when it ha
 
 const TEMPLATE = "memql-file://client.example/templates/t9/Welcome.email.json";
 const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
-const composed = (state: "writing" | "done" | "failed", extra: Record<string, unknown> = {}) => ({ state, startedAt: ago(125), error: "", ...extra });
+const composed = (state: "writing" | "done" | "failed", extra: Record<string, unknown> = {}) => ({ state, startedAt: ago(125), error: "", notes: [] as string[], ...extra });
 /** A draft template the composition is writing (or wrote, or failed to write). */
-function draftTemplate(composition: { state: "writing" | "done" | "failed"; startedAt: string; error: string }): OpenDocument {
+function draftTemplate(composition: { state: "writing" | "done" | "failed"; startedAt: string; error: string; notes?: unknown }): OpenDocument {
   const opened = templateDocument("client-org");
   opened.template!.status = "draft";
-  opened.composition = composition;
+  opened.composition = composition as OpenDocument["composition"];
   return opened;
 }
 /** What templateById answers while the cluster's composition is as given. */
@@ -961,6 +961,81 @@ test("a failed composition offers Retry, and after Retry it writes again and pol
   await g.send({ type: "act", act: "retry" });
   assert.deepEqual(g.problems(), ["This email is already being written."]);
   assert.equal(g.lastBar().state, "Cancelled");
+  // The editor does not know who is signed in, so it offers Retry to anyone who opens the email; the cluster refuses
+  // everyone but the person who asked, and its sentence is what the person reads.
+  const notYours = "Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files.";
+  const h = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })), answers: {
+    campaignRetryComposition: () => { throw new Error(`campaignRetryComposition: ${ENGINE}${notYours}`); },
+    templateById: () => row(composed("failed", { error: "Cancelled" })),
+  } });
+  await h.send({ type: "act", act: "retry" });
+  assert.deepEqual(h.problems(), [notYours]);
+  assert.deepEqual(h.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+});
+
+test("after five looks that cannot reach MemQL the bar says so, keeps looking, and recovers by itself", async t => {
+  let reachable = false;
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("writing")), answers: {
+    templateById: () => { if (!reachable) throw new Error("fetch failed: ECONNREFUSED"); return row(composed("writing")); },
+  } });
+  const polls = () => f.calls.filter(call => call.name === "templateById").length;
+  for (let look = 1; look <= 4; look++) {
+    await f.tick(2000);
+    assert.equal(polls(), look);
+    assert.equal(f.lastBar().state, C.writing, `after ${look} failed looks the bar still says MemQL is writing`);
+  }
+  await f.tick(2000);
+  assert.equal(polls(), 5);
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Can’t reach MemQL", acts: ["cancel"], writing: true });
+  assert.equal(f.problems().length, 0, "a look that fails is not a problem to show");
+  // It keeps looking, and the next good read puts the bar back.
+  reachable = true;
+  await f.tick(2000);
+  assert.equal(polls(), 6);
+  assert.equal(f.lastBar().state, C.writing);
+  assert.equal(f.lastBar().meta, "2 min");
+  // One more failure is one, not the sixth.
+  reachable = false;
+  await f.tick(2000);
+  assert.equal(f.lastBar().state, C.writing);
+  assert.equal(f.timers(), 1, "still looking");
+});
+
+test("a save or a publish of a failed composition's template ends the failure: the bar drops the sentence and Retry", async t => {
+  const failedState = composed("failed", { error: "Cancelled" });
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(failedState), answers: { templateById: () => row(failedState) } });
+  assert.deepEqual(f.lastBar(), { type: "bar", state: "Cancelled", acts: ["publish", "retry"] });
+  f.change(f.edited({ kind: "subject", value: "Finished by hand" }));
+  await f.settle();
+  await f.document.save();
+  await f.settle();
+  assert.equal(f.lastBar().state, C.draft);
+  assert.deepEqual(f.lastBar().acts, ["publish"]);
+  // Publishing, with nothing to save, ends it as well.
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("failed", { error: "Cancelled" })), answers: {
+    templateById: () => row(composed("failed", { error: "Cancelled" })),
+    campaignSaveTemplate: () => [{ saved: true, templateId: "t9", revision: "2026-10-12T10:00:00Z", status: "ready" }],
+  } });
+  await g.send({ type: "act", act: "publish" });
+  assert.ok(!g.lastBar().acts.includes("retry"), JSON.stringify(g.lastBar()));
+  assert.notEqual(g.lastBar().state, "Cancelled");
+});
+
+test("what MemQL left out is said once, quietly, beside the email, not on the bar", async t => {
+  const notes = ["Left out brochure.pdf: not a picture or text file."];
+  const f = await open(t, { uri: TEMPLATE, opened: draftTemplate(composed("done", { notes })) });
+  assert.deepEqual(f.of("notes").at(-1), { type: "notes", notes });
+  assert.ok(!JSON.stringify(f.of("bar")).includes("brochure.pdf"), "the bar does not carry them");
+  // A composition that finishes while the page is open brings its notes then.
+  let state = composed("writing");
+  const g = await open(t, { uri: TEMPLATE, opened: draftTemplate(state), answers: { templateById: () => row(state) } });
+  assert.deepEqual(g.of("notes").at(-1), { type: "notes", notes: [] });
+  state = composed("done", { notes });
+  await g.tick(2000);
+  assert.deepEqual(g.of("notes").at(-1), { type: "notes", notes });
+  // A Library file has no composition, and no notes.
+  const h = await open(t);
+  assert.deepEqual(h.of("notes").at(-1), { type: "notes", notes: [] });
 });
 
 test("the bar never offers Save as layout", async t => {

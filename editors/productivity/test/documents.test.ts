@@ -285,14 +285,31 @@ test("a template reads its composition, and a template being written is read-onl
   } } as unknown as EditorConnectionAPI;
   const documents = new Documents(api);
   const writing = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
-  assert.deepEqual(writing.composition, { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "" });
+  assert.deepEqual(writing.composition, { state: "writing", startedAt: "2026-11-04T10:00:00Z", error: "", notes: ["a"] });
   assert.equal(isReadOnly(writing), true);
   row = { ...row, composition: { ...composition, state: "failed", error: "Cancelled" } };
   const failed = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
-  assert.deepEqual(failed.composition, { state: "failed", startedAt: "2026-11-04T10:00:00Z", error: "Cancelled" });
+  assert.deepEqual(failed.composition, { state: "failed", startedAt: "2026-11-04T10:00:00Z", error: "Cancelled", notes: ["a"] });
+  // Notes that are not sentences are left out.
+  row = { ...row, composition: { ...composition, notes: ["Left out a.pdf: not a picture or text file.", 7, ""] } };
+  assert.deepEqual((await documents.read("memql-file://client.example/templates/t9/Welcome.email.json")).composition?.notes, ["Left out a.pdf: not a picture or text file."]);
   assert.equal(isReadOnly(failed), false, "the next stat answers writable again");
   row = { ...row, composition: undefined };
   const plain = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
   assert.equal(plain.composition, undefined);
   assert.equal(isReadOnly(plain), false);
+});
+
+test("a person's save of a template whose composition failed ends the failure, as the cluster does", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 1 };
+  const failed = { goalId: "g1", state: "failed", startedAt: "2026-11-04T10:00:00Z", finishedAt: "", error: "Cancelled", notes: ["Left out a.pdf: not a picture or text file."] };
+  const row = { id: "t9", name: "Welcome", accountId: "client-org", status: "draft", createdAt: "2026-11-04T10:00:00Z", document: { subject: "Hi", blocks: [] }, composition: failed };
+  const api = { connect: async () => lease, execute: async (_lease: unknown, name: string) =>
+    name === "templateById" ? [row] : [{ saved: true, revision: "2026-11-04T11:00:00Z" }],
+  } as unknown as EditorConnectionAPI;
+  const documents = new Documents(api);
+  const opened = await documents.read("memql-file://client.example/templates/t9/Welcome.email.json");
+  await documents.save(opened, new TextEncoder().encode(JSON.stringify({ subject: "Finished by hand", blocks: [] }, null, 2) + "\n"));
+  // Done: nothing offers to write it again; the reason and the notes stay as the record.
+  assert.deepEqual(opened.composition, { state: "done", startedAt: "2026-11-04T10:00:00Z", error: "Cancelled", notes: ["Left out a.pdf: not a picture or text file."] });
 });

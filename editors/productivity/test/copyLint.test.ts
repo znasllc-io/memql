@@ -132,6 +132,7 @@ const STATES: ReadonlySet<string> = new Set([
   "savingCopy",
   "writing",
   "writeFailed",
+  "unreachable",
 ]);
 
 // ---------------------------------------------------------------------------
