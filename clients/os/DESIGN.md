@@ -36,10 +36,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
    use the available width.
-   Shared record lists draw dividers **only between items**: no top line on
-   the first, no bottom line on the last, and no lines for a single item.
-   Keep this in the shared list styles, including rows with separate actions
-   and live-list wrappers; never add per-app row borders.
+   Shared record lists draw no dividers. Rows are separated by their own
+   spacing; a row shows the subtle hover and focus wash, and the open row keeps
+   its accent edge. Keep this in the shared list styles, never per-app row
+   borders.
 
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection

@@ -1794,12 +1794,8 @@ button.os-row.os-record-row:hover { background: var(--os-hover); }
 button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .os-record-list[data-density="compact"] .os-row.os-record-row { padding-block: 9px; }
 .os-record-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
-/* Dividers belong BETWEEN complete records, never on each row/action cell.
- * Cover direct records, semantic RecordList items, and LiveList's wrappers.
- * One row has no divider; action layouts keep one continuous separator. */
-:is(.os-record-row, .os-record-entry) + :is(.os-record-row, .os-record-entry),
-.os-record-list > li + li,
-.os-livelist-row:has(.os-record-row) + .os-livelist-row:has(.os-record-row) { border-top: 1px solid var(--os-line); }
+/* Record lists draw no dividers: a row is separated from the next by its own
+ * block padding, and a row with actions keeps them on the same line. */
 .os-record-actions:empty { display: none; }
 .os-record-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 4px 10px 12px; }
 .os-record-entry[data-actions="compact"] { grid-template-columns: minmax(0, 1fr) auto; }
