@@ -1,0 +1,12 @@
+Wishing you a bright and happy season, with thanks for being part of it.
+
+Founder of Acme
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

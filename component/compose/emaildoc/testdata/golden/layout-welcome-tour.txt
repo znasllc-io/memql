@@ -1,0 +1,20 @@
+Welcome, and thanks for joining us
+
+Here is a quick tour of what you can do with your new account.
+
+Set up your space. Add your details in a couple of minutes.
+
+Start the tour
+
+Instagram
+YouTube
+LinkedIn
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

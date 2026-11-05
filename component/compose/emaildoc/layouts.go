@@ -68,6 +68,11 @@ var builtinLayouts = [...]struct {
 		[]string{"icons", "closing"}, map[string]RepeatRange{"reason": {Min: 2, Max: 4}}},
 	{"builtin:side-by-side", "Side by side", "A banner, a tinted introduction, two cards side by side and closing lines, with a signature.", "Products", []string{"closing"}, nil},
 	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button.", "Announcements", nil, nil},
+	{"builtin:welcome-tour", "Welcome tour", "A banner, a short introduction, one to three benefits with icons, a button and social links.", "Welcome", nil, map[string]RepeatRange{"benefit": {Min: 1, Max: 3}}},
+	{"builtin:plain-note", "Plain note", "A greeting and a few paragraphs of plain text, with a signature.", "Letters", nil, nil},
+	{"builtin:greeting", "Greeting", "A full-width picture, a short message and a signature.", "Letters", nil, nil},
+	{"builtin:announcement", "Announcement", "A banner, a headline, a short text, one button and social links.", "Announcements", nil, nil},
+	{"builtin:video", "Video", "A headline, a video picture that links to the video, a short text, one button and social links.", "Announcements", nil, nil},
 }
 
 // Layouts lists the built-in layouts in the order of the catalogue:

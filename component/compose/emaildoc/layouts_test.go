@@ -23,6 +23,11 @@ var builtinCatalog = []struct {
 	{"builtin:three-reasons", "Three reasons", "A banner, a row of icons, a tinted body of titled reasons with a closing line, and a signature.", "Three choices we made on purpose", "What goes into every Acme tool, and why."},
 	{"builtin:side-by-side", "Side by side", "A banner, a tinted introduction, two cards side by side and closing lines, with a signature.", "Two sizes, made for different jobs", "Find the one that fits your home."},
 	{"builtin:spotlight", "Spotlight", "One large picture, a short message and one button.", "Meet Ace", "Our guide to getting the small things done."},
+	{"builtin:welcome-tour", "Welcome tour", "A banner, a short introduction, one to three benefits with icons, a button and social links.", "Welcome to Acme", "Three things to try first."},
+	{"builtin:plain-note", "Plain note", "A greeting and a few paragraphs of plain text, with a signature.", "A quick note from us", "Just a few words."},
+	{"builtin:greeting", "Greeting", "A full-width picture, a short message and a signature.", "Warm wishes from all of us", "A small hello."},
+	{"builtin:announcement", "Announcement", "A banner, a headline, a short text, one button and social links.", "Something new at Acme", "Here is what is changing."},
+	{"builtin:video", "Video", "A headline, a video picture that links to the video, a short text, one button and social links.", "Watch: a short introduction", "Two minutes, start to finish."},
 }
 
 // builtinTheme is the neutral example brand's palette and fonts, which the
@@ -256,7 +261,14 @@ var builtinRoles = map[string]string{
 		"reply=brand reply-heading=brand reply-button=brand reply-note=brand " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
 		"rule=brand footer=brand",
-	"builtin:spotlight": "logo=brand spotlight=content message-box=content message=content cta=content social=brand footer=brand",
+	"builtin:spotlight":    "logo=brand spotlight=content message-box=content message=content cta=content social=brand footer=brand",
+	"builtin:welcome-tour": "logo=brand hero=content headline=content intro=content benefit=content benefit-icon=content benefit-text=content cta=content social=brand footer=brand",
+	"builtin:plain-note": "logo=brand letter=content greeting=content body=content " +
+		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand footer=brand",
+	"builtin:greeting": "logo=brand picture=content message=content " +
+		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand footer=brand",
+	"builtin:announcement": "logo=brand hero=content headline=content text=content cta=content social=brand footer=brand",
+	"builtin:video":        "logo=brand headline=content video=content text=content cta=content social=brand footer=brand",
 }
 
 func TestLayoutsSplitBrandAndContent(t *testing.T) {
@@ -317,6 +329,14 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 		"builtin:side-by-side": "image_missing:logo image_missing:banner image_missing:card-a-icon image_missing:card-b-icon " +
 			"link_missing:reply-button image_missing:signature-photo image_missing:signature-name link_missing:footer",
 		"builtin:spotlight": "image_missing:logo image_missing:spotlight link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:welcome-tour": "image_missing:logo image_missing:hero image_missing:benefit-icon link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:plain-note": "image_missing:logo image_missing:signature-photo image_missing:signature-name link_missing:footer",
+		"builtin:greeting":   "image_missing:logo image_missing:picture image_missing:signature-photo image_missing:signature-name link_missing:footer",
+		"builtin:announcement": "image_missing:logo image_missing:hero link_missing:cta " +
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:video": "image_missing:logo image_missing:video link_missing:cta " +
 			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 	}
 	for _, info := range Layouts() {
