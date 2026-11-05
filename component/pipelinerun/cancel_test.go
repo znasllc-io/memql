@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -167,5 +168,100 @@ func TestACancelsFinalCheckRunThatDidNotLandIsRecordedUnavailable(t *testing.T) 
 	}
 	if keys := h.gate.seen(); len(keys) != 2 || keys[0] != RunGateKey(run.ID) || keys[1] != RunGateKey(run.ID) {
 		t.Errorf("gate keys = %v; want the run's gate for the conclusion, then again, after GitHub, to record the answer", keys)
+	}
+}
+
+// cancelIfWaiting concludes a run only while nobody drives it -- the one state
+// in which nothing is in flight and nobody else would conclude it. A run an
+// agent claimed, started or not, is left alone to finish; a finished run keeps
+// its answer. Each is decided under the run's gate on a fresh read.
+func TestCancelIfWaitingConcludesOnlyARunNobodyDrives(t *testing.T) {
+	for name, c := range map[string]struct {
+		shape     func(r *Run)
+		concluded bool
+		err       error
+	}{
+		"waiting":                  {func(r *Run) {}, true, nil},
+		"claimed, not yet started": {func(r *Run) { r.DriverNodeID, r.DriverLeaseID, r.DriverHeartbeatAt = "agent-b", "lease-b", testNow }, false, nil},
+		"claimed long ago":         {func(r *Run) { r.DriverNodeID, r.DriverHeartbeatAt = "agent-b", testNow.Add(-time.Hour) }, false, nil},
+		"in progress":              {func(r *Run) { *r = drivenBy(*r, "agent-b") }, false, nil},
+		"asked to stop already":    {func(r *Run) { r.CancelRequested, r.CancelledBy = true, ownerID }, false, nil},
+		"finished":                 {func(r *Run) { r.Status, r.Conclusion = StatusCompleted, ConclusionSuccess }, false, ErrRunFinished},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := withLogs(h.integ)
+			p := testPipeline(DeliveryWebhook)
+			h.store.addPipeline(p)
+			run := queuedRun(p, shaA)
+			c.shape(&run)
+			h.store.addRun(run)
+
+			got, concluded, err := h.integ.cancelIfWaiting(context.Background(), h.integ.snapshot(), run.ID, supersededPrefix+"run-of-shaC")
+			if concluded != c.concluded || !errors.Is(err, c.err) || (c.err == nil && err != nil) {
+				t.Fatalf("concluded %v err %v; want %v %v", concluded, err, c.concluded, c.err)
+			}
+			now, _ := h.store.run(run.ID)
+			if got.ID != run.ID || got.Status != now.Status {
+				t.Errorf("the answer is the row as it stands: %+v, stored %+v", got, now)
+			}
+			if keys := h.gate.seen(); len(keys) == 0 || keys[0] != RunGateKey(run.ID) {
+				t.Errorf("decided under the run's gate: %v", keys)
+			}
+			if fresh := len(h.store.runUpdates); c.concluded != (fresh > 0) {
+				t.Errorf("writes %d; a run is written only when it is concluded", fresh)
+			}
+			if !c.concluded {
+				if now.Finished() != run.Finished() || now.CancelRequested != run.CancelRequested || now.CancelledBy != run.CancelledBy {
+					t.Errorf("a run left alone is untouched: %+v", now)
+				}
+				if len(h.github.updatedRuns()) != 0 {
+					t.Errorf("a run left alone keeps its check run: %+v", h.github.updatedRuns())
+				}
+				if name != "finished" && name != "asked to stop already" {
+					wantLogged(t, logs.String(), "already executing; it finishes", "INFO")
+				}
+				return
+			}
+			if now.Status != StatusCompleted || now.Conclusion != ConclusionCancelled || !now.CancelRequested ||
+				now.CancelledBy != supersededPrefix+"run-of-shaC" || now.FinishedAt.IsZero() {
+				t.Errorf("concluded cancelled, superseded: %+v", now)
+			}
+			if !stoppedBySupersede(now) {
+				t.Errorf("the run reads as stopped by a supersede: %+v", now)
+			}
+			updates := h.github.updatedRuns()
+			if len(updates) != 1 || updates[0].ID != 501 || updates[0].Run.Conclusion != "cancelled" {
+				t.Errorf("its check run is concluded cancelled, after the gate: %+v", updates)
+			}
+		})
+	}
+}
+
+// The cancel a person asks for and the one a supersede makes write the same
+// conclusion for a run nobody drives, through one helper: the request records
+// who asked, the conclusion and the time.
+func TestAPersonsCancelAndASupersedeConcludeAWaitingRunAlike(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	byPerson, bySupersede := queuedRun(p, shaA), queuedRun(p, shaB)
+	bySupersede.ID = "run-superseded"
+	h.store.addRun(byPerson)
+	h.store.addRun(bySupersede)
+
+	if err := h.integ.RequestCancel(context.Background(), byPerson.ID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := h.integ.cancelIfWaiting(context.Background(), h.integ.snapshot(), bySupersede.ID, supersededPrefix+"x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	a, _ := h.store.run(byPerson.ID)
+	b, _ := h.store.run(bySupersede.ID)
+	if a.Status != b.Status || a.Conclusion != b.Conclusion || a.CancelRequested != b.CancelRequested || !a.FinishedAt.Equal(b.FinishedAt) {
+		t.Errorf("the two conclusions differ: %+v\n%+v", a, b)
+	}
+	if a.CancelledBy != ownerID || b.CancelledBy != supersededPrefix+"x" {
+		t.Errorf("each records who asked: %q, %q", a.CancelledBy, b.CancelledBy)
 	}
 }

@@ -395,6 +395,33 @@ query run pipelineRunsUnfinishedForPullRequest {
   shape   pipelineRunFull
 }
 
+/// Every run of one pipeline's event not yet completed, in any mode, the ones in progress first and
+/// then the most recently queued -- what the push lane reads (component/pipelinerun/push_lane.go,
+/// design record 2026-11-05 D4): a claim asks whether another push run of the pipeline is executing,
+/// a new push which waiting push runs it supersedes, and recovery or a run that just concluded which
+/// waiting push run starts next. The lane rules (mode, trigger, the installation's opt-in) are applied
+/// in Go, where they are tested. @serverOnly: the push is a GitHub delivery or the poll's and recovery
+/// runs on a schedule, with no person behind either, and the run that holds the lane must be found
+/// whoever owns it, so an actor.userId conjunct would match nothing and let every push run start at
+/// once. Bounded at 100: the lane leaves one run executing and the newest waiting, so a full page
+/// means far more pushes than the lane ever holds, and the ones in progress -- what a claim decides
+/// on -- sort first.
+@serverOnly
+@actor
+query run pipelineRunsUnfinishedForPipelineEvent {
+  args {
+    pipelineId  string!
+    event       string!
+  }
+  filter    row => row.pipelineId == args.pipelineId
+                && row.event == args.event
+                && row.status in ["queued", "in_progress"]
+                && actor.isClusterOwner == true
+  sort      "status", "asc", "queuedAt", "desc"
+  paginate  100
+  shape     pipelineRunFull
+}
+
 /// Every run concluded since a moment whose FINAL check run did not land -- recovery's other read: a
 /// run concluded while GitHub would not take its report keeps a check run that still shows it
 /// unfinished, which holds a merge on a required check, and recovery republishes it. @serverOnly:

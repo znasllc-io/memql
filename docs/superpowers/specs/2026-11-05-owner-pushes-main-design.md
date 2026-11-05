@@ -90,6 +90,39 @@ no force push, no deletion.
 nothing, which is the same rule cancel-on-push applies to pull requests. A
 release run, a scheduled run and a manual run are never superseded.
 
+**As implemented** (`component/pipelinerun/push_lane.go`, the push lane;
+operator view in `docs/public/operate/pipelines-substrate.md#the-push-lane`).
+More specific than the decision above in these ways:
+
+- **Opt-in.** A push run joins the lane only when its own saved policy's
+  `supersession` phase answers yes for a full push from a webhook or the poll.
+  The portable policy answers no, so nothing changes until an installation adds
+  that case to its supersession template (`memql-znas`, rollout step 3).
+- **"Has not started a step" is "no agent claimed it".** A queued run nobody
+  claimed is waiting and can be superseded. A claimed run is executing, even
+  before its first step, and finishes.
+- **One at a time.** A waiting lane run is not claimed while another push run
+  of the pipeline executes. Nothing is written, so its run ceiling has not
+  started. The replica that concludes the run ahead starts the next waiting
+  run: the one at the head, else the newest queued. Recovery does the same
+  within a minute.
+- **Proof, not order.** A push supersedes a waiting run only when GitHub names
+  the new commit as the default branch's head and proves the waiting run's
+  commit a proper ancestor of it (`CompareAncestry`). A failed head read, a
+  failed compare or a commit that is not an ancestor supersedes nothing.
+- **Late deliveries.** An older commit's run that opens after the head's own
+  run supersedes nothing when it opens. Recovery supersedes it toward the
+  head's run, which must exist and must not have been asked to stop.
+- **Soft.** Each claim takes only its own run's gate, so two waiting runs
+  claimed at the same instant on two replicas can both start. That costs a
+  runner. A claim and a supersede of one run share that gate, so exactly one
+  wins.
+- **A force-push back** to a superseded commit runs it again as its key's next
+  attempt, as for pull requests (R37). The ruleset in D1 refuses force pushes;
+  the engine does not rely on it.
+- **Notifications** pass over a superseded run when they decide whether a pass
+  recovered.
+
 ### D5. A push run reuses the verified result of a step whose inputs did not change
 
 A push run in full mode would otherwise re-execute every verification step.

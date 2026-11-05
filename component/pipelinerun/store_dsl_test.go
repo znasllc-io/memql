@@ -130,6 +130,10 @@ func everyStoreCall(s Store, value string) []struct {
 		{"RunByCheckRun", func() error { _, err := s.RunByCheckRun(ctx, value, 30431907812); return err }},
 		{"RunsUnfinished", func() error { _, err := s.RunsUnfinished(ctx); return err }},
 		{"RunsUnfinishedForPullRequest", func() error { _, err := s.RunsUnfinishedForPullRequest(ctx, value, 42); return err }},
+		{"RunsUnfinishedForPipelineEvent", func() error {
+			_, err := s.RunsUnfinishedForPipelineEvent(ctx, value, pipelines.Event(value))
+			return err
+		}},
 		{"RunsFinalCheckRunUnavailable", func() error { _, err := s.RunsFinalCheckRunUnavailable(ctx, now); return err }},
 		{"RunByID", func() error { _, err := s.RunByID(ctx, value); return err }},
 		{"ChannelsForOwner", func() error { _, err := s.ChannelsForOwner(ctx); return err }},
@@ -318,7 +322,8 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	for _, want := range []string{
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
 		qPipelinesForRepository, qPipelinesPolled, qPipelinesForScheduledScan, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
-		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsUnfinishedForPullRequest, qPipelineRunsCheckRunLost,
+		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsUnfinishedForPullRequest, qPipelineRunsUnfinishedForPipelineEvent,
+		qPipelineRunsCheckRunLost,
 		qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
@@ -1177,6 +1182,45 @@ func TestAPullRequestsUnfinishedRunsAreReadByItsNumber(t *testing.T) {
 	}
 	if n := len(engine.recorded()); n != 1 {
 		t.Errorf("no pull request is no read: %d calls", n)
+	}
+}
+
+// What holds a pipeline's push lane is read by the pipeline's BARE id and the
+// event, as the pipelines system actor, stamped internal, whoever asked; and a
+// blank pipeline or event is no read (in the query a blank value equals an
+// absent field, so it would answer every run that names none).
+func TestAPipelinesUnfinishedRunsOfAnEventAreReadByItsBareID(t *testing.T) {
+	engine := newRecordingEngine()
+	engine.answers[qPipelineRunsUnfinishedForPipelineEvent] = []any{map[string]any{
+		"id": "v1:pipelines:run:r1", "pipelineId": "v1:pipelines:pipeline:p1", "event": "push",
+		"mode": "full", "status": "in_progress", "trigger": "webhook",
+	}}
+	store := NewDSLStore(engine)
+
+	runs, err := store.RunsUnfinishedForPipelineEvent(personCtx(ownerID), "v1:pipelines:pipeline:p1", pipelines.EventPush)
+	if err != nil || len(runs) != 1 || runs[0].ID != "r1" || runs[0].Event != pipelines.EventPush || runs[0].Mode != pipelines.ModeFull ||
+		runs[0].Status != StatusInProgress || runs[0].Trigger != TriggerWebhook {
+		t.Fatalf("RunsUnfinishedForPipelineEvent: %+v %v", runs, err)
+	}
+	calls := engine.recorded()
+	if len(calls) != 1 || calls[0].query != `query pipelineRunsUnfinishedForPipelineEvent(event: "push", pipelineId: "p1")` {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !calls[0].origin.IsInternal() || calls[0].actor == nil || calls[0].actor.UserId != "system:pipelines" {
+		t.Errorf("the read is the pipelines system actor's, stamped internal, whoever asked: %+v", calls[0].actor)
+	}
+	for name, read := range map[string]func() ([]Run, error){
+		"no pipeline": func() ([]Run, error) {
+			return store.RunsUnfinishedForPipelineEvent(context.Background(), " ", pipelines.EventPush)
+		},
+		"no event": func() ([]Run, error) { return store.RunsUnfinishedForPipelineEvent(context.Background(), "p1", "") },
+	} {
+		if got, err := read(); err != nil || got != nil {
+			t.Errorf("%s: %+v %v", name, got, err)
+		}
+	}
+	if n := len(engine.recorded()); n != 1 {
+		t.Errorf("a blank pipeline or event is no read: %d calls", n)
 	}
 }
 

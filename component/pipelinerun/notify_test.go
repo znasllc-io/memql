@@ -921,6 +921,11 @@ func TestANotificationSaysTheRunRecoveredAfterAFailure(t *testing.T) {
 			Status: status, Conclusion: conclusion, QueuedAt: testNow.Add(queued),
 		}
 	}
+	cancelledBy := func(r Run, by string) Run {
+		r.CancelRequested, r.CancelledBy = true, by
+		return r
+	}
+	superseded := func(r Run) Run { return cancelledBy(r, supersededPrefix+"a-newer-push") }
 	for _, c := range []struct {
 		name    string
 		before  []Run
@@ -949,6 +954,24 @@ func TestANotificationSaysTheRunRecoveredAfterAFailure(t *testing.T) {
 		{"a failed pull request", []Run{prior("p1", pipelines.EventPullRequest, StatusCompleted, ConclusionFailure, -time.Hour)}, nil, "passed"},
 		{"the history cannot be read", []Run{prior("p1", pipelines.EventPush, StatusCompleted, ConclusionFailure, -time.Hour)},
 			errors.New("engine unavailable"), "passed"},
+		// A push a newer push superseded was never an answer: the newest
+		// answer before it is.
+		{"the previous push was superseded, after one that passed", []Run{
+			superseded(prior("p1", pipelines.EventPush, StatusCompleted, ConclusionCancelled, -time.Hour)),
+			prior("p2", pipelines.EventPush, StatusCompleted, ConclusionSuccess, -2*time.Hour),
+		}, nil, "passed"},
+		{"the previous push was superseded, after one that failed", []Run{
+			superseded(prior("p1", pipelines.EventPush, StatusCompleted, ConclusionCancelled, -time.Hour)),
+			prior("p2", pipelines.EventPush, StatusCompleted, ConclusionFailure, -2*time.Hour),
+		}, nil, "recovered"},
+		{"the only previous push was superseded", []Run{
+			superseded(prior("p1", pipelines.EventPush, StatusCompleted, ConclusionCancelled, -time.Hour)),
+		}, nil, "passed"},
+		// A person's cancel is still the run before: it did not pass.
+		{"the previous push was cancelled by a person", []Run{
+			cancelledBy(prior("p1", pipelines.EventPush, StatusCompleted, ConclusionCancelled, -time.Hour), "v1:identity:user:"+ownerID),
+			prior("p2", pipelines.EventPush, StatusCompleted, ConclusionSuccess, -2*time.Hour),
+		}, nil, "recovered"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dh := newNotifyHarness(t, notifyManifest)

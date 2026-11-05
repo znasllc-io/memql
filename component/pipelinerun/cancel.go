@@ -20,6 +20,13 @@ import (
 // cancelled. The one exception is a run nobody drives yet: a queued run with
 // no driver has nothing in flight and nobody to conclude it, so it is
 // concluded cancelled on the spot, check run included.
+//
+// A SUPERSEDE OF A WAITING PUSH asks for ONLY that exception
+// (cancelIfWaiting, push_lane.go): a push run an agent has already claimed is
+// executing, and the push lane lets it finish rather than flag it to stop. So
+// it concludes the run on the spot while nobody drives it and otherwise leaves
+// it entirely alone -- no flag, no write -- deciding under the same gate the
+// claim takes, so of a claim and a supersede of one run exactly one wins.
 
 func (i *Integration) handleCancel(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = handlerContext(ctx)
@@ -105,15 +112,9 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 		if r.Status == StatusQueued && strings.TrimSpace(r.DriverNodeID) == "" {
 			// Nobody drives it: nothing is in flight, and nobody would
 			// conclude it. The cancel IS the conclusion.
-			now := d.now()
-			patch := RunPatch{
-				Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled),
-				CancelRequested: ptr(true), CancelledBy: ptr(by), FinishedAt: ptr(now),
-			}
-			if err := d.Store.UpdateRun(gctx, r.OwnerUserID, r.ID, patch); err != nil {
+			if err := concludeUndriven(gctx, d, r, by); err != nil {
 				return err
 			}
-			applyRunPatch(r, patch)
 			result, concluded = *r, true
 			return nil
 		}
@@ -146,6 +147,98 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 		d.SignalCancel(ctx, result.ID)
 	}
 	return result, nil
+}
+
+// concludeUndriven concludes r -- queued, claimed by no agent, read fresh
+// under the run's gate that gctx holds -- cancelled on by's word: the one
+// write both a cancel and a supersede make of a run nobody drives, so the two
+// conclusions never differ but in who asked. The write is fenced to the row
+// version read, as a claim's is: should the gate's session be lost between the
+// read and the write, a claim that landed meanwhile refuses it rather than
+// having a claimed run concluded under its driver.
+func concludeUndriven(gctx context.Context, d Deps, r *Run, by string) error {
+	patch := RunPatch{
+		Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled),
+		CancelRequested: ptr(true), CancelledBy: ptr(by), FinishedAt: ptr(d.now()),
+	}
+	wctx := memql.ContextWithRowVersionFence(gctx, RunConcept, r.ID, r.CreatedAt)
+	if err := d.Store.UpdateRun(wctx, r.OwnerUserID, r.ID, patch); err != nil {
+		return err
+	}
+	applyRunPatch(r, patch)
+	return nil
+}
+
+// cancelIfWaiting concludes runID cancelled on by's word only while nobody
+// drives it -- queued, never started, claimed by no agent, not asked to stop
+// (waitingRun) -- and reports whether it did. A run an agent claimed, started
+// or not, is left entirely alone, with no flag written, and the log says so:
+// it is already executing, and finishes. A finished run answers
+// ErrRunFinished, and keeps its answer.
+//
+// It is how the push lane supersedes (supersede.go, push_lane.go). The
+// decision is the claim's mirror: one fresh read and at most one write under
+// the run's gate -- the gate the claim takes -- so of a claim and this cancel,
+// racing on two replicas, exactly one wins. It takes the gate as a drive does
+// (driverGate), one of this node's sections at a time: recovery and the
+// hand-off after a drive call it on an agent replica, whose direct pool its
+// drives already share. The check run of a run concluded here is moved after
+// the gate is released, as RequestCancel moves it.
+func (i *Integration) cancelIfWaiting(ctx context.Context, d Deps, runID, by string) (Run, bool, error) {
+	if d.Store == nil {
+		return Run{}, false, errNoStore
+	}
+	runID = bareID(runID)
+	if runID == "" {
+		return Run{}, false, ErrRunNotFound
+	}
+	by = strings.TrimSpace(by)
+	if by == "" {
+		by = "system"
+	}
+	var (
+		result    Run
+		concluded bool
+	)
+	gate := func(ctx context.Context, key string, fn func(context.Context) error) error {
+		return i.driverGate(ctx, d, key, fn)
+	}
+	err := gate(ctx, RunGateKey(runID), func(gctx context.Context) error {
+		r, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), runID)
+		if err != nil {
+			return err
+		}
+		if r == nil {
+			return ErrRunNotFound
+		}
+		result = *r
+		if r.Finished() {
+			return ErrRunFinished
+		}
+		if !waitingRun(*r) {
+			return nil
+		}
+		if err := concludeUndriven(gctx, d, r, by); err != nil {
+			return err
+		}
+		result, concluded = *r, true
+		return nil
+	})
+	if err != nil {
+		return result, false, err
+	}
+	if !concluded {
+		// Claimed or started: executing, and it finishes. A run already asked
+		// to stop is being stopped by whoever asked, and says nothing here.
+		if !result.CancelRequested {
+			d.Logger.Info("pipelines: an agent claimed the run before it could be cancelled, so it is already executing; it finishes",
+				"component", "pipelinerun", logger.Subject(RunConcept, result.ID), "status", result.Status,
+				"holder", result.DriverNodeID, "cancelledBy", by)
+		}
+		return result, false, nil
+	}
+	reportConclusion(ctx, d, gate, result)
+	return result, true, nil
 }
 
 // reportConclusion writes the final check run of a run concluded OUTSIDE a

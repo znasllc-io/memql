@@ -2529,6 +2529,105 @@ written in the runner's shape. Not verified: AKS, an image from the release pipe
 reconciliation through ArgoCD, a release through the native receiver, or a step created
 by a real runner in a queue.
 
+## A burst of pushes runs the newest commit (2026-11-05)
+
+Design record `docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md`, D4.
+The owner pushes straight to the default branch, and every push opens a full run. A
+run is claimed and started the moment it opens, and queueing happens per step inside
+Kueue, so three pushes in ten minutes started three full runs at once and the newest
+commit's verdict arrived last. `component/pipelinerun/push_lane.go` gives each
+pipeline's pushes one runner at a time and drops the commits a newer push covers.
+
+**Trigger and opt-in.** A push run joins the lane when it is a full push from a webhook
+or the poll and its OWN saved policy snapshot's `supersession` phase answers yes for
+`{event: push, mode: full, previousMode: full, trigger}`. The portable
+`pipelineSupersessionPolicy` answers no, so nothing changes until an installation opts
+in. Two alternatives were rejected. A new policy role is a contract change for one
+boolean. An environment variable is a second source of truth outside the snapshot, and
+would change a waiting run's treatment when a replica restarts. Reusing the role keeps
+the answer in the snapshot every run already saves, so every replica, retry and
+recovery reads the same answer, and a later policy change reaches only runs opened
+after it.
+
+**Hold, not refuse.** `claimInLane` (lease.go) holds an unstarted lane run while
+another lane-shaped push run of the pipeline executes: in progress whatever its lease,
+or queued under a lease renewed within `leaseStaleAfter`. Nothing is written, so the
+run stays queued, its check reads *Queued*, and its ceiling, counted from `startedAt`,
+does not begin. Holding is judged on shape, not opt-in, so a run opened before the
+opt-in holds the lane until it ends. A started run and a run asked to stop are never
+held: a takeover after a lost replica and a cancel never wait on the lane. Membership
+is decided before the gate (`pushLaneMember`, a fresh `RunByID`), because evaluating a
+snapshot is more than a gated section should do and membership rests on fields a run
+never changes. A lane that cannot be read fails the claim and the run stays queued for
+recovery, the stance operator admission takes.
+
+**Supersede on proof only.** A new lane push supersedes each waiting lane run (queued,
+no driver) of its pipeline whose commit `CompareAncestry` proves a PROPER ancestor of
+the new commit, when `readDefaultHead` names the new commit as the head
+(`coalescePush`, supersede.go). The head and the compares are read with no gate held.
+`cancelIfWaiting` (cancel.go) then concludes each run under its own gate, only if a
+fresh read still shows it waiting, with the same fenced write a cancel of an undriven
+run makes (`concludeUndriven`). It takes the gate the claim takes, so of a claim and a
+supersede exactly one wins. Recovery's lane pass (`reconcilePushLane`) supersedes
+toward a push run at the head that nobody asked to stop, which is how an older
+commit's run that opened after the head's is dropped. Stop conditions: no token, a
+failed or empty head read, no run at the head, an unproven ancestry, a run claimed
+meanwhile. Each supersedes nothing and is logged. The invariant: a run is superseded
+only while no agent holds it and while a run exists that tests a superset of its
+changes.
+
+**Starting the next.** The replica that concludes a lane-shaped run starts the next
+waiting run itself (`advancePushLane`): the one at the head, else the newest queued.
+Recovery does the same within a minute when that replica is gone, and leaves unstarted
+lane runs out of its ordinary pass, so a held run is neither claimed nor logged every
+minute.
+
+**Soft, deliberately.** Each claim takes only its own run's gate, so two waiting runs
+claimed at the same instant on two replicas can both find the lane free and both
+start. A pipeline-wide gate around every claim would close that window and put every
+claim of a pipeline behind one advisory lock for a fresh read. What it would prevent
+costs one runner, so the claim stays on the run's gate, the stance supersede.go takes
+for pull requests.
+
+**What survives a retry, a pause or a replica change.** Nothing about the lane lives in
+memory: membership is the saved snapshot, waiting is the row, the head and the
+ancestries are asked again every time. A replica that dies holding a lane run leaves a
+run in progress, which holds the lane until recovery takes it over and finishes it, or
+a claimed run that never started, whose lease goes stale and then holds nothing. That
+holds for a pod that restarts under the same name too: the run it claimed and never
+started holds the lane for up to `leaseStaleAfter` (120 seconds) before recovery
+resumes it, where an ordinary run is resumed at the next pass. A
+superseded run keeps its row, its check run concluded `cancelled` and
+`cancelledBy: superseded by <run>`. A force-push back runs its commit again (R37, now
+for the default branch's head too), and `previousRunFailed` passes it over so the next
+pass does not read as *recovered*.
+
+**Tests.** `push_lane_test.go`: membership
+(`TestOnlyAPushTheInstallationOptedInJoinsTheLane`), the hold
+(`TestAWaitingPushIsNotClaimedWhileAnotherExecutes`,
+`TestAFreshClaimHoldsTheLaneAndAStaleOneDoesNot`,
+`TestALaneThatCannotBeReadLeavesTheRunQueued`), the hop between replicas
+(`TestAWaitingPushStartsWhenTheRunAheadOfItConcludes`), the portable default
+(`TestWithoutTheOptInEveryPushStartsAtOnce`,
+`TestWithoutTheOptInTheClaimDoesNotReadTheLane`), recovery (`TestRecovery*`) and the
+race (`TestAClaimAndASupersedeOfOneRunNeverBothWin`). `supersede_test.go`: superseding
+from a webhook and from the poll, late deliveries, unknown heads, unproven ancestries,
+executing runs, R37 for pushes and the gate order. Also `cancel_test.go`
+(`cancelIfWaiting`), `notify_test.go`, `gate_discipline_test.go`
+(`TestThePushLaneKeepsTheGateDiscipline`), `store_db_test.go`
+(`pipelineRunsUnfinishedForPipelineEvent` over real rows) and `push_lane_db_test.go`
+(`TestThePushLaneOverRealRows`: the hold, the supersede and the fenced conclusion
+through the engine and the production advisory gate).
+
+**Not verified, and known limits.** No live cluster has run the lane: it has run
+against the package's fakes, and its query, hold and supersede against a real
+Postgres. Production's
+installed supersession policy does not opt in; until the installation adds the push
+case, none of this runs there. A head whose delivery never arrives covers nothing, so
+the runs waiting below it run one at a time, newest first. A superseded commit's push
+check is cancelled rather than passed, which release preparation (D6) must read as
+untested.
+
 ## The local cluster runs production's pipeline queue (2026-11-04)
 
 The owner wanted every installation to get the deadline promoter, the local k3d cluster
