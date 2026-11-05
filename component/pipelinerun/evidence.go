@@ -17,7 +17,9 @@ import (
 // A re-run (rerunOf) asks for nothing here. A whole re-run is someone asking for
 // the checks to run again, and a failed-only re-run carries passes inside its own
 // chain (carryPassed). A release compares trees (reuseSameTree); every other event
-// compares commits, below.
+// compares commits, below. A full push to the default branch then carries forward
+// what an earlier push executed and its change left untouched (carryForward), for
+// the steps the same commit could not supply.
 func (dr *runDriver) reuseVerification(ctx context.Context) bool {
 	if dr.run.PolicySnapshot == nil || dr.run.Event == pipelines.EventSchedule || dr.run.RerunOf != "" {
 		return true
@@ -48,7 +50,7 @@ func (dr *runDriver) reuseVerification(ctx context.Context) bool {
 		if source.PolicySnapshot == nil || source.PolicySnapshot["version"] != dr.run.PolicySnapshot["version"] {
 			continue
 		}
-		allowed, ok := dr.evidenceAdmitted(ctx, source, age)
+		allowed, ok := dr.evidenceAdmitted(ctx, source, age, relationCommit)
 		if !ok {
 			return false
 		}
@@ -75,13 +77,42 @@ func (dr *runDriver) reuseVerification(ctx context.Context) bool {
 			t.step.Skip = &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: "Verified at this commit in run " + source.ID + "."}
 		}
 	}
+	if dr.carriesForward() {
+		return dr.carryForward(ctx)
+	}
 	return true
 }
 
+// The relations an evidence source can have to the run reusing it, as the
+// installed evidenceReuse policy is told them once it declares `relation`
+// (evidenceAsksRelation): the same commit (reuseVerification), the same tree for
+// a release (reuseSameTree), or an earlier commit of the default branch a push
+// carries a step forward from (carryForward).
+const (
+	relationCommit   = "commit"
+	relationTree     = "tree"
+	relationAncestor = "ancestor"
+)
+
 // evidenceAdmitted asks the installed policy about one source. ok is false when
 // the drive must stop: a policy that errs is not a policy that said no.
-func (dr *runDriver) evidenceAdmitted(ctx context.Context, source Run, age time.Duration) (allowed, ok bool) {
-	value, err := dr.runPinnedWorkflow(ctx, "pipelineEvidenceReuse", map[string]any{"event": string(dr.run.Event), "sourceEvent": string(source.Event), "sourceMode": string(source.Mode), "ageSeconds": int64(age / time.Second)})
+//
+// relation is passed only to a template that declares it. A template written
+// before relations existed is asked exactly what it always was, and is never
+// asked about an ancestor at all (carryForward stops before reading a source),
+// so an installation opts into carrying forward by declaring the argument and
+// answering it.
+func (dr *runDriver) evidenceAdmitted(ctx context.Context, source Run, age time.Duration, relation string) (allowed, ok bool) {
+	args := map[string]any{"event": string(dr.run.Event), "sourceEvent": string(source.Event), "sourceMode": string(source.Mode), "ageSeconds": int64(age / time.Second)}
+	declared, err := dr.evidenceAsksRelation()
+	if err != nil {
+		dr.abort("reading the verification evidence policy", err)
+		return false, false
+	}
+	if declared {
+		args["relation"] = relation
+	}
+	value, err := dr.runPinnedWorkflow(ctx, "pipelineEvidenceReuse", args)
 	if err != nil {
 		dr.abort("evaluating verification evidence policy", err)
 		return false, false
@@ -142,7 +173,7 @@ func (dr *runDriver) reuseSameTree(ctx context.Context) bool {
 		if source.PolicySnapshot == nil || source.PolicySnapshot["version"] != dr.run.PolicySnapshot["version"] {
 			continue
 		}
-		allowed, ok := dr.evidenceAdmitted(ctx, source, max(now.Sub(source.FinishedAt), 0))
+		allowed, ok := dr.evidenceAdmitted(ctx, source, max(now.Sub(source.FinishedAt), 0), relationTree)
 		if !ok {
 			return false
 		}
@@ -264,6 +295,7 @@ func (dr *runDriver) adoptReleaseSlices(prior []WorkStep) {
 // refingerprint recomputes what a step's call declares after its slice changed.
 func (dr *runDriver) refingerprint(t *stepTrack) {
 	t.definition, t.verification, t.tree = dr.definitionOf(t.step), dr.verificationOf(t.step), dr.treeFingerprintOf(t.step)
+	t.carry = dr.carryFingerprintOf(t.step)
 }
 
 // stepGroups is the tracks keep admits, one group per manifest step: its shards

@@ -166,7 +166,8 @@ holds. Anything else runs the step.
   image, services, shard and packages all match. The run's event, mode, version
   and commit, and which stages come first in the plan, do not take part.
 - The source executed the step itself and reported no artifact. A pass that source
-  only carried from an earlier attempt does not count.
+  only carried from an earlier attempt, reused from another run, or carried forward
+  from an earlier push does not count.
 - The installed `evidenceReuse` policy admits the source, and that source ran under
   the same policy version. The engine's default admits nothing.
 
@@ -189,6 +190,13 @@ A pull request usually runs `affected`, so it covers fewer packages than a full
 release, and its `go-tests` and `db-tests` qualify only when its selection went
 full. The release commit's `push` run covers them, and **Check source** takes a
 commit only once its required checks have passed, so that run has finished.
+
+**A push may carry a step forward** from an earlier push whose change left it
+untouched ([pipelines.md](pipelines.md#carrying-a-verified-step-forward-on-the-default-branch)).
+Such a step was not executed on the release's tree, so the release executes it, with
+every shard of it, and reuses only what the push executed. A release never stands on
+a carried step: candidate coverage refuses one named as evidence, so the 24-hour
+bound holds for every check a release ships with.
 
 A reused step has no log of its own in the release. Its log stays on the run it came
 from, under that run's artifact retention, which is usually shorter than a release's.

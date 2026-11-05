@@ -64,7 +64,14 @@ pipeline:
   select:
     go: import-graph
     # Native test setup has no Go imports, so its changes need full coverage.
-    full: [cockpit/Makefile, "cockpit/scripts/**", "scripts/ci/delivery-artifacts.sh", "scripts/ci/delivery_artifacts*", "scripts/lib/capability.sh", "scripts/identity/build-css.sh"]
+    # So does what the go-tests and db-tests runners run and read beside `go
+    # test`, which the import graph cannot see either: build-css.sh and the
+    # lib.sh it sources; brand/, which it compiles into component/identity/web's
+    # embedded stylesheet and copies there as faces and favicon; and db-tests'
+    # runner and the per-package budgets it reads. Selecting every package is
+    # also what stops a push carrying a go-tests or db-tests slice forward over
+    # such a change (component/pipelinerun/carry.go).
+    full: [cockpit/Makefile, "cockpit/scripts/**", "scripts/ci/delivery-artifacts.sh", "scripts/ci/delivery_artifacts*", "scripts/lib/capability.sh", "scripts/identity/build-css.sh", "scripts/identity/lib.sh", "brand/**", "scripts/ci/pipeline-db-tests.py", "scripts/ci/db-test-budgets.yaml"]
     # The trees whose packages need a database, as
     # scripts/ci/db-gated-packages.sh --trees prints them: that script is the
     # canonical list, and the test holds this copy to it. db-tests takes these
@@ -791,15 +798,21 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -tags workbench -timeout=300s ./app/ ./component/node/
-    # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
-    # only: a full run tests every package in go-tests, these among them, so
-    # this stage is planned for every pull request, including Go-only changes.
-    # The stage comes after the tests so a red gate
+    # ci.yml go-checks' gate-inputs step: planned for every pull request,
+    # Go-only changes included, and for every push to main. A merge group and a
+    # release test every package in go-tests, these among them. A push may not:
+    # it carries a go-tests slice forward from an earlier push when the import
+    # graph says its change left the slice untouched
+    # (component/pipelinerun/carry.go), and these packages' tests read docs,
+    # scripts and `git ls-files`, which the graph does not see. Running them on
+    # every push keeps every repository-reading gate executed on every commit
+    # of main, whatever was carried. The step declares no verification, so it
+    # is never carried itself. The stage comes after the tests so a red gate
     # never skips a test; a red test stage skips it in turn, as the seam skips
     # every stage after a failed one. The packages are ci.yml's GATE_PACKAGES;
     # the test holds them equal.
     - name: gates
-      on: [pull_request, manual]
+      on: [pull_request, push, manual]
       steps:
         - name: gate-inputs
           placement: cluster

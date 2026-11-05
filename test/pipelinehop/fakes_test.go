@@ -418,6 +418,20 @@ func (h githubAt) Compare(_ context.Context, token, repository, base, head strin
 	return slices.Clone(r.changed), true, nil
 }
 
+// CompareAncestry proves nothing. The fake holds commits and no history, so it
+// cannot show one commit an ancestor of another, and a push here never carries a
+// step forward (component/pipelinerun/carry.go). A compare that proves nothing is
+// GitHub's 404, which the driver reads as "no source" and never as a failure.
+func (h githubAt) CompareAncestry(_ context.Context, token, repository, base, head string) (githubapp.Ancestry, error) {
+	g := h.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if _, err := g.repo(token, repository); err != nil {
+		return githubapp.Ancestry{}, err
+	}
+	return githubapp.Ancestry{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/compare/" + base + "..." + head}
+}
+
 func (h githubAt) CommitTree(_ context.Context, _, _, _ string) (string, error) {
 	return "", fmt.Errorf("the hop fixture has no commit objects to read")
 }

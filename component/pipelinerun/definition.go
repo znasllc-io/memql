@@ -126,3 +126,35 @@ func (dr *runDriver) treeFingerprintOf(step pipelines.Step) string {
 	step.DependsOn = nil
 	return dr.definitionForRun(step, run, evidenceScope)
 }
+
+// carryFingerprintOf is what a push run compares to carry a verification step
+// forward from an earlier commit's receipt (carry.go; design record
+// docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md, D5). It is
+// treeFingerprintOf with the tree gone too:
+//
+//   - A constant takes the commit's place. The source is another commit with
+//     another tree, so neither can be part of the identity. What ties the two
+//     commits is the affected selection over the compare between them, judged
+//     slice by slice in carry.go, and never this fingerprint.
+//   - DependsOn goes, for treeFingerprintOf's reason: it orders the plan and
+//     never reaches the command.
+//
+// Everything else verificationOf binds stays: the engine revision, the installed
+// policy's version (workflowIdentity), the owner, the pipeline and repository,
+// the compute, the domain, and the whole step -- command, image digest,
+// services, key, shard and packages. So an engine upgrade, a policy change or an
+// edited command between two pushes carries nothing.
+//
+// A step that declares checkoutHistory reads more than its tree, so it never
+// carries: "". So does a step that does not declare verification, and, through
+// definitionForRun, one built from an unknown or dirty revision.
+func (dr *runDriver) carryFingerprintOf(step pipelines.Step) string {
+	if !step.Verification || step.Kind != pipelines.StepCommand || step.CheckoutHistory != "" {
+		return ""
+	}
+	run := dr.run
+	run.Event, run.Mode, run.Version, run.InboundRequestID, run.HeadBranch = "", "", "", "", ""
+	run.SHA = carryCommit
+	step.DependsOn = nil
+	return dr.definitionForRun(step, run, evidenceScope)
+}

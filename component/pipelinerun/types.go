@@ -120,9 +120,19 @@ type WorkStep struct {
 	// receipt. Empty unless the step declared verification and the tree is known.
 	TreeFingerprint string
 	// EvidenceRunID names the run whose receipt this step reused instead of
-	// executing (call.evidenceRunId). Empty for a step a failed-only re-run
-	// carried from an earlier attempt of its own run key.
+	// executing (call.evidenceRunId): at this commit, on this tree for a release,
+	// or at an earlier commit a push carried it forward from (CarriedFrom). Empty
+	// for a step a failed-only re-run carried from an earlier attempt of its own
+	// run key.
 	EvidenceRunID string
+	// CarryFingerprint is the same check at any commit of the pipeline
+	// (definition.go, carryFingerprintOf): what a push compares to carry the step
+	// forward from an earlier push's receipt (carry.go). Empty unless the step
+	// declared verification and reads no history beyond its tree.
+	CarryFingerprint string
+	// CarriedFrom is the receipt a push carried this step forward from
+	// (call.carriedFrom): nil for every step a push did not carry.
+	CarriedFrom *carriedFrom
 	// Raw is the row as read: a release runs the candidate's own receipt
 	// inspector over it before it plans a skip (evidence.go).
 	Raw map[string]any

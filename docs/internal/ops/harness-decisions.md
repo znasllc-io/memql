@@ -3207,7 +3207,7 @@ later gate re-proves the commit the saved release chose.
 - **What is recorded.** `pl.ReleaseBuildSource.Walk` (head, bound, newer commits)
   inside the release's immutable selection, so the digest covers it. Preparation
   keeps the first, unbound inspection's record and copies it onto the bound
-  inspection's source (`prepareBuildAt`); `selectionWalk` validates it on every
+  inspection's source (`prepareBuild`); `selectionWalk` validates it on every
   read. A walk that passed nothing over records nothing (`Walk` is `omitempty`),
   so a release of a green head encodes exactly as before.
 - **What survives a retry or a replica change.** Only a saved selection. A
@@ -3266,6 +3266,122 @@ before this change decodes saved journals strictly and refuses a release whose
 walk passed a commit over, and the release list that reads it: during a rolling
 upgrade until the old replicas are gone, and after rolling the engine back for
 as long as such a release is among those the list reads.
+
+## A push carries a verified step forward (2026-11-05)
+
+The owner pushes to `main` with no pull request (design record
+`docs/superpowers/specs/2026-11-05-owner-pushes-main-design.md`, D5), and every push
+opens a full run that executed every verification step again, even after a push that
+touched one package. A push now skips a verification step, or one slice of a sharded
+one, as `pipeline_passed_earlier` when an earlier push executed it and the change
+since leaves it untouched. The connected workflow is in
+[pipelines.md](../../public/operate/pipelines.md#carrying-a-verified-step-forward-on-the-default-branch).
+
+- **Trigger** (`carriesForward`, `component/pipelinerun/carry.go`). A push's first
+  attempt, in full mode, on the pipeline's default branch, after same-commit reuse
+  (`reuseVerification`) and before the work run opens. A re-run, a pull request, a
+  merge group, a release and a scheduled scan never carry forward.
+- **Opt-in** (`evidenceAsksRelation`, `evidenceAdmitted`). Only when the installed
+  `evidenceReuse` template declares `relation`, read from the run's captured policy
+  like `stageUsesPullRequest`. Such a template is told `commit`, `tree` or `ancestor`
+  for every source. One that does not declare it is asked exactly what it was before,
+  and never about an ancestor, so existing installations and the portable default
+  are unchanged. Rejected: always passing the argument (undeclared arguments are
+  tolerated), because a policy written for commits and trees would then admit
+  ancestors without anyone choosing to.
+- **Sources** (`carrySourceProblem`). The newest pushes from `PreviousRuns`, native
+  rules first: success, never asked to stop, full, the same pipeline, owner,
+  repository and branch, the same policy version, a work run, another commit, and a
+  finish within 24 hours (`carryWindow`). The policy then decides each one, and at
+  most four (`maxCarrySources`) are compared, because each costs a GitHub call.
+- **Evidence** (`compareAncestry`). `CompareAncestry` must prove the source a proper
+  ancestor and list the change whole (under 300 paths). A three-dot compare from a
+  commit that is not an ancestor leaves out that commit's own changes, so anything
+  less proves nothing. A failed compare skips the source and never fails the run.
+- **Untouched** (`readChange`, `untouched`). The change is read through what
+  `readPlan` selects an affected run by: the import graph and the block the plan was
+  compiled from (kept on the driver as `planSpec` and `planGraph`), then the pinned
+  `pipelinePackageSelection`, `pipelinePackageStepSelection` and
+  `pipelineBucketIncluded`, asked in affected mode. A slice carries when the
+  selection narrows and reaches none of its packages, when its step's bucket is not
+  selected, or when the tree did not change (an empty compare, checked against the
+  two tree hashes when both were read). A full selection, a whole-tree step on a
+  changed tree, and coverage that stays `all` carry nothing. A native refusal of the
+  policy's narrowing (`ResolveSelection`) carries nothing rather than failing the
+  push.
+- **Executed only** (`carrySourceRow`). The source row must be a done command with no
+  artifacts, no evidence run and no `carriedFrom`, over exactly the slice's packages,
+  under the same `carryFingerprint`: the verification fingerprint with a constant in
+  the commit's place and no `dependsOn` (`carryFingerprintOf`), so it binds the engine
+  revision, the policy version, the owner, pipeline, repository, compute, domain and
+  the whole step. `checkoutHistory` gives none. A carried row is never a source, so a
+  pass is never carried from a carry, and every slice executes at least once within
+  24 hours. A slice the newest source carried, or whose change reaches it, stays
+  undecided for an older source, judged against its own change.
+- **Slices** (`carryFromSource`, `sourceSplit`). A push takes a source's split, as
+  `reuseGroup` and `adoptReleaseSlices` do, when the source's rows hold exactly the
+  plan's keys and packages; only before any slice of the step is decided, and only
+  when the split carries something. The tracks are fingerprinted again, and the
+  slices the push executes cover what the carried ones do not.
+- **Record** (`decls`). A carried step's call names `evidenceRunId` (the run that
+  executed it), `carriedFrom` (that run, its work run, commit, tree and the changed
+  paths) and `carryFingerprint`, which every verification step declares. Its reason
+  is *Inputs unchanged since \<commit\>; verified in run \<id\>.*, which the step check
+  shows as a pass (`offerStepChecks` reads `evidenceRunID`).
+- **Failed-only re-runs** (`carryPassed`). Outside a release, a re-run no longer
+  carries a step its original took from another run (reused or carried forward): a
+  re-run opened days later would otherwise stretch the pass past the window. A release
+  keeps carrying such steps inside its own 24-hour chain.
+- **Releases** (no change, fail-closed). `reuseGroup` requires executed rows, so a
+  release executes every step the push of its tree carried, all its shards, and
+  `ProveReusedStep` refuses a carried row either way a candidate could reach it: a push
+  is no full release, and a reused receipt must be executed. The cost moves from push
+  runs to releases, which are fewer.
+- **This repository's bounds** (`memql-package.yaml`). The graph cannot see what a step
+  runs beside `go test`, so `select.full` names `build-css.sh`, its `lib.sh`, `brand/**`
+  (compiled into `component/identity/web`'s embedded stylesheet), and `db-tests`'
+  runner and budgets; and the `gates` stage runs `gate-inputs` on every push, since its
+  packages' tests read docs, scripts and `git ls-files`. A carried `go-tests` slice
+  holding a gate package is then still checked on every commit.
+
+Stop conditions: anything unproven runs the step. A `PreviousRuns` or `WorkSteps` read
+that fails, a policy that errs or answers no verdict, and a `relation` declared with
+another type stop the drive for recovery, as reuse does. A lost lease stops it; a
+cancel ends the decision with what was already decided.
+
+Invariants: a carried step stands on a receipt its source executed, within 24 hours of
+the decision, at a proven ancestor whose change the pinned selection says cannot reach
+it; a release never stands on a carry; a decision is journaled once and never made
+again. What survives a retry, pause or replica change: the decision is in each step's
+declaration before the work run opens, and `resume` and `adoptRows` restore
+`carryFingerprint` and `carriedFrom` from the rows before any call is declared again,
+because the run's definition fingerprint covers every call
+(`TestATakeoverKeepsWhatCarryForwardDeclared`). A drive stopped before the work run
+opened decides again from scratch, which is safe because nothing ran.
+
+Tests: `component/pipelinerun/carry_test.go` (every rule above, the four-source bound,
+the takeover, the failed-only re-run, a release over a carried push, the documented
+opt-in, and `TestCarryFingerprintIsTheSameCheckAtAnyCommit`),
+`TestACarriedStepShowsWhereItWasVerified`, and the db-gated
+`TestAPushCarriesForwardOverRealRows`, which runs the real `PreviousRuns` query,
+journal and proof over rows the driver wrote; `TestACarriedForwardStepStandsForNoRelease`
+(`integrations/release`, db-gated); `TestEngineCarriedStepRunnersSelectEveryPackage` and
+`TestEngineGatesRunOnEveryPush` (root package).
+
+Not verified: a live push on a cluster, or the time it saves; the real
+`CompareAncestry` against GitHub beyond `component/identity/githubapp`'s own tests.
+Known limits:
+
+- carry-forward is only as sound as the affected selection: a test that reads another
+  package's files by path, or a step runner outside `select.full`, is invisible to it
+  for up to 24 hours;
+- an engine upgrade or any policy change between two pushes carries nothing;
+- a failed-only re-run of a push executes what its original carried or reused;
+- the false-green count (`component/pipelines/falsegreen.go`) cannot see a selection
+  miss that a carried step hid, until the step executes again.
+
+It does nothing until the installation's `evidenceReuse` template declares `relation`,
+and helps only after the change ships in an engine release.
 
 ## A release publishes in one call (2026-11-01)
 
