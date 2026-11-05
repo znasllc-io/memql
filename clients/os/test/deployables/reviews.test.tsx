@@ -199,7 +199,14 @@ describe("one review", () => {
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Decline" }));
     expect(await screen.findByText("Which reason applies?")).toBeTruthy();
-    expect(screen.getByText(/A low rating, a harsh tone or a bad experience is never a reason/)).toBeTruthy();
+    // The criteria's own guidance stands beside the reasons: one standard for
+    // every rating, criticism is publishable, and a doubt is decided by publishing.
+    const guidance = screen.getByText(/The same standards apply to every star rating/);
+    expect(guidance.textContent).toMatch(/a low rating, a harsh tone or a bad experience is never a reason/);
+    expect(guidance.textContent).toMatch(/taste, results, packaging, shipping, price or service/);
+    expect(guidance.textContent).toMatch(/When in doubt, publish\./);
+    // Profanity is a person's reading, never a match: whole words, offensive use, context.
+    expect(screen.getByText(/used offensively: whole words and phrases only, never letters inside a harmless word/)).toBeTruthy();
     expect(screen.getAllByRole("radio")).toHaveLength(11);
     expect(barButtons()).toEqual(["Cancel"]);
 
