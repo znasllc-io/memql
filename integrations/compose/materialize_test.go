@@ -2342,7 +2342,7 @@ func TestEmailWithoutALayoutUsesTheArticle(t *testing.T) {
 func TestLayoutRefusalsWriteNothing(t *testing.T) {
 	letter, _ := builtinLayout(t, "builtin:letter")
 	for _, c := range []struct{ name, layoutId, want string }{
-		{"an unknown built-in", "builtin:newsletter", "compose: choose one of the listed layouts"},
+		{"an unknown built-in", "builtin:no-such-layout-xyz", "compose: choose one of the listed layouts"},
 		{"an organization layout the caller cannot read", "org:missing", "compose: that layout is not readable by you"},
 		{"an archived layout", "org:old", "compose: that layout is archived; restore it first"},
 		{"another organization's layout", "org:theirs", "compose: that layout belongs to another organization"},
