@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 
@@ -24,6 +25,27 @@ export interface AzureEmailReply {
 }
 export const AZURE_EMAIL_LOCATIONS = ["Africa", "Asia Pacific", "Australia", "Brazil", "Canada", "Europe", "France", "Germany", "India", "Japan", "Korea", "Norway", "Switzerland", "United Arab Emirates", "United Kingdom", "United States"];
 
+/**
+ * Steps the engine saves and resumes, so asking again after a dropped
+ * connection is safe: the page keeps asking by itself for a short while.
+ */
+const RESUMABLE = new Set(["provision", "verify", "sender", "domainStatus", "status", "clusterStatus"]);
+const RETRY_BACKOFF_MS = [1000, 2000, 4000, 8000];
+const RETRY_EVERY_MS = 10_000;
+const RETRY_FOR_MS = 120_000;
+const WORDS: Record<string, string> = { provision: "Continue setup", verify: "Check domain records", sender: "Save sender" };
+
+/** What a person reads when the connection dropped, never the transport's words. */
+export function droppedSentence(action: string): string {
+  return WORDS[action] ? `The connection to MemQL dropped. ${WORDS[action]} picks up where it left off.` : "The connection to MemQL dropped. Try again.";
+}
+
+const pause = (ms: number, signal: AbortSignal) => new Promise<void>(done => {
+  const finish = () => { window.clearTimeout(timer); signal.removeEventListener("abort", finish); done(); };
+  const timer = window.setTimeout(finish, ms);
+  signal.addEventListener("abort", finish);
+});
+
 /** One request at a time; discard replies from an old connection or organization. */
 export function useAzureEmailCall(accountId: string) {
   const connection = useOsConnection();
@@ -40,7 +62,21 @@ export function useAzureEmailCall(accountId: string) {
     const generation = epoch.current, request = new AbortController();
     pending.current = request; setBusy(true); setError("");
     try {
-      const response = await connection.query.emailAzureSetup({ accountId, action, options, sessionId }, { signal: request.signal });
+      const ask = () => connection.query.emailAzureSetup({ accountId, action, options, sessionId }, { signal: request.signal });
+      let response: Awaited<ReturnType<typeof ask>>;
+      for (let attempt = 0, waited = 0;; attempt++) {
+        try { response = await ask(); break; }
+        catch (reason) {
+          // A dropped connection is not the step's failure. Resumable steps are asked again
+          // with a short backoff, and the person sees only a plain sentence if it never returns.
+          if (!isTransportInterruption(reason) || request.signal.aborted) throw reason;
+          const wait = RETRY_BACKOFF_MS[attempt] ?? RETRY_EVERY_MS;
+          if (!RESUMABLE.has(action) || waited + wait > RETRY_FOR_MS) throw Error(droppedSentence(action));
+          waited += wait;
+          await pause(wait, request.signal);
+          if (generation !== epoch.current) return null;
+        }
+      }
       if (generation !== epoch.current) return null;
       const row = response.rows()[0];
       const reply = row ? flatten(row) as unknown as AzureEmailReply : null;

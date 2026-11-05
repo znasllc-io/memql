@@ -191,6 +191,92 @@ describe("one Azure configuration per cluster", () => {
     expect(checks).toBe(61);
     expect(screen.getByText("Preparing email")).toBeTruthy();
   });
+  describe("a dropped connection is never the operation's failure", () => {
+    const dropped = () => Object.assign(Error("stream closed"), { reason: "transport" });
+    const SENTENCE = "The connection to MemQL dropped. Continue setup picks up where it left off.";
+    const open = async (reply: (args: Args) => Record<string, unknown>) => {
+      const call = query(reply);
+      render(withSession(<AzureEmailConnections/>));
+      chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+      await screen.findByRole("button", { name: "Manage email for Our company" });
+      vi.useFakeTimers();
+      await click("Manage email for Our company");
+      return call;
+    };
+    it("retries preparing by itself after one interruption and reaches Verify domain", async () => {
+      let checks = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "provision") { if (++checks === 1) throw dropped(); return { status: "dns", plan, records: [] }; }
+        return { status: "provisioning", plan, planId: "saved" };
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.queryByText("Needs attention")).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(checks).toBe(2);
+      expect(screen.getByText(/Merge SPF/)).toBeTruthy();
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+    });
+    it("says the connection dropped, in plain words, when interruptions persist", async () => {
+      let checks = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "provision") { checks++; throw dropped(); }
+        return { status: "provisioning", plan, planId: "saved" };
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000 + 130_000); });
+      expect(checks).toBeGreaterThan(4);
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.getByText(SENTENCE)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Continue setup" })).toBeTruthy();
+    });
+    it("still shows an Azure refusal as it is", async () => {
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "provision") throw Error("Azure permission expired");
+        return { status: "provisioning", plan, planId: "saved" };
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(screen.getByText("Azure permission expired")).toBeTruthy();
+      expect(screen.queryByText(SENTENCE)).toBeNull();
+    });
+    it("retries Check domain records after an interruption", async () => {
+      let checks = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "verify") { if (++checks === 1) throw dropped(); return { status: "verified", plan }; }
+        return { status: "dns", plan, planId: "saved", records: [] };
+      });
+      await click("Check domain records");
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(checks).toBe(2);
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.queryByText("Needs attention")).toBeNull();
+    });
+    it("gives a plain sentence when Check domain records keeps dropping", async () => {
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "verify") throw dropped();
+        return { status: "dns", plan, planId: "saved", records: [] };
+      });
+      await click("Check domain records");
+      await act(async () => { await vi.advanceTimersByTimeAsync(130_000); });
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.getByText(/The connection to MemQL dropped\./)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Check domain records" })).toBeTruthy();
+    });
+    it("shows a validation sentence from Check domain records unchanged", async () => {
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "verify") throw Error("Domain is not yours");
+        return { status: "dns", plan, planId: "saved", records: [] };
+      });
+      await click("Check domain records");
+      expect(screen.getByText("Domain is not yours")).toBeTruthy();
+    });
+  });
   it("explains a missing publisher registration before offering sign-in", async () => {
     const call = query(() => ({ status: "unconfigured", applicationReady: false }));
     render(withSession(<AzureEmailConnections/>));
