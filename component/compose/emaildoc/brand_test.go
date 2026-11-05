@@ -737,8 +737,9 @@ func TestApplyBrandUsesOnColourLogoOnAColouredPanel(t *testing.T) {
 	if logo.Src != kit.Logo.OnColour || logo.Alt != kit.Logo.Alt || logo.Href != kit.Logo.Href {
 		t.Fatalf("confirmation logo = %+v, want the reversed logo with the kit's alt and link", logo)
 	}
-	// Any enclosing section or columns on a colour that is not canvas, white or
-	// page, however deep; none of those three, and no container, is not coloured.
+	// Any enclosing section or columns on a colour that is not canvas, white,
+	// page or tint, however deep; those four are light, and neither they nor no
+	// container at all is a coloured panel.
 	for _, c := range []struct {
 		name, blocks string
 		reversed     bool
@@ -747,6 +748,8 @@ func TestApplyBrandUsesOnColourLogoOnAColouredPanel(t *testing.T) {
 		{"section of canvas", `{"id":"s","type":"section","background":"canvas","blocks":[` + logoBlock + `]}`, false},
 		{"section of white", `{"id":"s","type":"section","background":"white","blocks":[` + logoBlock + `]}`, false},
 		{"section of page", `{"id":"s","type":"section","background":"page","blocks":[` + logoBlock + `]}`, false},
+		{"section of tint", `{"id":"s","type":"section","background":"tint","blocks":[` + logoBlock + `]}`, false},
+		{"columns of tint", `{"id":"c","type":"columns","background":"tint","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}`, false},
 		{"section without a background", `{"id":"s","type":"section","blocks":[` + logoBlock + `]}`, false},
 		{"section of primary", `{"id":"s","type":"section","background":"primary","blocks":[` + logoBlock + `]}`, true},
 		{"columns of accent", `{"id":"c","type":"columns","background":"accent","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}`, true},
