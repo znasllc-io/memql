@@ -37,6 +37,18 @@ func TestWireframeUsesOnlyGreysAndShapes(t *testing.T) {
 						t.Errorf("%s: element <%s> is not allowed", info.ID, n.Data)
 					}
 				}
+				stroked, nonScaling := false, false
+				for _, a := range n.Attr {
+					if a.Key == "stroke" {
+						stroked = true
+					}
+					if a.Key == "vector-effect" && a.Val == "non-scaling-stroke" {
+						nonScaling = true
+					}
+				}
+				if stroked && !nonScaling {
+					t.Errorf("%s: a stroked <%s> lacks vector-effect non-scaling-stroke", info.ID, n.Data)
+				}
 				for _, a := range n.Attr {
 					for _, c := range colour.FindAllString(a.Val, -1) {
 						if !wireframeColours[strings.ToLower(c)] {

@@ -50,7 +50,7 @@ func (w *wireframe) rect(x, y, width, height, radius float64, fill, stroke strin
 	}
 	w.b.WriteString(` fill="` + fill + `"`)
 	if stroke != "" {
-		w.b.WriteString(` stroke="` + stroke + `" stroke-width="1"`)
+		w.b.WriteString(` stroke="` + stroke + `" stroke-width="1" vector-effect="non-scaling-stroke"`)
 		if dashed {
 			w.b.WriteString(` stroke-dasharray="6 4"`)
 		}
@@ -59,7 +59,7 @@ func (w *wireframe) rect(x, y, width, height, radius float64, fill, stroke strin
 }
 
 func (w *wireframe) line(x1, y1, x2, y2 float64, stroke string) {
-	w.b.WriteString(`<line x1="` + wfNum(x1) + `" y1="` + wfNum(y1) + `" x2="` + wfNum(x2) + `" y2="` + wfNum(y2) + `" stroke="` + stroke + `" stroke-width="1"/>`)
+	w.b.WriteString(`<line x1="` + wfNum(x1) + `" y1="` + wfNum(y1) + `" x2="` + wfNum(x2) + `" y2="` + wfNum(y2) + `" stroke="` + stroke + `" stroke-width="1" vector-effect="non-scaling-stroke"/>`)
 }
 
 // place returns the left edge of an item of width iw inside [x, x+w] for the alignment.
@@ -177,7 +177,7 @@ func (w *wireframe) block(b Block, x, width, y float64, nested bool) float64 {
 		left := wfPlace(x, width, span, b.Align, "center")
 		for i := 0; i < n; i++ {
 			cx := left + 10 + float64(i)*32
-			w.b.WriteString(`<circle cx="` + wfNum(cx) + `" cy="` + wfNum(y+16) + `" r="10" fill="` + wfLine + `" stroke="` + wfOutline + `" stroke-width="1"/>`)
+			w.b.WriteString(`<circle cx="` + wfNum(cx) + `" cy="` + wfNum(y+16) + `" r="10" fill="` + wfLine + `" stroke="` + wfOutline + `" stroke-width="1" vector-effect="non-scaling-stroke"/>`)
 		}
 		return y + 32 + 8
 	case "footer":
