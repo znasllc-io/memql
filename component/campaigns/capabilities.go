@@ -65,6 +65,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
 		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
+		{Name: "createTemplateFromLayout", Description: "Create a draft email template from a built-in layout, with the organization's brand applied.", Handler: w.handleCreateTemplateFromLayout},
 		{Name: "saveLayout", Description: "Save an organization email layout on the reviewed revision, or archive or restore it.", Handler: w.handleSaveLayout},
 		// PreserveOrder: the picker lists the built-in layouts first, in catalogue
 		// order, and then the organization's own, newest first. A builtin's nodes

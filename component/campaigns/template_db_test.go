@@ -749,7 +749,7 @@ func TestTemplateListsAreLight(t *testing.T) {
 	if listed == nil {
 		t.Fatal("templates does not list the template")
 	}
-	const listKeys = "accountId,createdAt,id,layoutId,name,ownerUserId,preheader,sourceArtifactId,status,subject"
+	const listKeys = "accountId,composition,createdAt,id,layoutId,name,ownerUserId,preheader,sourceArtifactId,status,subject"
 	if got := asKeys(listed); got != listKeys {
 		t.Errorf("a templates row has %s, want %s", got, listKeys)
 	}

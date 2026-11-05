@@ -455,6 +455,34 @@ QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClien
   return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
 };
 
+/** Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate. */
+export interface CampaignCreateTemplateFromLayoutArgs {
+  /** The organization the template is for. */
+  accountId: string;
+  /** The template's name, up to 200 characters. */
+  name: string;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. */
+  layoutId: string;
+}
+
+export function buildCampaignCreateTemplateFromLayout(args: CampaignCreateTemplateFromLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "builtin campaignCreateTemplateFromLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignCreateTemplateFromLayout(args: CampaignCreateTemplateFromLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignCreateTemplateFromLayout = function (this: QueryClient, args: CampaignCreateTemplateFromLayoutArgs = {} as CampaignCreateTemplateFromLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignCreateTemplateFromLayout", buildCampaignCreateTemplateFromLayout(args), opts);
+};
+
 /** Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney. */
 export interface CampaignDescribeJourneyArgs {
   accountId: string;

@@ -162,6 +162,10 @@ type templateContent struct {
 	// document is the email document as a JSON object, or nil for a template
 	// saved before documents existed, which is written back without one.
 	document map[string]any
+	// composition is the state of an AI composition as a JSON object, or nil for
+	// a template that has none. A write that leaves it nil does not name it, so
+	// the stored one stays.
+	composition map[string]any
 }
 
 // handleSaveTemplate implements integration.campaigns.saveTemplate.
@@ -330,19 +334,28 @@ func (w *Worker) mayWriteTemplates(ctx context.Context, accountID string) bool {
 
 // createTemplate saves a template nobody has saved yet, as a draft.
 func (w *Worker) createTemplate(ctx context.Context, req templateRequest, rendered *renderedTemplate) ([]memorynodes.MemoryNode, error) {
+	revision, err := w.insertTemplate(ctx, req, rendered)
+	if err != nil {
+		return nil, err
+	}
+	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
+}
+
+// insertTemplate is createTemplate's write, answering the revision it stamped.
+func (w *Worker) insertTemplate(ctx context.Context, req templateRequest, rendered *renderedTemplate) (time.Time, error) {
 	if req.expected != "" || req.action != "save" {
-		return nil, errTemplateNotFound
+		return time.Time{}, errTemplateNotFound
 	}
 	revision := w.templateRevision(time.Time{})
 	values := rendered.content.values(req.templateID, revision)
 	values["accountId"] = req.accountID
 	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
 		if req.sourceID != "" && req.templateID == sourceTemplateID(req.accountID, req.sourceID) && errors.Is(err, memql.ErrOrganizationRowForbidden) {
-			return nil, errTemplateIDTaken
+			return time.Time{}, errTemplateIDTaken
 		}
-		return nil, err
+		return time.Time{}, err
 	}
-	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
+	return revision, nil
 }
 
 // changeTemplate saves, publishes, archives or restores a template that is
@@ -465,6 +478,9 @@ func storedTemplate(row map[string]any) templateContent {
 	if document, ok := row["document"].(map[string]any); ok && len(document) > 0 {
 		content.document = document
 	}
+	if stored, ok := row["composition"].(map[string]any); ok && len(stored) > 0 {
+		content.composition = stored
+	}
 	return content
 }
 
@@ -480,6 +496,9 @@ func (c templateContent) values(templateID string, revision time.Time) map[strin
 	}
 	if c.document != nil {
 		values["document"] = c.document
+	}
+	if c.composition != nil {
+		values["composition"] = c.composition
 	}
 	return values
 }

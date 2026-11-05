@@ -60,6 +60,7 @@ shape template templateSummary {
   layoutId
   preheader
   sourceArtifactId
+  composition
   row.createdAt
 }
 
@@ -88,6 +89,7 @@ shape template templateFull {
   layoutId
   preheader
   sourceArtifactId
+  composition
   row.createdAt
 }
 

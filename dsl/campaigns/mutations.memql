@@ -165,11 +165,12 @@ mutation template createTemplate {
     layoutId string
     sourceArtifactId string
     document object
+    composition object
     accountId string!
     versionTime datetime!
   }
   insert {
-    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, accountId }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, accountId }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -195,11 +196,12 @@ mutation template updateTemplate {
     layoutId string
     sourceArtifactId string
     document object
+    composition object
     status string!
     versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, status }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, composition, status }
     stamp {
       id: args.templateId
       createdAt: args.versionTime

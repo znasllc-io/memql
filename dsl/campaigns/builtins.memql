@@ -279,6 +279,15 @@ builtin campaignBrandPreview {
   layoutId   string   @description("A built-in layout id, as campaignLayoutCatalogue lists them. Defaults to builtin:article.")
 }
 
+@description("Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate.")
+@sdk
+@executor("integration.campaigns.createTemplateFromLayout")
+builtin campaignCreateTemplateFromLayout {
+  accountId  string!  @description("The organization the template is for.")
+  name       string!  @description("The template's name, up to 200 characters.")
+  layoutId   string!  @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
+}
+
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
 @sdk
 @executor("integration.campaigns.configureSeries")

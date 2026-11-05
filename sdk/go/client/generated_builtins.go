@@ -590,6 +590,41 @@ func CampaignConfigureTestAudienceBuild(args CampaignConfigureTestAudienceArgs) 
 	return b.String()
 }
 
+// CampaignCreateTemplateFromLayout -- Create a draft email template from a built-in layout at once: the layout in its smallest form (a Steps email starts with two steps), with the organization's brand kit applied when it has one, its example subject, and the name given. Answers {templateId, revision, status, saved, issues}. The layout must be one campaignLayoutCatalogue lists, or the answer is \"choose one of the built-in layouts\". Needs the same organization write permission as campaignSaveTemplate.
+type CampaignCreateTemplateFromLayoutArgs struct {
+	// The organization the template is for.
+	AccountId string
+	// The template's name, up to 200 characters.
+	Name string
+	// A built-in layout id, as campaignLayoutCatalogue lists them.
+	LayoutId string
+}
+
+// CampaignCreateTemplateFromLayout calls the engine builtin campaignCreateTemplateFromLayout.
+func (qc *QueryClient) CampaignCreateTemplateFromLayout(ctx context.Context, args CampaignCreateTemplateFromLayoutArgs) (*Result, error) {
+	call := CampaignCreateTemplateFromLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignCreateTemplateFromLayout", call)
+}
+
+func CampaignCreateTemplateFromLayoutBuild(args CampaignCreateTemplateFromLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignCreateTemplateFromLayout(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 41 {
+		b.WriteString(", ")
+	}
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignDescribeJourney -- Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney.
 type CampaignDescribeJourneyArgs struct {
 	AccountId string
