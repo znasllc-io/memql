@@ -356,7 +356,7 @@ func (w *Worker) saveComposedCopy(ctx context.Context, t composingTemplate, row 
 
 	failed := stored
 	failed.State, failed.FinishedAt, failed.Notes = compositionFailed, finished, notes
-	failed.Error = "The template changed while MemQL was writing; its version is saved as " + name + "."
+	failed.Error = "The template changed, so MemQL saved a copy."
 	if _, err := w.rewriteComposition(ctx, t.id, row, failed); err != nil {
 		return "", time.Time{}, err
 	}

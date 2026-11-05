@@ -42,7 +42,7 @@ const (
 	composeNothingToStop = "MemQL is not writing this email, so there is nothing to cancel."
 	composeNotFailed     = "Only an email MemQL could not finish can be retried."
 	composeUnavailable   = "MemQL can't write emails on this server. Ask your administrator."
-	composeStartFailed   = "MemQL could not start writing this email. Try again in a moment."
+	composeStartFailed   = "MemQL could not start writing this email."
 	composeAppsUnknown   = "MemQL could not check your apps right now. Try again in a moment."
 	composeNotYours      = "Only the person who asked MemQL to write this email can retry it. Use New email to write it with your own files."
 	composeStartStop     = "the composition could not start"

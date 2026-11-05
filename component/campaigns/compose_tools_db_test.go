@@ -102,7 +102,7 @@ func TestComposeSubmitThroughTheRealTemplateWrites(t *testing.T) {
 		t.Errorf("the original lost the save made meanwhile: layout %q subject %q", str(original, "layoutId"), str(original, "subject"))
 	}
 	failed, _ := compositionFromRow(original)
-	if failed.State != compositionFailed || failed.Error != "The template changed while MemQL was writing; its version is saved as Autumn (MemQL's version)." {
+	if failed.State != compositionFailed || failed.Error != "The template changed, so MemQL saved a copy." {
 		t.Errorf("original's composition = %+v", failed)
 	}
 }

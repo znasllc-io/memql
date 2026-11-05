@@ -543,7 +543,7 @@ func TestSaveBrandKitStoresArtifactPicturesAsData(t *testing.T) {
 // cause is never shown.
 func TestSaveBrandKitTellsATransientPictureReadApart(t *testing.T) {
 	const (
-		justNow = "logo.wide: the picture could not be read just now. Try again."
+		justNow = "logo.wide: the picture could not be read. Try again, or upload it again."
 		choose  = "logo.wide: the picture could not be read. Choose a PNG, JPEG or GIF of up to 1 MiB that you uploaded"
 		cause   = "dial tcp 10.0.0.9:443: i/o timeout"
 	)

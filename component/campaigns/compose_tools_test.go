@@ -44,7 +44,7 @@ const (
 	composeMissing      = "The template this composition writes can't be found."
 	composeNotComposing = "MemQL is not writing this template."
 	composeCopyName     = "Spring news (MemQL's version)"
-	composeChanged      = "The template changed while MemQL was writing; its version is saved as Spring news (MemQL's version)."
+	composeChanged      = "The template changed, so MemQL saved a copy."
 	composeNoOrg        = "organization is not active or accessible"
 )
 

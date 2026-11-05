@@ -129,7 +129,7 @@ var (
 	errComposeNeedsBrand    = errors.New("Set up this organization's brand first: Email, Settings, Brand.")
 	errComposeNeedsApp      = errors.New("Open Cockpit with Claude Code signed in, then try again.")
 	errComposeAppsUnknown   = errors.New("MemQL could not check your apps right now. Try again in a moment.")
-	errComposeCouldNotStart = errors.New("MemQL could not start writing this email. Try again in a moment.")
+	errComposeCouldNotStart = errors.New("MemQL could not start writing this email.")
 	errComposeDescription   = errors.New("Describe the email in 1 to 8000 characters.")
 	errComposeFileID        = errors.New("Attach files from your Library.")
 	errComposeUnavailable   = errors.New("MemQL can't write emails on this server. Ask your administrator.")
