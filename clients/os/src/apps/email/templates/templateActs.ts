@@ -1,6 +1,6 @@
 import { editorArtifactURL, editorTemplateURL } from "../../../items/editorPreference";
 import type { ActSpec } from "../acts";
-import { isPublished, templateIsArchived, templateName, type TemplateRecord, type TemplateRow } from "../rows";
+import { compositionFailed, isPublished, isWriting, templateIsArchived, templateName, type TemplateRecord, type TemplateRow } from "../rows";
 
 // WHAT A TEMPLATE'S PAGE OFFERS (DESIGN.md rule 12), as a pure table.
 //
@@ -11,6 +11,8 @@ import { isPublished, templateIsArchived, templateName, type TemplateRecord, typ
 //   published   Archive (asks)           Open in editor
 //   asking      Keep                     Archive (does it)
 //   archived                             Restore
+//   writing     Cancel                   (MemQL is writing the email)
+//   failed      the usual acts, then Retry (primary, last): at most three
 //
 // A published template is asked about before it is archived, because
 // campaigns and automations that use it stop being able to send it; a draft
@@ -23,13 +25,23 @@ const ARCHIVE_ASKS: ActSpec = { id: "archive", label: "Archive", text: true };
 const KEEP: ActSpec = { id: "keep", label: "Keep", text: true };
 const ARCHIVE_CONFIRMED: ActSpec = { id: "archive-confirmed", label: "Archive", tone: "danger" };
 const OPEN_IN_EDITOR: ActSpec = { id: "open-editor", label: "Open in editor", tone: "primary" };
+const OPEN_QUIETLY: ActSpec = { id: "open-editor", label: "Open in editor" };
+const CANCEL: ActSpec = { id: "cancel-composition", label: "Cancel" };
+const RETRY: ActSpec = { id: "retry-composition", label: "Retry", tone: "primary" };
 const RESTORE: ActSpec = { id: "restore", label: "Restore", tone: "primary" };
 
 /** What a template's page offers, given what is being asked of it. */
 export function templateActs(t: TemplateRow, asking: "" | "archive"): ActSpec[] {
   if (templateIsArchived(t)) return [RESTORE];
+  // While MemQL writes the email, the only thing to do is stop it: the editor
+  // and Archive would be racing the writer.
+  if (isWriting(t)) return [CANCEL];
+  if (asking === "archive" && isPublished(t)) return [KEEP, ARCHIVE_CONFIRMED];
+  // After a failure Retry is what the state is for, so it is last; the usual
+  // acts keep their order before it, and all three fit.
+  if (compositionFailed(t)) return [isPublished(t) ? ARCHIVE_ASKS : ARCHIVE_NOW, OPEN_QUIETLY, RETRY];
   if (!isPublished(t)) return [ARCHIVE_NOW, OPEN_IN_EDITOR];
-  return asking === "archive" ? [KEEP, ARCHIVE_CONFIRMED] : [ARCHIVE_ASKS, OPEN_IN_EDITOR];
+  return [ARCHIVE_ASKS, OPEN_IN_EDITOR];
 }
 
 /** A file name long enough to say the template and short enough to keep its extension. */

@@ -132,4 +132,22 @@ describe("templates and layouts are made in the editor", () => {
     expect(offences([{ path: "apps/files/x.ts", text: 'query.executeNamed("campaignSaveLayout", call);' }])).toHaveLength(1);
     expect(offences([{ path: "apps/email/useEmail.ts", text: "await query.campaignSaveLayout({ action: \"archive\" });" }])).toHaveLength(1);
   });
+
+  it("stopping and restarting an email being written are called from their own hooks and nowhere else", () => {
+    const allowed: Record<string, string> = { campaignCancelComposition: "useCancelComposition", campaignRetryComposition: "useRetryComposition" };
+    const tree = sources();
+    for (const file of tree) {
+      for (const match of file.text.matchAll(/\b(campaignCancelComposition|campaignRetryComposition)\b/g)) {
+        expect(file.path, `${match[1]} in ${file.path}`).toBe("apps/email/actions.ts");
+      }
+    }
+    // The hooks exist, and each names its own builtin: the scan reaches them.
+    const actions = tree.find((file) => file.path === "apps/email/actions.ts")!.text;
+    for (const [name, hook] of Object.entries(allowed)) {
+      const span = hookSpan(actions, hook);
+      expect(span, hook).not.toBeNull();
+      expect(actions.slice(0, span![0]) + actions.slice(span![1])).toContain(name);
+      expect(actions.slice(span![0], span![1])).toContain("useComposition(");
+    }
+  });
 });

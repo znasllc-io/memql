@@ -784,6 +784,38 @@ export function useImportRecipients(): ImportState {
 // empty, and a read made only to fill an ignored field could fail a change that
 // was never in doubt.
 
+// ---------------------------------------------------------------------------
+// An email MemQL is writing: stopped, or started again
+// ---------------------------------------------------------------------------
+
+export interface CompositionAct extends WriteState, MayBeLost {
+  /** Run the act on a template's composition; true when the cluster took it. */
+  run: (templateId: string) => Promise<boolean>;
+}
+
+function useComposition(name: "campaignCancelComposition" | "campaignRetryComposition"): CompositionAct {
+  const write = useWrite(async (query, templateId: string) => {
+    const result = name === "campaignCancelComposition" ? await query.campaignCancelComposition({ templateId }) : await query.campaignRetryComposition({ templateId });
+    const rows = result.rows().map(flatten);
+    // A retry whose goal could not start answers with the reason: the draft is kept, failed.
+    const refused = rows.find((row) => typeof row.error === "string" && row.error !== "");
+    if (refused !== undefined) throw new Error(String(refused.error));
+    if (!rows.some((row) => row.templateId === templateId)) throw new Error("The cluster did not confirm the change.");
+    return true;
+  }, false);
+  return { busy: write.busy, error: write.error === "" ? "" : refusalSentence(write.error, name), lost: write.lost, reset: write.reset, run: (id) => write.call(id) };
+}
+
+/** Stopping an email MemQL is writing: it fails as "Cancelled". The engine refuses unless it is writing. */
+export function useCancelComposition(): CompositionAct {
+  return useComposition("campaignCancelComposition");
+}
+
+/** Writing an email again after it failed. The engine refuses unless it failed. */
+export function useRetryComposition(): CompositionAct {
+  return useComposition("campaignRetryComposition");
+}
+
 /** A template or a layout put away or brought back: the busy/error pair, and whether the answer was lost. */
 export interface LifecycleState extends WriteState, MayBeLost {}
 

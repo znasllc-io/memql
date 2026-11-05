@@ -61,6 +61,7 @@ export const WORDS = {
     repeat: "Starting",
     archive: "Archiving",
     restore: "Restoring",
+    retry: "Starting",
   } as const,
 
   /** What happened to one recipient of a send, by the delivery's status. */
@@ -90,6 +91,14 @@ export const WORDS = {
     draft: "Draft",
     ready: "Published",
     archived: "Archived",
+  } as const,
+
+  /** An email MemQL writes into a template: the row's state word, and the page's bar. */
+  composition: {
+    writing: "Writing",
+    failed: "Failed",
+    /** The bar's state while it is being written. */
+    writingBar: "MemQL is writing this email",
   } as const,
 
   /** What a template made without a layout is: its own HTML. */

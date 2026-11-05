@@ -329,8 +329,10 @@ report scene supplies a browser File to the upload port. No scene sends email.
   subscriber states, persistent import evidence and copyable signup code.
 - Templates: `email-templates`, `email-templates-empty`, `email-template`,
   `email-template-plain`, `email-template-issues`, `email-template-create`,
-  `email-layouts`, `email-layouts-none`, `email-layout`, `email-layout-builtin`.
-  Inspect styled and plain previews, issues, publication actions and editor waits.
+  `email-template-writing`, `email-template-failed`.
+  Inspect styled and plain previews, issues, publication actions and editor waits;
+  the list's Writing and Failed rows; the writing page (Cancel only) and the failed
+  page (Retry last). Templates is one view, so it has no tab bar.
 - Inbox: `email-inbox`, `email-inbox-empty`, `email-inbox-external`, `email-message`.
 - Settings: `email-settings`, `email-settings-member`, `email-settings-single`,
   `email-sender`. The member fixture verifies that actions follow access.

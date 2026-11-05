@@ -379,6 +379,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
       addRecipient: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       setRecipientSubscription: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       campaignSaveTemplate: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true, revision: "2026-10-01T00:00:00Z" }])),
+      // An email MemQL is writing (Task 23): cancelled, or written again.
+      campaignCancelComposition: vi.fn(async (args: Record<string, unknown>) => rowsResult([{ templateId: args.templateId, revision: "2026-10-01T00:00:01Z", state: "failed" }])),
+      campaignRetryComposition: vi.fn(async (args: Record<string, unknown>) => rowsResult([{ templateId: args.templateId, goalId: "goal-2", revision: "2026-10-01T00:00:02Z", state: "writing" }])),
       createSenderIdentity: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       updateSenderIdentity: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       setSenderIdentityStatus: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),

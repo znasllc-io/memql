@@ -684,6 +684,43 @@ export interface TemplateRow {
   sourceArtifactId: string;
   /** The revision: it moves on every save. */
   createdAt: string;
+  /** An email MemQL is writing into this template, or null when none was asked for. */
+  composition?: Composition | null;
+}
+
+/** MemQL writing an email into a draft template: writing, then done or failed. */
+export interface Composition {
+  state: "writing" | "done" | "failed";
+  /** When the writing began (an instant), or "". */
+  startedAt: string;
+  /** The reason it failed, as a plain sentence the server wrote. */
+  error: string;
+  /** One plain sentence for each file left out and why. */
+  notes: string[];
+}
+
+function compositionFromRow(flat: Record<string, unknown>): Composition | null {
+  const object = rowObject(flat, "composition");
+  if (object === null) return null;
+  const state = object.state;
+  if (state !== "writing" && state !== "done" && state !== "failed") return null;
+  const notes = Array.isArray(object.notes) ? object.notes.filter((note): note is string => typeof note === "string" && note !== "") : [];
+  return {
+    state,
+    startedAt: typeof object.startedAt === "string" ? object.startedAt : "",
+    error: typeof object.error === "string" ? object.error : "",
+    notes,
+  };
+}
+
+/** Whether MemQL is writing this template's email now. */
+export function isWriting(template: TemplateRow): boolean {
+  return template.composition?.state === "writing";
+}
+
+/** Whether the last attempt to write this template's email failed. */
+export function compositionFailed(template: TemplateRow): boolean {
+  return template.composition?.state === "failed";
 }
 
 export function templateFromRow(row: Row): TemplateRow {
@@ -699,6 +736,7 @@ export function templateFromRow(row: Row): TemplateRow {
     preheader: rowString(flat, "preheader"),
     sourceArtifactId: rowString(flat, "sourceArtifactId"),
     createdAt: rowString(flat, "createdAt"),
+    composition: compositionFromRow(flat),
   };
 }
 
@@ -760,6 +798,8 @@ export function templateFingerprint(template: TemplateRow): string {
     template.status,
     template.accountId,
     template.createdAt,
+    template.composition?.state ?? "",
+    template.composition?.error ?? "",
   ].join("|");
 }
 
