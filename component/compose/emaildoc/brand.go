@@ -33,6 +33,11 @@ const (
 	maxBrandFollowChars = 200
 )
 
+// brandHeadroom is what a document keeps of MaxBytes for everything but the
+// kit's pictures (a layout's structure and the kit's words), so that a kit
+// ParseBrandKit accepts always makes a document Parse accepts.
+const brandHeadroom = 128 << 10
+
 const brandUploadHint = "Upload pictures through the Brand page"
 
 // BrandPicture is the logo: a data: picture, its description and where it links.
@@ -219,7 +224,7 @@ func kitHref(href string, tagsAllowed bool) string {
 // footer, a footer without an {{unsubscribeUrl}} link, a signature name that
 // is not exactly one of a picture and text, a reply without a heading, button
 // label and button link, and more social links, footer links or footer lines
-// than the limits. The kit must also fit every built-in layout.
+// than the limits. ApplyBrand takes every kit it accepts on every built-in layout.
 func ParseBrandKit(data []byte) (BrandKit, error) {
 	if len(data) > MaxBytes {
 		return BrandKit{}, ErrFileTooLarge
@@ -257,6 +262,9 @@ func ParseBrandKit(data []byte) (BrandKit, error) {
 	if kit.Logo.Src == "" {
 		return BrandKit{}, errors.New("logo.src is required")
 	}
+	if strings.TrimSpace(kit.Logo.Alt) == "" {
+		return BrandKit{}, errors.New("logo.alt is required: describe the logo for readers who cannot see it")
+	}
 	if problem := kitPicture(kit.Logo.Src); problem != "" {
 		return BrandKit{}, fmt.Errorf("logo: %s", problem)
 	}
@@ -288,6 +296,9 @@ func ParseBrandKit(data []byte) (BrandKit, error) {
 		}); err != nil {
 		return BrandKit{}, err
 	}
+	if used := kitPictureChars(kit); used > MaxBytes-brandHeadroom {
+		return BrandKit{}, fmt.Errorf("the kit's pictures take %d KiB written out; together they must stay under %d KiB. Use fewer or smaller pictures", used>>10, (MaxBytes-brandHeadroom)>>10)
+	}
 	if kit.Footer, err = parseKitFooter(fields["footer"]); err != nil {
 		return BrandKit{}, err
 	}
@@ -295,13 +306,6 @@ func ParseBrandKit(data []byte) (BrandKit, error) {
 		return BrandKit{}, err
 	}
 
-	// The kit has to be usable: every built-in layout takes it, and the result
-	// is a document Parse reads.
-	for _, info := range Layouts() {
-		if _, err := ApplyBrand(info.Document, kit); err != nil {
-			return BrandKit{}, fmt.Errorf("the kit does not fit %s: %w", info.Name, err)
-		}
-	}
 	return kit, nil
 }
 
@@ -454,6 +458,43 @@ func removeBlock(blocks *[]Block, id string) {
 	}
 }
 
+// tidyColumns drops the columns of a columns block that hold nothing to see (no block, or spacers only) and gives
+// their width to the ones that remain, in proportion, so the block stays valid.
+func onlySpacers(blocks []Block) bool {
+	for _, b := range blocks {
+		if b.Type != typeSpacer {
+			return false
+		}
+	}
+	return true
+}
+
+func tidyColumns(b *Block) {
+	kept := b.Columns[:0:0]
+	total, dropped := 0.0, 0.0
+	for _, c := range b.Columns {
+		if onlySpacers(c.Blocks) {
+			dropped += c.Width
+			continue
+		}
+		kept = append(kept, c)
+		total += c.Width
+	}
+	if dropped == 0 || len(kept) == 0 {
+		b.Columns = kept
+		return
+	}
+	for i := range kept {
+		if total > 0 {
+			kept[i].Width += dropped * kept[i].Width / total
+		} else {
+			kept[i].Width = 100 / float64(len(kept))
+		}
+		kept[i].Width = float64(int(kept[i].Width*100)) / 100
+	}
+	b.Columns = kept
+}
+
 // ApplyBrand writes a kit into a copy of layout: the kit's theme replaces the
 // layout's and each brand slot, found by its id wherever it sits, takes the
 // kit's content. A slot the kit leaves empty is removed, and a kit slot the
@@ -498,14 +539,25 @@ func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
 				b.Src = s.NameImage
 				return
 			}
-			// The title's colour and alignment are the band's; the name is the
-			// larger line above it.
-			name := Block{ID: b.ID, Type: typeText, Text: s.NameText, Size: 22, LineHeight: 26, Weight: 700, Font: "heading", Color: "text", Align: "center"}
+			// The replaced picture's padding and alignment stay; the colour is
+			// the title's, the band's; the name is the larger line above it.
+			name := Block{ID: b.ID, Type: typeText, Text: s.NameText, Size: 22, LineHeight: 26, Weight: 700, Font: "heading",
+				Color: "text", Align: b.Align, Padding: b.Padding}
 			if title != nil {
-				name.Color, name.Align = title.Color, title.Align
+				name.Color = title.Color
+				if name.Align == "" {
+					name.Align = title.Align
+				}
 			}
 			*b = name
 		})
+	}
+
+	if band := findBlock(*blocks, SlotSignature); band != nil {
+		tidyColumns(band)
+		if len(band.Columns) == 0 {
+			removeBlock(blocks, SlotSignature)
+		}
 	}
 
 	fill(SlotFollow, kit.Follow != "", func(b *Block) { b.Text = kit.Follow })
@@ -607,4 +659,17 @@ func kitPictureBytes(kit BrandKit) int {
 		}
 	}
 	return total
+}
+
+// kitPictureChars is the length of the pictures as a document writes them: one
+// copy for every place the kit puts a picture.
+func kitPictureChars(kit BrandKit) int {
+	n := len(kit.Logo.Src)
+	if s := kit.Signature; s != nil {
+		n += len(s.Photo) + len(s.NameImage)
+	}
+	for _, l := range kit.Social {
+		n += len(l.Icon)
+	}
+	return n
 }

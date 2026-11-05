@@ -121,30 +121,52 @@ func TestParseBrandKitRefusesArtifactPictures(t *testing.T) {
 
 func TestParseBrandKitRefusals(t *testing.T) {
 	good := testKit(t)
-	cases := map[string]func(k *BrandKit){
-		"logo src required": func(k *BrandKit) { k.Logo.Src = "" },
-		"link tag in social": func(k *BrandKit) {
-			k.Social = []Link{{Network: "X", Href: TagViewURL}}
-		},
-		"link tag on logo":    func(k *BrandKit) { k.Logo.Href = TagViewURL },
-		"nine social":         func(k *BrandKit) { k.Social = make([]Link, 9) },
-		"long follow":         func(k *BrandKit) { k.Follow = strings.Repeat("a", 201) },
-		"thirteen lines":      func(k *BrandKit) { k.Footer.Lines = make([]string, 13) },
-		"long line":           func(k *BrandKit) { k.Footer.Lines = []string{strings.Repeat("a", 301)} },
-		"reply without label": func(k *BrandKit) { k.Reply.ButtonLabel = "" },
+	manyLinks := func(n int, label bool) []Link {
+		links := make([]Link, n)
+		for i := range links {
+			links[i] = Link{Network: "Mastodon", Href: "https://social.example/northwind"}
+			if label {
+				links[i] = Link{Label: "More", Href: "https://northwind.example/more"}
+			}
+		}
+		return links
 	}
-	for name, mutate := range cases {
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(k *BrandKit)
+		want   string
+	}{
+		{"logo src required", func(k *BrandKit) { k.Logo.Src = "" }, "logo.src is required"},
+		{"logo alt required", func(k *BrandKit) { k.Logo.Alt = "" }, "logo.alt is required"},
+		{"link tag in social", func(k *BrandKit) { k.Social = []Link{{Network: "X", Href: TagViewURL}} }, "footer link"},
+		{"link tag on logo", func(k *BrandKit) { k.Logo.Href = TagViewURL }, "footer link"},
+		{"nine social", func(k *BrandKit) { k.Social = manyLinks(9, false) }, "at most 8 social links"},
+		{"nine footer links", func(k *BrandKit) {
+			k.Footer.Links = append(manyLinks(8, true), Link{Label: "Unsubscribe", Href: TagUnsubscribeURL})
+		}, "at most 8 links"},
+		{"long follow", func(k *BrandKit) { k.Follow = strings.Repeat("a", 201) }, "follow can be at most 200"},
+		{"thirteen lines", func(k *BrandKit) { k.Footer.Lines = make([]string, 13) }, "at most 12 lines"},
+		{"long line", func(k *BrandKit) { k.Footer.Lines = []string{strings.Repeat("a", 301)} }, "longer than 300"},
+		{"reply without label", func(k *BrandKit) { k.Reply.ButtonLabel = "" }, "reply needs a heading"},
+		{"web picture", func(k *BrandKit) { k.Signature.Photo = "https://x.example/p.png" }, "embedded PNG"},
+		{"pictures too big together", func(k *BrandKit) {
+			k.Logo.Src = testPNG(t, 520, true)
+			k.Signature.Photo = testPNG(t, 521, true)
+			k.Signature.NameImage = testPNG(t, 522, true)
+		}, "Use fewer or smaller pictures"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			k := good
 			sig, rep := *good.Signature, *good.Reply
 			k.Signature, k.Reply = &sig, &rep
-			mutate(&k)
+			c.mutate(&k)
 			raw, err := k.JSON()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := ParseBrandKit(raw); err == nil {
-				t.Fatal("kit accepted")
+			if _, err := ParseBrandKit(raw); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, c.want)
 			}
 		})
 	}
@@ -248,6 +270,10 @@ func TestApplyBrandSignatureNameAsText(t *testing.T) {
 	if b == nil || b.Type != "text" || b.Text != "Sam Rivera" || b.Font != "heading" {
 		t.Fatalf("signature-name = %+v", b)
 	}
+	old := findBlock(layoutOrFail(t, "builtin:letter").Blocks, "signature-name")
+	if !reflect.DeepEqual(b.Padding, old.Padding) || (old.Align != "" && b.Align != old.Align) {
+		t.Fatalf("padding/align not kept: %+v vs %+v", b, old)
+	}
 	// It stays in the second column, above the title.
 	band := findBlock(got.Blocks, "signature")
 	if len(band.Columns) != 2 || band.Columns[1].Blocks[1].ID != "signature-name" {
@@ -319,5 +345,49 @@ func TestBrandWarningsLargePictures(t *testing.T) {
 		if w.Code == "pictures_large" {
 			t.Fatalf("one picture is under the limit: %+v", w)
 		}
+	}
+}
+
+func TestApplyBrandPartialSignaturesStayValid(t *testing.T) {
+	base := testKit(t)
+	big := testPNG(t, 520, true) // about 780 KiB, under the 1 MiB limit
+	name, photo, title := base.Signature.NameImage, base.Signature.Photo, "Founder"
+	sigs := map[string]*BrandSignature{
+		"photo only":      {Photo: photo},
+		"name only":       {NameImage: name},
+		"text name only":  {NameText: "Sam Rivera"},
+		"title only":      {Title: title},
+		"name and title":  {NameImage: name, Title: title},
+		"photo and title": {Photo: photo, Title: title},
+		"photo and name":  {Photo: photo, NameText: "Sam"},
+		"empty":           {},
+		"big pictures":    {Photo: testPNG(t, 300, true), NameImage: name, Title: title},
+	}
+	for label, sig := range sigs {
+		for _, info := range Layouts() {
+			t.Run(label+"/"+info.ID, func(t *testing.T) {
+				kit := base
+				kit.Signature = sig
+				kit.Logo.Src = big
+				if _, err := ApplyBrand(info.Document, kit); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+	// A photo-only signature gives the whole band to the photo's column.
+	kit := base
+	kit.Signature = &BrandSignature{Photo: photo}
+	got, err := ApplyBrand(layoutOrFail(t, "builtin:letter"), kit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if band := findBlock(got.Blocks, "signature"); len(band.Columns) != 1 || band.Columns[0].Width < 95 {
+		t.Fatalf("columns = %+v", band.Columns)
+	}
+	kit.Signature = &BrandSignature{}
+	got, _ = ApplyBrand(layoutOrFail(t, "builtin:letter"), kit)
+	if hasID(got.Blocks, "signature") {
+		t.Fatal("an empty signature should be removed")
 	}
 }
