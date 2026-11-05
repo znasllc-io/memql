@@ -285,15 +285,17 @@ describe("a template row", () => {
 });
 
 
-describe("email reference recipes", () => {
-  it("retains the organization, output kind, and explicit resource choices", () => {
+describe("reference recipes", () => {
+  it("retains the organization and explicit resource choices, and never an email output kind", () => {
     const row = compositionRow({ accountIds: ["client-a"], outputKind: "email_template", format: "json", sources: [
       {kind: "library_file", ref: "resources", label: "brand.zip", content: true, includeImages: true},
       {kind: "library_file", ref: "example", label: "example.png", content: true, includeImages: false},
       {kind: "query", ref: "query products()", label: "Products"},
     ] });
     const recipe = recipeFacts(compositionFromRow(row), sourcesOf(row));
-    expect(recipe).toMatchObject({ accountIds: ["client-a"], outputKind: "email_template", format: "json", sourceSelectors: [
+    expect(recipe).not.toHaveProperty("outputKind");
+    expect(recipe).not.toHaveProperty("layoutId");
+    expect(recipe).toMatchObject({ accountIds: ["client-a"], format: "json", sourceSelectors: [
       {kind: "library_file", selector: "resources", label: "brand.zip", content: true, includeImages: true},
       {kind: "library_file", selector: "example", label: "example.png", content: true, includeImages: false},
       {kind: "concept_query", selector: "query products()", label: "Products"},

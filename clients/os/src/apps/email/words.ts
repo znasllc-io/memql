@@ -128,7 +128,6 @@ export const WORDS = {
   unavailable: {
     campaign: "That campaign isn't available.",
     template: "That template isn't available.",
-    layout: "That layout isn't available.",
   } as const,
 
   /**

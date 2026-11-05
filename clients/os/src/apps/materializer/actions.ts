@@ -170,13 +170,6 @@ export function useMaterialize(): MaterializeState {
         setError(problem);
         return "";
       }
-      if (
-        request.outputKind === "email_template" &&
-        (request.accountIds?.length !== 1 || !request.accountIds[0]?.trim())
-      ) {
-        setError("Choose an organization for this email template.");
-        return "";
-      }
       const current = generation.current;
       setBusy(true);
       setError("");
@@ -274,11 +267,9 @@ export interface NewRecipeFacts {
   description: string;
   format: string;
   templateId: string;
-  layoutId?: string;
   folderId: string;
   sourceSelectors: SelectorRow[];
   accountIds: string[];
-  outputKind: string;
 }
 
 /** Preserve reference files and their explicit content/image choices when an
@@ -293,9 +284,7 @@ export function recipeFacts(
     format: composition.format,
     templateId: composition.templateId,
     folderId: composition.folderId,
-    ...(composition.layoutId ? { layoutId: composition.layoutId } : {}),
     accountIds: composition.accountIds,
-    outputKind: composition.outputKind,
     sourceSelectors: sources.filter(recipeKeeps).map((source) => ({
       kind: source.kind === "query" ? "concept_query" : source.kind,
       selector: source.ref,
@@ -385,12 +374,10 @@ export function useCompositionActs(): CompositionActsState {
           name: facts.name.trim(),
           format: facts.format,
           accountIds: facts.accountIds,
-          ...(facts.outputKind ? { outputKind: facts.outputKind } : {}),
           ...(facts.description.trim()
             ? { description: facts.description.trim() }
             : {}),
           ...(facts.templateId ? { templateId: facts.templateId } : {}),
-          ...(facts.layoutId ? { layoutId: facts.layoutId } : {}),
           ...(facts.folderId ? { folderId: facts.folderId } : {}),
           ...(facts.sourceSelectors.length > 0
             ? {

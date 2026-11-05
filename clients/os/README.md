@@ -1719,7 +1719,7 @@ offered. Requests follow this table in the OS, the SDK and the engine:
 | A name and kind, with no description, sources or template | Blank Markdown, text, HTML, CSV or JSON, with no model call. Word and PDF need content |
 | Markdown described in words with nothing picked, or only Markdown files up to 32 KiB each and PNG, JPEG, GIF or WebP pictures up to 8 MiB each | Blank file followed by the person's Library revision request |
 | Markdown described in words with any other file, a record or a query | Composer reads the sources and writes the file |
-| A template, another kind of file, an email template or a package | Composer writes the file |
+| A template, another kind of file or a package | Composer writes the file |
 
 The SDK's `readDescribedMarkdown` reads missing Library file facts before
 starting; its shared predicate determines the route. Every picked Library file
@@ -1801,8 +1801,9 @@ actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent
 ```
 
 A setup starts no work. `readComposeIntent` keeps supported formats and source
-kinds, complete return addresses, and opaque ids exactly as received. An email
-template uses `outputKind: "email_template"` with JSON. The wizard applies the
+kinds, complete return addresses, and opaque ids exactly as received. Emails are
+not made here: a setup that asks for one (`outputKind: "email_template"`) is read
+as an ordinary file, and emails are composed in the Email app. The wizard applies the
 setup together to a fresh draft and opens the next unanswered step; Files' New
 Markdown file opens Name. Leaving abandons the draft. Its first made file keeps
 the way back only for that trip; Start over creates a new draft without it.

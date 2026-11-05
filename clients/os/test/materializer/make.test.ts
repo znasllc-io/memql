@@ -69,7 +69,6 @@ const DATA = pick("file-data", "data.csv");
 const draft = (over: Partial<MakeDraft> = {}): MakeDraft => ({ ...draftFromSetup(null, "markdown"), ...over });
 const makeDoc = (format: ComposeFormat, over: Partial<MakeDraft> = {}): MakeDraft =>
   draft({ fileKind: { kind: "document", format }, ...over });
-const email = (over: Partial<MakeDraft> = {}): MakeDraft => draft({ fileKind: { kind: "emailTemplate" }, ...over });
 const staticSite = (over: Partial<MakeDraft> = {}): MakeDraft =>
   draft({ fileKind: { kind: "package", deployableKind: "static" }, ...over });
 
@@ -107,16 +106,16 @@ describe("FILE_KINDS", () => {
     expect(FILE_KINDS.map((entry) => entry.label)).toEqual([
       "Markdown", "Web page", "Plain text", "Spreadsheet (CSV)", "Data (JSON)", "Word document", "PDF",
       "Single-page app package", "Static site package", "Shopify storefront package",
-      "Email template",
     ]);
+    // Emails are made in the Email app, so the Materializer never offers one.
+    expect(FILE_KINDS.map((entry) => entry.label.toLowerCase()).filter((label) => label.includes("email"))).toEqual([]);
   });
 
-  it("describes the packages and the email template, and nothing else", () => {
+  it("describes the packages, and nothing else", () => {
     expect(FILE_KINDS.filter((entry) => entry.description !== undefined).map((entry) => [entry.label, entry.description])).toEqual([
       ["Single-page app package", "A package for Deployables"],
       ["Static site package", "A package for Deployables"],
       ["Shopify storefront package", "A package for Deployables"],
-      ["Email template", "Opens in the email editor"],
     ]);
   });
 
@@ -132,7 +131,6 @@ describe("FILE_KINDS", () => {
       { kind: "package", deployableKind: "spa" },
       { kind: "package", deployableKind: "static" },
       { kind: "package", deployableKind: "shopify_storefront" },
-      { kind: "emailTemplate" },
     ]);
   });
 
@@ -144,11 +142,10 @@ describe("FILE_KINDS", () => {
 });
 
 describe("formatOf", () => {
-  it("is the document's format, HTML for a package and JSON for an email template", () => {
+  it("is the document's format, or HTML for a package", () => {
     expect(formatOf({ kind: "document", format: "pdf" })).toBe("pdf");
     expect(formatOf({ kind: "package", deployableKind: "spa" })).toBe("html");
     expect(formatOf({ kind: "package", deployableKind: "shopify_storefront" })).toBe("html");
-    expect(formatOf({ kind: "emailTemplate" })).toBe("json");
   });
 });
 
@@ -185,10 +182,10 @@ describe("draftFromSetup", () => {
     ]);
   });
 
-  it("makes an email template of an output kind with JSON or no format, and keeps the sender's other format", () => {
-    expect(draftFromSetup({ outputKind: "email_template" }, "markdown").fileKind).toEqual({ kind: "emailTemplate" });
-    expect(draftFromSetup({ outputKind: "email_template", format: "json" }, "markdown").fileKind).toEqual({ kind: "emailTemplate" });
-    expect(draftFromSetup({ outputKind: "email_template", format: "markdown" }, "pdf").fileKind).toEqual({ kind: "document", format: "markdown" });
+  it("takes the sender's format, and the default when it names none", () => {
+    expect(draftFromSetup({ format: "json" }, "markdown").fileKind).toEqual({ kind: "document", format: "json" });
+    expect(draftFromSetup({ format: "markdown" }, "pdf").fileKind).toEqual({ kind: "document", format: "markdown" });
+    expect(draftFromSetup({}, "pdf").fileKind).toEqual({ kind: "document", format: "pdf" });
   });
 });
 
@@ -208,10 +205,10 @@ describe("draftFromComposition", () => {
     });
   });
 
-  it("reads a package from its deployable kind and an email template from its output kind", () => {
+  it("reads a package from its deployable kind, and a file that was an email as the JSON it is", () => {
     expect(draftFromComposition(composition({ format: "html", deployableKind: "static" }), []).fileKind).toEqual({ kind: "package", deployableKind: "static" });
     expect(draftFromComposition(composition({ format: "html", deployableKind: "spa" }), []).fileKind).toEqual({ kind: "package", deployableKind: "spa" });
-    expect(draftFromComposition(composition({ format: "json", outputKind: "email_template" }), []).fileKind).toEqual({ kind: "emailTemplate" });
+    expect(draftFromComposition(composition({ format: "json", outputKind: "email_template" }), []).fileKind).toEqual({ kind: "document", format: "json" });
   });
 
   it("falls back to the record's format when its deployable kind is one this app does not know", () => {
@@ -247,16 +244,14 @@ describe("stepsOf", () => {
     expect(stepsOf(makeDoc("html"), facts({ templates: [page] }))).toEqual(withTemplate);
   });
 
-  it("asks a package's template for HTML, and an email template's for JSON", () => {
+  it("asks a package's template for HTML", () => {
     const page = template("t3", "Landing", "html");
     const data = template("t5", "Welcome", "json");
     expect(stepsOf(staticSite(), facts({ templates: [page] }))).toContain("template");
-    expect(stepsOf(email(), facts({ templates: [page] }))).not.toContain("template");
-    expect(stepsOf(email(), facts({ templates: [data] }))).toContain("template");
+    expect(stepsOf(staticSite(), facts({ templates: [data] }))).not.toContain("template");
   });
 
-  it("adds Organization for an email template, or for a draft that already carries one", () => {
-    expect(stepsOf(email(), facts())).toEqual(["kind", "from", "describe", "name", "folder", "organization", "file"]);
+  it("adds Organization only for a draft that already carries one", () => {
     expect(stepsOf(draft({ accountId: "acct-1" }), facts())).toEqual(["kind", "from", "describe", "name", "folder", "organization", "file"]);
     expect(stepsOf(draft(), facts())).not.toContain("organization");
   });
@@ -300,10 +295,8 @@ describe("stepState", () => {
     expect(state("name", makeDoc("pdf", { name: ".md" }))).toBe("done");
   });
 
-  it("answers Organization when set, waits for an email template without one, and is otherwise skipped", () => {
-    expect(state("organization", email({ accountId: "acct-1" }))).toBe("done");
+  it("answers Organization when set, and is otherwise skipped", () => {
     expect(state("organization", draft({ accountId: "acct-1" }))).toBe("done");
-    expect(state("organization", email())).toBe("waiting");
     expect(state("organization", draft())).toBe("skipped");
   });
 
@@ -337,13 +330,6 @@ describe("openingStep", () => {
     expect(openingStep(draft({ ingredients: [NOTES], statement: "A summary", name: "Plan" }), facts())).toBe("describe");
   });
 
-  it("asks an email template for its organization after its name", () => {
-    const setup = draftFromSetup({ outputKind: "email_template" }, "markdown");
-    expect(openingStep(setup, facts())).toBe("name");
-    expect(openingStep({ ...setup, name: "Welcome" }, facts())).toBe("organization");
-    expect(openingStep({ ...setup, name: "Welcome", accountId: "acct-1" }, facts())).toBe("describe");
-  });
-
   it("opens on Describe when nothing waits, the answer most often changed before trying again", () => {
     const answered = draft({ name: "Plan", statement: "A summary", ingredients: [NOTES] });
     expect(openingStep(answered, facts())).toBe("describe");
@@ -356,7 +342,6 @@ describe("answerOf", () => {
   it("names the kind of file as the choice does", () => {
     expect(answer("kind")).toBe("Markdown");
     expect(answer("kind", staticSite())).toBe("Static site package");
-    expect(answer("kind", email())).toBe("Email template");
     expect(answer("kind", makeDoc("csv"))).toBe("Spreadsheet (CSV)");
   });
 
@@ -382,7 +367,6 @@ describe("answerOf", () => {
     expect(answer("name", draft({ name: "a/b" }))).toBeUndefined();
     expect(answer("name", draft({ name: "Plan" }))).toBe("Plan.md");
     expect(answer("name", staticSite({ name: "Site" }))).toBe("Site.zip");
-    expect(answer("name", email({ name: "Welcome" }))).toBe("Welcome.email.json");
   });
 
   it("says Library for the top level, the folder's name, Unavailable folder once the list has loaded without it, and nothing while it loads", () => {
@@ -392,11 +376,9 @@ describe("answerOf", () => {
     expect(answer("folder", draft({ folderId: "f-loading" }))).toBeUndefined();
   });
 
-  it("names the organization, says there is none, and has no answer while an email template still needs one", () => {
-    expect(answer("organization", email({ accountId: "acct-1" }))).toBe("Acme Ltd");
+  it("names the organization, and says there is none", () => {
     expect(answer("organization", draft({ accountId: "acct-1" }))).toBe("Acme Ltd");
     expect(answer("organization")).toBe("No organization");
-    expect(answer("organization", email())).toBeUndefined();
   });
 
   it("leaves File to the component, which shows the filed name once the file is made", () => {
@@ -418,9 +400,8 @@ describe("pathOf", () => {
 
   // Only a document can start blank. (The floor asks for something before it consults the path
   // for these, but the path is the model's to get right on its own.)
-  it("is composed for a package or an email template, which cannot start blank", () => {
+  it("is composed for a package, which cannot start blank", () => {
     expect(path(staticSite())).toBe("composed");
-    expect(path(email())).toBe("composed");
   });
 
   it("is described for Markdown with a description and nothing picked", () => {
@@ -457,7 +438,6 @@ describe("pathOf", () => {
     expect(path(draft({ templateId: "t1", statement: "A summary" }))).toBe("composed");
     expect(path(makeDoc("html", { statement: "A summary" }))).toBe("composed");
     expect(path(staticSite({ statement: "A summary" }))).toBe("composed");
-    expect(path(email({ statement: "A summary" }))).toBe("composed");
   });
 
   // The Library's rule is the SDK's to say (isDescribedMarkdown), so the model holds no list of
@@ -487,7 +467,7 @@ describe("blocker", () => {
   it("asks for a name first, whatever else is missing", () => {
     expect(block(draft())).toEqual({ reason: "name", words: { word: "Name the file" } });
     expect(block(makeDoc("pdf", { name: "a/b" }), facts({ inference: false }))).toEqual({ reason: "name", words: { word: "Name the file" } });
-    expect(block(email({ name: ".json" }))).toEqual({ reason: "name", words: { word: "Name the file" } });
+    expect(block(makeDoc("json", { name: ".json" }))).toEqual({ reason: "name", words: { word: "Name the file" } });
   });
 
   it("says a blank file can be Markdown, text, HTML, CSV or JSON, for a kind that cannot start blank", () => {
@@ -495,7 +475,6 @@ describe("blocker", () => {
     expect(block(makeDoc("pdf", { name: "Report" }))).toEqual({ reason: "blank", words });
     expect(block(makeDoc("docx", { name: "Report" }))).toEqual({ reason: "blank", words });
     expect(block(staticSite({ name: "Site" }))).toEqual({ reason: "blank", words });
-    expect(block(email({ name: "Welcome", accountId: "acct-1" }))).toEqual({ reason: "blank", words });
   });
 
   it("lets Markdown, text, HTML, CSV and JSON start blank, and no other kind", () => {
@@ -524,11 +503,6 @@ describe("blocker", () => {
     expect(block(makeDoc("pdf", { name: "Report", statement: "  \n  " }))?.reason).toBe("blank");
   });
 
-  it("asks an email template for an organization", () => {
-    expect(block(email({ name: "Welcome", statement: "A welcome email" }))).toEqual({ reason: "organization", words: { word: "Choose an organization" } });
-    expect(block(email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" }))).toBeNull();
-  });
-
   it("says Making this needs Inference only when readiness reports it not set up and a model is needed", () => {
     const needs = { reason: "inference", words: { word: "Making this needs Inference" } };
     const described = draft({ name: "Plan", statement: "A summary" });
@@ -547,8 +521,7 @@ describe("blocker", () => {
     const pdf = makeDoc("pdf");
     expect(block(pdf, facts({ inference: false }))?.reason).toBe("name");
     expect(block({ ...pdf, name: "Report" }, facts({ inference: false }))?.reason).toBe("blank");
-    expect(block(email({ name: "Welcome", statement: "A welcome email" }), facts({ inference: false }))?.reason).toBe("organization");
-    expect(block(email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" }), facts({ inference: false }))?.reason).toBe("inference");
+    expect(block({ ...pdf, name: "Report", statement: "A summary" }, facts({ inference: false }))?.reason).toBe("inference");
   });
 });
 
@@ -570,10 +543,6 @@ describe("readyWords", () => {
     expect(readyWords(staticSite({ name: "Site", statement: "A landing page" }), facts())).toEqual({ word: "Ready to make Site.zip", detail: "A model writes it." });
   });
 
-  it("says an email template is filed as .email.json", () => {
-    const welcome = email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" });
-    expect(readyWords(welcome, facts())).toEqual({ word: "Ready to make Welcome.email.json", detail: "A model writes it." });
-  });
 });
 
 // The brief's own case, varied one way at a time: a description with notes.md (2 KiB) and
@@ -756,12 +725,6 @@ describe("requestOf", () => {
     expect(requestOf(draft({ fileKind: { kind: "package", deployableKind: "shopify_storefront" }, name: "Shop" }))).toMatchObject({ format: "html", deployableKind: "shopify_storefront" });
   });
 
-  it("sends an email template as JSON with its output kind and its organization", () => {
-    expect(requestOf(email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" }))).toStrictEqual({
-      name: "Welcome", format: "json", statement: "A welcome email", outputKind: "email_template", accountIds: ["acct-1"],
-    });
-  });
-
   it("sends what a Start over drafted from the record", () => {
     const record = composition({ name: "Q3 summary", statement: "A summary", format: "markdown", folderId: "f-projects" });
     expect(requestOf(draftFromComposition(record, [recorded("library_file", "file-notes", "notes.md")]))).toStrictEqual({
@@ -787,7 +750,6 @@ describe("filedName", () => {
     expect(filed("Settings", { kind: "document", format: "json" })).toBe("Settings.json");
     expect(filed("Letter", { kind: "document", format: "docx" })).toBe("Letter.docx");
     expect(filed("Report", { kind: "document", format: "pdf" })).toBe("Report.pdf");
-    expect(filed("Welcome", { kind: "emailTemplate" })).toBe("Welcome.email.json");
   });
 
   it("does not add a second extension when the name already ends with the kind's", () => {
@@ -800,29 +762,6 @@ describe("filedName", () => {
   it("keeps another format's extension as part of the name", () => {
     expect(filed("Report.pdf")).toBe("Report.pdf.md");
     expect(filed("Plan.md.md")).toBe("Plan.md");
-  });
-
-  // The engine files an email template as <stem>.email.json (the filing site in
-  // integrations/compose/materialize.go): it makes the .json file name as it does for any JSON
-  // document, takes a ".json" off it, case-sensitively, and adds ".email.json".
-  it("files an email template as .email.json", () => {
-    const email = { kind: "emailTemplate" } as const;
-    expect(filed("Welcome", email)).toBe("Welcome.email.json");
-    expect(filed("Welcome.json", email)).toBe("Welcome.email.json");
-    expect(filed("Welcome.JSON", email)).toBe("Welcome.email.json");
-    expect(filed("Mixed.Json", email)).toBe("Mixed.email.json");
-    expect(filed("Plan.md.json", email)).toBe("Plan.md.email.json");
-  });
-
-  it("takes only a lower-case .json off an email template's stem, as the engine does", () => {
-    const email = { kind: "emailTemplate" } as const;
-    // The name's own ".JSON" is cleaned away first, and the one before it stays: not lower case.
-    expect(filed("a.JSON.JSON", email)).toBe("a.JSON.email.json");
-    // After the cleaning, a lower-case .json is still on the stem, and it goes too.
-    expect(filed("x.json.JSON", email)).toBe("x.email.json");
-    // A person who knows the engine's suffix still gets it added.
-    expect(filed("Welcome.email", email)).toBe("Welcome.email.email.json");
-    expect(filed("Welcome.email.json", email)).toBe("Welcome.email.email.json");
   });
 
   it("files a package as a ZIP", () => {
@@ -880,15 +819,13 @@ describe("filedName", () => {
 
 // THE ENGINE'S OWN TABLE of the names a file is filed under (integrations/compose/testdata/
 // filed_names.json). A Go test computes every row through the engine's parse and filing; this runs the
-// same rows through the app's copy of the rule. The app once said an email template is filed as .json
-// where the engine files .email.json, and nothing compared the two: this is what compares them.
+// same rows through the app's copy of the rule, so the two cannot drift apart unseen.
 describe("filedName, held to the engine's table", () => {
   interface Row { name: string; format: ComposeFormat; deployableKind: string; outputKind: string; filed: string }
   const rows = (JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "integrations", "compose", "testdata", "filed_names.json"), "utf8")) as { rows: Row[] }).rows;
   const kindOf = (row: Row): FileKind =>
-    row.outputKind === "email_template" ? { kind: "emailTemplate" }
-      : row.deployableKind !== "" ? { kind: "package", deployableKind: row.deployableKind as "spa" | "static" | "shopify_storefront" }
-        : { kind: "document", format: row.format };
+    row.deployableKind !== "" ? { kind: "package", deployableKind: row.deployableKind as "spa" | "static" | "shopify_storefront" }
+      : { kind: "document", format: row.format };
   const label = (row: Row) => `${row.outputKind || row.deployableKind || row.format} ${JSON.stringify(row.name)}`;
 
   it("files every name in the table as the engine does, and refuses the names it refuses", () => {
@@ -925,7 +862,8 @@ describe("filedName, held to the engine's table", () => {
     expect(rows.length).toBeGreaterThanOrEqual(300);
     expect(rows.filter((row) => row.filed === "").length).toBeGreaterThanOrEqual(20);
     expect(rows.filter((row) => limitFallsInsideACharacter(row.name)).length).toBeGreaterThanOrEqual(4);
-    expect(rows.filter((row) => row.outputKind === "email_template" && row.filed.endsWith(".email.json")).length).toBeGreaterThanOrEqual(20);
+    // Emails are made in the Email app: the table holds no row for one.
+    expect(rows.filter((row) => row.outputKind !== "")).toEqual([]);
   });
 
   // A filed name is text: no row holds a replacement character, and the app files none.
@@ -1122,27 +1060,10 @@ describe("withKind", () => {
     expect(withKind(draft({ templateId: "t1" }), PDF, onlyBoard).templateId).toBe("");
   });
 
-  it("drops the organization an email template carried when it becomes an ordinary file", () => {
-    const welcome = email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" });
-    expect(stepsOf(welcome, loaded)).toContain("organization");
-    expect(requestOf(welcome).accountIds).toEqual(["acct-1"]);
-
-    for (const ordinary of [PDF, { kind: "document", format: "markdown" }, { kind: "package", deployableKind: "static" }] as const) {
-      const changed = withKind(welcome, ordinary, loaded);
-      expect(changed.accountId).toBe("");
-      expect(stepsOf(changed, loaded)).not.toContain("organization");
-      expect(requestOf(changed)).not.toHaveProperty("accountIds");
-      expect(requestOf(changed)).not.toHaveProperty("outputKind");
-    }
-  });
-
   it("keeps the organization of an ordinary file that already carried one, as an older record's does", () => {
     const older = draft({ name: "Q3 summary", accountId: "acct-1" });
     expect(withKind(older, PDF, loaded).accountId).toBe("acct-1");
     expect(withKind(older, { kind: "package", deployableKind: "spa" }, loaded).accountId).toBe("acct-1");
-    // And an email template that stays one keeps its own.
-    const welcome = email({ accountId: "acct-1" });
-    expect(withKind(welcome, { kind: "emailTemplate" }, loaded).accountId).toBe("acct-1");
   });
 
   it("changes nothing else the person has answered", () => {

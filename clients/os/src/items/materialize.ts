@@ -76,12 +76,6 @@ export interface ComposeSetup {
   /** Where to file it: a bare Library folder id. The cluster refuses one the person cannot read or that is archived. */
   folderId?: string;
   sources?: ComposeSource[];
-  /**
-   * An email template, which is a JSON document: the composer chooses JSON when
-   * no format is given, and the reader drops the kind when another format is
-   * named (the sender's format is what it asked for by name).
-   */
-  outputKind?: "email_template";
   /** Where the person goes back to once the file exists. */
   returnTo?: { appId: string; sectionId: string };
 }
@@ -141,7 +135,6 @@ export function readComposeIntent(payload: Record<string, unknown>): ComposeSetu
       })
     : [];
   if (sources.length > 0) setup.sources = sources;
-  if (raw["outputKind"] === "email_template" && (format === undefined || format === "json")) setup.outputKind = "email_template";
   const returnTo = readReturnTo(raw["returnTo"]);
   if (returnTo !== null) setup.returnTo = returnTo;
   return setup;

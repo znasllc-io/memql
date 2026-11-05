@@ -25,7 +25,6 @@ import { folderOptions } from "../../items/FolderSelect";
 import { downloadArtifact } from "../files/actions/download";
 import { folderFromRow } from "../files/rows";
 import { useAccountOptions } from "../accounts/tie";
-import { useDefaultOrganization } from "../accounts/organization";
 import { accountName } from "../accounts/rows";
 import {
   Button,
@@ -130,8 +129,7 @@ export function MaterializerApp({
   const compositions = useCompositions(),
     templates = useTemplates(),
     recipes = useRecipes();
-  const accounts = useAccountOptions(),
-    defaultAccount = useDefaultOrganization(accounts);
+  const accounts = useAccountOptions();
   const materialize = useMaterialize(),
     compositionActs = useCompositionActs(),
     templateActs = useTemplateActs(),
@@ -296,20 +294,11 @@ export function MaterializerApp({
   }
   function beginSetup(setup: ComposeSetup | null) {
     const next = draftFromSetup(setup, defaultFormat);
-    if (next.fileKind.kind === "emailTemplate") next.accountId = defaultAccount;
     begin(next, setup?.returnTo);
   }
   useEffect(() => {
     setDraft((previous) => keepUsableTemplate(previous, facts));
   }, [templates.snapshot, draft.fileKind]);
-  useEffect(() => {
-    if (
-      draft.fileKind.kind === "emailTemplate" &&
-      !draft.accountId &&
-      defaultAccount
-    )
-      setDraft((previous) => ({ ...previous, accountId: defaultAccount }));
-  }, [defaultAccount]);
   const previousSection = useRef(sectionId);
   useEffect(() => {
     if (previousSection.current !== sectionId) generation.current++;

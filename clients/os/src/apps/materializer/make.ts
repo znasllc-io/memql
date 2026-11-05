@@ -49,7 +49,7 @@ import { deployableWord, formatWord } from "./words";
 // ===========================================================================
 // A person is told what will happen before the engine is asked, so some of the engine's rules
 // are copied here. A copy nothing holds drifts, and says something false to a person when it
-// does (it did: an email template is filed as .email.json, and this once said .json).
+// does.
 // integrations/compose/os_copies_test.go reads this file and holds the copies to the engine:
 //
 //   READABLE_EXTENSIONS   the files the composer reads (source_content.go), in both directions
@@ -72,8 +72,7 @@ export type PackageKind = (typeof PACKAGE_KINDS)[number];
 
 export type FileKind =
   | { kind: "document"; format: ComposeFormat }
-  | { kind: "package"; deployableKind: PackageKind }
-  | { kind: "emailTemplate" };
+  | { kind: "package"; deployableKind: PackageKind };
 
 /** One thing to make the file from. A Library file's `ref` is the file row's own id, as the cluster gave it. */
 export interface Ingredient {
@@ -87,7 +86,6 @@ export interface MakeDraft {
   fileKind: FileKind;
   /** "" for no template. */
   templateId: string;
-  layoutId?: string;
   ingredients: Ingredient[];
   /** What the person described, as typed. */
   statement: string;
@@ -142,7 +140,7 @@ export interface FloorWords {
 }
 
 export interface Blocker {
-  reason: "name" | "blank" | "organization" | "inference";
+  reason: "name" | "blank" | "inference";
   words: FloorWords;
 }
 
@@ -184,7 +182,6 @@ export interface FileKindEntry {
 }
 
 const PACKAGE_DESCRIPTION = "A package for Deployables";
-const EMAIL_TEMPLATE_DESCRIPTION = "Opens in the email editor";
 
 /** A kind of file as the choice offers it, and as the rail names it. */
 export function fileKindEntry(kind: FileKind): FileKindEntry {
@@ -198,13 +195,6 @@ export function fileKindEntry(kind: FileKind): FileKindEntry {
         label: `${deployableWord(kind.deployableKind)} package`,
         description: PACKAGE_DESCRIPTION,
       };
-    case "emailTemplate":
-      return {
-        value: "emailTemplate",
-        kind,
-        label: "Email template",
-        description: EMAIL_TEMPLATE_DESCRIPTION,
-      };
   }
 }
 
@@ -214,27 +204,23 @@ const KINDS_IN_ORDER: readonly FileKind[] = [
     kind: "package",
     deployableKind,
   })),
-  { kind: "emailTemplate" },
 ];
 
 /**
  * Every kind, in the order the choice offers them (spec 2.4). A package is one choice, not a
  * format crossed with a deploy kind: the cluster renders a package's page as HTML whatever
- * format is sent. The email template is the last, and the wizard offers it only to a draft
- * that already is one, which only a sender's setup makes.
+ * format is sent. Emails are not among them: they are composed in the Email app.
  */
 export const FILE_KINDS: readonly FileKindEntry[] =
   KINDS_IN_ORDER.map(fileKindEntry);
 
-/** The format the cluster is asked for: a document's own, HTML for a package, JSON for an email template. */
+/** The format the cluster is asked for: a document's own, or HTML for a package. */
 export function formatOf(kind: FileKind): ComposeFormat {
   switch (kind.kind) {
     case "document":
       return kind.format;
     case "package":
       return "html";
-    case "emailTemplate":
-      return "json";
   }
 }
 
@@ -293,10 +279,8 @@ function emptyDraft(format: ComposeFormat): MakeDraft {
  * A fresh draft. From the plus (`null`) every step starts answered but the name, From and
  * Describe still waiting. From another app's setup the sender has answered the kind of file
  * and the folder, and From and Describe count as passed (From is answered when the setup
- * carried sources), so the one thing left is what to call it. An email template is what a
- * setup's output kind asks for, with JSON or no format; the sender's other format wins, as
- * readComposeIntent has it. The setup's way back is the app's to keep; it is no part of what
- * a file is made from.
+ * carried sources), so the one thing left is what to call it. The setup's way back is the
+ * app's to keep; it is no part of what a file is made from.
  */
 export function draftFromSetup(
   setup: ComposeSetup | null,
@@ -304,14 +288,9 @@ export function draftFromSetup(
 ): MakeDraft {
   const plus = emptyDraft(defaultFormat);
   if (setup === null) return plus;
-  const emailTemplate =
-    setup.outputKind === "email_template" &&
-    (setup.format === undefined || setup.format === "json");
   return {
     ...plus,
-    fileKind: emailTemplate
-      ? { kind: "emailTemplate" }
-      : { kind: "document", format: setup.format ?? defaultFormat },
+    fileKind: { kind: "document", format: setup.format ?? defaultFormat },
     ingredients: distinct(setup.sources ?? [], isIngredientKind),
     folderId: setup.folderId ?? "",
     passed: { from: true, describe: true },
@@ -319,7 +298,6 @@ export function draftFromSetup(
 }
 
 function kindOfComposition(c: CompositionRow): FileKind {
-  if (c.outputKind === "email_template") return { kind: "emailTemplate" };
   const deployableKind = PACKAGE_KINDS.find(
     (candidate) => candidate === c.deployableKind,
   );
@@ -344,7 +322,6 @@ export function draftFromComposition(
   return {
     fileKind: kindOfComposition(c),
     templateId: c.templateId,
-    ...(c.layoutId ? { layoutId: c.layoutId } : {}),
     ingredients: distinct(sources, isIngredientKind),
     statement: c.statement,
     name: c.name,
@@ -394,44 +371,29 @@ export function keepUsableTemplate(
 
 /**
  * The draft with its kind changed: THE ONLY WAY A KIND CHANGES. Choosing a kind has two
- * consequences the model owns, because requestOf holds no facts and sends whatever the draft
- * holds:
- *
- *  - a template that does not make the new kind is let go (keepUsableTemplate's rule). The
- *    Template step goes with it, so a template left behind would be sent from a step that is
- *    no longer there, and the floor would speak of a template the rail does not show;
- *  - the organization an email template carried is dropped when it becomes an ordinary file
- *    (D9: ordinary files ask for no organization). A draft that is not an email template and
- *    already carries one, as an older record's does, keeps it.
+ * consequence the model owns, because requestOf holds no facts and sends whatever the draft
+ * holds: a template that does not make the new kind is let go (keepUsableTemplate's rule). The
+ * Template step goes with it, so a template left behind would be sent from a step that is no
+ * longer there, and the floor would speak of a template the rail does not show. An
+ * organization an older record carried is kept.
  */
 export function withKind(
   draft: MakeDraft,
   kind: FileKind,
   facts: MakeFacts,
 ): MakeDraft {
-  const leavingEmailTemplate =
-    draft.fileKind.kind === "emailTemplate" && kind.kind !== "emailTemplate";
-  return keepUsableTemplate(
-    {
-      ...draft,
-      fileKind: kind,
-      ...(leavingEmailTemplate ? { layoutId: undefined } : {}),
-      accountId: leavingEmailTemplate ? "" : draft.accountId,
-    },
-    facts,
-  );
+  return keepUsableTemplate({ ...draft, fileKind: kind }, facts);
 }
 
 /**
  * The steps this draft has, in order: Template only when a live template makes the kind,
- * Organization only for an email template or a draft that already carries one.
+ * Organization only for a draft that already carries one, as an older record's does.
  */
 export function stepsOf(draft: MakeDraft, facts: MakeFacts): MakeStepId[] {
   const steps: MakeStepId[] = ["kind"];
   if (templatesFor(draft, facts).length > 0) steps.push("template");
   steps.push("from", "describe", "name", "folder");
-  if (draft.fileKind.kind === "emailTemplate" || draft.accountId !== "")
-    steps.push("organization");
+  if (draft.accountId !== "") steps.push("organization");
   steps.push("file");
   return steps;
 }
@@ -449,7 +411,7 @@ const nameProblem = (draft: MakeDraft): string | undefined =>
  * Where a step stands on the rail. Kind of file, Template and Folder start answered. From
  * and Describe are answered when they hold something, skipped when passed with nothing, and
  * otherwise waiting. Name is answered when the SDK finds nothing wrong with it. Organization
- * is answered when set, waits for an email template without one, and is otherwise skipped.
+ * is answered when set and otherwise skipped.
  *
  * FILE IS NEVER WAITING: it is the cluster's step, not the person's, and the component draws
  * its own mark (ahead until the press, current while the cluster works). Reporting it as
@@ -475,8 +437,7 @@ export function stepState(
     case "name":
       return nameProblem(draft) === undefined ? "done" : "waiting";
     case "organization":
-      if (draft.accountId !== "") return "done";
-      return draft.fileKind.kind === "emailTemplate" ? "waiting" : "skipped";
+      return draft.accountId !== "" ? "done" : "skipped";
   }
 }
 
@@ -567,9 +528,8 @@ export function answerOf(
         : (folder ?? "Unavailable folder");
     }
     case "organization":
-      if (draft.accountId !== "") return names.account(draft.accountId);
-      return draft.fileKind.kind === "emailTemplate"
-        ? undefined
+      return draft.accountId !== ""
+        ? names.account(draft.accountId)
         : "No organization";
     case "file":
       return undefined;
@@ -617,18 +577,12 @@ function filedStem(stem: string): string {
   return kept === "" ? "composition" : kept;
 }
 
-// How an email template is filed (the filing site in integrations/compose/materialize.go).
-const JSON_EXTENSION = ".json";
-const EMAIL_TEMPLATE_SUFFIX = ".email.json";
-
 /**
  * The name the file is filed under, as the filing site in integrations/compose/materialize.go
- * makes it (outputFileName, and for an email template the suffix after it): the extension is
+ * makes it (outputFileName): the extension is
  * md for Markdown, zip for a package and otherwise the format; the stem is the name without
  * one trailing extension of the kind (fileNameStem); and a stem that already ends with the
- * extension does not get it twice. AN EMAIL TEMPLATE IS FILED AS <stem>.email.json: the name
- * made that way for any JSON file has its ".json" taken off, case-sensitively, and
- * ".email.json" put on. Meaningful once the name can be used (fileNameProblem finds nothing
+ * extension does not get it twice. Meaningful once the name can be used (fileNameProblem finds nothing
  * wrong with it).
  *
  * The engine's table of these (integrations/compose/testdata/filed_names.json) is held to this
@@ -643,15 +597,9 @@ export function filedName(draft: MakeDraft): string {
         ? "md"
         : format;
   const stem = filedStem(fileNameStem(draft.name, format));
-  const filed = stem.toLowerCase().endsWith(`.${extension}`)
+  return stem.toLowerCase().endsWith(`.${extension}`)
     ? stem
     : `${stem}.${extension}`;
-  if (draft.fileKind.kind !== "emailTemplate") return filed;
-  return (
-    (filed.endsWith(JSON_EXTENSION)
-      ? filed.slice(0, -JSON_EXTENSION.length)
-      : filed) + EMAIL_TEMPLATE_SUFFIX
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -667,9 +615,8 @@ function sourceOf(ingredient: Ingredient): MaterializeSource {
 
 /**
  * What a press sends (spec 2.10), every unanswered optional left out: the name as typed,
- * trimmed; the kind's format; a package's deployable kind or an email template's output
- * kind; the template, the folder (not the top level), the organization, the description and
- * the picked things. The request id is the ask's, not the draft's.
+ * trimmed; the kind's format; a package's deployable kind; the template, the folder (not the
+ * top level), the organization, the description and the picked things. The request id is the ask's, not the draft's.
  */
 export function requestOf(
   draft: MakeDraft,
@@ -685,10 +632,6 @@ export function requestOf(
     request.sources = draft.ingredients.map(sourceOf);
   if (draft.templateId !== "") request.templateId = draft.templateId;
   if (draft.folderId !== "") request.folderId = draft.folderId;
-  if (kind.kind === "emailTemplate") {
-    request.outputKind = "email_template";
-    if (draft.layoutId) request.layoutId = draft.layoutId;
-  }
   if (draft.accountId !== "") request.accountIds = [draft.accountId];
   if (kind.kind === "package") request.deployableKind = kind.deployableKind;
   return request;
@@ -758,11 +701,6 @@ export function blocker(draft: MakeDraft, facts: MakeFacts): Blocker | null {
       },
     };
   }
-  if (draft.fileKind.kind === "emailTemplate" && draft.accountId === "")
-    return {
-      reason: "organization",
-      words: { word: "Choose an organization" },
-    };
   if (facts.inference === false && pathOf(draft, facts) !== "blank")
     return {
       reason: "inference",

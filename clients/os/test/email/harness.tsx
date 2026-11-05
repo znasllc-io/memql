@@ -163,12 +163,6 @@ export interface FakeSeed {
    * the built-ins alone.
    */
   layouts?: Record<string, Row[] | Error>;
-  /**
-   * `emailLayoutById`'s rows (emailLayoutFull). Absent: each organization
-   * layout of `layouts` read back by its bare id, owned by the session's
-   * person, its revision its createdAt.
-   */
-  layoutRecords?: Row[] | Error;
   /** `emailRender`'s answer for a call, or one answer for every call. Absent: the subject, as HTML and as text, and no issues. */
   render?: Row | Error | ((args: { document?: Record<string, unknown>; accountId?: string }) => Row | Error);
   /** `searchUsers`: the people this session can name. An Error is a reader below the roster's floor. */
@@ -347,35 +341,11 @@ export function fakeConnection(seed: FakeSeed = {}) {
         const listed = [...BUILT_IN_LAYOUTS, ...own];
         return rowsResult(args.includeArchived === true ? listed : listed.filter((row) => row.status !== "archived"));
       }),
-      emailLayoutById: vi.fn(async (args: { layoutId?: string }, _opts?: unknown) => {
-        if (seed.layoutRecords instanceof Error) throw seed.layoutRecords;
-        const records =
-          seed.layoutRecords ??
-          Object.entries(seed.layouts ?? {}).flatMap(([accountId, rows]) =>
-            rows instanceof Error
-              ? []
-              : rows.map((row) => ({
-                  id: row.layoutId,
-                  ownerUserId: "v1:identity:user:me",
-                  accountId,
-                  name: row.name,
-                  description: row.description,
-                  document: row.document ?? { subject: "From Acme", blocks: [] },
-                  sourceArtifactId: row.sourceArtifactId ?? "",
-                  status: row.status,
-                  createdAt: row.revision,
-                })),
-          );
-        return rowsResult(records.filter((row) => row.id === args.layoutId));
-      }),
       emailRender: vi.fn(async (args: { document?: Record<string, unknown>; accountId?: string }, _opts?: unknown) => {
         const answer = typeof seed.render === "function" ? seed.render(args) : seed.render ?? plainRender(args);
         if (answer instanceof Error) throw answer;
         return rowsResult([answer]);
       }),
-      campaignSaveLayout: vi.fn(async (args: Record<string, unknown>) =>
-        rowsResult([{ layoutId: args.layoutId, revision: "2026-10-12T00:00:00Z", status: args.action === "archive" ? "archived" : "active", saved: true }]),
-      ),
       libraryArtifactById: reader(seed.artifacts, (row, args) => row.id === args.artifactId),
       searchUsers: reader(seed.people ?? []),
 

@@ -27,7 +27,6 @@ import {
   brandPreviewFromRow,
   campaignFromRow,
   layoutFromRow,
-  layoutRecordFromRow,
   renderFromRow,
   sameLayout,
   statsFromPayload,
@@ -37,7 +36,6 @@ import {
   type BrandPreview,
   type CampaignStats,
   type EmailRender,
-  type LayoutRecord,
   type LayoutRow,
   type TemplateRecord,
 } from "./rows";
@@ -1241,26 +1239,6 @@ function shareLayouts(before: readonly LayoutRow[] | null, after: readonly Layou
     return held !== undefined && sameLayout(held, layout) ? held : layout;
   });
   return next.length === before.length && next.every((layout, at) => layout === before[at]) ? before : next;
-}
-
-/**
- * One organization layout, whole (`emailLayoutById`): who saved it, its document
- * when the listing had to leave it out, and the revision its page shows. Read
- * again when `revision` -- the listing's -- moves.
- */
-export function useLayoutRecord(layoutId: string, revision = ""): Reading<LayoutRecord | null> {
-  const connection = useOsConnection();
-  const query = connection?.query ?? null;
-  const read = useMemo(() => {
-    if (query === null || layoutId === "") return null;
-    return async (signal: AbortSignal) => {
-      const row = (await query.emailLayoutById({ layoutId }, { signal })).rows()[0];
-      return row === undefined ? null : layoutRecordFromRow(row);
-    };
-    // `revision` is the reason to read again: a save writes a new version.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, layoutId, revision]);
-  return useLastAnswer(useReading<LayoutRecord | null>(null, read, [read]));
 }
 
 /**

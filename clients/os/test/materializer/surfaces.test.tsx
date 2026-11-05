@@ -304,7 +304,7 @@ describe("made file pages", () => {
       compositionId: "made",
     });
   });
-  it("saves an email recipe with layout, content choices and organization once", async () => {
+  it("saves a recipe of an email made earlier with its content choices and organization, and no email output kind, once", async () => {
     const conn = fakeConnection({
       compositions: [
         c({
@@ -329,9 +329,7 @@ describe("made file pages", () => {
       expect(conn.query.createComposeRecipe).toHaveBeenCalledOnce(),
     );
     expect(conn.query.createComposeRecipe.mock.calls[0]?.[0]).toMatchObject({
-      layoutId: "layout",
       accountIds: ["org"],
-      outputKind: "email_template",
       sourceSelectors: [
         {
           kind: "library_file",
@@ -342,6 +340,8 @@ describe("made file pages", () => {
         },
       ],
     });
+    expect(conn.query.createComposeRecipe.mock.calls[0]?.[0]).not.toHaveProperty("outputKind");
+    expect(conn.query.createComposeRecipe.mock.calls[0]?.[0]).not.toHaveProperty("layoutId");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save as recipe" })).toBeNull());
   });
   it.each(["failed", "cancelled", "abandoned"])(

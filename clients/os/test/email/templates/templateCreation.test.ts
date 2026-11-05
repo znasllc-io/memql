@@ -6,14 +6,16 @@ import { describe, expect, it } from "vitest";
 // Rulings 9 and 24).
 //
 // A template is written in the editor and published from there; a layout is
-// saved from a finished email in the editor. The OS reads both, previews them,
-// and puts them away or brings them back -- and that is all. So the two save
-// calls appear in exactly one place each, the lifecycle hooks in
-// apps/email/actions.ts, and every action either passes is archive or restore.
-// A placeholder draft ("Your subject", "Your message") written from a list page
-// is what this pins against.
+// saved from a finished email in the editor. The OS reads templates, previews
+// them, and puts them away or brings them back -- and that is all. So the
+// template save appears in exactly one place, the lifecycle hook in
+// apps/email/actions.ts, and every action it passes is archive or restore. The
+// layout save appears nowhere: the OS has no layout lifecycle at all (the
+// Layouts view is gone, and a layout is only ever read, to name the one a
+// template was made from). A placeholder draft ("Your subject", "Your message")
+// written from a list page is what this pins against.
 //
-// THE REACHABLE POSITIVE: the scan finds the hooks' own calls, so an empty list
+// THE REACHABLE POSITIVE: the scan finds the hook's own call, so an empty list
 // of offenders is evidence about the tree, not about the pattern; and a planted
 // save is caught wherever it is put.
 
@@ -39,10 +41,9 @@ function sources(): Source[] {
   return walk(SRC).map((path) => ({ path: relative(SRC, path).split(sep).join("/"), text: readFileSync(path, "utf8") }));
 }
 
-/** Where each save may be called, and nowhere else: the file and the hook. */
+/** Where each save may be called, and nowhere else: the file and the hook. A save not listed may be called nowhere. */
 const ALLOWED: Record<string, { path: string; hook: string }> = {
   campaignSaveTemplate: { path: "apps/email/actions.ts", hook: "useTemplateLifecycle" },
-  campaignSaveLayout: { path: "apps/email/actions.ts", hook: "useLayoutLifecycle" },
 };
 
 /**
@@ -80,7 +81,11 @@ function offences(files: readonly Source[]): string[] {
       const name = match[1] ?? match[2] ?? "";
       const at = match.index ?? 0;
       const where = `${file.path}:${file.text.slice(0, at).split("\n").length}`;
-      const allowed = ALLOWED[name]!;
+      const allowed = ALLOWED[name];
+      if (allowed === undefined) {
+        out.push(`${where}: ${name} is called nowhere`);
+        continue;
+      }
       const span = file.path === allowed.path ? hookSpan(file.text, allowed.hook) : null;
       if (span === null || at < span[0] || at >= span[1]) {
         out.push(`${where}: ${name} outside ${allowed.hook}`);
@@ -103,7 +108,7 @@ describe("templates and layouts are made in the editor", () => {
     const tree = sources();
     expect(offences(tree)).toEqual([]);
 
-    // The scan reaches the hooks' own calls: one archive and one restore each.
+    // The scan reaches the hook's own calls: one archive and one restore.
     const actions = tree.find((file) => file.path === "apps/email/actions.ts")!.text;
     for (const [name, { hook }] of Object.entries(ALLOWED)) {
       const span = hookSpan(actions, hook);
@@ -124,12 +129,13 @@ describe("templates and layouts are made in the editor", () => {
     expect(inHook).not.toBe(actions.text);
     expect(offences([{ ...actions, text: inHook }])).toEqual([expect.stringMatching(/campaignSaveTemplate with action "save"$/)]);
 
-    // A layout saved, or one whose action is decided at run time.
-    const asLayout = actions.text.replace(/(\nexport function useLayoutLifecycle\b[^\n]*\n)/, "$1  void query.campaignSaveLayout({ layoutId, action: chosen });\n");
-    expect(offences([{ ...actions, text: asLayout }])).toEqual([expect.stringMatching(/campaignSaveLayout with action chosen$/)]);
+    // A template whose action is decided at run time.
+    const decided = actions.text.replace(/(\nexport function useTemplateLifecycle\b[^\n]*\n)/, "$1  void query.campaignSaveTemplate({ templateId, action: chosen });\n");
+    expect(offences([{ ...actions, text: decided }])).toEqual([expect.stringMatching(/campaignSaveTemplate with action chosen$/)]);
 
-    // Named to a call that takes a name, or called from another file.
-    expect(offences([{ path: "apps/files/x.ts", text: 'query.executeNamed("campaignSaveLayout", call);' }])).toHaveLength(1);
+    // A layout saved anywhere, by call or by name, is an offence: the OS has no layout lifecycle.
+    expect(offences([{ path: "apps/files/x.ts", text: 'query.executeNamed("campaignSaveLayout", call);' }])).toEqual(["apps/files/x.ts:1: campaignSaveLayout is called nowhere"]);
+    expect(offences([{ ...actions, text: actions.text + '\nvoid query.campaignSaveLayout({ action: "archive" });\n' }])).toHaveLength(1);
     expect(offences([{ path: "apps/email/useEmail.ts", text: "await query.campaignSaveLayout({ action: \"archive\" });" }])).toHaveLength(1);
   });
 

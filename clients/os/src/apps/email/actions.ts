@@ -10,11 +10,9 @@ import {
   campaignName,
   type AudienceRow,
   type CampaignRow,
-  type LayoutRow,
   type RecipientMode,
   type TemplateRow,
 } from "./rows";
-import { WORDS } from "./words";
 
 // Every write the Email app makes, and the busy/error pair each one owns.
 //
@@ -889,45 +887,6 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     reset: write.reset,
     archive: (template) => write.call(template, "archive"),
     restore: (template) => write.call(template, "restore"),
-  };
-}
-
-export interface LayoutLifecycle extends LifecycleState {
-  /** Archive an organization's layout: the editor stops offering it. */
-  archive: (layout: LayoutRow) => Promise<boolean>;
-  /** Bring an archived layout back. */
-  restore: (layout: LayoutRow) => Promise<boolean>;
-}
-
-/**
- * Archiving and restoring an organization's layout (Ruling 24), held to the
- * revision the page SHOWS -- the listing's, the one its "Changed" fact reads --
- * so a layout saved in the editor after the page read it is refused in the
- * engine's words ("this layout changed; ...") rather than archived unseen. A
- * revision read at the press would always match, and the check would guard
- * nothing. The engine reads no name or document for these two, so the name
- * goes as listed and no document is sent. A built-in layout has no lifecycle
- * and never reaches here.
- */
-export function useLayoutLifecycle(): LayoutLifecycle {
-  const write = useWrite(async (query, layout: LayoutRow, action: "archive" | "restore") => {
-    const layoutId = layout.layoutId ?? "";
-    if (layoutId === "") throw new Error(WORDS.unavailable.layout);
-    const base = { layoutId, accountId: layout.accountId, name: layout.name, expectedRevision: layout.revision ?? "" };
-    const result =
-      action === "archive"
-        ? await query.campaignSaveLayout({ ...base, action: "archive" })
-        : await query.campaignSaveLayout({ ...base, action: "restore" });
-    if (!result.rows().map(flatten).some((row) => row.saved === true)) throw new Error("The cluster did not confirm the layout change.");
-    return true;
-  }, false);
-  return {
-    busy: write.busy,
-    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveLayout"),
-    lost: write.lost,
-    reset: write.reset,
-    archive: (layout) => write.call(layout, "archive"),
-    restore: (layout) => write.call(layout, "restore"),
   };
 }
 
