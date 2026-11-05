@@ -1471,6 +1471,11 @@ const VIEWS: Record<
   "release-cut-uncertain": { render: () => <ReleaseJourneyPreview phase="uncertain" /> },
   "release-cut-published": { render: () => <ReleaseJourneyPreview phase="published" /> },
   "release-cut-error": { render: () => <ReleaseJourneyPreview phase="prepared" unavailable /> },
+  // A release whose source check passed newer commits over; open Source in the rail.
+  "release-cut-source": { render: () => <ReleaseJourneyPreview phase="prepared" skipped /> },
+  // A source check that found no tested commit, driven with
+  // `&click=Cut release|Release engine|Use pipeline MemQL|Check source`.
+  "release-cut-untested": { render: () => <ReleaseJourneyPreview phase="new" untested /> },
   "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
@@ -2301,10 +2306,12 @@ function ReleasePreview({ empty = false, fail = false, pending = false, file = f
   return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
 }
 
-function ReleaseJourneyPreview({ phase, unavailable = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean }) {
+function ReleaseJourneyPreview({ phase, unavailable = false, skipped = false, untested = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean; skipped?: boolean; untested?: boolean }) {
   const [fixture] = useState(() => {
     const f = releaseJourneyFixture(phase);
     f.journey.failedGet = unavailable;
+    if (skipped) f.skipped();
+    if (untested) f.journey.untestedPrepare = "None of the newest 20 commits on main has passed its required checks: 2 running, 1 failed, 17 untested. Check the source again once a commit's checks pass.";
     if (phase === "uncertain") { f.journey.build.reason = "The build start response was lost. Its recorded attempt must be checked before continuing."; f.journey.build.pipelineRunId = ""; f.journey.build.workRunId = ""; }
     return f;
   });

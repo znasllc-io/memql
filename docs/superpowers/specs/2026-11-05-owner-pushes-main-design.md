@@ -142,6 +142,25 @@ and shown on the release journey. A walk that finds nothing green is refused
 unbound check, or the required name reported by another App. It never skips past
 such a commit.
 
+**As implemented** (connected workflow:
+[release-cutting.md](../../public/operate/release-cutting.md#which-commit-a-release-takes);
+decision map: [harness-decisions.md](../../internal/ops/harness-decisions.md#a-release-takes-the-newest-commit-whose-run-passed-2026-11-05)):
+- A run superseded under D4 concludes its check `cancelled`, so the walk records
+  it as a fourth state, `cancelled` (shown as "Superseded"), rather than as
+  `missing`. `missing` is a commit no required check reported on.
+- A merge commit no required check reported on is not skipped: it is offered to
+  `ObserveReleaseSource`, whose merged pull request fallback alone can judge it.
+  A pick the proof refuses is answered with that refusal; the walk does not go on.
+- A walk that took the head records nothing, so that release encodes exactly as
+  before. The record is kept only when newer commits were passed over.
+- The walk also aborts on two latest runs for one check and on a history answer
+  that does not start where it asked. History is read 100 commits at a time and
+  read again from any first parent a read misses, so a merge of a long branch
+  does not end the walk.
+- An engine from before this change cannot read a saved release whose walk
+  passed a commit over (journals are decoded strictly), during a rolling upgrade
+  or after rolling back.
+
 **Policy change.** The installed reuse window from a push run to a release
 widens from 6 to 24 hours. A release now often comes from a commit whose run
 finished hours earlier.

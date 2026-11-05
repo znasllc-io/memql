@@ -125,6 +125,9 @@ func (r releaseBuildRecord) validate(owner, key string) error {
 			return errors.New("release selection lacks required source verification")
 		}
 	}
+	if err := selectionWalk(s); err != nil {
+		return err
+	}
 	switch r.Phase {
 	case "prepared", "tagging", "building", "built", "ready", "publishing", "published", "blocked", "uncertain":
 	default:
@@ -149,6 +152,30 @@ func (r releaseBuildRecord) validate(owner, key string) error {
 		return errors.New("invalid release build candidate")
 	}
 	return nil
+}
+
+// selectionWalk checks how the selection's commit was chosen, when preparation
+// passed newer commits over to reach it (pl.ReleaseSourceWalk, design record
+// 2026-11-05-owner-pushes-main-design.md D6). The record is part of the
+// immutable selection, so it is held to it: every commit it passed over is a
+// commit and none is the one released, it starts at the head it read, every
+// state is one the walk can record, and with the released commit it examined
+// no more than its own bound.
+//
+// An engine from before walks decodes a saved journal strictly
+// (decodeCandidateObject), so it refuses a release whose walk passed a commit
+// over, and the release list that reads it. That is accepted: during a rolling
+// upgrade it lasts only until the old replicas are gone, the refusal is loud
+// and takes no effect, and a lenient decoder would let a replica act on a
+// selection it cannot see whole. A release of a head that passed records no
+// walk and encodes as before, so it stays readable everywhere. Rolling the
+// engine back past this change keeps the refusal for as long as such a
+// release is among those the list reads.
+func selectionWalk(s releaseBuildSelection) error {
+	if s.Source.Walk == nil {
+		return nil
+	}
+	return s.Source.Walk.Validate(s.Request.ExpectedSHA)
 }
 
 // Provider observations change as the build progresses; they must not create a

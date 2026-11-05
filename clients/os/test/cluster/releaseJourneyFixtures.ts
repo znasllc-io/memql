@@ -21,8 +21,11 @@ export function releaseJourneyFixture(phase: BuildPhase | "new" = "prepared") {
     approvalId: ["publishing", "published"].includes(phase) ? "approval-exact" : "",
     reasonCode: "", reason: "", createdAt: "2026-10-06T18:00:00Z", updatedAt: "2026-10-06T18:01:00Z", catalog: { state: "absent" },
     actions: phase === "prepared" || phase === "new" ? ["start"] : phase === "building" ? ["observe"] : phase === "built" || phase === "uncertain" ? ["resume"] : phase === "ready" ? ["approve", "view_candidate"] : phase === "publishing" ? ["observe"] : [],
+    branch: "main", headSha: "", lookBack: 0, newer: [],
   };
-  const state = { build, saved: phase !== "new", failedGet: false, lostPrepareReply: false, lostStartReply: false, lostPublishReply: false, syncApproval: true, pipelines: [releasePipeline], run: { ...releaseRun }, calls: [] as { name: string; call: string }[] };
+  // untestedPrepare is the sentence a source check refuses with when no recent
+  // commit passed its checks; that refusal saves nothing.
+  const state = { build, saved: phase !== "new", failedGet: false, lostPrepareReply: false, untestedPrepare: "", lostStartReply: false, lostPublishReply: false, syncApproval: true, pipelines: [releasePipeline], run: { ...releaseRun }, calls: [] as { name: string; call: string }[] };
   function seal() {
     state.build.phase = "published"; state.build.actions = ["view_candidate"];
     state.build.approvalId = "approval-exact";
@@ -30,6 +33,15 @@ export function releaseJourneyFixture(phase: BuildPhase | "new" = "prepared") {
     Object.assign(f.state.record, { state: "approved", approvalId: "approval-exact", catalog: { state: "sealed", approvalId: "approval-exact", catalogDigest: state.build.catalog.digest } });
   }
   if (phase === "published") seal();
+  /** Checking the source passed newer commits over to reach the released one. */
+  function skipped() {
+    Object.assign(state.build, { headSha: "e".repeat(40), lookBack: 20, newer: [
+      { sha: "e".repeat(40), state: "pending", check: "MemQL / memql / push", conclusion: "" },
+      { sha: "f".repeat(40), state: "failed", check: "MemQL / memql / push", conclusion: "failure" },
+      { sha: "1".repeat(40), state: "cancelled", check: "MemQL / memql / push", conclusion: "cancelled" },
+      { sha: "2".repeat(40), state: "missing", check: "MemQL / memql / push", conclusion: "" },
+    ] });
+  }
   f.query.pipelinesForOwner = async () => new Result({ data: state.pipelines } as never);
   f.query.pipelineForOwner = async () => new Result({ data: state.pipelines } as never);
   f.query.pipelineRunForOwner = async () => new Result({ data: [state.run] } as never);
@@ -37,6 +49,7 @@ export function releaseJourneyFixture(phase: BuildPhase | "new" = "prepared") {
     state.calls.push({ name, call });
     if (name === "releaseBuilds") return releaseResult({ intents: state.saved ? [structuredClone(state.build)] : [] });
     if (name === "releasePrepareBuild") {
+      if (state.untestedPrepare) throw new Error(`releasePrepareBuild: MemQL engine failed to execute query. Details: release_source_untested: ${state.untestedPrepare}`);
       state.saved = true;
       if (state.lostPrepareReply) throw new Error("Source check reply was lost");
     } else {
@@ -58,5 +71,5 @@ export function releaseJourneyFixture(phase: BuildPhase | "new" = "prepared") {
     }
     return releaseResult(structuredClone(state.build));
   };
-  return { ...f, journey: state, seal };
+  return { ...f, journey: state, seal, skipped };
 }

@@ -99,9 +99,14 @@ func ComposeCheckRun(osOrigin string, p Pipeline, r Run, report pipelines.RunRep
 // event but a pull request or merge candidate, that event's suffix.
 func runCheckName(p Pipeline, r Run) string {
 	name := pipelines.CheckRunName(p.Name)
-	// Event filters make these different proofs even at the same commit.
-	// In particular, release/manual runs may omit introduced-commit scans.
-	// Only PRs and exact merge candidates can report the required context.
+	// Event filters make these different proofs even at the same commit, so
+	// each event reports under its own name; release/manual runs may omit
+	// introduced-commit scans. Which name a branch requires is its rule's
+	// choice: memql's default branch requires the push run's
+	// `MemQL / memql / push`, which only a push to the default branch reports
+	// (pipelines.classifyPush ignores every other branch), and release
+	// preparation proves its commit by that check (githubapp
+	// WalkReleaseSource and ObserveReleaseSource).
 	switch r.Event {
 	case pipelines.EventPullRequest, pipelines.EventMergeGroup:
 	case pipelines.EventPush, pipelines.EventRelease, pipelines.EventManual:

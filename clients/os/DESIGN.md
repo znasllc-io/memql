@@ -47,7 +47,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    showing it is one target. Removing the line is not the whole job: the rows
    must still read as separate items without it. Move a surface when it is
    being worked on, not in a sweep of apps nobody asked to change; the default
-   follows once the surfaces have. A store's Reviews is the first.
+   follows once the surfaces have. A store's Reviews is the first; Cut release
+   is the second, and a guided flow moves through the kit `Wizard`'s
+   `dividers="none"`.
 
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection

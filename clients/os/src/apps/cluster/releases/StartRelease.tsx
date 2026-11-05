@@ -6,7 +6,7 @@ import type { Stop } from "../../../kit/Rail";
 import type { Act } from "../../../kit/ActionBar";
 import { pipelineFromRow, type PipelineRow } from "../../deployables/pipelines/rows";
 import { readProfiles, type AssemblyPlan } from "./assembly";
-import { buildCall, readReleaseBuild } from "./journey";
+import { buildCall, readReleaseBuild, SOURCE_LOOK_BACK, untestedSource } from "./journey";
 import type { ReleaseQueries } from "./ReleasesSection";
 import { useReleaseRead } from "./useReleaseRead";
 
@@ -18,18 +18,26 @@ export function StartRelease({ query, connected, visible, back, prepared }: { qu
   const [open, setOpen] = useState("release");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [uncertain, setUncertain] = useState(false);
+  // The cluster's sentence when no recent commit had passed its checks.
+  // Nothing was saved, so the source can be checked again as it is.
+  const [untested, setUntested] = useState("");
   const inFlight = useRef(false), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { setUntested(""); }, [profile?.name, pipeline?.id]);
   const current = profile && profiles.fresh && profiles.value?.some(p => p.name === profile.name && p.configuration === profile.configuration);
   async function prepare() {
     if (inFlight.current || uncertain || !available || !current || !profile || !pipeline || !query) return;
-    inFlight.current = true; setBusy(true); setError("");
+    inFlight.current = true; setBusy(true); setError(""); setUntested("");
     try {
       const intent = readReleaseBuild(await buildCall(query, "releasePrepareBuild", { profileName: profile.name, pipelineId: pipeline.id, expectedConfiguration: profile.configuration }));
       if (intent.profileName !== profile.name || intent.configuration !== profile.configuration || intent.pipelineId !== pipeline.id || intent.repository !== pipeline.repository) throw new Error("The cluster returned a different release source.");
       if (mounted.current) prepared(intent.intentId);
     } catch (e) {
-      if (mounted.current) { setError(e instanceof Error ? e.message : String(e)); setUncertain(true); }
+      if (!mounted.current) return;
+      const sentence = untestedSource(e);
+      // Any other failure may have saved the request before its reply was lost.
+      if (sentence !== null) setUntested(sentence);
+      else { setError(e instanceof Error ? e.message : String(e)); setUncertain(true); }
     } finally { inFlight.current = false; if (mounted.current) setBusy(false); }
   }
   const steps: Stop[] = [
@@ -39,7 +47,7 @@ export function StartRelease({ query, connected, visible, back, prepared }: { qu
       <RecordList as="ul" label="Release profiles">{profiles.value?.map(p => <RecordRow key={p.name} name={p.name} secondary={p.components[0]!.repository} onOpen={profiles.fresh && !busy && !uncertain ? () => { selectProfile(p); selectPipeline(null); setOpen("source"); } : undefined} label={`Release ${p.name}`} />)}</RecordList>
     </> },
     { id: "source", name: "Source", sentence: "Check the reviewed source", answer: pipeline?.name, state: profile ? "open" : "ahead", body: profile ? <>
-      <Caption>The cluster checks {profile.build!.branch} and its committed version before a build can start. Checking the source saves a release request; it does not create a tag, start a build or publish anything.</Caption>
+      <Caption>Checking the source picks the newest of the last {SOURCE_LOOK_BACK} commits on {profile.build!.branch} whose checks passed, and reads its committed version. It saves a release request; it does not create a tag, start a build or publish anything.</Caption>
       <SourcePicker key={profile.name} profile={profile} query={query} available={available && !!current && !busy && !uncertain} visible={visible && open === "source"} chosen={pipeline?.id ?? ""} choose={selectPipeline} />
     </> : null },
     { id: "version", name: "Version", sentence: "Confirm the release version", state: "ahead" },
@@ -51,9 +59,9 @@ export function StartRelease({ query, connected, visible, back, prepared }: { qu
   const acts: Act[] = [{ label: busy ? "Leave" : uncertain ? "Read release requests" : "Cancel", text: !busy, onAct: back }];
   if (open === "source" && pipeline && current && available && !busy && !uncertain) acts.push({ label: "Check source", tone: "primary", onAct: () => void prepare() });
   if (profiles.error && !busy) acts.push({ label: "Read profiles again", onAct: profiles.retry });
-  return <Wizard icon={<PackageCheck size={26} />} title="Cut release" label="Cut release steps" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={id => { if (!busy && !uncertain) setOpen(id); }} acts={acts}
-    status={{ word: busy ? "Checking release source" : uncertain ? "Release request not yet confirmed" : !available ? "Disconnected" : profile && profiles.fresh && !current ? "Release profile changed" : pipeline ? "Ready to check source" : profile ? "Choose a pipeline" : "Choose a release", tone: busy ? "busy" : "none" }}
-    notices={<>{!available ? <Notice sentence="Disconnected. Your choices are kept until the connection returns." /> : null}{profiles.error ? <Notice tone="error" sentence={profiles.error} /> : null}{profile && profiles.fresh && !current ? <Notice tone="warn" sentence="This release profile changed. Choose it again before checking the source." /> : null}{error ? <Notice tone="error" sentence={error} next="The request may have been saved. Read release requests before starting another." /> : null}</>}
+  return <Wizard icon={<PackageCheck size={26} />} title="Cut release" label="Cut release steps" dividers="none" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={id => { if (!busy && !uncertain) setOpen(id); }} acts={acts}
+    status={{ word: busy ? "Checking release source" : uncertain ? "Release request not yet confirmed" : !available ? "Disconnected" : profile && profiles.fresh && !current ? "Release profile changed" : untested ? "No tested commit to release" : pipeline ? "Ready to check source" : profile ? "Choose a pipeline" : "Choose a release", tone: busy ? "busy" : "none" }}
+    notices={<>{!available ? <Notice sentence="Disconnected. Your choices are kept until the connection returns." /> : null}{profiles.error ? <Notice tone="error" sentence={profiles.error} /> : null}{profile && profiles.fresh && !current ? <Notice tone="warn" sentence="This release profile changed. Choose it again before checking the source." /> : null}{untested ? <Notice tone="warn" sentence={untested} /> : null}{error ? <Notice tone="error" sentence={error} next="The request may have been saved. Read release requests before starting another." /> : null}</>}
   />;
 }
 
