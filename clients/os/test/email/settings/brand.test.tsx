@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -243,6 +245,11 @@ describe("The Brand page", () => {
     const conn = fakeConnection({ brandKits: [kitRow()], brandPreview: { html: "<p>Brand</p>", warnings: [{ code: "contrast", message: warning }] } });
     await openBrand(conn);
     expect(await screen.findByText(warning)).toBeTruthy();
+    // They stand under the frame, so their coming and going never moves it.
+    const frame = await screen.findByTitle("Email preview");
+    const notice = screen.getByText(warning).closest(".os-notice")!;
+    expect(frame.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame.parentElement).toBe(notice.parentElement);
 
     fireEvent.change(screen.getByLabelText("Accent"), { target: { value: "#f2c94c" } });
     expect(barButtons()).toEqual(["Discard changes", "Save"]);
@@ -303,6 +310,87 @@ describe("The Brand page", () => {
     expect((screen.getByLabelText("Primary") as HTMLInputElement).value).toBe("#1a625c");
     expect(barButtons()).toEqual([]);
     expect(conn.query.campaignSaveBrandKit).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The preview beside the editor
+// ---------------------------------------------------------------------------
+
+describe("The Brand page's preview", () => {
+  it("fills the Brand page's pane by a rule of the Brand page's own, and leaves the shared frame as it was", async () => {
+    // The frame stands directly in the Brand page's preview column, which the fill rule names.
+    const conn = fakeConnection({ brandKits: [kitRow()] });
+    await openBrand(conn);
+    expect((await screen.findByTitle("Email preview")).parentElement?.classList.contains("email-brand-preview")).toBe(true);
+
+    const css = readFileSync(join(__dirname, "../../../src/apps/email/email.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
+    // The template page and the inbox keep their frame's own height.
+    const shared = rules.filter((rule) => rule.selector === ".email-preview-frame");
+    expect(shared).toHaveLength(1);
+    expect(shared[0]!.body).toMatch(/height:\s*min\(72vh,\s*900px\)/);
+    // Every other rule that sizes the frame is the Brand page's.
+    const others = rules.filter((rule) => rule.selector !== ".email-preview-frame" && rule.selector.includes(".email-preview-frame"));
+    expect(others.length).toBeGreaterThan(0);
+    for (const rule of others) {
+      for (const selector of rule.selector.split(",")) expect(selector.trim(), rule.selector).toMatch(/^\.email-brand/);
+    }
+  });
+
+  it("asks the preview for the part being edited: the end for the footer, the start for the colours, and stops when the person reaches in", async () => {
+    // A browser shows a sandboxed srcdoc frame as an opaque window: its address
+    // cannot be read, and the page may still ask it to move to a fragment.
+    const replace = vi.fn();
+    const opaque = { location: { get href(): string { throw new DOMException("Blocked a frame from accessing a cross-origin frame.", "SecurityError"); }, replace } };
+    const opaqueWindow = vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(opaque as unknown as Window);
+    try {
+      const conn = fakeConnection({ brandKits: [kitRow()] });
+      await openBrand(conn);
+      const frame = await screen.findByTitle("Email preview");
+      fireEvent.load(frame);
+      replace.mockClear();
+
+      const footer = region("Footer");
+      const lines = within(footer).getByLabelText("Footer lines");
+      fireEvent.focus(lines);
+      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-end");
+      // Moving within the footer is not entering it again.
+      const calls = replace.mock.calls.length;
+      fireEvent.focus(within(footer).getByLabelText("Label of the unsubscribe link"), { relatedTarget: lines });
+      expect(replace.mock.calls.length).toBe(calls);
+
+      // A new email drawn while the footer is edited is kept at its end.
+      fireEvent.change(lines, { target: { value: "Acme, 2 Main Street" } });
+      await waitFor(() => expect(previewKit(conn).footer.lines).toEqual(["Acme, 2 Main Street"]));
+      replace.mockClear();
+      fireEvent.load(screen.getByTitle("Email preview"));
+      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-end");
+
+      // Once the person reaches into the frame, a new email does not move it.
+      fireEvent.pointerEnter(screen.getByTitle("Email preview"));
+      replace.mockClear();
+      fireEvent.change(lines, { target: { value: "Acme, 3 Main Street" } });
+      await waitFor(() => expect(previewKit(conn).footer.lines).toEqual(["Acme, 3 Main Street"]));
+      fireEvent.load(screen.getByTitle("Email preview"));
+      expect(replace).not.toHaveBeenCalled();
+
+      // Entering another group asks again: the colours are at the start.
+      fireEvent.focus(screen.getByLabelText("Primary"), { relatedTarget: lines });
+      expect(replace).toHaveBeenLastCalledWith("about:srcdoc#email-preview-start");
+    } finally {
+      opaqueWindow.mockRestore();
+    }
+  });
+
+  it("says under the last email, not over it, when the next cannot be drawn", async () => {
+    const conn = fakeConnection({ brandKits: [kitRow()] });
+    await openBrand(conn);
+    conn.query.campaignBrandPreview.mockRejectedValueOnce(new Error("campaignBrandPreview: reply needs a heading, a button label and a button link"));
+    fireEvent.change(screen.getByLabelText("Reply heading"), { target: { value: "Questions?" } });
+    const said = await screen.findByText("reply needs a heading, a button label and a button link");
+    const frame = await screen.findByTitle("Email preview");
+    expect(frame.compareDocumentPosition(said) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

@@ -342,7 +342,10 @@ report scene supplies a browser File to the upload port. No scene sends email.
   and `email-brand-empty` (no kit yet: neutral colours, no preview until a logo).
   The pictures are neutral placeholders (`emailBrandSeeds.ts`), and the preview is
   a stand-in that draws the kit as the article layout does. Add
-  `&at=Footer` to capture the footer's links.
+  `&at=Footer` to capture the footer's links, and
+  `&click=Brand|focus:Footer lines` with it to capture the preview kept at the
+  email's end while the footer is edited (`focus:<label>` puts the keyboard in
+  a field).
 
 Capture all scenes at 1400 and 520 pixels, light and dark. Check one heading,
 one pinned action bar, readable copy and keyboard focus. Rendering fixtures do

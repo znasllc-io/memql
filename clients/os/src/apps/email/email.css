@@ -57,11 +57,36 @@
   align-items: start;
   min-width: 0;
 }
-.email-brand-editor,
-.email-brand-preview {
+.email-brand-editor {
   display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* THE PREVIEW FITS THE PANE. The page's scroller is the measure: with an email
+ * to show, the preview column is exactly as tall as the scroller shows (its
+ * content box, so inside the page's padding and above the bar). The frame takes
+ * what the column leaves and keeps its own scroll, and what is said about the
+ * email stands under it. The column starts at the top of the scroller -- the
+ * page's heading is in the editor's column -- so it fits whether or not the
+ * editor has been scrolled. The shared frame (`.email-preview-frame`, the
+ * template page and the inbox) keeps its own height. */
+.email-brand-body {
+  container: email-brand-pane / size;
+}
+.email-brand-preview {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-width: 0;
+}
+.email-brand-preview:has(> .email-preview-frame) {
+  height: 100cqh;
+}
+.email-brand-preview > .email-preview-frame {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 14rem;
 }
 @container os-window (min-width: 1040px) {
   .email-brand {

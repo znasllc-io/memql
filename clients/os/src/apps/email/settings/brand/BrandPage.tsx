@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { Mail } from "lucide-react";
 import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 
@@ -7,7 +7,7 @@ import { ActionBar, type Act, type ActionBarTone } from "../../../../kit/ActionB
 import type { UploadProvider } from "../../../../items/upload";
 import { useSaveBrandKit } from "../../actions";
 import type { BrandKitRecord } from "../../rows";
-import { Preview } from "../../templates/Preview";
+import { Preview, type PreviewPlace } from "../../templates/Preview";
 import { useBrandPreview, type Reading } from "../../useEmail";
 import { FooterGroup, ReplyGroup, SocialGroup } from "./LinkGroups";
 import { ColoursGroup, FontsGroup } from "./LookGroups";
@@ -33,11 +33,28 @@ import { draftFromKit, draftProblem, kitFromDraft, sameKit, type BrandDraft, typ
 //
 // THE PREVIEW is asked for 400 ms after the last change, never on every
 // keystroke, and only for a kit the page could send: a colour that is not one
-// leaves the last email on screen. What the engine says about the kit -- a
-// contrast below AA, pictures that leave an email little room -- stands above
-// the preview and never stops a save.
+// leaves the last email on screen. It fills the height the pane shows, its
+// frame keeping its own scroll, and keeps in view the part of the email the
+// person is editing. What the engine says about the kit -- a contrast below AA,
+// pictures that leave an email little room -- stands under the frame, so it
+// never moves it, and never stops a save.
 
 const PREVIEW_PAUSE_MS = 400;
+
+/**
+ * Where each group's part sits in the email the preview draws
+ * (`builtin:article`): the look and the logo from its start, the signature,
+ * the social links, the reply and the footer at its end.
+ */
+const PART_OF_GROUP: Readonly<Record<string, PreviewPlace["part"]>> = {
+  Colours: "start",
+  Fonts: "start",
+  Logo: "start",
+  Signature: "end",
+  Social: "end",
+  Reply: "end",
+  Footer: "end",
+};
 
 /** A value that follows another once it has stopped changing for `ms`; the first value at once. */
 function useSettled<T>(value: T, ms: number): T {
@@ -154,6 +171,19 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
   const preview = useBrandPreview(accountId, useSettled(stable, PREVIEW_PAUSE_MS));
   const drawable = draft.logo.src !== "" && draft.logo.alt.trim() !== "";
 
+  // THE PART BEING EDITED, KEPT IN VIEW. Focus entering a group asks the
+  // preview for that group's part of the email; moving between the fields of
+  // one group is staying in it. Asked again on every entry, so coming back to
+  // a group the person scrolled away from brings its part back.
+  const [place, setPlace] = useState<PreviewPlace>({ part: "start", asked: 0 });
+  function entered(event: FocusEvent<HTMLDivElement>) {
+    const group = event.target instanceof Element ? event.target.closest(".os-details-section") : null;
+    if (group === null) return;
+    if (event.relatedTarget instanceof Node && group.contains(event.relatedTarget)) return;
+    const part = PART_OF_GROUP[group.getAttribute("aria-label") ?? ""];
+    if (part !== undefined) setPlace((held) => ({ part, asked: held.asked + 1 }));
+  }
+
   // A refusal stands at the top of the editor; the person pressed Save at the bottom.
   const refusal = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -201,11 +231,11 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
 
   return (
     <div className="os-action-pane" data-os-page-context={context}>
-      <div className="os-action-body os-app-stack">
-        {head}
+      <div className="os-action-body email-brand-body">
         <AutoRefresh onRefresh={brand.reload} busy={brand.state === "loading"} />
         <div className="email-brand">
-          <div className="email-brand-editor">
+          <div className="email-brand-editor" onFocus={entered}>
+            {head}
             <div ref={refusal}>
               {lost ? (
                 <Notice tone="warn" sentence="No answer came back, so the brand may have been saved." next="Saving again is safe." detail={saving.error} />
@@ -226,6 +256,15 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
           <section className="email-brand-preview" aria-label="Preview">
             {drawable ? (
               <>
+                <Preview
+                  html={preview.value?.html ?? ""}
+                  loading={preview.value === null && previewFailure === null}
+                  failed={preview.value === null ? previewFailure : null}
+                  place={place}
+                />
+                {/* What is said about the email stands under it: coming and
+                    going while somebody types, it never moves the frame. */}
+                {preview.value === null ? null : previewFailure}
                 {warnings.length === 0 ? null : warnings.length === 1 ? (
                   <Notice tone="warn" sentence={warnings[0]!.message} />
                 ) : (
@@ -237,12 +276,6 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
                     </ul>
                   </Notice>
                 )}
-                {preview.value === null ? null : previewFailure}
-                <Preview
-                  html={preview.value?.html ?? ""}
-                  loading={preview.value === null && previewFailure === null}
-                  failed={preview.value === null ? previewFailure : null}
-                />
               </>
             ) : (
               <EmptyState icon={Mail} title="No preview yet">

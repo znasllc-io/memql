@@ -2333,7 +2333,7 @@ function App() {
 // the system-preference branch and both captures come out identical.
 // A ONE-SHOT CAPTURE CANNOT SCROLL, and every surface long enough to be worth
 // judging has something below the fold. `?at=<text>` finds the first element
-// whose text starts with it and scrolls it to the top, after the virtual clock
+// whose text starts with it (or else the region it names) and scrolls it to the top, after the virtual clock
 // has let the reads land -- so a section reached by scrolling can be captured
 // without a driver attached. On a view reached by pressing (`click`), it waits
 // for the presses, so it scrolls the page they opened.
@@ -2341,9 +2341,10 @@ const at = new URLSearchParams(window.location.search).get("at") ?? "";
 function scrollToAt(after: number) {
   if (at === "") return;
   window.setTimeout(() => {
-    const target = Array.from(document.querySelectorAll<HTMLElement>("h3, h4, .os-subhead")).find(
-      (el) => (el.textContent ?? "").trim().startsWith(at),
-    );
+    // A heading that starts with the text, or else a region it names (`at=Preview`).
+    const target =
+      Array.from(document.querySelectorAll<HTMLElement>("h3, h4, .os-subhead")).find((el) => (el.textContent ?? "").trim().startsWith(at)) ??
+      Array.from(document.querySelectorAll<HTMLElement>("section[aria-label]")).find((el) => el.checkVisibility() && el.getAttribute("aria-label") === at);
     if (!target) return;
     // The page's own scroller, not every box around it: `scrollIntoView` also
     // scrolls a window frame that clips what overflows it, and the capture then
@@ -2380,6 +2381,13 @@ clicks.forEach((label, i) => {
       const [field, ...value] = label.slice(5).split("=");
       const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
       if (target) { const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(target, value.join("=")); target.dispatchEvent(new Event("input", { bubbles: true })); }
+      return;
+    }
+    // `focus:<label>` puts the keyboard in a field, as a person arriving at it does.
+    if (label.startsWith("focus:")) {
+      const field = label.slice(6);
+      const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
+      target?.focus();
       return;
     }
     if (label === "file:people") {
