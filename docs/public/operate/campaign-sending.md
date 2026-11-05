@@ -100,28 +100,14 @@ Choose **Create new template** from the Email app to write a template in the edi
 keeps the template list, organization, status, and archive controls. Files
 settings select browser VS Code (the default), desktop VS Code, or Cursor.
 
-**New Email** asks for the organization, layout and name. Start from the layout
-or describe it with an image, individual files or a selected ZIP of resources. MemQL reads
-the authorized bytes and writes the email into a layout: the Article unless
-another is chosen (`composeMaterialize.layoutId`, one of the built-in layouts
-or one your organization saved). It writes the subject, the preheader and the
-layout's content blocks; the brand blocks (logo, signature, footer) stay as the
-layout has them. A draft aimed at a brand block, at a link tag such as
-`{{confirmUrl}}`, or at a picture you did not include is refused, and nothing
-is filed. With no brief and no files, the new `.email.json` is the layout
-itself, made without a model call. A resource ZIP is inspected only for that
-explicit composition; opening a ZIP in Files still downloads it intact. Choose
-which images are visual inspiration and which should appear in the email. An
-included picture that is one of your own Library files stays a reference to
-that file; one from a ZIP, or a file you cannot reference, is embedded as a
-copy of the bytes you selected. Pictures are sent as inline attachments; the
-flow does not publish private file URLs. Review the words, pictures and links
-before publishing.
+To make an email with a layout and a description, use **New email**. See
+[Composing an email](#composing-an-email). Emails are no longer made from
+Files or from **Make a file**: those refuse with "Emails are made in the Email
+app."
 
 Use **Publish** to save and publish the reviewed email for its organization.
 Publishing the same file updates that template. Resolve displayed issues first.
-**Save as layout** keeps its design for future emails. Local files use
-**Save to MemQL** first. Publishing makes it available to send; it does not send
+Local files use **Save to MemQL** first. Publishing makes it available to send; it does not send
 mail. Editing a published template returns it to draft. Concurrent edits fail
 with a comparison prompt, and publishing requires the exact saved revision.
 An existing template cannot be moved to another organization by editing its
@@ -132,6 +118,152 @@ reviewed at preflight. Later edits do not change those messages. The worker
 still rechecks the caller's authority and the source template's readability.
 Jobs queued before this change have no captured copy and retain their previous
 behavior; pause and recreate those jobs before editing their shared template.
+
+### Composing an email
+
+**New email** is a page in the editor. It makes a template in a few clicks, and
+it can have MemQL write the words for you.
+
+1. Choose the organization the email is for.
+2. Choose a layout from the grid. The 24 layouts are drawn as grey wireframes
+   and grouped by kind: Welcome, Letters, Articles, Announcements, Products,
+   Promotions, News, Guides, Events and Feedback. A wireframe shows structure
+   only. The look comes from the organization's [brand kit](#brand-kits).
+3. Give the email a name.
+4. To have MemQL write it, describe the email. You can also attach files:
+   pictures, ZIPs and text files, up to 64 files and 16 MiB. You can add a
+   picture of how the finished email should look.
+5. Choose one of two buttons.
+
+- **Start from the layout** makes the template at once, with the brand kit
+  applied, and opens it. If the organization has no brand kit yet, the layout
+  takes a neutral look. Nothing is written for you.
+- **Write it** makes the same template, opens it, and starts MemQL writing the
+  email in the background.
+
+The template opens at once either way. You never wait for the writing.
+
+#### While MemQL writes
+
+MemQL writes the email in Claude Code on your own machine, using the Apps
+route. The editor opens the template read-only. It says "MemQL is writing this
+email" and shows how long it has been going, with **Cancel**. When MemQL
+finishes, the new email replaces the content in place. In the OS, the template
+shows **Writing** in Email, Templates. Open it there to see the same message,
+the time, and **Cancel**.
+
+If the writing stops, the template shows **Failed** with the reason, and a
+**Retry** button. Retry starts again with the layout, description and files you
+gave. The draft stays as the brand-applied layout until a run succeeds.
+
+Write it needs two things. Without them it refuses, and nothing is created.
+
+- The organization needs a brand kit. Set one up in Email, Settings, Brand.
+- One of your machines needs Cockpit open, with Claude Code signed in.
+
+MemQL never falls back to another model, and it never publishes. The result is
+a draft for you to review. Check the words, pictures and links. A draft may
+list issues, such as a button with no link. Publishing stays refused until you
+fix them.
+
+#### What MemQL writes
+
+- Text in your files is used word for word. Your description fills in what the
+  files leave out.
+- It writes the subject and preheader when your files do not give them.
+- It does not invent a claim, a price, a date, an address or a link. A button
+  with no destination stays empty, and the draft reports it.
+- Link tags such as `{{confirmUrl}}` and `{{unsubscribeUrl}}` stay as the
+  layout has them.
+- The logo, signature, follow line, social links, footer and reply come from
+  the brand kit. MemQL does not write into them.
+- A layout can have blocks you may leave out, and blocks that can repeat, such
+  as steps. A new template starts with each repeating block at its smallest
+  size. MemQL may drop optional blocks and repeat blocks within their range.
+  It makes no other change to the structure.
+
+Pictures can be PNG, JPEG or GIF. An email holds at most 8 different pictures,
+and at most 1 MiB for each picture and 1 MiB of pictures in all. If your
+material is more than that, MemQL chooses fewer pictures and names the ones it
+left out. It does not shrink or convert pictures. The picture of the finished
+email is guidance only. It goes in the email only if your description asks for
+it. Files of other types are named in the summary and left out. A ZIP can hold
+up to 256 files and 64 MiB once unpacked. It cannot hold paths that leave the
+ZIP, ZIPs inside ZIPs, or links.
+
+If you edit the template while MemQL is writing, MemQL does not overwrite your
+changes. It saves its version as a new template beside yours, named
+`<name> (MemQL's version)`, and says so.
+
+| What happens | What you see |
+|---|---|
+| No machine with a signed-in app | Write it is refused before anything is made. The message says to open Cockpit with Claude Code signed in |
+| The organization has no brand kit | Write it is refused, with a pointer to Brand. Start from the layout still works |
+| Some files cannot be used | They are named in the summary. MemQL continues without them. It stops only when nothing usable is left |
+| MemQL cannot fix every issue | It submits anyway. The draft lists the issues |
+| You cancel, or the machine sleeps or quits | The template shows **Failed**, with the reason and **Retry** |
+| The writing could not start | The template is still made and opens, and the editor offers **Retry** |
+
+#### From Ask
+
+In Ask, attach your files and ask for an email. If it is not clear which
+organization the email is for, Ask asks. Ask then shows the layouts as
+wireframes, the closest first, and you pick one. You can also answer in words.
+After you choose, Ask starts MemQL writing. The draft is already in Email,
+Templates, marked **Writing**, and it fills in when MemQL finishes.
+
+For developers: `emailLayouts` lists the layouts with their wireframes.
+`campaignCreateTemplateFromLayout` is Start from the layout.
+`campaignComposeEmail` is Write it. `campaignCancelComposition` and
+`campaignRetryComposition` stop and restart a run. Only an assistant gets the
+email tools in a conversation: `emailLayoutCatalogue` and
+`startEmailComposition`. The layout question uses `requestUserFeedback` with
+`presentation` set to `layouts`. Leave `presentation` out for a plain choice.
+
+### Brand kits
+
+A brand kit is the look of an organization's emails. Each organization has one.
+The built-in layouts are plain frames. When an email is made from a layout, the
+kit fills in the colours, fonts and the brand blocks.
+
+A kit holds:
+
+- **Theme.** Eight colours, a heading font and a body font. Each font is sent
+  with an email-safe fallback.
+- **Logo.** A picture, its description and where it links. It can also have a
+  version for coloured panels (`onColour`) and a version for full-width
+  headers (`wide`). Each falls back to the logo when it is missing.
+- **Signature.** A photo, a name as text or a picture, and a title. Or one
+  whole picture of the signature.
+- **Follow line.** One line of text above the social links.
+- **Social links.** A list of networks, each with an address and an icon.
+- **Footer.** Lines of text, links, a separator, and the space between lines.
+  The footer must link `{{unsubscribeUrl}}`. It can also use
+  `{{preferencesUrl}}` and `{{viewUrl}}`.
+- **Reply.** A heading, a button with a label and a link, and a note.
+
+Only the theme, logo and footer are required. A part you leave empty is left
+out of the email.
+
+Pictures are PNG, JPEG or GIF. You can use a picture from the Library that you
+uploaded. MemQL reads it as you and stores a copy in the kit, so everyone in
+the organization can use it.
+
+To set up a kit, go to Email, Settings, and open the **Brand** row for the
+organization. The page has the colours, fonts, pictures, footer, follow line
+and reply, with a live preview. Choose **Save** in the action bar. Warnings
+show beside the preview. They never block a save:
+
+- a text and background colour pair that falls under WCAG 2 AA contrast;
+- pictures that together are over 512 KiB.
+
+An email made from a layout keeps the look it was made with. Changing the kit
+later does not change templates that already exist.
+
+For developers: `campaignSaveBrandKit({accountId, kit, expectedRevision})`
+saves a kit and answers `{revision, warnings}`. `brandKitForAccount` reads it.
+`campaignBrandPreview` renders a kit on a built-in layout without saving it.
+Saving needs the same organization write permission as saving a template.
 
 ### The email document
 
@@ -175,15 +307,15 @@ keeps the `artifact:` reference, and the saved HTML has the picture embedded
 
 ### Layouts and previews
 
-Four built-in layouts start an email: **Confirmation**, **Letter**, **Article**
-and **Spotlight**. They come with MemQL, in a neutral example brand, with
-pictures and links left to choose. An organization can also keep a finished
-email as a layout of its own, which keeps its logo, footer and signature for
-the next email in the series.
+MemQL ships 24 built-in layouts, from **Confirmation**, **Letter**, **Article**
+and **Spotlight** to patterns such as newsletters, steps, offers and events.
+They are structure only, and take their look from the organization's
+[brand kit](#brand-kits). You cannot create layouts. Layouts an organization
+saved earlier stay in the database, and templates made from them keep working.
 
 - `emailLayouts({accountId, includeArchived?})` lists what the organization can
-  start from: the four built-in layouts, then its own. Each row is
-  `{id, kind, name, description, document, status}`, and an organization's own
+  start from: the built-in layouts, then its own. Each row is
+  `{id, kind, name, description, category, wireframe, document, status}`, and an organization's own
   also carry `layoutId`, `revision` and `sourceArtifactId`. The `id`
   (`builtin:<name>` or `org:<layoutId>`) is opaque: a client passes it on and
   never builds or splits one. Documents are included up to an 8 MiB answer
@@ -196,6 +328,7 @@ the next email in the series.
   document only. Archiving and restoring need only the revision, and an
   archived layout is restored before it is edited. `layoutId` is the bare id of
   the row, not the opaque id of a picker row.
+  The Email app and the editor no longer offer a way to save a layout.
 - `emailRender({document, accountId, sample?})` previews a document: it answers
   `{subject, html, text, issues}` with the pictures the caller can read
   embedded, `sample` values (`displayName`, `email`, `accountName`,
@@ -2158,8 +2291,11 @@ package configuration for each organization.
 
 Use **Add a campaign** to choose an audience, template, sender and schedule.
 **Create new template** opens the editor and keeps the campaign's answers while
-you work. Templates and layouts have their own pages, formatted and plain-text
-previews, and publication or archive actions.
+you work. Templates have their own pages, formatted and plain-text previews,
+and publication or archive actions. A template MemQL is writing shows
+**Writing**, with its time and **Cancel**, and one that failed shows **Failed**
+with **Retry**. Settings holds each organization's **Brand** page, which sets
+the look of new emails. See [Composing an email](#composing-an-email).
 
 Automations send a sequence when someone joins an audience or confirms a
 subscription, or send one email when a MemQL event occurs. Build the sequence

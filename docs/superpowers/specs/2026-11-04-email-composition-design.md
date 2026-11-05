@@ -64,7 +64,7 @@ The blocks that repeat in every email of an account have reserved top-level ids 
 Kept in the layout catalogue (Go, beside each entry), not in the document format, so the canonical `*.email.json` bytes do not change:
 
 - **Optional** content block ids: composition may drop them when there is nothing for them.
-- **Repeatable** content blocks with a range (for example `step` 2 to 6, `story` 1 to 3): composition may repeat the block, with ids suffixed `-2`, `-3`, and so on, within the range.
+- **Repeatable** content blocks with a range (for example `step` 2 to 6, `story` 1 to 3): composition may repeat the block, with ids suffixed `-2`, `-3`, and so on, within the range. (revised: see Planning revisions)
 
 Any other change to a layout's structure is refused at submit (section 3.3).
 
@@ -120,11 +120,11 @@ Every layout stays within the engine's limit of 8 distinct pictures **with a ful
 One kit per account:
 
 - **theme**: the eight colours (`#rrggbb`), `headingFont` and `bodyFont` (each rendered with an email-safe fallback stack), and `webFonts`, as the document's `Theme` already has them.
-- **logo**: `{src, alt, href?}`.
-- **signature**: `{photo?, name: {src} | {text}, title?}`.
+- **logo**: `{src, alt, href?}`. (revised: see Planning revisions)
+- **signature**: `{photo?, name: {src} | {text}, title?}`. (revised: see Planning revisions)
 - **follow**: one line of text.
 - **social**: a list of `{network, href, icon}`.
-- **footer**: `{lines[], links[{label, href}], separator?}`. It **must** carry a `{{unsubscribeUrl}}` link, so no email built from the kit needs the engine's appended footer; preferences and view-in-browser use `{{preferencesUrl}}` and `{{viewUrl}}`.
+- **footer**: `{lines[], links[{label, href}], separator?}`. (revised: see Planning revisions) It **must** carry a `{{unsubscribeUrl}}` link, so no email built from the kit needs the engine's appended footer; preferences and view-in-browser use `{{preferencesUrl}}` and `{{viewUrl}}`.
 - **reply**: `{heading, button: {label, href}, note?}`. A link is a web address, `mailto:` or `tel:`, as emaildoc already accepts.
 
 Every part except theme, logo and footer is optional; an empty part empties its slot (1.2).
@@ -132,7 +132,7 @@ Every part except theme, logo and footer is optional; an empty part empties its 
 ### 2.2 Storage and API
 
 - **Concept** `v1:campaigns:brandKit`: `ownerUserId` (attribution), `accountId` (fixed at creation; one kit per account), `kit` (the object above). `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")`, as templates have. The revision is the row version, as for templates.
-- **Pictures are stored inside the kit** as `data:` PNG, JPEG or GIF. Library pictures can be read only by whoever uploaded them (`component/campaigns/store.go` `LibraryFileForArtifact`), so a kit holding `artifact:` references would break for every colleague. Saving accepts `artifact:<id>` (read under the saver, who uploaded it) or `data:`, and stores `data:`.
+- **Pictures are stored inside the kit** as `data:` PNG, JPEG or GIF. Library pictures can be read only by whoever uploaded them (`component/campaigns/store.go` `LibraryFileForArtifact`), so a kit holding `artifact:` references would break for every colleague. Saving accepts `artifact:<id>` (read under the saver, who uploaded it) or `data:`, and stores `data:`. (revised: see Planning revisions)
 - **Builtins:** `campaignSaveBrandKit(accountId!, kit!, expectedRevision)` returns `{revision, warnings}`. It needs the same organization write permission as `campaignSaveTemplate`. It refuses an invalid kit with a sentence naming the field. **Contrast never refuses:** each text and background pair the layouts draw that falls under WCAG 2 AA comes back as a warning. Fylo's white headline on teal is about 2.3 to 1, and refusing it would make Welcome 1 impossible to reproduce. It also warns when the kit's pictures exceed 512 KiB, half an email's picture budget.
 - **Query:** `brandKitForAccount(accountId)`.
 
@@ -148,7 +148,7 @@ It is used when a template is created from a layout (both buttons, section 3), b
 
 ### 2.4 The Brand page
 
-OS → Email → Settings → **Brand**, per organization:
+OS → Email → Settings → **Brand**, per organization: (revised: see Planning revisions)
 
 - colour swatches, a font list, picture uploads (logo, signature photo and name, social icons), footer lines and links, the follow line and the reply;
 - a live preview of a sample layout through `emailRender`;
@@ -170,36 +170,36 @@ D carries the kit like templates: `email/brand.json` with its picture files in a
 - an optional **picture of the finished email**;
 - two buttons: **Start from the layout** and **Write it**.
 
-**Ask:** the person attaches files and asks for an email. Ask's agent finds the email composition capability and calls `campaignComposeEmail` without a layout (3.2). That starts a composition goal on the Apps route, **whatever route the conversation itself uses**. The goal:
+**Ask:** the person attaches files and asks for an email. Ask's agent finds the email composition capability and calls `campaignComposeEmail` without a layout (3.2). (revised: see Planning revisions) That starts a composition goal on the Apps route, **whatever route the conversation itself uses**. The goal:
 
 1. works out the account, asking if it is not clear;
 2. suggests the closest layout from the catalogue, comparing the attached picture of the finished email (when there is one) and the material with the layouts' structures, and asks the person (`requestUserFeedback`) with the layout's name, its wireframe and two alternatives;
-3. creates the template once the person confirms or names another, and composes it (3.3).
+3. creates the template once the person confirms or names another, and composes it (3.3). (revised: see Planning revisions)
 
 ### 3.2 Nothing waits
 
 Two new builtins:
 
 - `campaignCreateTemplateFromLayout(accountId!, name!, layoutId!)`: applies the account's kit (or the neutral look when the account has none) and saves a draft. Returns `{templateId, revision}` at once. **Start from the layout** calls it and opens the template.
-- `campaignComposeEmail(accountId!, description!, fileIds!, referenceFileId?, layoutId?, name?)`: refuses when the account has no brand kit, or when the caller has no Apps machine connected (3.5). With a `layoutId` (**Write it**), it creates the template as above, marks it writing, starts the goal, and returns `{templateId, goalId}` at once. Without one (Ask), it starts the goal, which creates the template after the person confirms the layout.
+- `campaignComposeEmail(accountId!, description!, fileIds!, referenceFileId?, layoutId?, name?)`: refuses when the account has no brand kit, or when the caller has no Apps machine connected (3.5). With a `layoutId` (**Write it**), it creates the template as above, marks it writing, starts the goal, and returns `{templateId, goalId}` at once. Without one (Ask), it starts the goal, which creates the template after the person confirms the layout. (revised: see Planning revisions)
 
 The template row gains an optional **`composition`** object: `{goalId, state: writing | done | failed, startedAt, finishedAt?, error?}`.
 
 - The editor opens the template at once. While `state` is `writing` it shows "MemQL is writing this email", the elapsed time and **Cancel**, and is read-only; when the run submits, the composed email replaces the content in place.
-- The OS Templates list shows the template at once, marked **Writing**, or **Composition failed** with the reason and **Retry** (which starts a new goal with the recorded inputs).
+- The OS Templates list shows the template at once, marked **Writing**, or **Composition failed** with the reason and **Retry** (which starts a new goal with the recorded inputs). (revised: see Planning revisions)
 - Emails no longer go through the Materializer: no Library file and no `composeMaterialize` run is involved. The editor already opens and saves a template that has no Library file behind it (`templates/<id>`). Existing templates linked to Library files keep working as they do.
 
 ### 3.3 The run
 
 - **The goal** is created as the caller, with source `route:apps`, level `strong`, and a new `requestedVia` value `email`, recorded with its inputs (account, template, layout, description, files, reference picture).
-- **One tool-using step**, `composeEmail`, runs whole in Claude Code on the caller's own machine, through the existing session door. The step's prompt is a new DSL prompt `emailCompose`, `@level("strong")`.
-- **Inputs land in the session workspace.** The step's files become the session handover's inputs, which Cockpit already pulls from the Library into the workspace. Today Ask's handover sets no inputs, and wiring them is part of A. A ZIP is checked on the server first by the hardened reader in `integrations/compose/source_content.go` (no paths leaving the archive, no nested archives, no links). Its limits are raised for composition to 256 entries and 64 MiB unpacked. Cockpit then unpacks it in the workspace by the same rules.
+- **One tool-using step**, `composeEmail`, runs whole in Claude Code on the caller's own machine, through the existing session door. (revised: see Planning revisions) The step's prompt is a new DSL prompt `emailCompose`, `@level("strong")`.
+- **Inputs land in the session workspace.** The step's files become the session handover's inputs, which Cockpit already pulls from the Library into the workspace. Today Ask's handover sets no inputs, and wiring them is part of A. A ZIP is checked on the server first by the hardened reader in `integrations/compose/source_content.go` (no paths leaving the archive, no nested archives, no links). Its limits are raised for composition to 256 entries and 64 MiB unpacked. Cockpit then unpacks it in the workspace by the same rules. (revised: see Planning revisions)
 - **Picture handles.** The server gives every picture among the inputs and inside ZIPs a handle, `memql-asset:<sha256>` of its bytes, the form the composer already uses.
 - **Its tools over MCP** (beside the session's own `submit` and `next_task`):
   - `emailComposeContext`: the layout (blocks with ids, types, roles and sizes; the optional ids and repeat ranges), which brand slots the kit fills, the pictures (handle, workspace path, type, bytes, width and height), the remaining picture budget, and the account's name;
   - `emailComposeRender(document)`: the HTML, the text and the issues, with handles resolved as at submit;
-  - `emailComposeSubmit(document)`: saves the email (below);
-  - in the Ask flow, also `emailLayoutCatalogue` (names, descriptions, categories and wireframes) and `requestUserFeedback`.
+  - `emailComposeSubmit(document)`: saves the email (below); (revised: see Planning revisions)
+  - in the Ask flow, also `emailLayoutCatalogue` (names, descriptions, categories and wireframes) and `requestUserFeedback`. (revised: see Planning revisions)
 - **Its loop:**
   1. read the context and the files (the copy from text files; the pictures, including the reference, which Claude Code views itself);
   2. write the document: subject, preheader and the content blocks, placing pictures by handle and using optional and repeatable blocks;
@@ -209,7 +209,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 
   Claude Code cannot photograph the render inside its sandbox. Its check is the issue list plus the content against the reference; the pixel comparison is the acceptance harness's job (section 6).
 - **Submit:**
-  - checks the structure against the layout: brand slots untouched, and only optional blocks dropped and repeatable blocks repeated within range;
+  - checks the structure against the layout: brand slots untouched, and only optional blocks dropped and repeatable blocks repeated within range; (revised: see Planning revisions)
   - parses the document with the same parser as any template;
   - resolves each handle to a `data:` picture from the server's own copy (no picture bytes pass through the model);
   - saves the draft revision through the same path as `campaignSaveTemplate`, then sets `composition.state` to `done`.
@@ -242,7 +242,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
   - When the material would exceed them, the step chooses fewer pictures and names the ones left out.
   - Pictures are neither shrunk nor converted; one that is too large is reported.
   - All eleven Fylo emails fit (at most 7 pictures and 124 KB).
-- **Failures, as the person sees them:**
+- **Failures, as the person sees them:** (revised: see Planning revisions)
 
   | Situation | What happens |
   |---|---|
@@ -260,7 +260,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 | Area | Change |
 |---|---|
 | `component/compose/emaildoc` | 20 new layouts; Confirmation rebuilt on tokens; Article's `reply` section; catalogue metadata (category, optional ids, repeat ranges); `Wireframe`; `BrandKit` type, its parse and `ApplyBrand`; the structure check used at submit; tests |
-| `dsl/campaigns` | `brandKit` concept; the template's `composition` field; builtins `campaignSaveBrandKit`, `campaignCreateTemplateFromLayout`, `campaignComposeEmail`; query `brandKitForAccount`; `emailLayouts` shape gains `wireframe` and `category` |
+| `dsl/campaigns` (revised: see Planning revisions) | `brandKit` concept; the template's `composition` field; builtins `campaignSaveBrandKit`, `campaignCreateTemplateFromLayout`, `campaignComposeEmail`; query `brandKitForAccount`; `emailLayouts` shape gains `wireframe` and `category` |
 | `component/campaigns` | Handlers for the builtins; the composition state; submit (structure check, handle resolution, save, copy on conflict); contrast and size warnings |
 | `integrations/compose` | The hardened ZIP reader reused with composition's limits; the Materializer's `email_template` output and `emailContentInstructions` retired |
 | `integrations/agent`, `integrations/work`, `app` | The `composeEmail` step and its MCP tools; the `emailCompose` prompt; goals with `route:apps` and `requestedVia: email` |
@@ -300,7 +300,7 @@ The template row gains an optional **`composition`** object: `{goalId, state: wr
 - **OS.** The Brand page; the Writing and failed marks and Retry; the Layouts list and "Save as layout" hidden.
 - **Ask.** Attachments reach the session. The flow goes suggestion, confirmation, then composition.
 
-**Acceptance on real material**, with B's material:
+**Acceptance on real material**, with B's material: (revised: see Planning revisions)
 
 1. On a local stack, with Fylo's brand kit, compose each of the eleven emails from its own folder: its pictures, its plain-text copy, and a screenshot of the original as the reference picture, using the layout the table in 1.5 gives it.
 2. Compare each result with the original with the existing fidelity harness (`scripts/email/fidelity.sh`: headless Chrome, 600 pixels wide, pixel difference). The target is its default limit, 2%.
@@ -342,3 +342,29 @@ The material stays outside the repository, as that harness requires.
 - **Hidden, not removed.** Organization layouts stay in the database, and templates made from them keep working.
 - **Contrast warnings allow brand colours under AA.** The account's look wins, and the warning stays visible on the Brand page.
 - **The deadline.** If A risks 2026-11-13, the seventeen common layouts beyond B's seven ship after the deadline, and the grid starts with the seven.
+
+## Planning revisions
+
+Written 2026-11-05, when the build was done. These are the ways the build differs from the spec as first written. Where the spec body now reads wrong, it carries the mark "(revised: see Planning revisions)".
+
+1. **Ask's layout choice runs in Ask's own turn.** A question asked inside a Claude Code session ends that session, and only the agent reply loop resumes after an answer. So Ask's agent lists the layouts, asks with `requestUserFeedback` (`presentation: "layouts"`), then calls `campaignComposeEmail`. That builtin therefore always takes a `layoutId`. Ask's suggestion reads the description, the file names and the catalogue. The pictures are seen by the composition run.
+2. **ZIPs are unpacked on the server.** Members become Library files in a folder named `Email material`, archived after the run. The session pulls them as ordinary inputs. Cockpit is unchanged, so composing needs no Cockpit update on anyone's machine.
+3. **Slot blocks are found by id anywhere in the document.** Confirmation's logo sits inside its coloured panel. The footer stays at the top level, as the renderer requires.
+4. **The step submits a composition, never a whole document.** A composition is the subject, the preheader, the content items, the drops and the repeats. The server rebuilds the email from the brand-applied layout, so brand pictures never pass through the model and the structure check is built in.
+5. **Builtins beyond the spec's list.** These were added: `campaignComposeContext`, `campaignComposeRender` and `campaignComposeSubmit` (the step's tool handlers), `campaignRunComposition` (the run step), `campaignCancelComposition`, `campaignRetryComposition`, `campaignBrandPreview` and `campaignLayoutCatalogue`.
+6. **The New email page has no per-file "Use in the email" switch.** The composer chooses among the attached pictures. The separate picture of the finished email is guidance only.
+7. **The step runs as a per-user system agent, `emailComposerAgent`** (role `specialist`), because a session's tools need an acting agent.
+8. **The real-material acceptance moved to sub-project B.** That is composing the eleven Fylo emails and comparing them with the fidelity harness, where Fylo's brand kit is created. A merges on the automated tests and the UI review.
+9. **Kit pictures.** A picture in a kit is a `data:` PNG, JPEG or GIF, or `artifact:<id>`. An artifact is read as the caller and stored as `data:`. A size guard applies to both.
+10. **The signature.** It may be one whole picture (`signature.picture`) as well as its parts, or instead of them.
+11. **The logo.** It has two optional versions: `logo.onColour` for coloured panels and `logo.wide` for full-width headers. `ApplyBrand` picks between them, and each falls back to the logo.
+12. **The footer.** It takes `lineGap`, the space between its lines.
+13. **Repeatable blocks.** They start at their minimum (`ExpandToMinimum`) in compositions, in new templates and in wireframes.
+14. **The catalogue.** `campaignLayoutCatalogue` rows carry no wireframes. Clients read wireframes from `emailLayouts`, and an Ask question gets them from the server. So the Ask flow's `emailLayoutCatalogue` tool gives names, descriptions, categories and outlines, not drawings.
+15. **Presentation.** The `presentation` argument of `requestUserFeedback` is `enum("layouts")`. Leaving it out means a plain choice.
+16. **The email tools.** Owned-work turns offer `emailLayoutCatalogue` and `startEmailComposition` only when the acting role is assistant.
+17. **App reachability.** It is read through `(*MemQLEngine).AppReachableFor`, which answers on every node.
+18. **Brand in the OS.** It is a page opened from a Brand row in Settings, with Save in its ActionBar. It is not an inline section.
+19. **The OS Templates page.** It follows a composition through the live Templates feed, read again every 2 seconds while any template is writing.
+20. **Start failures.** A composition whose goal could not start still opens its template, and the editor offers Retry.
+21. **The Materializer refuses emails.** A request for one gets "Emails are made in the Email app." The old email output, its layout code and the clients' email choices were removed, along with the OS Layouts hooks and helpers that nothing used any more. The OS keeps reading layouts, only to name the layout a template was made from.

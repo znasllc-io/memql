@@ -279,8 +279,8 @@ The plus in Materialized opens **Make a file**. Its steps cover the kind of file
 an optional template, **From**, **Describe**, **Name**, **Folder**, and organization.
 From mixes Library files and records in one searchable tray. Picked items appear
 above it and can be removed individually. Describe is optional. Name is checked as
-you type, and the folder control shows where the file will go. An email template
-needs an organization; an ordinary file does not.
+you type, and the folder control shows where the file will go. Emails are not made
+here: ask for one and you are told "Emails are made in the Email app."
 
 A name alone can make a blank file. **Make the file** is available as soon as the
 answers can be used, from any step. The floor says whether the file starts blank,
@@ -292,7 +292,7 @@ needs setup, people with permission can open its setup from the wizard.
 | A name and kind, with no description, sources or template | A blank Markdown, text, HTML, CSV or JSON file, with no model call. Word and PDF need something to write |
 | Markdown described in words, with nothing picked or only Markdown files up to 32 KiB each and PNG, JPEG, GIF or WebP pictures up to 8 MiB each | A blank Markdown file whose description the client hands to the Library's revision workflow. You review its draft in the editor |
 | Markdown described in words with any other file, a record or a query | A file written by the composer, which reads the supplied sources |
-| A template, another kind of file, an email template or a package | A file written by the composer |
+| A template, another kind of file or a package | A file written by the composer |
 
 The OS offers each of these paths. Audio and video are not offered. A folder you
 cannot read or that is in the Bin is refused before anything is written:
@@ -330,6 +330,28 @@ belongs to one action, so a double click starts one file. The OS uses
 `startMaterialize`, follows the live composition and Files feeds, and calls
 `handOffDescription` for described Markdown. The editor follows the same SDK
 contract. Guard tests prevent another creation path.
+
+### Email
+
+Email holds campaigns, automations, audiences, templates and, for owners and
+developers, the capture inbox. Its own Settings hold each organization's
+sending domain, senders, testing audience and brand. For the full guide see
+[Campaign sending](campaign-sending.md).
+
+**Brand.** In Email, Settings, each organization has a **Brand** row. Open it to
+set the look that new emails take: colours, fonts, the logo, the signature, the
+follow line, social links, the footer and the reply. A live preview sits beside
+the fields, with any warnings about contrast or picture size. Warnings never
+stop a save. Choose **Save** in the action bar when you are done. Changes apply
+to emails made after the save. Templates that already exist keep their look.
+
+**Templates.** A template that MemQL is writing appears at once in Templates,
+marked **Writing**. The list checks again every two seconds while any template
+is being written. Open the template to see "MemQL is writing this email", how
+long it has taken, and **Cancel**. If the writing stops, the row shows
+**Failed**. Open it to see why and to choose **Retry**. A finished email shows
+as a normal draft. MemQL never publishes it. Emails are started from New email
+in the editor or from Ask, not from the OS.
 
 ### Settings
 

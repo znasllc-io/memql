@@ -1,5 +1,7 @@
 # The Materializer as the one way a file is created
 
+> **Note (2026-11-05):** For emails, this spec is superseded by `2026-11-04-email-composition-design.md`. Emails are no longer made through the Materializer: a template is created directly from a layout, and MemQL writes its content in the background. The Materializer refuses an email with "Emails are made in the Email app." The rest of this spec still holds.
+
 - **Date:** 2026-10-11
 - **Status:** approved 2026-10-11 and built (memql#6023, tasks #6024 to #6031); this record is amended below to what shipped. The implementation plan was deleted with the epic's merge.
 - **Branch:** written on `docs/materializer-front-door-spec`, cut from `origin/main` at `78ed527f3`; built on `epic/materializer-front-door`

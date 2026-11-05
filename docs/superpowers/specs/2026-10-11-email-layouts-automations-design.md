@@ -1,5 +1,7 @@
 # Email layouts, one Email app, and automations
 
+> **Note (2026-11-05):** For emails, this spec is superseded by `2026-11-04-email-composition-design.md`. Emails are composed from a built-in layout with the organization's brand kit, no longer written into a layout by the Materializer, and organization layouts are no longer offered. The rest of this spec still holds.
+
 - **Date:** 2026-10-11
 - **Status:** owner direction of 2026-10-11 ("the brainstorming is done, execute"); decisions below are the implementer's rulings on the points the brainstorm left open
 - **Program:** epic #6022, sub-projects 2 to 5 (#6032, #6033, #6034, #6035) plus #6036/#6037 follow-ups, building on sub-project 1 (`2026-10-11-materializer-front-door-design.md`)
