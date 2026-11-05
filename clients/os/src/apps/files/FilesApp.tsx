@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { useAuthSource } from "../../auth/context";
-import { EdgeUploadProvider } from "../../items/edgeUpload";
+import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
 import { Button, Check, ContentSkeleton, Head, Notice, Panel, SetupGroup } from "../../kit";
 import { useOsConnection } from "../../live/connection";
@@ -77,13 +76,9 @@ export function FilesApp({
   // Injectable for tests; nothing in the shell passes either.
   const settingsStore = useMemo(() => store ?? new LocalFilesSettingsStore(), [store]);
   const [settings, setSettings] = useState<FilesSettings>(() => settingsStore.load());
-  const authSource = useAuthSource();
   const connection = useOsConnection();
   const { state: osState } = useOs();
-  const provider = useMemo(
-    () => uploads ?? new EdgeUploadProvider(() => authSource.bearer()),
-    [uploads, authSource],
-  );
+  const provider = useEdgeUploadProvider(uploads);
 
   const { artifacts, folders, files, compositions } = useLibraryFeeds();
 

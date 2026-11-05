@@ -29,6 +29,8 @@
 // have to: the field itself, and the resume key.
 
 import type { UploadHandle, UploadOptions, UploadProgress, UploadProvider, UploadResult } from "./upload";
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { flatten } from "../kit/rows";
 import { LocalResumeStore, type ResumeStore } from "./uploadResume";
 
 export const ONE_SHOT_LIMIT_BYTES = 32 * 1024 * 1024;
@@ -60,6 +62,34 @@ async function refusalFrom(response: Response): Promise<string> {
   return body;
 }
 
+/** Looks an uploaded file's Library artifact up by file id; null = not yet. */
+export type ArtifactResolver = (fileId: string, signal: AbortSignal) => Promise<string | null>;
+
+export const NOT_IN_LIBRARY_YET =
+  "The file was uploaded but is not in your Library yet. Try again in a moment.";
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException("The upload was cancelled.", "AbortError"));
+    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); reject(new DOMException("The upload was cancelled.", "AbortError")); };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** The resolver the shell wires: the typed `libraryArtifactForFile` query. */
+export function libraryArtifactResolver(
+  connection: () => { query: { libraryArtifactForFile: (args: { fileId: string }, opts?: { signal?: AbortSignal }) => Promise<{ rows(): Row[] }> } } | null,
+): ArtifactResolver {
+  return async (fileId, signal) => {
+    const live = connection();
+    if (!live) return null;
+    const row = (await live.query.libraryArtifactForFile({ fileId }, { signal })).rows()[0];
+    const id = row ? rowString(flatten(row), "id") : "";
+    return id !== "" ? id : null;
+  };
+}
+
 interface SessionFacts {
   uploadId: string;
   chunkSize: number;
@@ -81,10 +111,55 @@ export class EdgeUploadProvider implements UploadProvider {
     // other half was the 401 the engine answered once a request DID move).
     // jsdom's fetch tolerates any receiver, so the suite could never see it.
     private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
-    opts: { resume?: ResumeStore; backoffMs?: number } = {},
+    opts: {
+      resume?: ResumeStore;
+      backoffMs?: number;
+      resolveArtifact?: ArtifactResolver;
+      resolveWaitMs?: number;
+      resolveBudgetMs?: number;
+    } = {},
   ) {
     this.resume = opts.resume ?? new LocalResumeStore();
     this.backoffMs = opts.backoffMs ?? 600;
+    this.resolveArtifact = opts.resolveArtifact;
+    this.resolveWaitMs = opts.resolveWaitMs ?? 400;
+    this.resolveBudgetMs = opts.resolveBudgetMs ?? 20_000;
+  }
+
+  private readonly resolveArtifact: ArtifactResolver | undefined;
+  private readonly resolveWaitMs: number;
+  private readonly resolveBudgetMs: number;
+
+  /**
+   * The artifact id of an upload, whether or not the server could wait for
+   * the Library entry. When the answer names the file alone (the entry was not
+   * visible within the server's short promotion wait) the artifact is looked
+   * up by file id with a growing pause, for about 20 s, stopping the moment
+   * the upload is aborted.
+   */
+  private async artifactOf(
+    landed: { artifactId: string; fileId: string },
+    signal: AbortSignal,
+  ): Promise<string> {
+    if (landed.artifactId) return landed.artifactId;
+    if (landed.fileId && this.resolveArtifact) {
+      const started = Date.now();
+      let pause = this.resolveWaitMs;
+      for (;;) {
+        if (signal.aborted) throw new DOMException("The upload was cancelled.", "AbortError");
+        try {
+          const found = await this.resolveArtifact(landed.fileId, signal);
+          if (found) return found;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          // A failed lookup is the same as "not visible yet": keep waiting.
+        }
+        if (Date.now() - started + pause > this.resolveBudgetMs) break;
+        await sleep(pause, signal);
+        pause = Math.min(pause * 1.5, 2_000);
+      }
+    }
+    throw new Error(NOT_IN_LIBRARY_YET);
   }
 
   upload(file: File, opts?: UploadOptions): UploadHandle {
@@ -136,10 +211,10 @@ export class EdgeUploadProvider implements UploadProvider {
     });
     if (!response.ok) throw new Error(await refusalFrom(response));
     const landed = readUploadResponse(await response.json());
-    if (!landed.artifactId) throw new Error("Upload landed but named no artifact.");
+    const artifactId = await this.artifactOf(landed, signal);
     report({ sentBytes: file.size, totalBytes: file.size });
     return {
-      artifactId: landed.artifactId,
+      artifactId,
       title: file.name,
       fileKind: "file",
       source: "uploaded",
@@ -303,10 +378,10 @@ export class EdgeUploadProvider implements UploadProvider {
     });
     if (!response.ok) throw new Error(await refusalFrom(response));
     const landed = readUploadResponse(await response.json());
-    if (!landed.artifactId) throw new Error("Upload landed but named no artifact.");
+    const artifactId = await this.artifactOf(landed, signal);
     this.resume.forget(file, opts?.targetArtifactId);
     return {
-      artifactId: landed.artifactId,
+      artifactId,
       title: file.name,
       fileKind: "file",
       source: "uploaded",

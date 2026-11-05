@@ -8,7 +8,7 @@ import { SharedCredentialsProvider } from "../modules/connections/useSourceCrede
 import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
 import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
 import { useAskReadiness } from "../ask/useAskReadiness";
@@ -31,7 +31,7 @@ import { SetupReturnDispatcher } from "../apps/setup/SetupReturnDispatcher";
 import { AuthSourceProvider } from "../auth/context";
 import type { OsAuthSource } from "../auth/source";
 import type { OsRuntimeConfig } from "../cluster/config";
-import { EdgeUploadProvider } from "../items/edgeUpload";
+import { EdgeUploadProvider, libraryArtifactResolver } from "../items/edgeUpload";
 import { type UploadProvider } from "../items/upload";
 import { SdkDesktopGateway } from "../live/desktopGateway";
 import { MachinesProvider } from "../live/machines";
@@ -342,8 +342,13 @@ function ShellTransports({
       transcriber: new SdkTranscriber(() => connection?.dispatcher ?? null),
     };
   }, [ports.askVoice, connection]);
+  const liveConnection = useRef(connection);
+  liveConnection.current = connection;
   const uploads = useMemo<UploadProvider>(
-    () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer(), undefined, undefined, isRoleTestTab() ? { resume: new InMemoryResumeStore() } : {}),
+    () => ports.uploads ?? new EdgeUploadProvider(() => source.bearer(), undefined, undefined, {
+      ...(isRoleTestTab() ? { resume: new InMemoryResumeStore() } : {}),
+      resolveArtifact: libraryArtifactResolver(() => liveConnection.current),
+    }),
     [ports.uploads, source],
   );
   // The desktop store, which is the local one until there is a cluster to

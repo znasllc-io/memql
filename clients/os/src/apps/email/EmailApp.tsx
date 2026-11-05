@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
-import { useAuthSource } from "../../auth/context";
-import { EdgeUploadProvider } from "../../items/edgeUpload";
+import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { accessAdmits, type OsAppProps } from "../../system/registry";
@@ -131,16 +130,12 @@ function EmailSections({
   // nothing in the shell passes either.
   const settingsStore = useMemo(() => store ?? new LocalEmailSettingsStore(), [store]);
   const [settings, setSettings] = useState<EmailSettings>(() => settingsStore.load());
-  const authSource = useAuthSource();
 
   // THE SHELL'S ONE UPLOAD PATH. `items/edgeUpload.ts` is the only place in
   // clients/os that speaks the artifact upload wire (test/files/onePath.test.ts
   // fails the build on a second speaker), so the CSV import inherits chunking,
   // resume, retry, progress and verbatim refusals without learning any of them.
-  const uploadProvider = useMemo(
-    () => uploads ?? new EdgeUploadProvider(() => authSource.bearer()),
-    [uploads, authSource],
-  );
+  const uploadProvider = useEdgeUploadProvider(uploads);
 
   const feeds = useEmailFeeds();
   // THE ORGANIZATIONS SETTINGS HAS BEEN ON. The composed feeds read the

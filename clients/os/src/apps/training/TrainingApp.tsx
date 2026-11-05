@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Check, Head, Panel, SetupGroup } from "../../kit";
-import { useAuthSource } from "../../auth/context";
 import { useLiveView } from "../../live/liveView";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { EdgeUploadProvider } from "../../items/edgeUpload";
+import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
 import { useChunkDecisions } from "./actions";
 import { CHUNK_CONCEPT, FILE_CONCEPT, RUN_CONCEPT, type ChunkDecision } from "./concepts";
@@ -102,7 +101,6 @@ export function TrainingApp({
   const settingsStore = useMemo(() => store ?? new LocalTrainingSettingsStore(), [store]);
   const [settings, setSettings] = useState<TrainingSettings>(() => settingsStore.load());
 
-  const authSource = useAuthSource();
   const canEnterDomain = useSession().access?.role === "owner";
 
   // THE LIBRARY'S OWN PROVIDER, not a second one. Every upload in the OS
@@ -111,10 +109,7 @@ export function TrainingApp({
   // chunked resumable session, the per-chunk retry and the byte progress come
   // from. The space attachment provider this replaced had none of them and
   // capped at 25 MB.
-  const provider = useMemo<UploadProvider>(
-    () => injectedUploads ?? new EdgeUploadProvider(() => authSource.bearer()),
-    [injectedUploads, authSource],
-  );
+  const provider = useEdgeUploadProvider(injectedUploads);
 
   const uploads = useUploads(provider);
 
