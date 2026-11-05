@@ -1011,3 +1011,78 @@ func TestLayoutCapabilitiesAreRegistered(t *testing.T) {
 		t.Error("saveLayout answers one receipt; there is no order to preserve")
 	}
 }
+
+func TestEmailLayoutsRowsCarryWireframeAndCategory(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	engine.emailLayouts["l1"] = storedLayout(t, "active")
+	nodes, err := w.handleEmailLayouts(importCtx(), map[string]any{"accountId": layoutOrg}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	categories := map[string]bool{}
+	for _, c := range emaildoc.LayoutCategories {
+		categories[c] = true
+	}
+	for _, row := range nodePayloads(t, nodes) {
+		wireframe, _ := row["wireframe"].(string)
+		if !strings.HasPrefix(wireframe, "<svg") {
+			t.Errorf("%v: wireframe = %.40q", row["id"], wireframe)
+		}
+		category, _ := row["category"].(string)
+		if row["kind"] == "organization" {
+			if category != "Saved" {
+				t.Errorf("%v: category = %q", row["id"], category)
+			}
+		} else if !categories[category] {
+			t.Errorf("%v: category %q is not a layout category", row["id"], category)
+		}
+	}
+}
+
+func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	engine.emailLayouts["l1"] = storedLayout(t, "active")
+	nodes, err := w.handleLayoutCatalogue(importCtx(), map[string]any{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := nodePayloads(t, nodes)
+	builtins := emaildoc.Layouts()
+	if len(rows) != len(builtins) {
+		t.Fatalf("%d rows, want %d built-in layouts", len(rows), len(builtins))
+	}
+	for i, info := range builtins {
+		row := rows[i]
+		if row["id"] != info.ID || row["name"] != info.Name || row["category"] != info.Category || row["description"] != info.Description {
+			t.Errorf("row %d = %v", i, row)
+		}
+		if wf, _ := row["wireframe"].(string); !strings.HasPrefix(wf, "<svg") {
+			t.Errorf("%s: wireframe = %.40q", info.ID, wf)
+		}
+		outline, _ := row["outline"].(string)
+		if outline == "" || strings.Contains(outline, "\n") {
+			t.Errorf("%s: outline = %q", info.ID, outline)
+		}
+		for _, b := range info.Document.Blocks {
+			if !strings.Contains(outline, b.ID+":"+b.Type) {
+				t.Errorf("%s: outline lacks %s:%s: %s", info.ID, b.ID, b.Type, outline)
+			}
+		}
+		for _, id := range info.Optional {
+			if !strings.Contains(outline, id) || !strings.Contains(outline, " opt") {
+				t.Errorf("%s: outline does not mark %s optional: %s", info.ID, id, outline)
+			}
+		}
+		for id, r := range info.Repeat {
+			if want := fmt.Sprintf("rep %d..%d", r.Min, r.Max); !strings.Contains(outline, want) {
+				t.Errorf("%s: outline lacks %q for %s: %s", info.ID, want, id, outline)
+			}
+		}
+		if _, present := row["document"]; present {
+			t.Errorf("%s: catalogue row carries a document", info.ID)
+		}
+	}
+	if len(engine.calls("query emailLayoutsForAccount")) != 0 {
+		t.Fatal("the catalogue read organization layouts")
+	}
+}

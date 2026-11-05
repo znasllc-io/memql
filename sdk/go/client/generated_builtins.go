@@ -2186,7 +2186,7 @@ func EmailInboxBuild(args EmailInboxArgs) string {
 	return "builtin emailInbox()"
 }
 
-// EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
+// EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
 type EmailLayoutsArgs struct {
 	AccountId          string
 	IncludeArchived    bool
@@ -3347,6 +3347,21 @@ func (qc *QueryClient) LanguageStatus(ctx context.Context, args LanguageStatusAr
 func LanguageStatusBuild(args LanguageStatusArgs) string {
 	_ = args
 	return "builtin languageStatus()"
+}
+
+// LayoutCatalogue -- The built-in email layouts, for choosing one: rows are {id, name, category, description, outline, wireframe}. The outline is one line of the layout's blocks in order as id:type, containers listing children in brackets, brand blocks marked (brand), blocks a person may leave out marked opt and repeatable ones rep min..max. The wireframe is an SVG of the layout in its smallest form. Needs no organization. The id is opaque: pass it to composeMaterialize as layoutId.
+type LayoutCatalogueArgs struct {
+}
+
+// LayoutCatalogue calls the engine builtin layoutCatalogue.
+func (qc *QueryClient) LayoutCatalogue(ctx context.Context, args LayoutCatalogueArgs) (*Result, error) {
+	call := LayoutCatalogueBuild(args)
+	return qc.executeNamed(ctx, "layoutCatalogue", call)
+}
+
+func LayoutCatalogueBuild(args LayoutCatalogueArgs) string {
+	_ = args
+	return "builtin layoutCatalogue()"
 }
 
 // LibraryAddArtifactLabel -- Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.
