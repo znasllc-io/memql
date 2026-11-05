@@ -57,6 +57,11 @@ export function useAzureEmailCall(accountId: string) {
     epoch.current++; setBusy(false); setError("");
     return () => { epoch.current++; pending.current?.abort(); pending.current = null; };
   }, [connection, accountId]);
+  /** Stop whatever is being asked, retries included, and let the next request start. */
+  const cancel = useCallback(() => {
+    if (!pending.current) return;
+    epoch.current++; pending.current.abort(); pending.current = null; setBusy(false);
+  }, []);
   const call = useCallback(async (action: string, options: Record<string, unknown> = {}, sessionId = ""): Promise<AzureEmailReply | null> => {
     if (!connection || pending.current) return null;
     const generation = epoch.current, request = new AbortController();
@@ -64,15 +69,15 @@ export function useAzureEmailCall(accountId: string) {
     try {
       const ask = () => connection.query.emailAzureSetup({ accountId, action, options, sessionId }, { signal: request.signal });
       let response: Awaited<ReturnType<typeof ask>>;
-      for (let attempt = 0, waited = 0;; attempt++) {
+      const began = Date.now();
+      for (let attempt = 0;; attempt++) {
         try { response = await ask(); break; }
         catch (reason) {
           // A dropped connection is not the step's failure. Resumable steps are asked again
           // with a short backoff, and the person sees only a plain sentence if it never returns.
           if (!isTransportInterruption(reason) || request.signal.aborted) throw reason;
           const wait = RETRY_BACKOFF_MS[attempt] ?? RETRY_EVERY_MS;
-          if (!RESUMABLE.has(action) || waited + wait > RETRY_FOR_MS) throw Error(droppedSentence(action));
-          waited += wait;
+          if (!RESUMABLE.has(action) || Date.now() - began + wait > RETRY_FOR_MS) throw Error(droppedSentence(action));
           await pause(wait, request.signal);
           if (generation !== epoch.current) return null;
         }
@@ -90,5 +95,5 @@ export function useAzureEmailCall(accountId: string) {
       if (generation === epoch.current) setBusy(false);
     }
   }, [connection, accountId]);
-  return { call, busy, error };
+  return { call, cancel, busy, error };
 }

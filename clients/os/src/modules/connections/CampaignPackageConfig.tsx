@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
 import { Button, Caption, Fact, Facts, Field, Notice, Select, Subhead } from "../../kit";
 import { flatten } from "../../kit/rows";
@@ -37,7 +38,7 @@ export function CampaignPackageConfig({ accountId, organizationName, onImported 
       if (!row) throw Error("The cluster did not confirm the package operation.");
       return flatten(row) as unknown as Reply;
     } catch (reason) {
-      if (!request.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason));
+      if (!request.signal.aborted) setError(isTransportInterruption(reason) ? "The connection to MemQL dropped. Try again." : reason instanceof Error ? reason.message : String(reason));
       return null;
     } finally {
       if (pending.current === request) { pending.current = null; if (!request.signal.aborted) setBusy(false); }

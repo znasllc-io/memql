@@ -1,5 +1,5 @@
 import { accountDefaultDomain } from "../../apps/accounts/defaults";
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Mail } from "lucide-react";
 import { useSession } from "../../chrome/access";
 import { AccountPicker } from "../../apps/accounts/AccountPicker";
@@ -142,7 +142,10 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   clusterNotice?: boolean;
 }) {
   const formID = useId();
-  const { call, busy, error } = useAzureEmailCall(accountId);
+  const { call, cancel, busy, error } = useAzureEmailCall(accountId);
+  // Leaving the wizard ends any automatic retry, so a later visit can start its own request.
+  const lastView = useRef(view);
+  useEffect(() => { if (lastView.current === "setup" && view !== "setup") cancel(); lastView.current = view; }, [view, cancel]);
   const [state, setState] = useState<AzureEmailReply | null>(null);
   const [domainDraft, setDomain] = useState<string | null>(null);
   const domain = domainDraft ?? accountDomain;

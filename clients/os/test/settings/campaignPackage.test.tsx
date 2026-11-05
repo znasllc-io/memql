@@ -50,3 +50,14 @@ it("retains campaign bindings when Deployables exports address choices", () => {
  expect(configured.campaigns).toEqual(manifest.campaigns);
  expect(configured.deployables[0]?.deployment).toEqual({slug:"other-site",domains:["new.example.com"]});
 });
+
+it("never shows transport text when an export is cut off", async () => {
+ const call=vi.fn(async (args:Args)=>{if(args.action==="installed")return rowsResult([{status:"installed",manifest}]);throw Object.assign(Error("stream closed"),{reason:"transport"});});
+ h.connection={query:{packageCampaigns:call}};
+ render(<CampaignPackageConfig accountId="client" organizationName="Client" onImported={()=>{}}/>);
+ await screen.findByText("client-package · memql-package.yaml");
+ fireEvent.click(screen.getByRole("button",{name:"Export configuration"}));
+ await screen.findByText("Package configuration could not be completed.");
+ expect(screen.queryByText(/stream closed/)).toBeNull();
+ expect(screen.getByText(/The connection to MemQL dropped\./)).toBeTruthy();
+});

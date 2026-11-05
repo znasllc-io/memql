@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
 import { chooseOption } from "../selectControl";
@@ -194,7 +194,7 @@ describe("one Azure configuration per cluster", () => {
   describe("a dropped connection is never the operation's failure", () => {
     const dropped = () => Object.assign(Error("stream closed"), { reason: "transport" });
     const SENTENCE = "The connection to MemQL dropped. Continue setup picks up where it left off.";
-    const open = async (reply: (args: Args) => Record<string, unknown>) => {
+    const open = async (reply: (args: Args) => Record<string, unknown> | Promise<Record<string, unknown>>) => {
       const call = query(reply);
       render(withSession(<AzureEmailConnections/>));
       chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
@@ -266,6 +266,66 @@ describe("one Azure configuration per cluster", () => {
       expect(screen.queryByText(/stream closed/)).toBeNull();
       expect(screen.getByText(/The connection to MemQL dropped\./)).toBeTruthy();
       expect(screen.getByRole("button", { name: "Check domain records" })).toBeTruthy();
+    });
+    it("stops retrying when the page is closed", async () => {
+      let checks = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "verify") { checks++; throw dropped(); }
+        return { status: "dns", plan, planId: "saved", records: [] };
+      });
+      await click("Check domain records");
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(checks).toBe(2);
+      cleanup();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(checks).toBe(2);
+    });
+    it("stops retrying on Leave, and the sending domain can be opened again", async () => {
+      let checks = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "provision") { checks++; throw dropped(); }
+        return { status: "planned", plan, planId: "saved" };
+      });
+      await click("Create Azure resources");
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(checks).toBe(2);
+      await click("Leave");
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(checks).toBe(2);
+      await click("Manage email for Our company");
+      await click("Create Azure resources");
+      expect(checks).toBe(3);
+    });
+    it("retries saving the sender after a drop and saves it once", async () => {
+      let tries = 0, saved = 0;
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "sender") { if (++tries === 1) throw dropped(); saved++; return { status: "ready", plan, sender: "news@client.example", senders: { "news@client.example": "News" } }; }
+        return { status: "verified", plan, planId: "saved", records: [] };
+      });
+      await click("Save sender");
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(tries).toBe(2);
+      expect(saved).toBe(1);
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.queryByText("Needs attention")).toBeNull();
+    });
+    it("counts the time a request itself takes toward the two minutes", async () => {
+      let asks = 0;
+      const slow = Object.assign(Error("stream closed"), { reason: "transport" });
+      await open(args => {
+        if (args.action === "clusterStatus") return cluster;
+        if (args.action === "verify") { asks++; return new Promise<Record<string, unknown>>((_, no) => { setTimeout(() => no(slow), 50_000); }); }
+        return { status: "dns", plan, planId: "saved", records: [] };
+      });
+      await click("Check domain records");
+      await act(async () => { await vi.advanceTimersByTimeAsync(400_000); });
+      expect(asks).toBe(3);
+      expect(screen.queryByText(/stream closed/)).toBeNull();
+      expect(screen.getByText(/The connection to MemQL dropped\./)).toBeTruthy();
     });
     it("shows a validation sentence from Check domain records unchanged", async () => {
       await open(args => {
