@@ -616,3 +616,71 @@ func TestParseBrandKitFooterLinesMayBreak(t *testing.T) {
 		t.Fatalf("301 characters in one entry: %v", err)
 	}
 }
+
+// TestBrandWarningsFlagsALightSecondaryOnFooterLinks pins that a kit whose
+// secondary colour is too light for text on white is warned about where the
+// layouts draw text in it: the footer's links (14.7 pixels, which need 4.5 to
+// 1) and the reply's heading (21.3 pixels and bold, large text, which needs 3
+// to 1). The kit is accepted all the same: contrast warns, never refuses.
+func TestBrandWarningsFlagsALightSecondaryOnFooterLinks(t *testing.T) {
+	const light, white = "#d9eef0", "#ffffff"
+	kit := testKit(t)
+	kit.Theme.Secondary, kit.Theme.Canvas = light, white
+	raw, err := kit.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseBrandKit(raw)
+	if err != nil {
+		t.Fatalf("a kit with a light secondary must be accepted: %v", err)
+	}
+	// The runs the warnings are made of: in each layout with a reply, the
+	// footer's links and the reply's heading are read in the secondary on white.
+	for _, id := range compactSignatureLayouts {
+		doc, err := ApplyBrand(layoutOrFail(t, id), parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := Render(context.Background(), doc, nil, RenderOptions{Preview: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs, err := TextRuns(r.HTML)
+		if err != nil {
+			t.Fatal(err)
+		}
+		links, heading := 0, 0
+		for _, run := range runs {
+			if run.Foreground != light || run.Background != white {
+				continue
+			}
+			switch {
+			case run.Block == SlotFooter && !run.Large():
+				links++
+			case run.Block == "reply-heading" && run.Large():
+				heading++
+			}
+		}
+		if links < len(kit.Footer.Links) || heading == 0 {
+			t.Errorf("%s: want every footer link and the reply heading read in %s on %s, got %d link runs and %d heading runs", id, light, white, links, heading)
+		}
+	}
+	// The warnings name the secondary: as text, for the footer's links, and as
+	// large text, for the reply's heading.
+	want := map[string]bool{"the minimum here is 4.5 to 1.": false, "the minimum here is 3 to 1.": false}
+	for _, w := range BrandWarnings(context.Background(), parsed) {
+		if w.Code != "contrast" || !strings.HasPrefix(w.Message, "Text in "+light+" on "+white+" has a contrast of 1.2 to 1;") {
+			continue
+		}
+		for end := range want {
+			if strings.HasSuffix(w.Message, end) {
+				want[end] = true
+			}
+		}
+	}
+	for end, found := range want {
+		if !found {
+			t.Errorf("no contrast warning for text in %s on %s ending %q", light, white, end)
+		}
+	}
+}
