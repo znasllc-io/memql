@@ -527,20 +527,26 @@ func logoFor(logo BrandPicture, bleed, onColour bool) string {
 	return logo.Src
 }
 
-// onColouredPanel reports whether the block with the id sits inside a section
-// or columns block whose background is a colour of the brand: anything but the
-// light ones, canvas, white, page and tint (and none). coloured says whether
-// blocks already sit on one.
+// onColouredPanel reports whether the block with the id sits on a coloured
+// panel: whether the nearest section or columns block around it with a
+// background of its own has a colour of the brand, anything but the light
+// ones (canvas, white, page and tint). A container without a background
+// leaves the one around it in force, and a light one inside a coloured one is
+// light. coloured says whether blocks already sit on one.
 func onColouredPanel(blocks []Block, id string, coloured bool) bool {
 	for _, b := range blocks {
 		if b.ID == id {
 			return coloured
 		}
 		inside := coloured
-		switch b.Background {
-		case "", "canvas", "white", "page", "tint":
-		default:
-			inside = inside || b.Type == typeSection || b.Type == typeColumns
+		if b.Type == typeSection || b.Type == typeColumns {
+			switch b.Background {
+			case "":
+			case "canvas", "white", "page", "tint":
+				inside = false
+			default:
+				inside = true
+			}
 		}
 		if onColouredPanel(b.Blocks, id, inside) {
 			return true

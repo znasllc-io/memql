@@ -754,6 +754,11 @@ func TestApplyBrandUsesOnColourLogoOnAColouredPanel(t *testing.T) {
 		{"section of primary", `{"id":"s","type":"section","background":"primary","blocks":[` + logoBlock + `]}`, true},
 		{"columns of accent", `{"id":"c","type":"columns","background":"accent","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}`, true},
 		{"plain columns in a coloured section", `{"id":"s","type":"section","background":"secondary","blocks":[{"id":"c","type":"columns","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}]}`, true},
+		// The nearest background decides: a light container inside a coloured
+		// one is light, and a coloured one inside a light one is coloured.
+		{"white columns in a coloured section", `{"id":"s","type":"section","background":"primary","blocks":[{"id":"c","type":"columns","background":"white","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}]}`, false},
+		{"tint columns in a coloured section", `{"id":"s","type":"section","background":"secondary","blocks":[{"id":"c","type":"columns","background":"tint","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}]}`, false},
+		{"coloured columns in a white section", `{"id":"s","type":"section","background":"white","blocks":[{"id":"c","type":"columns","background":"secondary","columns":[{"width":100,"blocks":[` + logoBlock + `]}]}]}`, true},
 	} {
 		want := kit.Logo.Src
 		if c.reversed {
