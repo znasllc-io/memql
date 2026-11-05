@@ -1,0 +1,610 @@
+package emaildoc
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
+
+// brand.go -- an account's brand kit.
+//
+// A layout is structure only. A brand kit supplies its look (the theme's
+// colours and fonts) and the content of the six brand slots (logo, signature,
+// follow, social, footer, reply). ApplyBrand writes a kit into a layout; a
+// kit is read and written as JSON like a document is, and BrandWarnings says
+// what a kit would do to the built-in layouts without refusing it.
+
+// BrandPicturesWarnBytes is the pictures of a kit past which BrandWarnings
+// says they leave an email little room for its own (MaxImageBytes is the most
+// one email carries).
+const BrandPicturesWarnBytes = 512 << 10
+
+// Limits of a kit.
+const (
+	maxBrandSocial      = 8
+	maxBrandFooterLinks = 8
+	maxBrandFooterLines = 12
+	maxBrandLineChars   = 300
+	maxBrandFollowChars = 200
+)
+
+const brandUploadHint = "Upload pictures through the Brand page"
+
+// BrandPicture is the logo: a data: picture, its description and where it links.
+type BrandPicture struct{ Src, Alt, Href string }
+
+// BrandSignature is the signature band: a photo, the name as a picture or as
+// text (at most one of NameImage and NameText) and a title.
+type BrandSignature struct{ Photo, NameImage, NameText, Title string }
+
+// BrandFooter is the footer's lines, links and the separator between links.
+type BrandFooter struct {
+	Lines     []string
+	Links     []Link
+	Separator *string
+}
+
+// BrandReply is the invitation to reply.
+type BrandReply struct{ Heading, ButtonLabel, ButtonHref, Note string }
+
+// BrandKit is an account's brand.
+type BrandKit struct {
+	Theme     Theme
+	Logo      BrandPicture
+	Signature *BrandSignature
+	Follow    string
+	Social    []Link
+	Footer    BrandFooter
+	Reply     *BrandReply
+}
+
+type kitFile struct {
+	Theme     Theme         `json:"theme"`
+	Logo      kitLogo       `json:"logo"`
+	Signature *kitSignature `json:"signature,omitempty"`
+	Follow    string        `json:"follow,omitempty"`
+	Social    []Link        `json:"social,omitempty"`
+	Footer    kitFooter     `json:"footer"`
+	Reply     *kitReply     `json:"reply,omitempty"`
+}
+
+type kitLogo struct {
+	Src  string `json:"src"`
+	Alt  string `json:"alt,omitempty"`
+	Href string `json:"href,omitempty"`
+}
+
+type kitName struct {
+	Src  string `json:"src,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+type kitSignature struct {
+	Photo string   `json:"photo,omitempty"`
+	Name  *kitName `json:"name,omitempty"`
+	Title string   `json:"title,omitempty"`
+}
+
+type kitFooter struct {
+	Lines     []string `json:"lines,omitempty"`
+	Links     []Link   `json:"links"`
+	Separator *string  `json:"separator,omitempty"`
+}
+
+type kitButton struct {
+	Label string `json:"label"`
+	Href  string `json:"href"`
+}
+
+type kitReply struct {
+	Heading string    `json:"heading"`
+	Button  kitButton `json:"button"`
+	Note    string    `json:"note,omitempty"`
+}
+
+// JSON returns the canonical bytes of the kit: the key order of the format,
+// two-space indentation, markup unescaped and one trailing newline.
+// ParseBrandKit(k.JSON()) is k.
+func (k BrandKit) JSON() ([]byte, error) {
+	file := kitFile{
+		Theme:  k.Theme,
+		Logo:   kitLogo{Src: k.Logo.Src, Alt: k.Logo.Alt, Href: k.Logo.Href},
+		Follow: k.Follow,
+		Social: k.Social,
+		Footer: kitFooter{Lines: k.Footer.Lines, Links: k.Footer.Links, Separator: k.Footer.Separator},
+	}
+	if s := k.Signature; s != nil {
+		sig := &kitSignature{Photo: s.Photo, Title: s.Title}
+		switch {
+		case s.NameImage != "":
+			sig.Name = &kitName{Src: s.NameImage}
+		case s.NameText != "":
+			sig.Name = &kitName{Text: s.NameText}
+		}
+		file.Signature = sig
+	}
+	if r := k.Reply; r != nil {
+		file.Reply = &kitReply{Heading: r.Heading, Button: kitButton{Label: r.ButtonLabel, Href: r.ButtonHref}, Note: r.Note}
+	}
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(file); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+var (
+	kitKeys      = map[string]bool{"theme": true, "logo": true, "signature": true, "follow": true, "social": true, "footer": true, "reply": true}
+	logoKeys     = map[string]bool{"src": true, "alt": true, "href": true}
+	sigKeys      = map[string]bool{"photo": true, "name": true, "title": true}
+	nameKeys     = map[string]bool{"src": true, "text": true}
+	footerKeys   = map[string]bool{"lines": true, "links": true, "separator": true}
+	replyKeys    = map[string]bool{"heading": true, "button": true, "note": true}
+	buttonKeys   = map[string]bool{"label": true, "href": true}
+	kitSocialKey = map[string]bool{"network": true, "href": true, "icon": true}
+	kitFooterKey = map[string]bool{"label": true, "href": true}
+)
+
+// kitObject reads the object at where, refusing a repeated or unknown key. An
+// absent or null member is nil, false.
+func kitObject(raw json.RawMessage, where string, keys map[string]bool) (map[string]json.RawMessage, bool, error) {
+	if len(raw) == 0 || isNull(raw) {
+		return nil, false, nil
+	}
+	fields, duplicate, err := readObject(raw)
+	if err != nil {
+		return nil, false, fmt.Errorf("%s must be an object", where)
+	}
+	if duplicate != "" {
+		return nil, false, fmt.Errorf("%s: duplicate field %s", where, quote(duplicate))
+	}
+	if key := unknownKey(fields, keys); key != "" {
+		return nil, false, fmt.Errorf("%s: unknown field %s", where, quote(key))
+	}
+	return fields, true, nil
+}
+
+func kitText(fields map[string]json.RawMessage, key, where string) (string, error) {
+	s, err := textOf(fields[key])
+	if err != nil {
+		return "", fmt.Errorf("%s: %s must be text", where, key)
+	}
+	return s, nil
+}
+
+// kitPicture says what is wrong with a kit's picture, or "": it is a data:
+// picture that pictureProblem accepts. A kit stores its pictures; it does not
+// point at the Library.
+func kitPicture(src string) string {
+	if strings.HasPrefix(src, "artifact:") {
+		return brandUploadHint
+	}
+	if problem := pictureProblem(src); problem != "" {
+		return problem
+	}
+	if src != "" && !strings.HasPrefix(src, "data:") {
+		return brandUploadHint
+	}
+	return ""
+}
+
+// kitHref says what is wrong with a link of a kit, or "". Link merge tags are
+// for footer links only.
+func kitHref(href string, tagsAllowed bool) string {
+	if href == "" {
+		return hrefHint
+	}
+	if problem := hrefProblem(href, false); problem != "" {
+		return problem
+	}
+	if !tagsAllowed && linkTagOf(href) != "" {
+		return "a link tag can only be a footer link"
+	}
+	return ""
+}
+
+// ParseBrandKit reads and validates a brand kit. It refuses, with a sentence
+// that names the problem: a key it does not know, a theme Parse would refuse,
+// a logo without a src, a picture that is not an embedded PNG, JPEG or GIF
+// within the limits (a Library picture is told to be uploaded through the
+// Brand page), a link that breaks the link rule or a link tag outside the
+// footer, a footer without an {{unsubscribeUrl}} link, a signature name that
+// is not exactly one of a picture and text, a reply without a heading, button
+// label and button link, and more social links, footer links or footer lines
+// than the limits. The kit must also fit every built-in layout.
+func ParseBrandKit(data []byte) (BrandKit, error) {
+	if len(data) > MaxBytes {
+		return BrandKit{}, ErrFileTooLarge
+	}
+	fields, duplicate, err := readObject(data)
+	if err != nil {
+		return BrandKit{}, errors.New("a brand kit must be a JSON object")
+	}
+	if duplicate != "" {
+		return BrandKit{}, fmt.Errorf("duplicate field %s", quote(duplicate))
+	}
+	if key := unknownKey(fields, kitKeys); key != "" {
+		return BrandKit{}, fmt.Errorf("unknown field %s", quote(key))
+	}
+	var kit BrandKit
+	if kit.Theme, err = parseTheme(fields["theme"]); err != nil {
+		return BrandKit{}, err
+	}
+
+	logo, ok, err := kitObject(fields["logo"], "logo", logoKeys)
+	if err != nil {
+		return BrandKit{}, err
+	}
+	if !ok {
+		return BrandKit{}, errors.New("logo is required: a picture, as logo.src")
+	}
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{{"src", &kit.Logo.Src}, {"alt", &kit.Logo.Alt}, {"href", &kit.Logo.Href}} {
+		if *f.dst, err = kitText(logo, f.key, "logo"); err != nil {
+			return BrandKit{}, err
+		}
+	}
+	if kit.Logo.Src == "" {
+		return BrandKit{}, errors.New("logo.src is required")
+	}
+	if problem := kitPicture(kit.Logo.Src); problem != "" {
+		return BrandKit{}, fmt.Errorf("logo: %s", problem)
+	}
+	if kit.Logo.Href != "" {
+		if problem := kitHref(kit.Logo.Href, false); problem != "" {
+			return BrandKit{}, fmt.Errorf("logo: %s", problem)
+		}
+	}
+
+	if kit.Signature, err = parseKitSignature(fields["signature"]); err != nil {
+		return BrandKit{}, err
+	}
+	if kit.Follow, err = kitText(fields, "follow", "brand kit"); err != nil {
+		return BrandKit{}, err
+	}
+	if utf8.RuneCountInString(kit.Follow) > maxBrandFollowChars {
+		return BrandKit{}, fmt.Errorf("follow can be at most %d characters", maxBrandFollowChars)
+	}
+
+	if kit.Social, err = readLinks(fields["social"], "social", kitSocialKey, maxBrandSocial,
+		fmt.Sprintf("at most %d social links", maxBrandSocial), func(l Link) string {
+			if problem := socialLinkProblem(l); problem != "" {
+				return problem
+			}
+			if problem := kitHref(l.Href, false); problem != "" {
+				return problem
+			}
+			return kitPicture(l.Icon)
+		}); err != nil {
+		return BrandKit{}, err
+	}
+	if kit.Footer, err = parseKitFooter(fields["footer"]); err != nil {
+		return BrandKit{}, err
+	}
+	if kit.Reply, err = parseKitReply(fields["reply"]); err != nil {
+		return BrandKit{}, err
+	}
+
+	// The kit has to be usable: every built-in layout takes it, and the result
+	// is a document Parse reads.
+	for _, info := range Layouts() {
+		if _, err := ApplyBrand(info.Document, kit); err != nil {
+			return BrandKit{}, fmt.Errorf("the kit does not fit %s: %w", info.Name, err)
+		}
+	}
+	return kit, nil
+}
+
+func parseKitSignature(raw json.RawMessage) (*BrandSignature, error) {
+	fields, ok, err := kitObject(raw, "signature", sigKeys)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var s BrandSignature
+	if s.Photo, err = kitText(fields, "photo", "signature"); err != nil {
+		return nil, err
+	}
+	if s.Title, err = kitText(fields, "title", "signature"); err != nil {
+		return nil, err
+	}
+	if problem := kitPicture(s.Photo); problem != "" {
+		return nil, fmt.Errorf("signature photo: %s", problem)
+	}
+	name, ok, err := kitObject(fields["name"], "signature.name", nameKeys)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		src, err := kitText(name, "src", "signature.name")
+		if err != nil {
+			return nil, err
+		}
+		text, err := kitText(name, "text", "signature.name")
+		if err != nil {
+			return nil, err
+		}
+		if (src == "") == (text == "") {
+			return nil, errors.New("signature.name is a picture (src) or text, exactly one")
+		}
+		if problem := kitPicture(src); problem != "" {
+			return nil, fmt.Errorf("signature name: %s", problem)
+		}
+		s.NameImage, s.NameText = src, text
+	}
+	return &s, nil
+}
+
+func parseKitFooter(raw json.RawMessage) (BrandFooter, error) {
+	fields, ok, err := kitObject(raw, "footer", footerKeys)
+	if err != nil {
+		return BrandFooter{}, err
+	}
+	if !ok {
+		return BrandFooter{}, errors.New("footer is required, with an unsubscribe link ({{unsubscribeUrl}})")
+	}
+	var f BrandFooter
+	if v := fields["lines"]; len(v) > 0 && !isNull(v) {
+		var lines []string
+		if err := json.Unmarshal(v, &lines); err != nil {
+			return BrandFooter{}, errors.New("footer: lines must be a list of text")
+		}
+		if len(lines) > maxBrandFooterLines {
+			return BrandFooter{}, fmt.Errorf("footer: at most %d lines", maxBrandFooterLines)
+		}
+		for n, line := range lines {
+			if utf8.RuneCountInString(line) > maxBrandLineChars {
+				return BrandFooter{}, fmt.Errorf("footer: line %d is longer than %d characters", n+1, maxBrandLineChars)
+			}
+		}
+		if len(lines) > 0 {
+			f.Lines = lines
+		}
+	}
+	if f.Links, err = readLinks(fields["links"], "footer", kitFooterKey, maxBrandFooterLinks,
+		fmt.Sprintf("at most %d links", maxBrandFooterLinks), func(l Link) string {
+			if problem := footerLinkProblem(l); problem != "" {
+				return problem
+			}
+			return kitHref(l.Href, true)
+		}); err != nil {
+		return BrandFooter{}, err
+	}
+	unsubscribe := false
+	for _, l := range f.Links {
+		unsubscribe = unsubscribe || l.Href == TagUnsubscribeURL
+	}
+	if !unsubscribe {
+		return BrandFooter{}, errors.New("footer: needs a link to " + TagUnsubscribeURL + " so every email can be unsubscribed from")
+	}
+	if v := fields["separator"]; len(v) > 0 && !isNull(v) {
+		sep, err := kitText(fields, "separator", "footer")
+		if err != nil {
+			return BrandFooter{}, err
+		}
+		f.Separator = &sep
+	}
+	return f, nil
+}
+
+func parseKitReply(raw json.RawMessage) (*BrandReply, error) {
+	fields, ok, err := kitObject(raw, "reply", replyKeys)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var r BrandReply
+	if r.Heading, err = kitText(fields, "heading", "reply"); err != nil {
+		return nil, err
+	}
+	if r.Note, err = kitText(fields, "note", "reply"); err != nil {
+		return nil, err
+	}
+	button, _, err := kitObject(fields["button"], "reply.button", buttonKeys)
+	if err != nil {
+		return nil, err
+	}
+	if r.ButtonLabel, err = kitText(button, "label", "reply.button"); err != nil {
+		return nil, err
+	}
+	if r.ButtonHref, err = kitText(button, "href", "reply.button"); err != nil {
+		return nil, err
+	}
+	if r.Heading == "" || r.ButtonLabel == "" || r.ButtonHref == "" {
+		return nil, errors.New("reply needs a heading, a button label and a button link")
+	}
+	if problem := kitHref(r.ButtonHref, false); problem != "" {
+		return nil, fmt.Errorf("reply button: %s", problem)
+	}
+	return &r, nil
+}
+
+// findBlock returns the block with this id anywhere in blocks (in a section or
+// a column too), or nil.
+func findBlock(blocks []Block, id string) *Block {
+	var found *Block
+	eachBlock(blocks, roleContent, func(b *Block, _ string) {
+		if found == nil && b.ID == id {
+			found = b
+		}
+	})
+	return found
+}
+
+// removeBlock removes the block with this id from the list it sits in.
+func removeBlock(blocks *[]Block, id string) {
+	for i := range *blocks {
+		b := &(*blocks)[i]
+		if b.ID == id {
+			*blocks = append((*blocks)[:i:i], (*blocks)[i+1:]...)
+			return
+		}
+		removeBlock(&b.Blocks, id)
+		for c := range b.Columns {
+			removeBlock(&b.Columns[c].Blocks, id)
+		}
+	}
+}
+
+// ApplyBrand writes a kit into a copy of layout: the kit's theme replaces the
+// layout's and each brand slot, found by its id wherever it sits, takes the
+// kit's content. A slot the kit leaves empty is removed, and a kit slot the
+// layout does not have is not used. A text signature name replaces the name's
+// picture with a text block of the same id in the heading font. Content
+// blocks are never touched. The result is read back through JSON and Parse.
+func ApplyBrand(layout Document, kit BrandKit) (Document, error) {
+	if layout.Mode() != ModeLayout {
+		return Document{}, errors.New("this email is custom HTML, so it has no brand slots")
+	}
+	raw, err := layout.JSON()
+	if err != nil {
+		return Document{}, err
+	}
+	out, err := Parse(raw)
+	if err != nil {
+		return Document{}, fmt.Errorf("the layout is not a valid email document: %w", err)
+	}
+	out.Theme = kit.Theme
+	blocks := &out.Blocks
+
+	// fill sets a slot with set, or removes it when the kit has nothing for it.
+	fill := func(id string, present bool, set func(b *Block)) {
+		if !present {
+			removeBlock(blocks, id)
+			return
+		}
+		if b := findBlock(*blocks, id); b != nil {
+			set(b)
+		}
+	}
+	fill(SlotLogo, true, func(b *Block) { b.Src, b.Alt, b.Href = kit.Logo.Src, kit.Logo.Alt, kit.Logo.Href })
+
+	if s := kit.Signature; s == nil {
+		removeBlock(blocks, SlotSignature)
+	} else {
+		title := findBlock(*blocks, "signature-title")
+		fill("signature-photo", s.Photo != "", func(b *Block) { b.Src = s.Photo })
+		fill("signature-title", s.Title != "", func(b *Block) { b.Text = s.Title })
+		fill("signature-name", s.NameImage != "" || s.NameText != "", func(b *Block) {
+			if s.NameText == "" {
+				b.Src = s.NameImage
+				return
+			}
+			// The title's colour and alignment are the band's; the name is the
+			// larger line above it.
+			name := Block{ID: b.ID, Type: typeText, Text: s.NameText, Size: 22, LineHeight: 26, Weight: 700, Font: "heading", Color: "text", Align: "center"}
+			if title != nil {
+				name.Color, name.Align = title.Color, title.Align
+			}
+			*b = name
+		})
+	}
+
+	fill(SlotFollow, kit.Follow != "", func(b *Block) { b.Text = kit.Follow })
+	fill(SlotSocial, len(kit.Social) > 0, func(b *Block) { b.Links = append([]Link(nil), kit.Social...) })
+	fill(SlotFooter, true, func(b *Block) {
+		b.Lines = append([]string(nil), kit.Footer.Lines...)
+		b.Links = append([]Link(nil), kit.Footer.Links...)
+		b.Separator = nil
+		if kit.Footer.Separator != nil {
+			sep := *kit.Footer.Separator
+			b.Separator = &sep
+		}
+	})
+
+	if r := kit.Reply; r == nil {
+		removeBlock(blocks, SlotReply)
+	} else {
+		fill("reply-heading", true, func(b *Block) { b.Text = r.Heading })
+		fill("reply-button", true, func(b *Block) { b.Label, b.Href = r.ButtonLabel, r.ButtonHref })
+		fill("reply-note", r.Note != "", func(b *Block) { b.Text = r.Note })
+	}
+
+	applied, err := out.JSON()
+	if err != nil {
+		return Document{}, err
+	}
+	return Parse(applied)
+}
+
+// BrandWarning is something about a kit that is allowed but worth knowing.
+// Code is "contrast" or "pictures_large".
+type BrandWarning struct{ Code, Message string }
+
+// BrandWarnings renders every built-in layout with the kit applied and says
+// what a reader may struggle with: each pair of text and background colour
+// below the WCAG minimum, once however many layouts and blocks draw it, and
+// pictures that together leave an email little room of its own. It never
+// refuses a kit.
+func BrandWarnings(ctx context.Context, kit BrandKit) []BrandWarning {
+	var warnings []BrandWarning
+	type triple struct {
+		fg, bg string
+		large  bool
+	}
+	seen := map[triple]bool{}
+	for _, info := range Layouts() {
+		doc, err := ApplyBrand(info.Document, kit)
+		if err != nil {
+			continue
+		}
+		result, err := Render(ctx, doc, nil, RenderOptions{Preview: true})
+		if err != nil {
+			continue
+		}
+		runs, err := TextRuns(result.HTML)
+		if err != nil {
+			continue
+		}
+		for _, run := range runs {
+			key := triple{strings.ToLower(run.Foreground), strings.ToLower(run.Background), run.Large()}
+			if seen[key] {
+				continue
+			}
+			if ratio := ContrastRatio(run.Foreground, run.Background); ratio < run.Required() {
+				seen[key] = true
+				warnings = append(warnings, BrandWarning{Code: "contrast", Message: fmt.Sprintf(
+					"Text in %s on %s has a contrast of %.1f to 1; the minimum here is %s to 1.",
+					run.Foreground, run.Background, ratio, number(run.Required()))})
+			}
+		}
+	}
+	if total := kitPictureBytes(kit); total > BrandPicturesWarnBytes {
+		warnings = append(warnings, BrandWarning{Code: "pictures_large", Message: fmt.Sprintf(
+			"The kit's pictures total %d KiB, over the %d KiB that leaves room for an email's own pictures.",
+			(total+1023)>>10, BrandPicturesWarnBytes>>10)})
+	}
+	return warnings
+}
+
+// kitPictureBytes is the size of the kit's distinct pictures once decoded.
+func kitPictureBytes(kit BrandKit) int {
+	srcs := []string{kit.Logo.Src}
+	if s := kit.Signature; s != nil {
+		srcs = append(srcs, s.Photo, s.NameImage)
+	}
+	for _, l := range kit.Social {
+		srcs = append(srcs, l.Icon)
+	}
+	seen := map[string]bool{}
+	total := 0
+	for _, src := range srcs {
+		_, payload, ok := strings.Cut(src, ";base64,")
+		if !ok || seen[src] {
+			continue
+		}
+		seen[src] = true
+		if data, err := base64.StdEncoding.DecodeString(payload); err == nil {
+			total += len(data)
+		}
+	}
+	return total
+}
