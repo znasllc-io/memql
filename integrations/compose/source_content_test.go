@@ -357,3 +357,22 @@ func TestReferenceAndTemplateReadsRefuseAKeyOutsideTheOwnersLibrary(t *testing.T
 		t.Fatalf("storage was asked %d time(s) before the refusal", reader.calls)
 	}
 }
+
+func TestReferencesShareOneExpandedBudgetWithTheOriginalSentence(t *testing.T) {
+	budget := &referenceBudget{}
+	half := bytes.Repeat([]byte("x"), 10<<20)
+	if _, err := readReference("a.zip", "", referenceZIP(t, map[string][]byte{"a.txt": half}, ""), &referenceBudget{bytes: 0}); err == nil {
+		t.Fatal("10 MiB of text exceeds the text cap and must fail on its own")
+	}
+	img := bytes.Repeat([]byte{0}, 9<<20)
+	budget.bytes = len(img) // a first reference already used 9 MiB
+	_, err := readReference("b.zip", "", referenceZIP(t, map[string][]byte{"b.csv": bytes.Repeat([]byte("y"), 8<<20)}, ""), budget)
+	if err == nil || err.Error() != "reference contents exceed 16 MiB expanded" {
+		t.Fatalf("got %v", err)
+	}
+	budget.bytes = maxReferenceBytes
+	_, err = readReference("c.zip", "", referenceZIP(t, map[string][]byte{"c.txt": []byte("z")}, ""), budget)
+	if err == nil || err.Error() != "reference contents exceed 16 MiB expanded" {
+		t.Fatalf("empty remainder: got %v", err)
+	}
+}

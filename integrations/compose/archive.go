@@ -25,6 +25,16 @@ type ArchiveLimits struct {
 	// SkipUnsupported names a member that is not a picture or text file in
 	// Archive.Skipped instead of failing the whole archive.
 	SkipUnsupported bool
+	// reportUnpacked, when set, is the total named in the over-budget sentence
+	// while MaxUnpackedBytes is a smaller remainder of a shared budget.
+	reportUnpacked int64
+}
+
+func (l ArchiveLimits) unpackedWords() string {
+	if l.reportUnpacked > 0 {
+		return sizeWords(l.reportUnpacked)
+	}
+	return sizeWords(l.MaxUnpackedBytes)
 }
 
 // MaterializerArchiveLimits are what the Materializer has always applied to a
@@ -90,7 +100,7 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 		}
 		remaining := limits.MaxUnpackedBytes - unpacked
 		if remaining <= 0 || f.UncompressedSize64 > uint64(remaining) {
-			return out, fmt.Errorf("reference contents exceed %s expanded", sizeWords(limits.MaxUnpackedBytes))
+			return out, fmt.Errorf("reference contents exceed %s expanded", limits.unpackedWords())
 		}
 		r, err := f.Open()
 		if err != nil {
@@ -105,7 +115,7 @@ func ReadArchive(data []byte, limits ArchiveLimits) (Archive, error) {
 			return out, closeErr
 		}
 		if int64(len(body)) > remaining {
-			return out, fmt.Errorf("reference contents exceed %s expanded", sizeWords(limits.MaxUnpackedBytes))
+			return out, fmt.Errorf("reference contents exceed %s expanded", limits.unpackedWords())
 		}
 		unpacked += int64(len(body))
 		member, reason, err := classifyMember(name, body, limits)

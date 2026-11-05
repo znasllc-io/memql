@@ -119,7 +119,10 @@ func readReference(name, mime string, data []byte, budget *referenceBudget) ([]S
 		return []SourceContent{entry}, nil
 	}
 	limits := MaterializerArchiveLimits
-	limits.MaxUnpackedBytes = maxReferenceBytes
+	// Reading stops at what the composition's shared budget has left, but the
+	// sentence keeps naming the whole 16 MiB.
+	limits.MaxUnpackedBytes = int64(maxReferenceBytes - budget.bytes)
+	limits.reportUnpacked = maxReferenceBytes
 	read, err := ReadArchive(data, limits)
 	if err != nil {
 		return nil, err
