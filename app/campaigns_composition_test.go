@@ -101,48 +101,33 @@ func TestCompositionGoalStarterUsesAppsRouteChosenByOwner(t *testing.T) {
 	}
 }
 
-// fakeAppDoors stands in for the app-inference seam's Doors.
+// fakeAppDoors stands in for the engine's AppReachableFor.
 type fakeAppDoors struct {
-	doors []memqlengine.AppDoor
-	err   error
-	asked []string
+	reachable bool
+	err       error
+	asked     []string
 }
 
-func (f *fakeAppDoors) Doors(_ context.Context, actingUserId string) ([]memqlengine.AppDoor, error) {
+func (f *fakeAppDoors) AppReachableFor(_ context.Context, actingUserId string) (bool, error) {
 	f.asked = append(f.asked, actingUserId)
-	return f.doors, f.err
+	return f.reachable, f.err
 }
 
-func TestCompositionAppReachabilityCountsAnyReachableDoor(t *testing.T) {
+// The door-by-door Reachable() cases live with the engine method
+// (component/memql TestAppReachableFor); here the composition passes the
+// person through and returns the engine's answer unchanged.
+func TestCompositionAppReachabilityAsksTheEngineForThePerson(t *testing.T) {
 	const owner = "v1:identity:user:composer-1"
-	door := func(machines ...memqlengine.AppMachine) memqlengine.AppDoor {
-		return memqlengine.AppDoor{AppId: "claude-code", Machines: machines}
-	}
-	for _, tc := range []struct {
-		name  string
-		doors []memqlengine.AppDoor
-		want  bool
-	}{
-		{"no machines", nil, false},
-		{"a machine that is off", []memqlengine.AppDoor{door(memqlengine.AppMachine{Online: false, LocalStream: true})}, false},
-		{"online but held nowhere", []memqlengine.AppDoor{door(memqlengine.AppMachine{Online: true})}, false},
-		{"held by this replica", []memqlengine.AppDoor{door(memqlengine.AppMachine{Online: true, LocalStream: true})}, true},
-		// What a bff sees: the agent holding the machine is reached by a
-		// forward. Reachable, never Runnable there, and enough.
-		{"held by another agent", []memqlengine.AppDoor{door(memqlengine.AppMachine{Online: true, Forwardable: true})}, true},
-		{"one of several", []memqlengine.AppDoor{door(memqlengine.AppMachine{Online: false}), door(memqlengine.AppMachine{Online: true, Forwardable: true})}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			lister := &fakeAppDoors{doors: tc.doors}
-			reach := &compositionAppReachability{doors: func() compositionAppDoors { return lister }}
-			got, err := reach.HasReachableApp(context.Background(), owner)
-			if err != nil || got != tc.want {
-				t.Fatalf("HasReachableApp = %v, %v; want %v", got, err, tc.want)
-			}
-			if len(lister.asked) != 1 || lister.asked[0] != owner {
-				t.Errorf("asked about %v, want the person", lister.asked)
-			}
-		})
+	for _, want := range []bool{true, false} {
+		f := &fakeAppDoors{reachable: want}
+		reach := &compositionAppReachability{doors: func() compositionAppDoors { return f }}
+		got, err := reach.HasReachableApp(context.Background(), owner)
+		if err != nil || got != want {
+			t.Fatalf("HasReachableApp = %v, %v; want %v", got, err, want)
+		}
+		if len(f.asked) != 1 || f.asked[0] != owner {
+			t.Errorf("asked about %v, want the person", f.asked)
+		}
 	}
 	failing := &compositionAppReachability{doors: func() compositionAppDoors { return &fakeAppDoors{err: errors.New("the fleet cannot be read")} }}
 	if ok, err := failing.HasReachableApp(context.Background(), owner); ok || err == nil {
@@ -150,7 +135,22 @@ func TestCompositionAppReachabilityCountsAnyReachableDoor(t *testing.T) {
 	}
 	none := &compositionAppReachability{doors: func() compositionAppDoors { return nil }}
 	if ok, err := none.HasReachableApp(context.Background(), owner); ok || err != nil {
-		t.Errorf("no app doors on this node = %v, %v", ok, err)
+		t.Errorf("no engine on this node = %v, %v", ok, err)
+	}
+}
+
+// Reachability does not read App.appInference: a bff or planner node leaves
+// that field nil and installs its app door in the provider registry only.
+func TestCompositionReachabilityDoesNotDependOnAppInference(t *testing.T) {
+	const owner = "v1:identity:user:composer-1"
+	a := &App{}
+	if a.appInference != nil {
+		t.Fatal("appInference must be nil")
+	}
+	var engine compositionAppDoors = &fakeAppDoors{reachable: true}
+	reach := &compositionAppReachability{doors: func() compositionAppDoors { return engine }}
+	if ok, err := reach.HasReachableApp(context.Background(), owner); !ok || err != nil {
+		t.Errorf("reachable with appInference nil = %v, %v", ok, err)
 	}
 }
 

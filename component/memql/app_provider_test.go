@@ -608,3 +608,32 @@ func TestTheReadinessRowCountsAnAppThisNodeCanForwardTo(t *testing.T) {
 		t.Fatal("an offline machine made the app door eligible")
 	}
 }
+
+func TestAppReachableFor(t *testing.T) {
+	ctx := context.Background()
+	if ok, err := (*MemQLEngine)(nil).AppReachableFor(ctx, "alice"); ok || err != nil {
+		t.Errorf("nil engine = %v, %v", ok, err)
+	}
+	if ok, err := (&MemQLEngine{}).AppReachableFor(ctx, "alice"); ok || err != nil {
+		t.Errorf("no registry = %v, %v", ok, err)
+	}
+	with := func(apps AppInference) *MemQLEngine {
+		r := newProviderRegistry()
+		r.SetAppInference(apps)
+		return &MemQLEngine{providers: r}
+	}
+	if ok, err := with(&stubApps{}).AppReachableFor(ctx, "alice"); ok || err != nil {
+		t.Errorf("no doors = %v, %v", ok, err)
+	}
+	off := AppDoor{AppId: appIdClaudeCode, Machines: []AppMachine{{Online: false, LocalStream: true}}}
+	if ok, err := with(&stubApps{doors: []AppDoor{off}}).AppReachableFor(ctx, "alice"); ok || err != nil {
+		t.Errorf("unreachable door = %v, %v", ok, err)
+	}
+	apps := &stubApps{doors: []AppDoor{off, runnableDoor(appIdClaudeCode)}}
+	if ok, err := with(apps).AppReachableFor(ctx, "alice"); !ok || err != nil {
+		t.Errorf("reachable door = %v, %v", ok, err)
+	}
+	if apps.lastActor != "alice" {
+		t.Errorf("asked for %q, want alice", apps.lastActor)
+	}
+}

@@ -409,6 +409,25 @@ func (r *ProviderRegistry) AppDoors(ctx context.Context, actingUserId string) ([
 	return doors, nil
 }
 
+// AppReachableFor reports whether any of the person's app doors can be
+// reached from this node now: the app door of inferenceStatus's appEligible,
+// for one named person. A node with no provider registry reaches none.
+func (e *MemQLEngine) AppReachableFor(ctx context.Context, actingUserId string) (bool, error) {
+	if e == nil || e.providers == nil {
+		return false, nil
+	}
+	doors, err := e.providers.AppDoors(ctx, actingUserId)
+	if err != nil {
+		return false, err
+	}
+	for _, door := range doors {
+		if door.Reachable() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // SplitAppReference decomposes an app door reference into the app id and the
 // MODEL PIN a policy may write after it (`app:<id>:<model>`, design D8).
 //

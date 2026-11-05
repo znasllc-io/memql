@@ -53,10 +53,11 @@ type compositionGoalOpener interface {
 	OpenDirectGoal(ctx context.Context, g workspine.DirectGoal) (goalId, runId string, err error)
 }
 
-// compositionAppDoors lists a person's app doors: the app-inference seam's
-// Doors, the read work dispatch makes.
+// compositionAppDoors answers whether a person's app doors can be reached from
+// this node: the engine's AppReachableFor, which reads the provider registry
+// every node installs its app door into.
 type compositionAppDoors interface {
-	Doors(ctx context.Context, actingUserId string) ([]memql.AppDoor, error)
+	AppReachableFor(ctx context.Context, actingUserId string) (bool, error)
 }
 
 // compositionGoalStarter implements campaigns.GoalStarter.
@@ -128,16 +129,7 @@ func (r *compositionAppReachability) HasReachableApp(ctx context.Context, userID
 	if doors == nil {
 		return false, nil
 	}
-	list, err := doors.Doors(ctx, userID)
-	if err != nil {
-		return false, err
-	}
-	for _, door := range list {
-		if door.Reachable() {
-			return true, nil
-		}
-	}
-	return false, nil
+	return doors.AppReachableFor(ctx, userID)
 }
 
 // campaignCompositionSeams are the three, each resolving what it needs off
@@ -155,11 +147,10 @@ func (a *App) campaignCompositionSeams() (campaigns.GoalStarter, campaigns.GoalC
 		return procedureCapabilityByName(a.engine, "work", "cancelGoal")
 	}}
 	reach := &compositionAppReachability{doors: func() compositionAppDoors {
-		// The seam is held as any and may be absent on a node with no app
-		// door: asserted, as work dispatch does. The call context is the
-		// caller's own, so Doors answers for the acting person.
-		doors, _ := a.appInference.(compositionAppDoors)
-		return doors
+		if a.engine == nil {
+			return nil
+		}
+		return a.engine
 	}}
 	return starter, canceller, reach
 }
