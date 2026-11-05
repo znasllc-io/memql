@@ -401,8 +401,10 @@ func (w *Worker) handleLayoutCatalogue(_ context.Context, _ map[string]any, _ in
 }
 
 // layoutOutline is the layout's blocks in document order on one line:
-// id:type, with containers listing their children in brackets, brand blocks
-// marked (brand), optional ones "opt" and repeatable ones "rep min..max".
+// id:type, with containers listing their children in brackets -- a section its
+// blocks, a columns block each column's blocks with " | " between the columns
+// -- brand blocks marked (brand), optional ones "opt" and repeatable ones
+// "rep min..max".
 func layoutOutline(info emaildoc.LayoutInfo) string {
 	optional := map[string]bool{}
 	for _, id := range info.Optional {
@@ -415,6 +417,13 @@ func layoutOutline(info emaildoc.LayoutInfo) string {
 			part := b.ID + ":" + b.Type
 			if len(b.Blocks) > 0 {
 				part += "[" + write(b.Blocks) + "]"
+			}
+			if len(b.Columns) > 0 {
+				columns := make([]string, 0, len(b.Columns))
+				for _, column := range b.Columns {
+					columns = append(columns, write(column.Blocks))
+				}
+				part += "[" + strings.Join(columns, " | ") + "]"
 			}
 			if b.Role == "brand" {
 				part += "(brand)"

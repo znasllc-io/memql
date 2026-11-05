@@ -1063,11 +1063,13 @@ func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
 		if outline == "" || strings.Contains(outline, "\n") {
 			t.Errorf("%s: outline = %q", info.ID, outline)
 		}
-		for _, b := range info.Document.Blocks {
+		// Every block, those inside sections and columns included: Ask's
+		// assistant chooses a layout from what it holds.
+		eachLayoutBlock(info.Document.Blocks, func(b emaildoc.Block) {
 			if !strings.Contains(outline, b.ID+":"+b.Type) {
 				t.Errorf("%s: outline lacks %s:%s: %s", info.ID, b.ID, b.Type, outline)
 			}
-		}
+		})
 		for _, id := range info.Optional {
 			if !strings.Contains(outline, id) || !strings.Contains(outline, " opt") {
 				t.Errorf("%s: outline does not mark %s optional: %s", info.ID, id, outline)
@@ -1084,6 +1086,22 @@ func TestLayoutCatalogueListsBuiltInLayoutsWithOutlines(t *testing.T) {
 	}
 	if len(engine.calls("query emailLayoutsForAccount")) != 0 {
 		t.Fatal("the catalogue read organization layouts")
+	}
+}
+
+// TestLayoutOutlineShowsWhatColumnsHold: a columns block lists each column's
+// blocks in its brackets, the columns apart by " | ".
+func TestLayoutOutlineShowsWhatColumnsHold(t *testing.T) {
+	var outline string
+	for _, info := range emaildoc.Layouts() {
+		if info.ID == "builtin:side-by-side" {
+			outline = layoutOutline(info)
+		}
+	}
+	want := "cards:columns[card-a-icon:image, card-a-title:heading, card-a-subtitle:text, card-a-text:text | " +
+		"card-b-icon:image, card-b-title:heading, card-b-subtitle:text, card-b-text:text]"
+	if !strings.Contains(outline, want) {
+		t.Errorf("outline = %s\nwant it to hold %s", outline, want)
 	}
 }
 
