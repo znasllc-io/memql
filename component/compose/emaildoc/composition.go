@@ -77,7 +77,7 @@ func shape(layout Document, info LayoutInfo, drop []string, repeat map[string]in
 		n := repeat[id]
 		rng, ok := info.Repeat[id]
 		if !ok {
-			return Document{}, fmt.Errorf("the draft repeated %s %d times; this layout allows %d to %d", id, n, 1, 1)
+			return Document{}, fmt.Errorf("the draft repeated %s; this layout does not repeat that block", id)
 		}
 		if n < rng.Min || n > rng.Max || n < 1 {
 			return Document{}, fmt.Errorf("the draft repeated %s %d times; this layout allows %d to %d", id, n, rng.Min, rng.Max)

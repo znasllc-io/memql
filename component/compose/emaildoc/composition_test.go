@@ -20,7 +20,7 @@ func repeatLayout(t *testing.T) (Document, LayoutInfo) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return d, LayoutInfo{ID: "test:steps", Optional: []string{"note"}, Repeat: map[string]RepeatRange{"step": {Min: 1, Max: 3}}}
+	return d, LayoutInfo{ID: "test:steps", Optional: []string{"note", "step"}, Repeat: map[string]RepeatRange{"step": {Min: 1, Max: 3}}}
 }
 
 func slotIDs(slots []Slot) []string {
@@ -47,8 +47,9 @@ func TestComposeDropsOnlyOptionalBlocks(t *testing.T) {
 	if err == nil || err.Error() != "the draft dropped a block this layout needs: intro" {
 		t.Fatalf("got %v", err)
 	}
-	if _, err = Compose(layout, info, Composition{Subject: "S", Drop: []string{"note"}, Repeat: map[string]int{"note": 2}}, nil); err == nil {
-		t.Fatal("want a refusal for dropping and repeating one id")
+	_, err = Compose(layout, info, Composition{Subject: "S", Drop: []string{"step"}, Repeat: map[string]int{"step": 2}}, nil)
+	if err == nil || err.Error() != "the draft both dropped and repeated step" {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -93,8 +94,11 @@ func TestComposeRefusesRepeatOutsideRange(t *testing.T) {
 			t.Errorf("got %v, want %s", err, c.want)
 		}
 	}
-	if _, err := Compose(layout, info, Composition{Subject: "S", Repeat: map[string]int{"intro": 2}}, nil); err == nil {
-		t.Error("want a refusal for a block that is not repeatable")
+	for _, n := range []int{1, 2} {
+		_, err := Compose(layout, info, Composition{Subject: "S", Repeat: map[string]int{"intro": n}}, nil)
+		if want := "the draft repeated intro; this layout does not repeat that block"; err == nil || err.Error() != want {
+			t.Errorf("got %v, want %s", err, want)
+		}
 	}
 }
 
