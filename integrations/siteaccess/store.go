@@ -89,11 +89,13 @@ type Engine interface {
 // Code is one v1:platform:siteAccessCode as the access decision needs it. Its ids
 // are BARE: the view hands them back canonical, and the handler compares
 // AccountID with the site's, where one spelling on each side would read as a move.
+// Label is the operator's name for the code, which the handler stamps on a gated
+// mutation that declares accessCodeLabel; nothing decides by it.
 type Code struct {
-	ID, SiteID, AccountID, Gate, Subject string
-	Generation                           int
-	ExpiresAt                            time.Time
-	Revoked                              bool
+	ID, SiteID, AccountID, Gate, Subject, Label string
+	Generation                                  int
+	ExpiresAt                                   time.Time
+	Revoked                                     bool
 }
 
 // Session is one v1:platform:siteAccessSession as the access decision needs it.
@@ -351,10 +353,10 @@ type siteView struct {
 }
 
 // codeView is a Code with what only the operator's surface reads: the row's own
-// words, as they were stored, and the version an act decides from.
+// words, as they were stored, and the version an act decides from. The label is
+// the Code's own, since the handler stamps it too.
 type codeView struct {
 	Code
-	Label     string
 	Hint      string
 	IssuedAt  string
 	ExpiresOn string // expiresAt as stored; Code.ExpiresAt is the same value parsed
@@ -371,11 +373,11 @@ func codeFromRow(r map[string]any) codeView {
 			AccountID:  memql.BareShortId(rowString(r, "accountId")),
 			Gate:       rowString(r, "gate"),
 			Subject:    rowString(r, "subject"),
+			Label:      rowString(r, "label"),
 			Generation: rowInt(r, "generation"),
 			ExpiresAt:  rowTime(r, "expiresAt"),
 			Revoked:    revokedAt != "",
 		},
-		Label:     rowString(r, "label"),
 		Hint:      rowString(r, "codeHint"),
 		IssuedAt:  rowString(r, "issuedAt"),
 		ExpiresOn: rowString(r, "expiresAt"),

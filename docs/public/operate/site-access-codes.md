@@ -277,7 +277,7 @@ POST /_memql/access/call
 
 ### The reserved arguments, and how they isolate data
 
-Four argument names are **reserved**. When a construct declares one, the handler
+Five argument names are **reserved**. When a construct declares one, the handler
 stamps it, *last*, from what it knows about the session. A caller that sends one
 is refused with `invalid_args`, even to a construct that does not declare it,
 so a forged argument cannot tell anybody what a construct declares.
@@ -288,12 +288,20 @@ so a forged argument cannot tell anybody what a construct declares.
 | `accessSubject` | the subject the operator gave the code. **Not stamped at all** for a code with none -- never an empty string | scope by client |
 | `accessGate` | the gate the code opens. A construct has exactly one, so this is always that gate | record on a row which gate wrote it |
 | `siteId` | the bare id of the deployable's site | scope by deployable |
+| `accessCodeLabel` | the operator's name for the code, its label. **On a mutation only**: the load refuses it on a query | tell the operator which code did something |
 
 That is the isolation mechanism, and it is the author's to use: **rows carry the
 stamped `accessCodeId`, or match `accessSubject`, and the filter says so.** A
 gated construct that reads rows with neither opens them to everyone holding any
 code for that gate. Writing the annotation without a filter is deciding exactly
 that.
+
+`accessCodeLabel` isolates nothing. It lets a product tell the operator, in a
+message only they read, which code did something, because no workflow can read a
+code. The visitor is never told: a mutation answers them with its bare id, and the
+load refuses the name on a query, which answers with what its shape selects. A row
+you write the name to is yours to keep out of every gated read's shape (added
+2026-11-04).
 
 Declare a reserved argument as `string!`. A construct that needs `accessSubject`
 and is called by a code with no subject is refused by the engine for the missing

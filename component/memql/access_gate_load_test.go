@@ -38,6 +38,7 @@ concept deskBrief {
   ownerUserId   string
   accessCodeId  string
   accessSubject string
+  codeLabel     string
   siteId        string
   title         string
   count         int
@@ -290,6 +291,21 @@ tool deskTool {
 			refused: []string{"deskNote", "AccessSubject", "reserved argument accessSubject", "Declare it as accessSubject"},
 		},
 		{
+			name: "an argument spelled accessCodelabel, on a mutation",
+			domains: map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+				"    accessCodelabel string!\n    title string!\n", "      codeLabel: args.accessCodelabel\n")},
+			refused: []string{"deskNote", "accessCodelabel", "reserved argument accessCodeLabel", "Declare it as accessCodeLabel"},
+		},
+		// THE CODE'S NAME NEVER REACHES A QUERY. A query answers a visitor with the rows
+		// its shape selects, so a query told the name could hand it to the visitor; a
+		// mutation answers with its bare id alone.
+		{
+			name: "the code's name declared on a query",
+			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
+				codeArgs+"    accessCodeLabel string!\n", codeFilter+` && row.codeLabel == args.accessCodeLabel`)},
+			refused: []string{"deskBriefs", "accessCodeLabel", "only a mutation"},
+		},
+		{
 			// Two file namespaces, one domain: the second construct binds to the
 			// desk concept through an import, so both belong to desk.
 			// Different gates on purpose: the call names the construct and not
@@ -359,6 +375,13 @@ tool deskTool {
 			domains: map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
 				codeArgs+"    accessSubject string\n", codeFilter+` && row.accessSubject == args.accessSubject`)},
 			opens: []gateOpens{{"client-desk", "dashboard", "deskBriefs", "query", "desk"}},
+		},
+		{
+			name: "the code's name declared on a mutation",
+			domains: map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+				codeArgs+"    accessCodeLabel string!\n    title string!\n",
+				"      accessCodeId: args.accessCodeId\n      codeLabel: args.accessCodeLabel\n")},
+			opens: []gateOpens{{"client-desk", "dashboard", "deskNote", "mutation", "desk"}},
 		},
 		{
 			// A disabled construct is out of service, so it opens nothing and
@@ -1061,9 +1084,29 @@ func TestAccessGateCallPrefixMirrorsTheShopperOne(t *testing.T) {
 // that stamps them: a name here the handler does not stamp is an argument no
 // caller can supply, and a name stamped that is not here is one a caller can.
 func TestAccessGateReservedArgumentsArePinned(t *testing.T) {
-	want := []string{"siteId", "accessCodeId", "accessGate", "accessSubject"}
+	want := []string{"siteId", "accessCodeId", "accessGate", "accessSubject", "accessCodeLabel"}
 	if !reflect.DeepEqual(ReservedAccessArgs, want) {
 		t.Fatalf("ReservedAccessArgs = %v, want %v", ReservedAccessArgs, want)
+	}
+}
+
+// A mutation that declares the code's name lists it among the names the handler
+// stamps, beside the code's id, in declaration order.
+func TestAccessGateAMutationIsStampedWithTheCodesName(t *testing.T) {
+	entries, problems := loadGateBundleEntries(t, gateBundleDomains(map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+		codeArgs+"    accessCodeLabel string!\n    title string!\n",
+		"      accessCodeId: args.accessCodeId\n      codeLabel: args.accessCodeLabel\n")}), false)
+	if len(problems) != 0 {
+		t.Fatalf("the bundle did not load clean: %v", problems)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %+v, want the one mutation", entries)
+	}
+	if want := []string{AccessArgCodeID, AccessArgCodeLabel}; !reflect.DeepEqual(entries[0].Stamped, want) {
+		t.Fatalf("Stamped = %v, want %v", entries[0].Stamped, want)
+	}
+	if want := []string{"title"}; !reflect.DeepEqual(entries[0].Args, want) {
+		t.Fatalf("Args = %v, want %v: a caller may send the title and nothing stamped", entries[0].Args, want)
 	}
 }
 

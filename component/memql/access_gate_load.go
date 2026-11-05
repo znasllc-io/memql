@@ -274,6 +274,15 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 			return AccessGateEntry{}, fmt.Errorf("%q declares the reserved argument %s as %s, but the access "+
 				"handler stamps it as a string. Declare it as string", fn.Name, name, field.Type)
 		}
+		// THE CODE'S NAME IS NEVER A QUERY'S. A query answers the visitor with the rows its
+		// shape selects, so a query told the operator's name for the code could hand it to
+		// the visitor; a mutation answers with its bare id alone.
+		if name == AccessArgCodeLabel && kind != AccessKindMutation {
+			return AccessGateEntry{}, fmt.Errorf("%q is a query and declares %s, the operator's name for the "+
+				"code. A query answers the visitor with what its shape selects, so the name could reach them, "+
+				"and only a mutation, which answers with its bare id, may declare it. Remove the argument, or "+
+				"record the name from a gated mutation", fn.Name, name)
+		}
 		entry.Stamped = append(entry.Stamped, name)
 	}
 	return entry, nil

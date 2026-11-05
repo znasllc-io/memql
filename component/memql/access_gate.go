@@ -89,25 +89,35 @@ const (
 	AccessKindMutation = "mutation"
 )
 
-// The four argument names the access handler stamps, last, on a construct that
+// The five argument names the access handler stamps, last, on a construct that
 // declares them. A caller sending one is refused, so a visitor can never choose
 // which code, gate, subject or site a call runs as.
 //
-// They are how a product isolates data between codes: rows carry the stamped
-// accessCodeId, or match accessSubject, and the construct's filter says so. A
-// gated construct that reads rows with neither opens them to everyone holding
-// any code for that gate, which its author is deciding deliberately by writing
-// the annotation.
+// The first four are how a product isolates data between codes: rows carry the
+// stamped accessCodeId, or match accessSubject, and the construct's filter says
+// so. A gated construct that reads rows with neither opens them to everyone
+// holding any code for that gate, which its author is deciding deliberately by
+// writing the annotation.
+//
+// accessCodeLabel is the operator's name for the code (its `label`), so a product
+// can tell the OPERATOR which code did something -- "opened with Client reviewers"
+// in a message to the site's owner -- without reading codes, which no workflow can.
+// It isolates nothing. A MUTATION ONLY: the load refuses it on a query, and the
+// handler stamps it on a mutation alone, because a query answers a visitor with
+// what its shape selects and a mutation answers with its bare id. A row a mutation
+// writes it to is the product's to keep out of every gated read's shape, since the
+// name is never meant for a visitor (owner decision 2026-11-04).
 const (
-	AccessArgSiteID  = "siteId"
-	AccessArgCodeID  = "accessCodeId"
-	AccessArgGate    = "accessGate"
-	AccessArgSubject = "accessSubject"
+	AccessArgSiteID    = "siteId"
+	AccessArgCodeID    = "accessCodeId"
+	AccessArgGate      = "accessGate"
+	AccessArgSubject   = "accessSubject"
+	AccessArgCodeLabel = "accessCodeLabel"
 )
 
 // ReservedAccessArgs lists the stamped names. A construct that declares one
 // must declare it as a string; a caller that sends one is refused.
-var ReservedAccessArgs = []string{AccessArgSiteID, AccessArgCodeID, AccessArgGate, AccessArgSubject}
+var ReservedAccessArgs = []string{AccessArgSiteID, AccessArgCodeID, AccessArgGate, AccessArgSubject, AccessArgCodeLabel}
 
 // reservedAccessArgSet is the same list as a set the load rules read. A copy,
 // so a caller rewriting the exported slice cannot loosen what the load refuses.

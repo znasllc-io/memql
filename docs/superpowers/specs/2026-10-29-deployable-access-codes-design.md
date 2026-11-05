@@ -107,6 +107,7 @@ way it answers a stranger.
 | D15 | A site's organization cannot change while it has live codes; the refusal says to remove them first. Act-on-code handlers re-read the code's site under the caller, and the bff refuses a code whose copied account differs from its site's current one, so a move racing a mint leaves a code that opens nothing. | Codes copy the site's `accountId` for the tier and the gate, so a move would leave the old organization able to mint for a site it can no longer read. |
 | D11 | Validity is decided from the database on every request. Nothing in the access decision is cached: `v1:platform:siteAccess` joins `cacheDenylistedConceptPrefixes`, and the server reads carry `@cache(0)`. | Requirement R5. The edge's 15-second preview cache, or the engine's default result cache, would make "the moment the 10 minutes pass" false. |
 | D12 | The first version gates what the bff returns, not the static bundle. | The first user needs only this, and a bundle is public by construction. Path gating at the edge is the follow-up binary assets will need; see section 14. |
+| D16 | A gated mutation may declare `accessCodeLabel` and is stamped with the code's label; a query may not. The load refuses it on a query, and the handler stamps it on a mutation alone. Added 2026-11-04 at the owner's request. | The owner wants to be told which code opened a deployable, and a product's workflow reads no code (measured 2026-11-01), so the name has to arrive with the gated write that records the visit. A mutation answers the visitor with its bare id, so the name stays on the server; a query answers with what its shape selects, so it could not. A row a product writes the name to is the product's to keep out of every gated read's shape. |
 
 ## 4. Data
 
@@ -121,7 +122,7 @@ codes.
 | `siteId` | Parent `v1:platform:site`. |
 | `ownerUserId` | Copied from the site at mint time, never from the actor. |
 | `accountId` | Copied from the site at mint time. |
-| `label` | The operator's name for it ("Client reviewers"). Never sent to a visitor. |
+| `label` | The operator's name for it ("Client reviewers"). Never sent to a visitor; a gated mutation may be stamped with it (D16). |
 | `gate` | Which gate it opens. |
 | `subject` | Optional scope, stamped as `accessSubject`. |
 | `codeHash` | SHA-256 hex of the normalized code. Excluded from the OS-facing shape. |
@@ -334,6 +335,9 @@ between codes: rows carry the stamped `accessCodeId` or match `accessSubject`, a
 the filter says so. A gated construct that reads rows with neither is opening
 them to everyone holding any code for that gate, which the author is deciding
 deliberately by writing the annotation.
+`accessCodeLabel`, the code's label, joined them on 2026-11-04 (D16). It
+isolates nothing: it lets a product tell the operator which code did something,
+and only a mutation may declare it.
 
 **Load rules**, in `component/memql/access_gate_load.go`, faults landing on the
 LoadReport so strict boot refuses them and package analysis reports

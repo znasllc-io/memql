@@ -1,0 +1,21 @@
+/// Record a ticket with the operator's name for the code that opened the gate,
+/// so the operator can be told which code did it. accessCodeLabel is reserved
+/// like accessCodeId, and a mutation's reply to the visitor is its bare id, so
+/// the name never reaches them.
+@accessGate(deployable="client-desk", gate="dashboard")
+@actor
+mutation ticket recordTicketNamingTheCode {
+  args {
+    accessCodeId    string!
+    accessCodeLabel string!
+    title           string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      accessCodeId: args.accessCodeId
+      status:       args.accessCodeLabel
+      ownerUserId:  actor.userId
+    }
+  }
+}
