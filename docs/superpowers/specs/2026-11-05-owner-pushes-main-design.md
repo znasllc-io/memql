@@ -257,11 +257,13 @@ The runbook lives where the installation lives, in `memql-znas`. It covers:
 Developers cannot cut an engine release. `memql-fylo` ships as a package, so its
 main developer can deploy and roll it back.
 
-### D10. `memql-fylo`'s pushes are tested
+### D10. `memql-fylo` has no pipeline
 
-`memql-fylo` declares a pipeline, but no run has ever reported on its commits:
-it is not connected on the production cluster. Connecting it, with compute
-`cluster`, is part of the rollout.
+`memql-fylo` is a client's repository, and the ZNAS instance hosts its
+deployables. The owner decided on 2026-11-05 that only `memql` and `memql-znas`
+need a pipeline. So its pipeline stays unconnected on the production cluster,
+and the installation's delivery policy does not name it. Its GitHub controls
+(D1) still apply.
 
 ## Rollout
 
@@ -277,9 +279,9 @@ it is not connected on the production cluster. Connecting it, with compute
    - the delivery policy's supersession, reuse and train comments;
    - `docs/instance.md`;
    - the deploy and rollback runbook (D8).
-4. Production, after the new engine is deployed:
-   - delete the paused `MEMQL_PIPELINES_TRAINS` row;
-   - connect `memql-fylo`'s pipeline.
+4. Production, after the new engine is deployed: switch off the paused
+   `MEMQL_PIPELINES_TRAINS` row, and remove the live `memql-release-deploy`
+   Role and RoleBinding that a sync with prune off leaves behind.
 
 ## Known limits
 
