@@ -31,9 +31,12 @@ type dbGoals struct {
 	cancelled []string
 	before    func()
 	onCancel  func()
+	// openedOn is the error of the context each goal was opened on, once
+	// opened: nil when the caller's going away did not reach it.
+	openedOn []error
 }
 
-func (g *dbGoals) StartComposition(context.Context, CompositionGoal) (string, error) {
+func (g *dbGoals) StartComposition(ctx context.Context, _ CompositionGoal) (string, error) {
 	g.mu.Lock()
 	g.opened++
 	id := fmt.Sprintf("v1:work:goal:%s-%d", g.suffix, g.opened)
@@ -42,6 +45,9 @@ func (g *dbGoals) StartComposition(context.Context, CompositionGoal) (string, er
 	if before != nil {
 		before()
 	}
+	g.mu.Lock()
+	g.openedOn = append(g.openedOn, ctx.Err())
+	g.mu.Unlock()
 	return id, nil
 }
 
@@ -150,6 +156,9 @@ func TestComposeEmailThroughTheRealEngine(t *testing.T) {
 	})
 	id, goal := str(started, "templateId"), str(started, "goalId")
 	inStep(id, goal)
+	if str(started, "state") != compositionWriting {
+		t.Errorf("started answered %v", started)
+	}
 	if row, _ := read(id); !templateTime(started["revision"]).Equal(templateTime(row["createdAt"])) {
 		t.Errorf("answered revision %v, template %v", started["revision"], row["createdAt"])
 	}
@@ -171,14 +180,15 @@ func TestComposeEmailThroughTheRealEngine(t *testing.T) {
 	}
 	retried := builtin("campaignRetryComposition", map[string]any{"templateId": id})
 	second := str(retried, "goalId")
-	if sameGoal(second, goal) {
-		t.Fatalf("the retry answered the old goal %q", second)
+	if sameGoal(second, goal) || str(retried, "state") != compositionWriting {
+		t.Fatalf("the retry answered %v (the old goal was %q)", retried, goal)
 	}
 	inStep(id, second)
 	runSubmits(id, second, "Autumn is here")
 
-	// The caller goes away while the goal is being opened: the goal is
-	// recorded all the same, so a cancel can find it.
+	// The caller goes away while the goal is being opened: the goal is opened
+	// on a context that outlives the caller, and recorded all the same, so a
+	// cancel can find it.
 	ctx, leave := context.WithCancel(w.owner)
 	goals.before = leave
 	nodes, err := starter.handleComposeEmail(ctx, map[string]any{
@@ -191,6 +201,9 @@ func TestComposeEmailThroughTheRealEngine(t *testing.T) {
 	out := decodeResult(t, nodes)
 	id = str(out, "templateId")
 	inStep(id, str(out, "goalId"))
+	if last := goals.openedOn[len(goals.openedOn)-1]; last != nil {
+		t.Errorf("the goal was opened on the caller's context: %v", last)
+	}
 
 	// The caller goes away once the goal is asked to stop: the composition is
 	// cancelled all the same, so it does not wait for a run that never comes.

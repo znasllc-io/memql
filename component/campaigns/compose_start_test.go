@@ -1,10 +1,12 @@
 package campaigns
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -37,16 +39,22 @@ const (
 	composeCancelReason  = "cancelled by person"
 	composeNothingToStop = "MemQL is not writing this email, so there is nothing to cancel."
 	composeNotFailed     = "Only an email MemQL could not finish can be retried."
-	composeUnavailable   = "This node cannot start MemQL writing an email: its work runtime and app doors are not wired."
-	composeStartFailed   = "MemQL could not start writing this email: the work runtime is not answering."
+	composeUnavailable   = "MemQL can't write emails on this server. Ask your administrator."
+	composeStartFailed   = "MemQL could not start writing this email. Try again in a moment."
+	composeAppsUnknown   = "MemQL could not check your apps right now. Try again in a moment."
+
+	// rawCause is what a stand-in for the work runtime or the app doors fails
+	// with: infrastructure's words, which a person must never read.
+	rawCause = "pq: connection reset by peer on goal insert"
 )
 
-// startedGoal is one goal the starter opened, with whether a template lock was
-// held when it was asked.
+// startedGoal is one goal the starter opened, with how many template locks were
+// held when it was asked, and its context's error once it had opened the goal.
 type startedGoal struct {
 	goal      CompositionGoal
 	goalID    string
 	locksHeld int
+	ctxErr    error
 }
 
 // recordingStarter is a GoalStarter that keeps what it is asked and answers
@@ -61,10 +69,11 @@ type recordingStarter struct {
 	before func(g CompositionGoal, goalID string)
 }
 
-func (s *recordingStarter) StartComposition(_ context.Context, g CompositionGoal) (string, error) {
+func (s *recordingStarter) StartComposition(ctx context.Context, g CompositionGoal) (string, error) {
 	_, held := s.gate.snapshot()
 	s.mu.Lock()
-	goalID := fmt.Sprintf("v1:work:goal:started-%d", len(s.opened)+1)
+	n := len(s.opened)
+	goalID := fmt.Sprintf("v1:work:goal:started-%d", n+1)
 	s.opened = append(s.opened, startedGoal{goal: g, goalID: goalID, locksHeld: held})
 	fail, before := s.fail, s.before
 	s.mu.Unlock()
@@ -74,6 +83,9 @@ func (s *recordingStarter) StartComposition(_ context.Context, g CompositionGoal
 	if before != nil {
 		before(g, goalID)
 	}
+	s.mu.Lock()
+	s.opened[n].ctxErr = ctx.Err()
+	s.mu.Unlock()
 	return goalID, nil
 }
 
@@ -84,10 +96,12 @@ func (s *recordingStarter) snapshot() []startedGoal {
 }
 
 // cancelledGoal is one goal the canceller was asked to stop, with the
-// composition's state as it read at that moment.
+// composition's state as it read at that moment, and the error of the context
+// it was asked on.
 type cancelledGoal struct {
 	goalID, reason, state string
 	locksHeld             int
+	ctxErr                error
 }
 
 // recordingCanceller is a GoalCanceller that keeps what it is asked. fail, when
@@ -100,7 +114,7 @@ type recordingCanceller struct {
 	fail      error
 }
 
-func (c *recordingCanceller) CancelGoal(_ context.Context, goalID, reason string) error {
+func (c *recordingCanceller) CancelGoal(ctx context.Context, goalID, reason string) error {
 	_, held := c.gate.snapshot()
 	state := ""
 	if c.state != nil {
@@ -108,7 +122,7 @@ func (c *recordingCanceller) CancelGoal(_ context.Context, goalID, reason string
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cancelled = append(c.cancelled, cancelledGoal{goalID: goalID, reason: reason, state: state, locksHeld: held})
+	c.cancelled = append(c.cancelled, cancelledGoal{goalID: goalID, reason: reason, state: state, locksHeld: held, ctxErr: ctx.Err()})
 	return c.fail
 }
 
@@ -244,6 +258,46 @@ func (sw *startWorld) retry(templateID string) (map[string]any, error) {
 	return decodeAnswer(sw.t, nodes, "campaignCompositionStarted"), nil
 }
 
+// startAnswer decodes what a start or a retry answered: its kind
+// (campaignCompositionStarted or campaignCompositionFailedToStart) and fields.
+func startAnswer(t *testing.T, nodes []memorynodes.MemoryNode) (string, map[string]any) {
+	t.Helper()
+	if len(nodes) != 1 || (nodes[0].ID != "campaignCompositionStarted" && nodes[0].ID != "campaignCompositionFailedToStart") {
+		t.Fatalf("expected one start answer, got %+v", nodes)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
+		t.Fatalf("decoding the answer: %v", err)
+	}
+	return nodes[0].ID, out
+}
+
+// logs sends the worker's warnings to a buffer the test reads.
+func (sw *startWorld) logs() *syncBuffer {
+	buf := &syncBuffer{}
+	sw.w.logger = slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return buf
+}
+
+// syncBuffer is a bytes.Buffer safe to write from one goroutine and read from
+// another.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // compositionOf is the stored composition of the template.
 func (sw *startWorld) compositionOf(templateID string) composition {
 	sw.t.Helper()
@@ -299,15 +353,20 @@ func TestComposeEmailRefusesWithoutReachableApp(t *testing.T) {
 		t.Errorf("the apps were asked about %v, want the caller", asked)
 	}
 
-	// The apps could not be asked: that is said as what it is, and nothing is
-	// written either.
+	// The apps could not be asked: the person reads a fixed sentence, never the
+	// cause, which is logged; and nothing is written.
 	sw = newStartWorld(t)
 	sw.withKit()
-	sw.apps.err = errors.New("the fleet cannot be read")
-	if _, err := sw.compose(composeArgs()); err == nil || errors.Is(err, errComposeNeedsApp) || !strings.Contains(err.Error(), "the fleet cannot be read") {
+	logged := sw.logs()
+	sw.apps.err = errors.New(rawCause)
+	_, err = sw.compose(composeArgs())
+	if err == nil || err.Error() != composeAppsUnknown || strings.Contains(err.Error(), rawCause) {
 		t.Fatalf("err = %v", err)
 	}
 	sw.nothingDone(t, "when the apps cannot be asked")
+	if !strings.Contains(logged.String(), rawCause) {
+		t.Error("the cause was not logged")
+	}
 
 	// A node with nothing to open a goal with, or to ask the apps, refuses by
 	// name rather than guessing.
@@ -443,8 +502,8 @@ func TestComposeEmailCreatesWritingTemplateAndStartsGoal(t *testing.T) {
 	// In step: the composition starts from the template as it is now, and the
 	// answer names that revision.
 	revision := templateTime(row["createdAt"])
-	if !c.BaseRevision.Equal(revision) || str(out, "revision") != revision.Format(time.RFC3339Nano) {
-		t.Errorf("base revision %v, row %v, answered %s", c.BaseRevision, revision, str(out, "revision"))
+	if !c.BaseRevision.Equal(revision) || str(out, "revision") != revision.Format(time.RFC3339Nano) || str(out, "state") != compositionWriting {
+		t.Errorf("base revision %v, row %v, answered %s %s", c.BaseRevision, revision, str(out, "revision"), str(out, "state"))
 	}
 	if n := len(sw.engine.writes()); n != 2 {
 		t.Errorf("%d writes, want the template and the goal", n)
@@ -501,18 +560,26 @@ func TestComposeEmailLeavesTheGoalItsRunClaimedFirst(t *testing.T) {
 func TestComposeEmailMarksFailedWhenGoalCannotStart(t *testing.T) {
 	sw := newStartWorld(t)
 	kit := sw.withKit()
-	sw.starter.fail = errors.New("the work runtime is not answering")
-	_, err := sw.compose(composeArgs())
-	if err == nil || !strings.HasPrefix(err.Error(), composeStartFailed) {
-		t.Fatalf("err = %v", err)
+	logged := sw.logs()
+	sw.starter.fail = errors.New(rawCause)
+	nodes, err := sw.w.handleComposeEmail(importCtx(), composeArgs(), 0)
+	if err != nil {
+		t.Fatalf("a goal that cannot start is answered, not refused: %v", err)
 	}
+	kind, out := startAnswer(t, nodes)
 	rows := sw.engine.rowsNow()
 	if len(rows) != 1 {
 		t.Fatalf("%d templates, want the draft kept", len(rows))
 	}
+	id := bare(str(rows[0], "id"))
+	// The answer names the draft that was kept, failed, with the sentence the
+	// person reads: a client opens that draft rather than making another.
+	if kind != "campaignCompositionFailedToStart" || str(out, "templateId") != id || str(out, "state") != compositionFailed ||
+		str(out, "error") != composeStartFailed || str(out, "revision") != templateTime(rows[0]["createdAt"]).Format(time.RFC3339Nano) {
+		t.Errorf("answer = %s %v", kind, out)
+	}
 	// The template stays as the brand-applied layout, so the person can retry it
 	// or write the email by hand; its composition says why it stopped.
-	id := bare(str(rows[0], "id"))
 	if !sameJSON(t, rows[0]["document"], expectedLayoutDocument(t, "builtin:article", &kit)) || str(rows[0], "status") != "draft" {
 		t.Error("the draft is not the brand-applied layout")
 	}
@@ -520,24 +587,130 @@ func TestComposeEmailMarksFailedWhenGoalCannotStart(t *testing.T) {
 	if c.State != compositionFailed || c.Error != composeStartFailed || c.GoalID != "" || !c.FinishedAt.Equal(templateNow) {
 		t.Errorf("composition = %s %q goal %q finished %v", c.State, c.Error, c.GoalID, c.FinishedAt)
 	}
+	// The cause is logged, and nowhere a person reads it: not in the answer,
+	// not anywhere on the template.
+	answered, _ := plainJSON(out)
+	stored, _ := plainJSON(sw.engine.row(id))
+	if strings.Contains(string(answered), rawCause) || strings.Contains(string(stored), rawCause) {
+		t.Errorf("the cause reached the person: answer %s", answered)
+	}
+	if !strings.Contains(logged.String(), rawCause) {
+		t.Error("the cause was not logged")
+	}
+
+	// The person retries the draft that was kept: still one template.
+	sw.starter.fail = nil
+	retried, err := sw.retry(id)
+	if err != nil || str(retried, "templateId") != id || str(retried, "state") != compositionWriting {
+		t.Fatalf("retrying the kept draft: %v %v", retried, err)
+	}
+	if n := len(sw.engine.rowsNow()); n != 1 {
+		t.Errorf("%d templates after the retry, want the one draft", n)
+	}
 
 	// No goal at all is a goal that cannot start too.
 	sw = newStartWorld(t)
 	sw.withKit()
 	sw.w.SetCompositionGoals(goalStarterFunc(func(context.Context, CompositionGoal) (string, error) { return " ", nil }), sw.canceller, sw.apps)
-	if _, err := sw.compose(composeArgs()); err == nil || !strings.HasPrefix(err.Error(), "MemQL could not start writing this email") {
-		t.Fatalf("an empty goal: err = %v", err)
+	nodes, err = sw.w.handleComposeEmail(importCtx(), composeArgs(), 0)
+	if err != nil {
+		t.Fatalf("an empty goal: %v", err)
+	}
+	if kind, out := startAnswer(t, nodes); kind != "campaignCompositionFailedToStart" || str(out, "state") != compositionFailed || str(out, "error") != composeStartFailed {
+		t.Errorf("an empty goal answered %s %v", kind, out)
 	}
 	if rows := sw.engine.rowsNow(); len(rows) != 1 {
 		t.Fatalf("%d templates", len(rows))
-	} else if c, _ := compositionFromRow(rows[0]); c.State != compositionFailed {
-		t.Errorf("an empty goal left the composition %s", c.State)
+	} else if c, _ := compositionFromRow(rows[0]); c.State != compositionFailed || c.Error != composeStartFailed {
+		t.Errorf("an empty goal left the composition %s %q", c.State, c.Error)
 	}
+}
 
-	// A failed start can be retried.
-	sw.w.SetCompositionGoals(sw.starter, sw.canceller, sw.apps)
-	if _, err := sw.retry(bare(str(sw.engine.rowsNow()[0], "id"))); err != nil {
-		t.Errorf("retrying a start that failed: %v", err)
+// The goal is opened on a context the caller's going away does not reach: a
+// page closed while the goal is being opened neither cuts the opening short (a
+// goal left with no run) nor fails the composition with the cancellation.
+func TestComposeEmailOpensItsGoalWhenTheCallerLeaves(t *testing.T) {
+	sw := newStartWorld(t)
+	sw.withKit()
+	ctx, leave := context.WithCancel(importCtx())
+	defer leave()
+	sw.starter.before = func(CompositionGoal, string) { leave() }
+	nodes, err := sw.w.handleComposeEmail(ctx, composeArgs(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, out := startAnswer(t, nodes)
+	opened := sw.starter.snapshot()
+	if len(opened) != 1 || opened[0].ctxErr != nil {
+		t.Fatalf("the goal was opened on the caller's context: %+v", opened)
+	}
+	c := sw.compositionOf(str(out, "templateId"))
+	if kind != "campaignCompositionStarted" || str(out, "state") != compositionWriting || c.State != compositionWriting || !sameGoal(c.GoalID, opened[0].goalID) {
+		t.Errorf("answer %s %v, composition %s goal %q", kind, out, c.State, c.GoalID)
+	}
+}
+
+// A cancel is held to the run it read: when that run ended and the template was
+// retried before the cancel took the lock, the retried run and its goal are
+// left alone.
+func TestCancelCompositionIsHeldToTheRunItRead(t *testing.T) {
+	sw := newStartWorld(t)
+	sw.withKit()
+	id, first := sw.mustCompose(composeArgs())
+	later := templateNow.Add(time.Hour)
+	second := ""
+	gate, hooked := sw.w.templateGate, false
+	sw.w.templateGate = func(ctx context.Context, key string) (func(), error) {
+		if !hooked {
+			// Before the cancel's lock: the run ends, failed, and is retried.
+			hooked = true
+			ended := sw.compositionOf(id)
+			ended.State, ended.Error, ended.FinishedAt = compositionFailed, "MemQL finished without saving the email.", templateNow
+			if _, err := sw.w.writeComposition(importCtx(), templateOrg, id, ended); err != nil {
+				t.Error(err)
+			}
+			sw.w.now = func() time.Time { return later }
+			retried, err := sw.retry(id)
+			if err != nil {
+				t.Errorf("the retry: %v", err)
+			}
+			second = str(retried, "goalId")
+		}
+		return gate(ctx, key)
+	}
+	out, err := sw.cancel(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := sw.compositionOf(id)
+	if second == "" || c.State != compositionWriting || !sameGoal(c.GoalID, second) || !c.StartedAt.Equal(later) || c.Error != "" {
+		t.Errorf("the stale cancel touched the retried run: %s %q goal %q (retried as %q)", c.State, c.Error, c.GoalID, second)
+	}
+	if cancelled := sw.canceller.snapshot(); len(cancelled) != 1 || !sameGoal(cancelled[0].goalID, first) {
+		t.Errorf("goals asked to stop: %+v, want only the run the cancel read", cancelled)
+	}
+	if str(out, "state") != compositionWriting {
+		t.Errorf("answer = %v", out)
+	}
+}
+
+// A cancel whose caller has gone away still stops the goal and fails the
+// composition: once it acts, it finishes.
+func TestCancelCompositionFinishesWhenTheCallerLeaves(t *testing.T) {
+	sw := newStartWorld(t)
+	sw.withKit()
+	id, goal := sw.mustCompose(composeArgs())
+	ctx, leave := context.WithCancel(importCtx())
+	leave()
+	if _, err := sw.w.handleCancelComposition(ctx, map[string]any{"templateId": id}, 0); err != nil {
+		t.Fatal(err)
+	}
+	cancelled := sw.canceller.snapshot()
+	if len(cancelled) != 1 || !sameGoal(cancelled[0].goalID, goal) || cancelled[0].ctxErr != nil {
+		t.Errorf("cancelled = %+v, want the goal asked on a context the caller's leaving does not reach", cancelled)
+	}
+	if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != compositionCancelled {
+		t.Errorf("composition = %s %q", c.State, c.Error)
 	}
 }
 
@@ -737,8 +910,8 @@ func TestComposeEmailStopsItsGoalWhenCancelledWhileStarting(t *testing.T) {
 	}
 	id, goal := str(out, "templateId"), str(out, "goalId")
 	c := sw.compositionOf(id)
-	if c.State != compositionFailed || c.Error != compositionCancelled || c.GoalID != "" {
-		t.Errorf("composition = %s %q goal %q", c.State, c.Error, c.GoalID)
+	if c.State != compositionFailed || c.Error != compositionCancelled || c.GoalID != "" || str(out, "state") != compositionFailed {
+		t.Errorf("composition = %s %q goal %q, answered %v", c.State, c.Error, c.GoalID, out)
 	}
 	cancelled := sw.canceller.snapshot()
 	if len(cancelled) != 1 || !sameGoal(cancelled[0].goalID, goal) || cancelled[0].reason != composeCancelReason {
@@ -809,7 +982,7 @@ func TestRetryCompositionStartsNewGoalWithRecordedRequest(t *testing.T) {
 	if !sameJSON(t, c.Request, recorded) {
 		t.Errorf("request = %+v, want the recorded %+v", c.Request, recorded)
 	}
-	if !c.BaseRevision.Equal(revision) || str(out, "revision") != revision.Format(time.RFC3339Nano) || str(out, "templateId") != id {
+	if !c.BaseRevision.Equal(revision) || str(out, "revision") != revision.Format(time.RFC3339Nano) || str(out, "templateId") != id || str(out, "state") != compositionWriting {
 		t.Errorf("base %v, row %v, answer %v", c.BaseRevision, revision, out)
 	}
 
@@ -933,12 +1106,20 @@ func TestRetryCompositionRefusesUnlessItCanRunAgain(t *testing.T) {
 	})
 	t.Run("the goal cannot start", func(t *testing.T) {
 		sw, id := failedTemplate(t)
-		sw.starter.fail = errors.New("the work runtime is not answering")
-		if _, err := sw.retry(id); err == nil || !strings.HasPrefix(err.Error(), composeStartFailed) {
-			t.Fatalf("err = %v", err)
+		sw.starter.fail = errors.New(rawCause)
+		nodes, err := sw.w.handleRetryComposition(importCtx(), map[string]any{"templateId": id}, 0)
+		if err != nil {
+			t.Fatalf("a retry whose goal cannot start is answered, not refused: %v", err)
+		}
+		if kind, out := startAnswer(t, nodes); kind != "campaignCompositionFailedToStart" || str(out, "templateId") != id ||
+			str(out, "state") != compositionFailed || str(out, "error") != composeStartFailed {
+			t.Errorf("answer = %s %v", kind, out)
 		}
 		if c := sw.compositionOf(id); c.State != compositionFailed || c.Error != composeStartFailed {
 			t.Errorf("composition = %s %q", c.State, c.Error)
+		}
+		if n := len(sw.engine.rowsNow()); n != 1 {
+			t.Errorf("%d templates", n)
 		}
 	})
 }

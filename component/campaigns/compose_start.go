@@ -3,7 +3,6 @@ package campaigns
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -20,9 +19,10 @@ import (
 //
 // # Starting: nothing waits
 //
-// campaignComposeEmail makes the template at once and answers {templateId,
-// goalId, revision}; the composition's goal writes the email later, whole in
-// Claude Code on the caller's own machine (compose_run.go). In order:
+// campaignComposeEmail makes the template at once and answers
+// campaignCompositionStarted {templateId, goalId, revision, state}; the
+// composition's goal writes the email later, whole in Claude Code on the
+// caller's own machine (compose_run.go). In order:
 //
 //  1. the request: a name as campaignSaveTemplate takes one, a built-in
 //     layout, a description of 1 to 8000 characters and at most 64 attached
@@ -41,8 +41,16 @@ import (
 //  7. the goal recorded on the composition.
 //
 // The refusals of 1 to 4 write nothing. A goal that cannot be opened leaves the
-// template, its composition failed with the reason, so that the person can
-// retry it or write the email by hand.
+// template, its composition failed, so that the person can retry it or write
+// the email by hand, and the answer is campaignCompositionFailedToStart
+// {templateId, revision, state, error}: it names the draft that was kept, so a
+// client opens it rather than making another.
+//
+// # What a person reads
+//
+// Every sentence a person reads, in an answer or on the template, is a fixed
+// one. The cause of a failure (the work runtime's words, a store's) is logged
+// and never shown.
 //
 // # Who records the goal
 //
@@ -59,19 +67,22 @@ import (
 // will use, is cancelled. A record that cannot be written does not fail the
 // start: the run claims its composition itself.
 //
-// What follows the goal's opening settles what the start wrote, so it runs on a
-// context the caller's going away (a page closed mid-call) does not reach: a
-// composition left writing with no goal would wait for a run that never comes.
+// The goal is opened, and what follows settles what the start wrote, on a
+// context the caller's going away (a page closed mid-call) does not reach: an
+// opening cut short could leave a goal with no run, and a composition left
+// writing with no goal would wait for a run that never comes.
 //
 // # Cancelling
 //
-// Only a writing composition can be cancelled. Its goal is asked to stop first
-// (GoalCanceller: the work runtime's cancelGoal, as the caller), while the
-// composition still reads writing, and then the composition is failed with
-// "Cancelled", the word a cancelled run records itself; a composition its run
-// settled meanwhile keeps its own record, and the record is written whether or
-// not the caller is still there. A goal recorded while the cancel was on its
-// way is asked to stop as well. A goal that will not stop (one the caller
+// Only a writing composition can be cancelled, and a cancel is held to the run
+// it read. Its goal is asked to stop first (GoalCanceller: the work runtime's
+// cancelGoal, as the caller), while the composition still reads writing, and
+// then the composition is failed with "Cancelled", the word a cancelled run
+// records itself. A composition its run settled meanwhile keeps its own record,
+// and one started again meanwhile (a retry, a newer startedAt) is not this
+// cancel's: neither it nor its goal is touched. A goal the same run recorded
+// while the cancel was on its way is asked to stop as well. Once the cancel acts,
+// it finishes whether or not the caller is still there. A goal that will not stop (one the caller
 // cannot read, a work runtime that does not answer) does not keep the
 // composition writing: a composition that is not writing is one no tool of that
 // goal's run can write to (compose_tools.go). The draft stays as it was.
@@ -96,14 +107,19 @@ const (
 )
 
 var (
-	errComposeNeedsBrand  = errors.New("Set up this organization's brand first: Email, Settings, Brand.")
-	errComposeNeedsApp    = errors.New("Open Cockpit with Claude Code signed in, then try again.")
-	errComposeDescription = errors.New("Describe the email in 1 to 8000 characters.")
-	errComposeFileID      = errors.New("Attach files from your Library.")
-	errComposeUnavailable = errors.New("This node cannot start MemQL writing an email: its work runtime and app doors are not wired.")
-	errComposeNoGoal      = errors.New("the work runtime opened no goal")
-	errNothingToCancel    = errors.New("MemQL is not writing this email, so there is nothing to cancel.")
-	errRetryNeedsFailed   = errors.New("Only an email MemQL could not finish can be retried.")
+	errComposeNeedsBrand    = errors.New("Set up this organization's brand first: Email, Settings, Brand.")
+	errComposeNeedsApp      = errors.New("Open Cockpit with Claude Code signed in, then try again.")
+	errComposeAppsUnknown   = errors.New("MemQL could not check your apps right now. Try again in a moment.")
+	errComposeCouldNotStart = errors.New("MemQL could not start writing this email. Try again in a moment.")
+	errComposeDescription   = errors.New("Describe the email in 1 to 8000 characters.")
+	errComposeFileID        = errors.New("Attach files from your Library.")
+	errComposeUnavailable   = errors.New("MemQL can't write emails on this server. Ask your administrator.")
+	errNothingToCancel      = errors.New("MemQL is not writing this email, so there is nothing to cancel.")
+	errRetryNeedsFailed     = errors.New("Only an email MemQL could not finish can be retried.")
+
+	// errNoGoalOpened is logged, never shown: the goal starter answered
+	// without an error and without a goal.
+	errNoGoalOpened = errors.New("the goal starter answered no goal id")
 )
 
 // handleComposeEmail implements integration.campaigns.composeEmail.
@@ -223,11 +239,18 @@ func (w *Worker) readyToCompose(ctx context.Context, accountID string) (GoalStar
 	}
 	starter, _, apps := w.compositionGoals()
 	if starter == nil || apps == nil {
+		if w.logger != nil {
+			w.logger.Warn("campaigns: a composition cannot start on this node: its goal starter or app check is not wired",
+				"starter", starter != nil, "apps", apps != nil)
+		}
 		return nil, errComposeUnavailable
 	}
 	reachable, err := apps.HasReachableApp(ctx, callerUserID(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("MemQL could not see whether an app is signed in on your machines: %w", err)
+		if w.logger != nil {
+			w.logger.Warn("campaigns: a composition could not ask whether the caller has an app", "account", accountID, "error", err)
+		}
+		return nil, errComposeAppsUnknown
 	}
 	if !reachable {
 		return nil, errComposeNeedsApp
@@ -243,36 +266,39 @@ type compositionStart struct {
 	startedAt, base                       time.Time
 }
 
-// openCompositionGoal opens the goal of the composition s wrote, records it,
-// and answers campaignCompositionStarted. A goal that cannot be opened fails
-// the composition with the reason, which is the answer.
+// openCompositionGoal opens the goal of the composition s wrote and records
+// it, on a context the caller's going away does not reach (see the header), and
+// answers campaignCompositionStarted {templateId, goalId, revision, state}, the
+// state being the composition's as the call leaves it. A goal that cannot be
+// opened fails the composition (failStart).
 func (w *Worker) openCompositionGoal(ctx context.Context, starter GoalStarter, s compositionStart) ([]memorynodes.MemoryNode, error) {
-	goalID, err := starter.StartComposition(ctx, CompositionGoal{
+	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), compositionFinalWait)
+	defer cancel()
+	goalID, err := starter.StartComposition(settle, CompositionGoal{
 		OwnerUserID: callerUserID(ctx), AccountID: s.accountID, TemplateID: s.templateID,
 		Statement: compositionStatement(s.name, s.layoutID),
 	})
 	goalID = strings.TrimSpace(goalID)
 	if err == nil && goalID == "" {
-		err = errComposeNoGoal
+		err = errNoGoalOpened
 	}
-	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), compositionFinalWait)
-	defer cancel()
 	if err != nil {
-		return nil, w.failStart(settle, s, err)
+		return w.failStart(settle, s, err)
 	}
-	revision, ours, err := w.recordGoal(settle, s, goalID)
+	c, revision, ours, err := w.recordGoal(settle, s, goalID)
+	state := c.State
 	switch {
 	case err != nil:
 		if w.logger != nil {
 			w.logger.Warn("campaigns: a composition's goal could not be recorded; its run claims the composition itself",
 				"template", s.templateID, "goal", goalID, "error", err)
 		}
-		revision = s.base
+		revision, state = s.base, compositionWriting
 	case !ours:
 		w.stopGoal(settle, goalID)
 	}
 	return resultNode("campaignCompositionStarted", map[string]any{
-		"templateId": s.templateID, "goalId": goalID, "revision": revision.UTC().Format(time.RFC3339Nano),
+		"templateId": s.templateID, "goalId": goalID, "revision": revision.UTC().Format(time.RFC3339Nano), "state": state,
 	})
 }
 
@@ -286,11 +312,12 @@ func compositionStatement(name, layoutID string) string {
 }
 
 // recordGoal records goalID on the composition s began (see the header) and
-// answers the template's revision, and whether the composition is this goal's:
-// false when it is no longer s's start, which is left as it is.
-func (w *Worker) recordGoal(ctx context.Context, s compositionStart, goalID string) (time.Time, bool, error) {
+// answers the composition and the template's revision as it leaves them, and
+// whether the composition is this goal's: false when it is no longer s's start,
+// which is left as it is.
+func (w *Worker) recordGoal(ctx context.Context, s compositionStart, goalID string) (composition, time.Time, bool, error) {
 	ours := false
-	_, revision, err := w.updateComposition(ctx, s.accountID, s.templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
+	c, revision, err := w.updateComposition(ctx, s.accountID, s.templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
 		switch {
 		case has && sameGoal(c.GoalID, goalID):
 			// Its run recorded it first.
@@ -306,30 +333,38 @@ func (w *Worker) recordGoal(ctx context.Context, s compositionStart, goalID stri
 		}
 		return true, nil
 	})
-	return revision, ours, err
+	return c, revision, ours, err
 }
 
 // failStart fails the composition s began because its goal could not be
-// opened, and answers the error the person reads: the reason, and where the
-// draft is.
-func (w *Worker) failStart(ctx context.Context, s compositionStart, cause error) error {
+// opened. The cause is logged and never shown: the composition records, and
+// the answer says, errComposeCouldNotStart. It answers
+// campaignCompositionFailedToStart {templateId, revision, state, error}, naming
+// the draft the start kept, so that a client opens it (where the person can
+// retry) rather than making another.
+func (w *Worker) failStart(ctx context.Context, s compositionStart, cause error) ([]memorynodes.MemoryNode, error) {
 	if w.logger != nil {
 		w.logger.Warn("campaigns: a composition's goal could not be opened", "template", s.templateID, "error", cause)
 	}
-	// The cause's words, not the cause: a start the caller abandoned is not a
-	// cancelled composition.
-	reason := compositionReason(errors.New("MemQL could not start writing this email: " + cause.Error()))
-	_, _, err := w.updateComposition(ctx, s.accountID, s.templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
+	reason := errComposeCouldNotStart.Error()
+	c, revision, err := w.updateComposition(ctx, s.accountID, s.templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
 		if !has || c.State != compositionWriting || !c.StartedAt.Equal(s.startedAt) {
 			return false, nil
 		}
 		c.State, c.Error, c.FinishedAt = compositionFailed, reason, w.nowUTC()
 		return true, nil
 	})
-	if err != nil && w.logger != nil {
-		w.logger.Warn("campaigns: a composition whose goal could not be opened could not be marked failed", "template", s.templateID, "error", err)
+	state := c.State
+	if err != nil {
+		// It stays writing with no goal, until a person cancels it.
+		if w.logger != nil {
+			w.logger.Warn("campaigns: a composition whose goal could not be opened could not be marked failed", "template", s.templateID, "error", err)
+		}
+		revision, state = s.base, compositionWriting
 	}
-	return errors.New(reason + " The draft is kept in Templates, where you can retry it.")
+	return resultNode("campaignCompositionFailedToStart", map[string]any{
+		"templateId": s.templateID, "revision": revision.UTC().Format(time.RFC3339Nano), "state": state, "error": reason,
+	})
 }
 
 // handleCancelComposition implements integration.campaigns.cancelComposition.
@@ -347,19 +382,21 @@ func (w *Worker) handleCancelComposition(ctx context.Context, args map[string]an
 	if !has || seen.State != compositionWriting {
 		return nil, errNothingToCancel
 	}
-	stopped := map[string]bool{}
-	if seen.GoalID != "" {
-		w.stopGoal(ctx, seen.GoalID)
-		stopped[bare(seen.GoalID)] = true
-	}
-	// The goal is asked to stop: the record follows even if the caller goes
-	// away now, or a goal whose run had not started would leave it writing.
+	// From here the cancel finishes even if the caller goes away: a goal asked
+	// to stop whose run had not started would otherwise leave the composition
+	// writing.
 	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), compositionFinalWait)
 	defer cancel()
+	stopped := map[string]bool{}
+	if seen.GoalID != "" {
+		w.stopGoal(settle, seen.GoalID)
+		stopped[bare(seen.GoalID)] = true
+	}
 	var writingFor string
 	c, revision, err := w.updateComposition(settle, bare(str(row, "accountId")), templateID, func(c *composition, has bool, _ map[string]any) (bool, error) {
-		if !has || c.State != compositionWriting {
-			// Settled meanwhile, by its run: that is the record.
+		// Held to the run it read: one its run settled meanwhile keeps its
+		// record, and one started again meanwhile is not this cancel's.
+		if !has || c.State != compositionWriting || !c.StartedAt.Equal(seen.StartedAt) {
 			return false, nil
 		}
 		writingFor = c.GoalID

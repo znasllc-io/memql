@@ -43,6 +43,8 @@ const (
 	compositionAutomation = "composeEmailRun"
 )
 
+// errNoCompositionWork is a cause for operators: component/campaigns logs what
+// these adapters answer and shows a person only its own fixed sentences.
 var errNoCompositionWork = errors.New("this node has no work runtime to open or cancel an email composition's goal")
 
 // compositionGoalOpener opens a goal whose template is known: the work

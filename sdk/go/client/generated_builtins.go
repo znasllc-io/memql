@@ -437,7 +437,7 @@ func CampaignBrandPreviewBuild(args CampaignBrandPreviewArgs) string {
 	return b.String()
 }
 
-// CampaignCancelComposition -- Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails with \"Cancelled\". The draft stays as it was. Refused unless the composition is writing. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.
+// CampaignCancelComposition -- Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails as Cancelled. The draft stays as it was. Refused unless the composition is writing. A cancel acts only on the composition run it read: one its run finished, or one started again, meanwhile is left as it is. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.
 type CampaignCancelCompositionArgs struct {
 	// The template MemQL is writing.
 	TemplateId string
@@ -458,7 +458,7 @@ func CampaignCancelCompositionBuild(args CampaignCancelCompositionArgs) string {
 	return b.String()
 }
 
-// CampaignComposeEmail -- Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (\"Set up this organization's brand first: Email, Settings, Brand.\
+// CampaignComposeEmail -- Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (the answer says to set it up first in Email, Settings, Brand) and when none of your machines has an app signed in (the answer says to open Cockpit with Claude Code signed in). Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision, state}. When the goal cannot start, the draft is kept with its composition failed and the answer is {templateId, revision, state, error}: open that draft and retry it there rather than starting another.
 type CampaignComposeEmailArgs struct {
 	// The organization the email is for.
 	AccountId string
@@ -846,7 +846,7 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	return b.String()
 }
 
-// CampaignRetryComposition -- Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision}.
+// CampaignRetryComposition -- Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers as campaignComposeEmail does: {templateId, goalId, revision, state}, or {templateId, revision, state, error} when the new goal cannot start.
 type CampaignRetryCompositionArgs struct {
 	// The template whose composition failed.
 	TemplateId string
