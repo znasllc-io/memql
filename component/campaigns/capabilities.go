@@ -79,6 +79,9 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "composeRender", Description: "Render a running email composition in its brand-applied layout, with its issues. Saves nothing.", Handler: w.handleComposeRender},
 		{Name: "composeSubmit", Description: "Save a running email composition as its template's draft and finish it. Never publishes.", Handler: w.handleComposeSubmit},
 		{Name: "runComposition", Description: "Run an email composition, the step of the composeEmailRun template: file its material, hand it with three tools to the email composer on the Apps route, and settle the composition when the composer is done. Never publishes.", Handler: w.handleRunComposition},
+		{Name: "composeEmail", Description: "Start an email composition: create a draft template from a built-in layout with the organization's brand kit, marked writing, and open its goal on the Apps route, where MemQL writes the email in Claude Code on the caller's machine. Answers at once. Never publishes.", Handler: w.handleComposeEmail},
+		{Name: "cancelComposition", Description: "Cancel a writing email composition: ask its goal to stop and fail the composition as Cancelled. The draft stays.", Handler: w.handleCancelComposition},
+		{Name: "retryComposition", Description: "Start a failed email composition again with the request it recorded, under a new goal on the Apps route.", Handler: w.handleRetryComposition},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",

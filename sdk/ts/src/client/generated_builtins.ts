@@ -365,6 +365,65 @@ QueryClient.prototype.campaignBrandPreview = function (this: QueryClient, args: 
   return this.executeNamed("campaignBrandPreview", buildCampaignBrandPreview(args), opts);
 };
 
+/** Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails with \"Cancelled\". The draft stays as it was. Refused unless the composition is writing. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}. */
+export interface CampaignCancelCompositionArgs {
+  /** The template MemQL is writing. */
+  templateId: string;
+}
+
+export function buildCampaignCancelComposition(args: CampaignCancelCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "builtin campaignCancelComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignCancelComposition(args: CampaignCancelCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignCancelComposition = function (this: QueryClient, args: CampaignCancelCompositionArgs = {} as CampaignCancelCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignCancelComposition", buildCampaignCancelComposition(args), opts);
+};
+
+/** Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (\"Set up this organization's brand first: Email, Settings, Brand.\ */
+export interface CampaignComposeEmailArgs {
+  /** The organization the email is for. */
+  accountId: string;
+  /** The template's name, up to 200 characters. */
+  name: string;
+  /** A built-in layout id, as campaignLayoutCatalogue lists them. */
+  layoutId: string;
+  /** What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest. */
+  description: string;
+  /** The attached Library files: pictures, ZIPs and text files, at most 64. May be empty. */
+  fileIds: string[];
+  /** A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it. */
+  referenceFileId?: string;
+}
+
+export function buildCampaignComposeEmail(args: CampaignComposeEmailArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  if (args.referenceFileId !== undefined) parts.push("referenceFileId: " + renderMemQLValue(args.referenceFileId));
+  return "builtin campaignComposeEmail(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignComposeEmail(args: CampaignComposeEmailArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignComposeEmail = function (this: QueryClient, args: CampaignComposeEmailArgs = {} as CampaignComposeEmailArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignComposeEmail", buildCampaignComposeEmail(args), opts);
+};
+
 /** Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter. */
 export interface CampaignConfigureNewsletterArgs {
   siteId: string;
@@ -617,6 +676,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, args: CampaignRetireEmailRuleArgs = {} as CampaignRetireEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
+};
+
+/** Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision}. */
+export interface CampaignRetryCompositionArgs {
+  /** The template whose composition failed. */
+  templateId: string;
+}
+
+export function buildCampaignRetryComposition(args: CampaignRetryCompositionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  return "builtin campaignRetryComposition(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetryComposition(args: CampaignRetryCompositionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetryComposition = function (this: QueryClient, args: CampaignRetryCompositionArgs = {} as CampaignRetryCompositionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetryComposition", buildCampaignRetryComposition(args), opts);
 };
 
 /** Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain. */

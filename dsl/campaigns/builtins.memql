@@ -288,6 +288,40 @@ builtin campaignCreateTemplateFromLayout {
   layoutId   string!  @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
 }
 
+// ---- Starting, cancelling and retrying an email composition ----
+//
+// @sdk: the New email page's Write it, Ask's assistant once the person has
+// chosen a layout, and the editor's and the OS's Cancel and Retry. A
+// composition's goal runs on route:apps at level strong, whatever route the
+// caller's conversation uses, and only on a signed-in app of the caller's own
+// machines; it never falls back to a local model and never publishes.
+
+@description("Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (\"Set up this organization's brand first: Email, Settings, Brand.\") and when none of your machines has an app signed in (\"Open Cockpit with Claude Code signed in, then try again.\"). When the goal cannot start, the draft is kept with the composition failed, to retry. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision}.")
+@sdk
+@executor("integration.campaigns.composeEmail")
+builtin campaignComposeEmail {
+  accountId        string!    @description("The organization the email is for.")
+  name             string!    @description("The template's name, up to 200 characters.")
+  layoutId         string!    @description("A built-in layout id, as campaignLayoutCatalogue lists them.")
+  description      string!    @description("What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest.")
+  fileIds          []string!  @description("The attached Library files: pictures, ZIPs and text files, at most 64. May be empty.")
+  referenceFileId  string     @description("A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it.")
+}
+
+@description("Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails with \"Cancelled\". The draft stays as it was. Refused unless the composition is writing. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.")
+@sdk
+@executor("integration.campaigns.cancelComposition")
+builtin campaignCancelComposition {
+  templateId  string!  @description("The template MemQL is writing.")
+}
+
+@description("Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision}.")
+@sdk
+@executor("integration.campaigns.retryComposition")
+builtin campaignRetryComposition {
+  templateId  string!  @description("The template whose composition failed.")
+}
+
 // ---- The tools of an email composition run (dsl/campaigns/tools.memql) ----
 //
 // NOT @sdk: a composition run calls them through its three emailCompose* tools,

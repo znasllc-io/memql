@@ -437,6 +437,85 @@ func CampaignBrandPreviewBuild(args CampaignBrandPreviewArgs) string {
 	return b.String()
 }
 
+// CampaignCancelComposition -- Cancel an email MemQL is writing: its goal is asked to stop, and the template's composition fails with \"Cancelled\". The draft stays as it was. Refused unless the composition is writing. Needs the same organization write permission as campaignSaveTemplate. Answers {templateId, revision, state}.
+type CampaignCancelCompositionArgs struct {
+	// The template MemQL is writing.
+	TemplateId string
+}
+
+// CampaignCancelComposition calls the engine builtin campaignCancelComposition.
+func (qc *QueryClient) CampaignCancelComposition(ctx context.Context, args CampaignCancelCompositionArgs) (*Result, error) {
+	call := CampaignCancelCompositionBuild(args)
+	return qc.executeNamed(ctx, "campaignCancelComposition", call)
+}
+
+func CampaignCancelCompositionBuild(args CampaignCancelCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignCancelComposition(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignComposeEmail -- Start MemQL writing an email, and answer at once: a draft template is made from a built-in layout with the organization's brand kit applied, marked as being written, and a goal on the Apps route writes the email into it in Claude Code on your own machine, from the description and the attached files. The template opens at once; templateById shows its composition as writing, then done or failed with the reason. Refused, with nothing created, when the organization has no brand kit (\"Set up this organization's brand first: Email, Settings, Brand.\
+type CampaignComposeEmailArgs struct {
+	// The organization the email is for.
+	AccountId string
+	// The template's name, up to 200 characters.
+	Name string
+	// A built-in layout id, as campaignLayoutCatalogue lists them.
+	LayoutId string
+	// What the email should say and do, in 1 to 8000 characters. Words in the attached files are used as they are; the description fills in the rest.
+	Description string
+	// The attached Library files: pictures, ZIPs and text files, at most 64. May be empty.
+	FileIds []string
+	// A Library picture of how the finished email should look: guidance for the content and its order, put in the email only when the description asks for it.
+	ReferenceFileId string
+}
+
+// CampaignComposeEmail calls the engine builtin campaignComposeEmail.
+func (qc *QueryClient) CampaignComposeEmail(ctx context.Context, args CampaignComposeEmailArgs) (*Result, error) {
+	call := CampaignComposeEmailBuild(args)
+	return qc.executeNamed(ctx, "campaignComposeEmail", call)
+}
+
+func CampaignComposeEmailBuild(args CampaignComposeEmailArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignComposeEmail(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("description: ")
+	b.WriteString(quoteMemQL(args.Description))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fileIds: ")
+	b.WriteString(renderMemQLValue(args.FileIds))
+	if args.ReferenceFileId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("referenceFileId: ")
+		b.WriteString(quoteMemQL(args.ReferenceFileId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
 type CampaignConfigureNewsletterArgs struct {
 	SiteId           string
@@ -763,6 +842,27 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	b.WriteString("builtin campaignRetireEmailRule(")
 	b.WriteString("emailRuleId: ")
 	b.WriteString(quoteMemQL(args.EmailRuleId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignRetryComposition -- Start an email composition that failed again, with the layout, description and files it recorded, under a new goal on the Apps route; the template is written over in place. Refused unless the composition failed, and, as when starting, when the organization has no brand kit or none of your machines has an app signed in. Needs the same organization write permission as campaignSaveTemplate. Never publishes. Answers {templateId, goalId, revision}.
+type CampaignRetryCompositionArgs struct {
+	// The template whose composition failed.
+	TemplateId string
+}
+
+// CampaignRetryComposition calls the engine builtin campaignRetryComposition.
+func (qc *QueryClient) CampaignRetryComposition(ctx context.Context, args CampaignRetryCompositionArgs) (*Result, error) {
+	call := CampaignRetryCompositionBuild(args)
+	return qc.executeNamed(ctx, "campaignRetryComposition", call)
+}
+
+func CampaignRetryCompositionBuild(args CampaignRetryCompositionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetryComposition(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
 	b.WriteString(")")
 	return b.String()
 }

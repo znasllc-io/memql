@@ -240,6 +240,11 @@ func (a *App) engineAndBus() {
 	// rollout, while replicas of the previous release (which cannot write a
 	// recipient that carries the field) are still serving.
 	campaignWorker.SetRecipientDigestSweep(a.campaignRecipientDigestSweep)
+	// Starting, cancelling and retrying an email composition open and cancel a
+	// work goal on the Apps route and ask the app doors whether the caller has
+	// a signed-in app (app/campaigns_composition.go). Each seam resolves the
+	// work runtime and the doors when it is called: neither exists yet here.
+	a.wireCampaignComposition(campaignWorker)
 	a.Dependencies = append(a.Dependencies, campaignWorker)
 	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {
 		a.fatal("failed to register campaigns integration", "error", err)
