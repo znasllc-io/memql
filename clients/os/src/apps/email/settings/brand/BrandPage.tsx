@@ -38,13 +38,41 @@ import { draftFromKit, draftProblem, kitFromDraft, sameKit, type BrandDraft, typ
 // person is editing. What the engine says about the kit -- a contrast below AA,
 // pictures that leave an email little room -- stands under the frame, so it
 // never moves it, and never stops a save.
+//
+// THE PART BEING EDITED IS DRAWN ON A LAYOUT THAT HAS IT. No one built-in
+// layout carries every brand part: Article has the full-width header, the reply
+// and the footer, and no follow line, social links or coloured panel; Letter
+// has the logo as it is, the signature, the follow line and the social links;
+// Confirmation has the logo on a coloured panel. So the group in focus, and
+// within Logo the picture in focus, chooses the layout.
 
 const PREVIEW_PAUSE_MS = 400;
 
+const ARTICLE = "builtin:article";
+const LETTER = "builtin:letter";
+const CONFIRMATION = "builtin:confirmation";
+
+/** The layout each group's part is drawn on: one that has it. */
+const LAYOUT_OF_GROUP: Readonly<Record<string, string>> = {
+  Colours: ARTICLE,
+  Fonts: ARTICLE,
+  Logo: LETTER,
+  Signature: LETTER,
+  Social: LETTER,
+  Reply: ARTICLE,
+  Footer: ARTICLE,
+};
+
+/** Within Logo, the two pictures another layout draws (by the picture field's name). */
+const LAYOUT_OF_PICTURE: Readonly<Record<string, string>> = {
+  "logo for coloured panels": CONFIRMATION,
+  "full-width header": ARTICLE,
+};
+
 /**
- * Where each group's part sits in the email the preview draws
- * (`builtin:article`): the look and the logo from its start, the signature,
- * the social links, the reply and the footer at its end.
+ * Where each group's part sits in the email the preview draws it on: the
+ * look and the logo from its start, the signature, the social links, the
+ * reply and the footer at its end.
  */
 const PART_OF_GROUP: Readonly<Record<string, PreviewPlace["part"]>> = {
   Colours: "start",
@@ -168,19 +196,27 @@ function BrandEditor({ accountId, head, context, brand, uploads }: {
   const sendableKey = sendable === null ? "" : JSON.stringify(sendable);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stable = useMemo(() => sendable, [sendableKey]);
-  const preview = useBrandPreview(accountId, useSettled(stable, PREVIEW_PAUSE_MS));
+  const [layout, setLayout] = useState(ARTICLE);
+  const preview = useBrandPreview(accountId, useSettled(stable, PREVIEW_PAUSE_MS), layout);
   const drawable = draft.logo.src !== "" && draft.logo.alt.trim() !== "";
 
-  // THE PART BEING EDITED, KEPT IN VIEW. Focus entering a group asks the
-  // preview for that group's part of the email; moving between the fields of
-  // one group is staying in it. Asked again on every entry, so coming back to
-  // a group the person scrolled away from brings its part back.
+  // THE PART BEING EDITED, ON A LAYOUT THAT HAS IT, KEPT IN VIEW. Focus in a
+  // group, or in one of Logo's pictures, draws the email on the layout that
+  // has its part. Focus entering a group asks the preview for that group's
+  // part of the email; moving between the fields of one group is staying in
+  // it. Asked again on every entry, so coming back to a group the person
+  // scrolled away from brings its part back.
   const [place, setPlace] = useState<PreviewPlace>({ part: "start", asked: 0 });
   function entered(event: FocusEvent<HTMLDivElement>) {
-    const group = event.target instanceof Element ? event.target.closest(".os-details-section") : null;
-    if (group === null) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const group = target?.closest(".os-details-section") ?? null;
+    if (target === null || group === null) return;
+    const name = group.getAttribute("aria-label") ?? "";
+    const picture = target.closest("[data-picture]")?.getAttribute("data-picture") ?? "";
+    const drawnOn = LAYOUT_OF_PICTURE[picture] ?? LAYOUT_OF_GROUP[name];
+    if (drawnOn !== undefined) setLayout(drawnOn);
     if (event.relatedTarget instanceof Node && group.contains(event.relatedTarget)) return;
-    const part = PART_OF_GROUP[group.getAttribute("aria-label") ?? ""];
+    const part = PART_OF_GROUP[name];
     if (part !== undefined) setPlace((held) => ({ part, asked: held.asked + 1 }));
   }
 

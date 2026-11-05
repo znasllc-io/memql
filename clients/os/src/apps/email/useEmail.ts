@@ -1280,26 +1280,26 @@ export function useBrandKit(accountId: string): Reading<BrandKitRecord | null> {
   return useReading<BrandKitRecord | null>(null, read, [read]);
 }
 
-/** The layout a brand is previewed on: an article, which carries every brand part. */
-export const BRAND_PREVIEW_LAYOUT = "builtin:article";
-
 /**
- * A brand kit drawn on a built-in layout before it is saved
- * (`campaignBrandPreview`), with the kit's warnings. Drawn again when the kit
- * does -- the same kit is the same object, so the page decides when (it waits
- * for the person to stop changing it) -- and the last email drawn stays on
- * screen while the next is on its way. No kit, nothing asked.
+ * A brand kit drawn on a built-in layout (`layoutId`) before it is saved
+ * (`campaignBrandPreview`), with the kit's warnings. No one layout carries
+ * every brand part (Article has no follow line, social links or coloured
+ * panel), so the page names the layout that shows the part being edited.
+ * Drawn again when the kit or the layout does -- the same kit is the same
+ * object, so the page decides when (it waits for the person to stop changing
+ * it) -- and the last email drawn stays on screen while the next is on its
+ * way. No kit, nothing asked.
  */
-export function useBrandPreview(accountId: string, kit: Record<string, unknown> | null): Reading<BrandPreview | null> {
+export function useBrandPreview(accountId: string, kit: Record<string, unknown> | null, layoutId: string): Reading<BrandPreview | null> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => {
-    if (query === null || accountId === "" || kit === null) return null;
+    if (query === null || accountId === "" || kit === null || layoutId === "") return null;
     return async (signal: AbortSignal) => {
-      const row = (await query.campaignBrandPreview({ accountId, kit, layoutId: BRAND_PREVIEW_LAYOUT }, { signal })).rows()[0];
+      const row = (await query.campaignBrandPreview({ accountId, kit, layoutId }, { signal })).rows()[0];
       return row === undefined ? null : brandPreviewFromRow(row);
     };
-  }, [query, accountId, kit]);
+  }, [query, accountId, kit, layoutId]);
   return useLastAnswer(useReading<BrandPreview | null>(null, read, [read]));
 }
 

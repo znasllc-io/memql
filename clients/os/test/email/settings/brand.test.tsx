@@ -383,6 +383,35 @@ describe("The Brand page's preview", () => {
     }
   });
 
+  it("draws the part being edited on a layout that has it", async () => {
+    // Article has no follow line, no social links and no coloured panel, so
+    // one layout cannot show every part: Letter carries the logo as it is, the
+    // signature, the follow line and the social links; Confirmation carries the
+    // logo on a coloured panel; Article the full-width header, the reply and
+    // the footer.
+    const conn = fakeConnection({ brandKits: [kitRow()] });
+    await openBrand(conn);
+    const drawnOn = () => conn.query.campaignBrandPreview.mock.calls.at(-1)![0].layoutId;
+    expect(drawnOn()).toBe("builtin:article");
+    const entering = async (element: HTMLElement, layout: string) => {
+      fireEvent.focus(element);
+      await waitFor(() => expect(drawnOn()).toBe(layout));
+    };
+    await entering(screen.getByLabelText("Logo description"), "builtin:letter");
+    await entering(screen.getByRole("button", { name: "Upload the logo for coloured panels" }), "builtin:confirmation");
+    await entering(screen.getByRole("button", { name: "Upload the full-width header" }), "builtin:article");
+    await entering(screen.getByLabelText("Logo link"), "builtin:letter");
+    await entering(screen.getByRole("button", { name: "Upload the logo" }), "builtin:letter");
+    await entering(screen.getByLabelText("Signature title"), "builtin:letter");
+    await entering(screen.getByLabelText("Footer lines"), "builtin:article");
+    await entering(screen.getByLabelText("Follow line"), "builtin:letter");
+    await entering(screen.getByLabelText("Reply heading"), "builtin:article");
+    await entering(screen.getByLabelText("Heading font"), "builtin:article");
+    // The same kit each time: only the layout moved.
+    const kits = conn.query.campaignBrandPreview.mock.calls.map(([args]) => JSON.stringify(args.kit));
+    expect(new Set(kits).size).toBe(1);
+  });
+
   it("says under the last email, not over it, when the next cannot be drawn", async () => {
     const conn = fakeConnection({ brandKits: [kitRow()] });
     await openBrand(conn);
@@ -487,6 +516,19 @@ describe("The Brand page's fields", () => {
       { label: "Preferences", href: "{{preferencesUrl}}" },
       { label: "Read it online", href: "{{viewUrl}}" },
     ]);
+  });
+
+  it("refuses a picture over 1 MiB at its field before uploading it, as the engine would", async () => {
+    const conn = fakeConnection({ brandKits: [kitRow()] });
+    const uploads = await openBrand(conn);
+    const big = new File([new Uint8Array(1024 * 1024 + 1)], "header.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Full-width header file"), { target: { files: [big] } });
+    expect(await within(region("Logo")).findByText("Choose a picture of 1 MiB or less.")).toBeTruthy();
+    expect(uploads.upload).not.toHaveBeenCalled();
+    // At 1 MiB it goes.
+    const fits = new File([new Uint8Array(1024 * 1024)], "header.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Full-width header file"), { target: { files: [fits] } });
+    await waitFor(() => expect(uploads.upload).toHaveBeenCalledTimes(1));
   });
 
   it("sends an uploaded picture as the upload, and a saved one back as it came", async () => {

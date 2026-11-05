@@ -17,10 +17,14 @@ import type { UploadProvider } from "../../../../items/upload";
 // picture a browser can draw.
 //
 // A saved kit's pictures arrive as `data:` pictures and are drawn as they are.
-// Only a PNG, a JPEG or a GIF is drawn or taken, which is what a kit holds;
-// how large one may be is the engine's to say, in the preview and on save.
+// Only a PNG, a JPEG or a GIF of up to 1 MiB is drawn or taken, which is what a
+// kit holds: a larger one is refused at its field before it is uploaded, as the
+// engine would refuse it on save. Whether a picture can be read is the
+// engine's to say, in the preview and on save.
 
 const TYPES = ["image/png", "image/jpeg", "image/gif"];
+/** The most one picture of a kit may be (emaildoc's MaxImageBytes). */
+const MAX_PICTURE_BYTES = 1024 * 1024;
 const RASTER = /^data:image\/(png|jpeg|gif);base64,/;
 
 /** What every picture on the Brand page shares: the upload port, and the pictures picked here, by kit value. */
@@ -69,6 +73,10 @@ export function PictureField({ name, value, pictures, onChange, hint, ground }: 
       setProblem("Choose a PNG, JPEG or GIF picture.");
       return;
     }
+    if (file.size > MAX_PICTURE_BYTES) {
+      setProblem("Choose a picture of 1 MiB or less.");
+      return;
+    }
     setBusy(true);
     setProblem("");
     try {
@@ -84,7 +92,7 @@ export function PictureField({ name, value, pictures, onChange, hint, ground }: 
   }
 
   return (
-    <div className="email-picture-field">
+    <div className="email-picture-field" data-picture={name}>
       <div className="email-picture" ref={row}>
         <span
           className="email-picture-frame"
