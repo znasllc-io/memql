@@ -390,6 +390,7 @@ var tierDecidesTheRead = map[string]string{
 	"journeyById":                   "memql#6032: the mandatory organization and Email app boundary scopes automations to current members; creator-only filtering would exclude authorized organization peers.",
 	"journeys":                      "memql#6032: as journeyById; optional status selection narrows the organization-authorized row set.",
 	"journeyEnrollmentCounts":       "memql#6032: the mandatory organization and Email app boundary scopes enrollment counts, including authorized peers reviewing shared automations.",
+	"journeyEnrollmentsByStatus":    "memql#6032: as journeyEnrollmentCounts: the mandatory organization and Email app boundary scopes the runs an automation lists, including authorized peers reviewing shared automations.",
 	"packagesByRepoUrl":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"packagesShippingDslDomain":     "docs/superpowers/specs/2026-10-31-deployer-fleet-design.md: @serverOnly, read as the cluster by the model-call seam. A workflow has no person, and it must see every package listing a domain to refuse one that two packages list.",
 	"packagesTrackingRepos":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
