@@ -1,6 +1,7 @@
 package email
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -78,6 +79,27 @@ func (s *connectionStore) gates() (*sql.DB, error) {
 // change executes the supplied update while holding a database transaction
 // lock. A network-backed update must itself use bounded request deadlines. A
 // gate that could not be taken says why: busy (try again), or no gate pool.
+//
+// AN UNCHANGED STATE IS NOT WRITTEN. Sealing uses a fresh random nonce, so the
+// stored ciphertext differs on every write even when the plaintext does not,
+// and the row is append-only: every callback that changed nothing still added
+// a version. The email maintenance pass runs such callbacks on its own
+// schedule (the installation workflow's cluster check; for each ready
+// organization due a feedback check, the feedback configuration twice and the
+// cluster connection held around the ARM call), and production appended about
+// 1,400 versions a day across seven rows (2026-11-06).
+//
+// The comparison is between the target re-serialized right after the read and
+// after the callback, both by this build's json.Marshal, so a field the stored
+// plaintext lacks or one this build does not know cannot make an unchanged
+// state look changed, and a field a newer replica wrote is not dropped by a
+// callback that changed nothing. A state that was NOT found is always written:
+// creating the row is the point of that call. The scheduling index written
+// beside the ciphertext is derived from the plaintext, so it is unchanged too,
+// except an organization's nextAttemptAt, which a write sets to now; between
+// real changes that schedule is the feedback indexer's
+// (indexFeedbackConnection). TestAnUnchangedEmailConnectionStateIsNotRewritten
+// is the regression test.
 func (s *connectionStore) change(ctx context.Context, key string, target any, change func(found bool) error) error {
 	db, err := s.gates()
 	if err != nil {
@@ -92,12 +114,21 @@ func (s *connectionStore) change(ctx context.Context, key string, target any, ch
 	if err != nil {
 		return err
 	}
+	var read []byte
+	if found {
+		if read, err = json.Marshal(target); err != nil {
+			return fmt.Errorf("could not read email connection state")
+		}
+	}
 	if err = change(found); err != nil {
 		return err
 	}
 	data, err := json.Marshal(target)
 	if err != nil || len(data) > 128<<10 {
 		return fmt.Errorf("email connection state exceeds its storage limit")
+	}
+	if found && bytes.Equal(read, data) {
+		return nil
 	}
 	sealed, _, err := secret.Encrypt(string(data))
 	if err != nil {
