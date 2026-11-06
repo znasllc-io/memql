@@ -885,7 +885,16 @@ architecture emulation is refused. Native execution also probes Docker when
 `needs: { docker: true }` is declared. Labels alone do not prove daemon health.
 
 The worker admits one pipeline command at a time per OS user across all its
-cluster connections. Its exclusive host lock also excludes Fleet workbench
+cluster connections, unless the machine's `pipelines.max_concurrent_steps` (1
+through 8) names more. With several, each step holds a slot with its own attempt
+record, every running step's CPU, memory and disk limits are charged in full
+when another is admitted, and an attempt of a step that is still running in
+another slot is refused `pipeline_capacity_busy`, so a retry pinned to that
+machine never overlaps the attempt it retries. The steps share the host lock,
+which is held while any of them runs. The engine needs no change: no slot count is
+advertised, and it learns that a machine is full only from that refusal
+([Several steps at once](https://github.com/znasllc-io/memql/blob/main/cockpit/docs/pipelines.md#several-steps-at-once)).
+Its exclusive host lock also excludes Fleet workbench
 execution and guarded local builds for that user. Local model calls take no part
 in it: a model call never waits for a step and is never refused because of one,
 and a step can start during a call. The memory checks on each side are the only
@@ -1721,7 +1730,8 @@ Each of these is understood, and accepted for this release.
 - **An unknown outcome on the only eligible machine cannot fail over.** A macOS
   step with one Mac allowing pipelines fails as it does without retries.
 - **A step waiting between attempts keeps its stage's slot**, and each machine
-  still runs one pipeline step at a time.
+  runs one pipeline step at a time unless its owner's `max_concurrent_steps`
+  names more.
 - **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
   (memql#5813):
   - cache-prep, which runs as root with every capability dropped, creates the

@@ -4188,9 +4188,12 @@ separate verification against the selected deployment.
   (the source tests above are the only evidence for the release rule). The first
   verification steps a push runs under it reuse nothing from earlier pushes, whose
   fingerprints bound `placement: cluster`. Linux container capacity on the Fleet
-  is two machines (CyberPC and MSI Raider, 2026-11-06), and Cockpit runs one
-  pipeline step per machine at a time (its exclusive `pipeline.lock`). The cost
-  guard still writes version-1 admission, so a cost hold still stops Fleet work too.
+  is two machines (CyberPC and MSI Raider, 2026-11-06), and Cockpit ran one
+  pipeline step per machine at a time (its exclusive `pipeline.lock`) until a
+  machine's owner names more ([A machine runs as many pipeline steps as its owner
+  allows](#a-machine-runs-as-many-pipeline-steps-as-its-owner-allows-2026-11-06)).
+  The cost guard still writes version-1 admission, so a cost hold still stops
+  Fleet work too.
 
 Fleet CI owns the host build lock exclusively against workspaces and local
 builds. Local model calls take no part in it, by the owner's decision of
@@ -4259,6 +4262,105 @@ does not know reads as pressure (`TestDarwinPressureBlocksOnlyAtCritical`). The
 model-call admission keeps its own reading, in which warn is pressure: a local
 call waits for headroom, up to its deadline, rather than being refused at once.
 That reading is unchanged.
+
+## A machine runs as many pipeline steps as its owner allows (2026-11-06)
+
+- *Trigger.* The 09:19Z push run of 2026-11-06 (`3fe2e0ee1`) had 16 steps in
+  flight and two Linux Fleet machines, CyberPC and MSI Raider, each allowing 8192
+  MiB and 4000 milliCPU per step. Moving the 20 verification steps to `pool` made
+  the run slower (73 min against 64): both machines were already full, because
+  Cockpit took an exclusive flock on `pipeline.lock` for every step whatever the
+  machine had room for, so the moved steps waited out `fleetWaitSeconds` and
+  queued for the cluster.
+- *Chosen path.* `pipelines.max_concurrent_steps` in `policy.yaml`, 1 through 8,
+  default 1, so nothing changes until an owner names more
+  (`PipelinesPolicy.ConcurrentSteps`). Each step holds a slot with its own lock and
+  attempt record (`capacity.PipelineSlotFile`): slot 0 is `pipeline.lock`, written
+  byte for byte as before, and slot *n* is `pipeline-slot-n.lock`. The steps of one
+  process share one exclusive hold on `pipeline.lock`: the first takes it, the
+  last to leave releases it (`cockpit/internal/worker/tools/pipeline_capacity_unix.go`).
+- *Why one exclusive hold shared within the process.* `pipeline.lock` is also
+  the fence Fleet workbenches (shared) and guarded local builds (exclusive)
+  honour. flock has no mode that is shared among steps and exclusive against
+  them, and holding it exclusively keeps every existing reader correct while any
+  step runs: a workbench, the local build guard, an older guard or an older
+  Cockpit. The cost: a second worker process on the same account is refused
+  while the first runs any step. The supervisor runs every enrollment in one
+  process (`fleet.go`), so only a legacy single-home worker run beside it pays.
+  Rejected: steps holding the lock shared plus every workbench slot's lock shared,
+  which is cross-process but makes an older guard miss a running step's record and
+  adds a lock to every admission for a case the supervisor no longer has.
+- *Two attempts of one step never overlap.* The engine retries a step on its
+  last machine because "a machine still holding the old command refuses the next
+  one" (`component/pipelinerun/attempts.go`). With one slot the lock did that. A
+  slot now carries the dispatch's `RunId` and `StepId`
+  (`integrations/pipelinesteps/fleet.go`, `dispatchStep`), and an attempt of a step
+  still running in another slot is refused `pipeline_capacity_busy` even when a
+  slot is free. A dispatch naming neither runs only alone.
+- *Admission charges every running step in full.* CPU and memory add each running
+  step's command and service limits to the new one's (Docker only for steps that
+  use it), and the disk check asks `min_free_disk_mib` for each running step as
+  well as the new one. A step still cloning has used almost none of what it will,
+  and recording each step's use on its slot before it measures lets two
+  admissions run at once with no lock of their own: each charges the other. It
+  over-reserves by what running steps already use. Rejected for now: the
+  workbench's credit of measured usage by exact container name
+  (`workbench/headroom.go`). `docker stats` fails as a whole when one named
+  container is gone, and reading other containers' names is what the probe
+  deliberately avoids. Summed CPU keeps one CPU outside every step, as the single
+  step's check did.
+- *Reconciliation per slot.* An interrupted attempt is a slot record with content
+  that no running step of this process holds. Admission reconciles every one
+  before its step continues (`reconcileInterruptedPipelines`); the minute
+  maintenance does the same while other slots run (`reconcileIdlePipeline`). A
+  running slot's container, workspace and record are never read or touched. Any
+  attempt left unreconciled keeps new steps out, as the one record always did;
+  a reconciliation already under way answers `pipeline_capacity_busy`. A slot file
+  with a name no Cockpit writes, or one that is not a regular file, is never
+  interpreted. Records survive process death per slot, and the kernel releases the
+  locks.
+- *Caches and the other fences.* Cockpit never used `MEMQL_CACHE_LOCKED` or the
+  cluster's cache gate (`integrations/pipelinesteps/wrapper.go`): the host build
+  lock serialized pruning. Now an in-process count marks the caches running
+  steps mount, which a prune neither measures nor removes, and no prune runs
+  while any slot holds an interrupted attempt, whose container may still write.
+  Steps of one cache scope share its directory, as cluster pods do. Every slot's
+  admission checks `local-build.json` and the workbench records; workbenches and
+  the guard read slot records (`capacity.PipelineSlotsPending`,
+  `PIPELINE_SLOT_GLOB` in `scripts/lib/host_build_guard.py`).
+- *The engine needs no change.* Routing keeps no in-flight count; a
+  `pipeline_capacity_busy` is a refusal before start, after which the fleet runner
+  waits and routes again (`integrations/pipelinesteps/fleet_capacity.go`). No slot
+  count is advertised. Each running step holds one of the machine's HEADLESS slots
+  on the engine's side (8 by default); a step beyond them would queue there for
+  that machine instead of being refused and rerouted, which is why the policy
+  stops at 8.
+- *Tests.* `TestPipelineSlotsShareTheHostLockAcrossOneProcess`,
+  `TestPipelineSlotsDefaultToOneStepAtATime`,
+  `TestPipelineSlotsRefuseASecondAttemptOfTheSameStep`,
+  `TestAnInterruptedSlotIsReconciledWhileAnotherSlotRuns`,
+  `TestAnUnreconcilableSlotFencesAdmissionButNotTheRunningStep`,
+  `TestPipelineSlotsOutliveTheirProcess`, `TestAnUnknownSlotFileIsNeverInterpreted`,
+  `TestLoweringTheSlotCountCountsTheStepsStillRunning`,
+  `TestPipelineStepsRunSideBySideUpToTheMachinesSlots`,
+  `TestASecondAttemptOfARunningStepIsRefusedWhileASlotIsFree` and
+  `TestAMachineNamingNoSlotsRunsOneStepAtATime` (`cockpit/internal/worker/tools`);
+  `TestPipelineHeadroomChargesEveryRunningStepInFull`,
+  `TestPipelineDiskAdmissionReservesTheMinimumForEveryRunningStep`,
+  `TestPipelineCachePruneLeavesACacheARunningStepMounts` and
+  `TestPipelineCachePruneWaitsForAnInterruptedSlot`;
+  `TestWorkbenchWaitsForAnInterruptedPipelineSlot` (`workbench`);
+  `test_an_interrupted_pipeline_slot_is_never_cleared` (`scripts/lib`).
+- *Not verified, and known limits.* No machine has run two steps at once: the
+  change needs a Cockpit release, and the release and each machine's opt-in are
+  the owner's. Real Docker is not exercised with two slots (the tests fake the
+  daemon or run native steps). A guard from an older checkout, or an older
+  Cockpit on the same account, reads only `pipeline.lock`, so after a worker dies
+  it misses an interrupted step in another slot. A machine with several slots
+  is idle less often, and an `allow` or `repos` change reaches the engine only at
+  an idle moment (the new answer still refuses a step routed on the old one).
+  How many steps CyberPC and MSI Raider fit is unmeasured: summed CPU caps keep
+  two 4000-milliCPU steps from starting on fewer than nine CPUs.
 
 ## Pipeline step attempts, retries and failover
 
@@ -4563,8 +4665,9 @@ tag).
   unknown until it has a code of its own.
 - An unknown outcome on the only eligible machine cannot fail over: a macOS step
   with one Mac allowing pipelines fails as it does without retries.
-- A step waiting between attempts keeps its stage's slot, and each machine still
-  runs one step at a time.
+- A step waiting between attempts keeps its stage's slot, and each machine runs
+  one step at a time unless its owner's `pipelines.max_concurrent_steps` names
+  more; then Cockpit still refuses a second attempt of a step it is running.
 - A step wrongly marked repeatable can run twice, and a dishonest exit 75 is
   retried within the limits; review owns both.
 - A failover to another machine waits for the check run's *Retrying* publish:

@@ -180,3 +180,33 @@ func TestPipelinesReposAreCopiedOut(t *testing.T) {
 		t.Errorf("Pipelines handed out the live repos slice: %v", again.Repos)
 	}
 }
+
+// max_concurrent_steps is how many steps the machine runs at once. Omitted, it
+// is one: a machine is exactly what it was until its owner names more.
+func TestPipelinesConcurrentStepsDefaultToOneAndAreBounded(t *testing.T) {
+	for _, tc := range []struct {
+		yaml string
+		want int
+	}{
+		{"", 1},
+		{"  max_concurrent_steps: 0\n", 1},
+		{"  max_concurrent_steps: 1\n", 1},
+		{"  max_concurrent_steps: 3\n", 3},
+		{"  max_concurrent_steps: 8\n", 8},
+	} {
+		settings := policyWith(t, "pipelines:\n  allow: true\n"+tc.yaml).Pipelines()
+		if err := settings.Check("o/r"); err != nil {
+			t.Fatalf("%q refused: %v", tc.yaml, err)
+		}
+		if got := settings.ConcurrentSteps(); got != tc.want {
+			t.Fatalf("%q runs %d steps at once, want %d", tc.yaml, got, tc.want)
+		}
+	}
+	for _, bad := range []string{"-1", "9", "64"} {
+		settings := policyWith(t, "pipelines:\n  allow: true\n  max_concurrent_steps: "+bad+"\n").Pipelines()
+		err := settings.Check("o/r")
+		if err == nil || !strings.Contains(err.Error(), "pipelines.max_concurrent_steps") {
+			t.Fatalf("max_concurrent_steps %s admitted: %v", bad, err)
+		}
+	}
+}

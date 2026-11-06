@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/znasllc-io/memql/cockpit/internal/worker/apps"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/capacity"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/harness"
 	"github.com/znasllc-io/memql/cockpit/internal/worker/models"
 )
@@ -280,6 +281,11 @@ type BackupPolicy struct {
 // Services retain separate 2 CPU / 2 GiB caps; aggregate host admission includes them.
 // min_free_disk_mib is the available workspace filesystem headroom required
 // before checkout and command admission (default 20480). It is not a quota.
+// max_concurrent_steps is how many steps this machine runs at once, 1 through
+// 8 (default 1, the machine as it always was). Each step past the first is
+// admitted only when the CPU, memory and disk checks fit it beside every step
+// already running, all charged in full; two attempts of one step never run at
+// once (pipeline_capacity_unix.go).
 //
 // The whole block REPLACES on reload, unlike the allow lists above: it is a
 // consent, and one a SIGHUP could not take back would be a grant the file no
@@ -292,6 +298,17 @@ type PipelinesPolicy struct {
 	ContainerMemoryMiB int      `yaml:"container_memory_mib"`
 	ContainerCPUMilli  int      `yaml:"container_cpu_milli"`
 	MinFreeDiskMiB     int      `yaml:"min_free_disk_mib"`
+	MaxConcurrentSteps int      `yaml:"max_concurrent_steps"`
+}
+
+// ConcurrentSteps is how many pipeline steps this machine runs at once: the
+// policy's max_concurrent_steps, or one when it names none. Check refuses a
+// value outside 1 through capacity.PipelineSlots before this is read.
+func (pp PipelinesPolicy) ConcurrentSteps() int {
+	if pp.MaxConcurrentSteps == 0 {
+		return 1
+	}
+	return pp.MaxConcurrentSteps
 }
 
 // DefaultPipelineMaxTimeoutSec is the longest a pipeline step may run when
@@ -319,6 +336,9 @@ func (pp PipelinesPolicy) Check(repository string) error {
 	}
 	if pp.MinFreeDiskMiB != 0 && (pp.MinFreeDiskMiB < 1024 || pp.MinFreeDiskMiB > 1048576) {
 		return errors.New("pipelines.min_free_disk_mib must be between 1024 and 1048576 MiB, or omitted for the 20480 MiB default")
+	}
+	if pp.MaxConcurrentSteps != 0 && (pp.MaxConcurrentSteps < 1 || pp.MaxConcurrentSteps > capacity.PipelineSlots) {
+		return fmt.Errorf("pipelines.max_concurrent_steps must be between 1 and %d, or omitted for one step at a time", capacity.PipelineSlots)
 	}
 	if len(pp.Repos) == 0 {
 		return nil

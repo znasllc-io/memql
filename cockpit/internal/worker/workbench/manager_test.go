@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +139,37 @@ func TestWorkbenchNeverRunsBesideExclusivePipelineBuild(t *testing.T) {
 	}
 	if _, err = lockFile(filepath.Join(root, "pipeline.lock"), false); !errors.Is(err, ErrBusy) {
 		t.Fatal("pipeline bypassed workspace reservation", err)
+	}
+	_ = m.CloseHome("home")
+}
+
+// A machine running several pipeline steps keeps each extra step's record in a
+// slot file. One left with content after its worker died is an interrupted
+// step: no workbench starts until it is reconciled, exactly as for a record in
+// pipeline.lock itself.
+func TestWorkbenchWaitsForAnInterruptedPipelineSlot(t *testing.T) {
+	root := t.TempDir()
+	slot := filepath.Join(root, "pipeline-slot-2.lock")
+	if err := os.WriteFile(slot, []byte(`{"execution":"native","workspace":"/tmp/step-x"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeEngine{}
+	m := New(f, root)
+	if _, err := m.Execute(context.Background(), identity("run"), request()); !errors.Is(err, ErrInterrupted) {
+		t.Fatal("a workbench started beside an interrupted pipeline step", err)
+	}
+	if len(f.created) != 0 {
+		t.Fatal("the refusal created a container")
+	}
+	if data, err := os.ReadFile(slot); err != nil || !strings.Contains(string(data), "step-x") {
+		t.Fatal("the workbench changed a pipeline record", err)
+	}
+	// An empty slot file is a step that ended cleanly.
+	if err := os.Truncate(slot, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Execute(context.Background(), identity("run"), request()); err != nil {
+		t.Fatal(err)
 	}
 	_ = m.CloseHome("home")
 }
