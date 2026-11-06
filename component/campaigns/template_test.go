@@ -2257,6 +2257,13 @@ func TestPublishRefusesAnUnknownMergeTag(t *testing.T) {
 	if _, err = tw.save(saveTemplateArgs(content, revised(saved.Revision, "publish"))); err == nil || !strings.Contains(err.Error(), "{{ displayName }} is not a tag") {
 		t.Fatalf("publishing error = %v", err)
 	}
+	// Render fills fields.<key> with the key as written, so a space after the
+	// dot is a tag that is never filled.
+	content["htmlBody"] = "<p>Hi {{fields. plan}}</p>"
+	saved = tw.saved(saveTemplateArgs(content, revised(saved.Revision, "save")))
+	if _, err = tw.save(saveTemplateArgs(content, revised(saved.Revision, "publish"))); err == nil || !strings.Contains(err.Error(), "{{fields. plan}} is not a tag") {
+		t.Fatalf("publishing error = %v", err)
+	}
 	content["htmlBody"] = "<p>Hi {{displayName}}</p>"
 	saved = tw.saved(saveTemplateArgs(content, revised(saved.Revision, "save")))
 	if published := tw.saved(saveTemplateArgs(content, revised(saved.Revision, "publish"))); published.Status != "ready" {

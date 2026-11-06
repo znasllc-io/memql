@@ -24,6 +24,9 @@ type ledgerHarness struct {
 	campaign string
 	receipt  func(label, status string, withRow bool) (operation, address, delivery string)
 	post     func(operation, address, status string) int
+	// noAcceptedTime stores the next receipts with no accepted time, as a
+	// send whose response was lost has none.
+	noAcceptedTime bool
 }
 
 func newLedgerHarness(t *testing.T) *ledgerHarness {
@@ -110,6 +113,9 @@ func newLedgerHarness(t *testing.T) *ledgerHarness {
 		}
 		operation := id.NewShortId()
 		value := map[string]any{"ID": operation, "AccountID": n.org, "DeliveryID": delivery, "ResourceID": topic, "RecipientDigest": EmailDigest(address), "SenderDigest": EmailDigest("sender@example.test"), "Status": "unknown", "SubmittedAt": now}
+		if h.noAcceptedTime {
+			value["SubmittedAt"] = time.Time{}
+		}
 		n.execute(t, n.system, call("mutation", "storeEmailSendOperation", arg{"id", n.suffix + "-op-" + label}, arg{"accountId", n.org}, arg{"providerMessageId", operation}, arg{"status", "unknown"}, arg{"nextPollAt", now.Format(time.RFC3339Nano)}, arg{"encryptedValue", seal(value)}, arg{"versionTime", now.Format(time.RFC3339Nano)}))
 		return operation, address, delivery
 	}
@@ -163,5 +169,24 @@ func TestABounceSuppressesEvenWithoutItsDeliveryRow(t *testing.T) {
 	}
 	if !suppressed {
 		t.Fatal("the bounced address was not suppressed")
+	}
+}
+
+// With no accepted time on the receipt, the delivered report's own time is
+// when the message went.
+func TestADeliveredReportWithNoAcceptedTimeSetsSentAtFromTheReport(t *testing.T) {
+	h := newLedgerHarness(t)
+	h.noAcceptedTime = true
+	operation, address, delivery := h.receipt("noaccept", "failed", true)
+	if code := h.post(operation, address, "Delivered"); code != http.StatusNoContent {
+		t.Fatalf("feedback code %d", code)
+	}
+	row, err := h.n.worker.newsletterRow(h.n.system, "providerDeliveryById", "deliveryId", delivery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, provider := templateTime(row["sentAt"]), templateTime(row["providerAt"])
+	if str(row, "status") != "sent" || sent.IsZero() || !sent.Equal(provider) {
+		t.Fatalf("sentAt %v should be the report's time %v: %v", sent, provider, row)
 	}
 }

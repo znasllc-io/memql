@@ -401,7 +401,7 @@ func UnknownMergeTags(bodies ...string) []string {
 	for _, body := range bodies {
 		for _, m := range unresolvedTagPattern.FindAllStringSubmatch(body, -1) {
 			name := m[1]
-			if knownMergeTags[name] || (strings.HasPrefix(name, mergeFieldsPrefix) && strings.TrimSpace(name[len(mergeFieldsPrefix):]) != "" && name == strings.TrimSpace(name)) {
+			if knownMergeTags[name] || (strings.HasPrefix(name, mergeFieldsPrefix) && name[len(mergeFieldsPrefix):] != "" && strings.TrimSpace(name[len(mergeFieldsPrefix):]) == name[len(mergeFieldsPrefix):]) {
 				continue
 			}
 			tag := mergeTagPrefix + name + mergeTagSuffix
