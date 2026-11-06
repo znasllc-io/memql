@@ -450,3 +450,70 @@ func TestDecideForIsCapableForWithProvenance(t *testing.T) {
 		t.Fatalf("role alone: %+v", d)
 	}
 }
+
+// TestDecideForNamesWhoAnswered: beside the level, a decision names WHO at it
+// answered -- the role's slug, the group whose grant decided (the DENYING one
+// when the subject's groups disagree, since deny wins there), the person --
+// and marks a pair a limit on the role refused before any level spoke. An
+// operator's read of somebody's access (integration.rbac's
+// effectiveAccessForSubject) renders exactly these, so DecideFor and
+// EffectiveCapabilities must say the same.
+func TestDecideForNamesWhoAnswered(t *testing.T) {
+	installFake(t, &fakeCatalog{
+		ranks:  map[string]int{"user": 100, "org-role": 20},
+		names:  map[string]string{"user": "Member", "org-role": "Organization role"},
+		scopes: map[string]string{"org-role": "acct-1"},
+		grants: map[string]map[VerbResource]bool{
+			"user":     {{Verb: VerbRead, Resource: "app:deployables"}: true},
+			"org-role": {},
+		},
+	})
+	const app = "app:deployables"
+	by := func(g Grant, subject string) Grant { g.SubjectId = subject; return g }
+	installGrantFake(t, &countingGrantSource{
+		user: map[string][]Grant{"u1": {by(allow(VerbRead, "app:email"), "u1")}},
+		group: map[string][]Grant{
+			"g-allow": {by(allow(VerbRead, app), "g-allow"), by(allow(VerbRead, "app:logs"), "g-allow")},
+			"g-deny":  {by(deny(VerbRead, app), "g-deny")},
+		},
+	})
+	member := Subject{Role: "user", UserId: "u1", GroupIds: []string{"g-allow", "g-deny"}}
+
+	for _, tc := range []struct {
+		name     string
+		subject  Subject
+		resource string
+		want     Decision
+	}{
+		{"the role answers, naming itself", Subject{Role: "user", UserId: "u2"}, app,
+			Decision{Held: true, Source: SourceRole, SourceId: "user"}},
+		{"two groups disagree: the denying group answers", member, app,
+			Decision{Held: false, Source: SourceGroup, SourceId: "g-deny"}},
+		{"one group allows", member, "app:logs",
+			Decision{Held: true, Source: SourceGroup, SourceId: "g-allow"}},
+		{"the person's own grant answers, naming them", member, "app:email",
+			Decision{Held: true, Source: SourceUser, SourceId: "u1"}},
+		{"an organization role on a cluster app is barred whatever its group allows",
+			Subject{Role: "org-role", UserId: "u3", GroupIds: []string{"g-allow"}}, "app:logs",
+			Decision{Held: false, Source: SourceRole, SourceId: "org-role", Barred: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.want.Verb, tc.want.Resource = VerbRead, tc.resource
+			if got := DecideFor(context.Background(), tc.subject, VerbRead, tc.resource); got != tc.want {
+				t.Fatalf("DecideFor = %+v, want %+v", got, tc.want)
+			}
+			found := false
+			for _, d := range EffectiveCapabilities(context.Background(), tc.subject) {
+				if d.Verb == VerbRead && d.Resource == tc.resource {
+					found = true
+					if d != tc.want {
+						t.Fatalf("EffectiveCapabilities = %+v, want %+v", d, tc.want)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("EffectiveCapabilities has no entry for read %s", tc.resource)
+			}
+		})
+	}
+}

@@ -948,6 +948,20 @@ subject, verb, resource and effect in `detail`.
   `group` or `user`. It takes no subject, so nobody can name anybody else, and
   it is deliberately **not** admin-floored: every signed-in person needs their
   own answer, because this is the read MemQL OS decides what to show from.
+- `effectiveAccessForSubject(subjectKind, subjectId)` -- what **somebody
+  else** can open, and why: the read an operator decides access from. It runs
+  the functions the gates call, for the person named, rather than a
+  restatement of them: role, then group grants, then person grants, an
+  organization role's limits (`scoped-role-limit`), and the per-organization
+  decisions the action guards make. One row `{verb, resourceType, held,
+  source, sourceId, accountId}` per app door, floored section and part; a
+  pair the engine decides per organization (opening Email or Deployables, the
+  data verbs, an organization's deployable parts) has one row per organization
+  the person belongs to and never a merged one. For a group, the rows are its
+  own active grants. It keeps the grant reads' floor -- a cluster role at
+  admin or above, applied by the handler because a builtin carries no
+  `@requiresRank` -- and nobody reads a person who outranks them
+  (`access_subject_outranks_caller`).
 
 The engine itself never reads through the admin-floored queries. Resolution
 reads the rows through the engine's own graph-backed source under its own

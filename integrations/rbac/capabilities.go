@@ -149,6 +149,18 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{},
 		},
 		{
+			Name: "effectiveAccessForSubject",
+			Description: "What a named PERSON can open, and why, resolved by the engine's own resolver for them " +
+				"(role, group grants, person grants, an organization role's limits, per-organization decisions); " +
+				"or a GROUP's own active grants. Admin floor, and nobody reads a person who outranks them. " +
+				"Returns rows {verb, resourceType, held, source, sourceId, accountId}.",
+			Handler: i.handleEffectiveAccessForSubject,
+			ArgsSchema: map[string]string{
+				"subjectKind": "string (required) - user | group",
+				"subjectId":   "string (required) - the user's or group's id, in either spelling",
+			},
+		},
+		{
 			Name:        "canCreatePrincipal",
 			Description: "The create != edit split: may an actor at actorRank create a principal at newRank? Returns {allowed: bool}.",
 			Handler:     i.handleCanCreatePrincipal,

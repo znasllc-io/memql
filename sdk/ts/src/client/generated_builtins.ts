@@ -1817,6 +1817,31 @@ QueryClient.prototype.editDocument = function (this: QueryClient, args: EditDocu
   return this.executeNamed("editDocument", buildEditDocument(args), opts);
 };
 
+/** What a PERSON can open, and why, or a GROUP's own grants: the read an operator decides access from. The caller holds a cluster role at admin rank or above (the grant reads' floor, applied by the handler because a builtin carries no @requiresRank), and nobody reads a person who outranks them. For a user, the engine's own resolver runs for that person: role, then group grants, then person grants, with an organization role's limits. One row per app door (`read app:<id>`), floored section (`read app:<id>/<section>`) and part (`execute app:<id>/<part>`) the role catalog or the person's grants name; a pair the engine decides PER ORGANIZATION (opening Email or Deployables, the data verbs, an organization's deployable parts) has one row per organization the person belongs to and no merged row, and every other pair one row with accountId empty. An operator, or a person in no organization, has no per-organization rows. For a group, one row per active grant it holds, held from its effect, accountId the group's own organization. Rows: {verb, resourceType, held, source, sourceId, accountId}. source is role, group, person, scoped-role-limit (an organization role's limit, which no grant lifts) or not-granted; sourceId is the role slug, the group's id or the person's id, empty for not-granted. A refusal is an error starting with its code: access_caller_not_permitted, access_subject_outranks_caller, access_unknown_subject, access_invalid or access_unavailable. */
+export interface EffectiveAccessForSubjectArgs {
+  /** `user` or `group`. */
+  subjectKind: string;
+  /** The v1:identity:user or v1:identity:group to answer for, in either spelling. */
+  subjectId: string;
+}
+
+export function buildEffectiveAccessForSubject(args: EffectiveAccessForSubjectArgs): string {
+  const parts: string[] = [];
+  parts.push("subjectKind: " + renderMemQLValue(args.subjectKind));
+  parts.push("subjectId: " + renderMemQLValue(args.subjectId));
+  return "builtin effectiveAccessForSubject(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    effectiveAccessForSubject(args: EffectiveAccessForSubjectArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.effectiveAccessForSubject = function (this: QueryClient, args: EffectiveAccessForSubjectArgs = {} as EffectiveAccessForSubjectArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("effectiveAccessForSubject", buildEffectiveAccessForSubject(args), opts);
+};
+
 /** The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}], organizationEntries: [{accountId, verb, resource, effect}]}. Global entries retain their existing meaning. Organization entries report target-specific app and data permissions for authorized finite memberships; app discovery may admit a root app available in any organization, while actions must authorize their selected organization. Global operators keep global entries and an empty organizationEntries list. */
 export interface EffectiveCapabilitiesForActorArgs {
 }

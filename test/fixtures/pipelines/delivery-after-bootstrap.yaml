@@ -119,6 +119,7 @@ pipeline:
       - integrations/installation
       - integrations/planner
       - integrations/procedure
+      - integrations/rbac
       - integrations/release
       - integrations/shopify
       - integrations/email

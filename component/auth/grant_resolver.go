@@ -92,11 +92,18 @@ type Subject struct {
 // and its effect. Inactive carries the row's lifecycle flag so that ONE place
 // -- this resolver -- decides that an inactive grant decides nothing; a source
 // reports the row and does not editorialise.
+//
+// SubjectId is the user or group the row names, as the source read it. It
+// decides nothing: it is how a Decision says WHICH group answered, which an
+// operator reading somebody's access needs ("from the group Acme") and the
+// level alone cannot say once a person is in more than one group. A source
+// that leaves it empty costs the decision its SourceId and nothing else.
 type Grant struct {
-	Verb     string
-	Resource string
-	Effect   string
-	Inactive bool
+	Verb      string
+	Resource  string
+	Effect    string
+	Inactive  bool
+	SubjectId string
 }
 
 // GrantSource reads a subject's grants. Implemented by component/memql over
@@ -206,11 +213,25 @@ const (
 // Source names the MOST SPECIFIC level that spoke. A pair no grant names is
 // the role's answer whichever way it points -- "your role does not hold this"
 // is as much a role-level fact as "your role holds this".
+//
+// SourceId names WHO spoke at that level: the subject's role slug for the
+// role level, the id of the group whose grant decided for the group level
+// (the denying group when the subject's groups disagree, since deny wins
+// there), the subject's own id for the user level. Empty when the source
+// could not say -- a GrantSource that reports no SubjectId.
+//
+// Barred reports that a limit on the subject's ROLE refused the pair before
+// any level was consulted (ScopedRoleMayUse): an organization role on a
+// cluster surface, or Fleet below the roles that may manage it. Held is then
+// false whatever any grant says, and no grant can lift it -- which is a
+// different answer to give a person than "nothing grants it".
 type Decision struct {
 	Verb     string
 	Resource string
 	Held     bool
 	Source   string
+	SourceId string
+	Barred   bool
 }
 
 // CapableFor is THE capability decision: may this subject do verb on
@@ -225,14 +246,16 @@ func CapableFor(ctx context.Context, subject Subject, verb, resource string) boo
 // level answered. CapableFor is this function's Held field and nothing else,
 // so the gates and the effective read cannot disagree about one caller.
 func DecideFor(ctx context.Context, subject Subject, verb, resource string) Decision {
+	role := Role(normalizeSlug(string(subject.Role)))
 	if !ScopedRoleMayUse(subject.Role, resource) {
-		return Decision{Verb: verb, Resource: resource, Source: SourceRole}
+		return Decision{Verb: verb, Resource: resource, Source: SourceRole, SourceId: string(role), Barred: true}
 	}
 	d := Decision{
 		Verb:     verb,
 		Resource: resource,
-		Held:     roleHasCapability(Role(normalizeSlug(string(subject.Role))), verb, resource),
+		Held:     roleHasCapability(role, verb, resource),
 		Source:   SourceRole,
+		SourceId: string(role),
 	}
 	if subject.Unranked {
 		return d
@@ -242,16 +265,21 @@ func DecideFor(ctx context.Context, subject Subject, verb, resource string) Deci
 		return d
 	}
 	userGrants, groupGrants := grantsFor(ctx, src, subject)
-	return decideOver(d, userGrants, groupGrants)
+	return decideOver(d, subject.UserId, userGrants, groupGrants)
 }
 
-// decideOver folds the two grant levels over a role-level answer.
-func decideOver(d Decision, userGrants, groupGrants []Grant) Decision {
-	if v, decided := overlay(groupGrants, d.Verb, d.Resource); decided {
-		d.Held, d.Source = v, SourceGroup
+// decideOver folds the two grant levels over a role-level answer, naming the
+// group or person that decided. A user grant that reports no SubjectId is
+// still the subject's own, so the subject's id stands in for it.
+func decideOver(d Decision, userId string, userGrants, groupGrants []Grant) Decision {
+	if v, decided, by := overlay(groupGrants, d.Verb, d.Resource); decided {
+		d.Held, d.Source, d.SourceId = v, SourceGroup, by
 	}
-	if v, decided := overlay(userGrants, d.Verb, d.Resource); decided {
-		d.Held, d.Source = v, SourceUser
+	if v, decided, by := overlay(userGrants, d.Verb, d.Resource); decided {
+		if by == "" {
+			by = strings.TrimSpace(userId)
+		}
+		d.Held, d.Source, d.SourceId = v, SourceUser, by
 	}
 	return d
 }
@@ -303,13 +331,16 @@ func EffectiveCapabilities(ctx context.Context, subject Subject) []Decision {
 			Resource: vr.Resource,
 			Held:     roleHasCapability(role, vr.Verb, vr.Resource),
 			Source:   SourceRole,
+			SourceId: string(role),
 		}
 		if !subject.Unranked {
-			d = decideOver(d, userGrants, groupGrants)
+			d = decideOver(d, subject.UserId, userGrants, groupGrants)
 		}
 		if !ScopedRoleMayUse(subject.Role, vr.Resource) {
 			d.Held = false
 			d.Source = SourceRole
+			d.SourceId = string(role)
+			d.Barred = true
 		}
 		out = append(out, d)
 	}
@@ -355,23 +386,41 @@ func catalogUniverse(role Role) []VerbResource {
 // overlay folds one level's grants over one pair: deny wins within the level,
 // an allow decides otherwise, and a level with nothing to say leaves the
 // previous answer standing. Inactive rows decide nothing.
-func overlay(grants []Grant, verb, resource string) (held bool, decided bool) {
-	sawAllow := false
+//
+// `by` is the subject of a grant carrying the deciding effect -- a deny when
+// any denies, an allow otherwise -- the lowest id when several do, so two
+// reads of one subject name the same group. It is provenance only: which
+// grant is named never changes the answer.
+func overlay(grants []Grant, verb, resource string) (held bool, decided bool, by string) {
+	sawAllow, sawDeny := false, false
+	allowBy, denyBy := "", ""
+	lowest := func(current, next string) string {
+		next = strings.TrimSpace(next)
+		if current == "" || (next != "" && next < current) {
+			return next
+		}
+		return current
+	}
 	for _, g := range grants {
 		if g.Inactive || g.Verb != verb || g.Resource != resource {
 			continue
 		}
 		switch g.Effect {
 		case GrantDeny:
-			return false, true
+			sawDeny = true
+			denyBy = lowest(denyBy, g.SubjectId)
 		case GrantAllow:
 			sawAllow = true
+			allowBy = lowest(allowBy, g.SubjectId)
 		}
 	}
-	if sawAllow {
-		return true, true
+	if sawDeny {
+		return false, true, denyBy
 	}
-	return false, false
+	if sawAllow {
+		return true, true, allowBy
+	}
+	return false, false, ""
 }
 
 // grantsFor reads both levels for a subject, through the request memo when

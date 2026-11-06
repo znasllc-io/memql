@@ -156,6 +156,9 @@ func (e *MemQLEngine) grantsForSubjects(ctx context.Context, kind, subjectConcep
 			// EFFECT DEFAULTS ALLOW, matching the catalog reader: only the
 			// literal "deny" narrows.
 			Effect: auth.GrantAllow,
+			// Bare, the spelling the row stores and every client speaks: a
+			// decision names the group that answered with it (provenance only).
+			SubjectId: BareShortId(strings.TrimSpace(stringFromAny(payload["subjectId"]))),
 		}
 		if strings.TrimSpace(stringFromAny(payload["effect"])) == auth.GrantDeny {
 			g.Effect = auth.GrantDeny

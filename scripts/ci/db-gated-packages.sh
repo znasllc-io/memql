@@ -269,6 +269,13 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # Include the stream owner as well as its fleet catalog in the DB lane.
 # Workbench exports prove durable receipts, cross-replica recovery and actual
 # downloads through Postgres; their database tests must run in this lane.
+# `integrations/rbac` joined with effectiveAccessForSubject (access clarity
+# plan, task 1): an operator's read of what somebody else can open runs the
+# engine's own resolver for that person -- their memberships, their groups'
+# organizations and the grants on both are rows, and a recording engine would
+# answer whatever it was told. What the complement now means, having looked:
+# the package moves from go-checks to db-tests whole, and its guard suites,
+# which drive a recording engine, run beside a database they ignore.
 readonly DB_GATED_TREES=(
     component/filebackups
 	"app"
@@ -300,6 +307,7 @@ readonly DB_GATED_TREES=(
 	"integrations/installation"
 	"integrations/planner"
 	"integrations/procedure"
+	"integrations/rbac"
 	"integrations/release"
 	"integrations/shopify"
 	"integrations/email"

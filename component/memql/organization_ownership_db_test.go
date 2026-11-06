@@ -432,3 +432,49 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	}
 
 }
+
+// TestOrganizationDecisionsForAPersonAreTheirsNotTheCallers: the per-
+// organization decisions an operator reads for somebody ELSE
+// (ResolveOrganizationDecisionsFor, behind integration.rbac's
+// effectiveAccessForSubject) are that person's, even on a request whose
+// account scope was already resolved for the caller.
+//
+// The request memo holds ONE resolved scope. Had the person's resolution
+// reused it, the operator's everyAccount would answer for them: no
+// organization decisions at all, so every organization pair would fall back
+// to one merged answer -- the confusion the read exists to end. And the
+// caller's request must still answer for the caller afterwards.
+func TestOrganizationDecisionsForAPersonAreTheirsNotTheCallers(t *testing.T) {
+	engine, _, _ := sharedReadMergeEngine(t)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	engine.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+	suffix := fmt.Sprintf("decisions-for-%d", time.Now().UnixNano())
+	acme, person, operator := "acme-"+suffix, "person-"+suffix, "operator-"+suffix
+	seedPrincipal(t, engine, person, auth.RoleWriter)
+	seedGroup(t, engine, "g-"+acme, acme, "account", acme)
+	seedMembership(t, engine, "g-"+acme, person, "active")
+	writeGrant(t, engine, auth.SubjectKindGroup, "g-"+acme, auth.VerbRead, "app:deployables", auth.GrantDeny)
+
+	callerCtx := contextWithAccountScopeMemo(rankActorCtx(operator, auth.RoleAdmin), engine)
+	if scope := engine.accountScopeFor(callerCtx); scope == nil || !scope.everyAccount {
+		t.Fatalf("control: the operator's own scope = %+v, want every account", scope)
+	}
+
+	var deployables *OrganizationDecision
+	decisions := engine.ResolveOrganizationDecisionsFor(callerCtx, person, auth.RoleWriter, nil)
+	for i := range decisions {
+		if decisions[i].AccountID == acme && decisions[i].Verb == auth.VerbRead && decisions[i].Resource == "app:deployables" {
+			deployables = &decisions[i]
+		}
+	}
+	if deployables == nil {
+		t.Fatalf("no decision in the person's organization; the caller's scope answered for them: %+v", decisions)
+	}
+	if deployables.Held || deployables.Source != auth.SourceGroup || deployables.SourceId != "g-"+acme {
+		t.Fatalf("read app:deployables in the person's organization = %+v, want denied by the group g-%s", deployables.Decision, acme)
+	}
+	if scope := engine.accountScopeFor(callerCtx); scope == nil || !scope.everyAccount {
+		t.Fatalf("the person's resolution replaced the caller's own scope on the caller's request: %+v", scope)
+	}
+}

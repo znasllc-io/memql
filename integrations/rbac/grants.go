@@ -205,6 +205,309 @@ func (i *Integration) handleEffectiveCapabilities(ctx context.Context, _ map[str
 }
 
 // ---------------------------------------------------------------------
+// effectiveAccessForSubject
+// ---------------------------------------------------------------------
+//
+// WHAT SOMEBODY ELSE CAN OPEN, AND WHY (access clarity plan, task 1). The
+// read above answers the caller and nobody else, so an operator's screen used
+// to assemble a colleague's answer from the admin-floored grant reads and the
+// public catalog, restating the resolver in TypeScript -- and the restatement
+// missed both of the engine's organization rules: an organization role's
+// limits (auth.ScopedRoleMayUse) and the per-organization decisions the action
+// guards make (component/memql's OrganizationCapable). This read runs the
+// engine's own resolver for the named person instead. Nothing here decides
+// anything: the decisions are the resolver's, and this file only names them.
+//
+// A REFUSAL IS AN ERROR, never a row. Every row shares one shape, and a
+// refusal dressed as one would be drawn as an answer. Each message starts
+// with its code, the groups integration's convention, so a client matches the
+// contract rather than the sentence.
+const (
+	codeAccessCallerNotPermitted    = "access_caller_not_permitted"
+	codeAccessSubjectOutranksCaller = "access_subject_outranks_caller"
+	codeAccessUnknownSubject        = "access_unknown_subject"
+	codeAccessInvalid               = "access_invalid"
+	codeAccessUnavailable           = "access_unavailable"
+)
+
+// A row's `source`: where its answer came from, in an operator's words.
+const (
+	accessSourceRole            = "role"
+	accessSourceGroup           = "group"
+	accessSourcePerson          = "person"
+	accessSourceScopedRoleLimit = "scoped-role-limit"
+	accessSourceNotGranted      = "not-granted"
+)
+
+// accessRow is one row of effectiveAccessForSubject.
+type accessRow struct {
+	Verb         string `json:"verb"`
+	ResourceType string `json:"resourceType"`
+	Held         bool   `json:"held"`
+	Source       string `json:"source"`
+	SourceId     string `json:"sourceId"`
+	AccountId    string `json:"accountId"`
+}
+
+// organizationAccessResolver is the engine's per-organization resolution for
+// a NAMED person (memql.MemQLEngine.ResolveOrganizationDecisionsFor). Declared
+// here, as the caller's read declares its own, so this package's doubles need
+// not stand up an engine.
+type organizationAccessResolver interface {
+	ResolveOrganizationDecisionsFor(ctx context.Context, userId string, role componentAuth.Role, known []componentAuth.Decision) []memql.OrganizationDecision
+}
+
+func accessRefusal(code, message string) error {
+	return fmt.Errorf("%s: %s", code, message)
+}
+
+func (i *Integration) handleEffectiveAccessForSubject(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	kind := strings.ToLower(strings.TrimSpace(stringArg(args, "subjectKind")))
+	subject := memql.BareShortId(strings.TrimSpace(stringArg(args, "subjectId")))
+	if kind != componentAuth.SubjectKindUser && kind != componentAuth.SubjectKindGroup {
+		return nil, accessRefusal(codeAccessInvalid, "subjectKind must be user or group")
+	}
+	if subject == "" {
+		return nil, accessRefusal(codeAccessInvalid, "subjectId is required")
+	}
+	callerRank, err := accessCallerRank(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if i.engine == nil {
+		return nil, accessRefusal(codeAccessUnavailable, "this node has no engine to resolve access with")
+	}
+	var rows []accessRow
+	if kind == componentAuth.SubjectKindUser {
+		rows, err = i.personAccess(ctx, callerRank, subject)
+	} else {
+		rows, err = i.groupAccess(ctx, subject)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return accessNodes(rows), nil
+}
+
+// accessCallerRank applies the read's floor and answers the caller's rank.
+//
+// THE GRANT READS' FLOOR, restated in Go because a builtin cannot carry
+// @requiresRank (its annotation set is closed): grantsForSubject and
+// grantsForResource are @requiresRank("admin"), and this read answers the
+// same question about a named person with the resolution on top, so it
+// refuses what refuseBelowRequiredRank refuses for that floor -- no caller, a
+// floor the ladder cannot resolve, an organization role at ANY rank (an admin
+// floor asks for a cluster role, and rank is not the question), and a rank
+// below admin's. Internal origin is not exempted, unlike the annotation: the
+// read is a client's, and no server path asks it.
+func accessCallerRank(ctx context.Context) (int, error) {
+	access, _ := componentAuth.AccessFromContext(ctx)
+	if access == nil {
+		return 0, accessRefusal(codeAccessCallerNotPermitted, "this call carries no caller identity")
+	}
+	role := componentAuth.Role(strings.ToLower(strings.TrimSpace(string(access.Role))))
+	floor := componentAuth.RoleRank(componentAuth.RoleAdmin)
+	if floor <= 0 {
+		return 0, accessRefusal(codeAccessCallerNotPermitted,
+			"the admin rung does not resolve on this cluster's ladder, so the floor cannot be applied")
+	}
+	if componentAuth.RoleAccountScope(role) != "" {
+		return 0, accessRefusal(codeAccessCallerNotPermitted,
+			"reading somebody's access needs a cluster role; yours belongs to one organization")
+	}
+	rank := componentAuth.RoleRank(role)
+	if rank < floor {
+		return 0, accessRefusal(codeAccessCallerNotPermitted,
+			fmt.Sprintf("reading somebody's access needs the admin role or above; yours is %q", string(role)))
+	}
+	return rank, nil
+}
+
+// personAccess answers what one person can open, and why.
+//
+// THE RANK RULE FIRST: nobody reads a person who outranks them, so a
+// developer looking at Access sees nothing for the owner. The person's role
+// comes off their user row under the synthetic operator, the grant guards'
+// read; a role that ranks nowhere cannot be compared, and "cannot compare"
+// refuses.
+//
+// THEN THE ENGINE'S RESOLVER, FOR THEM. The subject is built the way role
+// testing builds one (component/identity/roletest/service.go): an
+// AccessContext carrying their id and role, through SubjectFromContext, so
+// their groups come from the installed membership source. Two answers:
+//
+//   - EffectiveCapabilities, the same call the person's own read makes:
+//     every pair any role holds or their grants name, with provenance and the
+//     role's limits. Only the `app:` pairs become rows -- a door
+//     (`read app:<id>`), a floored section (`read app:<id>/<section>`), a part
+//     (`execute app:<id>/<part>`).
+//   - The engine's per-organization decisions for them. A pair answered there
+//     is answered per organization ONLY: a merged row would have to pick one
+//     organization's answer for all of them, which is the confusion this read
+//     exists to end. Which pairs those are is the engine's to say; the data
+//     verbs arrive this way too. An operator, and a person in no
+//     organization, has none, and keeps one row per pair.
+func (i *Integration) personAccess(ctx context.Context, callerRank int, userId string) ([]accessRow, error) {
+	role, found, err := i.userRole(ctx, userId)
+	if err != nil {
+		return nil, accessRefusal(codeAccessUnknownSubject, "the person could not be read: "+err.Error())
+	}
+	if !found {
+		return nil, accessRefusal(codeAccessUnknownSubject, "no active user by that id")
+	}
+	rank := componentAuth.RoleRank(componentAuth.Role(role))
+	if rank <= 0 {
+		return nil, accessRefusal(codeAccessSubjectOutranksCaller, fmt.Sprintf(
+			"the person's role %q ranks nowhere on this cluster's ladder, so it cannot be compared to yours", role))
+	}
+	if rank > callerRank {
+		// No rank in the sentence: it would say which rung a person holds to
+		// somebody the rule has just refused to tell anything about them.
+		return nil, accessRefusal(codeAccessSubjectOutranksCaller,
+			"that person ranks above you, and nobody reads the access of somebody who outranks them")
+	}
+	resolver, ok := i.engine.(organizationAccessResolver)
+	if !ok {
+		// Answering every pair globally instead would read an organization's
+		// door as open everywhere: a confident wrong picture, not a degraded one.
+		return nil, accessRefusal(codeAccessUnavailable, "this node cannot resolve per-organization access")
+	}
+
+	ctx = componentAuth.ContextWithGrantMemo(ctx)
+	personCtx := componentAuth.ContextWithAccess(ctx, &componentAuth.AccessContext{UserId: userId, Role: componentAuth.Role(role)})
+	person, _ := componentAuth.SubjectFromContext(personCtx)
+	decisions := componentAuth.EffectiveCapabilities(personCtx, person)
+	organizations := resolver.ResolveOrganizationDecisionsFor(ctx, userId, componentAuth.Role(role), decisions)
+
+	perOrganization := map[componentAuth.VerbResource]bool{}
+	for _, d := range organizations {
+		perOrganization[componentAuth.VerbResource{Verb: d.Verb, Resource: d.Resource}] = true
+	}
+	rows := make([]accessRow, 0, len(decisions)+len(organizations))
+	for _, d := range decisions {
+		if !strings.HasPrefix(d.Resource, "app:") || perOrganization[componentAuth.VerbResource{Verb: d.Verb, Resource: d.Resource}] {
+			continue
+		}
+		rows = append(rows, accessRowFrom(d, role, ""))
+	}
+	for _, d := range organizations {
+		rows = append(rows, accessRowFrom(d.Decision, role, d.AccountID))
+	}
+	sortAccessRows(rows)
+	return rows, nil
+}
+
+// accessRowFrom names one decision in the read's vocabulary.
+//
+// A BARRED pair is the role's limit, and which limit says who to blame: an
+// organization role's (`scoped-role-limit`, "an organization role can't open
+// this") or a global role's -- Fleet below the roles that manage it -- which
+// is the role's own answer (`role`, held false). Neither is "not granted":
+// a grant may well name it, and none can lift it. Otherwise the level that
+// answered names itself, and a role-level answer that is not held is
+// `not-granted`: nothing the person holds reaches it.
+func accessRowFrom(d componentAuth.Decision, role, accountId string) accessRow {
+	row := accessRow{Verb: d.Verb, ResourceType: d.Resource, Held: d.Held, AccountId: accountId}
+	switch {
+	case d.Barred && componentAuth.RoleAccountScope(componentAuth.Role(role)) != "":
+		row.Held, row.Source, row.SourceId = false, accessSourceScopedRoleLimit, role
+	case d.Barred:
+		row.Held, row.Source, row.SourceId = false, accessSourceRole, role
+	case d.Source == componentAuth.SourceUser:
+		row.Source, row.SourceId = accessSourcePerson, memql.BareShortId(d.SourceId)
+	case d.Source == componentAuth.SourceGroup:
+		row.Source, row.SourceId = accessSourceGroup, memql.BareShortId(d.SourceId)
+	case d.Held:
+		row.Source, row.SourceId = accessSourceRole, role
+	default:
+		row.Source = accessSourceNotGranted
+	}
+	return row
+}
+
+// groupAccess answers a group's own grants: one row per ACTIVE grant naming
+// it, held from its effect. accountId is the group's own organization, the
+// one its grants come from: a tied group's grants reach that organization's
+// per-organization decisions and no other's. A group tied to none answers ""
+// (its grants reach every organization's decisions, and the global ones).
+//
+// No rank rule: a group is not a person, and the grant reads this replaces
+// for a group carry the admin floor alone. A group that is not there, or is
+// archived, refuses -- an archived group grants nobody anything, and an empty
+// answer would say it grants nothing for a different reason. The rows come
+// from the grant source the resolver folds at the group level, so the page
+// and the gates read one set.
+func (i *Integration) groupAccess(ctx context.Context, groupId string) ([]accessRow, error) {
+	groups, err := i.rows(ctx, `query groupById(groupId: `+langparser.QuoteString(groupId)+`)`)
+	if err != nil {
+		return nil, accessRefusal(codeAccessUnknownSubject, "the group could not be read: "+err.Error())
+	}
+	if len(groups) == 0 {
+		return nil, accessRefusal(codeAccessUnknownSubject, "no active group by that id")
+	}
+	status, _ := groups[0]["status"].(string)
+	if strings.TrimSpace(status) != "active" {
+		return nil, accessRefusal(codeAccessUnknownSubject, "no active group by that id")
+	}
+	account, _ := groups[0]["accountId"].(string)
+	account = memql.BareShortId(strings.TrimSpace(account))
+	src := componentAuth.InstalledGrantSource()
+	if src == nil {
+		return nil, accessRefusal(codeAccessUnavailable, "this node has no grant source to read the group's grants from")
+	}
+	grants, err := src.ActiveGrantsForGroups(ctx, []string{groupId})
+	if err != nil {
+		return nil, accessRefusal(codeAccessUnavailable, "the group's grants could not be read: "+err.Error())
+	}
+	rows := make([]accessRow, 0, len(grants))
+	for _, g := range grants {
+		if g.Inactive || g.Verb == "" || g.Resource == "" {
+			continue
+		}
+		rows = append(rows, accessRow{
+			Verb: g.Verb, ResourceType: g.Resource, Held: g.Effect == componentAuth.GrantAllow,
+			Source: accessSourceGroup, SourceId: groupId, AccountId: account,
+		})
+	}
+	sortAccessRows(rows)
+	return rows, nil
+}
+
+// sortAccessRows orders rows by organization (the unscoped ones first), then
+// resource, then verb, so two reads of one subject draw the same list.
+func sortAccessRows(rows []accessRow) {
+	sort.SliceStable(rows, func(a, b int) bool {
+		if rows[a].AccountId != rows[b].AccountId {
+			return rows[a].AccountId < rows[b].AccountId
+		}
+		if rows[a].ResourceType != rows[b].ResourceType {
+			return rows[a].ResourceType < rows[b].ResourceType
+		}
+		return rows[a].Verb < rows[b].Verb
+	})
+}
+
+// accessNodes renders one node per row. EVERY ID IS DISTINCT: a top-level
+// builtin's reply is keyed by node id (component/memql's nodesToMap), so two
+// rows sharing one would arrive as one. Numbered in the rows' order, which is
+// also the order a client reading the reply by id sees them in.
+func accessNodes(rows []accessRow) []memorynodes.MemoryNode {
+	now := time.Now().UTC()
+	out := make([]memorynodes.MemoryNode, 0, len(rows))
+	for n, row := range rows {
+		payload, _ := json.Marshal(row)
+		out = append(out, memorynodes.MemoryNode{
+			ID:        fmt.Sprintf("integration:rbac:effectiveAccess:%05d", n),
+			Concept:   "integration:rbac:effectiveAccess",
+			Type:      memorynodes.NodeTypeObject,
+			CreatedAt: now,
+			Payload:   payload,
+		})
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------
 // the guards, shared by set and revoke
 // ---------------------------------------------------------------------
 

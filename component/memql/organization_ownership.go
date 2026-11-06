@@ -203,37 +203,57 @@ func (e *MemQLEngine) organizationAppAllows(ctx context.Context, account, resour
 // grants. Callers must still resolve and authorize the resource itself. An
 // empty account supports existing private rows and conveys no membership.
 func (e *MemQLEngine) OrganizationCapable(ctx context.Context, account string, verb, resource string) bool {
+	return e.organizationDecision(ctx, account, verb, resource).Held
+}
+
+// organizationDecision is OrganizationCapable with its provenance: the same
+// rule, reporting which level answered and who at it. OrganizationCapable is
+// this function's Held field and nothing else, so the action guards and the
+// operator's read of somebody's access (ResolveOrganizationDecisionsFor)
+// cannot disagree about one person in one organization.
+func (e *MemQLEngine) organizationDecision(ctx context.Context, account string, verb, resource string) auth.Decision {
 	if strings.TrimSpace(account) != "" && !organizationOperator(ctx) {
 		scope := e.accountScopeFor(ctx)
 		if scope == nil || !scope.admits(account) {
-			return false
+			return auth.Decision{Verb: verb, Resource: resource, Source: auth.SourceRole}
 		}
 	}
-	return e.organizationCapabilityAllows(ctx, account, verb, resource)
+	return e.organizationCapabilityDecision(ctx, account, verb, resource)
 }
 
 func (e *MemQLEngine) organizationCapabilityAllows(ctx context.Context, account string, verb, resource string) bool {
+	return e.organizationCapabilityDecision(ctx, account, verb, resource).Held
+}
+
+// organizationCapabilityDecision is organizationCapabilityAllows with its
+// provenance, for organizationDecision's reason.
+func (e *MemQLEngine) organizationCapabilityDecision(ctx context.Context, account string, verb, resource string) auth.Decision {
 	if resource == "" {
-		return true
+		return auth.Decision{Verb: verb, Resource: resource, Held: true, Source: auth.SourceRole}
 	}
+	refused := auth.Decision{Verb: verb, Resource: resource, Source: auth.SourceRole}
 	subject, ok := auth.SubjectFromContext(ctx)
 	if !ok {
-		return false
+		return refused
 	}
 	if subject.Unranked {
 		ac, _ := auth.AccessFromContext(ctx)
 		if ac == nil || ac.Synthetic {
-			return auth.CapableFor(ctx, subject, verb, resource)
+			return auth.DecideFor(ctx, subject, verb, resource)
 		}
 		role, found := e.organizationUserRole(ctx, subject.UserId)
 		if !found {
-			return false
+			return refused
 		}
 		subject.Role = role
 		subject.Unranked = false
 	}
 	if resource == auth.ResourceData && strings.TrimSpace(account) == "" && auth.RoleAccountScope(subject.Role) != "" {
-		return false
+		// An organization role lending its data verbs to data no
+		// organization owns: a limit on the role, which no grant lifts.
+		refused.SourceId = strings.ToLower(strings.TrimSpace(string(subject.Role)))
+		refused.Barred = true
+		return refused
 	}
 	if e != nil {
 		memberships := e.membershipsFor(ctx, subject.UserId)
@@ -245,7 +265,7 @@ func (e *MemQLEngine) organizationCapabilityAllows(ctx context.Context, account 
 			}
 		}
 	}
-	return auth.CapableFor(ctx, subject, verb, resource)
+	return auth.DecideFor(ctx, subject, verb, resource)
 }
 
 func organizationAppAllowsRow(ctx context.Context, account, resource string) bool {
