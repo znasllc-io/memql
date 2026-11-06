@@ -4116,8 +4116,8 @@ separate verification against the selected deployment.
 - *Verification steps may move (decided 2026-11-06,* the owner's "Yes, all three",
   after asking for more checks to run at once). The engine accepts the 20
   `verification: true` steps as `pool` under one rule with two halves. The
-  manifest moves them in its own later change, after an engine with this rule is
-  deployed: a run is planned by the deployed engine, and before it one refuses a
+  manifest moved them in its own later change, once an engine with this rule ran
+  in production: a run is planned by the deployed engine, and before it one refuses a
   verification step that is not `cluster`, so landing both together would leave
   main's push run unplannable and the release that fixes it unreleasable. The
   rule's two halves:

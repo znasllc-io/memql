@@ -14,11 +14,11 @@
 # `placement: pool`: the installed compute policy (memql-znas
 # znasFleetFirstDeliveryProfile) gives it 60 s to start on an opted-in Fleet
 # machine, then runs it as a Workbench Job, so the cluster is the fallback and
-# its admitted slots are left to the steps that must stay there. These stay
-# `cluster`:
-#   - `verification: true` steps, until the engine that runs this file accepts
-#     them as pool (0.31.17, decided 2026-11-06): an older one refuses any
-#     other placement, and the deployed engine plans every run;
+# its admitted slots are left to the steps that must stay there.
+# `verification: true` steps are pool too (since the engine accepted them,
+# 0.31.17; the owner's decision, 2026-11-06): a Fleet pass counts between
+# pushes, and a release runs them on the cluster and stands only on a cluster
+# pass. These stay `cluster`:
 #   - release output (images, release files, Cockpit release builds, fixtures),
 #     so a published artifact is built on the cluster;
 #   - steps with a repository token or SARIF upload;
@@ -243,7 +243,8 @@ pipeline:
         # every change.
         - name: path-routing
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -253,7 +254,8 @@ pipeline:
             python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -263,7 +265,8 @@ pipeline:
             go vet -tags identity github.com/znasllc-io/memql/...
         - name: build-mcp
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -273,7 +276,8 @@ pipeline:
             go vet -tags mcp github.com/znasllc-io/memql/...
         - name: build-agent
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -283,7 +287,8 @@ pipeline:
             go vet -tags agent github.com/znasllc-io/memql/...
         - name: build-planner
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -293,7 +298,8 @@ pipeline:
             go vet -tags planner github.com/znasllc-io/memql/...
         - name: build-workbench
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -311,7 +317,8 @@ pipeline:
         # installer-lifecycle.pipelines leg.
         - name: build-clustere2e
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -325,7 +332,8 @@ pipeline:
             go test -tags clustere2e,agent -count=1 -run '^TestPipelinesSubstrate$' ./test/clustere2e/
         - name: module-boundaries
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 60m
           run: |
             set -eu
@@ -334,7 +342,8 @@ pipeline:
             bash scripts/ci/module-integrity.sh
         - name: bash32-smoke
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 10m
           image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
           caches: []
@@ -479,7 +488,7 @@ pipeline:
         # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
           verification: true
-          placement: cluster
+          placement: pool
           packages: affected
           only: not-db-gated
           shards: 4
@@ -505,7 +514,8 @@ pipeline:
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
           # each shard reserves three cores; two leave room in a 6.5-core pool
@@ -696,7 +706,8 @@ pipeline:
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make sdk-ts-install
@@ -704,7 +715,8 @@ pipeline:
             make sdk-ts-test
         - name: viewkit-checks
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make viewkit-install
@@ -762,7 +774,8 @@ pipeline:
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
         - name: test-agent
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Agent-tagged persistence cases are absent from untagged DB shards.
           # A dedicated service and required DB mode prevent a skipped green.
           services: [postgres]
@@ -787,7 +800,8 @@ pipeline:
             go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
         - name: test-bff
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -796,7 +810,8 @@ pipeline:
             go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-edge
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -805,7 +820,8 @@ pipeline:
             go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-identity
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -814,7 +830,8 @@ pipeline:
             go test -tags identity -timeout=300s ./app/ ./component/node/
         - name: test-mcp
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -823,7 +840,8 @@ pipeline:
             go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
         - name: test-planner
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -832,7 +850,8 @@ pipeline:
             go test -tags planner -timeout=300s ./app/ ./component/node/
         - name: test-workbench
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu

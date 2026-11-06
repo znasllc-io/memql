@@ -1865,9 +1865,10 @@ cluster. Retries need no activation: the deploy turns them on with the portable
 limits.
 
 The engine repository's own `memql-package.yaml` took the second step on
-2026-11-05. Its `verification: true` steps move to `pool` in a separate change
-once an engine that accepts them (0.31.17) is deployed: the deployed engine plans
-every run, and an older one refuses a verification step that is not `cluster`.
+2026-11-05, and moved its `verification: true` steps to `pool` in a separate
+change once an engine that accepts them (0.31.17) ran in production: the
+deployed engine plans every run, and an older one refuses a verification step
+that is not `cluster`.
 Its portable checks that carry no credential, image build or release output are
 `pool`; its release builds and its credentialed steps stay `cluster`. A `pool`
 step under an installed policy without the `computePlacement` role is
