@@ -176,7 +176,7 @@ func TestEmailInstallationManagedDomainUsesProviderDefault(t *testing.T) {
 	p.ClusterID = "cluster"
 	created := map[string]bool{p.emailPath(): true, p.communicationPath(): true, p.domainPath(): true}
 	protocol := installationProtocol(t, created, func() string { return p.ClusterID })
-	cfg, _, err := protocol.finish(context.Background(), "ephemeral", "self", p, map[string]any{"username": "donotreply", "displayName": "Unusable custom name"})
+	cfg, _, err := protocol.finish(context.Background(), "ephemeral", "self", p, ACSConfig{}, map[string]any{"username": "donotreply", "displayName": "Unusable custom name"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

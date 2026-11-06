@@ -209,41 +209,57 @@ func azureDomainSummary(resource azureResource) map[string]any {
 	return map[string]any{"status": status, "records": records}
 }
 
-// finish never changes an existing sender's name implicitly. Domain linking
+// azureSender is one sender finish registered on a domain, as MemQL records
+// it: the address Azure sends as, the display name Azure holds for it (every
+// send must use exactly that name), and where replies to its mail go.
+type azureSender struct{ Address, DisplayName, ReplyTo string }
+
+// finish registers one sender with Azure and returns the connection's sending
+// configuration, built from what Azure has, and the sender it registered.
+// It never changes an existing sender's name implicitly. Domain linking
 // preserves every existing link and modifies no auth or network properties.
-func (a *azureProtocol) finish(ctx context.Context, token, account string, plan azurePlan, options map[string]any) (ACSConfig, string, error) {
+//
+// ADDING A SENDER KEEPS THE DEFAULT. The connection's first sender becomes its
+// default, the address mail that names none goes out as; a later sender becomes
+// the default only when makeDefault asks. A default Azure no longer has cannot
+// stay, so the sender being added takes its place. `current` is the connection
+// as it stands. The connection's Reply-To, which mail that names none carries,
+// is set by a sender that becomes the default as it is added (or is added again
+// as the default); adding any other sender leaves it as it was.
+func (a *azureProtocol) finish(ctx context.Context, token, account string, plan azurePlan, current ACSConfig, options map[string]any, makeDefault bool) (ACSConfig, azureSender, error) {
 	var empty ACSConfig
+	var none azureSender
 	username, name, replyTo := argString(options, "username"), argString(options, "displayName"), argString(options, "replyTo")
 	if !azureSenderName.MatchString(username) || len(name) > 100 || strings.TrimSpace(name) == "" || headerUnsafe(name) {
-		return empty, "", fmt.Errorf("enter a sender name and display name")
+		return empty, none, fmt.Errorf("enter a sender name and display name")
 	}
 	if replyTo != "" {
 		mailbox, err := mail.ParseAddress(replyTo)
 		if err != nil || mailbox.Address != replyTo || headerUnsafe(replyTo) {
-			return empty, "", fmt.Errorf("Reply-To must be an existing mailbox address")
+			return empty, none, fmt.Errorf("Reply-To must be an existing mailbox address")
 		}
 	}
 	for _, path := range []string{plan.emailPath(), plan.communicationPath()} {
 		ready, err := a.ensureService(ctx, token, path, account, plan.DataLocation, plan.ClusterID, nil)
 		if err != nil {
-			return empty, "", err
+			return empty, none, err
 		}
 		if !ready {
-			return empty, "", fmt.Errorf("Azure is still preparing the email services")
+			return empty, none, fmt.Errorf("Azure is still preparing the email services")
 		}
 	}
 	domain, err := a.domain(ctx, token, plan, false, nil)
 	if err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	if !azureDomainVerified(domain) {
-		return empty, "", fmt.Errorf("verify all domain records before adding a sender")
+		return empty, none, fmt.Errorf("verify all domain records before adding a sender")
 	}
 	// ARM resource identifiers in JSON are not escaped HTTP request paths.
 	// A resource group containing a space must link the actual domain ID.
 	domainID, err := url.PathUnescape(plan.domainPath())
 	if err != nil {
-		return empty, "", fmt.Errorf("invalid Azure domain identifier")
+		return empty, none, fmt.Errorf("invalid Azure domain identifier")
 	}
 	path := plan.domainPath() + "/senderUsernames/" + username
 	var sender azureResource
@@ -252,24 +268,24 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 		err = a.arm(ctx, http.MethodPut, azureVersion(path), token, map[string]any{"properties": map[string]string{"username": username, "displayName": name}}, &sender)
 	}
 	if err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	if plan.ManagedDomain {
 		// Azure creates this fixed username. Managed domains cannot add or
 		// personalize usernames; use the actual provider display name too.
 		if username != "donotreply" || !strings.EqualFold(sender.Properties.Username, username) || sender.Properties.DisplayName == "" {
-			return empty, "", fmt.Errorf("Azure has not prepared the installation's default sender")
+			return empty, none, fmt.Errorf("Azure has not prepared the installation's default sender")
 		}
 		name = sender.Properties.DisplayName
 	} else if sender.Properties.Username != username || sender.Properties.DisplayName != name {
-		return empty, "", fmt.Errorf("this sender already has a different display name; choose another sender name")
+		return empty, none, fmt.Errorf("this sender already has a different display name; choose another sender name")
 	}
 	var service azureResource
 	if err = a.arm(ctx, http.MethodGet, azureVersion(plan.communicationPath()), token, nil, &service); err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	if service.Tags["memql-organization"] != account || service.Tags["memql-cluster"] != plan.ClusterID || service.Properties.DisableLocalAuth {
-		return empty, "", fmt.Errorf("this Azure service cannot provide this organization's email connection")
+		return empty, none, fmt.Errorf("this Azure service cannot provide this organization's email connection")
 	}
 	linked := false
 	for _, entry := range service.Properties.LinkedDomains {
@@ -280,11 +296,11 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 	if !linked {
 		links := append(service.Properties.LinkedDomains, domainID)
 		if err = a.arm(ctx, http.MethodPatch, azureVersion(plan.communicationPath()), token, map[string]any{"properties": map[string]any{"linkedDomains": links}}, nil); err != nil {
-			return empty, "", err
+			return empty, none, err
 		}
 		// Linking can still be asynchronous. Read it back before enabling mail.
 		if err = a.arm(ctx, http.MethodGet, azureVersion(plan.communicationPath()), token, nil, &service); err != nil {
-			return empty, "", err
+			return empty, none, err
 		}
 		for _, entry := range service.Properties.LinkedDomains {
 			if strings.EqualFold(entry, domainID) {
@@ -294,27 +310,27 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 	}
 	ready, err := azureResourceReady(service.Properties.ProvisioningState)
 	if err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	if !linked || !ready {
-		return empty, "", fmt.Errorf("Azure is still connecting this domain; check again shortly")
+		return empty, none, fmt.Errorf("Azure is still connecting this domain; check again shortly")
 	}
 	var keys struct {
 		PrimaryKey string `json:"primaryKey"`
 	}
 	if err = a.arm(ctx, http.MethodPost, azureVersion(plan.communicationPath()+"/listKeys"), token, nil, &keys); err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	sendingDomain := plan.Domain
 	if plan.ManagedDomain {
 		sendingDomain = domain.Properties.FromSenderDomain
 	}
 	address := strings.ToLower(username + "@" + sendingDomain)
-	cfg := ACSConfig{AccountID: account, ResourceID: plan.communicationPath(), Endpoint: "https://" + service.Properties.HostName, AccessKey: keys.PrimaryKey, Senders: map[string]string{address: name}, Default: address, ReplyTo: replyTo}
+	cfg := ACSConfig{AccountID: account, ResourceID: plan.communicationPath(), Endpoint: "https://" + service.Properties.HostName, AccessKey: keys.PrimaryKey, Senders: map[string]string{address: name}}
 
 	usernames, err := a.list(ctx, azureVersion(plan.domainPath()+"/senderUsernames"), token)
 	if err != nil {
-		return empty, "", err
+		return empty, none, err
 	}
 	for _, row := range usernames {
 		props, _ := row["properties"].(map[string]any)
@@ -323,8 +339,12 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 			cfg.Senders[strings.ToLower(user+"@"+sendingDomain)] = display
 		}
 	}
-	if _, err = NewACSSender(cfg); err != nil {
-		return empty, "", fmt.Errorf("Azure returned an unusable email endpoint or credential")
+	cfg.Default, cfg.ReplyTo = strings.ToLower(strings.TrimSpace(current.Default)), current.ReplyTo
+	if _, kept := cfg.Senders[cfg.Default]; makeDefault || !kept || cfg.Default == address {
+		cfg.Default, cfg.ReplyTo = address, replyTo
 	}
-	return cfg, replyTo, nil
+	if _, err = NewACSSender(cfg); err != nil {
+		return empty, none, fmt.Errorf("Azure returned an unusable email endpoint or credential")
+	}
+	return cfg, azureSender{Address: address, DisplayName: name, ReplyTo: replyTo}, nil
 }

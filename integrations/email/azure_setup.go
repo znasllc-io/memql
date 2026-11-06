@@ -122,7 +122,7 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		output["capture"] = capture
 		return configureResult(output)
 	}
-	if action == "status" || action == "disconnect" || action == "prepare" || action == "operations" {
+	if action == "status" || action == "disconnect" || action == "prepare" || action == "operations" || action == "makeDefault" {
 		output, err := a.connectionAction(ctx, account, action, options)
 		if err == nil && action == "status" && output["status"] == "unconfigured" {
 			err = a.organizationDefaults(output, rows[0])

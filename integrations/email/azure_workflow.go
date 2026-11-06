@@ -19,11 +19,34 @@ func azureConnectionSummary(connection azureConnection) map[string]any {
 	return map[string]any{"status": connection.Status, "plan": connection.Plan, "planId": azurePlanID(connection), "sender": connection.Config.Default, "senders": connection.Config.Senders, "replyTo": connection.ReplyTo, "senderIdentityId": connection.SenderIdentityID, "requestedSender": connection.RequestedSender}
 }
 
-// Organization status and disconnect require MemQL permission but no live
-// Microsoft session. Disconnect drops the active credential; it never deletes
-// Azure resources, changes DNS, or cancels billing on the user's behalf.
+// summary is the connection's summary as a page listing its senders reads it:
+// with where replies to each sender go, when the sender records can be read.
+func (a *azureSetup) summary(ctx context.Context, connection azureConnection) map[string]any {
+	summary := azureConnectionSummary(connection)
+	if replies := a.senderReplies(ctx, connection); replies != nil {
+		summary["replies"] = replies
+	}
+	return summary
+}
+
+// Organization status, disconnect and the choice of default sender require
+// MemQL permission but no live Microsoft session. Disconnect drops the active
+// credential; it never deletes Azure resources, changes DNS, or cancels
+// billing on the user's behalf. Make default only chooses among the senders
+// Azure has already registered, so it asks Azure nothing.
 func (a *azureSetup) connectionAction(ctx context.Context, account, action string, options map[string]any) (map[string]any, error) {
 	var connection azureConnection
+	if action == "makeDefault" {
+		if err := a.store.change(ctx, "organization:"+account, &connection, func(found bool) error {
+			if !found || connection.AccountID != account {
+				return fmt.Errorf("finish this organization's sending domain before choosing its default sender")
+			}
+			return connection.makeDefault(argString(options, "sender"))
+		}); err != nil {
+			return nil, err
+		}
+		return a.summary(ctx, connection), nil
+	}
 	if action == "operations" {
 		rows, err := (&storedACSOperations{connection: a.store}).recent(ctx, account)
 		if err != nil {
@@ -45,9 +68,9 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 			}
 			ready = clientID != ""
 		}
-		summary := azureConnectionSummary(connection)
-		if !found {
-			summary = map[string]any{"status": "unconfigured"}
+		summary := map[string]any{"status": "unconfigured"}
+		if found {
+			summary = a.summary(ctx, connection)
 		}
 		summary["applicationReady"] = ready
 		return summary, nil
@@ -181,7 +204,13 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			if err := a.claimResources(ctx, session.AccountID, plan); err != nil {
 				return err
 			}
-			cfg, replyTo, err := a.protocol.finish(ctx, session.AccessToken, session.AccountID, plan, options)
+			// Adding a sender keeps the default unless the caller asks to move it.
+			makeDefault, _ := options["makeDefault"].(bool)
+			cfg, added, err := a.protocol.finish(ctx, session.AccessToken, session.AccountID, plan, connection.Config, options, makeDefault)
+			if err != nil {
+				return err
+			}
+			identityID, err := a.saveSenderIdentity(ctx, session.AccountID, added)
 			if err != nil {
 				return err
 			}
@@ -189,13 +218,11 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			connection.Config = cfg
 			connection.RequestedSender = nil
 			connection.RequestedDNS = nil
-			connection.ReplyTo = replyTo
-			identityID, err := a.saveSenderIdentity(ctx, connection)
-			if err != nil {
-				return err
+			connection.ReplyTo = cfg.ReplyTo
+			if cfg.Default == added.Address {
+				connection.SenderIdentityID = identityID
 			}
-			connection.SenderIdentityID = identityID
-			output = azureConnectionSummary(connection)
+			output = a.summary(ctx, connection)
 			return nil
 		}
 		return fmt.Errorf("unknown Azure resource action")
@@ -229,5 +256,22 @@ func (a *azureSetup) claimResources(ctx context.Context, account string, plan az
 			return err
 		}
 	}
+	return nil
+}
+
+// makeDefault moves the connection's default, the address mail that names
+// none goes out as, to a sender the domain has registered with Azure. It
+// changes nothing else: not the senders or their names, not the Reply-To, not
+// the credential. Nothing in it needs Azure, so it needs no Microsoft session.
+func (c *azureConnection) makeDefault(address string) error {
+	if c.Status != "ready" {
+		return fmt.Errorf("finish this organization's sending domain before choosing its default sender")
+	}
+	address = strings.ToLower(strings.TrimSpace(address))
+	if _, registered := c.Config.Senders[address]; !registered {
+		return fmt.Errorf("choose a sender this domain has registered with Azure")
+	}
+	c.Config.Default = address
+	c.SenderIdentityID = azureSenderIdentityID(c.AccountID, address)
 	return nil
 }

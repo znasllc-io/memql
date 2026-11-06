@@ -270,11 +270,12 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 	}
 	resourceAccount = account
 
-	identityID, err := instances[0].azure.saveSenderIdentity(owner, connection)
+	defaultSender := azureSender{Address: cfg.Default, DisplayName: cfg.Senders[cfg.Default], ReplyTo: connection.ReplyTo}
+	identityID, err := instances[0].azure.saveSenderIdentity(owner, account, defaultSender)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry, err := instances[1].azure.saveSenderIdentity(owner, connection); err != nil || retry != identityID {
+	if retry, err := instances[1].azure.saveSenderIdentity(owner, account, defaultSender); err != nil || retry != identityID {
 		t.Fatal("sender retry lost identity", err)
 	}
 	resolved, err := instances[1].azure.sender(owner, account)
