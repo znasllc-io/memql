@@ -4169,13 +4169,28 @@ separate verification against the selected deployment.
   timed out three times fetching the repository's full history from GitHub
   (exit 124, 17 minutes), against under two minutes on the cluster, so both
   gitleaks scans are `cluster` again.
-- *Not yet verified.* No push run has completed under the new placement, and no
-  release has run since verification steps became `pool` (the source tests above
-  are the only evidence for the release rule). The first verification steps a
-  push runs under it reuse nothing from earlier pushes, whose fingerprints bound
-  `placement: cluster`. Linux container capacity on the Fleet was one machine
-  (CyberPC) on 2026-11-05. The cost guard still writes version-1 admission, so a
-  cost hold still stops Fleet work too.
+- *Service tuning, found by the first push with verification on `pool`
+  (3fe2e0ee1, 2026-11-06).* `tests.db-tests#4` failed on CyberPC with
+  `too many clients` in `integrations/library`'s `TestDocumentRevisionWorkflow`,
+  having passed on the cluster in every earlier run. The CI Postgres image tunes
+  itself on first start (timescaledb-tune 0.19.0) from its container: the cluster
+  gives a service the LimitRange's 4 GiB, which tuned to 50 connections, and
+  Cockpit runs every service with `--memory=2g`, which tuned to 25. The suite
+  peaks at 27 to 28: against the same image under Cockpit's limits it failed at
+  25 and passed with the limit pinned at 100. The manifest pins
+  `TS_TUNE_MEMORY: 2GB`, `TS_TUNE_NUM_CPUS: "2"` and `TS_TUNE_MAX_CONNS: "100"`,
+  so both surfaces start the same database, sized to the Fleet's cap
+  (`TestEngineManifestPostgresServiceTunesTheSameOnEverySurface`). Raising
+  Cockpit's service memory instead would need a Cockpit release and still leave
+  the tuning to each machine: the image's tune script drops its cgroup reading
+  when the host has less free memory than the limit.
+- *Not yet verified.* No release has run since verification steps became `pool`
+  (the source tests above are the only evidence for the release rule). The first
+  verification steps a push runs under it reuse nothing from earlier pushes, whose
+  fingerprints bound `placement: cluster`. Linux container capacity on the Fleet
+  is two machines (CyberPC and MSI Raider, 2026-11-06), and Cockpit runs one
+  pipeline step per machine at a time (its exclusive `pipeline.lock`). The cost
+  guard still writes version-1 admission, so a cost hold still stops Fleet work too.
 
 Fleet CI owns the host build lock exclusively against workspaces and local
 builds. Local model calls take no part in it, by the owner's decision of

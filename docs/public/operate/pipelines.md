@@ -1875,6 +1875,18 @@ step under an installed policy without the `computePlacement` role is
 Fleet-only and never falls back, so select that policy before marking any step
 `pool`.
 
+A `pool` step's services do not get the same container on both surfaces: the
+cluster gives each service the pipelines namespace's default container limits
+(2 CPUs and 4 GiB where they were measured), and Cockpit runs every service with
+2 CPUs and 2 GB. Anything a service image derives from its own container therefore
+differs by where the step ran, so pin it in the service's `env`. The engine's
+Postgres service tunes itself on first start (timescaledb-tune), and left to
+derive it took 50 connections on the cluster and 25 on the Fleet; a database
+suite that opens 27 failed only on the Fleet (2026-11-06). Its manifest pins
+`TS_TUNE_MEMORY`, `TS_TUNE_NUM_CPUS` and `TS_TUNE_MAX_CONNS`, so the database is
+the same on both, sized to the Fleet's cap
+(`TestEngineManifestPostgresServiceTunesTheSameOnEverySurface`).
+
 ## The check run
 
 Each run writes one check run of its own on its commit, and one per step

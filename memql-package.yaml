@@ -79,6 +79,16 @@ pipeline:
         # These change only what survives a crash, never what a query sees.
         # initdb takes -c from PostgreSQL 16, which the image runs.
         POSTGRES_INITDB_ARGS: -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+        # The same database wherever the step runs. The image tunes itself on
+        # first start from the memory and CPUs its container gets, and the
+        # surfaces differ: the cluster gives a service 4 GiB, Cockpit 2 GB.
+        # Derived, that was 50 connections on the cluster and 25 on the Fleet,
+        # below the 27 integrations/library uses (db-tests#4 failed "too many
+        # clients" on CyberPC, 2026-11-06). Memory is the Fleet's hard cap, so
+        # no setting assumes more than a Fleet service may use.
+        TS_TUNE_MEMORY: 2GB
+        TS_TUNE_NUM_CPUS: "2"
+        TS_TUNE_MAX_CONNS: "100"
       # Over TCP, the way the step connects. The image's first start runs its
       # initialization on a server listening on its socket alone and then
       # restarts it, so a socket probe can pass before the server the step will
