@@ -2,13 +2,14 @@ package campaigns
 
 import (
 	"context"
-	"github.com/znasllc-io/memql/component/auth"
+	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
-	"errors"
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/email"
 )
@@ -237,4 +238,27 @@ func TestALateConfirmationWhilePausedIsSentAfterResume(t *testing.T) {
 	if a.azure.count() != 2 {
 		t.Fatalf("after resuming %d messages were sent, want the confirmation and the welcome", a.azure.count())
 	}
+}
+
+// A send Azure accepted after the enrollment gave up on it is not sent again by
+// a retry: the provider's record completes the receipt and the step replays as
+// sent.
+func TestRetryEnrollmentsDoesNotResendWhatTheProviderAccepted(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "journey-retry-accepted", oneEmail)
+	a.azure.answers = []int{answerLost, http.StatusAccepted}
+	a.drain(t)
+	a.later(24 * time.Hour)
+	a.drain(t)
+	if row := a.enrollment(t, a.member); str(row, "status") != "failed" {
+		t.Fatalf("the unconfirmed send left %v, want it failed", row)
+	}
+	a.azure.poll(email.OutcomeAccepted)
+	if got := a.retry(t); got != 1 {
+		t.Fatalf("retried %d, want 1", got)
+	}
+	if got := str(a.receipt(t, "welcome"), "status"); got != receiptComplete {
+		t.Fatalf("the accepted attempt's receipt is %q, want complete", got)
+	}
+	a.drain(t)
+	a.sentOnceAndAdvanced(t, 1)
 }

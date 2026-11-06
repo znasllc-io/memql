@@ -8,6 +8,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // journey_retry.go -- a run that failed can be started again by the person who
@@ -127,9 +128,12 @@ func (w *Worker) retryEnrollment(ctx, system context.Context, j journeyRow, scan
 		return false, nil
 	}
 	// An enrollment that failed because its send could not be confirmed keeps an
-	// attempting receipt, which replays "uncertain" forever. The operator has
-	// checked and chosen to retry, so that attempt is recorded as not accepted and
-	// the next one submits. A complete receipt is never touched: that email went.
+	// attempting receipt, which replays "uncertain" forever. Ask the provider what
+	// became of that attempt first: if it accepted the email, the receipt is
+	// completed and the step replays as sent, with no second submission. Otherwise
+	// -- not accepted, still unknown, or no record kept -- the operator asked for a
+	// retry, so the attempt is recorded as not accepted and the next one submits.
+	// A complete receipt is never touched: that email went.
 	// The receipt belongs to the owner the drain sent as; only that actor reads and
 	// versions it.
 	ownerCtx := auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(w.ownerActorContext(phase, owner)))
@@ -139,7 +143,12 @@ func (w *Worker) retryEnrollment(ctx, system context.Context, j journeyRow, scan
 	}
 	if len(receipts) > 0 && str(receipts[0], "status") == receiptAttempting {
 		receipt := &singleSendReceipt{id: receiptID, fingerprint: str(receipts[0], "fingerprint"), accountID: str(receipts[0], "accountId"), prior: templateTime(receipts[0]["createdAt"]), hold: hold}
-		if err = w.saveReceiptHeld(ownerCtx, receipt, receiptFailed, nil); err != nil {
+		status, result := receiptFailed, map[string]any(nil)
+		if w.priorOutcome(ownerCtx, receipt) == email.OutcomeAccepted {
+			status = receiptComplete
+			result = map[string]any{"sent": true, "skipped": false, "recipientId": bare(str(row, "recipientId")), "emailRuleId": ""}
+		}
+		if err = w.saveReceiptHeld(ownerCtx, receipt, status, result); err != nil {
 			return false, err
 		}
 	}
@@ -154,5 +163,8 @@ func (w *Worker) retryEnrollment(ctx, system context.Context, j journeyRow, scan
 			"versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), now).Format(time.RFC3339Nano),
 		})
 	})
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
