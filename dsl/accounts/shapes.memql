@@ -64,9 +64,15 @@ shape account accountIdRef {
 }
 
 /// The slice of an account the two account sweeps read: the domain walk's name
-/// to check, the token to check it with and the reservation it stamps on
-/// success, and the front-door sweep's reserved name, whether it is held and
-/// the reason it last recorded for one that is not.
+/// to check, the token to check it with, the reservation it stamps on success
+/// and the answer it last recorded (status, failure and when it looked), and the
+/// front-door sweep's reserved name, whether it is held and the reason it last
+/// recorded for one that is not.
+///
+/// The walk reads its own last answer so that a failure it finds again is not
+/// written again: it rewrites an unchanged failure only once the stored
+/// domainLastCheckedAt is thirty minutes old (accountDomainStampRefresh,
+/// integrations/customdomain/account_domain.go).
 ///
 /// EVERY FIELD EITHER SWEEP READS MUST BE HERE, for the reason this file's
 /// header gives: a field the shape leaves out reads as absent, and nothing says
@@ -83,6 +89,9 @@ shape account accountDomainWalk {
   domain
   domainToken
   domainStatus
+  domainFailureReason
+  domainFailureDetail
+  domainLastCheckedAt
   memqlDomain
   memqlReservedAt
   memqlReservationReason

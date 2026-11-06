@@ -88,11 +88,12 @@ automation refreshAccountGroup {
 /// memberships.
 ///
 /// THE FILTER IS WHAT MAKES THIS CORRECT, not a refinement of it. `node.updated`
-/// fires on every write to an account -- the domain walk alone writes
-/// domainLastCheckedAt every two minutes -- so without the status test this
-/// would run a cascade on a live account hundreds of times a day, and each run
-/// would find nothing to do only because the groups it walks are already
-/// active. The one time it mattered would be indistinguishable from the noise.
+/// fires on every write to an account -- the domain walk alone restamps
+/// domainLastCheckedAt every thirty minutes while an unverified account's check
+/// keeps failing -- so without the status test this would run a cascade on a
+/// live account dozens of times a day, and each run would find nothing to do
+/// only because the groups it walks are already active. The one time it
+/// mattered would be indistinguishable from the noise.
 @trigger(event="node.updated", concept="v1:accounts:account")
 @filter(row => row.status == "archived")
 automation archiveAccountGroup {
@@ -110,7 +111,10 @@ automation archiveAccountGroup {
 /// somebody has just pasted a record into a registrar and is watching the
 /// panel. The cost is bounded by the population of UNVERIFIED accounts rather
 /// than by all of them -- accountsForDomainWalk excludes the verified -- so a
-/// cluster whose clients are all set up pays one query per tick.
+/// cluster whose clients are all set up pays one query per tick. An unverified
+/// account is looked up on every tick but WRITTEN only when its answer changes,
+/// or every thirty minutes while the same failure repeats, to keep its "Last
+/// looked" honest (accountDomainStampRefresh, integrations/customdomain).
 @trigger(schedule="0 */2 * * * *")
 automation reconcileAccountDomains {
   walk := builtin accountDomainReconcile()

@@ -1398,10 +1398,10 @@ rules rather than repetitions of the five before it.
   refuses `domain_not_verified` and a checkbox that can only fail is one
   somebody has to read past; and nothing anywhere has a Check-now button,
   because the reconciler walks on its own schedule and a button could only lie
-  about DNS propagating. `domainLastCheckedAt` is written on EVERY pass, so it
-  is out of the arrival fingerprint -- while `domainStatus` and `joinOnDomain`
-  are in it, because a domain that became proven is what a person would call a
-  change.
+  about DNS propagating. `domainLastCheckedAt` moves on a timer (an unchanged
+  failure is restamped every thirty minutes), so it is out of the arrival
+  fingerprint -- while `domainStatus` and `joinOnDomain` are in it, because a
+  domain that became proven is what a person would call a change.
 
 - **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
   deployables require one organization. The first ownership form requires the

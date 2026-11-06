@@ -149,9 +149,9 @@ func TestChangingTheDomainResetsTheWholeWalk(t *testing.T) {
 
 func TestAnUnchangedDomainKeepsItsVerification(t *testing.T) {
 	// The positive control. Without it the test above would pass against a
-	// reset that fired on every write -- and the walk writes
-	// domainLastCheckedAt every two minutes, so that would discard the
-	// verification on its own next tick, forever.
+	// reset that fired on every write -- and the walk keeps restamping
+	// domainLastCheckedAt on a timer, so that would discard the verification
+	// on its own next write, forever.
 	payload := map[string]any{
 		"domain":           "acme.com",
 		"domainStatus":     "verified",

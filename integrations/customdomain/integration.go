@@ -48,6 +48,19 @@ type Integration struct {
 	// failing: a node that cannot sweep is not a node that should refuse the
 	// automation.
 	doors *DoorReconciler
+
+	// now is the account domain walk's clock. Nil reads the wall clock; a
+	// test sets it to place a stored domainLastCheckedAt either side of
+	// accountDomainStampRefresh.
+	now func() time.Time
+}
+
+// clock is the time the account domain walk stamps and judges staleness by.
+func (i *Integration) clock() time.Time {
+	if i.now != nil {
+		return i.now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // NewIntegration builds the integration over an engine and the provisioning
@@ -313,7 +326,7 @@ func (i *Integration) handleReconcileAccountDomains(ctx context.Context, _ map[s
 	}
 	return i.node(fmt.Sprintf("accountDomains:%d", time.Now().UnixNano()), map[string]any{
 		"checked": res.Checked, "minted": res.Minted, "verified": res.Verified,
-		"failed": res.Failed, "reserved": res.Reserved,
+		"failed": res.Failed, "reserved": res.Reserved, "unchanged": res.Unchanged,
 	})
 }
 
