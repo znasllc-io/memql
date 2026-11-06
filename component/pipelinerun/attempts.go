@@ -415,7 +415,10 @@ func cutText(s string, n int) string {
 // The two "P again" differ because what guards against two copies of the
 // command differs. On a machine only the machine's own reservation does: a
 // machine still holding the old command refuses the next one (which counts as
-// nothing ran), and that guard is worth one more try. On the cluster the
+// nothing ran), and that guard is worth one more try. A machine whose owner
+// allows several steps at once keeps it per step: Cockpit refuses an attempt
+// of a step still running in another of its slots, keyed on the dispatch's
+// RunId and StepId (cockpit/internal/worker/tools/pipeline_capacity_unix.go). On the cluster the
 // driver itself confirms the previous attempt's Job, Secret and pods are gone
 // before it sends the next attempt (runStep), so a repeatable step cannot
 // overlap itself there however often it is retried; and since nearly every

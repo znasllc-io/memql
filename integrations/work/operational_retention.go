@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/znasllc-io/memql/component/automations"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -213,8 +214,28 @@ func retentionHeldBackSQL(concept string) string {
 //
 // A WINDOW IS KEYED BY ITS ENV NAME, NEVER BY ITS CONCEPT. Two policies read
 // v1:work:run, and they never select the same run: a system run is triggered
-// by `schedule`, a pipeline's by `pipeline:<mode>` (pipelines.WorkTriggerPrefix).
-// And one window, MEMQL_PIPELINES_RUN_RETENTION_DAYS, governs three concepts.
+// by `schedule` or `event:<topic>`, a pipeline's by `pipeline:<mode>`
+// (pipelines.WorkTriggerPrefix). And one window,
+// MEMQL_PIPELINES_RUN_RETENTION_DAYS, governs three concepts.
+//
+// A SYSTEM RUN is a finished, unowned, goalless run the core scheduler fired:
+// on a cron tick (automations.TriggeredBySchedule) or on an event
+// (automations.TriggeredByEventPrefix + the topic, which includes
+// system.startup and every graph.node.* trigger). Both spellings come from the
+// scheduler's own constants, so the writer and this reader cannot drift apart.
+// Event firings joined on 2026-11-06: the policy said `schedule` alone, so an
+// event-triggered run was never retired at all -- about 5,300 a day on
+// production, each with its steps. Nothing else about the policy changed:
+// still terminal, still `ownerUserId` present and empty, still no goal, and
+// still kept whole while a child holds it (retentionCandidateRead's run probes
+// and retireVerified). Every other trigger stays out: `authored`, `manual`,
+// `run:client`, `sub-automation`, `http-trigger` and the driver-owned prefixes
+// (`pipeline:`, `procedure:`, `journal:`) -- a person's, a caller's or a
+// driver's records, not the scheduler's own. Widening the predicate changes
+// this policy's progress key (loadRetentionProgress), so the first pass after
+// it walks from the oldest stored version and the event runs behind the old
+// checkpoint are not skipped; a backlog larger than the policy's share of the
+// pass is retired over several nights from the checkpoints it leaves.
 //
 // A FINISHED PIPELINE RUN (#5496) is its v1:pipelines:run row once it is
 // `completed` -- the conclusion is not the test, a refused run is completed
@@ -245,7 +266,7 @@ var operationalPolicies = []operationalPolicy{
 	{"v1:safety:classification", "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS", 90, "TRUE"},
 	{"v1:safety:outputScreening", "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS", 90, "TRUE"},
 	{"v1:worker:invocation", "MEMQL_WORKER_INVOCATION_RETENTION_DAYS", 90, `COALESCE(n.payload->>'outcome','') IN ('success','failure','cancelled','timeout','denied_by_scope','denied_by_policy','denied_by_classifier','kill_switch_engaged','no_worker_available','rerouted')`},
-	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND n.payload->>'triggeredBy' = 'schedule' AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
+	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND (n.payload->>'triggeredBy' = '` + automations.TriggeredBySchedule + `' OR n.payload->>'triggeredBy' LIKE '` + automations.TriggeredByEventPrefix + `%') AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
 	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
 	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},
 	// After the work-run policy: no run may remain. The partial expression

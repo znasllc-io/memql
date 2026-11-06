@@ -648,6 +648,21 @@ type StepResult struct {
 	BoundRecorded bool `json:"-"`
 }
 
+// The triggeredBy spellings of the core scheduler's own firings, written onto
+// every run row its journal opens. Named once because a reader outside this
+// package selects runs by them: integrations/work's operational retention
+// retires finished, unowned, goalless runs fired by either
+// (MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS), and a run carrying another spelling
+// is not a system run to it.
+const (
+	// TriggeredBySchedule is a cron firing.
+	TriggeredBySchedule = "schedule"
+	// TriggeredByEventPrefix opens an event firing's triggeredBy,
+	// "event:<topic>". It is used inside a SQL LIKE pattern, so it must never
+	// hold %, _, a quote or a backslash (TestTheSystemRunPolicySelectsTheSchedulersOwnFirings).
+	TriggeredByEventPrefix = "event:"
+)
+
 // AutomationExecution represents a complete automation run.
 type AutomationExecution struct {
 	// SourceTrusted mirrors Automation.Trusted onto the run, so the step
@@ -731,7 +746,8 @@ type AutomationExecution struct {
 	Duration time.Duration `json:"duration"`
 
 	// TriggeredBy indicates what started this execution.
-	// "schedule", "manual", "event:{topic}"
+	// "schedule", "manual", "event:{topic}" (TriggeredBySchedule,
+	// TriggeredByEventPrefix)
 	TriggeredBy string `json:"triggeredBy,omitempty"`
 
 	// Chain tracking fields (populated when ChainTrackingEnabled is true)

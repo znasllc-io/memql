@@ -85,8 +85,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		if errors.Is(err, errExpiredLinkToken) {
 			// An expired token still verified, so its organization is the one the
 			// link was made for and the page may speak for it.
-			owner := ownerActorContext(r.Context(), p.OwnerUserID)
-			brand := h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact)
+			brand := h.store.pageBrandFor(h.organizationRead(r.Context()), h.logger, p.AccountID, h.contact)
 			writeBrandedPage(rw, 410, "Link expired", `<h1>This link has expired.</h1><p>Your subscription wasn't confirmed, so you won't get `+emailsFrom(brand.Org)+`.</p>`+brand.contactLine(), brand)
 		} else {
 			if errors.Is(err, errNoLinkClock) {
@@ -120,20 +119,21 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
 	}
 	owner := memql.ContextWithFreshRead(ownerActorContext(r.Context(), p.OwnerUserID))
+	organization := h.organizationRead(r.Context())
 	recipient, found, err := h.store.RecipientByID(owner, p.RecipientID)
 	if err != nil {
 		h.retry(rw, err)
 		return
 	}
 	if !found && kind == LinkView {
-		h.unavailable(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact))
+		h.unavailable(rw, h.store.pageBrandFor(organization, h.logger, p.AccountID, h.contact))
 		return
 	}
 	if !found || !sameOrganization(recipient.AccountID, p.AccountID) || EmailDigest(recipient.Email) != p.EmailDigest {
-		h.invalid(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact))
+		h.invalid(rw, h.store.pageBrandFor(organization, h.logger, p.AccountID, h.contact))
 		return
 	}
-	org, err := h.store.AccountName(owner, p.AccountID)
+	org, err := h.store.AccountName(organization, p.AccountID)
 	if err != nil {
 		h.retry(rw, err)
 		return
@@ -145,7 +145,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		h.view(rw, r.Context(), owner, p, recipient, org)
 		return
 	}
-	brand := h.store.brandFor(owner, h.logger, p.AccountID, org, h.contact)
+	brand := h.store.brandFor(organization, h.logger, p.AccountID, org, h.contact)
 	system := memql.ContextWithFreshRead(h.system(r.Context()))
 	_, blocked, err := h.store.SuppressionForSend(system, p.AccountID, p.EmailDigest)
 	if err != nil {
@@ -226,6 +226,17 @@ func inConfirmWindow(recipient Recipient, now time.Time) bool {
 // the membership's own: it carries when this membership began, so a retry of the
 // same confirmation finds its event and records nothing twice, while a later
 // membership of the same person records its own.
+// organizationRead is the context a page reads its organization's name and brand
+// with: the system's, fresh. The token is verified, so the organization it names
+// is the one the link was made for, and its name and brand are what that
+// organization shows on its own pages. The automation owner's identity a page
+// borrows is a bare user, and the account concept hides from it every
+// organization that user did not create: the page named nobody for exactly the
+// organizations an operator or a deploy created.
+func (h *EmailLinkHandler) organizationRead(ctx context.Context) context.Context {
+	return memql.ContextWithFreshRead(h.system(ctx))
+}
+
 func (h *EmailLinkHandler) confirm(owner context.Context, p LinkPayload, recipient Recipient, source string) error {
 	eventID := sha256Hex("email-confirm\x00" + bare(p.RecipientID) + "\x00" + strconv.FormatInt(p.ExpiresAt, 10) + "\x00" + strconv.FormatInt(recipient.JoinedAt.UnixNano(), 10))
 	if err := h.grant(owner, p, eventID, source); err != nil {

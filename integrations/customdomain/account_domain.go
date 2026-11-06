@@ -27,6 +27,13 @@ package customdomain
 // lookups. That is the reconciler's own discipline: the row is the state
 // machine, and letting the next pass pick a row up is the only coordination
 // two replicas need.
+//
+// # A failure found again is not written again
+//
+// An unverified account is looked up on every pass, but a failure that repeats
+// the stored status, reason and detail is written only when the stored
+// domainLastCheckedAt is accountDomainStampRefresh old. Every other answer is
+// written on the pass that finds it. accountDomainStampRefresh says why.
 
 import (
 	"context"
@@ -55,9 +62,38 @@ type AccountDomainPass struct {
 	Verified int `json:"verified"`
 	Failed   int `json:"failed"`
 	Reserved int `json:"reserved"`
+	// Unchanged counts the checks that failed exactly as the row already said,
+	// recently enough that nothing was written (accountDomainStampRefresh).
+	Unchanged int `json:"unchanged"`
 }
 
-// accountRow is the slice of v1:accounts:account this walk reads.
+// accountDomainStampRefresh is how old the stored domainLastCheckedAt may be
+// before a check that fails exactly as the row already says is written again.
+//
+// WHY AN UNCHANGED FAILURE IS NOT WRITTEN ON EVERY PASS. The walk runs every
+// two minutes, and every write is a new version of the account row that fires
+// the account's node.created and node.updated automations. An account whose
+// record is not published yet fails the same way on every pass, and the walk
+// wrote the same status, reason and detail with a fresh stamp each time: on
+// production (2026-11-06) the self account took a version every two minutes
+// from this walk, and each started two journaled automation runs.
+//
+// WHY THIRTY MINUTES AND NOT NEVER. The Accounts rail shows "Last looked
+// <moment>" from the stamp (clients/os/src/apps/accounts/AccountDomainRail.tsx),
+// so the stamp must stay within thirty minutes of the truth while the sweep
+// still looks every two. That is about fifteen times fewer writes for a
+// failure nobody has fixed, and the rail's claim stays roughly true.
+//
+// WHAT STILL WRITES AT ONCE: a minted token, a pass, a failure whose status,
+// reason or detail differs from the stored one -- somebody who has just pasted
+// a wrong value sees what the lookup found on the next pass -- and a stored
+// stamp that is missing, unreadable or in the future. The trade-off accepted:
+// for an unchanged failure "Last looked" can read up to thirty minutes old.
+const accountDomainStampRefresh = 30 * time.Minute
+
+// accountRow is the slice of v1:accounts:account this walk reads. Every field
+// comes through the accountDomainWalk shape, which must project it:
+// TestEveryFieldTheAccountSweepsReadIsProjected.
 type accountRow struct {
 	ID          string
 	Domain      string
@@ -65,6 +101,32 @@ type accountRow struct {
 	Status      string
 	MemqlDomain string
 	Reserved    string
+	// The answer the walk last recorded, read back so that one it finds
+	// again need not be written again (unchangedFailureIsFresh).
+	FailureReason string
+	FailureDetail string
+	LastCheckedAt string
+}
+
+// unchangedFailureIsFresh reports whether a failed check says exactly what the
+// row already says and the row's stamp is younger than
+// accountDomainStampRefresh, so that writing it would change nothing but the
+// stamp.
+//
+// A stamp that is missing or unreadable is not fresh: skipping on it would
+// leave the rail saying "No check has run yet" while checks run. Nor is one in
+// the future (a replica with a clock ahead wrote it): the write puts it back
+// on this replica's clock, and the next pass judges it from there.
+func unchangedFailureIsFresh(row accountRow, res CheckResult, now time.Time) bool {
+	if row.Status != AccountDomainVerifying || row.FailureReason != res.Reason || row.FailureDetail != res.Detail {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339, row.LastCheckedAt)
+	if err != nil {
+		return false
+	}
+	age := now.Sub(at)
+	return age >= 0 && age < accountDomainStampRefresh
 }
 
 // ReconcileAccountDomains walks every active account whose domain is set and
@@ -104,7 +166,7 @@ func (i *Integration) ReconcileAccountDomains(ctx context.Context) (AccountDomai
 
 // stepAccountDomain advances ONE account by at most one state.
 func (i *Integration) stepAccountDomain(ctx context.Context, row accountRow, out *AccountDomainPass) error {
-	now := time.Now().UTC()
+	now := i.clock()
 
 	// No token yet: mint one and stop. The person has to publish it before
 	// a lookup can find it, so checking in the same pass would spend a DNS
@@ -128,6 +190,13 @@ func (i *Integration) stepAccountDomain(ctx context.Context, row accountRow, out
 		// and both are reported on the row rather than raised. Raising
 		// would put a warning in the log every two minutes for every
 		// client who has not finished pasting a record.
+		//
+		// AND THE SAME FAILURE AGAIN IS NOT A WRITE until the stored stamp
+		// is accountDomainStampRefresh old: the row already says it.
+		if unchangedFailureIsFresh(row, res, now) {
+			out.Unchanged++
+			return nil
+		}
 		return i.writeAccountDomain(ctx, row.ID, map[string]string{
 			"domainStatus":        AccountDomainVerifying,
 			"domainFailureReason": res.Reason,
@@ -174,12 +243,15 @@ func (i *Integration) accountsToWalk(ctx context.Context) ([]accountRow, error) 
 	out := make([]accountRow, 0, len(rows))
 	for _, r := range rows {
 		row := accountRow{
-			ID:          memql.BareShortId(rowString(r, "id")),
-			Domain:      NormalizeHostname(rowString(r, "domain")),
-			Token:       rowString(r, "domainToken"),
-			Status:      rowString(r, "domainStatus"),
-			MemqlDomain: rowString(r, "memqlDomain"),
-			Reserved:    rowString(r, "memqlReservedAt"),
+			ID:            memql.BareShortId(rowString(r, "id")),
+			Domain:        NormalizeHostname(rowString(r, "domain")),
+			Token:         rowString(r, "domainToken"),
+			Status:        rowString(r, "domainStatus"),
+			MemqlDomain:   rowString(r, "memqlDomain"),
+			Reserved:      rowString(r, "memqlReservedAt"),
+			FailureReason: rowString(r, "domainFailureReason"),
+			FailureDetail: rowString(r, "domainFailureDetail"),
+			LastCheckedAt: rowString(r, "domainLastCheckedAt"),
 		}
 		// Stated in Go as a guard rather than trusted from the filter, the
 		// reconciler's own discipline: a future widening of that query must

@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
 
 // policiesOn is every operational policy that runs on one window.
@@ -89,11 +91,57 @@ func TestPipelinesWindowRetiresTheRunItsWorkAndItsGoal(t *testing.T) {
 	}
 
 	// The system-run policy is the other reader of v1:work:run, and the two
-	// must never select the same run: one is triggered by a schedule, the
-	// other by the pipelines driver.
+	// must never select the same run: one is triggered by the scheduler (a
+	// schedule or an event), the other by the pipelines driver.
 	system := policiesOn(EnvSystemRunRetentionDays)
 	if len(system) != 1 || system[0].concept != runConcept || !strings.Contains(system[0].predicate, "'schedule'") {
 		t.Fatalf("the system-run policy changed shape: %+v", system)
+	}
+}
+
+// TestTheSystemRunPolicySelectsTheSchedulersOwnFirings. The system-run policy
+// retires what the core scheduler fired -- a cron tick or an event -- and
+// spells both triggers with the scheduler's own constants, so a renamed
+// trigger cannot leave its runs unretired the way event firings were until
+// 2026-11-06. The event prefix sits inside a LIKE literal: a metacharacter
+// would widen the match and a quote would end the literal. And no trigger a
+// driver or another policy owns may fall under either spelling.
+func TestTheSystemRunPolicySelectsTheSchedulersOwnFirings(t *testing.T) {
+	system := policiesOn(EnvSystemRunRetentionDays)
+	if len(system) != 1 || system[0].concept != runConcept {
+		t.Fatalf("the system-run window governs %+v, want one v1:work:run policy", system)
+	}
+	predicate := system[0].predicate
+	for _, want := range []string{
+		`n.payload->>'triggeredBy' = '` + automations.TriggeredBySchedule + `'`,
+		`n.payload->>'triggeredBy' LIKE '` + automations.TriggeredByEventPrefix + `%'`,
+		`n.payload->>'ownerUserId' = ''`,
+		`COALESCE(n.payload->>'goalId','') = ''`,
+	} {
+		if !strings.Contains(predicate, want) {
+			t.Errorf("the system-run policy lacks %s: %s", want, predicate)
+		}
+	}
+	if p := automations.TriggeredByEventPrefix; p == "" || strings.ContainsAny(p, `%_'\`) {
+		t.Fatalf("automations.TriggeredByEventPrefix %q is empty or holds a LIKE metacharacter or a quote", p)
+	}
+	if s := automations.TriggeredBySchedule; s == "" || strings.ContainsAny(s, `'\`) {
+		t.Fatalf("automations.TriggeredBySchedule %q is empty or holds a quote", s)
+	}
+	for name, other := range map[string]string{
+		"a pipeline's run":          pipelines.WorkTriggerPrefix,
+		"a procedure's replay":      ProcedureReplayTriggerPrefix,
+		"a Go-written journal":      workjournal.TriggerPrefix,
+		"an authored firing":        "authored",
+		"an operator's manual run":  "run:client",
+		"a run by name":             "manual",
+		"a sub-automation":          "sub-automation",
+		"an HTTP trigger":           "http-trigger",
+		"a resumed run's execution": "resumed:",
+	} {
+		if strings.HasPrefix(other, automations.TriggeredByEventPrefix) || strings.HasPrefix(automations.TriggeredByEventPrefix, other) || other == automations.TriggeredBySchedule {
+			t.Errorf("%s (%q) overlaps the scheduler's triggers, so the system-run policy would select it", name, other)
+		}
 	}
 }
 

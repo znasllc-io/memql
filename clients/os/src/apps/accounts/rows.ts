@@ -74,11 +74,12 @@ export interface AccountRow {
   /** What the lookup actually saw, verbatim -- the half a person can act on. */
   domainFailureDetail: string;
   /**
-   * When the walk last looked.
+   * When the walk last looked, to within thirty minutes: an unchanged failure
+   * is restamped every half hour, every new answer at once.
    *
-   * NEVER IN THE ARRIVAL FINGERPRINT. It is written on EVERY pass, so a digest
-   * built over it changes every two minutes and would ring the account list on
-   * a timer -- the standing badge the cue exists not to be.
+   * NEVER IN THE ARRIVAL FINGERPRINT. It moves on a timer, so a digest built
+   * over it would ring the account list for nothing a person did -- the
+   * standing badge the cue exists not to be.
    */
   domainLastCheckedAt: string;
   /** When ownership was first proven. Never cleared while the domain stands. */
@@ -195,9 +196,10 @@ export function accountFingerprint(account: AccountRow): string {
     account.domainStatus,
     account.joinOnDomain,
     // `domainLastCheckedAt` is deliberately ABSENT, and it is the one field on
-    // this row that moves on a timer: the walk writes it on EVERY pass, so a
-    // digest built over it would change every two minutes and turn the list
-    // into a strobe -- the standing badge the cue exists not to be.
+    // this row that moves on a timer: the walk restamps it every half hour
+    // while a check keeps failing the same way, so a digest built over it
+    // would ring the list for nothing a person did -- the standing badge the
+    // cue exists not to be.
   ].join("|");
 }
 

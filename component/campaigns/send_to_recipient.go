@@ -310,7 +310,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		})
 	}
 
-	accountName, err := w.store.AccountName(ctx, campaign.AccountID)
+	accountName, err := w.emailOrganizationName(ctx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns.sendToRecipient: could not resolve the account name", "error", err)
 	}

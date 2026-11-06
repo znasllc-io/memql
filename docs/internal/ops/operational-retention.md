@@ -187,6 +187,25 @@ as failed, retries on its next schedule, and only proven unowned scheduled waits
 with missing approvals are closed by recovery. User goals and real approvals
 keep their existing lifecycle.
 
+## Event-fired system runs (2026-11-06)
+
+The system-run policy selected `triggeredBy = 'schedule'` alone, so a run the
+scheduler fired on an event (`event:<topic>`, including `system.startup`) was
+never retired: about 5,300 a day on production, each with its steps. The policy
+now selects both spellings, taken from the scheduler's own constants
+(`automations.TriggeredBySchedule`, `automations.TriggeredByEventPrefix`).
+Every other condition is unchanged: terminal, `ownerUserId` present and empty,
+no goal, and kept whole while a pending approval, a model call or observation,
+a recent child or a child that is not the run's own holds it.
+
+The widened predicate has a new progress key, so the first pass after the
+upgrade walks from the oldest stored run version. A backlog larger than the
+policy's share of the pass is retired over several nights from the checkpoints
+it leaves. Regression tests: `TestOperationalRetentionRetiresEventFiredSystemRuns`
+and `TestAChangedSystemRunPredicateWalksFromTheStart`
+(`integrations/work/operational_retention_event_runs_db_test.go`), and
+`TestTheSystemRunPolicySelectsTheSchedulersOwnFirings`.
+
 ## Bounded current-run recovery
 
 The first covering-index repair improved warm queries but still traversed every
@@ -298,9 +317,14 @@ system-run policy is fifth of eight, so with nothing to do before it, it may
 spend a quarter of the four minutes, a minute.
 
 Completed pages and day windows are checkpointed in `work_retention_progress`,
-keyed by concept, policy and configured lifetime. A different cron leader resumes
-from that point. A generation fence refuses a stale replica's attempt to rewind
-it, and dry runs neither consume nor alter progress. A complete traversal resets
+keyed by concept, policy and a digest of the configured lifetime and predicate.
+A different cron leader resumes from that point. A changed lifetime or predicate
+gets a new key and walks from the oldest stored version: a checkpoint only
+certifies what its own configuration examined, and resuming a wider predicate
+from it would skip the rows behind it that the old one never selected. The
+superseded row is left unread rather than deleted, so an older cron leader
+mid-rollout keeps its own checkpoint. A generation fence refuses a stale
+replica's attempt to rewind it, and dry runs neither consume nor alter progress. A complete traversal resets
 the checkpoint: dependency-protected records, denied rows and backdated inserts
 must be reconsidered on a later cycle. The `(concept, createdAt, id)` index makes
 these day probes cheap even when years of protected history remain. Empty spans
@@ -329,7 +353,12 @@ independently and returns both errors if they fail.
 ## Safeguards
 
 - No arbitrary-concept TTL. User-owned runs/goals, active work, business rows and
-  unknown concepts are excluded from system-run retirement.
+  unknown concepts are excluded from system-run retirement. A system run is a
+  terminal, unowned, goalless run the core scheduler fired: `triggeredBy` is
+  `schedule` or `event:<topic>`. Authored firings (`authored`), manual and
+  operator runs (`manual`, `run:client`), `sub-automation` and `http-trigger`
+  runs, and driver-owned runs (`pipeline:`, `procedure:`, `journal:`) are not
+  system runs.
 - The archive contains all versions with their intrinsic fields. Content-derived
   object names prevent a later partial batch from overwriting earlier evidence.
 - Upload plus bounded read-back equality precedes deletion. No configured

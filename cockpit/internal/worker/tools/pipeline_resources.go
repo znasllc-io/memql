@@ -198,9 +198,39 @@ func pipelineByteQuantity(raw string) (uint64, error) {
 	return 0, errors.New("invalid Docker memory quantity")
 }
 
-func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest) error {
-	cpu := req.cpuMilli + len(req.services)*pipelineServiceCPUMilli
-	memory := uint64(req.memoryMiB+len(req.services)*pipelineServiceMemoryMiB) << 20
+// checkPipelineHeadroom admits req beside the steps already holding a slot on
+// this machine (others, pipelines.max_concurrent_steps).
+//
+// EVERY RUNNING STEP IS CHARGED IN FULL. A running step's CPU cap and memory
+// limit (command plus services) are added to this step's demand, whatever it
+// uses now: a step still cloning or pulling its image has used almost none of
+// what it will, and the measurements below cannot see that. Memory a running
+// container already uses is in those measurements too, so this over-reserves
+// by it; the workbench instead credits each existing reservation its measured
+// usage by exact container name (workbench/headroom.go), which this check
+// cannot do without reading the names of containers that are not its own.
+// Charging in full is also what lets two admissions run at once without a lock
+// of their own: each step's use is recorded on its slot before it measures, so
+// two steps admitted together each charge the other and neither can spend the
+// headroom the other counted on. CPU caps are summed for the same reason the
+// single step's is checked: the machine keeps one CPU outside every step it
+// runs, all running flat out.
+func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest, others []pipelineSlotUse) error {
+	stepCPU, stepMemory := pipelineStepDemand(req)
+	cpu, memory := stepCPU, uint64(stepMemory)<<20
+	dockerCPU, dockerMemory := cpu, memory
+	for _, other := range others {
+		cpu += other.cpuMilli
+		memory += uint64(other.memoryMiB) << 20
+		if other.docker {
+			dockerCPU += other.cpuMilli
+			dockerMemory += uint64(other.memoryMiB) << 20
+		}
+	}
+	beside := ""
+	if len(others) > 0 {
+		beside = fmt.Sprintf(" beside the %d steps already running here (lower pipelines.max_concurrent_steps or the per-step limits to fit more)", len(others))
+	}
 	var docker dockerResourceHeadroom
 	usesDocker := req.execution == "container" || slices.Contains(req.needs, "docker")
 	if usesDocker {
@@ -221,7 +251,7 @@ func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest) error {
 	// including every service. This does not constrain unrelated applications,
 	// native commands or a local model call that starts afterwards.
 	if cpu > (pipelineHostCPUs()-1)*1000 || host.Available < reserve || memory > host.Available-reserve {
-		return errors.New("pipeline_step: insufficient host CPU or RAM headroom for command and services; no pipeline command started")
+		return errors.New("pipeline_step: insufficient host CPU or RAM headroom for command and services" + beside + "; no pipeline command started")
 	}
 	if !usesDocker {
 		return nil
@@ -230,8 +260,8 @@ func checkPipelineHeadroom(ctx context.Context, req pipelineStepRequest) error {
 	// separate quarter-pool reserve for its kernel, caches and untracked work.
 	reserve = max(pipelineMemoryReserve, docker.Total/4)
 	available := docker.Total - docker.Used
-	if cpu > (docker.CPUs-1)*1000 || available < reserve || memory > available-reserve {
-		return errors.New("pipeline_step: insufficient Docker CPU or RAM headroom for command and services; no pipeline command started")
+	if dockerCPU > (docker.CPUs-1)*1000 || available < reserve || dockerMemory > available-reserve {
+		return errors.New("pipeline_step: insufficient Docker CPU or RAM headroom for command and services" + beside + "; no pipeline command started")
 	}
 
 	return nil

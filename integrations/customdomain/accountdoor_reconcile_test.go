@@ -46,7 +46,11 @@ func (f *fakeDoorEngine) Execute(_ context.Context, query string) (any, error) {
 		if f.reservationErr != nil {
 			return nil, f.reservationErr
 		}
-		return f.reservations, nil
+		// THROUGH THE REAL SHAPE (account_walk_shape_test.go). This fake once
+		// answered with every fixture field, including a reason the shape
+		// did not project, and the reason-skip tests below passed against a
+		// sweep that rewrote the reason on every pass on a real engine.
+		return accountWalkRows(f.t, f.reservations), nil
 	case strings.HasPrefix(query, "query accountFrontDoor"):
 		// Every door read answers the same fixture, so a test can hand the
 		// sweep a `live` row and assert it is skipped by the work loop while

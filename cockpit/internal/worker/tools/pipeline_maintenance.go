@@ -57,24 +57,32 @@ func maintainPipelineResources(ctx context.Context, logger *slog.Logger, every t
 	}
 }
 
+// reconcileIdlePipeline reconciles every slot whose record outlived its step,
+// and only those: a slot a running step of this process holds is never read,
+// so this also runs while other slots are busy. Another process holding the
+// host build lock, or a reconciliation already under way, is not an error: the
+// next tick tries again.
 func reconcileIdlePipeline(ctx context.Context) (bool, error) {
 	pending, err := hasPipelineAttempt()
 	if err != nil || !pending {
 		return false, err
 	}
-	reservation, err := acquirePipelineReservation()
+	claims, err := claimInterruptedPipelineSlots(nil)
 	if errors.Is(err, errPipelineBusy) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	defer reservation.close()
-	if !reservation.dirty {
-		return false, nil
+	var failures []error
+	for _, claim := range claims {
+		if err := reconcilePipelineReservation(ctx, claim); err != nil {
+			failures = append(failures, err)
+		}
+		claim.close()
 	}
-	if err := reconcilePipelineReservation(ctx, reservation); err != nil {
+	if err := errors.Join(failures...); err != nil {
 		return false, err
 	}
-	return true, nil
+	return len(claims) > 0, nil
 }

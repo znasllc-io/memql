@@ -290,7 +290,7 @@ func (h *UnsubscribeHandler) pageFor(ctx context.Context, payload UnsubscribePay
 	// not its answer.
 	ctx, cancel := context.WithTimeout(ctx, brandReadTimeout)
 	defer cancel()
-	brand := h.store.pageBrandFor(ownerActorContext(ctx, payload.OwnerUserID), h.logger, payload.AccountID, h.contact)
+	brand := h.store.pageBrandFor(memql.ContextWithFreshRead(h.system(ctx)), h.logger, payload.AccountID, h.contact)
 	return brand, preferencesLinkFor(h.cfg, h.logger, LinkPayload{OwnerUserID: payload.OwnerUserID, RecipientID: payload.RecipientID, CampaignID: payload.CampaignID, AccountID: payload.AccountID, EmailDigest: payload.EmailDigest})
 }
 

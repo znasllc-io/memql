@@ -80,6 +80,15 @@ func reserveAt(root string, slotIndex int) (*reservation, error) {
 		pipeline.Close()
 		return nil, ErrInterrupted
 	}
+	// A machine running several pipeline steps (pipelines.max_concurrent_steps)
+	// keeps each extra step's record in a slot file of its own. Every Cockpit
+	// step holds pipeline.lock exclusively while it runs, so holding it shared
+	// proves none is running: a slot record with content is an interrupted step,
+	// as one in pipeline.lock is.
+	if pending, err := capacity.PipelineSlotsPending(root); err != nil || pending {
+		pipeline.Close()
+		return nil, ErrInterrupted
+	}
 	// A worker may have exited while its model runtime is still working, and a
 	// model call takes no part in this lock; the separate activity witness fences
 	// until the runtime's confirmed completion or the time it names. A model call

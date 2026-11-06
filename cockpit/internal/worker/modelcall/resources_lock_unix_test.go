@@ -109,11 +109,12 @@ func TestInferencePreservesRetainedHostRecords(t *testing.T) {
 }
 
 // A worker that restarts during a native step leaves its record in pipeline.lock
+// (or, on a machine running several steps, in its slot's pipeline-slot-n.lock)
 // until someone reconciles it, and an interrupted local build leaves
-// local-build.json. Both concern builds. A model call reads neither, so neither
-// can stop a machine answering.
+// local-build.json. All concern builds. A model call reads none, so none can
+// stop a machine answering.
 func TestARetainedBuildRecordDoesNotRefuseInference(t *testing.T) {
-	for _, name := range []string{"pipeline.lock", "local-build.json"} {
+	for _, name := range []string{"pipeline.lock", "pipeline-slot-1.lock", "local-build.json"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, name)

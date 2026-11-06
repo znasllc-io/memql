@@ -43,9 +43,13 @@ func TestPipelineCacheRetentionAndLinks(t *testing.T) {
 	pipelineCacheRetainedBytes = 10
 	t.Cleanup(func() { pipelineCacheRetainedBytes = oldLimit })
 	req := pipelineStepRequest{cacheHome: "cluster", cacheScope: strings.Repeat("a", 64), image: containerTestDigest}
-	if err := preparePipelineCache(&req); err != nil {
+	release, err := preparePipelineCache(&req)
+	if err != nil {
 		t.Fatal(err)
 	}
+	// Each build gives its cache back when it ends; only then is it counted
+	// against the budget, and only then can it be removed.
+	release()
 	old := req.cacheDir
 	if err := os.WriteFile(filepath.Join(old, "file"), []byte("12345678"), 0400); err != nil {
 		t.Fatal(err)
@@ -54,9 +58,10 @@ func TestPipelineCacheRetentionAndLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.cacheScope = strings.Repeat("b", 64)
-	if err := preparePipelineCache(&req); err != nil {
+	if release, err = preparePipelineCache(&req); err != nil {
 		t.Fatal(err)
 	}
+	release()
 	if err := os.WriteFile(filepath.Join(req.cacheDir, "file"), []byte("12345678"), 0400); err != nil {
 		t.Fatal(err)
 	}
@@ -145,4 +150,92 @@ func TestPipelineCachesRealDocker(t *testing.T) {
 	run(context.WithValue(context.Background(), pipelineCacheHomeKey{}, "second-cluster"), `test ! -e "$GOCACHE/proof"`)
 	extra["cacheScope"] = strings.Repeat("b", 64)
 	run(ctx, `test ! -e "$GOCACHE/proof"`)
+}
+
+// A cache a running step mounts is neither measured nor removed by another
+// step's prune, even when it is the oldest; once its step ends it is counted
+// and can go.
+func TestPipelineCachePruneLeavesACacheARunningStepMounts(t *testing.T) {
+	testPipelineReservation(t)
+	oldLimit := pipelineCacheRetainedBytes
+	pipelineCacheRetainedBytes = 10
+	t.Cleanup(func() { pipelineCacheRetainedBytes = oldLimit })
+	prepare := func(scope string, age int64) (string, func()) {
+		t.Helper()
+		req := pipelineStepRequest{cacheHome: "cluster", cacheScope: strings.Repeat(scope, 64), image: containerTestDigest}
+		release, err := preparePipelineCache(&req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(req.cacheDir, "file"), []byte("12345678"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(req.cacheDir, time.Unix(age, 0), time.Unix(age, 0)); err != nil {
+			t.Fatal(err)
+		}
+		return req.cacheDir, release
+	}
+	mounted, releaseMounted := prepare("a", 1)
+	older, releaseOlder := prepare("b", 2)
+	releaseOlder()
+	newer, releaseNewer := prepare("c", 3)
+	releaseNewer()
+	if err := prunePipelineCaches(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mounted); err != nil {
+		t.Fatalf("a mounted cache was pruned: %v", err)
+	}
+	if _, err := os.Stat(older); !os.IsNotExist(err) {
+		t.Fatalf("the oldest idle cache survived over budget: %v", err)
+	}
+	if _, err := os.Stat(newer); err != nil {
+		t.Fatalf("a cache within budget was pruned: %v", err)
+	}
+	releaseMounted()
+	releaseMounted() // a release is idempotent
+	if err := prunePipelineCaches(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mounted); !os.IsNotExist(err) {
+		t.Fatalf("an idle cache over budget survived: %v", err)
+	}
+}
+
+// An interrupted attempt in any slot may still have a container writing into a
+// cache no running step counts: retention waits until it is reconciled.
+func TestPipelineCachePruneWaitsForAnInterruptedSlot(t *testing.T) {
+	testPipelineReservation(t)
+	oldLimit := pipelineCacheRetainedBytes
+	pipelineCacheRetainedBytes = 1
+	t.Cleanup(func() { pipelineCacheRetainedBytes = oldLimit })
+	req := pipelineStepRequest{cacheHome: "cluster", cacheScope: strings.Repeat("d", 64), image: containerTestDigest}
+	release, err := preparePipelineCache(&req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := os.WriteFile(filepath.Join(req.cacheDir, "file"), []byte("12345678"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := pipelineCapacityRoot()
+	slot := capacity.PipelineSlotFile(root, 3)
+	if err := os.WriteFile(slot, []byte(`{"execution":"container"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := prunePipelineCaches(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.cacheDir); err != nil {
+		t.Fatalf("a cache was pruned beside an interrupted attempt: %v", err)
+	}
+	if err := os.Truncate(slot, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := prunePipelineCaches(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(req.cacheDir); !os.IsNotExist(err) {
+		t.Fatalf("retention did not resume after reconciliation: %v", err)
+	}
 }

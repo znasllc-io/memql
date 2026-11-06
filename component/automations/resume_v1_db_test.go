@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,78 @@ automation continuesPast%d {
 	if a := probe.argsOf(t, "after", 0)["a"]; a != "A" {
 		t.Fatalf("after(a: %v), want the value one recorded", a)
 	}
+}
+
+// TestResumeV1_DB_AMutationReceiptHoldsItsRowOnceAndNoSchema: a REAL mutation's
+// result -- the row the engine wrote, with its concept's schema on the node --
+// is journaled to Postgres as a statement's receipt, read back through
+// LoadRunJournal and resumed from (journal_step_result.go). The receipt holds
+// the row once, as its value, and no schema anywhere; the mutation does not
+// run again; and the statement after it reads from the rebound row exactly
+// what the failed attempt read from the live one.
+func TestResumeV1_DB_AMutationReceiptHoldsItsRowOnceAndNoSchema(t *testing.T) {
+	engine := sharedJournalEngine(t)
+	ctx := context.Background()
+	stamp := time.Now().UnixNano()
+	written, err := engine.Execute(journalContext(ctx), fmt.Sprintf(
+		`mutation createWorkRun(runId: %s, automationName: "schemaProbe", templateFingerprint: "fp", status: "succeeded", startedAt: %s)`,
+		jsonString(fmt.Sprintf("schema-probe-%d", stamp)), jsonString(rfc3339(time.Now()))))
+	if err != nil {
+		t.Fatalf("the real mutation: %v", err)
+	}
+	nodes := written.Bundle.GetNodes()
+	if len(nodes) != 1 || len(nodes[0].GetSchema().GetFields()) == 0 {
+		t.Fatalf("the engine's mutation result carries no schema on its node, so this test would prove nothing: %v", written.Bundle)
+	}
+	untrimmed, _ := json.Marshal(UnwrapStepResult(written))
+
+	probe := newStmtProbe()
+	probe.answers["writeThing"] = written
+	probe.fails["finish"] = 1
+	first, resumed := runThenResume(t, engine, resumeDBProbe{stmtProbe: probe, engine: engine}, fmt.Sprintf(`@trigger(event="probe.fired")
+automation writeThenFinish%d {
+  written := mutation writeThing()
+  builtin finish(id: written.id, status: written.status)
+}`, stamp))
+	if resumed.Status != "completed" {
+		t.Fatalf("resumed run status %q (%s)", resumed.Status, resumed.Error)
+	}
+	if got, want := probe.callees(), []string{"writeThing", "finish", "finish"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls %v, want %v: the mutation that finished must not run again", got, want)
+	}
+	failed, again := jsonShape(t, probe.argsOf(t, "finish", 0)), jsonShape(t, probe.argsOf(t, "finish", 1))
+	if !reflect.DeepEqual(failed, again) {
+		t.Fatalf("the resumed statement read %v from the rebound row; the failed attempt read %v from the live one", again, failed)
+	}
+	if args := probe.argsOf(t, "finish", 1); args["id"] != nodes[0].GetId() || args["status"] != "succeeded" {
+		t.Fatalf("finish(%v), want the id and status of the row the mutation wrote (%s)", args, nodes[0].GetId())
+	}
+
+	// The receipt as Postgres holds it.
+	steps, err := engine.Execute(journalContext(ctx), "query workStepsForRun(runId: "+jsonString(first.ID)+")")
+	if err != nil {
+		t.Fatalf("workStepsForRun: %v", err)
+	}
+	var receipt map[string]any
+	for _, row := range memql.MaterializeRows(steps) {
+		if row["key"] == "written" && row["status"] == "done" {
+			receipt, _ = row["result"].(map[string]any)
+		}
+	}
+	if receipt == nil {
+		t.Fatalf("no done receipt for the mutation statement in run %s", first.ID)
+	}
+	stored, _ := json.Marshal(receipt)
+	if strings.Contains(string(stored), `"schema"`) {
+		t.Fatalf("the stored receipt records a concept schema:\n  %s", stored)
+	}
+	if _, has := receipt["result"]; has {
+		t.Fatalf("the stored receipt records the Bundle beside the value it duplicates:\n  %s", stored)
+	}
+	if value, _ := receipt["value"].(map[string]any); value["id"] != nodes[0].GetId() || receipt["valueRecorded"] != true {
+		t.Fatalf("the stored receipt's value is not the row the mutation wrote:\n  %s", stored)
+	}
+	t.Logf("receipt %d bytes; the Bundle alone was %d bytes before this change", len(stored), len(untrimmed))
 }
 
 // A private engine, unlike its two neighbours: this one registers a logic

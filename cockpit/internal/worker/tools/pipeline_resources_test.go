@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func TestPipelineHeadroomIncludesEveryServiceAndBothPools(t *testing.T) {
 	pipelineHostMemory = func() (capacity.SystemHeadroom, error) { return host, nil }
 	pipelineHostCPUs = func() int { return 8 }
 	pipelineDockerResources = func(context.Context) (dockerResourceHeadroom, error) { return docker, nil }
-	if err := checkPipelineHeadroom(context.Background(), base); err != nil {
+	if err := checkPipelineHeadroom(context.Background(), base, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"host memory", "host pressure", "host CPU", "Docker memory", "Docker CPU", "Docker identity", "Docker unavailable", "host unavailable"} {
@@ -97,7 +98,7 @@ func TestPipelineHeadroomIncludesEveryServiceAndBothPools(t *testing.T) {
 			case "host unavailable":
 				pipelineHostMemory = func() (capacity.SystemHeadroom, error) { return capacity.SystemHeadroom{}, errors.New("unavailable") }
 			}
-			if err := checkPipelineHeadroom(context.Background(), base); err == nil {
+			if err := checkPipelineHeadroom(context.Background(), base, nil); err == nil {
 				t.Fatalf("accepted %s", kind)
 			}
 		})
@@ -202,10 +203,52 @@ func TestPipelineHeadroomReadsHostAfterDocker(t *testing.T) {
 		order += "host;"
 		return capacity.SystemHeadroom{Total: 64 << 30, Available: 48 << 30}, nil
 	}
-	if err := checkPipelineHeadroom(context.Background(), pipelineStepRequest{execution: "container", dockerID: "fixed", cpuMilli: 1000, memoryMiB: 2048}); err != nil {
+	if err := checkPipelineHeadroom(context.Background(), pipelineStepRequest{execution: "container", dockerID: "fixed", cpuMilli: 1000, memoryMiB: 2048}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if order != "docker;host;" {
 		t.Fatal(order)
+	}
+}
+
+// A step is admitted beside the steps already running only when the machine
+// fits all of them at their full limits: a running step still cloning has used
+// none of what it will.
+func TestPipelineHeadroomChargesEveryRunningStepInFull(t *testing.T) {
+	fakePipelineHostHeadroom(t) // 32 CPUs; 48 of 64 GiB free, 8 GiB kept back
+	native := pipelineStepRequest{execution: "native", cpuMilli: 4000, memoryMiB: 8192}
+	running := func(n, cpuMilli, memoryMiB int, docker bool) []pipelineSlotUse {
+		uses := make([]pipelineSlotUse, n)
+		for i := range uses {
+			uses[i] = pipelineSlotUse{step: fmt.Sprint(i), cpuMilli: cpuMilli, memoryMiB: memoryMiB, docker: docker}
+		}
+		return uses
+	}
+	if err := checkPipelineHeadroom(context.Background(), native, running(3, 8000, 8192, false)); err != nil {
+		t.Fatalf("28 CPUs and 32 GiB fit 31 CPUs and 40 GiB: %v", err)
+	}
+	for name, others := range map[string][]pipelineSlotUse{
+		"CPU":    running(4, 8000, 1024, false), // 36 CPUs, one must stay free
+		"memory": running(5, 1000, 8192, false), // 48 GiB of 40
+	} {
+		err := checkPipelineHeadroom(context.Background(), native, others)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("beside the %d steps already running", len(others))) {
+			t.Fatalf("%s: admitted beside steps that use it up: %v", name, err)
+		}
+	}
+
+	// Docker is charged only for the running steps that use it.
+	previous := pipelineDockerResources
+	pipelineDockerResources = func(context.Context) (dockerResourceHeadroom, error) {
+		return dockerResourceHeadroom{ID: "fixed", CPUs: 16, Total: 32 << 30, Used: 0}, nil
+	}
+	t.Cleanup(func() { pipelineDockerResources = previous })
+	container := pipelineStepRequest{execution: "container", dockerID: "fixed", cpuMilli: 4000, memoryMiB: 8192}
+	if err := checkPipelineHeadroom(context.Background(), container, running(3, 4000, 8192, false)); err != nil {
+		t.Fatalf("native steps were charged to Docker: %v", err)
+	}
+	err := checkPipelineHeadroom(context.Background(), container, running(3, 4000, 8192, true))
+	if err == nil || !strings.Contains(err.Error(), "insufficient Docker") {
+		t.Fatalf("32 GiB of containers admitted into Docker's 24 usable: %v", err)
 	}
 }
