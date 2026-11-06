@@ -110,6 +110,14 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// before borrowing each source owner's credential/deploy authority.
 		// A reader actor silently sees no packages and reports checked=0.
 		"pollPackageUpstreams",
+		// reclaimClosedChunkSpace is logsRetentionSweep's case, not a cross-owner
+		// read: the closed-chunk compaction reads no row through the graph (it
+		// sums column sizes and rewrites a chunk's storage as it stands), and
+		// what needs the principal is its native handler's cluster-owner floor --
+		// the pass spends the installation's I/O and WAL. Under the default
+		// RoleReader actor it would be refused every night, and the space
+		// retention frees inside closed chunks would never come back.
+		"reclaimClosedChunkSpace",
 		// Declared graph retention spans owners and its native handler has an
 		// owner floor, including dry runs. The default scheduled reader is refused.
 		"retireDeclaredConceptVersions",

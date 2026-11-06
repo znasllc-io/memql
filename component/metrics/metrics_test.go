@@ -339,3 +339,29 @@ func TestMigrationLockHeldSecondsReadsItsSource(t *testing.T) {
 		t.Fatalf("the scrape does not carry the reading:\n%s", body)
 	}
 }
+
+// The closed-chunk compaction's series exist from boot, for every outcome, and an
+// outcome nobody declared is counted as failed rather than becoming a new series:
+// the Help string says to alert on failed recurring and on a flat zero, and both
+// rules need the series before the first pass.
+func TestChunkCompactionSeriesExistFromBootAndStayClosed(t *testing.T) {
+	scrape := func() string {
+		rec := httptest.NewRecorder()
+		Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+	body := scrape()
+	for _, outcome := range ChunkCompactionOutcomes() {
+		if !strings.Contains(body, `memql_database_chunk_compaction_runs_total{outcome="`+outcome+`"}`) {
+			t.Errorf("no series for outcome %q at boot", outcome)
+		}
+	}
+	if !strings.Contains(body, "memql_database_chunk_compaction_reclaimed_bytes_total") {
+		t.Error("no reclaimed-bytes series at boot")
+	}
+
+	ChunkCompactionRun("something_new")
+	if body := scrape(); strings.Contains(body, `outcome="something_new"`) {
+		t.Error("an undeclared outcome minted its own series")
+	}
+}

@@ -111,6 +111,16 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   six seconds for a connection and then answers that coordination is busy,
   which every caller treats as "nothing attempted, try later". Raise the size
   only if the budget above has the room.
+- **The maintenance session** (`component/database/maintenance_session.go`) is
+  one connection a closed-chunk compaction pass opens on the direct endpoint
+  for its duration and closes after, with no statement timeout and no client
+  read deadline beyond the pass's own (a `reorder_chunk` of a large chunk runs
+  for minutes). It is counted once per **installation**, not per process, under
+  separate jobs and monitors: an advisory lock admits one pass at a time
+  cluster-wide, the nightly one on the cron leader at 04:20 UTC, and a second
+  pass (an owner's manual call) holds its connection only long enough to be
+  refused the lock. An idle process holds none
+  ([closed-chunk compaction](database-platform.md#closed-chunk-compaction)).
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 

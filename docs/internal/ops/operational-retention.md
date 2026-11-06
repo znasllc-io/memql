@@ -55,6 +55,43 @@ The existing log sweep reads logLine's retention declaration and verifies each
 archive before dropping a day's chunks. It continues to use
 `MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
 
+## Returning the space: closed-chunk compaction
+
+A retention delete frees space inside its chunk, and `MemoryNodes` /
+`SecretMemoryNodes` only ever insert into the newest chunk. So every sweep in
+this document whose window is longer than a chunk (seven days) -- the declared
+TTLs, this journal's 30 days, pipeline runs -- deletes rows from CLOSED chunks
+and the disk gets nothing back. The log sweep is the exception: it drops whole
+day chunks of its own hypertable. Measured on production before the job
+existed: five closed chunks held about 7.1 GB of free space, one of them a
+7.7 GB chunk with 3.3 GB live.
+
+Those deletes return space only through `reclaimClosedChunkSpace`, nightly at
+04:20 UTC on the cron leader, after this sweep's 03:40 pass. It calls
+`closedChunkCompaction` (`integration.retention.compact`,
+`component/retention/compact.go`), which rewrites at most one closed chunk a
+night with `reorder_chunk` and `VACUUM (ANALYZE)`, chosen as the one giving back
+most, at least 256 MiB and 30% of its size, among those that fit the volume
+twice over. It refuses while WAL awaits archiving, when the engine's role does
+not own the chunk, and without a storage reading it can trust. A sweep's deletes
+move a chunk's change counter, which is what makes the next compaction pass
+measure that chunk again; the measurements and the last attempt per chunk are in
+`chunk_compaction_progress`. The rewrite never changes a row and a failure leaves
+the chunk as it was.
+
+The decision rules, how to read a pass, and how to run or stop it are in the
+operator guide's [Closed-chunk compaction](../../public/operate/database-platform.md#closed-chunk-compaction).
+Tests: `component/retention/compact_decide_test.go` holds every decision;
+`compact_db_test.go` rewrites a real TimescaleDB chunk, proves a reader at the
+swap fails the rewrite cleanly, that an open or just-closed chunk is never
+chosen, that a dry run changes nothing, and that a second replica is refused
+while a pass runs and reuses its measurements. The test database's role is a
+superuser; every statement of a pass was also run by hand (2026-11-06,
+PostgreSQL 16, TimescaleDB 2.27) as a NOSUPERUSER role outside `pg_monitor`
+that owned its hypertable, rewrite and `VACUUM` included. Not verified at all:
+the `database-health` report read on a live cluster, and an archiver with a real
+backlog (the test database does not archive; `judgeWAL` is held by unit tests).
+
 ## Current liveness observations
 
 Worker registration heartbeats, cluster-node health and mesh observations, and
@@ -416,7 +453,9 @@ owner-only `clusterStorageStatus` builtin on its ordinary stream. The read
 verifies the Event's source and current CloudNativePG cluster UID, so a report
 from a replaced installation cannot describe the new one. The shared base grants
 only `get` on that named Event and cluster. There is no new monitor or stored
-health history in the engine.
+health history in the engine. The closed-chunk compaction reads the same
+verified report natively (`storagehealth.Integration.Read`) for its room check,
+trusting it only when observed within 15 minutes, as the OS does.
 
 The OS uses the monitor's data/WAL capacity warning (over 80%). Owners see one
 notice above the dock, opening Cluster → Readiness for usage and measurement

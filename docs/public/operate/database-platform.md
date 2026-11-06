@@ -509,6 +509,130 @@ removed across boots. Do **not** turn compression itself off
 (`ALTER TABLE ... SET (timescaledb.compress = false)`): the next boot would put
 it back.
 
+## Closed-chunk compaction
+
+`MemoryNodes` and `SecretMemoryNodes` are append-only hypertables in 7-day
+chunks on `"createdAt"`, and inserts only ever reach the newest chunk. Space a
+`DELETE` frees in a **closed** chunk is therefore reused by nothing and never
+returned to the volume: every retention whose window is longer than a chunk
+(declared `@retention` TTLs, the work journal's 30 days, pipeline runs) deletes
+rows without giving back disk, and so did the October 14 schema conversion,
+whose updates shrank rows. Production measured five closed chunks holding about
+7.1 GB free, one of them 7.7 GB with 3.3 GB live.
+
+**Deletes in closed chunks return space only through this job.** The nightly
+`reclaimClosedChunkSpace` automation (04:20 UTC, on the cron leader, after the
+03:20 log and 03:40 work-journal retention) calls the cluster-owner builtin
+`closedChunkCompaction`, which rewrites **at most one** closed chunk per night
+with TimescaleDB's `reorder_chunk` and then runs `VACUUM (ANALYZE)` on it (a
+rewrite does not set the visibility map index-only reads need). No row is
+changed: `reorder_chunk` swaps a finished copy in or discards it.
+
+### How a pass decides
+
+1. **Closed chunks only:** the chunk's range ended at least a day ago, and it is
+   not compressed.
+2. **Measure, once per change.** A pass scans the heap of a chunk that has no
+   current measurement, summing `pg_column_size` of every column (a TOASTed
+   value's stored size is read off its pointer, not fetched) plus 44 bytes a
+   row. At most 4 chunks a pass, none started after 15 minutes, chunks never
+   measured first and then the oldest measurement, so none is starved. Measurements
+   live in `chunk_compaction_progress` and are reused while the chunk's size and
+   its insert/update/delete counter (`pg_stat_user_tables`) still read what they
+   read then, for at most 30 days; a retention delete moves the counter, so the
+   next pass measures that chunk again.
+3. **Worth it:** the chunk would give back at least 256 MiB **and** 30% of its
+   size (the automation's arguments; the handler's floors are 16 MiB and 5%).
+4. **Room, twice over.** The pass needs room for the chunk's live data plus its
+   indexes, twice (the second copy covers a sort spilling to disk). Capacity
+   comes from the `database-health` report (the one `clusterStorageStatus`
+   reads) when it was observed within 15 minutes; usage is the larger of the
+   report's and the live sum of `pg_database_size`. Without a fresh report the
+   pass uses `MEMQL_CHUNK_COMPACTION_VOLUME_BYTES`, if set, against the live
+   sizes; with neither it rewrites nothing (`room_unknown`), and a real pass
+   stops before measuring anything. 5% of the volume is
+   treated as unusable (ext4's root reserve). With a fresh report the WAL volume
+   must also hold the rewrite's WAL once. Of the chunks that are worth it, the
+   pass takes the one giving back most **that fits**: a smaller chunk rewritten
+   tonight is room for a larger one later.
+5. **Owner:** `reorder_chunk` requires the chunk's owner. The engine's role
+   creates `MemoryNodes` in its migrations, so it owns the hypertable and every
+   chunk; a pass that finds otherwise answers `not_owner`, naming both roles.
+6. **WAL archive keeping up.** A rewrite writes WAL roughly the size of what it
+   rewrites, and `database-health` fails above 64 segments awaiting archiving.
+   The pass reads `pg_stat_archiver` and the current WAL position (the engine's
+   role cannot call `pg_ls_archive_statusdir()`, which needs `pg_monitor`) and
+   refuses when more than 4 segments wait, when the archiver's latest attempt
+   failed, when segments wait and nothing was archived for 10 minutes, or when
+   the backlog cannot be read; a fresh report naming an `archive-*` problem
+   refuses too.
+
+### What a rewrite does to readers and writers
+
+`reorder_chunk` copies the chunk while reads carry on, holding an
+`ExclusiveLock` that makes a `DELETE` into that chunk wait. The swap at the end
+needs an `AccessExclusive` lock; the pass runs with `lock_timeout = 1s`, so a
+reader in the way makes the rewrite fail within a second, with the chunk intact,
+instead of queueing every later reader behind the swap. A lock timeout is
+retried up to three times in a pass, 30 s apart, re-reading the WAL guard
+first. A rewrite is bounded at 40 minutes and a pass at 55; anything that ends
+a rewrite leaves the chunk as it was, and the chunk then waits a day before the
+next attempt, doubling to at most 16 days while it keeps failing. The hourly
+declared-retention sweep at `:40` can see one batch end at its own statement
+timeout while a long rewrite holds the chunk; it retries the next hour.
+
+A pass takes one extra database connection for its duration, cluster-wide: an
+advisory lock admits one pass at a time, and the session is opened on the
+direct endpoint without the request pool's statement timeout
+([connection budget](db-connection-budget.md)).
+
+### Reading what it did
+
+The builtin answers `{ outcome, reason, detail, chunk, measured, eligible,
+room, wal }`. `outcome` is `compacted`, `planned` (a dry run that would
+rewrite), `skipped` or `failed`; `reason` names why nothing was rewritten
+(`disabled`, `already_running`, `reorder_unavailable`, `no_candidate`,
+`room_unknown`, `no_room`, `not_owner`, `wal_backlog`, `wal_unknown`,
+`no_reorder_index`, `out_of_time`) or why a rewrite failed (`lock_timeout`,
+`statement_timeout`, `cancelled`, `error`). A failure is logged at `WARN`
+naming the chunk; a pass that rewrites nothing logs its reason at `INFO`.
+`memql_database_chunk_compaction_runs_total{outcome}` and
+`memql_database_chunk_compaction_reclaimed_bytes_total` count passes and bytes
+given back.
+
+```sql
+-- What the passes measured and did, newest first
+SELECT chunk, live_bytes, measured_total_bytes, measured_at,
+       outcome, failures, attempted_at, compacted_at, detail
+  FROM chunk_compaction_progress
+ ORDER BY coalesce(attempted_at, measured_at) DESC;
+```
+
+### Running it, and stopping it
+
+- **Preview** as a cluster owner: `closedChunkCompaction(dryRun: true)`
+  measures, judges room, ownership and WAL, and reports what a pass would do,
+  writing nothing (no rewrite, no progress row).
+- **Run now:** `closedChunkCompaction()` takes the nightly thresholds by default
+  and holds the call until the pass ends. A run started from the automation's
+  Run button is bounded at five minutes at most, and a rewrite is only started
+  with five minutes of the pass left, so such a run measures and answers
+  `out_of_time`; call the builtin instead.
+- **Stop the nightly rewrites:** set `MEMQL_CHUNK_COMPACTION_ENABLED=false` in
+  the installation's overlay and roll the pods. Each pass then answers
+  `disabled`; dry runs still report.
+- **Stop a rewrite in progress:** cancel its backend. The statement rolls back
+  and the chunk stays as it was:
+
+  ```sql
+  SELECT pg_cancel_backend(pid)
+    FROM pg_stat_activity
+   WHERE query LIKE '%reorder_chunk(%' AND pid <> pg_backend_pid();
+  ```
+
+  Restarting the pod running the pass has the same effect within ten seconds
+  (the session sets `client_connection_check_interval`).
+
 ---
 
 ## Related

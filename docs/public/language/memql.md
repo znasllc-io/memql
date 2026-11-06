@@ -655,6 +655,17 @@ restart. The cluster-owner builtin `conceptRetentionSweep(dryRun: true)` preview
 one page per concept and table without deleting or advancing progress. Expiry is
 asynchronous; TTL is eligibility for maintenance, not a query visibility filter.
 
+Deleting a version does not by itself give its disk back. Versions are stored
+in time chunks of seven days, and new versions only ever land in the newest
+chunk, so the space a retention delete frees inside an older, closed chunk is
+reused by nothing. The nightly `reclaimClosedChunkSpace` automation returns it:
+at 04:20 UTC it rewrites at most one closed chunk that would give back at least
+256 MiB and 30% of its size, and only when the volume has room for the chunk's
+live data and indexes twice over and the WAL archive is keeping up. Rows are
+never changed by the rewrite. A cluster owner previews a pass with
+`closedChunkCompaction(dryRun: true)`; the decision rules, the stop switch and
+the report are in [Closed-chunk compaction](../operate/database-platform.md#closed-chunk-compaction).
+
 `observability.logLine` uses the same annotation through its chunk-aware nightly
 sweeper. Logs require whole days, `keepLatest=false` and `archive="required"`.
 Its declaration takes precedence over `MEMQL_LOGS_RETENTION_DAYS`; the environment

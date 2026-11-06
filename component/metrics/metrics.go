@@ -255,6 +255,23 @@ var (
 		return 0
 	})
 
+	// chunkCompactionRuns and chunkCompactionReclaimedBytes are the closed-chunk
+	// compaction's (component/retention/compact.go). Every node type exports
+	// them; only the node that ran a pass moves them.
+	chunkCompactionRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "chunk_compaction_runs_total",
+		Help:      "EVERY NODE TYPE exports this series, moved only by the node that ran a closed-chunk compaction pass (the cron leader nightly at 04:20 UTC, or an owner calling closedChunkCompaction by hand). One step per pass, by outcome: compacted (one closed MemoryNodes or SecretMemoryNodes chunk was rewritten and gave space back), planned (a dry run that would have rewritten one), skipped (nothing was rewritten, and the pass's result says why: no chunk over the thresholds, no room, WAL awaiting archiving, the role does not own the chunk, another pass running), failed (a rewrite was attempted and did not finish, e.g. a reader held the chunk past the 1 s lock timeout; the chunk is exactly as it was). Skipped is the normal night once nothing is left to give back. Alert on failed recurring night after night, and on a flat zero over every outcome for more than two days, which means the pass is not running at all.",
+	}, []string{"outcome"})
+
+	chunkCompactionReclaimedBytes = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Subsystem: "database",
+		Name:      "chunk_compaction_reclaimed_bytes_total",
+		Help:      "EVERY NODE TYPE exports this series, moved only by the node that ran a closed-chunk compaction pass. Bytes a rewrite gave back to the data volume: the chunk's total size (heap, TOAST and indexes) before the rewrite less its size after. Space that retention deletes leave inside a CLOSED chunk is reused by nothing else -- inserts only reach the newest chunk -- so this counter is how that space comes back. A flat value while chunk_compaction_runs_total{outcome=\"skipped\"} rises is the normal state once every closed chunk is compact.",
+	})
+
 	logsDeletedTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: "logs",
@@ -287,6 +304,8 @@ func init() {
 		logsDroppedTotal,
 		logsArchivedTotal,
 		logsDeletedTotal,
+		chunkCompactionRuns,
+		chunkCompactionReclaimedBytes,
 		resultCacheInvalidationEvictions,
 		resultCacheInvalidationEvents,
 		resultCacheQueryReads,
@@ -366,6 +385,39 @@ func init() {
 	for _, concept := range StatusHistoryConcepts() {
 		statusHistoryVersionsPurged.WithLabelValues(concept).Add(0)
 	}
+	// The compaction's outcomes exist at 0 from boot for the same reason: its
+	// Help says to alert on failed recurring and on a flat zero.
+	chunkCompactionReclaimedBytes.Add(0)
+	for _, outcome := range ChunkCompactionOutcomes() {
+		chunkCompactionRuns.WithLabelValues(outcome).Add(0)
+	}
+}
+
+// ChunkCompactionOutcomes is the closed set of chunk_compaction_runs_total's
+// outcome label, in the order the Help string names them.
+func ChunkCompactionOutcomes() []string {
+	return []string{"compacted", "planned", "skipped", "failed"}
+}
+
+// ChunkCompactionRun records one closed-chunk compaction pass by its outcome.
+// An outcome outside ChunkCompactionOutcomes is counted as failed rather than
+// minting a new series.
+func ChunkCompactionRun(outcome string) {
+	for _, known := range ChunkCompactionOutcomes() {
+		if outcome == known {
+			chunkCompactionRuns.WithLabelValues(outcome).Inc()
+			return
+		}
+	}
+	chunkCompactionRuns.WithLabelValues("failed").Inc()
+}
+
+// ChunkCompactionReclaimed records bytes a rewrite gave back to the volume.
+func ChunkCompactionReclaimed(n int64) {
+	if n <= 0 {
+		return
+	}
+	chunkCompactionReclaimedBytes.Add(float64(n))
 }
 
 // The two reasons a served request goes unrecorded (epic memql#4906). A

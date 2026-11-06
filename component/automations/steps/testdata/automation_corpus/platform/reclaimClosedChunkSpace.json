@@ -1,0 +1,51 @@
+{
+  "automation": "platform/automations.memql reclaimClosedChunkSpace",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "dryRun": false,
+              "measureChunks": 4,
+              "minReclaimBytes": 268435456,
+              "minReclaimPercent": 30
+            },
+            "kind": "builtin",
+            "name": "closedChunkCompaction"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "dryRun": false,
+              "measureChunks": 4,
+              "minReclaimBytes": 268435456,
+              "minReclaimPercent": 30
+            },
+            "kind": "builtin",
+            "name": "closedChunkCompaction"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

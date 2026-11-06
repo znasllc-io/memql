@@ -89,6 +89,12 @@ var maintenanceAutomations = map[string]string{
 	"retireDeclaredConceptVersions": "the engine-owned hourly sweep applies each graph concept's declared retention across every owner, " +
 		"verifying required archives before physical deletion. Its native handler requires a cluster owner even for a dry run; " +
 		"the ordinary scheduled reader actor is refused before any policy can run",
+	"reclaimClosedChunkSpace": "the engine-owned nightly closed-chunk compaction, which gives back the space retention deletes " +
+		"leave inside closed MemoryNodes and SecretMemoryNodes chunks by rewriting at most one of them with reorder_chunk. " +
+		"It reads no row through the graph -- it aggregates column sizes and rewrites storage as it stands -- so what needs " +
+		"the principal is logsRetentionSweep's reason: the native handler's own cluster-owner floor (it spends the " +
+		"installation's I/O and WAL, dry runs included), which the ordinary scheduled reader actor would be refused by " +
+		"every night, leaving the space deletes free in closed chunks never returned",
 	"pollPackageUpstreams": "engine-owned repository polling across every owner's active sources. " +
 		"The package composite tier hides user-owned sources from the default reader actor, so the " +
 		"poll otherwise succeeds with checked=0 and never discovers a new revision. Discovery must " +
