@@ -102,6 +102,21 @@ type PluginContext struct {
 	// from database.NewGatePool.
 	GateDB func() *sql.DB
 
+	// OpenMaintenanceSession opens ONE dedicated database session for
+	// maintenance statements that legitimately run for minutes -- the
+	// closed-chunk compaction's reorder_chunk and the heap scan that measures a
+	// chunk (component/retention/compact.go). It has no server
+	// statement_timeout and no client read deadline beyond the caller's
+	// context, and it opens on the direct endpoint when one is configured
+	// (component/database/maintenance_session.go). The caller owns it and calls
+	// the returned func to close it; it bounds every statement itself.
+	//
+	// nil on a node without a database. A plug-in that needs it REFUSES the
+	// capability rather than falling back to BunDB: the request pool's 8 s
+	// statement_timeout and pgdriver's 10 s read deadline end such a statement
+	// part-way, which is the reason this session exists.
+	OpenMaintenanceSession func(ctx context.Context) (*sql.Conn, func(), error)
+
 	// ResolveVisionProvider RESOLVES a vision-capable provider through the
 	// router, or returns nil when no door to one is open.
 	//

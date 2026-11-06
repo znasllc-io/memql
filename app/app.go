@@ -14,6 +14,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -387,6 +388,22 @@ func (a *App) gateDBGetter() func() *sql.DB {
 			return nil
 		}
 		return a.db.GateDB()
+	}
+}
+
+// maintenanceSessionOpener returns the opener of the dedicated maintenance
+// session (component/database, maintenance_session.go): one connection, opened
+// per run on the direct endpoint, with no statement_timeout and no client read
+// deadline beyond the caller's context. The closed-chunk compaction rewrites a
+// chunk for minutes on it. There is no fallback to any pool: each of them ends
+// such a statement part-way, at the request deadline or at pgdriver's 10 s read
+// deadline, so a node without a database answers that it has none.
+func (a *App) maintenanceSessionOpener() func(context.Context) (*sql.Conn, func(), error) {
+	return func(ctx context.Context) (*sql.Conn, func(), error) {
+		if a.db == nil {
+			return nil, nil, database.ErrMaintenanceSessionUnavailable
+		}
+		return a.db.OpenMaintenanceSession(ctx)
 	}
 }
 

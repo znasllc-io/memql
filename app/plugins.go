@@ -116,6 +116,9 @@ func (a *App) pluginContext() memql.PluginContext {
 		},
 		// The pool write gates run on (memql#6022): not the request pool above.
 		GateDB: a.gateDBGetter(),
+		// The long-statement session the closed-chunk compaction runs on: not
+		// any pool above, whose statement and read deadlines end it part-way.
+		OpenMaintenanceSession: a.maintenanceSessionOpener(),
 		// Both of these RESOLVE now, and the field names say so (epic
 		// memql#5127, design D2). They used to reach the registry directly --
 		// one for its default vision provider, one for a named embedding

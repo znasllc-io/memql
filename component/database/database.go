@@ -123,6 +123,7 @@ type (
 		sqlOpener                SQLOpener
 		migrationOpener          SQLOpener // nil: migrate over the request pool
 		gateOpener               SQLOpener // nil: no gate pool (gate_pool.go)
+		maintenanceOpener        SQLOpener // nil: no maintenance session (maintenance_session.go)
 		bunFactory               BunFactory
 		bunOptions               []BunOption
 		migrator                 Migrator
@@ -303,6 +304,7 @@ func defaultConfig() *config {
 		sqlOpener:                pgSQLOpener(sessionConnParams),
 		migrationOpener:          pgSQLOpener(migrationConnParams),
 		gateOpener:               pgSQLOpener(gateConnParams),
+		maintenanceOpener:        maintenanceSQLOpener(),
 		bunFactory: func(db *sql.DB) (*bun.DB, error) {
 			if db == nil {
 				return nil, fmt.Errorf("bun factory: nil sql.DB")
@@ -603,6 +605,7 @@ func (d *Database) WithSQLOpener(opener SQLOpener) DatabaseArg {
 			c.sqlOpener = opener
 			c.migrationOpener = nil
 			c.gateOpener = nil
+			c.maintenanceOpener = nil
 		}
 	})
 }
@@ -1882,6 +1885,13 @@ const (
 // is read at OPEN time, so the request pool and the migration pool differ
 // only in the session parameters they SET on every backend.
 func pgSQLOpener(params func() map[string]any) SQLOpener {
+	return pgSQLOpenerWith(params)
+}
+
+// pgSQLOpenerWith is pgSQLOpener with further pgdriver options applied after
+// the DSN's own, so they win over it. The maintenance session is the one user:
+// it lifts pgdriver's 10 s client read deadline (maintenance_session.go).
+func pgSQLOpenerWith(params func() map[string]any, extra ...pgdriver.Option) SQLOpener {
 	return func(_ string, dsn string) (*sql.DB, error) {
 		normalized, serverName, err := normalizeDSN(dsn)
 		if err != nil {
@@ -1904,6 +1914,7 @@ func pgSQLOpener(params func() map[string]any) SQLOpener {
 		if appName := dbApplicationName(); appName != "" {
 			opts = append(opts, pgdriver.WithApplicationName(appName))
 		}
+		opts = append(opts, extra...)
 
 		connector := pgdriver.NewConnector(opts...)
 		cfg := connector.Config()
