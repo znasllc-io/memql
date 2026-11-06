@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -660,9 +661,15 @@ func (w *accessWorld) join(group, account, user string) {
 
 // grant writes one group grant at the derived id and returns the id.
 func (w *accessWorld) grant(group, verb, resource, effect string) string {
-	id := componentAuth.GrantRowID(componentAuth.SubjectKindGroup, group, verb, resource)
-	w.exec(fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "group", subjectId: %s, verb: %s, resourceType: %s, effect: %s, grantedBy: "access-db-fixture")`,
-		langparser.QuoteString(id), langparser.QuoteString(group), langparser.QuoteString(verb),
+	return w.grantTo(componentAuth.SubjectKindGroup, group, verb, resource, effect)
+}
+
+// grantTo writes one grant on a person or a group at the derived id and
+// returns the id.
+func (w *accessWorld) grantTo(kind, subject, verb, resource, effect string) string {
+	id := componentAuth.GrantRowID(kind, subject, verb, resource)
+	w.exec(fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: %s, subjectId: %s, verb: %s, resourceType: %s, effect: %s, grantedBy: "access-db-fixture")`,
+		langparser.QuoteString(id), langparser.QuoteString(kind), langparser.QuoteString(subject), langparser.QuoteString(verb),
 		langparser.QuoteString(resource), langparser.QuoteString(effect)))
 	return id
 }
@@ -930,4 +937,185 @@ func TestEffectiveAccessForAGroupListsItsOwnGrants(t *testing.T) {
 	if _, err := readAccess(t, w.eng, caller, "group", w.id("nowhere")); err == nil || !strings.Contains(err.Error(), "access_unknown_subject") {
 		t.Fatalf("a group that is not there: err = %v, want access_unknown_subject", err)
 	}
+}
+
+// TestEffectiveAccessNamesThePersonsDenyOverTheirGroupsAllow: a grant on the
+// person is the most specific level, so it decides over their group's. The
+// group allows Logs and the reviews part, the person is denied both, and each
+// row reads not held, from the person, naming them -- Logs once, the part in
+// the organization that decides it. The control is a member of the same group
+// with no grant of their own, who holds both from the group: so the group's
+// allow was live, and the person's deny is what answered over it.
+func TestEffectiveAccessNamesThePersonsDenyOverTheirGroupsAllow(t *testing.T) {
+	w := newAccessWorld(t)
+	account := w.id("org")
+	w.installCatalog(account)
+	group := w.organization(account)
+	denied := w.person("denied", "writer")
+	member := w.person("member", "writer")
+	w.join(group, account, denied)
+	w.join(group, account, member)
+	w.grant(group, "read", "app:logs", "allow")
+	w.grant(group, "execute", "app:deployables/reviews", "allow")
+	w.grantTo(componentAuth.SubjectKindUser, denied, "read", "app:logs", "deny")
+	w.grantTo(componentAuth.SubjectKindUser, denied, "execute", "app:deployables/reviews", "deny")
+	caller := accessCaller(w.id("admin"), componentAuth.RoleAdmin)
+
+	rows, err := readAccess(t, w.eng, caller, "user", denied)
+	if err != nil {
+		t.Fatalf("an admin reading a person denied over their group: %v", err)
+	}
+	expectAccess(t, rows, "", "read", "app:logs", false, "person", denied)
+	expectAccess(t, rows, account, "execute", "app:deployables/reviews", false, "person", denied)
+
+	rows, err = readAccess(t, w.eng, caller, "user", member)
+	if err != nil {
+		t.Fatalf("an admin reading the control member: %v", err)
+	}
+	expectAccess(t, rows, "", "read", "app:logs", true, "group", group)
+	expectAccess(t, rows, account, "execute", "app:deployables/reviews", true, "group", group)
+}
+
+// TestEffectiveAccessRefusesAnArchivedGroup: an archived group grants nobody
+// anything, so asked about one the read refuses as it does for a group that is
+// not there -- rather than listing grants that decide nothing, or answering
+// empty, which would say "grants nothing" for a different reason. The control
+// is the same group, active, answering its grant.
+func TestEffectiveAccessRefusesAnArchivedGroup(t *testing.T) {
+	w := newAccessWorld(t)
+	account := w.id("org")
+	w.installCatalog(account)
+	group := w.organization(account)
+	w.grant(group, "read", "app:deployables", "allow")
+	caller := accessCaller(w.id("admin"), componentAuth.RoleAdmin)
+	if rows, err := readAccess(t, w.eng, caller, "group", group); err != nil || len(rows) != 1 {
+		t.Fatalf("control: the active group answers its one grant: rows=%d err=%v", len(rows), err)
+	}
+
+	w.exec(fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "archived", archivedAt: %s)`,
+		langparser.QuoteString(group), langparser.QuoteString(group), langparser.QuoteString(account),
+		langparser.QuoteString(time.Now().UTC().Format(time.RFC3339))))
+	rows, err := readAccess(t, w.eng, caller, "group", group)
+	if err == nil || !strings.Contains(err.Error(), "access_unknown_subject") {
+		t.Fatalf("an archived group: err = %v, want access_unknown_subject", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("a refusal answered %d rows", len(rows))
+	}
+}
+
+// TestAnOrganizationRoleOpensTheSettingsDoorButNotItsSections: an organization
+// role's limit bars Settings' SECTIONS -- every one but Access -- and not the
+// Settings door itself, which an organization's people open to reach Access.
+// With their group allowing both, the door reads held from the group and the
+// cluster section reads the role's limit.
+func TestAnOrganizationRoleOpensTheSettingsDoorButNotItsSections(t *testing.T) {
+	w := newAccessWorld(t)
+	account := w.id("org")
+	w.installCatalog(account)
+	group := w.organization(account)
+	moderator := w.person("moderator", accessModeratorRole)
+	w.join(group, account, moderator)
+	w.grant(group, "read", "app:settings", "allow")
+	w.grant(group, "read", "app:settings/cluster", "allow")
+
+	rows, err := readAccess(t, w.eng, accessCaller(w.id("admin"), componentAuth.RoleAdmin), "user", moderator)
+	if err != nil {
+		t.Fatalf("an admin reading an organization moderator: %v", err)
+	}
+	expectAccess(t, rows, "", "read", "app:settings", true, "group", group)
+	expectAccess(t, rows, "", "read", "app:settings/cluster", false, "scoped-role-limit", accessModeratorRole)
+}
+
+// unreadableGrants is the installed grant source with some rows unreadable: a
+// person's own grants, or a group's, fail the way a database that blinked
+// does, and everybody else's come from the rows as before.
+type unreadableGrants struct {
+	componentAuth.GrantSource
+	user  string // the bare id of a person whose own grants cannot be read
+	group string // the bare id of a group whose grants cannot be read
+}
+
+var errGrantRowsUnreadable = errors.New("the grant rows could not be read")
+
+func (s unreadableGrants) ActiveGrantsForUser(ctx context.Context, userId string) ([]componentAuth.Grant, error) {
+	if s.user != "" && memql.BareShortId(userId) == s.user {
+		return nil, errGrantRowsUnreadable
+	}
+	return s.GrantSource.ActiveGrantsForUser(ctx, userId)
+}
+
+func (s unreadableGrants) ActiveGrantsForGroups(ctx context.Context, groupIds []string) ([]componentAuth.Grant, error) {
+	for _, g := range groupIds {
+		if s.group != "" && memql.BareShortId(g) == s.group {
+			return nil, errGrantRowsUnreadable
+		}
+	}
+	return s.GrantSource.ActiveGrantsForGroups(ctx, groupIds)
+}
+
+// TestEffectiveAccessRefusesWhenAReadBehindTheAnswerFails (review item 1). The
+// action guards answer from what they could read when a grant read fails -- a
+// database that blinks must not take everybody's access away mid request --
+// and they still do. An operator's read of somebody is different: it draws a
+// picture, and one drawn from part of the rows is a wrong picture stated with
+// confidence. So when any read behind the person's answer fails, the read
+// refuses, access_unavailable, and answers no rows.
+//
+// The last case is the memo's. The request read the same person earlier, with
+// nobody listening for a failure: the failure was swallowed and the request's
+// grant memo kept what was left. The person's answer must not be served from
+// it.
+func TestEffectiveAccessRefusesWhenAReadBehindTheAnswerFails(t *testing.T) {
+	w := newAccessWorld(t)
+	account := w.id("org")
+	w.installCatalog(account)
+	group := w.organization(account)
+	member := w.person("member", "writer")
+	loner := w.person("loner", "writer")
+	w.join(group, account, member)
+	w.grant(group, "read", "app:logs", "allow")
+	caller := accessCaller(w.id("admin"), componentAuth.RoleAdmin)
+	rowsSource := componentAuth.InstalledGrantSource()
+
+	for _, person := range []string{member, loner} {
+		if rows, err := readAccess(t, w.eng, caller, "user", person); err != nil || len(rows) == 0 {
+			t.Fatalf("control: %s with every read answering: rows=%d err=%v", person, len(rows), err)
+		}
+	}
+
+	unreadable := func(t *testing.T, src unreadableGrants) {
+		t.Helper()
+		src.GrantSource = rowsSource
+		componentAuth.SetGrantSource(src)
+		t.Cleanup(func() { componentAuth.SetGrantSource(rowsSource) })
+	}
+	refused := func(t *testing.T, ctx context.Context, person string) {
+		t.Helper()
+		rows, err := readAccess(t, w.eng, ctx, "user", person)
+		if err == nil || !strings.Contains(err.Error(), "access_unavailable") {
+			t.Fatalf("err = %v with %d rows, want the access_unavailable refusal", err, len(rows))
+		}
+		if len(rows) != 0 {
+			t.Fatalf("a refusal answered %d rows", len(rows))
+		}
+	}
+
+	t.Run("the person's own grants", func(t *testing.T) {
+		unreadable(t, unreadableGrants{user: member})
+		refused(t, caller, member)
+	})
+	t.Run("their group's grants", func(t *testing.T) {
+		unreadable(t, unreadableGrants{group: group})
+		refused(t, caller, member)
+	})
+	t.Run("a failure the request memoised before the read began", func(t *testing.T) {
+		unreadable(t, unreadableGrants{user: loner})
+		request := componentAuth.ContextWithGrantMemo(caller)
+		// The entry the person's resolution looks up -- their bare id, in no
+		// group -- filled the way an action guard fills it: the failure
+		// swallowed, the role's answer standing.
+		componentAuth.CapableFor(request, componentAuth.Subject{Role: componentAuth.RoleWriter, UserId: loner}, "read", "app:files")
+		refused(t, request, loner)
+	})
 }

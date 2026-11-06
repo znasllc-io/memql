@@ -49,28 +49,48 @@ func (e *MemQLEngine) ResolveOrganizationCapabilities(ctx context.Context, known
 // effectiveAccessForSubject, which applies the read's floor before it asks).
 //
 // The person is built the way role testing builds one -- an AccessContext
-// carrying their id and their role -- so every decision below runs through
-// the action guards' own resolver for THEM: their account scope (narrowed to
-// an organization role's account), their groups filtered to the organization
-// being answered, the grants on both.
-//
-// A FRESH ACCOUNT-SCOPE MEMO, and this is the one thing that cannot be
-// shared with the caller's request. The memo holds ONE resolved scope per
-// request, and the caller's own -- an operator's everyAccount -- would answer
-// for the person: no organization decisions at all, read as "this person
-// has none". The membership and grant memos are keyed by user and by
-// subject, so the caller's entries in them cannot leak into these.
+// carrying their id and their role, on memos of their own (ContextForPerson,
+// which says why nothing of the caller's request memo is kept) -- so every
+// decision below runs through the action guards' own resolver for THEM: their
+// account scope (narrowed to an organization role's account), their groups
+// filtered to the organization being answered, the grants on both.
 //
 // Empty for an operator (they keep the global answer, as the caller's own
-// read does) and for a person in no organization.
+// read does) and for a person whose scope reaches no organization.
 func (e *MemQLEngine) ResolveOrganizationDecisionsFor(ctx context.Context, userId string, role auth.Role, known []auth.Decision) []OrganizationDecision {
 	userId = strings.TrimSpace(userId)
 	if e == nil || userId == "" {
 		return []OrganizationDecision{}
 	}
-	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: userId, Role: role})
-	ctx = context.WithValue(ctx, accountScopeMemoKey{}, &accountScopeMemo{engine: e})
-	return e.resolveOrganizationDecisions(ctx, known)
+	return e.resolveOrganizationDecisions(e.ContextForPerson(ctx, userId, role), known)
+}
+
+// ContextForPerson re-points ctx at a NAMED PERSON for a read about them: an
+// AccessContext carrying their id and role, on a FRESH ACCOUNT-SCOPE MEMO.
+//
+// Fresh, and none of the caller's request memo kept, for two reasons:
+//
+//   - The memo holds ONE resolved scope per request, and the caller's own --
+//     an operator's everyAccount -- would answer for the person: no
+//     organization decisions at all, read as "this person has none".
+//   - The per-user MEMBERSHIP CACHE lives in the same memo, so it goes too and
+//     the person's memberships are read anew rather than served from whatever
+//     the request read before. That is what an operator's read of somebody
+//     needs: it refuses when any read behind the answer failed
+//     (auth.ContextWithReadFailures), and a membership answer memoised before
+//     that holder was listening could rest on a failure it never heard. The
+//     cost is the person's membership read once per context built, on an
+//     operator's read of one person.
+//
+// The grant memo is not replaced here: the read that refuses on a failure
+// brings a fresh one with its holder, and without a holder a memo keyed by
+// subject hands the person nothing but their own grants.
+func (e *MemQLEngine) ContextForPerson(ctx context.Context, userId string, role auth.Role) context.Context {
+	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: strings.TrimSpace(userId), Role: role})
+	if e == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, accountScopeMemoKey{}, &accountScopeMemo{engine: e})
 }
 
 // resolveOrganizationDecisions answers, for the actor on ctx, every pair the

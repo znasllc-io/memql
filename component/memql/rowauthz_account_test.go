@@ -2,8 +2,13 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -330,5 +335,73 @@ func TestAccountFingerprintChangesWithMembership(t *testing.T) {
 	// Stable for one actor and one set, or the plan cache never hits.
 	if fingerprintAccountSet("u-1", before.accounts) != fingerprintAccountSet("u-1", accountScopeWith("acme").accounts) {
 		t.Fatal("the fingerprint is not stable for one actor and one set")
+	}
+}
+
+// closedDatabase is a handle every read on fails, as a database that refuses
+// does. No server is involved: the pool is closed before it is used.
+func closedDatabase(t *testing.T) *bun.DB {
+	t.Helper()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector()), pgdialect.New())
+	if err := db.Close(); err != nil {
+		t.Fatalf("closing the pool: %v", err)
+	}
+	return db
+}
+
+// TestAFailedMembershipReadIsNotedForWhoeverAsked (access clarity review, item
+// 1): the two membership reads answer from what they could read -- nothing,
+// when the database refuses -- because the action guards must not lose
+// everybody's access to a blink, and they note the failure on the context's
+// auth.ReadFailures, so an operator's read of somebody refuses rather than
+// answering as if the person were in no group at all.
+func TestAFailedMembershipReadIsNotedForWhoeverAsked(t *testing.T) {
+	db := closedDatabase(t)
+
+	if got := activeGroupIdsForUser(context.Background(), db, "u1"); len(got) != 0 {
+		t.Fatalf("with nobody listening the failed read answered %v, want no groups", got)
+	}
+	ctx, failures := auth.ContextWithReadFailures(context.Background())
+	if got := activeGroupIdsForUser(ctx, db, "u1"); len(got) != 0 {
+		t.Fatalf("a holder changed the answer to %v; it may only listen", got)
+	}
+	if failures.Err() == nil {
+		t.Fatal("the failed membership read was not noted")
+	}
+
+	ctx, failures = auth.ContextWithReadFailures(context.Background())
+	if groups, accounts, _ := activeGroupsAndAccounts(ctx, db, []string{"g1"}); len(groups)+len(accounts) != 0 {
+		t.Fatalf("the failed group read answered groups %v and accounts %v, want none", groups, accounts)
+	}
+	if failures.Err() == nil {
+		t.Fatal("the failed group read was not noted")
+	}
+}
+
+// TestAPersonsMembershipsAreReadAnewForThem (access clarity review, items 1
+// and 3): ContextForPerson puts a named person on an account-scope memo of
+// their own, and the per-user membership cache lives in that memo, so their
+// memberships are read anew -- under whatever holder is listening -- rather
+// than served from what the request read before, with nobody listening.
+func TestAPersonsMembershipsAreReadAnewForThem(t *testing.T) {
+	e := &MemQLEngine{db: closedDatabase(t)}
+	request := contextWithAccountScopeMemo(context.Background(), e)
+	memo, _ := request.Value(accountScopeMemoKey{}).(*accountScopeMemo)
+	earlier := memo.membershipsEntry("person")
+	earlier.once.Do(func() { earlier.m = memberships{groupIds: []string{"g-earlier"}} })
+
+	ctx, failures := auth.ContextWithReadFailures(request)
+	person := e.ContextForPerson(ctx, "person", auth.RoleWriter)
+	if ac, _ := auth.AccessFromContext(person); ac == nil || ac.UserId != "person" || ac.Role != auth.RoleWriter {
+		t.Fatalf("the person's context carries %+v, want their id and role", ac)
+	}
+	if got := e.membershipsFor(person, "person").groupIds; len(got) != 0 {
+		t.Fatalf("the person's memberships were served from the request's memo: %v", got)
+	}
+	if failures.Err() == nil {
+		t.Fatal("the person's membership read was not made under the holder")
+	}
+	if got := e.membershipsFor(request, "person").groupIds; len(got) != 1 || got[0] != "g-earlier" {
+		t.Fatalf("the person's read changed the request's own memo: %v", got)
 	}
 }

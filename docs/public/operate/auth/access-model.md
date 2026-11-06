@@ -957,11 +957,12 @@ subject, verb, resource and effect in `detail`.
   source, sourceId, accountId}` per app door, floored section and part; a
   pair the engine decides per organization (opening Email or Deployables, the
   data verbs, an organization's deployable parts) has one row per organization
-  the person belongs to and never a merged one. For a group, the rows are its
-  own active grants. It keeps the grant reads' floor -- a cluster role at
-  admin or above, applied by the handler because a builtin carries no
-  `@requiresRank` -- and nobody reads a person who outranks them
-  (`access_subject_outranks_caller`).
+  the person's scope reaches and never a merged one. An operator gets one
+  global answer, one row per pair: their scope reaches every organization
+  alike. For a group, the rows are its own active grants. It keeps the grant
+  reads' floor -- a cluster role at admin or above, applied by the handler
+  because a builtin carries no `@requiresRank` -- and nobody reads a person
+  who outranks them (`access_subject_outranks_caller`).
 
 The engine itself never reads through the admin-floored queries. Resolution
 reads the rows through the engine's own graph-backed source under its own

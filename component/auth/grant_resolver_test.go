@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -515,5 +516,80 @@ func TestDecideForNamesWhoAnswered(t *testing.T) {
 				t.Fatalf("EffectiveCapabilities has no entry for read %s", tc.resource)
 			}
 		})
+	}
+}
+
+// unreadableSource is a GrantSource whose reads fail, each level on its own
+// switch: the database that blinked, at the level it blinked.
+type unreadableSource struct{ user, group error }
+
+func (s unreadableSource) ActiveGrantsForUser(context.Context, string) ([]Grant, error) {
+	return nil, s.user
+}
+
+func (s unreadableSource) ActiveGrantsForGroups(context.Context, []string) ([]Grant, error) {
+	return nil, s.group
+}
+
+// TestAFailedGrantReadIsNotedForWhoeverAskedAndSwallowedForEveryoneElse
+// (access clarity review, item 1). A failed read still leaves the role's
+// answer standing -- grantsFor's rule, which keeps a blinking database from
+// taking everybody's access away -- and it is noted on the context's
+// ReadFailures when a caller installed one, so a read ABOUT somebody can
+// refuse rather than answer from part of the rows.
+func TestAFailedGrantReadIsNotedForWhoeverAskedAndSwallowedForEveryoneElse(t *testing.T) {
+	grantTestCatalog(t)
+	const app = "app:deployables"
+	subject := Subject{Role: "user", UserId: "u1", GroupIds: []string{"g1"}}
+	unreadable := errors.New("the grant rows could not be read")
+
+	for name, src := range map[string]unreadableSource{
+		"the user level":  {user: unreadable},
+		"the group level": {group: unreadable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			installGrantFake(t, src)
+			if !CapableFor(context.Background(), subject, VerbRead, app) {
+				t.Fatal("with nobody listening, a failed read took away what the role holds")
+			}
+			ctx, failures := ContextWithReadFailures(context.Background())
+			if !CapableFor(ctx, subject, VerbRead, app) {
+				t.Fatal("a holder changed the answer; it may only listen")
+			}
+			if !errors.Is(failures.Err(), unreadable) {
+				t.Fatalf("failures = %v, want the failed read", failures.Err())
+			}
+		})
+	}
+
+	// A HOLDER BRINGS A GRANT MEMO OF ITS OWN. The request's memo was filled
+	// before the holder, by a read whose failure nobody heard; served under the
+	// holder, that entry would answer from the failure without the holder ever
+	// hearing of it.
+	installGrantFake(t, unreadableSource{user: unreadable})
+	request := ContextWithGrantMemo(context.Background())
+	CapableFor(request, subject, VerbRead, app)
+	ctx, failures := ContextWithReadFailures(request)
+	CapableFor(ctx, subject, VerbRead, app)
+	if failures.Err() == nil {
+		t.Fatal("the read was served from a memo filled before the holder, so its failure went unheard")
+	}
+
+	// And it IS a memo: the reads made under the holder cost what they cost
+	// anywhere else, one read of each level per subject.
+	counting := &countingGrantSource{}
+	installGrantFake(t, counting)
+	ctx, _ = ContextWithReadFailures(context.Background())
+	CapableFor(ctx, subject, VerbRead, app)
+	CapableFor(ctx, subject, VerbRead, "app:email")
+	if counting.reads != 2 {
+		t.Fatalf("two questions under a holder cost %d reads, want 2 (one of each level)", counting.reads)
+	}
+
+	// No holder, nothing to note; an absent holder has heard of nothing.
+	NoteReadFailure(context.Background(), unreadable)
+	var none *ReadFailures
+	if none.Err() != nil {
+		t.Fatal("a nil holder reported a failure")
 	}
 }

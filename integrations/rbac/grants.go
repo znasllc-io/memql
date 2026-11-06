@@ -249,11 +249,13 @@ type accessRow struct {
 	AccountId    string `json:"accountId"`
 }
 
-// organizationAccessResolver is the engine's per-organization resolution for
-// a NAMED person (memql.MemQLEngine.ResolveOrganizationDecisionsFor). Declared
-// here, as the caller's read declares its own, so this package's doubles need
-// not stand up an engine.
-type organizationAccessResolver interface {
+// personAccessResolver is what the engine answers about a NAMED person: the
+// context their own resolution runs on (memql.MemQLEngine.ContextForPerson)
+// and their per-organization decisions (ResolveOrganizationDecisionsFor).
+// Declared here, as the caller's read declares its own, so this package's
+// doubles need not stand up an engine.
+type personAccessResolver interface {
+	ContextForPerson(ctx context.Context, userId string, role componentAuth.Role) context.Context
 	ResolveOrganizationDecisionsFor(ctx context.Context, userId string, role componentAuth.Role, known []componentAuth.Decision) []memql.OrganizationDecision
 }
 
@@ -289,38 +291,29 @@ func (i *Integration) handleEffectiveAccessForSubject(ctx context.Context, args 
 	return accessNodes(rows), nil
 }
 
-// accessCallerRank applies the read's floor and answers the caller's rank.
+// accessCallerRank applies the read's floor and answers the caller's rank,
+// which the outrank rule compares the person's to.
 //
-// THE GRANT READS' FLOOR, restated in Go because a builtin cannot carry
-// @requiresRank (its annotation set is closed): grantsForSubject and
-// grantsForResource are @requiresRank("admin"), and this read answers the
-// same question about a named person with the resolution on top, so it
-// refuses what refuseBelowRequiredRank refuses for that floor -- no caller, a
-// floor the ladder cannot resolve, an organization role at ANY rank (an admin
-// floor asks for a cluster role, and rank is not the question), and a rank
-// below admin's. Internal origin is not exempted, unlike the annotation: the
-// read is a client's, and no server path asks it.
+// THE GRANT READS' FLOOR, in Go because a builtin cannot carry @requiresRank
+// (its annotation set is closed): grantsForSubject and grantsForResource are
+// @requiresRank("admin"), and this read answers the same question about a
+// named person with the resolution on top. The floor is the engine's own
+// definition of a cluster operator, auth.IsClusterOperator: a role at admin
+// rank or above, never an organization role whatever its rank (an admin floor
+// asks for a cluster role, and rank is not the question), and nobody on a
+// ladder whose admin rung does not resolve. Internal origin is not exempted,
+// unlike the annotation: the read is a client's, and no server path asks it.
 func accessCallerRank(ctx context.Context) (int, error) {
 	access, _ := componentAuth.AccessFromContext(ctx)
 	if access == nil {
 		return 0, accessRefusal(codeAccessCallerNotPermitted, "this call carries no caller identity")
 	}
 	role := componentAuth.Role(strings.ToLower(strings.TrimSpace(string(access.Role))))
-	floor := componentAuth.RoleRank(componentAuth.RoleAdmin)
-	if floor <= 0 {
-		return 0, accessRefusal(codeAccessCallerNotPermitted,
-			"the admin rung does not resolve on this cluster's ladder, so the floor cannot be applied")
+	if !componentAuth.IsClusterOperator(role) {
+		return 0, accessRefusal(codeAccessCallerNotPermitted, fmt.Sprintf(
+			"reading somebody's access needs a cluster role at admin rank or above; yours is %q", string(role)))
 	}
-	if componentAuth.RoleAccountScope(role) != "" {
-		return 0, accessRefusal(codeAccessCallerNotPermitted,
-			"reading somebody's access needs a cluster role; yours belongs to one organization")
-	}
-	rank := componentAuth.RoleRank(role)
-	if rank < floor {
-		return 0, accessRefusal(codeAccessCallerNotPermitted,
-			fmt.Sprintf("reading somebody's access needs the admin role or above; yours is %q", string(role)))
-	}
-	return rank, nil
+	return componentAuth.RoleRank(role), nil
 }
 
 // personAccess answers what one person can open, and why.
@@ -333,8 +326,9 @@ func accessCallerRank(ctx context.Context) (int, error) {
 //
 // THEN THE ENGINE'S RESOLVER, FOR THEM. The subject is built the way role
 // testing builds one (component/identity/roletest/service.go): an
-// AccessContext carrying their id and role, through SubjectFromContext, so
-// their groups come from the installed membership source. Two answers:
+// AccessContext carrying their id and role (the engine's ContextForPerson),
+// through SubjectFromContext, so their groups come from the installed
+// membership source. Two answers:
 //
 //   - EffectiveCapabilities, the same call the person's own read makes:
 //     every pair any role holds or their grants name, with provenance and the
@@ -345,8 +339,21 @@ func accessCallerRank(ctx context.Context) (int, error) {
 //     is answered per organization ONLY: a merged row would have to pick one
 //     organization's answer for all of them, which is the confusion this read
 //     exists to end. Which pairs those are is the engine's to say; the data
-//     verbs arrive this way too. An operator, and a person in no
-//     organization, has none, and keeps one row per pair.
+//     verbs arrive this way too. An operator, and a person whose scope
+//     reaches no organization, has none, and keeps one row per pair.
+//
+// EVERY READ BEHIND THE ANSWER, OR NO ANSWER. The grant and membership
+// readers answer from what they could read when a read fails, on purpose: a
+// gate that refused everything because the database blinked would take
+// everybody's access away mid request (component/auth's grantsFor). This read
+// is not a gate. It draws an operator a picture of somebody, and one drawn
+// from part of the rows is a wrong picture stated with confidence -- a group's
+// deny that could not be read shows the app open. So the person's resolution
+// runs under a componentAuth.ReadFailures the readers note every failure on,
+// and any failure refuses, access_unavailable, with no rows. The holder brings
+// a grant memo of its own and ContextForPerson an account-scope memo (with its
+// membership cache) of its own, so nothing the request memoised earlier, with
+// nobody listening, answers for the person.
 func (i *Integration) personAccess(ctx context.Context, callerRank int, userId string) ([]accessRow, error) {
 	role, found, err := i.userRole(ctx, userId)
 	if err != nil {
@@ -366,18 +373,22 @@ func (i *Integration) personAccess(ctx context.Context, callerRank int, userId s
 		return nil, accessRefusal(codeAccessSubjectOutranksCaller,
 			"that person ranks above you, and nobody reads the access of somebody who outranks them")
 	}
-	resolver, ok := i.engine.(organizationAccessResolver)
+	resolver, ok := i.engine.(personAccessResolver)
 	if !ok {
 		// Answering every pair globally instead would read an organization's
 		// door as open everywhere: a confident wrong picture, not a degraded one.
 		return nil, accessRefusal(codeAccessUnavailable, "this node cannot resolve per-organization access")
 	}
 
-	ctx = componentAuth.ContextWithGrantMemo(ctx)
-	personCtx := componentAuth.ContextWithAccess(ctx, &componentAuth.AccessContext{UserId: userId, Role: componentAuth.Role(role)})
+	ctx, failures := componentAuth.ContextWithReadFailures(ctx)
+	personCtx := resolver.ContextForPerson(ctx, userId, componentAuth.Role(role))
 	person, _ := componentAuth.SubjectFromContext(personCtx)
 	decisions := componentAuth.EffectiveCapabilities(personCtx, person)
 	organizations := resolver.ResolveOrganizationDecisionsFor(ctx, userId, componentAuth.Role(role), decisions)
+	if err := failures.Err(); err != nil {
+		return nil, accessRefusal(codeAccessUnavailable,
+			"a grant or membership read failed while resolving the person's access, so it cannot be answered: "+err.Error())
+	}
 
 	perOrganization := map[componentAuth.VerbResource]bool{}
 	for _, d := range organizations {

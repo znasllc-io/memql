@@ -430,7 +430,8 @@ func overlay(grants []Grant, verb, resource string) (held bool, decided bool, by
 // everything when the rows cannot be read -- takes every person's access away
 // because the database blinked, mid request, on one replica, which is the
 // failure rbac_catalog.go's header argues against for roles. The request that
-// blinked here fails on its own read a moment later anyway.
+// blinked here fails on its own read a moment later anyway. The error is
+// noted for whoever installed a ReadFailures to hear it, and for nobody else.
 func grantsFor(ctx context.Context, src GrantSource, subject Subject) (user, group []Grant) {
 	memo, _ := ctx.Value(grantMemoKey{}).(*grantMemo)
 	if memo == nil {
@@ -444,10 +445,14 @@ func grantsFor(ctx context.Context, src GrantSource, subject Subject) (user, gro
 func readGrants(ctx context.Context, src GrantSource, subject Subject) (user, group []Grant) {
 	if u, err := src.ActiveGrantsForUser(ctx, subject.UserId); err == nil {
 		user = u
+	} else {
+		NoteReadFailure(ctx, err)
 	}
 	if len(subject.GroupIds) > 0 {
 		if g, err := src.ActiveGrantsForGroups(ctx, subject.GroupIds); err == nil {
 			group = g
+		} else {
+			NoteReadFailure(ctx, err)
 		}
 	}
 	return user, group
@@ -498,6 +503,71 @@ func ContextWithGrantMemo(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, grantMemoKey{}, &grantMemo{})
+}
+
+// ReadFailures hears the authorization reads that failed while one question
+// was being answered.
+//
+// The tolerant readers -- readGrants here, the membership reads in
+// component/memql -- answer from what they could read when a read fails, ON
+// PURPOSE: grantsFor's header says why, and it stays the rule for every gate.
+// A read ABOUT somebody is different. An operator asking what a person can
+// open (integration.rbac's effectiveAccessForSubject) is shown a picture, and
+// one drawn from part of the rows is a wrong picture stated with confidence.
+// So such a read installs a holder; the readers still answer as they always
+// do, and also note each error they swallowed on it; and the read refuses when
+// anything was noted. With no holder installed, noting is a no-op.
+type ReadFailures struct {
+	mu    sync.Mutex
+	first error
+}
+
+type readFailuresKey struct{}
+
+// ContextWithReadFailures installs a fresh holder and returns it beside the
+// context its reads must run on.
+//
+// A GRANT MEMO OF ITS OWN COMES WITH IT. The holder hears only the reads made
+// under it, and the request's memo was filled before it, by reads whose
+// failures nobody heard: an answer served from that memo could rest on a
+// failure the holder never saw. Reads under the holder are memoised on the new
+// memo instead, so they cost what they cost anywhere else. (The membership
+// cache is component/memql's to refresh: memql.MemQLEngine.ContextForPerson.)
+func ContextWithReadFailures(ctx context.Context) (context.Context, *ReadFailures) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	failures := &ReadFailures{}
+	ctx = context.WithValue(ctx, readFailuresKey{}, failures)
+	return context.WithValue(ctx, grantMemoKey{}, &grantMemo{}), failures
+}
+
+// NoteReadFailure records a read's error on the context's holder, when there
+// is one, and changes nothing else: the reader that calls it still answers
+// from what it could read.
+func NoteReadFailure(ctx context.Context, err error) {
+	if ctx == nil || err == nil {
+		return
+	}
+	failures, _ := ctx.Value(readFailuresKey{}).(*ReadFailures)
+	if failures == nil {
+		return
+	}
+	failures.mu.Lock()
+	defer failures.mu.Unlock()
+	if failures.first == nil {
+		failures.first = err
+	}
+}
+
+// Err is the first failure noted, or nil when every read answered.
+func (f *ReadFailures) Err() error {
+	if f == nil {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.first
 }
 
 // GrantRowID derives the one id a (subjectKind, subjectId, verb, resourceType)

@@ -349,8 +349,16 @@ func (e *MemQLEngine) resolveAccountScope(ctx context.Context) *accountScope {
 // the same reason: MemQL rows are append-only, so removing somebody writes a
 // NEW version rather than deleting the old one. Without the collapse a removed
 // member's original `active` row is still there and still grants.
+//
+// A FAILED READ ANSWERS NO GROUPS, the tolerant answer every gate wants (a
+// blinking database must not take everyone's access away mid request), and
+// is noted on the context's auth.ReadFailures for a read about somebody that
+// would rather refuse than answer as if they were in no group.
 func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []string {
-	groups, _ := activeGroupIdsForUserChecked(ctx, db, userId)
+	groups, err := activeGroupIdsForUserChecked(ctx, db, userId)
+	if err != nil {
+		auth.NoteReadFailure(ctx, err)
+	}
 	return groups
 }
 
@@ -416,6 +424,8 @@ func activeGroupIdsForUserChecked(ctx context.Context, db *bun.DB, userId string
 // a grant subject, D13, "it grants apps and still grants no rows"). Reading
 // the groups once and answering both is what keeps a request at one
 // membership read whichever gates it passes.
+//
+// A failed read answers nothing and is noted, activeGroupIdsForUser's rule.
 func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string) (activeGroupIds, accountIds []string, groupAccounts map[string]string) {
 	wanted := make(map[string]struct{}, len(groupIds)*2)
 	for _, g := range groupIds {
@@ -431,6 +441,7 @@ func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string)
 		Where("concept = ?", conceptIdentityGroup).
 		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
+		auth.NoteReadFailure(ctx, err)
 		return nil, nil, nil
 	}
 	seenAccount := map[string]struct{}{}
