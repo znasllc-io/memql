@@ -62,7 +62,7 @@ export const VENDORS_SECTION_RESOURCE = "app:settings/providers";
  * local cluster is an invitation to waste an afternoon.
  */
 export const VENDOR_WORDS = {
-  open: "Set up",
+  open: "Ready",
   unset: "Not set up",
   closed: "Not available",
   half: "Half set up",
