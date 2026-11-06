@@ -455,6 +455,51 @@ func TestASenderWithNoRecordOfItsSubmissionsSaysSo(t *testing.T) {
 	}
 }
 
+// TestAnOrganizationsContactIsItsOwnConnections: the pages behind email links name
+// whom to write to from the organization's own email connection -- its reply
+// address, else its default sender -- resolved as the organization's sender is.
+// Another organization's connection names nobody for it, and neither does the
+// node's own transport: an organization without a connection has no contact.
+func TestAnOrganizationsContactIsItsOwnConnections(t *testing.T) {
+	ctx := context.Background()
+	s := acsFixture(t)
+	if got, err := Contact(ctx, s, "client"); err != nil || got != "news@client.test" {
+		t.Fatalf("a connection with no reply address names %q (%v), want its default sender", got, err)
+	}
+	s.cfg.ReplyTo = "help@client.test"
+	if got, err := Contact(ctx, s, "v1:accounts:account:client"); err != nil || got != "help@client.test" {
+		t.Fatalf("a connection with a reply address names %q (%v), want it", got, err)
+	}
+	if got, err := Contact(ctx, s, "another"); err != nil || got != "" {
+		t.Fatalf("another organization's connection named %q (%v)", got, err)
+	}
+	lazy := NewLazySender(&ACSSender{cfg: ACSConfig{AccountID: "self", Default: "ops@install.test"}}, nil, nil, nil)
+	if got, err := Contact(ctx, lazy, "client"); err != nil || got != "" {
+		t.Fatalf("with no organization connections the node's transport named %q (%v)", got, err)
+	}
+	lazy.organization = func(_ context.Context, account string) (Sender, error) {
+		switch account {
+		case "client":
+			return s, nil
+		case "self":
+			return nil, nil // no connection of its own: the node's transport is not a contact
+		}
+		return nil, permanentSendRefusal("connect this organization's email domain before sending")
+	}
+	if got, err := Contact(ctx, lazy, "client"); err != nil || got != "help@client.test" {
+		t.Fatalf("the organization's connection, through the node's sender, named %q (%v)", got, err)
+	}
+	if got, err := Contact(ctx, lazy, "self"); err != nil || got != "" {
+		t.Fatalf("an organization with no connection named %q (%v), want nobody", got, err)
+	}
+	if got, err := Contact(ctx, lazy, "unconnected"); err == nil || got != "" {
+		t.Fatalf("an organization whose connection cannot send named %q (%v), want nobody and the reason", got, err)
+	}
+	if got, err := Contact(ctx, NewLogSender(nil), "client"); err != nil || got != "" {
+		t.Fatalf("a transport that cannot say named %q (%v)", got, err)
+	}
+}
+
 // The refusals a person fixes on the sender or its domain are named, so a page
 // can say which; the address is compared without regard to case, as sends do.
 func TestSenderRefusalNamesWhatToFix(t *testing.T) {

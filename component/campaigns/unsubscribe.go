@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // unsubscribe.go -- the RFC 8058 one-click endpoint.
@@ -66,6 +67,9 @@ type UnsubscribeHandler struct {
 	system func(ctx context.Context) context.Context
 	now    func() time.Time
 	gate   emailChoiceGate
+	// contact is where the pages' brand finds whom to name (WithSender), as the
+	// pages behind email links do; nil names nobody.
+	contact contactLookup
 }
 
 // NewUnsubscribeHandler builds the endpoint over the same store and
@@ -83,6 +87,14 @@ func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger, datab
 		now:    time.Now,
 		gate:   newEmailChoiceGate(database),
 	}
+}
+
+// WithSender gives the pages the email transport, resolved when a page asks, that
+// their brand names a contact from (email.Contact), as the pages behind email
+// links do.
+func (h *UnsubscribeHandler) WithSender(resolve func() email.Sender) *UnsubscribeHandler {
+	h.contact = transportContact(resolve)
+	return h
 }
 
 func (h *UnsubscribeHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -278,7 +290,7 @@ func (h *UnsubscribeHandler) pageFor(ctx context.Context, payload UnsubscribePay
 	// not its answer.
 	ctx, cancel := context.WithTimeout(ctx, brandReadTimeout)
 	defer cancel()
-	brand := h.store.pageBrandFor(ownerActorContext(ctx, payload.OwnerUserID), h.logger, payload.AccountID)
+	brand := h.store.pageBrandFor(ownerActorContext(ctx, payload.OwnerUserID), h.logger, payload.AccountID, h.contact)
 	return brand, preferencesLinkFor(h.cfg, h.logger, LinkPayload{OwnerUserID: payload.OwnerUserID, RecipientID: payload.RecipientID, CampaignID: payload.CampaignID, AccountID: payload.AccountID, EmailDigest: payload.EmailDigest})
 }
 

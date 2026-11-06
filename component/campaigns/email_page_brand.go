@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/compose/emaildoc"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // email_page_brand.go -- how the pages behind email links look and who they
@@ -20,9 +21,10 @@ import (
 // A person reaches these pages from a link in an email, and they should look
 // like it came from the organization that sent it: its name in the tab, its logo
 // and its colour on the button, and somebody to write to when the page cannot
-// help. All of it comes from the organization the SIGNED token names. A token
-// that did not verify names nobody, so a forged link cannot choose which
-// organization a page speaks for.
+// help -- the address the organization's own email connection names. All of it
+// comes from the organization the SIGNED token names. A token that did not verify
+// names nobody, so a forged link cannot choose which organization a page speaks
+// for.
 //
 // # What a brand is trusted with
 //
@@ -42,10 +44,28 @@ type pageBrand struct {
 	// Logo is the organization's logo: its saved data: picture or an absolute
 	// https address (see logoSource).
 	Logo string
-	// Contact is the address of somebody who can help: the organization's own
-	// default sender's Reply-To, else that sender's address. Empty when the
-	// organization has no sender of its own.
-	Contact string
+	// contact finds the address of somebody who can help: the one the
+	// organization's own email connection names (its reply address, else its
+	// default sender). It is asked only by a page that names a contact
+	// (contactLine) -- most pages do not, and the answer comes from the email
+	// transport. Nil, or an empty answer, names nobody.
+	contact func() string
+}
+
+// contactLookup is where a page's contact comes from: the address the
+// organization's own email connection names, through the email transport.
+type contactLookup func(ctx context.Context, accountID string) (string, error)
+
+// transportContact is the contact lookup of the email transport resolve returns
+// when it is asked (email.Contact): the organization's own connection, resolved
+// as the organization's sender is, and never the installation's own mailbox.
+func transportContact(resolve func() email.Sender) contactLookup {
+	if resolve == nil {
+		return nil
+	}
+	return func(ctx context.Context, accountID string) (string, error) {
+		return email.Contact(ctx, resolve(), accountID)
+	}
 }
 
 var hexColour = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
@@ -61,10 +81,14 @@ func (b pageBrand) title(generic, named string) string {
 
 // contactLine is the sentence a page that cannot help ends with.
 func (b pageBrand) contactLine() string {
-	if b.Contact == "" {
+	contact := ""
+	if b.contact != nil {
+		contact = strings.TrimSpace(b.contact())
+	}
+	if contact == "" {
 		return "<p>You can reply to the email this link came from.</p>"
 	}
-	return "<p>You can write to " + html.EscapeString(b.Contact) + " for help.</p>"
+	return "<p>You can write to " + html.EscapeString(contact) + " for help.</p>"
 }
 
 // luminance is the WCAG relative luminance of a "#rgb" or "#rrggbb" colour, or
@@ -134,9 +158,10 @@ func logoSource(src string) string {
 
 // brandFor reads the organization's brand for a page. ctx carries the token's
 // owner. org is the organization's name, already read by the caller (empty when
-// it did not resolve). A read that fails costs the page that part of its brand
-// and is logged at warn; it never fails the page.
-func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, org string) pageBrand {
+// it did not resolve). contact is where the page's contact comes from, asked only
+// if the page names one; nil names nobody. A read that fails costs the page that
+// part of its brand and is logged at warn; it never fails the page.
+func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, org string, contact contactLookup) pageBrand {
 	brand := pageBrand{Org: strings.TrimSpace(org)}
 	if strings.TrimSpace(accountID) == "" {
 		return brand
@@ -166,48 +191,33 @@ func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, or
 			brand.Logo = logoSource(kit.Logo.Src)
 		}
 	}
-	senders, err := s.SenderIdentitiesForAccount(ctx, accountID)
-	if err != nil {
-		logger.Warn("campaigns: an email page could not read its organization's senders; the page names no contact", "account", bare(accountID), "error", err)
-		return brand
+	if contact != nil {
+		brand.contact = func() string {
+			// Its own bound: the brand's reads may have had theirs already, and a
+			// slow connection costs the page its contact, never its answer.
+			read, cancel := context.WithTimeout(context.WithoutCancel(ctx), brandReadTimeout)
+			defer cancel()
+			address, err := contact(read, bare(accountID))
+			if err != nil {
+				logger.Warn("campaigns: an email page could not read its organization's email connection for a contact; the page says to reply to the email", "account", bare(accountID), "error", err)
+				return ""
+			}
+			return address
+		}
 	}
-	brand.Contact = defaultContact(senders, accountID)
 	return brand
-}
-
-// defaultContact is who a page tells people to write to: the Reply-To of the
-// organization's own default sender, else that sender's address. The default is
-// the first sender the organization set up that is still on (the engine has no
-// "default" flag on a sender, so the oldest active one stands for it). A sender of another
-// organization, and the installation's own identity, are never offered: the
-// list is read by organization, and a row that names another is skipped.
-func defaultContact(senders []SenderIdentity, accountID string) string {
-	// Newest first: walk from the end so the oldest active sender wins.
-	for i := len(senders) - 1; i >= 0; i-- {
-		s := senders[i]
-		if s.Disabled() || !sameOrganization(s.AccountID, accountID) {
-			continue
-		}
-		if contact := strings.TrimSpace(s.ReplyTo); contact != "" {
-			return contact
-		}
-		if contact := strings.TrimSpace(s.Address); contact != "" {
-			return contact
-		}
-	}
-	return ""
 }
 
 // pageBrandFor is the brand of the organization a verified token names: its name,
 // kit and contact. A read that fails leaves that part out of the page and is
 // logged; it never fails the page.
-func (s *Store) pageBrandFor(ctx context.Context, logger *slog.Logger, accountID string) pageBrand {
+func (s *Store) pageBrandFor(ctx context.Context, logger *slog.Logger, accountID string, contact contactLookup) pageBrand {
 	org, err := s.AccountName(ctx, accountID)
 	if err != nil {
 		logger.Warn("campaigns: an email page could not read its organization's name", "account", bare(accountID), "error", err)
 		org = ""
 	}
-	return s.brandFor(ctx, logger, accountID, org)
+	return s.brandFor(ctx, logger, accountID, org, contact)
 }
 
 // preferencesLinkFor is the member's own preferences page, the way back from a

@@ -1,12 +1,16 @@
 package campaigns
 
 import (
+	"context"
+	"errors"
 	"html"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // email_pages_test.go -- the pages behind email links: the confirm button of a
@@ -102,7 +106,7 @@ func TestThePreferencesPageDoesNotConfirmAnExpiredSignUp(t *testing.T) {
 		for _, method := range []string{"GET", "POST"} {
 			rr := pageRequest(h, method, PreferencesPath, token, "subscribe")
 			body := rr.Body.String()
-			if rr.Code != 200 || hasForm(body) || !strings.Contains(body, "<h1>This sign-up has expired.</h1>") || !strings.Contains(body, "didn't confirm") {
+			if rr.Code != 200 || offersConfirm(body) || !strings.Contains(body, "<h1>This sign-up has expired.</h1>") || !strings.Contains(body, "didn't confirm") {
 				t.Fatal(method, rr.Code, body)
 			}
 		}
@@ -112,6 +116,78 @@ func TestThePreferencesPageDoesNotConfirmAnExpiredSignUp(t *testing.T) {
 			}
 		}
 	})
+}
+
+// offersConfirm says whether a page carries a button that confirms.
+func offersConfirm(page string) bool { return strings.Contains(page, `name="action" value="confirm"`) }
+
+// offersRenewal says whether a page offers to send a new confirmation email.
+func offersRenewal(page string) bool {
+	return strings.Contains(page, `name="action" value="renew"`) && strings.Contains(page, "Send me a new confirmation email")
+}
+
+// TestAnExpiredSignUpCanAskForANewConfirmationEmail: a pending member past the
+// window to confirm is offered "Send me a new confirmation email". Pressing it
+// starts a fresh pending membership, as "Subscribe again" does in an audience that
+// asks people to confirm: the audience's joined automation mails the new
+// confirmation, and the page says to check the inbox. Pressing it again, or
+// anywhere it is not offered, writes nothing.
+func TestAnExpiredSignUpCanAskForANewConfirmationEmail(t *testing.T) {
+	token := emailPageToken(t, LinkPreferences, emailPagePayload())
+	lapsed := time.Now().Add(-confirmLinkLifetime - time.Hour).UTC()
+	expired := func(t *testing.T) (*emailPageEngine, *EmailLinkHandler) {
+		e, h := newEmailPageEngine("pending")
+		e.roster[0]["joinedAt"] = lapsed.Format(time.RFC3339Nano)
+		return e, h
+	}
+	t.Run("the expired sign-up offers it and confirms nothing", func(t *testing.T) {
+		_, h := expired(t)
+		body := pageRequest(h, "GET", PreferencesPath, token, "").Body.String()
+		if !offersRenewal(body) || offersConfirm(body) || !strings.Contains(body, "<h1>This sign-up has expired.</h1>") {
+			t.Fatal(body)
+		}
+	})
+	t.Run("pressing it starts a new membership once", func(t *testing.T) {
+		e, h := expired(t)
+		for press := 1; press <= 2; press++ {
+			rr := pageRequest(h, "POST", PreferencesPath, token, "renew")
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") {
+				t.Fatal(press, rr.Code, rr.Body.String())
+			}
+		}
+		restarts := e.mutations("restartRecipientMembership")
+		if len(restarts) != 1 || argOf(restarts[0].query, "subscriptionStatus") != "pending" || !parseTime(argOf(restarts[0].query, "joinedAt")).After(lapsed) {
+			t.Fatalf("pressing twice restarted the membership %v, want once, pending, after it lapsed", restarts)
+		}
+		if str(e.roster[0], "subscriptionStatus") != "pending" || len(e.mutations("recordConsentGrant")) != 0 || len(e.mutations("confirmRecipientSubscription")) != 0 {
+			t.Fatalf("a new confirmation email confirmed somebody: %v", e.calls)
+		}
+	})
+	for name, arrange := range map[string]func(e *emailPageEngine){
+		"inside the window": func(e *emailPageEngine) {
+			e.roster[0]["joinedAt"] = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+		},
+		"a suppressed address": func(e *emailPageEngine) {
+			e.suppression = map[string]map[string]any{emailPagePayload().EmailDigest: {"reason": "hard_bounce"}}
+		},
+		"someone subscribed":   func(e *emailPageEngine) { e.roster[0]["subscriptionStatus"] = "subscribed" },
+		"someone who left":     func(e *emailPageEngine) { e.roster[0]["subscriptionStatus"] = "unsubscribed" },
+		"a provider's verdict": func(e *emailPageEngine) { e.roster[0]["subscriptionStatus"] = "bounced" },
+	} {
+		t.Run("not for "+name, func(t *testing.T) {
+			e, h := expired(t)
+			arrange(e)
+			if body := pageRequest(h, "GET", PreferencesPath, token, "").Body.String(); offersRenewal(body) {
+				t.Fatal(body)
+			}
+			pageRequest(h, "POST", PreferencesPath, token, "renew")
+			for _, c := range e.calls {
+				if strings.HasPrefix(c.query, "mutation ") {
+					t.Fatal("a renewal nobody was offered wrote", c.query)
+				}
+			}
+		})
+	}
 }
 
 // savedLogo is the logo a kit saved the normal way holds: a data: picture.
@@ -294,74 +370,114 @@ func emailPageFixtureEngine() *emailPageEngine {
 	return &emailPageEngine{fakeEngine: emailPageFixture()}
 }
 
+// connectionContacts is an email transport whose organizations' own email
+// connections each name a contact (email.Contacts), as Azure's does from its
+// reply address or default sender. err, when set, is a connection that cannot be
+// read.
+type connectionContacts struct {
+	contacts map[string]string
+	err      error
+	asked    []string
+}
+
+func (c *connectionContacts) Send(context.Context, email.Message, email.SendAs) error { return nil }
+func (c *connectionContacts) Contact(_ context.Context, accountID string) (string, error) {
+	c.asked = append(c.asked, accountID)
+	return c.contacts[accountID], c.err
+}
+
 func TestExpiredAndInvalidLinkPagesNameAContact(t *testing.T) {
 	const reply = "the email this link came from"
-	senders := func(rows ...map[string]any) []map[string]any { return rows }
-	sender := func(account, address, replyTo, status string) map[string]any {
-		return map[string]any{"id": "v1:campaigns:senderIdentity:" + address, "accountId": account, "address": address, "replyTo": replyTo, "status": status, "fromName": "Example"}
-	}
 	expired := func() string {
 		p := emailPagePayload()
 		p.ExpiresAt = time.Now().Add(-time.Hour).Unix()
 		return emailPageToken(t, LinkConfirm, p)
 	}
-	t.Run("the organization's own default sender's Reply-To", func(t *testing.T) {
+	page := func(contacts *connectionContacts) (*emailPageEngine, *EmailLinkHandler) {
 		e, h := newEmailPageEngine("pending")
-		e.senders = senders(sender("org-1", "news@example.test", "help@example.test", "active"))
+		h.WithSender(func() email.Sender { return contacts })
+		return e, h
+	}
+	t.Run("the organization's own email connection names the contact", func(t *testing.T) {
+		contacts := &connectionContacts{contacts: map[string]string{"org-1": "help@example.test", "org-2": "other@example.test"}}
+		_, h := page(contacts)
 		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
-		if rr.Code != 410 || !strings.Contains(rr.Body.String(), "help@example.test") || !strings.Contains(rr.Body.String(), "Example &amp; Co") || strings.Contains(rr.Body.String(), "news@example.test") {
+		body := rr.Body.String()
+		if rr.Code != 410 || !strings.Contains(body, "help@example.test") || !strings.Contains(body, "Example &amp; Co") || strings.Contains(body, "other@") {
+			t.Fatal(rr.Code, body)
+		}
+		if len(contacts.asked) != 1 || contacts.asked[0] != "org-1" {
+			t.Fatalf("the transport was asked for %v, want the link's organization", contacts.asked)
+		}
+	})
+	t.Run("a sender record is never the contact", func(t *testing.T) {
+		e, h := page(&connectionContacts{})
+		e.senders = []map[string]any{{"id": "v1:campaigns:senderIdentity:news", "accountId": "org-1", "address": "news@example.test", "replyTo": "records@example.test", "status": "active", "fromName": "Example"}}
+		body := pageRequest(h, "POST", ConfirmPath, expired(), "").Body.String()
+		if strings.Contains(body, "news@") || strings.Contains(body, "records@") || !strings.Contains(body, reply) {
+			t.Fatal(body)
+		}
+		for _, c := range e.calls {
+			if strings.HasPrefix(c.query, "query senderIdentitiesForAccount") {
+				t.Fatal("a page read the organization's sender records")
+			}
+		}
+	})
+	t.Run("an organization with no email connection of its own says to reply", func(t *testing.T) {
+		_, h := page(&connectionContacts{})
+		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
+		if rr.Code != 410 || !strings.Contains(rr.Body.String(), reply) {
 			t.Fatal(rr.Code, rr.Body.String())
 		}
 	})
-	t.Run("else that sender's address", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
-		e.senders = senders(sender("org-1", "news@example.test", "", "active"))
+	t.Run("a connection that cannot be read leaves the page saying to reply", func(t *testing.T) {
+		_, h := page(&connectionContacts{contacts: map[string]string{"org-1": "help@example.test"}, err: errors.New("the connection could not be read")})
 		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
-		if !strings.Contains(rr.Body.String(), "news@example.test") {
-			t.Fatal(rr.Body.String())
+		if rr.Code != 410 || strings.Contains(rr.Body.String(), "help@") || !strings.Contains(rr.Body.String(), reply) {
+			t.Fatal(rr.Code, rr.Body.String())
 		}
 	})
-	t.Run("never another organization's sender, the installation's, or one that is off", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
-		e.senders = senders(sender("self", "ops@install.test", "", "active"), sender("org-2", "other@example.test", "", "active"), sender("org-1", "off@example.test", "", "disabled"))
+	t.Run("a node with no email transport says to reply", func(t *testing.T) {
+		_, h := newEmailPageEngine("pending")
 		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
-		body := rr.Body.String()
-		if strings.Contains(body, "install.test") || strings.Contains(body, "other@") || strings.Contains(body, "off@") || !strings.Contains(body, reply) {
-			t.Fatal(body)
-		}
-	})
-	t.Run("several active senders: the oldest one is the contact", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
-		// Newest first, as the query answers.
-		e.senders = senders(sender("org-1", "newest@example.test", "", "active"), sender("org-1", "middle@example.test", "", "disabled"), sender("org-1", "oldest@example.test", "", "active"))
-		body := pageRequest(h, "POST", ConfirmPath, expired(), "").Body.String()
-		if !strings.Contains(body, "oldest@example.test") || strings.Contains(body, "newest@") || strings.Contains(body, "middle@") {
-			t.Fatal(body)
+		if rr.Code != 410 || !strings.Contains(rr.Body.String(), reply) {
+			t.Fatal(rr.Code, rr.Body.String())
 		}
 	})
 	t.Run("a forged link names nobody", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
-		e.senders = senders(sender("org-1", "news@example.test", "help@example.test", "active"))
+		contacts := &connectionContacts{contacts: map[string]string{"org-1": "help@example.test"}}
+		e, h := page(contacts)
 		rr := pageRequest(h, "POST", ConfirmPath, "forged", "")
 		body := rr.Body.String()
-		if rr.Code != 400 || len(e.calls) != 0 || strings.Contains(body, "help@example.test") || strings.Contains(body, "Example") || !strings.Contains(body, reply) {
-			t.Fatal(rr.Code, e.calls, body)
+		if rr.Code != 400 || len(e.calls) != 0 || len(contacts.asked) != 0 || strings.Contains(body, "help@example.test") || strings.Contains(body, "Example") || !strings.Contains(body, reply) {
+			t.Fatal(rr.Code, e.calls, contacts.asked, body)
 		}
 	})
 	t.Run("a verified link whose recipient is gone still names its organization and contact", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
+		e, h := page(&connectionContacts{contacts: map[string]string{"org-1": "help@example.test"}})
 		e.roster = nil
-		e.senders = senders(sender("org-1", "news@example.test", "help@example.test", "active"))
 		rr := pageRequest(h, "GET", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "")
 		if rr.Code != 400 || !strings.Contains(rr.Body.String(), "help@example.test") {
 			t.Fatal(rr.Code, rr.Body.String())
 		}
 	})
-	t.Run("an organization with no sender of its own says to reply", func(t *testing.T) {
-		_, h := newEmailPageEngine("pending")
-		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
-		if rr.Code != 410 || !strings.Contains(rr.Body.String(), reply) {
+	t.Run("a page that names nobody does not ask", func(t *testing.T) {
+		contacts := &connectionContacts{contacts: map[string]string{"org-1": "help@example.test"}}
+		_, h := newEmailPageEngine("subscribed")
+		h.WithSender(func() email.Sender { return contacts })
+		if rr := pageRequest(h, "GET", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), ""); rr.Code != 200 || strings.Contains(rr.Body.String(), "help@") {
 			t.Fatal(rr.Code, rr.Body.String())
+		}
+		unsubscribe := handlerFor(emailPageFixtureEngine()).WithSender(func() email.Sender { return contacts })
+		token, err := MintUnsubscribeToken(testSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign, AccountID: "org-1", EmailDigest: emailPagePayload().EmailDigest})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rr := pageRequest(unsubscribe, "GET", UnsubscribePath, token, ""); rr.Code != 200 || !strings.Contains(rr.Body.String(), "Example &amp; Co") {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		if len(contacts.asked) != 0 {
+			t.Fatalf("pages that name no contact asked the transport for one %d times", len(contacts.asked))
 		}
 	})
 }
@@ -384,10 +500,10 @@ func TestAPendingMemberWithNoJoinDateIsOutsideTheWindow(t *testing.T) {
 	e, h := newEmailPageEngine("pending")
 	delete(e.roster[0], "joinedAt")
 	rr := pageRequest(h, "GET", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "")
-	if hasForm(rr.Body.String()) || !strings.Contains(rr.Body.String(), "This sign-up has expired.") {
+	if offersConfirm(rr.Body.String()) || !strings.Contains(rr.Body.String(), "This sign-up has expired.") {
 		t.Fatal(rr.Body.String())
 	}
-	if rr = pageRequest(h, "POST", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "confirm"); hasForm(rr.Body.String()) {
+	if rr = pageRequest(h, "POST", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "confirm"); offersConfirm(rr.Body.String()) {
 		t.Fatal(rr.Body.String())
 	}
 	for _, c := range e.calls {

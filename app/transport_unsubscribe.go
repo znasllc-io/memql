@@ -24,7 +24,10 @@ import (
 // questions with the same 404 answer.
 func (a *App) mountUnsubscribeEndpoint() {
 	cfg := campaigns.LoadConfig()
-	handler := campaigns.NewUnsubscribeHandler(&CampaignsEngineAdapter{Engine: a.engine}, cfg, a.Logger, a.gateDBGetter())
+	// The pages' brand names a contact from the organization's own email
+	// connection, through the email sender resolved when a page asks, as the pages
+	// behind email links do.
+	handler := campaigns.NewUnsubscribeHandler(&CampaignsEngineAdapter{Engine: a.engine}, cfg, a.Logger, a.gateDBGetter()).WithSender(a.campaignEmailSender)
 	for _, path := range server.UnsubscribePaths() {
 		// GET renders the confirmation page a person reaches from the link
 		// in the body; POST is what performs the opt-out, both for that

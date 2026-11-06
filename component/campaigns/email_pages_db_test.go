@@ -92,3 +92,57 @@ func TestSubscribingAgainToAConfirmFirstAudienceSendsAConfirmation(t *testing.T)
 		t.Fatalf("the email carries no confirm link: %q", text)
 	}
 }
+
+// A person who signed up and never confirmed, past the window to confirm, asks
+// their preferences page for a new confirmation email. It starts a new pending
+// membership, the audience's joined automation mails them a fresh confirmation,
+// and asking again sends nothing more.
+func TestAnExpiredSignUpGetsANewConfirmationEmailWhenItAsks(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "renew-expired", confirmFirst)
+	a.drain(t)
+	if a.azure.count() != 1 {
+		t.Fatalf("the first confirmation: %d emails", a.azure.count())
+	}
+	rid := a.suffix + "-member"
+	original := storedRecipient(t, a.store, a.owner, rid)
+	// The confirmation is never pressed: the run gives up after its timeout, and
+	// later the window to confirm closes.
+	a.later(confirmLinkLifetime + time.Hour)
+	a.drain(t)
+	if row := a.enrollment(t, a.member); str(row, "status") != "exited" || str(row, "exitReason") != "not confirmed" {
+		t.Fatalf("the unconfirmed run is %v", row)
+	}
+	page := NewEmailLinkHandler(deliveryDBEngine{a.engine}, a.worker.cfg, quietLogger(), gatePoolFor(t))
+	page.now = func() time.Time { return a.now }
+	token, err := MintLinkToken(a.worker.cfg.UnsubscribeSecret, LinkPreferences, LinkPayload{OwnerUserID: a.user, RecipientID: rid, AccountID: a.org, EmailDigest: EmailDigest("member@example.test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := pageRequest(page, "GET", PreferencesPath, token, "").Body.String(); !strings.Contains(body, "Send me a new confirmation email") {
+		t.Fatal(body)
+	}
+	if rr := pageRequest(page, "POST", PreferencesPath, token, "renew"); rr.Code != 200 || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	renewed := storedRecipient(t, a.store, a.owner, rid)
+	if str(renewed, "subscriptionStatus") != "pending" || !templateTime(renewed["joinedAt"]).After(templateTime(original["joinedAt"])) {
+		t.Fatalf("asking for a new confirmation left %v, want a new pending membership after %v", renewed, original["joinedAt"])
+	}
+	// Asking again, or reloading what was posted, writes nothing.
+	if rr := pageRequest(page, "POST", PreferencesPath, token, "renew"); rr.Code != 200 || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	if again := storedRecipient(t, a.store, a.owner, rid); !templateTime(again["joinedAt"]).Equal(templateTime(renewed["joinedAt"])) {
+		t.Fatalf("a second press restarted the membership again: %v, then %v", renewed["joinedAt"], again["joinedAt"])
+	}
+	a.later(time.Minute)
+	a.drain(t)
+	a.drain(t)
+	if a.azure.count() != 2 {
+		t.Fatalf("emails sent = %d, want the first confirmation and one new one", a.azure.count())
+	}
+	fresh := a.enrollment(t, journeyEnrollmentID(a.journeyID, rid, templateTime(renewed["joinedAt"])))
+	if str(fresh, "status") != "waiting" || str(fresh, "stepId") != "confirm" {
+		t.Fatalf("the new membership's run is %v, want it waiting for the new confirmation", fresh)
+	}
+}

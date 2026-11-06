@@ -624,6 +624,19 @@ func (s *ACSSender) identity(as SendAs) (string, error) {
 	return address, nil
 }
 
+// Contact is whom a person can write to about this connection's organization's
+// email (Contacts): the connection's reply address, else its default sender. ""
+// for any other organization.
+func (s *ACSSender) Contact(_ context.Context, accountID string) (string, error) {
+	if memql.BareShortId(strings.TrimSpace(accountID)) != s.cfg.AccountID {
+		return "", nil
+	}
+	if s.cfg.ReplyTo != "" {
+		return s.cfg.ReplyTo, nil
+	}
+	return s.cfg.Default, nil
+}
+
 func (s *ACSSender) CheckSender(_ context.Context, as SendAs) error {
 	if err := as.Validate(); err != nil {
 		return permanentSendRefusal(err.Error())

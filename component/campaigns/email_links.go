@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // EmailLinkHandler serves token-authorized recipient pages. GET only reads;
@@ -25,6 +26,9 @@ type EmailLinkHandler struct {
 	gate         emailChoiceGate
 	enrollments  emailEnrollmentGate
 	finishChoice func()
+	// contact is where a page that cannot help finds whom to name (WithSender);
+	// nil names nobody, and the page says to reply to the email instead.
+	contact contactLookup
 }
 
 // NewEmailLinkHandler requires the dedicated write-gate pool, never the request
@@ -34,6 +38,14 @@ func NewEmailLinkHandler(engine Engine, cfg Config, logger *slog.Logger, databas
 		logger = slog.Default()
 	}
 	return &EmailLinkHandler{store: NewStore(engine), cfg: cfg, logger: logger.With("component", "campaigns.emailLinks"), system: (&Worker{}).systemActorContext, now: time.Now, gate: newEmailChoiceGate(database), enrollments: newEmailEnrollmentGate(database)}
+}
+
+// WithSender gives the pages the email transport, resolved when a page asks, that
+// they name a contact from: the address the organization's own email connection
+// names (email.Contact).
+func (handler *EmailLinkHandler) WithSender(resolve func() email.Sender) *EmailLinkHandler {
+	handler.contact = transportContact(resolve)
+	return handler
 }
 
 func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -74,7 +86,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			// An expired token still verified, so its organization is the one the
 			// link was made for and the page may speak for it.
 			owner := ownerActorContext(r.Context(), p.OwnerUserID)
-			brand := h.store.pageBrandFor(owner, h.logger, p.AccountID)
+			brand := h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact)
 			writeBrandedPage(rw, 410, "Link expired", `<h1>This link has expired.</h1><p>Your subscription wasn't confirmed, so you won't get `+emailsFrom(brand.Org)+`.</p>`+brand.contactLine(), brand)
 		} else {
 			if errors.Is(err, errNoLinkClock) {
@@ -114,11 +126,11 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !found && kind == LinkView {
-		h.unavailable(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID))
+		h.unavailable(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact))
 		return
 	}
 	if !found || !sameOrganization(recipient.AccountID, p.AccountID) || EmailDigest(recipient.Email) != p.EmailDigest {
-		h.invalid(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID))
+		h.invalid(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID, h.contact))
 		return
 	}
 	org, err := h.store.AccountName(owner, p.AccountID)
@@ -133,7 +145,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		h.view(rw, r.Context(), owner, p, recipient, org)
 		return
 	}
-	brand := h.store.brandFor(owner, h.logger, p.AccountID, org)
+	brand := h.store.brandFor(owner, h.logger, p.AccountID, org, h.contact)
 	system := memql.ContextWithFreshRead(h.system(r.Context()))
 	_, blocked, err := h.store.SuppressionForSend(system, p.AccountID, p.EmailDigest)
 	if err != nil {
@@ -250,9 +262,11 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 	liftable := recipient.SubscriptionStatus == "unsubscribed" && row != nil && str(row, "reason") == "unsubscribed" && !globalFound
 	pending := recipient.SubscriptionStatus == "pending" && !blocked
 	// A pending member can confirm only while the confirmation they were sent
-	// could still be confirmed. Past it the sign-up has lapsed and a new one is
-	// needed, so the page offers no button and a posted one changes nothing.
+	// could still be confirmed. Past it the sign-up has lapsed: the page offers
+	// no Confirm button and a posted one changes nothing, and it offers a new
+	// confirmation email instead (renewable).
 	confirmable := pending && inConfirmWindow(recipient, h.now())
+	renewable := pending && !confirmable
 	if r.Method == http.MethodPost {
 		switch r.PostForm.Get("action") {
 		case "unsubscribe":
@@ -282,6 +296,28 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 					return
 				}
 				h.subscribed(rw, page)
+				return
+			}
+		case "renew":
+			if renewable {
+				// "Send me a new confirmation email" starts a new, unconfirmed
+				// membership, as "Subscribe again" does in an audience that asks
+				// people to confirm: the audience's joined automation mails its
+				// confirmation. The new membership is inside the window, so a second
+				// press, or a reload of this one, writes nothing (below).
+				if err := h.store.RejoinRecipient(owner, p.RecipientID, "pending", memql.VersionTimeAfter(recipient.JoinedAt, h.now().UTC())); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				page.write(rw, 200, checkYourInbox(org))
+				return
+			}
+			if confirmable {
+				page.write(rw, 200, checkYourInbox(org))
 				return
 			}
 		case "subscribe":
@@ -362,8 +398,8 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 		body += `<p>You're unsubscribed.</p>` + emailPageForm(token, "subscribe", "Subscribe again")
 	case confirmable:
 		body += `<p>Your subscription isn't confirmed yet.</p>` + emailPageForm(token, "confirm", "Confirm subscription")
-	case pending:
-		body = `<h1>This sign-up has expired.</h1><p>You didn't confirm your subscription in time, so you aren't subscribed to ` + emailsFrom(org) + `.</p>` + page.brand.contactLine()
+	case renewable:
+		body = `<h1>This sign-up has expired.</h1><p>You didn't confirm your subscription in time, so you aren't subscribed to ` + emailsFrom(org) + `.</p>` + emailPageForm(token, "renew", "Send me a new confirmation email")
 	default:
 		body = cannotSendBody(page.brand)
 	}
@@ -376,7 +412,7 @@ func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Conte
 		return
 	}
 	if !found || !sameOrganization(template.AccountID, p.AccountID) || !parseTime(template.Revision).Equal(parseTime(p.TemplateRevision)) {
-		h.unavailable(rw, h.store.brandFor(owner, h.logger, p.AccountID, org))
+		h.unavailable(rw, h.store.brandFor(owner, h.logger, p.AccountID, org, h.contact))
 		return
 	}
 	w := Worker{cfg: h.cfg, logger: h.logger, now: h.now}
