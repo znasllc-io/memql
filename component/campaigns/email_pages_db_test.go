@@ -55,6 +55,15 @@ func TestSubscribingAgainToAConfirmFirstAudienceSendsAConfirmation(t *testing.T)
 		t.Fatal(rr.Code, rr.Body.String())
 	}
 	renewed := storedRecipient(t, n.store, n.owner, rid)
+	// Pressing "Subscribe again" a second time, or refreshing it, confirms no one.
+	for i := 0; i < 2; i++ {
+		if rr := pageRequest(h, "POST", PreferencesPath, token, "subscribe"); rr.Code != 200 || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+	}
+	if again := storedRecipient(t, n.store, n.owner, rid); str(again, "subscriptionStatus") != "pending" || !templateTime(again["joinedAt"]).Equal(templateTime(renewed["joinedAt"])) {
+		t.Fatal("a replayed Subscribe again changed the membership", renewed, again)
+	}
 	if str(renewed, "subscriptionStatus") != "pending" || !templateTime(renewed["joinedAt"]).After(templateTime(original["joinedAt"])) {
 		t.Fatal("subscribing again did not begin a new pending membership", original, renewed)
 	}

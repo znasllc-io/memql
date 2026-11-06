@@ -74,9 +74,8 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			// An expired token still verified, so its organization is the one the
 			// link was made for and the page may speak for it.
 			owner := ownerActorContext(r.Context(), p.OwnerUserID)
-			org, _ := h.store.AccountName(owner, p.AccountID)
-			brand := h.store.brandFor(owner, h.logger, p.AccountID, org)
-			writeBrandedPage(rw, 410, "Link expired", `<h1>This link has expired.</h1><p>Your subscription wasn't confirmed, so you won't get `+emailsFrom(org)+`.</p>`+brand.contactLine(), brand)
+			brand := h.store.pageBrandFor(owner, h.logger, p.AccountID)
+			writeBrandedPage(rw, 410, "Link expired", `<h1>This link has expired.</h1><p>Your subscription wasn't confirmed, so you won't get `+emailsFrom(brand.Org)+`.</p>`+brand.contactLine(), brand)
 		} else {
 			if errors.Is(err, errNoLinkClock) {
 				h.logger.Error("email confirmation verifier has no clock", "error", err)
@@ -115,11 +114,11 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !found && kind == LinkView {
-		h.unavailable(rw, h.brandOf(owner, p))
+		h.unavailable(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID))
 		return
 	}
 	if !found || !sameOrganization(recipient.AccountID, p.AccountID) || EmailDigest(recipient.Email) != p.EmailDigest {
-		h.invalid(rw, h.brandOf(owner, p))
+		h.invalid(rw, h.store.pageBrandFor(owner, h.logger, p.AccountID))
 		return
 	}
 	org, err := h.store.AccountName(owner, p.AccountID)
@@ -127,11 +126,14 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 		h.retry(rw, err)
 		return
 	}
-	brand := h.store.brandFor(owner, h.logger, p.AccountID, org)
 	if kind == LinkView {
-		h.view(rw, r.Context(), owner, p, recipient, brand)
+		// A browser copy shows the message, not the brand: only the name is used
+		// (for {{accountName}}), and the kit is read only if the page has to say
+		// the email is unavailable.
+		h.view(rw, r.Context(), owner, p, recipient, org)
 		return
 	}
+	brand := h.store.brandFor(owner, h.logger, p.AccountID, org)
 	system := memql.ContextWithFreshRead(h.system(r.Context()))
 	_, blocked, err := h.store.SuppressionForSend(system, p.AccountID, p.EmailDigest)
 	if err != nil {
@@ -161,7 +163,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			return
 		}
 		if r.Method == http.MethodPost {
-			if err := h.confirm(owner, p, ConsentSourceDoubleOptIn); err != nil {
+			if err := h.confirm(owner, p, recipient, ConsentSourceDoubleOptIn); err != nil {
 				h.retry(rw, err)
 				return
 			}
@@ -178,7 +180,7 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			heading = "Confirm your subscription to " + org + "?"
 			detail = "You asked to get emails from " + org + "."
 		}
-		page.write(rw, 200, "<h1>"+html.EscapeString(heading)+"</h1><p>"+html.EscapeString(detail)+"</p>"+emailPageForm(token, "", "Confirm"))
+		page.write(rw, 200, "<h1>"+html.EscapeString(heading)+"</h1><p>"+html.EscapeString(detail)+"</p>"+emailPageForm(token, "confirm", "Confirm"))
 		return
 	}
 	h.preferences(rw, r, owner, system, p, linkPage{brand: brand, title: brand.title("Email preferences", "%s email preferences")}, recipient, token, blocked)
@@ -195,27 +197,9 @@ func (l linkPage) write(rw http.ResponseWriter, status int, body string) {
 	writeBrandedPage(rw, status, l.title, body, l.brand)
 }
 
-// brandOf is the brand of a verified token whose recipient could not be used:
-// the organization the signed token names still owns the page, so it still
-// names that organization and its contact. A read that fails leaves the page
-// plain.
-func (h *EmailLinkHandler) brandOf(owner context.Context, p LinkPayload) pageBrand {
-	org, err := h.store.AccountName(owner, p.AccountID)
-	if err != nil {
-		h.logger.Warn("email page could not read its organization's name", "account", bare(p.AccountID), "error", err)
-		org = ""
-	}
-	return h.store.brandFor(owner, h.logger, p.AccountID, org)
-}
-
-// preferencesLink is the member's own preferences page, the way back from a page
-// that says they are unsubscribed. Empty when it cannot be built.
+// preferencesLink is the member's own preferences page.
 func (h *EmailLinkHandler) preferencesLink(p LinkPayload) string {
-	link, err := PreferencesURL(h.cfg, LinkPayload{OwnerUserID: p.OwnerUserID, RecipientID: bare(p.RecipientID), CampaignID: bare(p.CampaignID), AccountID: p.AccountID, EmailDigest: p.EmailDigest})
-	if err != nil {
-		return ""
-	}
-	return link
+	return preferencesLinkFor(h.cfg, h.logger, p)
 }
 
 // inConfirmWindow reports whether a pending member can still confirm: the same
@@ -226,8 +210,12 @@ func inConfirmWindow(recipient Recipient, now time.Time) bool {
 	return !recipient.JoinedAt.IsZero() && now.Before(recipient.JoinedAt.Add(confirmLinkLifetime))
 }
 
-func (h *EmailLinkHandler) confirm(owner context.Context, p LinkPayload, source string) error {
-	eventID := sha256Hex("email-confirm\x00" + bare(p.RecipientID) + "\x00" + strconv.FormatInt(p.ExpiresAt, 10))
+// confirm records the consent and confirms the membership. The consent event is
+// the membership's own: it carries when this membership began, so a retry of the
+// same confirmation finds its event and records nothing twice, while a later
+// membership of the same person records its own.
+func (h *EmailLinkHandler) confirm(owner context.Context, p LinkPayload, recipient Recipient, source string) error {
+	eventID := sha256Hex("email-confirm\x00" + bare(p.RecipientID) + "\x00" + strconv.FormatInt(p.ExpiresAt, 10) + "\x00" + strconv.FormatInt(recipient.JoinedAt.UnixNano(), 10))
 	if err := h.grant(owner, p, eventID, source); err != nil {
 		return err
 	}
@@ -274,6 +262,28 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 			}
 			writeBrandedPage(rw, 200, page.brand.title("Unsubscribed", "Unsubscribe from %s"), `<h1>You're unsubscribed.</h1><p>You won't get `+emailsFrom(org)+`.</p>`+changedYourMind(h.preferencesLink(p)), page.brand)
 			return
+		case "confirm":
+			// The explicit "Confirm subscription" press, and only inside the window.
+			if recipient.SubscriptionStatus == "subscribed" && !blocked {
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				h.subscribed(rw, page)
+				return
+			}
+			if confirmable {
+				if err := h.confirm(owner, p, recipient, ConsentSourcePreferences); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				h.subscribed(rw, page)
+				return
+			}
 		case "subscribe":
 			if recipient.SubscriptionStatus == "subscribed" && !blocked {
 				if err := h.nudge(r.Context(), p); err != nil {
@@ -284,15 +294,9 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 				return
 			}
 			if confirmable {
-				if err := h.confirm(owner, p, ConsentSourcePreferences); err != nil {
-					h.retry(rw, err)
-					return
-				}
-				if err := h.nudge(r.Context(), p); err != nil {
-					h.retry(rw, err)
-					return
-				}
-				h.subscribed(rw, page)
+				// Pressing "Subscribe again" twice, or refreshing it, must not
+				// confirm anyone: only the explicit confirm button does.
+				page.write(rw, 200, checkYourInbox(org))
 				return
 			}
 			if liftable {
@@ -303,8 +307,10 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 				}
 				// A confirmation-required audience never mails anyone who has not
 				// confirmed, so coming back is a new, unconfirmed membership: the
-				// audience's joined automation sends the confirmation.
-				confirmFirst := found && audience.Confirmation == "required"
+				// audience's joined automation sends the confirmation. An audience
+				// that cannot be found is treated as requiring it: the page never
+				// subscribes someone straight away on a guess.
+				confirmFirst := !found || audience.Confirmation == "required"
 				// Record consent first so a failed later write can be retried without a
 				// sendable recipient missing its audit trail. SuppressedAt survives a lift.
 				eventID := sha256Hex("email-preferences\x00" + bare(p.RecipientID) + "\x00" + str(row, "suppressedAt"))
@@ -329,7 +335,7 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 					return
 				}
 				if confirmFirst {
-					page.write(rw, 200, `<h1>Check your inbox to confirm.</h1><p>We're sending a confirmation email to this address. You'll get `+emailsFrom(org)+` once you confirm.</p>`)
+					page.write(rw, 200, checkYourInbox(org))
 					return
 				}
 				h.subscribed(rw, page)
@@ -355,7 +361,7 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 	case liftable:
 		body += `<p>You're unsubscribed.</p>` + emailPageForm(token, "subscribe", "Subscribe again")
 	case confirmable:
-		body += `<p>Your subscription isn't confirmed yet.</p>` + emailPageForm(token, "subscribe", "Confirm subscription")
+		body += `<p>Your subscription isn't confirmed yet.</p>` + emailPageForm(token, "confirm", "Confirm subscription")
 	case pending:
 		body = `<h1>This sign-up has expired.</h1><p>You didn't confirm your subscription in time, so you aren't subscribed to ` + emailsFrom(org) + `.</p>` + page.brand.contactLine()
 	default:
@@ -363,15 +369,14 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 	}
 	page.write(rw, 200, body)
 }
-func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Context, p LinkPayload, recipient Recipient, brand pageBrand) {
-	org := brand.Org
+func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Context, p LinkPayload, recipient Recipient, org string) {
 	template, found, err := h.store.TemplateAtRevision(owner, p.TemplateID, p.TemplateRevision)
 	if err != nil {
 		h.retry(rw, err)
 		return
 	}
 	if !found || !sameOrganization(template.AccountID, p.AccountID) || !parseTime(template.Revision).Equal(parseTime(p.TemplateRevision)) {
-		h.unavailable(rw, brand)
+		h.unavailable(rw, h.store.brandFor(owner, h.logger, p.AccountID, org))
 		return
 	}
 	w := Worker{cfg: h.cfg, logger: h.logger, now: h.now}
@@ -413,6 +418,13 @@ func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Conte
 	}
 	rw.WriteHeader(200)
 	_, _ = rw.Write([]byte(body))
+}
+
+// checkYourInbox is the page of a member who has asked to be subscribed and has
+// yet to confirm. It does not say an email is on its way: whether one is sent is
+// the audience's automation's business.
+func checkYourInbox(org string) string {
+	return `<h1>Check your inbox to confirm.</h1><p>Once you confirm from the email sent to this address, you'll get ` + emailsFrom(org) + `.</p>`
 }
 func emailPageForm(token, action, label string) string {
 	return `<form method="POST"><input type="hidden" name="token" value="` + html.EscapeString(token) + `"><input type="hidden" name="action" value="` + html.EscapeString(action) + `"><button type="submit">` + html.EscapeString(label) + `</button></form>`

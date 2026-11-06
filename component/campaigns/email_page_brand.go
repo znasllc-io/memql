@@ -27,8 +27,8 @@ import (
 // # What a brand is trusted with
 //
 // Brand values are operator input shown on a public page, so each is checked
-// where it is read: a colour only in the two hex forms, a logo only as an
-// absolute https address, everything escaped. The page never fails for want of a
+// where it is read: a colour only in the two hex forms, a logo only as the
+// kit's own saved picture or an absolute https address, everything escaped. The page never fails for want of a
 // brand: an opt-out page has to work whatever state the kit is in, so a kit that
 // does not read renders the page plain and says so in the log.
 
@@ -39,7 +39,8 @@ type pageBrand struct {
 	Org string
 	// Color is the primary colour, "#rgb" or "#rrggbb", used for the button.
 	Color string
-	// Logo is an absolute https address of the organization's logo.
+	// Logo is the organization's logo: its saved data: picture or an absolute
+	// https address (see logoSource).
 	Logo string
 	// Contact is the address of somebody who can help: the organization's own
 	// default sender's Reply-To, else that sender's address. Empty when the
@@ -66,18 +67,21 @@ func (b pageBrand) contactLine() string {
 	return "<p>You can write to " + html.EscapeString(b.Contact) + " for help.</p>"
 }
 
-// buttonText is the colour text takes on the primary colour, chosen by
-// luminance so the button stays readable whatever the brand picked.
-func buttonText(colour string) string {
+// luminance is the WCAG relative luminance of a "#rgb" or "#rrggbb" colour, or
+// -1 when it does not parse.
+func luminance(colour string) float64 {
 	hex := strings.TrimPrefix(colour, "#")
 	if len(hex) == 3 {
 		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	}
+	if len(hex) != 6 {
+		return -1
 	}
 	var lum float64
 	for i, weight := range []float64{0.2126, 0.7152, 0.0722} {
 		v, err := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
 		if err != nil {
-			return "#fff"
+			return -1
 		}
 		c := float64(v) / 255
 		if c <= 0.03928 {
@@ -87,7 +91,20 @@ func buttonText(colour string) string {
 		}
 		lum += weight * c
 	}
-	if lum > 0.4 {
+	return lum
+}
+
+// buttonText is the text colour on the primary colour: whichever of white and
+// near-black has the higher contrast ratio against it, so the button stays
+// readable whatever the brand picked.
+func buttonText(colour string) string {
+	lum := luminance(colour)
+	if lum < 0 {
+		return "#fff"
+	}
+	white := 1.05 / (lum + 0.05)
+	dark := (lum + 0.05) / (luminance("#111") + 0.05)
+	if dark > white {
 		return "#111"
 	}
 	return "#fff"
@@ -179,4 +196,28 @@ func defaultContact(senders []SenderIdentity, accountID string) string {
 		}
 	}
 	return ""
+}
+
+// pageBrandFor is the brand of the organization a verified token names: its name,
+// kit and contact. A read that fails leaves that part out of the page and is
+// logged; it never fails the page.
+func (s *Store) pageBrandFor(ctx context.Context, logger *slog.Logger, accountID string) pageBrand {
+	org, err := s.AccountName(ctx, accountID)
+	if err != nil {
+		logger.Warn("campaigns: an email page could not read its organization's name", "account", bare(accountID), "error", err)
+		org = ""
+	}
+	return s.brandFor(ctx, logger, accountID, org)
+}
+
+// preferencesLinkFor is the member's own preferences page, the way back from a
+// page that says they are unsubscribed. Empty, and logged, when it cannot be
+// built.
+func preferencesLinkFor(cfg Config, logger *slog.Logger, p LinkPayload) string {
+	link, err := PreferencesURL(cfg, LinkPayload{OwnerUserID: p.OwnerUserID, RecipientID: bare(p.RecipientID), CampaignID: bare(p.CampaignID), AccountID: p.AccountID, EmailDigest: p.EmailDigest})
+	if err != nil {
+		logger.Warn("campaigns: an email page could not build the link to the member's preferences", "error", err)
+		return ""
+	}
+	return link
 }

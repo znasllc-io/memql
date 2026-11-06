@@ -351,6 +351,8 @@ func TestAConfirmTokenCannotView(t *testing.T) {
 }
 func TestPreferencesRetryAfterLiftRetainsConsentAndFinishes(t *testing.T) {
 	e, h := newEmailPageEngine("unsubscribed")
+	e.roster[0]["audienceId"] = "aud-open"
+	e.audiences = map[string]map[string]any{"aud-open": {"id": "aud-open", "accountId": "org-1", "confirmation": "optional"}}
 	digest := emailPagePayload().EmailDigest
 	e.suppression = map[string]map[string]any{organizationSuppressionID("org-1", digest): {"accountId": "org-1", "reason": "unsubscribed", "suppressedAt": "2026-10-01T00:00:00Z"}}
 	e.fail = "mutation restartRecipientMembership"

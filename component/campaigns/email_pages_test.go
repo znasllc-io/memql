@@ -330,6 +330,15 @@ func TestExpiredAndInvalidLinkPagesNameAContact(t *testing.T) {
 			t.Fatal(body)
 		}
 	})
+	t.Run("several active senders: the oldest one is the contact", func(t *testing.T) {
+		e, h := newEmailPageEngine("pending")
+		// Newest first, as the query answers.
+		e.senders = senders(sender("org-1", "newest@example.test", "", "active"), sender("org-1", "middle@example.test", "", "disabled"), sender("org-1", "oldest@example.test", "", "active"))
+		body := pageRequest(h, "POST", ConfirmPath, expired(), "").Body.String()
+		if !strings.Contains(body, "oldest@example.test") || strings.Contains(body, "newest@") || strings.Contains(body, "middle@") {
+			t.Fatal(body)
+		}
+	})
 	t.Run("a forged link names nobody", func(t *testing.T) {
 		e, h := newEmailPageEngine("pending")
 		e.senders = senders(sender("org-1", "news@example.test", "help@example.test", "active"))
@@ -349,12 +358,11 @@ func TestExpiredAndInvalidLinkPagesNameAContact(t *testing.T) {
 		}
 	})
 	t.Run("an organization with no sender of its own says to reply", func(t *testing.T) {
-		e, h := newEmailPageEngine("pending")
+		_, h := newEmailPageEngine("pending")
 		rr := pageRequest(h, "POST", ConfirmPath, expired(), "")
 		if rr.Code != 410 || !strings.Contains(rr.Body.String(), reply) {
 			t.Fatal(rr.Code, rr.Body.String())
 		}
-		_ = e
 	})
 }
 
@@ -369,5 +377,171 @@ func TestThePreferencesUnsubscribeSaysItCoversEveryEmail(t *testing.T) {
 	body = pageRequest(h, "GET", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "").Body.String()
 	if !strings.Contains(body, "Unsubscribe from all emails") || strings.Contains(body, "Unsubscribe from all  ") {
 		t.Fatal(body)
+	}
+}
+
+func TestAPendingMemberWithNoJoinDateIsOutsideTheWindow(t *testing.T) {
+	e, h := newEmailPageEngine("pending")
+	delete(e.roster[0], "joinedAt")
+	rr := pageRequest(h, "GET", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "")
+	if hasForm(rr.Body.String()) || !strings.Contains(rr.Body.String(), "This sign-up has expired.") {
+		t.Fatal(rr.Body.String())
+	}
+	if rr = pageRequest(h, "POST", PreferencesPath, emailPageToken(t, LinkPreferences, emailPagePayload()), "confirm"); hasForm(rr.Body.String()) {
+		t.Fatal(rr.Body.String())
+	}
+	for _, c := range e.calls {
+		if strings.HasPrefix(c.query, "mutation ") {
+			t.Fatal(c)
+		}
+	}
+}
+
+// Only the confirm button confirms: "subscribe" from a pending member, "confirm"
+// from anyone who is not pending or is past the window, change nothing.
+func TestOnlyAnExplicitConfirmConfirmsFromThePreferencesPage(t *testing.T) {
+	token := emailPageToken(t, LinkPreferences, emailPagePayload())
+	writes := func(e *emailPageEngine) int {
+		n := 0
+		for _, c := range e.calls {
+			if strings.HasPrefix(c.query, "mutation ") {
+				n++
+			}
+		}
+		return n
+	}
+	t.Run("subscribe from a pending member", func(t *testing.T) {
+		e, h := newEmailPageEngine("pending")
+		rr := pageRequest(h, "POST", PreferencesPath, token, "subscribe")
+		if rr.Code != 200 || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") || writes(e) != 0 || str(e.roster[0], "subscriptionStatus") != "pending" {
+			t.Fatal(rr.Code, rr.Body.String(), e.calls)
+		}
+	})
+	t.Run("the confirm button posts confirm", func(t *testing.T) {
+		_, h := newEmailPageEngine("pending")
+		body := pageRequest(h, "GET", PreferencesPath, token, "").Body.String()
+		if !strings.Contains(body, `name="action" value="confirm"`) {
+			t.Fatal(body)
+		}
+		body = pageRequest(h, "GET", ConfirmPath, emailPageToken(t, LinkConfirm, emailPagePayload()), "").Body.String()
+		if !strings.Contains(body, `name="action" value="confirm"`) {
+			t.Fatal(body)
+		}
+	})
+	t.Run("confirm inside the window confirms", func(t *testing.T) {
+		e, h := newEmailPageEngine("pending")
+		rr := pageRequest(h, "POST", PreferencesPath, token, "confirm")
+		if rr.Code != 200 || str(e.roster[0], "subscriptionStatus") != "subscribed" || len(e.mutations("recordConsentGrant")) != 1 {
+			t.Fatal(rr.Code, rr.Body.String(), e.calls)
+		}
+	})
+	for name, status := range map[string]string{"unsubscribed": "unsubscribed", "bounced": "bounced", "complained": "complained"} {
+		t.Run("confirm from a member who is "+name+" changes nothing", func(t *testing.T) {
+			e, h := newEmailPageEngine(status)
+			rr := pageRequest(h, "POST", PreferencesPath, token, "confirm")
+			if rr.Code != 200 || writes(e) != 0 {
+				t.Fatal(rr.Code, e.calls)
+			}
+		})
+	}
+	t.Run("confirm past the window changes nothing", func(t *testing.T) {
+		e, h := newEmailPageEngine("pending")
+		e.roster[0]["joinedAt"] = time.Now().Add(-confirmLinkLifetime - time.Hour).UTC().Format(time.RFC3339Nano)
+		rr := pageRequest(h, "POST", PreferencesPath, token, "confirm")
+		if rr.Code != 200 || writes(e) != 0 {
+			t.Fatal(rr.Code, e.calls)
+		}
+	})
+	t.Run("a suppressed pending member cannot confirm", func(t *testing.T) {
+		e, h := newEmailPageEngine("pending")
+		e.suppression = map[string]map[string]any{emailPagePayload().EmailDigest: {"reason": "hard_bounce"}}
+		rr := pageRequest(h, "POST", PreferencesPath, token, "confirm")
+		if rr.Code != 200 || writes(e) != 0 {
+			t.Fatal(rr.Code, e.calls)
+		}
+	})
+}
+
+func TestEachMembershipRecordsItsOwnConsentWhenItConfirms(t *testing.T) {
+	e, h := newEmailPageEngine("pending")
+	token := emailPageToken(t, LinkPreferences, emailPagePayload())
+	confirm := func() {
+		t.Helper()
+		if rr := pageRequest(h, "POST", PreferencesPath, token, "confirm"); rr.Code != 200 {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+	}
+	confirm()
+	confirm() // a retry of the same membership's confirmation records nothing more
+	if got := len(e.mutations("recordConsentGrant")); got != 1 {
+		t.Fatalf("grants after a retry = %d", got)
+	}
+	e.roster[0]["subscriptionStatus"] = "pending"
+	e.roster[0]["joinedAt"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	confirm()
+	if got := len(e.mutations("recordConsentGrant")); got != 2 {
+		t.Fatalf("a second membership's confirmation recorded %d consent events in all, want 2", got)
+	}
+}
+
+func TestComingBackFailsClosedWhenTheAudienceCannotBeRead(t *testing.T) {
+	setup := func() (*emailPageEngine, *EmailLinkHandler) {
+		e, h := newEmailPageEngine("unsubscribed")
+		e.roster[0]["audienceId"] = "aud-1"
+		e.suppression = map[string]map[string]any{organizationSuppressionID("org-1", emailPagePayload().EmailDigest): {"accountId": "org-1", "reason": "unsubscribed", "suppressedAt": "2026-10-01T00:00:00Z"}}
+		return e, h
+	}
+	token := emailPageToken(t, LinkPreferences, emailPagePayload())
+	t.Run("a read error shows the retry page and writes nothing", func(t *testing.T) {
+		e, h := setup()
+		e.fail = "query audienceById"
+		rr := pageRequest(h, "POST", PreferencesPath, token, "subscribe")
+		if rr.Code != 503 || len(e.mutations("recordConsentGrant")) != 0 || len(e.mutations("restartRecipientMembership")) != 0 {
+			t.Fatal(rr.Code, e.calls)
+		}
+	})
+	t.Run("an audience that is not found is treated as confirmation-required", func(t *testing.T) {
+		e, h := setup()
+		rr := pageRequest(h, "POST", PreferencesPath, token, "subscribe")
+		if rr.Code != 200 || str(e.roster[0], "subscriptionStatus") != "pending" || !strings.Contains(rr.Body.String(), "Check your inbox to confirm.") {
+			t.Fatal(rr.Code, rr.Body.String(), e.roster[0])
+		}
+	})
+}
+
+func TestButtonTextHasTheBetterContrast(t *testing.T) {
+	for colour, want := range map[string]string{"#0a7": "#111", "#000": "#fff", "#fff": "#111", "#123456": "#fff", "#ffcc00": "#111", "#0a7a5c": "#fff"} {
+		if got := buttonText(colour); got != want {
+			t.Errorf("%s: %s, want %s", colour, got, want)
+		}
+	}
+}
+
+func TestUnsubscribeFailurePagesSkipTheBrandReads(t *testing.T) {
+	e := emailPageFixtureEngine()
+	e.fail = "mutation recordOrganizationSuppression"
+	token, err := MintUnsubscribeToken(testSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign, AccountID: "org-1", EmailDigest: emailPagePayload().EmailDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := pageRequest(handlerFor(e), "POST", UnsubscribePath, token, "")
+	if rr.Code != 503 {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	for _, c := range e.calls {
+		if strings.HasPrefix(c.query, "query brandKitForAccount") || strings.HasPrefix(c.query, "query senderIdentitiesForAccount") || strings.HasPrefix(c.query, "query clientAccountById") {
+			t.Fatal("a failure page read its brand", c.query)
+		}
+	}
+}
+
+func TestAViewReadsTheBrandOnlyWhenItSaysUnavailable(t *testing.T) {
+	e, h := newEmailPageEngine("subscribed")
+	e.historical = map[string]any{"id": testTemplate, "accountId": "org-1", "createdAt": emailPagePayload().TemplateRevision, "textBody": "hello"}
+	pageRequest(h, "GET", ViewPath, emailPageToken(t, LinkView, emailPagePayload()), "")
+	for _, c := range e.calls {
+		if strings.HasPrefix(c.query, "query brandKitForAccount") || strings.HasPrefix(c.query, "query senderIdentitiesForAccount") {
+			t.Fatal("a view read the brand", c.query)
+		}
 	}
 }

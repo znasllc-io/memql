@@ -882,8 +882,9 @@ The pages carry the organization's look: its name in the page title, its logo
 button, read from the organization's brand kit. Anything in the kit that is not
 a plain hex colour, a saved png, jpeg or gif logo, or an `https://` logo address is left out, and a kit that
 cannot be read leaves the page plain; an opt-out page always works. A page that
-cannot help names the organization's default sender as the contact: that
-sender's Reply-To, else its address, never the installation's own identity.
+cannot help names the organization's oldest active sender as the contact (there
+is no default-sender setting): that sender's Reply-To, else its address, never
+the installation's own identity.
 When the organization has no sender of its own, or the link did not verify, the
 page says to reply to the email the link came from.
 
@@ -894,7 +895,12 @@ cluster's host and not the organization's own domain.
 
 A pending member can confirm from the preferences page, or from the view-in-browser
 copy of a confirmation email, only for 30 days after joining. Past that the page
-says the sign-up expired and offers no button. The unsubscribed pages offer a link
+says the sign-up expired and offers no button. "Subscribe again" in a
+confirmation-required audience starts a new, unconfirmed membership and waits on
+the audience's joined automation to send its confirmation email; the page says
+"Check your inbox to confirm." and nothing mails the person until they confirm.
+Only the explicit "Confirm subscription" button confirms; pressing "Subscribe
+again" a second time changes nothing. The unsubscribed pages offer a link
 back to the member's preferences page.
 
 The one-click unsubscribe endpoint retains its existing RFC 8058 behavior.

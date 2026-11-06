@@ -181,8 +181,7 @@ func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Req
 	if err != nil {
 		h.logger.Error("campaigns: unsubscribe coordination unavailable", "error", err)
 		rw.Header().Set("Retry-After", "30")
-		brand, _ := h.pageFor(r.Context(), payload)
-		h.renderFor(rw, 503, pageRetry, "", brand, "")
+		h.render(rw, 503, pageRetry, "") // the database just failed: no more reads for decoration
 		return
 	}
 	defer hold.Release()
@@ -191,8 +190,7 @@ func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Req
 	if err := h.suppress(r.Context(), payload); err != nil {
 		h.logger.Error("campaigns: unsubscribe failed after a valid token", "campaign", payload.CampaignID, "error", err)
 		rw.Header().Set("Retry-After", "30")
-		brand, _ := h.pageFor(r.Context(), payload)
-		h.renderFor(rw, http.StatusServiceUnavailable, pageRetry, "", brand, "")
+		h.render(rw, http.StatusServiceUnavailable, pageRetry, "")
 		return
 	}
 	brand, back := h.pageFor(r.Context(), payload)
@@ -275,19 +273,17 @@ func (h *UnsubscribeHandler) pageFor(ctx context.Context, payload UnsubscribePay
 	if payload.AccountID == "" || payload.EmailDigest == "" {
 		return pageBrand{}, ""
 	}
-	owner := ownerActorContext(ctx, payload.OwnerUserID)
-	org, err := h.store.AccountName(owner, payload.AccountID)
-	if err != nil {
-		h.logger.Warn("campaigns: an unsubscribe page could not read its organization's name", "account", bare(payload.AccountID), "error", err)
-		org = ""
-	}
-	brand := h.store.brandFor(owner, h.logger, payload.AccountID, org)
-	back, err := PreferencesURL(h.cfg, LinkPayload{OwnerUserID: payload.OwnerUserID, RecipientID: bare(payload.RecipientID), CampaignID: bare(payload.CampaignID), AccountID: payload.AccountID, EmailDigest: payload.EmailDigest})
-	if err != nil {
-		back = ""
-	}
-	return brand, back
+	// The brand is a courtesy on a page that must always work, so its reads get
+	// a short deadline of their own: a slow database costs the page its brand,
+	// not its answer.
+	ctx, cancel := context.WithTimeout(ctx, brandReadTimeout)
+	defer cancel()
+	brand := h.store.pageBrandFor(ownerActorContext(ctx, payload.OwnerUserID), h.logger, payload.AccountID)
+	return brand, preferencesLinkFor(h.cfg, h.logger, LinkPayload{OwnerUserID: payload.OwnerUserID, RecipientID: payload.RecipientID, CampaignID: payload.CampaignID, AccountID: payload.AccountID, EmailDigest: payload.EmailDigest})
 }
+
+// brandReadTimeout bounds what an unsubscribe page spends reading its brand.
+const brandReadTimeout = 3 * time.Second
 
 // render writes a minimal self-contained page. No external assets beyond the
 // organization's own logo: this is rendered in a browser reached from a link in
@@ -324,6 +320,12 @@ func (h *UnsubscribeHandler) renderFor(rw http.ResponseWriter, status int, page 
 	writeBrandedPage(rw, status, brand.title("Unsubscribe", "Unsubscribe from %s"), body, brand)
 }
 
+// pageCSP is the policy of these pages. images, when given, is the one thing a
+// branded page adds: where its logo may load from.
+func pageCSP(images string) string {
+	return "default-src 'none'; " + images + "style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
+}
+
 func emailPageHeaders(rw http.ResponseWriter) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.Header().Set("Cache-Control", "no-store")
@@ -331,7 +333,7 @@ func emailPageHeaders(rw http.ResponseWriter) {
 	// frame or to have a script injected into. It renders nothing but
 	// fixed text and one escaped token, and says so to the browser too.
 	rw.Header().Set("X-Content-Type-Options", "nosniff")
-	rw.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+	rw.Header().Set("Content-Security-Policy", pageCSP(""))
 	rw.Header().Set("Referrer-Policy", "no-referrer")
 
 }
@@ -354,7 +356,7 @@ func writeBrandedPage(rw http.ResponseWriter, status int, title, body string, br
 	}
 	logo := ""
 	if brand.Logo != "" {
-		rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		rw.Header().Set("Content-Security-Policy", pageCSP("img-src data: https:; "))
 		style += `.logo{display:block;max-width:14rem;max-height:4rem;margin:0 0 1.5rem}`
 		logo = `<img class="logo" src="` + html.EscapeString(brand.Logo) + `" alt="` + html.EscapeString(brand.Org) + `">`
 	}

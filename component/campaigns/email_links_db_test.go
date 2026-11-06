@@ -45,7 +45,7 @@ func TestEmailLinkPagesDB(t *testing.T) {
 		if got := storedRecipient(t, n.store, n.owner, rid); str(got, "subscriptionStatus") != "subscribed" || str(got, "confirmedAt") == "" {
 			t.Fatal(got)
 		}
-		eventID := sha256Hex(fmt.Sprintf("email-confirm\x00%s\x00%d", rid, p.ExpiresAt))
+		eventID := sha256Hex(fmt.Sprintf("email-confirm\x00%s\x00%d\x00%d", rid, p.ExpiresAt, storedRecipientJoined(t, n.store, n.owner, rid).UnixNano()))
 		var count int
 		if err := n.db.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:campaigns:consentEvent' AND id = ?`, "v1:campaigns:consentEvent:"+eventID).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -233,4 +233,9 @@ func (e pausedEmailGrant) Execute(ctx context.Context, q string) (any, error) {
 		}
 	}
 	return e.Engine.Execute(ctx, q)
+}
+
+func storedRecipientJoined(t *testing.T, store *Store, ctx context.Context, rid string) time.Time {
+	t.Helper()
+	return templateTime(storedRecipient(t, store, ctx, rid)["joinedAt"])
 }
