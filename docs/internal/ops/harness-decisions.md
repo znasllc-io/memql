@@ -4112,6 +4112,15 @@ separate verification against the selected deployment.
   build: `TestEngineManifestCompilesForEveryOpening` and
   `TestEngineManifestRequiresConsentForMacEditorHosts`, with the reviewed contract
   in `test/fixtures/pipelines/delivery-after-bootstrap.yaml`.
+- *Memory, found by the first run (2026-11-06).* `go-checks` ran on CyberPC and
+  was killed for memory in `make arch-model`: with no `memoryMiB`, a cluster
+  container gets the `memql-pipelines` LimitRange's 4 GiB and a Fleet container
+  Cockpit's 2 GiB (`DefaultPipelineContainerMemoryMiB`). Every pool step now
+  names `memoryMiB` (4096 where it had relied on the cluster default), pinned by
+  `TestEngineManifestCompilesForEveryOpening`. A machine whose
+  `pipelines.container_memory_mib` is lower refuses the step before it starts
+  (`refused_before_start`), and the pool runs it on the cluster: the Fleet takes
+  these steps only once a machine's policy allows their memory.
 - *Not yet verified.* No push run has completed under the new placement. Linux
   container capacity on the Fleet was one machine (CyberPC) on 2026-11-05. The
   cost guard still writes version-1 admission, so a cost hold still stops Fleet

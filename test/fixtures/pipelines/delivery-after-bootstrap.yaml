@@ -195,6 +195,7 @@ pipeline:
         # authoring-surface comparison; a first push has no predecessor.
         - name: go-checks
           placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -407,6 +408,7 @@ pipeline:
             test "$status" -eq 0
         - name: npm-vulnerabilities
           placement: pool
+          memoryMiB: 4096
           timeout: 30m
           artifacts: [.memql-security/npm]
           run: |
@@ -501,6 +503,7 @@ pipeline:
         # component/identity/web, so it needs no stylesheet.
         - name: fuzz
           placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -512,6 +515,7 @@ pipeline:
         # ci.yml os-checks. Network setup may retry; tests run once.
         - name: os-checks
           placement: pool
+          memoryMiB: 4096
           # The full UI suite can exceed the default 20-minute deadline on
           # shared runners; retain time for its typecheck and production build.
           timeout: 30m
@@ -576,6 +580,7 @@ pipeline:
           run: bash scripts/ci/editor-site.sh
         - name: editor-packages
           placement: pool
+          memoryMiB: 4096
           when: { bucket: editors }
           timeout: 30m
           artifacts: [.memql-editor]
@@ -599,30 +604,35 @@ pipeline:
           when: { bucket: editors }
           timeout: 25m
           placement: pool
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop 1.91.0
         - name: vscode-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
           placement: pool
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh vscode-desktop stable
         - name: productivity-web-linux-stable
           when: { bucket: editors }
           timeout: 25m
           placement: pool
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-web stable
         - name: productivity-desktop-linux-1-91-0
           when: { bucket: editors }
           timeout: 25m
           placement: pool
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop 1.91.0
         - name: productivity-desktop-linux-stable
           when: { bucket: editors }
           timeout: 25m
           placement: pool
+          memoryMiB: 4096
           artifacts: [.memql-host-reports]
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: productivity-web-darwin-stable
@@ -673,6 +683,7 @@ pipeline:
             make viewkit-test
         - name: mcp-conformance
           placement: pool
+          memoryMiB: 4096
           services: [postgres]
           timeout: 30m
           run: |
@@ -692,6 +703,7 @@ pipeline:
             go test -count=1 -tags agent -timeout=300s -run 'TestComputerPermissionDBFullApprovalAndForwardedListing|TestWorkDBComputerScopeInputIsModelCorrectable' ./integrations/agent/worker/ ./app/
         - name: proving
           placement: pool
+          memoryMiB: 4096
           services: [postgres]
           timeout: 30m
           artifacts: [.memql-proving]
@@ -1005,6 +1017,7 @@ pipeline:
             python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=5120 --threads=1 --output-dir=.memql-security/codeql-javascript
         - name: codeql-python
           placement: pool
+          memoryMiB: 4096
           timeout: 45m
           artifacts: [.memql-security/codeql-python]
           run: |
@@ -1019,6 +1032,7 @@ pipeline:
       steps:
         - name: sbom
           placement: pool
+          memoryMiB: 4096
           timeout: 60m
           artifacts: [.memql-security/sbom]
           run: |

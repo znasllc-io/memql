@@ -507,6 +507,17 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if step.Placement == pipelines.PlacementPool && (step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
 					t.Errorf("pool step %s must carry no verification flag or credential: %+v", step.Key, step)
 				}
+				// A pool step names its memory, because the two places it can run
+				// default differently: the memql-pipelines namespace's LimitRange
+				// gives a cluster container 4 GiB, a Fleet machine's Cockpit 2 GiB
+				// (DefaultPipelineContainerMemoryMiB). go-checks passed on the
+				// cluster and was killed for memory on a Fleet machine on
+				// 2026-11-06 with neither number in the manifest. Named, a machine
+				// whose policy allows less refuses the step before it starts and the
+				// pool falls back to the cluster instead of failing it.
+				if step.Placement == pipelines.PlacementPool && step.MemoryMiB == 0 {
+					t.Errorf("pool step %s must declare memoryMiB; the cluster and a Fleet machine default differently", step.Key)
+				}
 				if len(step.Needs) > 0 {
 					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)
 				}
