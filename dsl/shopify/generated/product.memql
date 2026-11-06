@@ -29,7 +29,8 @@ concept product {
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.
   updatedAt  datetime!
-  /// When MemQL last wrote this row. Drift is (now - syncedAt) and the store's health reports it.
+  /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that
+  /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.
   syncedAt   datetime!
   /// Tombstone. A delete topic, or a fetch that finds nothing, sets it; the row and its history stay.
   deleted    bool

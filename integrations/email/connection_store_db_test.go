@@ -90,3 +90,103 @@ func TestEmailConnectionStateIsEncryptedAndSerializedAcrossReplicas(t *testing.T
 		t.Fatal("raw owner write bypassed connection checks")
 	}
 }
+
+// A callback that changes nothing writes nothing (connectionStore.change).
+// Sealing draws a fresh nonce, so before this every such callback stored a new
+// ciphertext and appended a version of a state that had not moved; the email
+// maintenance pass makes several per organization on a schedule. Two stores
+// stand in for two replicas: the comparison is against the row, not against
+// anything one process remembers.
+func TestAnUnchangedEmailConnectionStateIsNotRewritten(t *testing.T) {
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ac", 32))
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	defer db.Close()
+	if err := db.PingContext(context.Background()); err != nil {
+		dbtest.Unreachable(t, "email connections", dbtest.DSN(), err)
+	}
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	stores := make([]*connectionStore, 2)
+	for n := range stores {
+		e, err := memql.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = e.Init(memorynodes.DefaultRegistry()); err != nil {
+			t.Fatal(err)
+		}
+		clock := time.Date(2029, 1, 1, 0, n, 0, 0, time.UTC)
+		stores[n] = &connectionStore{engine: NewConfigWriter(e), gateDB: replicaGatePool(t), now: func() time.Time { return clock }}
+	}
+	key := fmt.Sprintf("feedback-%d", time.Now().UnixNano())
+	rowID := "v1:email:connectionState:" + emailStateID(key)
+	versions := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE concept = ? AND id = ?`, "v1:email:connectionState", rowID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = ? AND id = ?`, "v1:email:connectionState", rowID)
+	})
+	next := time.Date(2029, 1, 1, 0, 5, 0, 0, time.UTC)
+
+	// A state that does not exist yet is written even by a callback that
+	// sets nothing: creating the row is the point of that call.
+	var created azureFeedbackConnection
+	if err := stores[0].change(context.Background(), key, &created, func(bool) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := versions(); got != 1 {
+		t.Fatalf("a first change must create the row, got %d version(s)", got)
+	}
+	configure := func(s *connectionStore, status string) error {
+		var c azureFeedbackConnection
+		return s.change(context.Background(), key, &c, func(bool) error {
+			c.AccountID, c.PlanID, c.Status, c.Applied, c.NextAttemptAt = "acme", "plan-1", status, true, next
+			return nil
+		})
+	}
+	if err := configure(stores[0], "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if got := versions(); got != 2 {
+		t.Fatalf("a real change must append, got %d version(s)", got)
+	}
+
+	// The same values again, from either replica, and a callback that only
+	// reads: three no-ops, no versions.
+	if err := configure(stores[1], "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if err := configure(stores[0], "pending"); err != nil {
+		t.Fatal(err)
+	}
+	var observed azureFeedbackConnection
+	if err := stores[1].change(context.Background(), key, &observed, func(found bool) error {
+		if !found || observed.Status != "pending" {
+			t.Errorf("the callback must see the stored state: found=%v status=%q", found, observed.Status)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := versions(); got != 2 {
+		t.Fatalf("callbacks that changed nothing appended %d version(s)", got-2)
+	}
+
+	// A changed field is still a write, and the other replica reads it.
+	if err := configure(stores[1], "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if got := versions(); got != 3 {
+		t.Fatalf("a changed status must append, got %d version(s)", got)
+	}
+	var stored azureFeedbackConnection
+	if found, _, err := stores[0].read(context.Background(), key, &stored); err != nil || !found || stored.Status != "ready" {
+		t.Fatalf("cross-replica read after a change: found=%v status=%q err=%v", found, stored.Status, err)
+	}
+}

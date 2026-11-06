@@ -1,13 +1,18 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
+	"time"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
 // mirror.go -- the connector's own write of a MirrorWrite.
@@ -86,8 +91,33 @@ func mirrorInsert(w memqlsync.MirrorWrite) (string, error) {
 // at the origin would otherwise stop every domain behind it, and a sweep
 // that healed nothing because of one row is worse than one that healed
 // all but that row and said so.
+//
+// A ROW THE MIRROR ALREADY HOLDS IS NOT WRITTEN AGAIN. A sweep stamps every
+// row it maps with syncedAt = the fetch time, and a type Shopify publishes no
+// version for (about forty of the sixty-five, originVersion) with that time
+// as updatedAt too, so every pass appended a version of every row whether or
+// not the origin had changed anything: about 3,400 a day each for
+// quantityRule and priceListPrice across 170 rows on production (2026-11-06),
+// re-listed hourly. mirrorHolds skips the write when the stored row already
+// carries every value the write states, those two stamps aside.
+//
+// What a skip costs: syncedAt on a row a pass found unchanged keeps the time
+// of the last write that changed it, so it says "last changed here", not
+// "last confirmed against the origin". Nothing reads it to judge freshness:
+// the store's health reports the domain's sync state (lastReconcileAt and
+// the pass's drift count), never a row's syncedAt. And `healed` -- with the
+// Drifted count the report carries -- now counts the rows a pass actually
+// changed, which is what drift was always documented to mean; it used to
+// count every row a pass saw.
+//
+// The version guard is untouched: Apply's writes still go through the
+// runtime's, and a skipped heal writes nothing for it to compare. The read
+// runs under the connector actor, the one identity the mirror admits.
 func (c *Connector) heal(ctx context.Context, writes []memqlsync.MirrorWrite) (healed int, failed int) {
 	for _, w := range writes {
+		if c.mirrorHolds(ctx, w) {
+			continue
+		}
 		if err := c.writeMirror(ctx, w); err != nil {
 			failed++
 			c.logger.Warn("shopify: reconcile could not heal a row",
@@ -97,4 +127,180 @@ func (c *Connector) heal(ctx context.Context, writes []memqlsync.MirrorWrite) (h
 		healed++
 	}
 	return healed, failed
+}
+
+// mirrorHolds reports whether the mirror already holds what w would write
+// (heal). It is proof or nothing: a retirement, a row that is not there, a
+// read that fails or a value it cannot compare all answer false, and the
+// write goes ahead exactly as it did before this check existed.
+//
+// The read is the runtime's own raw concept read (component/datasync
+// StoredVersion), so it needs no generated query and no cluster-owner filter
+// the connector actor would fail, and it goes to the database rather than to
+// a replica's result cache (memql.ContextWithFreshRead): a sibling's eviction
+// is asynchronous, and a stale cached row could hide a change.
+func (c *Connector) mirrorHolds(ctx context.Context, w memqlsync.MirrorWrite) bool {
+	concept, rowID := strings.TrimSpace(w.Concept), strings.TrimSpace(w.RowId)
+	if w.Retire || concept == "" || rowID == "" || c.engine == nil {
+		return false
+	}
+	q := fmt.Sprintf("concept==%s && id==%s", concept, langparser.QuoteString(rowID))
+	res, err := c.engine.Execute(memql.ContextWithFreshRead(connectorContext(ctx)), q)
+	if err != nil || res == nil || res.Bundle == nil {
+		return false
+	}
+	// The row is matched by its own id rather than taken as the only node:
+	// an id is bare-ified on egress, and a bundle may carry other nodes.
+	var stored map[string]any
+	for _, node := range res.Bundle.GetNodes() {
+		if memql.BareShortId(node.GetId()) != memql.BareShortId(rowID) {
+			continue
+		}
+		if stored != nil {
+			return false
+		}
+		stored = node.GetPayload().AsMap()
+	}
+	return mirrorPayloadHolds(stored, w.Payload, fetchTimeVersion(w))
+}
+
+// fetchTimeVersion reports whether the write's updatedAt is the FETCH TIME
+// rather than the origin's version: the type declares no version field, or
+// the fetched object carried none (originVersion then stamps the fetch time,
+// the same instant mapObject writes as syncedAt). Such an updatedAt moves on
+// every pass and says nothing about the row, so it is not compared. An origin
+// version IS compared: it moves only when Shopify changed the row, and the
+// apply guard reads it.
+func fetchTimeVersion(w memqlsync.MirrorWrite) bool {
+	if spec := generated.Types[generated.ConceptFromID(w.Concept)]; spec == nil || spec.VersionField == "" {
+		return true
+	}
+	updated, _ := w.Payload["updatedAt"].(string)
+	synced, _ := w.Payload["syncedAt"].(string)
+	return updated != "" && updated == synced
+}
+
+// mirrorPayloadHolds compares a write with the stored payload the way the raw
+// insert would apply it: a top-level field the write omits keeps its stored
+// value, so only the fields it states are compared; a nested object it states
+// replaces the stored one whole, so a nested object must match key for key.
+// syncedAt is the pass's own stamp and is never compared.
+func mirrorPayloadHolds(stored, write map[string]any, ignoreUpdatedAt bool) bool {
+	if stored == nil {
+		return false
+	}
+	for key, value := range write {
+		if key == "syncedAt" || (key == "updatedAt" && ignoreUpdatedAt) {
+			continue
+		}
+		if !sameMirrorValue(stored[key], value) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameMirrorValue compares one stored value with one written value as JSON.
+//
+// The two sides arrive in different Go types for the same JSON -- the stored
+// one through a protobuf Struct (every number a float64), the written one from
+// the Admin decode (json.Number, strings, nested maps) -- so both are
+// re-encoded and decoded with UseNumber before comparing. Three equivalences
+// are allowed and nothing more: an absent value, null, "" and an empty list
+// are one unset value, as the engine reads them; two numbers are equal when
+// they are the same rational number (a 64-bit id that lost digits in a float64
+// is NOT equal, which makes it a write, the safe direction); and two RFC3339
+// strings naming the same instant are equal, in case a time is stored in a
+// different spelling than the origin sent.
+func sameMirrorValue(stored, written any) bool {
+	a, okA := mirrorJSON(stored)
+	b, okB := mirrorJSON(written)
+	return okA && okB && sameJSONValue(a, b)
+}
+
+func mirrorJSON(v any) (any, bool) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var out any
+	if err := d.Decode(&out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func unsetMirrorValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return x == ""
+	case []any:
+		return len(x) == 0
+	}
+	return false
+}
+
+func sameJSONValue(a, b any) bool {
+	if unsetMirrorValue(a) || unsetMirrorValue(b) {
+		return unsetMirrorValue(a) && unsetMirrorValue(b)
+	}
+	switch x := a.(type) {
+	case json.Number:
+		y, ok := b.(json.Number)
+		if !ok {
+			return false
+		}
+		if x == y {
+			return true
+		}
+		rx, okX := new(big.Rat).SetString(string(x))
+		ry, okY := new(big.Rat).SetString(string(y))
+		return okX && okY && rx.Cmp(ry) == 0
+	case string:
+		y, ok := b.(string)
+		if !ok {
+			return false
+		}
+		if x == y {
+			return true
+		}
+		tx, errX := time.Parse(time.RFC3339Nano, x)
+		ty, errY := time.Parse(time.RFC3339Nano, y)
+		return errX == nil && errY == nil && tx.Equal(ty)
+	case bool:
+		y, ok := b.(bool)
+		return ok && x == y
+	case []any:
+		y, ok := b.([]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !sameJSONValue(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		y, ok := b.(map[string]any)
+		if !ok {
+			return false
+		}
+		for key, value := range x {
+			if !sameJSONValue(value, y[key]) {
+				return false
+			}
+		}
+		for key, value := range y {
+			if _, seen := x[key]; !seen && !unsetMirrorValue(value) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }

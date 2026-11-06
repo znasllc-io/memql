@@ -64,6 +64,25 @@ engine read path merges this table with `MemoryNodes` before filtering, sorting,
 authorization and pagination. Its `createdAt` remains the observation version,
 so live feeds and reads from another replica order updates consistently.
 
+A worker registration's observation fields are `lastSeenAt`,
+`lastConnectedFromIP`, `connectedNodeId`, `activeCount`, `hardware`, `rttMs`,
+`rttAt`, `clockSkewMs` and `credentialExpiresAt`, plus, since migration
+`20261106150000_worker_registration_observations`, `sharingActivity` (the
+stream holder's model-call counts, republished every 15 s), `capacity` and
+`setup` (both re-asserted on every heartbeat flush with a fresh `reportedAt`).
+Before that migration each of the last three appended a registration version on
+every report. Adding a field to an existing concept's list needs no reader
+handshake: readers already merge `memory_liveness` for every listed concept
+(`HasLiveness` in `component/database/memory-nodes/liveness.go`). Adding a
+concept does. `TestWorkerLiveReportsAreObservationsNotRegistrationVersions`
+(`component/memql`) drives the three reports from two engines and counts both
+tables. A machine's permission snapshot is not an observation: a changed
+decision is history. The heartbeat writes it only when it differs from the
+snapshot the stream last wrote apart from `checked_at`, the baseline being the
+one its own register wrote (`component/worker/server.go`,
+`TestHeartbeatPermissionsAreWrittenOnlyWhenTheEvidenceChanges`). Before that,
+every beat's fresh `checked_at` appended a version.
+
 The first record and changes outside the closed observation-field list still
 append to `MemoryNodes`. A business change clears its preceding observation in
 the same transaction. Every engine write to these concepts carries a version
@@ -102,8 +121,20 @@ Reputation flushes acknowledge successfully saved windows and skip unchanged
 ones; failed saves remain eligible for retry. The magic-link sweep excludes
 already consumed requests. Package polling writes only a changed upstream head
 or availability, and seed materialization compares against a fresh read rather
-than a replica's cached result. These guards keep normal idle polling from
-creating business history.
+than a replica's cached result. A source credential's `lastUsedAt` is stamped
+only when the stored value is more than an hour old, read off the row the
+unseal already fetched (`credentialTouchDue`, `component/packages`), so the
+ten-minute poll and pipeline token minting no longer append a credential
+version on every use. A sealed email connection state (`v1:email:connectionState`)
+is re-sealed and written only when its re-serialized plaintext differs from what
+was read: sealing draws a fresh nonce, so every maintenance callback that
+changed nothing used to store a new ciphertext (`connectionStore.change`,
+`integrations/email`). A Shopify reconciliation pass reads each row it maps
+and writes only those that differ from the mirror, apart from its own
+`syncedAt` and a fetch-time `updatedAt` (`heal` and `mirrorHolds`,
+`integrations/shopify/mirror.go`); an hourly re-list of an unchanged price list
+used to append a version of every price and quantity rule. These guards keep
+normal idle polling from creating business history.
 
 ## Shared row schemas
 

@@ -51,8 +51,10 @@ Three properties are worth knowing before anything else:
   truncate, arrive out of order and are not guaranteed; the API does not.
 - **Reconciliation is a requirement.** Shopify states that webhook delivery
   is not guaranteed. Every domain is therefore re-checked on a cadence, and
-  the rows a pass finds are counted as *drift* -- which is the only evidence
-  anyone gets that deliveries are being lost.
+  the rows a pass finds different from the mirror are written and counted as
+  *drift* -- which is the only evidence anyone gets that deliveries are being
+  lost. A row the mirror already holds is read, compared and left alone, so a
+  quiet store's passes write nothing.
 
 ---
 
@@ -646,8 +648,13 @@ ingestion for one merchant while their deliveries keep being staged.
 ### What the numbers mean
 
 - **driftLast / driftTotal** -- rows a reconciliation pass wrote that live
-  delivery should have carried. A steady non-zero number means deliveries are
-  being lost; look at the subscription list and the store's health next.
+  delivery should have carried. A pass compares each row it maps with the
+  stored one and writes only those that differ, setting aside its own
+  `syncedAt` stamp and, for a type Shopify publishes no version for, the fetch
+  time that stands in for `updatedAt`; so zero is the healthy reading and a
+  row's `syncedAt` is when it last changed here, not when a pass last looked.
+  A steady non-zero number means deliveries are being lost; look at the
+  subscription list and the store's health next.
 - **staleWrites** -- writes refused because the stored row was newer. Ones
   and twos are normal (Shopify redelivers). A climbing number means something
   is replaying old deliveries.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -222,6 +223,10 @@ func (s *server) admitRegistration(
 
 	streamCtx, cancel := context.WithCancel(stream.Context())
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
+	// upsertRegistration just wrote this snapshot to the row, so it is the
+	// baseline the first heartbeat's report is compared with
+	// (permissionsWritten).
+	session.permissionsWritten = registration.Permissions
 	// The credential's expiry follows the stream that it admitted (design
 	// D4). It is taken from the resolved identity rather than re-read,
 	// because this is the value the interceptor actually admitted on -- a
@@ -525,6 +530,20 @@ type streamSession struct {
 	// last write held it back, and the beats after it carry the same steps,
 	// so without the flag it would wait for the batch interval after all.
 	setupPending bool
+	// permissionsWritten is the permission snapshot this stream last saw land
+	// on the registration row; a heartbeat report that matches it apart from
+	// checked_at is not written again (handleHeartbeat). It lives on the
+	// SESSION, and admitRegistration seeds it with the snapshot the Register
+	// message carried, because the register path has just written exactly
+	// that to the row (createWorkerRegistration or refreshWorkerRegistration,
+	// which stores an absent report as {} and seeds nil here, so the first
+	// reported snapshot is written). That is what makes a reconnect, on this
+	// replica or another, write at most once: the new session starts from the
+	// row it wrote, not from an empty memory. Only the stream holder receives
+	// this machine's beats, and nothing else writes the field while the
+	// stream lives, so no other replica's state is needed. Touched only on
+	// the recv goroutine, like lastPersistedAt, so it needs no lock.
+	permissionsWritten map[string]any
 
 	// pingMu guards the ONE outstanding Ping (epic memql#5218, D11). Two
 	// goroutines meet here -- runPinger writes a fresh id on its own timer,
@@ -1013,14 +1032,26 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 		return
 	}
 
+	// A PERMISSION SNAPSHOT IS WRITTEN WHEN IT SAYS SOMETHING NEW. The cockpit
+	// probes on every beat and stamps each report with a fresh checked_at, so
+	// writing every report appended a registration version per machine per
+	// beat (about 1,250 a day on production, 2026-11-06) while the decisions
+	// in it had not moved. The live registry still takes every report; the
+	// row is written when the snapshot differs, checked_at aside, from the
+	// one this stream last saw land (permissionsWritten). The stored
+	// checked_at is therefore when the stored decision was measured, not the
+	// newest probe that agreed with it. A failed write leaves
+	// permissionsWritten alone, so the next beat retries exactly as before.
 	if hb.GetPermissions() != nil {
 		snapshot := permissionStatusToMap(hb.GetPermissions())
 		s.worker.mu.Lock()
 		s.worker.Permissions = snapshot
 		s.worker.mu.Unlock()
-		if s.server.store != nil {
+		if s.server.store != nil && !samePermissionDecision(s.permissionsWritten, snapshot) {
 			if err := s.server.store.UpdatePermissions(s.ctx, s.worker.RegistrationId, s.worker.OwnerUserId, snapshot); err != nil {
 				s.server.logger.Warn("worker: permission snapshot persistence failed; next heartbeat will retry", "registration_id", s.worker.RegistrationId, "error", err)
+			} else {
+				s.permissionsWritten = snapshot
 			}
 		}
 	}
@@ -1607,9 +1638,34 @@ func permissionStatusToMap(p *memqlv1.PermissionStatus) map[string]any {
 	a, screen, x := state(p.GetAccessibilityState(), p.GetAccessibility()), state(p.GetScreenRecordingState(), p.GetScreenRecording()), state(p.GetX11DisplayState(), p.GetX11Display())
 	result := map[string]any{"accessibility": a == "granted", "screen_recording": screen == "granted", "x11_display": x == "granted", "accessibility_state": a, "screen_recording_state": screen, "x11_display_state": x, "detail": p.GetDetail(), "probe_context": p.GetProbeContext()}
 	if at := p.GetCheckedAt(); at != nil && at.IsValid() {
-		result["checked_at"] = at.AsTime().UTC().Format(time.RFC3339Nano)
+		result[permissionCheckedAtKey] = at.AsTime().UTC().Format(time.RFC3339Nano)
 	}
 	return result
+}
+
+// permissionCheckedAtKey is the one key of a permission snapshot that moves on
+// every probe without the evidence moving.
+const permissionCheckedAtKey = "checked_at"
+
+// samePermissionDecision reports whether a reported snapshot says what the
+// written one says: every decision, legacy flag, detail and probe context
+// equal, and only checked_at allowed to differ. A nil side is never the same,
+// so a stream that has written nothing writes its first report. Both maps come
+// from permissionStatusToMap, so their values are strings and bools.
+func samePermissionDecision(written, reported map[string]any) bool {
+	if written == nil || reported == nil {
+		return false
+	}
+	strip := func(snapshot map[string]any) map[string]any {
+		out := make(map[string]any, len(snapshot))
+		for key, value := range snapshot {
+			if key != permissionCheckedAtKey {
+				out[key] = value
+			}
+		}
+		return out
+	}
+	return reflect.DeepEqual(strip(written), strip(reported))
 }
 
 func platformHostname(p *memqlv1.PlatformInfo) string {

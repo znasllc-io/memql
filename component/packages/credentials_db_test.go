@@ -242,6 +242,22 @@ func cardFor(t *testing.T, eng *memqlengine.MemQLEngine, ctx context.Context, cr
 	return rows[0]
 }
 
+// credentialVersions counts the stored versions of one credential, in both row
+// tables, so the count does not depend on which one a concept lands in.
+func credentialVersions(t *testing.T, db *bun.DB, credentialId string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT (SELECT count(*) FROM "MemoryNodes" WHERE id = ?) + (SELECT count(*) FROM "SecretMemoryNodes" WHERE id = ?)`,
+		credentialId, credentialId).Scan(&n); err != nil {
+		t.Fatalf("count credential versions: %v", err)
+	}
+	if n == 0 {
+		t.Fatalf("no stored version of %q: the count would pass over nothing", credentialId)
+	}
+	return n
+}
+
 // TestCredentialResolutionIsOwnerScopedOverRealRows is the acceptance run for
 // D10 over a real read gate.
 func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
@@ -362,6 +378,14 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 		t.Fatalf("an anonymous probe sends no bearer, got: %v", authHeaders(reqs))
 	}
 
+	// The fetch and the poll below land inside the hour of that stamp, so
+	// neither writes the credential again (credentialTouchDue). Counted in
+	// versions rather than read off lastUsedAt, which has whole-second
+	// resolution and would read unchanged for a restamp in the same second.
+	// This is the row-level half: it fails if the sealed shape stops
+	// projecting lastUsedAt, which no fake engine can see.
+	stamped := credentialVersions(t, db, credentialId)
+
 	// (4) A cluster owner deploying A's package fetches under A's credential:
 	// the resolver runs under the PACKAGE owner, not the caller.
 	gh.reset()
@@ -388,6 +412,9 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	}
 	if got := rowString(mustPackage(t, s, ctxA, pkgA), "latestKnownVersion"); got != headSha {
 		t.Fatalf("the poll must record the head it read, got %q", got)
+	}
+	if got := credentialVersions(t, db, credentialId); got != stamped {
+		t.Fatalf("a fetch and a poll inside the hour of the last stamp wrote %d credential version(s); lastUsedAt is stamped at most once an hour", got-stamped)
 	}
 
 	// (2) B registers a package naming A's credential: refused by name,

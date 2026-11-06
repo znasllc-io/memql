@@ -239,7 +239,9 @@ shape sourceCredential sourceCredentialCard {
 /// user token expires in eight hours, so a resolution that could read only `encryptedValue` would
 /// send a person back through GitHub every working day. `kind` decides which shape of credential
 /// the resolver is holding, and therefore whether a 401 reads as "this token cannot see it" or as
-/// reconnect_required.
+/// reconnect_required. `lastUsedAt` is here so a fetch can see how old the heartbeat is from the
+/// row it already read, and stamp it only when an hour has passed (component/packages
+/// credentialTouchDue).
 @row
 shape sourceCredential sourceCredentialSealed {
   revokedAt
@@ -254,6 +256,7 @@ shape sourceCredential sourceCredentialSealed {
   refreshToken
   expiresAt
   installationIds
+  lastUsedAt
 }
 
 /// Full projection of v1:platform:package -- the OS packages list and detail.
