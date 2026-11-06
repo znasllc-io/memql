@@ -1009,7 +1009,7 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 // documented behaviour for an untied campaign, and an archived client must
 // not be able to stop a send.
 func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity, recipientID string) RenderOptions {
-	accountName, err := w.store.AccountName(ownerCtx, campaign.AccountID)
+	accountName, err := w.emailOrganizationName(ownerCtx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns worker: could not resolve the campaign's account name for {{accountName}}",
 			"campaign", campaign.ID, "error", err)
@@ -1251,6 +1251,16 @@ func (w *Worker) stopJob(systemCtx context.Context, job SendJob, status, reason 
 // Every use of this context in this package is a named construct over
 // operational campaign state or a verified inbound delivery; nothing here
 // reads a recipient under it.
+// emailOrganizationName is the name an organization's own email shows for it
+// ({{accountName}}), read as the system. A send runs as the owner of its
+// campaign or automation, a borrowed bare user, and the account concept hides
+// from that user every organization it did not create, so the tag rendered empty
+// for exactly the organizations an operator or a deploy created. The account id
+// is the campaign's own, so the read answers nothing the email would not show.
+func (w *Worker) emailOrganizationName(ctx context.Context, accountID string) (string, error) {
+	return w.store.AccountName(w.systemActorContext(ctx), accountID)
+}
+
 func (w *Worker) systemActorContext(ctx context.Context) context.Context {
 	claims := map[string]any{"sub": systemCampaignsActor, "role": "owner"}
 	ctx = auth.ContextWithClaims(ctx, claims)
