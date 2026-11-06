@@ -7,6 +7,10 @@
  * lower-case hex SHA-256 of what is left. It is a stored format, so a test
  * pins it against values the Go function produced. It returns "" for an
  * address the engine would not digest, the same answer the engine gives.
+ *
+ * Known gaps, backstopped by the engine refusing a duplicate itself: JS and Go
+ * lower-case a few non-ASCII letters differently, and JS `trim` strips U+FEFF
+ * where Go's `TrimSpace` does not (and the reverse for U+0085).
  */
 export function normalizeAddress(address: string): string {
   const trimmed = address.trim().toLowerCase();

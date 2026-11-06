@@ -53,9 +53,11 @@ export function useAzureEmailCall(accountId: string) {
   const [error, setError] = useState("");
   const epoch = useRef(0);
   const pending = useRef<AbortController | null>(null);
+  // The timed re-check in flight, if any. A request the person makes ends it first.
+  const quietRead = useRef<AbortController | null>(null);
   useEffect(() => {
     epoch.current++; setBusy(false); setError("");
-    return () => { epoch.current++; pending.current?.abort(); pending.current = null; };
+    return () => { epoch.current++; pending.current?.abort(); pending.current = null; quietRead.current?.abort(); quietRead.current = null; };
   }, [connection, accountId]);
   /** Stop whatever is being asked, retries included, and let the next request start. */
   const cancel = useCallback(() => {
@@ -64,6 +66,7 @@ export function useAzureEmailCall(accountId: string) {
   }, []);
   const call = useCallback(async (action: string, options: Record<string, unknown> = {}, sessionId = ""): Promise<AzureEmailReply | null> => {
     if (!connection || pending.current) return null;
+    quietRead.current?.abort();
     const generation = epoch.current, request = new AbortController();
     pending.current = request; setBusy(true); setError("");
     try {
@@ -97,18 +100,21 @@ export function useAzureEmailCall(accountId: string) {
   }, [connection, accountId]);
   /**
    * A read that changes nothing on screen but its answer: no busy state, no error,
-   * no retries, and none while a request the person made is in flight. For timed
+   * no retries, and none while a request the person made is in flight. A request
+   * the person makes while it runs ends it, so the two never run together. For timed
    * re-checks, which must not disable or flicker anything. A failure answers null;
    * the next tick asks again.
    */
   const quiet = useCallback(async (action: string): Promise<AzureEmailReply | null> => {
-    if (!connection || pending.current) return null;
-    const generation = epoch.current;
+    if (!connection || pending.current || quietRead.current) return null;
+    const generation = epoch.current, read = new AbortController();
+    quietRead.current = read;
     try {
-      const row = (await connection.query.emailAzureSetup({ accountId, action, options: {}, sessionId: "" })).rows()[0];
+      const row = (await connection.query.emailAzureSetup({ accountId, action, options: {}, sessionId: "" }, { signal: read.signal })).rows()[0];
       const reply = row ? flatten(row) as unknown as AzureEmailReply : null;
-      return generation === epoch.current && reply && typeof reply.status === "string" ? reply : null;
+      return generation === epoch.current && !read.signal.aborted && reply && typeof reply.status === "string" ? reply : null;
     } catch { return null; }
+    finally { if (quietRead.current === read) quietRead.current = null; }
   }, [connection, accountId]);
   return { call, quiet, cancel, busy, error };
 }

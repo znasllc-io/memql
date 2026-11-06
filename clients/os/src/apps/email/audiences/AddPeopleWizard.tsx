@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
-import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { Button, ChoiceStack, Field, Input, Notice, Switch } from "../../../kit";
 import { Wizard } from "../../../kit/Wizard";
 import type { Stop } from "../../../kit/Rail";
@@ -13,7 +13,7 @@ import { useExistingPerson } from "./useExistingPerson";
 /** What each step is, under its name on the rail. */
 const PEOPLE_SUBTITLES: Readonly<Record<string, string>> = { how: "A CSV file or one address", file: "A CSV with an email column", report: "What the import found", address: "Who to add" };
 
-export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone, onOpenPerson }: { audience: AudienceRow; writes: CampaignWrites; uploads: UploadProvider; onBack: () => void; onDone: () => void; onOpenPerson: (address: string) => void }) {
+export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone, onOpenPerson }: { audience: AudienceRow; writes: CampaignWrites; uploads: UploadProvider; onBack: () => void; onDone: () => void; onOpenPerson: (person: Row) => void }) {
   const [how, setHow] = useState("");
   const [step, setStep] = useState("how");
   const [email, setEmail] = useState("");
@@ -37,7 +37,7 @@ export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone, onO
     catch (failure) { setError(refusalSentence(failure)); }
     finally { working.current = false; setBusy(false); if (input.current) input.current.value = ""; }
   }
-  async function add() { if (working.current) return; working.current = true; setBusy(true); try { if (await writes.addRecipient.add(audience, email, name, pending ? "pending" : "subscribed", confirming && !pending ? true : undefined)) onDone(); } finally { working.current = false; setBusy(false); } }
+  async function add() { if (working.current) return; working.current = true; setBusy(true); try { if (await writes.addRecipient.add(audience, email, name, pending ? "pending" : "subscribed", confirming && !pending ? agreed : undefined)) onDone(); } finally { working.current = false; setBusy(false); } }
   const order = ["how", ...(how === "file" ? ["file", "report"] : how === "address" ? ["address"] : [])];
   const bodies = {
     how: <ChoiceStack name="email-people-how" label="How" value={how} options={[{ value: "file", label: "Import a CSV file" }, { value: "address", label: "Add one address" }]} onChange={value => { importer.dismiss(); setHow(value); setStep(value); }} />,
@@ -49,8 +49,8 @@ export function AddPeopleWizard({ audience, writes, uploads, onBack, onDone, onO
   const failure = error || importer.error || writes.addRecipient.error;
   const notices = [
     failure ? <Notice key="refused" tone="warn" sentence={refusalSentence(failure)} /> : null,
-    step === "address" && existing.state === "taken" ? <Notice key="taken" tone="warn" sentence="This address is already in this audience."><Button onClick={() => onOpenPerson(email.trim())}>Show them in the list</Button></Notice> : null,
-    step === "address" && existing.state === "failed" ? <Notice key="unchecked" tone="warn" sentence={refusalSentence(existing.error)} /> : null,
+    step === "address" && existing.state === "taken" ? <Notice key="taken" tone="warn" sentence="This address is already in this audience."><Button onClick={() => { if (existing.person) onOpenPerson(existing.person); }}>Show them in the list</Button></Notice> : null,
+    step === "address" && existing.state === "failed" ? <Notice key="unchecked" tone="warn" sentence={refusalSentence(existing.error)}><Button onClick={existing.again}>Try again</Button></Notice> : null,
   ].filter(Boolean);
   return <Wizard title="Add people" icon={<UserPlus size={20} aria-hidden />} label="Adding people" back={{ label: audience.name, onSelect: onBack }} steps={steps} open={step} onOpen={setStep} status={{ word: busy ? how === "file" ? `Importing ${fileName}` : "Adding address" : step === "report" ? "Import finished" : "Add people", tone: busy ? "busy" : undefined }} notices={notices.length ? <>{notices}</> : undefined} acts={busy ? [] : step === "report" ? [{ label: "Done", tone: "primary", onAct: () => { importer.dismiss(); onDone(); } }] : [{ label: "Cancel", text: true, onAct: onBack }, ...(step === "file" ? [{ label: "Choose a file", tone: "primary" as const, onAct: () => input.current?.click() }] : step === "address" && shaped && existing.state === "free" && (!confirming || pending || agreed) ? [{ label: "Add", tone: "primary" as const, onAct: () => { void add(); } }] : [])]} />;
 }

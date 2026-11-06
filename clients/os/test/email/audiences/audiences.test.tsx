@@ -128,16 +128,42 @@ describe("Email audiences", () => {
     chooseOption(screen.getByLabelText("Subscription state for one@acme.test"), "Subscribed");
     expect(conn.query.campaignSetRecipientSubscription).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Mark subscribed" })).toBeNull();
-    fireEvent.click(screen.getByRole("switch", { name: "They already agreed to receive these emails" })); await readTheBar();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("switch", { name: "They already agreed to receive these emails" }));
+    await screen.findByRole("button", { name: "Mark subscribed" }); await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Mark subscribed" }));
     await waitFor(() => expect(conn.query.campaignSetRecipientSubscription).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "r", subscriptionStatus: "subscribed", alreadyConfirmed: true })));
   });
-  it("shows a refusal to resubscribe an unsubscribed address verbatim", async () => {
-    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [recipientRow({ id: "r", email: "one@acme.test", subscriptionStatus: "unsubscribed" })] });
-    conn.query.campaignSetRecipientSubscription.mockRejectedValue(new Error("This person unsubscribed. Only they can subscribe again.")); mount(conn);
+  it("offers no change to subscribed for people who left, and shows the engine's refusal for others verbatim", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [recipientRow({ id: "gone", email: "gone@acme.test", subscriptionStatus: "unsubscribed" }), recipientRow({ id: "r", email: "one@acme.test", subscriptionStatus: "pending" })] });
+    conn.query.campaignSetRecipientSubscription.mockRejectedValue(new Error("This address is suppressed. Only the person can subscribe again.")); mount(conn);
     fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("one@acme.test");
+    expect(screen.queryByLabelText("Subscription state for gone@acme.test")).toBeNull();
     chooseOption(screen.getByLabelText("Subscription state for one@acme.test"), "Subscribed");
-    await screen.findByText("This person unsubscribed. Only they can subscribe again.");
+    await screen.findByText("This address is suppressed. Only the person can subscribe again.");
+  });
+  it("shows the person the duplicate check found even when the roster page does not hold them", async () => {
+    const old = recipientRow({ id: "old", email: "old@acme.test", displayName: "Old Member", emailDigest: await addressDigest("old@acme.test") });
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [old] });
+    conn.query.recipientsForAudience.mockResolvedValue(rowsResult([recipientRow({ id: "new", email: "new@acme.test" })])); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("new@acme.test");
+    expect(screen.queryByText("old@acme.test")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "old@acme.test" } });
+    await screen.findByText("This address is already in this audience.");
+    fireEvent.click(screen.getByRole("button", { name: "Show them in the list" }));
+    expect(await screen.findByLabelText("Subscription state for old@acme.test")).toBeTruthy();
+    expect(screen.getByText("new@acme.test")).toBeTruthy();
+  });
+  it("offers Try again when the duplicate check fails", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })] });
+    conn.query.recipientInAudienceByDigest.mockRejectedValueOnce(new Error("The lookup is unavailable.")); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@acme.test" } });
+    await screen.findByText("The lookup is unavailable.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("The lookup is unavailable.")).toBeNull());
   });
   it("shows a confirmation refusal verbatim and keeps the consequence", async () => {
     const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })] });

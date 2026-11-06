@@ -1332,6 +1332,39 @@ export function useEnrollmentCounts(journeyId: string, steps: readonly FlowStep[
   }, [connection, journeyId, signature]);
   return useReading<Array<ReturnType<typeof countQueries>[number] & { figure: Figure }>>([], read, [read]);
 }
+/** The statuses an automation run can be in, in the order people read them, with the words for each. */
+export const RUN_STATUSES = [["active", "In a run"], ["waiting", "Waiting"], ["completed", "Finished"], ["exited", "Left early"], ["failed", "Failed"]] as const;
+
+export interface FailedRun { id: string; stepId: string; lastError: string; address: string }
+export interface PeopleReading { counts: ReadonlyMap<string, Figure>; failed: FailedRun[] }
+const NOBODY: PeopleReading = { counts: new Map(), failed: [] };
+
+/**
+ * How many runs of one automation are in each status, and which failed.
+ *
+ * Runs are not broadcast, so this reads them: a count per status, then, only
+ * when something failed, the newest failed runs and each person's address. A
+ * run names its person by id, so addresses are read one person at a time, a few
+ * at once (`readEach`), and kept between refreshes: an address does not change
+ * under a run, so a refresh reads only the people it has not seen.
+ */
+export function useJourneyPeople(journeyId: string) {
+  const connection = useOsConnection();
+  const known = useRef(new Map<string, string>());
+  const read = useMemo(() => !connection || !journeyId ? null : async (signal: AbortSignal): Promise<PeopleReading> => {
+    const counts = new Map(await readEach(RUN_STATUSES.map(([status]) => status), async status => [status, countFigure((await connection.query.journeyEnrollmentCounts({ journeyId, status }, { signal })).count())] as const, signal));
+    const failedCount = counts.get("failed");
+    if (failedCount?.kind !== "measured" || failedCount.value === 0) return { counts, failed: [] };
+    const runs = (await connection.query.journeyEnrollmentsByStatus({ journeyId, status: "failed" }, { signal })).rows().map(flatten);
+    const unseen = [...new Set(runs.map(run => rowString(run, "recipientId")).filter(id => id !== "" && !known.current.has(id)))];
+    await readEach(unseen, async recipientId => {
+      const address = rowString(flatten((await connection.query.recipientById({ recipientId }, { signal })).rows()[0] ?? {}), "email");
+      if (address !== "") known.current.set(recipientId, address);
+    }, signal);
+    return { counts, failed: runs.map(run => ({ id: rowString(run, "id"), stepId: rowString(run, "stepId"), lastError: rowString(run, "lastError"), address: known.current.get(rowString(run, "recipientId")) ?? "" })) };
+  }, [connection, journeyId]);
+  return useReading<PeopleReading>(NOBODY, read, [read]);
+}
 export function useConfirmTemplates(steps: readonly FlowStep[], templates?: readonly Row[]) {
   const connection = useOsConnection();
   const signature = [...new Set(steps.filter(s => s.kind === "confirm").map(s => s.templateId).filter(Boolean))].sort().join("\n");

@@ -174,3 +174,8 @@ export function absentSentence(figure: AbsentFigure): string {
   if (figure.reason === "failed") return "The read failed.";
   return "Not read yet.";
 }
+
+/** A figure as a person reads it: the count (with "or more" when it stopped at a window), or "--" when it was not measured. */
+export function figureWords(figure: Figure | undefined): string {
+  return figure?.kind === "measured" ? `${figure.value.toLocaleString()}${figure.atLeast ? " or more" : ""}` : "--";
+}

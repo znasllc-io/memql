@@ -381,6 +381,14 @@ describe("one Azure configuration per cluster", () => {
     expect(screen.getByRole("button", { name: "Check domain records" })).toBeTruthy();
     await act(async () => { release(); });
     expect(checks()).toBe(before + 1);
+    // A press while a timed re-check is in flight ends it: the two never run together.
+    let quietSignal: AbortSignal | undefined; let releaseQuiet: () => void = () => {};
+    call.mockImplementationOnce((async (_args: Args, opts?: { signal?: AbortSignal }) => { quietSignal = opts?.signal; await new Promise<void>(done => { releaseQuiet = done; }); return rowsResult([{ status: "dns", plan, records }]); }) as never);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(quietSignal?.aborted).toBe(false);
+    await click("Check domain records");
+    expect(quietSignal?.aborted).toBe(true);
+    await act(async () => { releaseQuiet(); });
     expect(screen.queryByText(/Still checking/)).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000 * 10); });
     expect(checks()).toBeGreaterThan(before + 5);

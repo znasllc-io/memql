@@ -71,6 +71,32 @@ describe("Automation pages", () => {
     expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
     expect(document.querySelector("button:disabled")).toBeNull();
   });
+  it("says what an active automation holds instead of saying it cannot be turned on", async () => {
+    const active = { ...journey, status: "active", activatedAt: "2026-10-11T01:00:00Z" };
+    mount(setup({ journeys: [active], templates: [templateRow({ id: "t1", accountId: "self", name: "Welcome", status: "draft" })] }));
+    fireEvent.click(await screen.findByText("Welcome series"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Emails held: Publish “Welcome” to send its emails."));
+    expect(bar.textContent).not.toContain("Can't turn on yet");
+  });
+  it("offers no Retry on a retired automation", async () => {
+    const retired = { ...journey, status: "archived" };
+    const conn = setup({ journeys: [retired], enrollmentCounts: { ":failed": 1 }, recipientsForAudience: [recipientRow({ id: "r1", email: "one@acme.test" })],
+      enrollments: [{ id: "e1", journeyId: "j", recipientId: "r1", stepId: "send1", stepIndex: 0, status: "failed", lastError: "The sender is turned off.", createdAt: "2026-10-11T02:00:00Z" }] });
+    mount(conn, { id: "open-j", payload: { journeyId: "j" } });
+    const people = await screen.findByRole("region", { name: "People" });
+    await within(people).findByText("one@acme.test");
+    expect(within(people).queryByRole("button", { name: /Retry/ })).toBeNull();
+  });
+  it("reads each failed person's address once across refreshes", async () => {
+    const conn = setup({ journeys: [{ ...journey, status: "active" }], enrollmentCounts: { ":failed": 1 }, recipientsForAudience: [recipientRow({ id: "r1", email: "one@acme.test" })],
+      enrollments: [{ id: "e1", journeyId: "j", recipientId: "r1", stepId: "send1", stepIndex: 0, status: "failed", lastError: "x", createdAt: "2026-10-11T02:00:00Z" }] });
+    mount(conn); fireEvent.click(await screen.findByText("Welcome series")); await screen.findByText("one@acme.test");
+    const lists = conn.query.journeyEnrollmentsByStatus.mock.calls.length;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(conn.query.journeyEnrollmentsByStatus.mock.calls.length).toBeGreaterThan(lists));
+    expect(conn.query.recipientById).toHaveBeenCalledTimes(1);
+  });
   it("shows an event-rule refusal once and keeps code and failure context without internal facts", async () => {
     const sentence = "arming this rule is refused"; const row = ruleRow({ id: "r", name: "New admin", status: "failed", condition: 'row.role == "admin"', lastError: `emailrules: ${sentence}` });
     const conn = setup({ emailRules: [row] }); conn.query.campaignActivateEmailRule.mockRejectedValue(new Error(`emailrules: ${sentence}`)); mount(conn);

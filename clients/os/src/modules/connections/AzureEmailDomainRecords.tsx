@@ -1,4 +1,4 @@
-import { Caption, ContentSkeleton, Notice } from "../../kit";
+import { Caption, ContentSkeleton, Notice, formatMoment } from "../../kit";
 import { DnsRecord } from "../../kit/DnsRecord";
 import { PageHelp } from "../../kit/pageHelp";
 import type { AzureEmailReply } from "./azureEmailSetup";
@@ -29,7 +29,7 @@ export function AzureEmailDomainRecords({ domain, records, lastChecked, stillChe
       <DnsRecord key={record.purpose} record={{ kind: record.type, name: record.name, value: record.value, purpose: purposes[record.purpose] || record.purpose }} status={statuses[record.status] || "Not verified"}/>,
     )}
     <Caption>Merge SPF into the domain's one SPF record and end it with -all, because Azure does not verify ~all. Do not create a second SPF record. Keep existing mail and website records.</Caption>
-    {lastChecked ? <Caption>Last checked {new Date(lastChecked).toLocaleTimeString()}. This page checks again every 30 seconds while it is open.</Caption> : null}
+    {lastChecked ? <Caption>Last checked {formatMoment(new Date(lastChecked).toISOString())}. This page checks again every 30 seconds while it is open.</Caption> : null}
     {stillChecking ? <Caption>Still checking: make sure there is one SPF record and it ends in -all.</Caption> : null}
     <PageHelp title="Entering DNS names"><p>If your provider appends {domain} automatically, use @ for the name {domain}. Keep the DKIM names as shown.</p></PageHelp>
   </>;
