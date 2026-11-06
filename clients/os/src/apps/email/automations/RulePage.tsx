@@ -9,9 +9,10 @@ import type { CampaignWrites, RuleFacts } from "../actions";
 import { toKitActs } from "../acts";
 import { organizationName } from "../organizations";
 import { conceptEntity, senderProjection, templateProjection, type EmailRuleRow, type RecipientMode } from "../rows";
-import { useAuthoredAutomations, type EmailFeeds } from "../useEmail";
+import { useAuthoredAutomations, useSenderChecks, type EmailFeeds } from "../useEmail";
 import { Flow } from "./Flow";
-import { ruleActs, type Asking } from "./automationActs";
+import { blockedSentence, issuesAsShown, ruleActs, type Asking } from "./automationActs";
+import { senderRefusalIssue } from "./issues";
 import { emptyRule, RuleField } from "./ruleFields";
 
 export function AutomationSwitch() {
@@ -31,6 +32,12 @@ export function RulePage({ rule, feeds, writes, onBack }: { rule: EmailRuleRow; 
   const templates = templateProjection(feeds.templates.snapshot.rows), senders = senderProjection(feeds.senders.snapshot.rows);
   const trigger = `When a ${conceptEntity(draft.triggerConcept)} ${draft.eventKind === "updated" ? "changes" : "is created"}`;
   const error = writes.updateRule.error || writes.ruleArming.error;
+  // The engine's sending check for the rule's sender, for anyone who may turn
+  // it on: a sender the provider would refuse keeps Turn on away, and says why.
+  const sender = draft.recipientMode !== "cluster_roles" ? senders.find(s => s.id === draft.senderIdentityId && s.accountId === draft.accountId) : undefined;
+  const checks = useSenderChecks(draft.accountId, sender ? [sender] : []);
+  const issue = sender ? senderRefusalIssue("email", sender.address, checks.value.get(sender.id) ?? "") : null;
+  const issues = issue ? [issue] : [];
   const failure = refusalSentence(rule.lastError);
   async function run(id: string) {
     if (id === "keep") { setAsking(""); return; }
@@ -48,9 +55,9 @@ export function RulePage({ rule, feeds, writes, onBack }: { rule: EmailRuleRow; 
     } finally { working.current = false; setBusy(false); }
   }
   const status = dirty ? "Unsaved changes" : emailState("rule", rule.status);
-  return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`email-rule:${rule.id}`} title={rule.name} back={{ label: "Automations", onSelect: onBack }} /><AutomationSwitch />
+  return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`email-rule:${rule.id}`} title={rule.name} back={{ label: "Automations", onSelect: onBack }} /><AutomationSwitch /><AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={checks.reload} busy={checks.state === "loading"} />
     <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, rule.accountId)} /></Facts></Panel>
     {failure ? <Notice tone="warn" sentence={failure} /> : null}{error && refusalSentence(error) !== failure ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}
-    <Flow fixed trigger={trigger} triggerDetail={draft.condition ? <code className="os-mono">Only when {draft.condition}</code> : undefined} accountId={draft.accountId} steps={[{ id: "email", kind: "send", templateId: draft.templateId, senderIdentityId: draft.senderIdentityId }]} templates={templates} senders={senders} editable={rule.status !== "active"} onChange={() => {}} counts={new Map([["end", `Fired ${rule.firedCount} times${rule.lastFiredAt ? `, last ${new Date(rule.lastFiredAt).toLocaleDateString()}` : ""}`]])} inspector={selected => <>{(selected === "trigger" ? ["what", "event", "condition"] : selected === "email" ? ["template", "who", ...(draft.recipientMode !== "cluster_roles" ? ["sender"] : [])] : ["name"]).map(field => <RuleField key={field} field={field} draft={draft} onChange={setDraft} feeds={feeds} />)}</>} />
-  </div><ActionBar state={busy ? "Saving" : status} tone={busy ? "busy" : rule.status === "active" ? "live" : "none"} acts={busy ? [] : toKitActs(ruleActs(rule, dirty, asking).filter(a => a.id !== "save" || !!draft.name.trim()), id => { void run(id); })}>{asking ? <span className="os-actbar-confirm">{asking === "retire" ? `Retire “${rule.name}”? It stops sending and keeps its history.` : `Turn on “${rule.name}”? From then on it emails people every time ${trigger.replace(/^When /, "")}.`}</span> : null}</ActionBar></div>;
+    <Flow fixed trigger={trigger} triggerDetail={draft.condition ? <code className="os-mono">Only when {draft.condition}</code> : undefined} accountId={draft.accountId} steps={[{ id: "email", kind: "send", templateId: draft.templateId, senderIdentityId: draft.senderIdentityId }]} templates={templates} senders={senders} editable={rule.status !== "active"} issues={issuesAsShown(rule.status, issues)} onChange={() => {}} counts={new Map([["end", `Fired ${rule.firedCount} times${rule.lastFiredAt ? `, last ${new Date(rule.lastFiredAt).toLocaleDateString()}` : ""}`]])} inspector={selected => <>{(selected === "trigger" ? ["what", "event", "condition"] : selected === "email" ? ["template", "who", ...(draft.recipientMode !== "cluster_roles" ? ["sender"] : [])] : ["name"]).map(field => <RuleField key={field} field={field} draft={draft} onChange={setDraft} feeds={feeds} />)}</>} />
+  </div><ActionBar state={busy ? "Saving" : status} detail={dirty ? undefined : blockedSentence(rule.status, issues) || undefined} tone={busy ? "busy" : rule.status === "active" ? "live" : "none"} acts={busy ? [] : toKitActs(ruleActs(rule, dirty, asking).filter(a => a.id !== "save" || !!draft.name.trim()).filter(a => (a.id !== "turn-on" && (a.id !== "confirm" || asking !== "turn-on")) || (!issue && checks.state !== "loading")), id => { void run(id); })}>{asking ? <span className="os-actbar-confirm">{asking === "retire" ? `Retire “${rule.name}”? It stops sending and keeps its history.` : `Turn on “${rule.name}”? From then on it emails people every time ${trigger.replace(/^When /, "")}.`}</span> : null}</ActionBar></div>;
 }

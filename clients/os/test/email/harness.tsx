@@ -137,6 +137,12 @@ export interface FakeSeed {
   integrationStatus?: Row[] | Error;
   sendingReadiness?: Row[] | Error;
   /**
+   * `campaignSendingReadiness` for one sender (`{ accountId, senderIdentityId }`),
+   * by sender id, or as a function of it (asked on every read). A sender not
+   * answered here gets `sendingReadiness`. An Error refuses that sender's check.
+   */
+  senderReadiness?: Record<string, Row | Error> | ((senderIdentityId: string) => Row | Error | undefined);
+  /**
    * The `emailAzureSetup` reply for one `{ accountId, action }`. Absent = a
    * cluster whose Azure is connected and whose organizations have no sending
    * domain yet, because the unset state is the one the Settings page draws its
@@ -304,7 +310,15 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignStats: reader(seed.campaignStats),
       campaignsForAccount: reader(seed.campaignsForAccount),
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),
-      campaignSendingReadiness: reader(seed.sendingReadiness ?? [{ ready: true, reason: "" }]),
+      campaignSendingReadiness: vi.fn(async (args?: { senderIdentityId?: string }, _opts?: unknown) => {
+        const id = args?.senderIdentityId ?? "";
+        const own = typeof seed.senderReadiness === "function" ? seed.senderReadiness(id) : seed.senderReadiness?.[id];
+        if (own instanceof Error) throw own;
+        if (own) return rowsResult([own]);
+        const rows = seed.sendingReadiness ?? [{ ready: true, reason: "" }];
+        if (rows instanceof Error) throw rows;
+        return rowsResult(rows);
+      }),
       clusterSettingsCurrent: reader(seed.clusterSettings ?? [RUNNING_AUTOMATIONS]),
       // Settings -> Sending domain, and Package. The same two reads the
       // Connections page makes, because the domain's wizard is one component.

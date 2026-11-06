@@ -533,16 +533,27 @@ use its saved sending identities.
    `help@client.com`. ACS sends outbound mail; it does not create receiving
    mailboxes. `no-reply` is optional. The verified sender appears in Email.
 
-Further senders are added in one place. The domain's page lists every sender
-Azure has registered, with its display name, where its replies go, and which is
-the default: the address mail that names no sender goes out as. **Add a sender**
+Further senders are added on the domain's page, which lists every sender Azure
+has registered with its display name, where its replies go, and which is the
+default: the address mail that names no sender goes out as. **Add a sender**
 registers another username with Azure and records its sender in Email in one
-step, and keeps the default where it is; **Make default** on another sender
-moves only the default and needs no Microsoft sign-in. For an organization with
-an Azure domain, the plus on **Email → Settings → Senders** opens the same Add a
-sender. A sender recorded at an address Azure does not have reads **Not
-registered with Azure**, and an automation that sends as it cannot be turned on
-until the address is added on the domain.
+step, and keeps the default where it is. A sender already recorded at that
+address is taken over rather than recorded twice, and takes the display name
+Azure holds, the only one Azure sends with. **Make default** on another sender
+moves the default, with that sender's own reply address as the one mail that
+names none carries, and needs no Microsoft sign-in. For an owner or developer,
+the plus on **Email → Settings → Senders** opens the same Add a sender when the
+organization sends through an Azure domain of its own, and a recorded sender on
+that domain that Azure does not have offers **Register with Azure** on its page.
+For anyone else, and for any other organization, the plus records a sender only.
+
+Whether a send as a sender would be refused comes from the same check a send
+makes, so it shows for anyone who can send: **Not registered with Azure** when
+Azure does not have the address (on Azure's own domain, which sends only as its
+own sender, it never will), and **Azure uses another name** when Azure sends the
+address under a different display name. An automation that sends as such a
+sender cannot be turned on; one already on fails those sends, and the failed
+runs can be retried once the sender is fixed.
 
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display

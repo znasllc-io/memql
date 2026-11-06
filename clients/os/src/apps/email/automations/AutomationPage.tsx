@@ -9,13 +9,12 @@ import { useJourneyWrites } from "../actions";
 import { toKitActs } from "../acts";
 import { organizationName } from "../organizations";
 import { audienceProjection, senderProjection, templateProjection, type JourneyRow } from "../rows";
-import { listKnowledge, useConfirmTemplates, useEnrollmentCounts, type EmailFeeds } from "../useEmail";
-import { journeyActs, journeyReading, type Asking } from "./automationActs";
+import { listKnowledge, useConfirmTemplates, useEnrollmentCounts, useSenderChecks, type EmailFeeds } from "../useEmail";
+import { issuesAsShown, journeyActs, journeyReading, type Asking } from "./automationActs";
 import { Flow } from "./Flow";
 import { People } from "./People";
 import { triggerSentence } from "./flowModel";
 import { journeyIssues, type Issue } from "./issues";
-import { useAzureRegisteredSenders } from "../../../modules/connections/azureEmailSetup";
 
 export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow; feeds: EmailFeeds; onBack: () => void }) {
   const [draft, setDraft] = useState(journey);
@@ -31,9 +30,11 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
   const audiences = audienceProjection(feeds.audiences.snapshot.rows), templates = templateProjection(feeds.templates.snapshot.rows), senders = senderProjection(feeds.senders.snapshot.rows);
   const confirms = useConfirmTemplates(draft.steps, feeds.templates.snapshot.rows);
   const counts = useEnrollmentCounts(journey.id, journey.steps);
-  const azure = useAzureRegisteredSenders(journey.accountId);
-  const issues = [...journeyIssues(draft, { audiences, templates, senders, confirms: confirms.value, registered: azure.registered }), ...serverIssues];
-  const known = [feeds.audiences, feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known") && confirms.state === "ready" && azure.settled;
+  // The engine's sending check for each sender the steps name: anyone who may
+  // turn this on learns of a sender the provider would refuse before it does.
+  const checks = useSenderChecks(journey.accountId, senders.filter(sender => draft.steps.some(step => step.senderIdentityId === sender.id)));
+  const issues = [...journeyIssues(draft, { audiences, templates, senders, confirms: confirms.value, checks: checks.value }), ...serverIssues];
+  const known = [feeds.audiences, feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known") && confirms.state === "ready" && checks.state !== "loading";
   const audience = audiences.find(a => a.id === journey.trigger.audienceId)?.name || "Unavailable audience";
   const countWords = new Map<string, string>();
   for (const c of counts.value) if (c.figure.kind === "measured" && (c.figure.value > 0 || !["left early", "failed"].includes(c.label))) countWords.set(c.cardId, [countWords.get(c.cardId), `${c.figure.value.toLocaleString()}${c.figure.atLeast ? " or more" : ""} ${c.label}`].filter(Boolean).join(", "));
@@ -59,13 +60,13 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
   const specs = journeyActs(journey, dirty, issues, asking).filter(a => a.id !== "turn-on" || known).filter(a => a.id !== "save" || !!draft.name.trim());
   return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`automation:${journey.id}`} title={journey.name} back={{ label: "Automations", onSelect: onBack }} />
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={counts.reload} busy={counts.state === "loading"} />
-    <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={azure.reload} />
+    <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={checks.reload} busy={checks.state === "loading"} />
     <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, journey.accountId)} />{journey.activatedAt ? <Fact label="Turned on" value={formatMoment(journey.activatedAt)} /> : null}</Facts></Panel>
     {journey.status !== "draft" ? <People journey={journey} templates={templates} onRetried={() => { void counts.reload(); feeds.journeys.reseed(); }} /> : null}
     {journey.lastError ? <Notice tone="warn" sentence={refusalSentence(journey.lastError)} /> : null}
     {failure && refusalSentence(failure) !== refusalSentence(journey.lastError) ? <Notice tone="warn" sentence={refusalSentence(failure)} /> : null}
     {confirms.error ? <Notice tone="warn" sentence={refusalSentence(confirms.error)}><Button onClick={() => { void confirms.reload(); }}>Try again</Button></Notice> : null}
     {counts.error ? <Notice tone="warn" sentence={refusalSentence(counts.error)} /> : null}
-    <Flow defaultSender={accountDefaultSender(accounts.find(account => account.id === journey.accountId), senders)} trigger={triggerSentence(journey.trigger, audience)} steps={draft.steps} accountId={journey.accountId} templates={templates} senders={senders} editable={journey.status === "draft" || journey.status === "paused"} issues={issues} counts={countWords} name={draft.name} description={draft.description} onName={name => { setDraft(d => ({ ...d, name })); setServerIssues([]); }} onDescription={description => { setDraft(d => ({ ...d, description })); setServerIssues([]); }} onChange={steps => { setDraft(d => ({ ...d, steps })); setServerIssues([]); }} />
+    <Flow defaultSender={accountDefaultSender(accounts.find(account => account.id === journey.accountId), senders)} trigger={triggerSentence(journey.trigger, audience)} steps={draft.steps} accountId={journey.accountId} templates={templates} senders={senders} editable={journey.status === "draft" || journey.status === "paused"} issues={issuesAsShown(journey.status, issues)} counts={countWords} name={draft.name} description={draft.description} onName={name => { setDraft(d => ({ ...d, name })); setServerIssues([]); }} onDescription={description => { setDraft(d => ({ ...d, description })); setServerIssues([]); }} onChange={steps => { setDraft(d => ({ ...d, steps })); setServerIssues([]); }} />
   </div><ActionBar state={journeyReading(journey, dirty, issues).word} detail={journeyReading(journey, dirty, issues).detail} tone={busy ? "busy" : journeyReading(journey, dirty, issues).tone} acts={busy ? [] : toKitActs(specs, id => { void run(id); })}>{question ? <span className="os-actbar-confirm">{question}</span> : null}</ActionBar></div>;
 }

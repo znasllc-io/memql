@@ -14,8 +14,10 @@ import { ActionBar, type Act } from "../../kit/ActionBar";
 import { ClusterAzureEmail } from "./ClusterAzureEmail";
 import { AzureEmailDomainRecords, STILL_CHECKING_MS } from "./AzureEmailDomainRecords";
 import { PageHelp } from "../../kit/pageHelp";
-import { addsSendersOnAzure, useAzureEmailCall, type AzureEmailPlan, type AzureEmailReply } from "./azureEmailSetup";
-import { AddAzureSenderWizard } from "./AddAzureSenderWizard";
+import { useAzureEmailCall } from "./azureEmailSetup";
+import { addsSendersOnAzure, type AzureEmailPlan, type AzureEmailReply } from "./azureEmailReply";
+import { AddAzureSenderWizard, type RecordedSender } from "./AddAzureSenderWizard";
+import { drawnBy, usePressHold } from "../../kit/pressHold";
 import "./azureEmail.css";
 import { CampaignPackageConfig } from "./CampaignPackageConfig";
 
@@ -72,19 +74,24 @@ export function ClusterEmailNotice({ cluster }: { cluster: AzureEmailReply }) {
  * the cluster is not asked.
  *
  * THE HOST HEARS ABOUT THE DOMAIN, AND CAN ASK FOR ITS ADD A SENDER. Email's
- * Settings flags a sender Azure does not have and, for an organization with an
- * Azure domain, opens this domain's Add a sender from its Senders' plus: senders
- * on an Azure domain are added in one place.
+ * Settings waits for the domain's answer before its Senders' plus is offered and,
+ * for an organization with an Azure domain of its own, opens this domain's Add a
+ * sender from it, or Register with Azure from a sender Azure does not have:
+ * senders on an Azure domain are added in one place.
  */
 export function OrganizationSendingDomain({ accountId, name, backLabel, onPane, onState, addSender }: {
   accountId: string;
   name: string;
   backLabel: string;
   onPane?: (taking: boolean) => void;
-  /** Told the domain as the cluster last sent it; null while it is not known. */
-  onState?: (state: AzureEmailReply | null) => void;
-  /** A new number opens the domain's Add a sender, when senders are added on it. */
-  addSender?: number;
+  /**
+   * Told the domain as the cluster last sent it: `undefined` while it is being
+   * asked, `null` when it could not be read. Never told, for anyone who cannot
+   * read sending domains.
+   */
+  onState?: (state: AzureEmailReply | null | undefined) => void;
+  /** A new revision opens the domain's Add a sender, when senders are added on it. */
+  addSender?: AddSenderRequest;
 }) {
   const { access } = useSession();
   if (!canConfigure(access?.role || "")) return <section className="os-app-stack" aria-label="Sending domain">
@@ -94,13 +101,21 @@ export function OrganizationSendingDomain({ accountId, name, backLabel, onPane, 
   return <ConfiguredSendingDomain accountId={accountId} name={name} backLabel={backLabel} onPane={onPane} onState={onState} addSender={addSender}/>;
 }
 
-function ConfiguredSendingDomain({ accountId, name, backLabel, onPane, onState, addSender }: { accountId: string; name: string; backLabel: string; onPane?: (taking: boolean) => void; onState?: (state: AzureEmailReply | null) => void; addSender?: number }) {
+/**
+ * A host's request for the domain's Add a sender: each new revision opens it,
+ * for a sender already recorded (Register with Azure) when one is given.
+ */
+export interface AddSenderRequest { revision: number; recorded?: RecordedSender }
+
+function ConfiguredSendingDomain({ accountId, name, backLabel, onPane, onState, addSender }: { accountId: string; name: string; backLabel: string; onPane?: (taking: boolean) => void; onState?: (state: AzureEmailReply | null | undefined) => void; addSender?: AddSenderRequest }) {
   const accounts = useAccountOptions();
   const { call, error } = useAzureEmailCall(SELF_ACCOUNT_ID);
   const [cluster, setCluster] = useState<AzureEmailReply | null>(null);
   const [view, setView] = useState<ConnectionView>("list");
   const readCluster = useCallback(() => { void call("clusterStatus").then(result => { if (result) setCluster(result); }); }, [call]);
   useEffect(readCluster, [readCluster]);
+  // Until the cluster answers there is no domain to report; a cluster that could not be read has none to wait for.
+  useEffect(() => { if (cluster === null) onState?.(error ? null : undefined); }, [cluster, error, onState]);
   useEffect(() => { onPane?.(view !== "list"); }, [view, onPane]);
   useEffect(() => () => onPane?.(false), [onPane]);
   // Whether the cluster is connected decides what can be offered, so nothing is
@@ -151,8 +166,8 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   picker?: ReactNode; backLabel: string; cluster: AzureEmailReply | null;
   /** Draw the cluster's own state here, because the page that holds this does not. */
   clusterNotice?: boolean;
-  onState?: (state: AzureEmailReply | null) => void;
-  addSender?: number;
+  onState?: (state: AzureEmailReply | null | undefined) => void;
+  addSender?: AddSenderRequest;
 }) {
   const formID = useId();
   const { call, quiet, cancel, busy, error } = useAzureEmailCall(accountId);
@@ -176,6 +191,11 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     const result = await call("operations");
     if (result) setSendCheck(result);
   }, [call]);
+  // The timed re-check reads quietly: nothing on the page goes busy for it.
+  const recheckSends = useCallback(async () => {
+    const result = await quiet("operations");
+    if (result) setSendCheck(result);
+  }, [quiet]);
   const [records, setRecords] = useState<AzureEmailReply["records"]>(undefined);
   // When Azure last answered about the records, and since when it has been saying "Checking".
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
@@ -187,7 +207,9 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   const [chosen, setChosen] = useState<string | null>(null);
   const apply = useCallback((result: AzureEmailReply | null) => {
     if (!result) return;
-    setState(old => ({ ...old, ...result, planId: result.planId || old?.planId }));
+    // A summary that does not say where replies go has no answer to that: the
+    // last one is not shown beside senders it may no longer describe.
+    setState(old => ({ ...old, ...result, planId: result.planId || old?.planId, ...("senders" in result ? { replies: result.replies } : {}) }));
     if (result.plan) { setDomain(result.plan.domain); setEmailService(result.plan.emailService); setCommunicationService(result.plan.communicationService); }
     if (result.replyTo) setReplyTo(result.replyTo);
     if (result.requestedSender) { setUsername(result.requestedSender.username); setDisplayName(result.requestedSender.displayName); setReplyTo(result.requestedSender.replyTo || ""); }
@@ -195,17 +217,27 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     if (result.records) { setRecords(result.records); setCheckedAt(Date.now()); }
   }, []);
   useEffect(() => { void call("status").then(apply); }, [call, apply]);
-  useEffect(() => { onState?.(state); }, [state, onState]);
-  useEffect(() => () => onState?.(null), [onState]);
-  // Add a sender goes back where it was opened from: this page, or the host's.
+  useEffect(() => { onState?.(state ?? (error ? null : undefined)); }, [state, error, onState]);
+  useEffect(() => () => onState?.(undefined), [onState]);
+  // Add a sender goes back where it was opened from: this page, or the host's;
+  // opened from a recorded sender, it starts from that sender.
   const [addFrom, setAddFrom] = useState<ConnectionView>("detail");
-  const openAddSender = useCallback((from: ConnectionView) => { setAddFrom(from); setView("add-sender"); }, [setView]);
-  const askedToAdd = useRef(addSender);
+  const [recorded, setRecorded] = useState<RecordedSender | null>(null);
+  const openAddSender = useCallback((from: ConnectionView, sender: RecordedSender | null = null) => { setAddFrom(from); setRecorded(sender); setView("add-sender"); }, [setView]);
+  const askedToAdd = useRef(addSender?.revision ?? 0);
   useEffect(() => {
-    if (addSender === askedToAdd.current) return;
-    askedToAdd.current = addSender;
-    if (addsSendersOnAzure(state)) openAddSender("list");
+    const revision = addSender?.revision ?? 0;
+    if (revision === askedToAdd.current) return;
+    askedToAdd.current = revision;
+    if (addsSendersOnAzure(state)) openAddSender("list", addSender?.recorded ?? null);
   }, [addSender, state, openAddSender]);
+  // Make default, one sender at a time: only that sender's press shows it working.
+  const [making, setMaking] = useState("");
+  const makeDefault = useCallback((address: string) => {
+    if (making !== "") return;
+    setMaking(address);
+    void call("makeDefault", { sender: address }).then(apply).finally(() => setMaking(""));
+  }, [making, call, apply]);
   const perform = useCallback((action: string, options: Record<string, unknown> = {}) => { void call(action, { ...options, planId: state?.planId || "" }).then(result => { apply(result); if (result?.status === "ready") setView("detail"); }); }, [call, state?.planId, apply, setView]);
   const connected = cluster?.status === "connected";
   const provisioning = state?.status === "provisioning";
@@ -243,14 +275,14 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   </section>;
   if (view === "add-sender" && state?.plan && addsSendersOnAzure(state)) return <AddAzureSenderWizard
     accountId={accountId} planId={state.planId || ""} domain={state.plan.domain} registered={Object.keys(state.senders ?? {})} defaultSender={state.sender || ""}
-    organization={name} connected={connected} backLabel={addFrom === "detail" ? state.plan.domain : backLabel}
+    organization={name} connected={connected} recorded={recorded} backLabel={addFrom === "detail" ? state.plan.domain : backLabel}
     onBack={() => setView(addFrom)} onAdded={result => { apply(result); setView(addFrom); }}/>;
   if (view === "detail" || view === "add-sender") return <section className="os-action-pane">
     <Head title={state?.plan?.domain || "Sending domain"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
     <div className="os-action-body os-app-stack"><Panel label="Sending domain"><Facts><Fact label="Organization" value={name}/></Facts></Panel>
-      {state?.status === "ready" ? <DomainSenders state={state} busy={busy} onAdd={() => openAddSender("detail")} onMakeDefault={address => { void call("makeDefault", { sender: address }).then(apply); }}/> : null}
+      {state?.status === "ready" ? <DomainSenders state={state} making={making} onAdd={() => openAddSender("detail")} onMakeDefault={makeDefault}/> : null}
       {!connected ? <Notice sentence="Cluster Azure setup needs attention."/> : null}
-      <section className="os-app-stack" aria-label="Azure send processing"><Subhead actions={sendCheck === null ? <Button busy={busy} onClick={() => { void checkSends(); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={checkSends} />}>Send processing</Subhead>
+      <section className="os-app-stack" aria-label="Azure send processing"><Subhead actions={sendCheck === null ? <Button busy={busy} onClick={() => { void checkSends(); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={recheckSends} />}>Send processing</Subhead>
         {sendCheck ? <Facts><Fact label="Delivery reports" value={deliveryFeedbackLabel(sendCheck.deliveryFeedback)}/></Facts> : null}
         {sendCheck?.operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
         {sendCheck?.operations?.map(operation => {
@@ -295,25 +327,37 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
  * The senders Azure has on a sending domain: each address, the display name
  * Azure holds for it (every send must use exactly that name), where replies to
  * its mail go, and which is the default -- the address mail that names none
- * goes out as. Every other sender offers Make default, which moves only that.
+ * goes out as. Every other sender offers Make default, which moves only that
+ * and the reply address mail that names none carries.
+ *
+ * THE ROWS STAY WHERE THEY ARE. They are in address order, which Make default
+ * does not change, and the list holds presses for a moment after what it
+ * offers changes (the bar's own hold, `usePressHold`), so the second click of a
+ * double-click on Make default cannot land on the Make default that appears on
+ * the sender that was the default.
  */
-function DomainSenders({ state, busy, onAdd, onMakeDefault }: {
-  state: AzureEmailReply; busy: boolean;
+function DomainSenders({ state, making, onAdd, onMakeDefault }: {
+  state: AzureEmailReply;
+  /** The sender being made the default, if any: "" for none. */
+  making: string;
   onAdd: () => void; onMakeDefault: (address: string) => void;
 }) {
   const senders = state.senders ?? {};
-  const isDefault = (address: string) => address === state.sender;
-  // The default first, then the others by address.
-  const addresses = Object.keys(senders).sort((a, b) => Number(isDefault(b)) - Number(isDefault(a)) || a.localeCompare(b));
+  const addresses = Object.keys(senders).sort((a, b) => a.localeCompare(b));
+  const list = useRef<HTMLElement | null>(null);
+  const hold = usePressHold(() => (list.current === null ? "" : drawnBy([list.current])));
+  const attach = useCallback((element: HTMLElement | null) => { list.current = element; hold.watch(element); }, [hold.watch]);
   return <section className="os-app-stack" aria-label="Senders">
     <Subhead actions={addsSendersOnAzure(state) ? <AddButton label="Add a sender" onClick={onAdd}/> : null}>Senders</Subhead>
-    <RecordList label="Senders on this domain" as="ul">
-      {addresses.map(address => <RecordRow key={address} icon={<AtSign size={16} aria-hidden/>} name={<span className="os-mono">{address}</span>} secondary={senders[address]}
-        state={isDefault(address) ? "Default" : undefined} tone="accent" current={isDefault(address)}
-        actions={isDefault(address) ? undefined : <Button busy={busy} ariaLabel={`Make ${address} the default sender`} onClick={() => onMakeDefault(address)}>Make default</Button>}>
-        {state.replies?.[address] ? `Replies to ${state.replies[address]}` : null}
-      </RecordRow>)}
-    </RecordList>
+    <div ref={attach} onClickCapture={hold.onClickCapture}>
+      <RecordList label="Senders on this domain" as="ul">
+        {addresses.map(address => <RecordRow key={address} icon={<AtSign size={16} aria-hidden/>} name={<span className="os-mono">{address}</span>} secondary={senders[address]}
+          state={address === state.sender ? "Default" : undefined} tone="accent" current={address === state.sender}
+          actions={address === state.sender ? undefined : <Button busy={making === address} ariaLabel={`Make ${address} the default sender`} onClick={() => onMakeDefault(address)}>Make default</Button>}>
+          {state.replies?.[address] ? `Replies to ${state.replies[address]}` : null}
+        </RecordRow>)}
+      </RecordList>
+    </div>
   </section>;
 }
 

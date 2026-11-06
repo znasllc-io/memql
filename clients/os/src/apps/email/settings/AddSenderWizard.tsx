@@ -4,9 +4,8 @@ import { AtSign } from "lucide-react";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption, Field, Input, Notice } from "../../../kit";
-import type { Act } from "../../../kit/ActionBar";
-import type { Stop } from "../../../kit/Rail";
 import { Wizard } from "../../../kit/Wizard";
+import { senderSteps, type SenderStep } from "../../../modules/connections/senderSteps";
 import { AccountPicker } from "../../accounts/AccountPicker";
 import type { AccountRow } from "../../accounts/rows";
 import type { CampaignWrites } from "../actions";
@@ -17,15 +16,14 @@ import { organizationName } from "../organizations";
 //   Organization (only when there is a choice) -> Address -> Display name
 //   -> Reply to (optional) -> Review
 //
-// THIS ONE ONLY RECORDS. It is for an organization whose mail no Azure domain
-// here sends: its provider is set up elsewhere. An organization with an Azure
-// domain adds senders through that domain's own Add a sender
-// (modules/connections/AddAzureSenderWizard), which registers the address with
-// Azure as it records it, so a sender is never recorded that Azure cannot send as.
-//
-// One question a step. The forward act lives on the floor and nowhere else, and
-// it is ABSENT until the step is answered: the words on the left say what is
-// missing. Nothing is written until Review, so Cancel is simply going.
+// THIS ONE ONLY RECORDS. The steps are the ones every Add a sender shares
+// (modules/connections/senderSteps). An owner or developer whose organization
+// sends through an Azure domain of its own adds senders through that domain's
+// Add a sender instead, which registers the address with Azure as it records
+// the sender. Everyone else, and every organization without such a domain,
+// records here, and what is recorded is not proof that a provider can send as
+// it: a sender a send would be refused as says so in Settings' Senders, for
+// anyone who may send, and an automation that sends as it cannot be turned on.
 //
 // THE ADD IS RETRY-SAFE. The sender's id is minted when the wizard opens and
 // held for as long as it is open, so an Add whose answer was lost, or whose
@@ -33,23 +31,20 @@ import { organizationName } from "../organizations";
 // one the person then has to find and archive. A press while one is in flight
 // does nothing.
 
-type Step = "organization" | "address" | "name" | "reply" | "review";
-
 /** `news@acme.com` and nothing grander: one @, text either side, no spaces. The engine has the last word. */
 const looksLikeAddress = (value: string) => /^[^\s@]+@[^\s@]+$/.test(value.trim());
 
-/** The sentence Review says, which is also what the sender will do. */
-export function sendAs(fromName: string, address: string, replyTo: string): string {
-  const base = `Send as ${fromName.trim()} <${address.trim()}>`;
-  return replyTo.trim() === "" ? `${base}.` : `${base}, replies to ${replyTo.trim()}.`;
-}
-
-export function AddSenderWizard({ organizations, initialAccountId, writes, onBack, onCreated }: {
+export function AddSenderWizard({ organizations, initialAccountId, writes, azureOwnDomain = "", onBack, onCreated }: {
   /** The organizations a person can choose between. One or none means nothing to ask. */
   organizations: AccountRow[];
   /** The organization the page is on: the answer to the first question, already given. */
   initialAccountId: string;
   writes: CampaignWrites;
+  /**
+   * The one sender of an organization whose mail goes out through Azure's own
+   * domain, which registers no other, when the page knows it: Review says so.
+   */
+  azureOwnDomain?: string;
   /** Leave without adding. */
   onBack: () => void;
   onCreated: (senderId: string) => void;
@@ -57,7 +52,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
   const choosing = organizations.length > 1;
   const create = writes.createSender;
   const [senderIdentityId] = useState(newShortId);
-  const [step, setStep] = useState<Step>("address");
+  const [step, setStep] = useState<SenderStep>("address");
   const [accountId, setAccountId] = useState(initialAccountId);
   const [addressDraft, setAddress] = useState<string | null>(null);
   const domain = accountDefaultDomain(organizations.find(account => account.id === accountId));
@@ -71,15 +66,6 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
   useEffect(() => { create.reset(); return () => create.reset(); }, []);
 
   const addressed = looksLikeAddress(address);
-  const named = fromName.trim() !== "";
-  const reached = (candidate: Step) =>
-    candidate === "organization" ? choosing
-    : candidate === "address" ? true
-    : candidate === "name" ? addressed
-    : addressed && named;
-  const order: Step[] = ["organization", "address", "name", "reply", "review"];
-  const stateOf = (candidate: Step): Stop["state"] =>
-    candidate === step ? "open" : reached(candidate) ? (order.indexOf(candidate) < order.indexOf(step) ? "done" : "waiting") : "ahead";
 
   async function add() {
     // A second press while the first is on its way is the same press.
@@ -93,12 +79,12 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
     }
   }
 
-  const steps: Stop[] = [];
-  if (choosing) {
-    steps.push({
+  const { steps, acts, word, reached } = senderSteps({
+    step,
+    go: setStep,
+    organization: choosing ? {
       id: "organization",
       name: "Organization",
-      state: stateOf("organization"),
       sentence: "Whose email this sender sends.",
       answer: organizationName(organizations, accountId) || undefined,
       body: (
@@ -114,15 +100,11 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
           />
         </Field>
       ),
-    });
-  }
-  steps.push(
-    {
-      id: "address",
-      name: "Address",
-      state: stateOf("address"),
-      sentence: "The address mail is sent from.",
-      answer: addressed ? address.trim() : undefined,
+    } : null,
+    address: {
+      value: address,
+      answered: addressed,
+      word: "Enter the address",
       body: (
         <Field label="Address">
           <Input
@@ -136,81 +118,24 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
         </Field>
       ),
     },
-    {
-      id: "name",
-      name: "Display name",
-      state: stateOf("name"),
-      sentence: "The name recipients see.",
-      answer: named ? fromName.trim() : undefined,
-      body: (
-        <Field label="Display name">
-          <Input
-            id="email-sender-name"
-            label="Display name"
-            value={fromName}
-            placeholder="Acme News"
-            onChange={setFromName}
-            onEnter={() => { if (named) setStep("reply"); }}
-          />
-        </Field>
-      ),
-    },
-    {
-      id: "reply",
-      name: "Reply to",
-      state: stateOf("reply"),
-      sentence: "Where replies go, if elsewhere.",
-      answer: replyTo.trim() !== "" ? replyTo.trim() : step === "review" ? "Skipped" : undefined,
-      body: (
-        <Field label="Reply to">
-          <Input
-            id="email-sender-reply"
-            label="Reply to"
-            value={replyTo}
-            placeholder="help@acme.com"
-            onChange={setReplyTo}
-            onEnter={() => { if (replyTo.trim() !== "") setStep("review"); }}
-          />
-        </Field>
-      ),
-    },
-    {
-      id: "review",
-      name: "Review",
-      sentence: "Check, then add.",
-      state: stateOf("review"),
-      body: (
-        <div className="os-app-stack">
-          <p>{sendAs(fromName, address, replyTo)}</p>
-          <Caption>
-            Adding a sender only records it here. Your email provider has to have the address, and has to allow this cluster to send as it.
-          </Caption>
-        </div>
-      ),
-    },
-  );
-
-  // THE WAY OUT FIRST AND QUIET, the forward act last. Nothing has been written
-  // before Review, so Cancel is simply going.
-  const acts: Act[] = [{ label: "Cancel", text: true, onAct: onBack }];
-  if (step === "address" && addressed) acts.push({ label: "Next", tone: "primary", onAct: () => setStep("name") });
-  if (step === "name" && named) acts.push({ label: "Next", tone: "primary", onAct: () => setStep("reply") });
-  if (step === "reply") {
-    // Reply to is the one question that may go unanswered. Skip is the quiet
-    // way past it and lets go of anything typed; Next keeps what was.
-    acts.push(
-      { label: "Skip", text: true, onAct: () => { setReplyTo(""); setStep("review"); } },
-      { label: "Next", tone: "primary", onAct: () => setStep("review") },
-    );
-  }
-  if (step === "review") acts.push({ label: "Add sender", tone: "primary", busy: create.busy, onAct: () => void add() });
-
-  const word =
-    step === "organization" ? "Choose the organization"
-    : step === "address" ? "Enter the address"
-    : step === "name" ? "Enter the display name"
-    : step === "reply" ? "Reply to is optional"
-    : create.busy ? "Adding the sender" : "Ready to add";
+    fromName,
+    onFromName: setFromName,
+    replyTo,
+    onReplyTo: setReplyTo,
+    replyPlaceholder: "help@acme.com",
+    reviewLine: "Check, then add.",
+    review: (
+      <Caption>
+        {azureOwnDomain
+          ? `This organization's mail goes out through Azure's own domain, which sends only as ${azureOwnDomain}. A sender recorded here cannot send until the organization has a sending domain of its own.`
+          : "Adding a sender only records it here. Your email provider has to have the address, and has to allow this cluster to send as it."}
+      </Caption>
+    ),
+    add: { label: "Add sender", tone: "primary", busy: create.busy, onAct: () => void add() },
+    reviewWord: create.busy ? "Adding the sender" : "Ready to add",
+    onCancel: onBack,
+    idPrefix: "email-sender",
+  });
 
   return (
     <Wizard
@@ -221,7 +146,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
       label="Adding a sender"
       steps={steps}
       open={step}
-      onOpen={(next) => { if (reached(next as Step)) setStep(next as Step); }}
+      onOpen={(next) => { if (reached(next as SenderStep)) setStep(next as SenderStep); }}
       status={{ word, tone: "none" }}
       acts={acts}
       notices={

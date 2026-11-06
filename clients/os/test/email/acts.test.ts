@@ -86,6 +86,13 @@ describe("senderActs", () => {
     expect(dress(senderActs(sender(), true, ""))).toEqual([["Cancel", "text"], ["Save", "primary"]]);
   });
 
+  it("offers Register with Azure, last, only to an active sender that can be registered", () => {
+    expect(dress(senderActs(sender(), false, "", true))).toEqual([["Archive", "text"], ["Edit", "text"], ["Register with Azure", "primary"]]);
+    expect(dress(senderActs(sender(), true, "", true))).toEqual([["Cancel", "text"], ["Save", "primary"]]);
+    expect(dress(senderActs(sender(), false, "archive", true))).toEqual([["Keep", "text"], ["Archive", "danger"]]);
+    expect(dress(senderActs(sender({ status: "disabled" }), false, "", true))).toEqual([["Restore", "primary"]]);
+  });
+
   it("never offers more than three acts, and the primary is last", () => {
     for (const status of ["active", "disabled"]) {
       for (const editing of [false, true]) {

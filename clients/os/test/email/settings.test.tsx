@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { PageNavigationProvider } from "../../src/kit/pageNavigation";
 import { TrailRow } from "../../src/kit/TrailRow";
@@ -653,6 +654,76 @@ describe("Add a sender", () => {
     expect(screen.getByRole("heading", { level: 4, name: "Senders" })).toBeTruthy();
   });
 
+  it("waits for the sending domain's answer before an owner's plus, and never asks for anyone else's", async () => {
+    const asking = fakeConnection({ azure: (args) => (args.action === "clusterStatus" ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" } : new Promise<Row>(() => {})) });
+    mount(asking);
+    await screen.findByRole("heading", { level: 4, name: "Senders" });
+    await waitFor(() => expect(asking.query.emailAzureSetup).toHaveBeenCalledWith(expect.objectContaining({ action: "status" }), expect.anything()));
+    // Which wizard is this organization's is not known yet: no plus to press.
+    expect(screen.queryByRole("button", { name: "Add a sender" })).toBeNull();
+    cleanup();
+
+    installSeededAccess("writer");
+    const writer = fakeConnection();
+    mount(writer, { role: "writer" });
+    await openWizard();
+    // The record-only wizard: the whole address is asked, not a name on a domain.
+    expect((screen.getByLabelText("Address") as HTMLInputElement).placeholder).toBe("news@acme.com");
+    expect(writer.query.emailAzureSetup).not.toHaveBeenCalled();
+  });
+
+  it("says a sender recorded for Azure's own domain cannot send, and records it only", async () => {
+    const own = { status: "ready", plan: { domain: "AzureManagedDomain", managedDomain: true, subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" }, planId: "saved", sender: "donotreply@1111.azurecomm.net", senders: { "donotreply@1111.azurecomm.net": "DoNotReply" } };
+    const conn = fakeConnection({ azure: (args) => (args.action === "clusterStatus" ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" } : own) });
+    mount(conn);
+    await screen.findByRole("button", { name: "Manage email for Operator organization" });
+    await openWizard();
+    type("Address", "news@acme.com");
+    press("Next");
+    press("Next");
+    press("Skip");
+    expect(await screen.findByText(/goes out through Azure's own domain, which sends only as donotreply@1111\.azurecomm\.net/)).toBeTruthy();
+    expect(screen.queryByText(/registers the address with Azure/)).toBeNull();
+    press("Add sender");
+    await waitFor(() => expect(conn.query.createSenderIdentity).toHaveBeenCalledTimes(1));
+    expect(conn.query.emailAzureSetup).not.toHaveBeenCalledWith(expect.objectContaining({ action: "sender" }), expect.anything());
+  });
+
+  it("registers a sender Azure does not have from its page, as that sender", async () => {
+    const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
+    const ready = { status: "ready", plan, planId: "saved", sender: "hello@acme.com", senders: { "hello@acme.com": "Acme" } };
+    const conn = fakeConnection({
+      senderIdentities: [senderRow({ id: "s1", address: "news@acme.com", fromName: "Acme News", replyTo: "help@acme.com" })],
+      senderReadiness: { s1: { ready: false, reason: "not registered", senderRefusal: "unregistered" } },
+      azure: (args) =>
+        args.action === "clusterStatus"
+          ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" }
+          : args.action === "sender"
+            ? { ...ready, senders: { ...ready.senders, "news@acme.com": "Acme News" } }
+            : ready,
+    });
+    mount(conn);
+    await screen.findByRole("button", { name: "Manage email for Operator organization" });
+    fireEvent.click(await screen.findByText("news@acme.com"));
+    expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
+    await waitFor(() => expect(barButtons()).toContain("Register with Azure"));
+    press("Register with Azure");
+
+    // The domain's own wizard, already answered with this sender's address, name and reply address.
+    expect(await screen.findByRole("heading", { level: 3, name: "Register with Azure" })).toBeTruthy();
+    expect(screen.getByText("Send as Acme News <news@acme.com>, replies to help@acme.com.")).toBeTruthy();
+    press("Register");
+    await waitFor(() =>
+      expect(conn.query.emailAzureSetup).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "sender", options: expect.objectContaining({ username: "news", displayName: "Acme News", replyTo: "help@acme.com", planId: "saved" }) }),
+        expect.anything(),
+      ),
+    );
+    // The engine takes the recorded sender over: nothing is recorded a second time here.
+    expect(conn.query.createSenderIdentity).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
+  });
+
   it("asks which organization only when there is a choice, starting from the page's", async () => {
     const conn = fakeConnection({ accounts: TWO_ORGANIZATIONS });
     mount(conn);
@@ -1122,7 +1193,8 @@ describe("Settings draws no dead control", () => {
     await screen.findByRole("combobox", { name: "Testing audience" });
     expect(deadButtons()).toEqual([]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Add a sender" }));
+    // An owner's plus is there once the sending domain has answered.
+    fireEvent.click(await screen.findByRole("button", { name: "Add a sender" }));
     await screen.findByRole("heading", { level: 3, name: "Add a sender" });
     expect(deadButtons()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

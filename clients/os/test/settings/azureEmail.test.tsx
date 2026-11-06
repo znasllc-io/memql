@@ -546,10 +546,10 @@ describe("senders on an Azure domain", () => {
     state: item.querySelector(".os-record-status")?.textContent ?? "",
     makeDefault: within(item).queryByRole("button", { name: /^Make .* the default sender$/ }) !== null,
   }));
+  const ready = { status: "ready", plan, planId: "saved", sender: "news@client.example", replyTo: "help@client.example", senders: { "news@client.example": "Client" }, replies: { "news@client.example": "help@client.example" } };
+  const added = { ...ready, senders: { ...ready.senders, "hello@client.example": "Client Hello" }, replies: { ...ready.replies, "hello@client.example": "replies@client.example" } };
   it("domain page adds a sender without changing the default", async () => {
-    const ready = { status: "ready", plan, planId: "saved", sender: "news@client.example", replyTo: "help@client.example", senders: { "news@client.example": "Client" }, replies: { "news@client.example": "help@client.example" } };
-    const added = { ...ready, senders: { ...ready.senders, "hello@client.example": "Client Hello" }, replies: { ...ready.replies, "hello@client.example": "replies@client.example" } };
-    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "sender" ? added : args.action === "makeDefault" ? { ...added, sender: "hello@client.example" } : ready);
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "sender" ? added : args.action === "makeDefault" ? { ...added, sender: "hello@client.example", replyTo: "replies@client.example" } : ready);
     render(withSession(<AzureEmailConnections/>));
     chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
     await click("Manage email for Client");
@@ -580,9 +580,10 @@ describe("senders on an Azure domain", () => {
     expect(adds[0]![0]).toMatchObject({ accountId: "client", sessionId: "", options: { username: "hello", displayName: "Client Hello", replyTo: "replies@client.example", planId: "saved" } });
     expect(adds[0]![0].options?.makeDefault).toBeUndefined();
     expect(await screen.findByRole("heading", { level: 3, name: "client.example" })).toBeTruthy();
+    // In address order, which Make default does not change.
     expect(domainSenders()).toEqual([
-      { address: "news@client.example", state: "Default", makeDefault: false },
       { address: "hello@client.example", state: "", makeDefault: true },
+      { address: "news@client.example", state: "Default", makeDefault: false },
     ]);
     expect(screen.getByText("Replies to replies@client.example")).toBeTruthy();
 
@@ -593,6 +594,44 @@ describe("senders on an Azure domain", () => {
       { address: "hello@client.example", state: "Default", makeDefault: false },
       { address: "news@client.example", state: "", makeDefault: true },
     ]));
+    // The second click of a double-click lands on what just appeared, and is held.
+    fireEvent.click(screen.getByRole("button", { name: "Make news@client.example the default sender" }));
+    expect(call.mock.calls.filter(([args]) => args.action === "makeDefault")).toHaveLength(1);
+    await readTheBar();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Make news@client.example the default sender" })); });
+    expect(call.mock.calls.filter(([args]) => args.action === "makeDefault")).toHaveLength(2);
     expect(call.mock.calls.filter(([args]) => args.action === "sender")).toHaveLength(1);
+  });
+  it("shows only the sender being made the default as working, and re-checks sends quietly", async () => {
+    const three = { ...added, senders: { ...added.senders, "billing@client.example": "Client Billing" }, replies: undefined };
+    let answer: (value: Record<string, unknown>) => void = () => {};
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "makeDefault" ? new Promise(done => { answer = done; }) : args.action === "operations" ? { status: "ok", deliveryFeedback: "ready", operations: [] } : three);
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Manage email for Client");
+    await click("Make hello@client.example the default sender");
+    expect(screen.getByRole("button", { name: "Make hello@client.example the default sender" }).getAttribute("aria-busy")).toBe("true");
+    expect((screen.getByRole("button", { name: "Make billing@client.example the default sender" }) as HTMLButtonElement).disabled).toBe(false);
+    // A reply that does not say where replies go clears what the page said.
+    await act(async () => answer({ ...three, sender: "hello@client.example" }));
+    expect(screen.queryByText(/^Replies to /)).toBeNull();
+    // The timed re-check of sends changes nothing on the page while it runs.
+    vi.useFakeTimers();
+    await click("Check sends");
+    let release: () => void = () => {};
+    call.mockImplementationOnce(async () => { await new Promise<void>(done => { release = done; }); return rowsResult([{ status: "ok", deliveryFeedback: "ready", operations: [] }]); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(call.mock.calls.filter(([args]) => args.action === "operations").length).toBe(2);
+    expect(document.querySelector("button:disabled")).toBeNull();
+    await act(async () => { release(); });
+  });
+  it("offers no Add a sender on Azure's own domain, which registers no other sender", async () => {
+    const own = { status: "ready", plan: { ...plan, domain: "AzureManagedDomain", managedDomain: true }, planId: "saved", sender: "donotreply@1111.azurecomm.net", senders: { "donotreply@1111.azurecomm.net": "DoNotReply" } };
+    query(args => args.action === "clusterStatus" ? cluster : own);
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    await click("Manage email for Our company");
+    expect(domainSenders()).toEqual([{ address: "donotreply@1111.azurecomm.net", state: "Default", makeDefault: false }]);
+    expect(screen.queryByRole("button", { name: "Add a sender" })).toBeNull();
   });
 });

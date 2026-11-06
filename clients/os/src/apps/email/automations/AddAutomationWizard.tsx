@@ -12,13 +12,12 @@ import { useDefaultOrganization } from "../../accounts/organization";
 import { organizationName, selectableOrganizations, isOperatorOrganization } from "../organizations";
 import { useJourneyWrites, type CampaignWrites } from "../actions";
 import { audienceProjection, senderProjection, templateProjection, ruleSentence, emailRuleFromRow } from "../rows";
-import { EMAIL_REFRESH_MS, listKnowledge, useConfirmTemplates, type EmailFeeds } from "../useEmail";
+import { EMAIL_REFRESH_MS, listKnowledge, useConfirmTemplates, useSenderChecks, type EmailFeeds } from "../useEmail";
 import { useOpenRecord } from "../openRequest";
 import { addSteps, type AddStep, type TriggerChoice } from "./addModel";
 import { Flow } from "./Flow";
 import { newStep, triggerSentence, type FlowStep, type Trigger } from "./flowModel";
-import { journeyIssues, type Issue } from "./issues";
-import { useAzureRegisteredSenders } from "../../../modules/connections/azureEmailSetup";
+import { journeyIssues, senderRefusalIssue, type Issue } from "./issues";
 import { emptyRule, RuleField } from "./ruleFields";
 import { DescribeAutomationPage, type Proposal } from "./DescribeAutomationPage";
 
@@ -43,12 +42,16 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   const audience = audiences.find(a => a.id === audienceId);
   const trigger: Trigger = { kind: choice === "confirmed" ? "confirmed" : "joined", audienceId };
   const confirms = useConfirmTemplates(steps, feeds.templates.snapshot.rows);
-  const azure = useAzureRegisteredSenders(accountId);
-  const issues = choice === "event" ? [] : [...journeyIssues({ accountId, trigger, steps }, { audiences, templates, senders, confirms: confirms.value, registered: azure.registered }), ...serverIssues];
+  // The engine's sending check for each sender this automation would send as:
+  // the steps' senders, or the rule's when something in MemQL starts it.
+  const ruleSender = choice === "event" && rule.recipientMode !== "cluster_roles" ? senders.find(s => s.id === rule.senderIdentityId && s.accountId === accountId) : undefined;
+  const checks = useSenderChecks(accountId, choice === "event" ? (ruleSender ? [ruleSender] : []) : senders.filter(s => steps.some(step => step.senderIdentityId === s.id)));
+  const issues = choice === "event" ? [] : [...journeyIssues({ accountId, trigger, steps }, { audiences, templates, senders, confirms: confirms.value, checks: checks.value }), ...serverIssues];
+  const ruleIssue = ruleSender ? senderRefusalIssue("", ruleSender.address, checks.value.get(ruleSender.id) ?? "") : null;
   const resourceKnown = [feeds.audiences, feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known");
-  const known = resourceKnown && (choice === "event" || confirms.state === "ready" && azure.settled);
+  const known = resourceKnown && checks.state !== "loading" && (choice === "event" || confirms.state === "ready");
   const ruleDraft = { ...rule, accountId, name };
-  const ruleReady = !!rule.triggerConcept && !!rule.templateId && templates.some(t => t.id === rule.templateId && t.accountId === accountId && isPublished(t)) && (rule.recipientMode === "cluster_roles" || (isOperatorOrganization(accountId) || senders.some(s => s.id === rule.senderIdentityId && s.accountId === accountId && s.status !== "disabled")) && (rule.recipientMode === "audience" ? !!rule.audienceId : !!rule.recipientField.trim()));
+  const ruleReady = !ruleIssue && !!rule.triggerConcept && !!rule.templateId && templates.some(t => t.id === rule.templateId && t.accountId === accountId && isPublished(t)) && (rule.recipientMode === "cluster_roles" || (isOperatorOrganization(accountId) || senders.some(s => s.id === rule.senderIdentityId && s.accountId === accountId && s.status !== "disabled")) && (rule.recipientMode === "audience" ? !!rule.audienceId : !!rule.recipientField.trim()));
   const clean = known && (choice === "event" ? ruleReady : !issues.length) && !!name.trim();
   const open = !accountId ? "organization" : step;
   const order = addSteps(choice, rule.recipientMode, organizations.length !== 1);
@@ -86,5 +89,5 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   if (describing) return <DescribeAutomationPage accountId={accountId} feeds={feeds} onBack={() => setDescribing(false)} onEdit={editProposal} onDone={onDone} />;
   const error = journeyWrites.save.error || journeyWrites.setState.error || writes.createRule.error || writes.updateRule.error || writes.ruleArming.error || confirms.error;
   const stops: Stop[] = order.map((id, i) => ({ id, name: label[id], sentence: AUTOMATION_SUBTITLES[id], state: id === open ? "open" : i < order.indexOf(open) ? "done" : "ahead", body: body(id) }));
-  return <><AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={azure.reload} /><Wizard title="Add an automation" icon={<Workflow size={20} aria-hidden />} label="Adding an automation" back={{ label: "Automations", onSelect: onBack }} steps={stops} open={open} onOpen={id => setStep(id as AddStep)} status={{ word: busy ? "Saving" : revision ? "Saved as a draft" : open === "review" ? "Review the automation" : label[open], tone: busy ? "busy" : undefined }} acts={acts} confirm={asking ? asking === "cancel" ? "Retire this draft? It stays in history." : `Turn on “${name}”? It sends email to people automatically from now on.` : undefined} notices={<>{serverIssues.length ? <Notice tone="warn" sentence="Saved as a draft. It wasn't turned on." /> : null}{error ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}</>} /></>;
+  return <><AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={checks.reload} busy={checks.state === "loading"} /><Wizard title="Add an automation" icon={<Workflow size={20} aria-hidden />} label="Adding an automation" back={{ label: "Automations", onSelect: onBack }} steps={stops} open={open} onOpen={id => setStep(id as AddStep)} status={{ word: busy ? "Saving" : revision ? "Saved as a draft" : open === "review" ? "Review the automation" : label[open], tone: busy ? "busy" : undefined }} acts={acts} confirm={asking ? asking === "cancel" ? "Retire this draft? It stays in history." : `Turn on “${name}”? It sends email to people automatically from now on.` : undefined} notices={<>{serverIssues.length ? <Notice tone="warn" sentence="Saved as a draft. It wasn't turned on." /> : null}{ruleIssue ? <Notice tone="warn" sentence={`Can't turn on yet: ${ruleIssue.text}`} /> : null}{error ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}</>} /></>;
 }

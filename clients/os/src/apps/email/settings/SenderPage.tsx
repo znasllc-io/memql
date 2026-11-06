@@ -5,6 +5,7 @@ import { ActionBar } from "../../../kit/ActionBar";
 import type { CampaignWrites } from "../actions";
 import { toKitActs } from "../acts";
 import { senderIsRetired, senderLabel, type SenderIdentityRow } from "../rows";
+import { senderRefusalWord, type SenderRefusal } from "../senderChecks";
 import { WORDS } from "../words";
 import { senderActs } from "./senderActs";
 
@@ -32,13 +33,17 @@ const draftOf = (sender: SenderIdentityRow): Draft => ({
   notes: sender.notes,
 });
 
-export function SenderPage({ sender, organization, writes, unregistered = false, onBack }: {
+export function SenderPage({ sender, organization, writes, refusal = "", azureName = "", onRegister, onBack }: {
   sender: SenderIdentityRow;
   /** The organization's name, resolved by the page that holds this. */
   organization: string;
   writes: CampaignWrites;
-  /** Azure sends the organization's mail and does not have this address. */
-  unregistered?: boolean;
+  /** Why a send as this sender would be refused, if it is a reason fixed on it or its domain. */
+  refusal?: SenderRefusal;
+  /** The display name Azure holds for this address, when the page knows it. */
+  azureName?: string;
+  /** Register this sender on its organization's Azure domain, when that can be done here. */
+  onRegister?: () => void;
   onBack: () => void;
 }) {
   const archived = senderIsRetired(sender);
@@ -62,7 +67,7 @@ export function SenderPage({ sender, organization, writes, unregistered = false,
     draft.notes.trim() !== sender.notes.trim();
   // Save is not offered until there is something to save and a name to save it
   // under, and the state words beside it say which is missing.
-  const specs = senderActs(sender, editingNow, editingNow ? "" : asking).filter(
+  const specs = senderActs(sender, editingNow, editingNow ? "" : asking, refusal === "unregistered" && !!onRegister).filter(
     (spec) => spec.id !== "save" || (named && changed),
   );
   const busyId = status.busy ? (archived ? "restore" : "archive-confirmed") : update.busy ? "save" : undefined;
@@ -92,6 +97,9 @@ export function SenderPage({ sender, organization, writes, unregistered = false,
         update.reset();
         setEditing(false);
         break;
+      case "register":
+        onRegister?.();
+        break;
       case "save":
         void update
           .update(sender.id, {
@@ -106,8 +114,11 @@ export function SenderPage({ sender, organization, writes, unregistered = false,
     }
   }
 
-  const state = editingNow ? "Editing" : archived ? WORDS.archived : unregistered ? WORDS.notRegistered : WORDS.active;
-  const detail = editingNow && !named ? "Add a display name" : undefined;
+  const refused = archived ? "" : senderRefusalWord(refusal);
+  const state = editingNow ? "Editing" : archived ? WORDS.archived : refused || WORDS.active;
+  const detail = editingNow && !named ? "Add a display name"
+    : !editingNow && !archived && refusal === "renamed" && azureName !== "" ? `Azure sends it as ${azureName}.`
+    : undefined;
 
   return (
     <div
@@ -178,7 +189,7 @@ export function SenderPage({ sender, organization, writes, unregistered = false,
       <ActionBar
         state={state}
         detail={detail}
-        tone={archived || editingNow || unregistered ? "none" : "live"}
+        tone={archived || editingNow || refused ? "none" : "live"}
         acts={toKitActs(specs, run, busyId)}
       >
         {asking === "archive" && !editingNow && !archived ? (

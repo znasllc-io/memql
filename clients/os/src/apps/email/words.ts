@@ -19,9 +19,14 @@ export const WORDS = {
   /**
    * A sender of an organization whose mail Azure sends, at an address Azure
    * does not have: every email sent as it is refused until it is added on the
-   * organization's sending domain.
+   * organization's sending domain (or, on Azure's own domain, never).
    */
   notRegistered: "Not registered with Azure",
+  /**
+   * A sender Azure has under another display name, the only one it sends with:
+   * every email sent as it is refused until its display name is Azure's.
+   */
+  renamedInAzure: "Azure uses another name",
 
   /**
    * The one sentence for sending that is not set up for an organization. The

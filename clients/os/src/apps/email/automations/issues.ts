@@ -1,15 +1,40 @@
 import { isPublished } from "../rows";
 import type { AudienceRow, TemplateRow, SenderIdentityRow } from "../rows";
 import { isOperatorOrganization } from "../organizations";
-import { notRegisteredWithAzure } from "../../../modules/connections/azureEmailSetup";
+import type { SenderRefusal } from "../senderChecks";
 import { STEP_ID, type FlowStep, type Trigger } from "./flowModel";
-export interface Issue { stepId: string; text: string }
 /**
- * What stands between an automation and turning it on, by step. `registered` is
- * what the organization's Azure domain can send as when Azure sends its mail
- * (null when that is not known): an email sent as any other address is refused.
+ * Something that stands between an automation and turning it on, at a step (""
+ * for the automation as a whole). `whileOn` is what it means for an automation
+ * already on, when that is not simply that its emails are held: the engine
+ * holds a missing or turned-off sender's emails, but a send as a sender the
+ * provider refuses fails.
  */
-export function journeyIssues(draft: { accountId: string; trigger: Trigger | null; steps: readonly FlowStep[] }, feeds: { audiences: AudienceRow[]; templates: TemplateRow[]; senders: SenderIdentityRow[]; confirms?: ReadonlyMap<string, boolean>; registered?: ReadonlySet<string> | null }): Issue[] {
+export interface Issue { stepId: string; text: string; whileOn?: string }
+
+/**
+ * The issue with sending as a sender the provider would refuse, for a reason a
+ * person fixes on the sender or its sending domain; null when there is none.
+ */
+export function senderRefusalIssue(stepId: string, address: string, refusal: SenderRefusal): Issue | null {
+  switch (refusal) {
+    case "unregistered":
+      return { stepId, text: `The sender ${address} is not registered with Azure. Add it on the sending domain before turning this on.`, whileOn: `Sends from ${address} fail until it is added on the sending domain. Failed runs can then be retried.` };
+    case "renamed":
+      return { stepId, text: `Azure sends ${address} under a different name. Give the sender the display name Azure has before turning this on.`, whileOn: `Sends from ${address} fail until its display name is the one Azure has. Failed runs can then be retried.` };
+    case "azureOwnDomain":
+      return { stepId, text: `This organization sends through Azure's own domain, which sends only as its own sender, not ${address}. Choose that sender before turning this on.`, whileOn: `Sends from ${address} fail: Azure's own domain sends only as its own sender. Pause, choose that sender, then retry the failed runs.` };
+    default:
+      return null;
+  }
+}
+
+/**
+ * What stands between an automation and turning it on, by step. `checks` is the
+ * engine's sending check for each sender, by id (`useSenderChecks`): a sender
+ * the provider would refuse is an issue, for anyone who may turn it on.
+ */
+export function journeyIssues(draft: { accountId: string; trigger: Trigger | null; steps: readonly FlowStep[] }, feeds: { audiences: AudienceRow[]; templates: TemplateRow[]; senders: SenderIdentityRow[]; confirms?: ReadonlyMap<string, boolean>; checks?: ReadonlyMap<string, SenderRefusal> }): Issue[] {
   const issues: Issue[] = [];
   const add = (stepId: string, text: string) => issues.push({ stepId, text });
   const audience = feeds.audiences.find(a => a.id === draft.trigger?.audienceId);
@@ -39,7 +64,10 @@ export function journeyIssues(draft: { accountId: string; trigger: Trigger | nul
     if (!step.senderIdentityId) { if (!isOperatorOrganization(draft.accountId)) add(step.id, "Choose a sender."); }
     else if (!sender || sender.accountId !== draft.accountId) add(step.id, "Choose a sender in this organization.");
     else if (sender.status === "disabled") add(step.id, `The sender ${sender.address} is turned off.`);
-    else if (notRegisteredWithAzure(sender.address, feeds.registered ?? null)) add(step.id, `The sender ${sender.address} is not registered with Azure. Add it on the sending domain before turning this on.`);
+    else {
+      const refused = senderRefusalIssue(step.id, sender.address, feeds.checks?.get(sender.id) ?? "");
+      if (refused) issues.push(refused);
+    }
   }
   return issues;
 }

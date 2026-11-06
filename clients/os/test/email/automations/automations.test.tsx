@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
 import { audienceRow, fakeConnection, recipientRow, rowsResult, ruleRow, senderRow, templateRow, withSession, type FakeSeed } from "../harness";
+import { installSeededAccess } from "../../seededAccess";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../../src/live/connection", () => ({ useOsConnection: () => h.connection, bridgePathFor: (base: string) => base + "_memql/ws", osBridgePath: "/_memql/ws" }));
 vi.mock("../../../src/auth/context", () => ({ useAuthSource: () => ({ bearer: async () => "token", refresh: async () => {} }) }));
@@ -17,12 +18,14 @@ function mount(conn: ReturnType<typeof fakeConnection>, intent?: { id: string; p
   return render(withSession(<EmailApp sectionId="automations" navigate={() => {}} askContext={() => {}} uploads={{ upload: vi.fn() }} store={store} intent={intent} consumeIntent={() => {}} />));
 }
 async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name })); }
-/** A cluster whose Azure sends this organization's mail on acme.com, as the senders it has registered. */
-function sendingThroughAzure(senders: () => Record<string, string>) {
-  const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
-  return (args: { action: string }) => args.action === "clusterStatus" ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" } : { status: "ready", plan, planId: "saved", sender: "hello@acme.com", senders: senders() };
-}
+/** What the engine's sending check says of a sender a send as which would be refused for this reason. */
+const refused = (senderRefusal: string) => ({ ready: false, reason: "email: permanent failure (status 0): a sender to fix", senderRefusal });
 const senderIdentities = [senderRow({ id: "s1", accountId: "self", address: "news@acme.com" }), senderRow({ id: "s2", accountId: "self", address: "hello@acme.com", createdAt: "2026-07-01T00:00:00Z" })];
+function mountSettings(conn: ReturnType<typeof fakeConnection>, role?: string) {
+  h.connection = conn;
+  return render(withSession(<EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} uploads={{ upload: vi.fn() }} store={new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} })} />, { role }));
+}
+const senderState = (address: string) => within(screen.getByRole("list", { name: "Senders" })).getByText(address).closest(".os-record-row")?.querySelector(".os-record-status")?.textContent;
 describe("Automation pages", () => {
   it("merges journeys and event rules, keeps paused and filters by trigger", async () => {
     mount(setup({ journeys: [journey, { ...journey, id: "retired", name: "Old", status: "archived" }, { ...journey, id: "paused", name: "Paused series", status: "paused" }], emailRules: [ruleRow({ id: "r", name: "New admin" })] }));
@@ -86,15 +89,13 @@ describe("Automation pages", () => {
     expect(bar.textContent).not.toContain("Can't turn on yet");
   });
   it("an unregistered sender is flagged and blocks turning on", async () => {
-    // The organization sends through Azure, which has hello@acme.com and not
-    // news@acme.com, the sender the automation's email goes out as.
-    const azure = sendingThroughAzure(() => ({ "hello@acme.com": "Acme" }));
-    const conn = setup({ journeys: [journey], azure, senderIdentities });
-    h.connection = conn;
-    render(withSession(<EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} uploads={{ upload: vi.fn() }} store={new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} })} />));
-    const state = (address: string) => within(screen.getByRole("list", { name: "Senders" })).getByText(address).closest(".os-record-row")?.querySelector(".os-record-status")?.textContent;
-    await waitFor(() => expect(state("news@acme.com")).toBe("Not registered with Azure"));
-    expect(state("hello@acme.com")).toBe("Active");
+    // The engine's sending check: Azure has hello@acme.com and not news@acme.com,
+    // the sender the automation's email goes out as.
+    const conn = setup({ journeys: [journey], senderIdentities, senderReadiness: { s1: refused("unregistered") } });
+    mountSettings(conn);
+    await waitFor(() => expect(senderState("news@acme.com")).toBe("Not registered with Azure"));
+    expect(senderState("hello@acme.com")).toBe("Active");
+    expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ accountId: "self", senderIdentityId: "s1" }, expect.anything());
     // Its own page says the same, not that it is active.
     fireEvent.click(within(screen.getByRole("list", { name: "Senders" })).getByText("news@acme.com").closest("button")!);
     expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
@@ -110,23 +111,72 @@ describe("Automation pages", () => {
     expect(document.querySelector("button:disabled")).toBeNull();
     cleanup();
 
-    // One already on holds the emails, and says that instead.
-    mount(setup({ journeys: [{ ...journey, status: "active", activatedAt: "2026-10-11T01:00:00Z" }], azure, senderIdentities }));
+    // One already on is not holding these emails: they fail, and can be retried once it is added.
+    mount(setup({ journeys: [{ ...journey, status: "active", activatedAt: "2026-10-11T01:00:00Z" }], senderIdentities, senderReadiness: { s1: refused("unregistered") } }));
     fireEvent.click(await screen.findByText("Welcome series"));
-    const held = await screen.findByRole("group", { name: "What you can do with this" });
-    await waitFor(() => expect(held.textContent).toContain("Emails held: The sender news@acme.com is not registered with Azure. Add it on the sending domain to send its emails."));
+    const on = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(on.textContent).toContain("Sends from news@acme.com fail until it is added on the sending domain. Failed runs can then be retried."));
+    expect(on.textContent).not.toContain("Emails held");
+    expect(screen.getAllByText("Sends from news@acme.com fail until it is added on the sending domain. Failed runs can then be retried.").length).toBeGreaterThan(1);
   });
   it("stops flagging a sender once the domain has it, without leaving the page", async () => {
-    let senders: Record<string, string> = { "hello@acme.com": "Acme" };
-    mount(setup({ journeys: [journey], azure: sendingThroughAzure(() => senders), senderIdentities }));
+    let added = false;
+    mount(setup({ journeys: [journey], senderIdentities, senderReadiness: id => id === "s1" && !added ? refused("unregistered") : undefined }));
     fireEvent.click(await screen.findByText("Welcome series"));
     const bar = await screen.findByRole("group", { name: "What you can do with this" });
     await waitFor(() => expect(bar.textContent).toContain("is not registered with Azure"));
     // Added on the sending domain while the automation page stayed open.
-    senders = { ...senders, "news@acme.com": "Acme News" };
+    added = true;
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(await screen.findByRole("button", { name: "Turn on" })).toBeTruthy();
     expect(bar.textContent).not.toContain("is not registered with Azure");
+  });
+  it.each(["writer", "admin"])("tells a %s too, without reading the sending domain", async role => {
+    installSeededAccess(role);
+    try {
+      const conn = setup({ journeys: [journey], senderIdentities, senderReadiness: { s1: refused("unregistered") } });
+      mountSettings(conn, role);
+      await waitFor(() => expect(senderState("news@acme.com")).toBe("Not registered with Azure"));
+      cleanup();
+      h.connection = conn;
+      render(withSession(<EmailApp sectionId="automations" navigate={() => {}} askContext={() => {}} uploads={{ upload: vi.fn() }} store={new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} })} />, { role }));
+      fireEvent.click(await screen.findByText("Welcome series"));
+      const bar = await screen.findByRole("group", { name: "What you can do with this" });
+      await waitFor(() => expect(bar.textContent).toContain("Can't turn on yet: The sender news@acme.com is not registered with Azure."));
+      expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+      expect(conn.query.emailAzureSetup).not.toHaveBeenCalled();
+    } finally { installSeededAccess("owner"); }
+  });
+  it("keeps a sender Azure names differently flagged until its name is fixed", async () => {
+    let name = "Acme";
+    const conn = setup({ journeys: [journey], senderIdentities: [senderRow({ id: "s1", accountId: "self", address: "news@acme.com", fromName: name })], senderReadiness: id => id === "s1" && name !== "Acme News" ? refused("renamed") : undefined });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Welcome series"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Can't turn on yet: Azure sends news@acme.com under a different name. Give the sender the display name Azure has before turning this on."));
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    // The sender takes Azure's name (on its page); the check is asked again for it.
+    name = "Acme News";
+    act(() => conn.subscriptions.emit("v1:campaigns:senderIdentity", senderRow({ id: "s1", accountId: "self", address: "news@acme.com", fromName: name })));
+    expect(await screen.findByRole("button", { name: "Turn on" })).toBeTruthy();
+    expect(bar.textContent).not.toContain("under a different name");
+  });
+  it("says Azure's own domain sends only as its own sender, with no advice it cannot take", async () => {
+    mount(setup({ journeys: [journey], senderIdentities, senderReadiness: { s1: refused("azureOwnDomain") } }));
+    fireEvent.click(await screen.findByText("Welcome series"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Can't turn on yet: This organization sends through Azure's own domain, which sends only as its own sender, not news@acme.com. Choose that sender before turning this on."));
+    expect(bar.textContent).not.toContain("sending domain before");
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+  });
+  it("checks an event automation's sender before it is turned on", async () => {
+    const rule = ruleRow({ id: "r", name: "New admin", recipientMode: "audience", audienceId: "a1", senderIdentityId: "s1", templateId: "t1" });
+    mount(setup({ emailRules: [rule], senderIdentities, senderReadiness: { s1: refused("unregistered") } }));
+    fireEvent.click(await screen.findByText("New admin"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Can't turn on yet: The sender news@acme.com is not registered with Azure."));
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    expect(document.querySelector("button:disabled")).toBeNull();
   });
   it("offers no Retry on a retired automation", async () => {
     const retired = { ...journey, status: "archived" };
@@ -166,6 +216,20 @@ describe("Adding and describing", () => {
     await press("Turn on"); fireEvent.click(screen.getByRole("button", { name: "Turn on" })); expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled(); await press("Turn on");
     await waitFor(() => expect(conn.query.campaignSetJourneyState).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: "2026-10-12T00:00:00Z", action: "activate" })));
     expect(conn.query.campaignSaveJourney).toHaveBeenCalledOnce(); expect(conn.query.campaignSetJourneyState.mock.calls[0]?.[0].journeyId).toBe(conn.query.campaignSaveJourney.mock.calls[0]?.[0].journeyId);
+  });
+  it("checks the sender of an event automation being added before it can be turned on", async () => {
+    const conn = setup({ concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }], senderIdentities, senderReadiness: { s1: refused("unregistered") } });
+    mount(conn); fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Something happens in MemQL" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "user (identity)" }));
+    await press("Next"); await press("Next"); await press("Next");
+    fireEvent.click(screen.getByRole("radio", { name: /Everyone in an audience/ })); chooseOption(screen.getByLabelText("Audience"), "Newsletter"); await press("Next");
+    chooseOption(screen.getByLabelText("Template"), "Welcome"); await press("Next");
+    chooseOption(screen.getByLabelText("Sender"), "news@acme.com"); await press("Next");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "A new person" } });
+    expect(await screen.findByText("Can't turn on yet: The sender news@acme.com is not registered with Azure. Add it on the sending domain before turning this on.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ accountId: "self", senderIdentityId: "s1" }, expect.anything());
   });
   it("keeps one event-rule draft after activation refusal and saves later edits before retrying", async () => {
     const conn = setup({ concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }] });

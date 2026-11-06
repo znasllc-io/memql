@@ -1,62 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
-import { useSession } from "../../chrome/access";
-import { canConfigure } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 
-export interface AzureEmailScope {
-  subscriptionId: string; resourceGroup: string; dataLocation: string;
-  createResourceGroup?: boolean; resourceGroupLocation?: string;
-}
-export interface AzureEmailPlan extends AzureEmailScope {
-  domain: string; emailService: string; communicationService: string;
-  /** Azure's own domain for the installation, whose one sender Azure made. */
-  managedDomain?: boolean;
-}
-export interface AzureEmailReply {
-  requestedSender?: { username: string; displayName: string; replyTo?: string };
-  /** Every sender Azure has registered on the domain: address -> the display name Azure holds. */
-  senders?: Record<string, string>; tenantId?: string;
-  /** Where replies to each sender's mail go: address -> reply address. Absent when not known. */
-  replies?: Record<string, string>;
-  status: string; applicationReady?: boolean; capture?: boolean;
-  sessionId?: string; userCode?: string; verificationUri?: string; interval?: number;
-  subscriptionId?: string; resourceGroup?: string; dataLocation?: string;
-  createResourceGroup?: boolean; resourceGroupLocation?: string;
-  choices?: { id: string; name: string }[];
-  /** `sender` is the default: the address mail that names none goes out as. */
-  plan?: AzureEmailPlan; planId?: string; sender?: string; replyTo?: string;
-  records?: { purpose: string; name: string; type: string; value: string; status: string }[];
-  deliveryFeedback?: "not-configured" | "pending" | "ready";
-  operations?: { operationId: string; status: string; detail: string; submittedAt: string; checkedAt?: string; deliveryStatus?: string; deliveryAt?: string }[];
-}
-export const AZURE_EMAIL_LOCATIONS = ["Africa", "Asia Pacific", "Australia", "Brazil", "Canada", "Europe", "France", "Germany", "India", "Japan", "Korea", "Norway", "Switzerland", "United Arab Emirates", "United Kingdom", "United States"];
-
-/**
- * Whether senders are added on this organization's Azure domain: it is sending,
- * and it is the organization's own domain. Azure's own domain for the
- * installation has the one sender Azure made, and takes no others.
- */
-export function addsSendersOnAzure(state: AzureEmailReply | null | undefined): boolean {
-  return state?.status === "ready" && !!state.plan?.domain && !state.plan.managedDomain;
-}
-
-/**
- * The addresses an organization's mail can go out as, when Azure sends it: what
- * Azure has registered, lowercased. Null when that is not known or does not
- * apply -- the domain is not sending yet, or there is none -- so nothing is
- * flagged on a guess.
- */
-export function azureRegisteredSenders(state: AzureEmailReply | null | undefined): ReadonlySet<string> | null {
-  if (state?.status !== "ready" || !state.senders) return null;
-  return new Set(Object.keys(state.senders).map(address => address.trim().toLowerCase()));
-}
-
-/** Whether Azure, sending an organization's mail, does not have this address. */
-export function notRegisteredWithAzure(address: string, registered: ReadonlySet<string> | null): boolean {
-  return registered !== null && !registered.has(address.trim().toLowerCase());
-}
+// The reply's types and what follows from a reply live in a hook-free module,
+// so a pure helper can read a reply without importing this hook.
+export type { AzureEmailPlan, AzureEmailReply, AzureEmailScope } from "./azureEmailReply";
+export { AZURE_EMAIL_LOCATIONS, addsSendersOnAzure } from "./azureEmailReply";
+import type { AzureEmailReply } from "./azureEmailReply";
 
 /**
  * Steps the engine saves and resumes, so asking again after a dropped
@@ -153,43 +104,4 @@ export function useAzureEmailCall(accountId: string) {
     finally { if (quietRead.current === read) quietRead.current = null; }
   }, [connection, accountId]);
   return { call, quiet, cancel, busy, error };
-}
-
-/**
- * What an organization's Azure domain can send as, for a page that checks a
- * sender before it is used (an automation before it is turned on). Read quietly:
- * nothing on the page waits or flickers for it. `reload` reads it again, for the
- * page's AutoRefresh, so a sender added on the domain while the page was parked
- * stops being flagged.
- *
- * `registered` is null when that is not known or does not apply -- the domain is
- * not sending, the read failed, or this person cannot read sending domains, as
- * only an owner or a developer can, and they are not asked -- because a sender
- * is never flagged on a guess. `settled` says the first answer is in, whatever
- * it was; a later read that fails takes back nothing already known.
- */
-export function useAzureRegisteredSenders(accountId: string): { registered: ReadonlySet<string> | null; settled: boolean; reload: () => Promise<void> } {
-  const { access } = useSession();
-  const reads = canConfigure(access?.role || "") && accountId !== "";
-  const { quiet } = useAzureEmailCall(accountId);
-  const [answer, setAnswer] = useState<{ accountId: string; registered: ReadonlySet<string> | null } | null>(null);
-  // The organization being asked about now: a late answer about another is dropped.
-  const asking = useRef(accountId);
-  useEffect(() => { asking.current = accountId; }, [accountId]);
-  // One read at a time, so a reload while one is out is not taken for a failure.
-  const reading = useRef("");
-  const reload = useCallback(async () => {
-    if (!reads || reading.current === accountId) return;
-    reading.current = accountId;
-    try {
-      const reply = await quiet("status");
-      if (asking.current !== accountId) return;
-      setAnswer(known => reply === null && known?.accountId === accountId ? known : { accountId, registered: azureRegisteredSenders(reply) });
-    } finally {
-      if (reading.current === accountId) reading.current = "";
-    }
-  }, [reads, quiet, accountId]);
-  useEffect(() => { void reload(); }, [reload]);
-  if (!reads) return { registered: null, settled: true, reload };
-  return answer?.accountId === accountId ? { registered: answer.registered, settled: true, reload } : { registered: null, settled: false, reload };
 }

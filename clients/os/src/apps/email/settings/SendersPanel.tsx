@@ -4,9 +4,9 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Button, EmptyState, LiveList, Notice, RecordRow, Subhead } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { useLiveView } from "../../../live/liveView";
-import { notRegisteredWithAzure } from "../../../modules/connections/azureEmailSetup";
 import { isOperatorOrganization } from "../organizations";
 import { senderFingerprint, senderIdentityFromRow, senderIsRetired, senderLabel, type SenderIdentityRow } from "../rows";
+import { senderRefusalWord, type SenderRefusal } from "../senderChecks";
 import type { EmailFeeds } from "../useEmail";
 import { WORDS } from "../words";
 
@@ -27,18 +27,19 @@ function newestFirst(senders: SenderIdentityRow[]): SenderIdentityRow[] {
   return [...senders].sort((a, b) => at(b) - at(a));
 }
 
-export function SendersPanel({ feeds, accountId, includeArchived, registered = null, onOpen, onAdd }: {
+export function SendersPanel({ feeds, accountId, includeArchived, checks, onOpen, onAdd }: {
   feeds: EmailFeeds;
   /** The organization the page is on. */
   accountId: string;
   includeArchived: boolean;
   /**
-   * What the organization's Azure domain can send as, when Azure sends its mail.
-   * A sender at any other address says so. Null when that is not known.
+   * The engine's sending check for each sender, by id (`useSenderChecks`): a
+   * sender a send would be refused as says so in place of Active.
    */
-  registered?: ReadonlySet<string> | null;
+  checks?: ReadonlyMap<string, SenderRefusal>;
   onOpen: (senderId: string) => void;
-  onAdd: () => void;
+  /** Absent while the page cannot yet say which way of adding a sender is this organization's. */
+  onAdd?: () => void;
 }) {
   const source = useLiveView<Row, SenderIdentityRow>(
     feeds.senders.source,
@@ -54,7 +55,7 @@ export function SendersPanel({ feeds, accountId, includeArchived, registered = n
 
   return (
     <section className="os-app-stack" aria-label="Senders">
-      <Subhead actions={<AddButton label="Add a sender" onClick={onAdd} />}>Senders</Subhead>
+      <Subhead actions={onAdd ? <AddButton label="Add a sender" onClick={onAdd} /> : null}>Senders</Subhead>
       <LiveList<SenderIdentityRow>
         // Keyed on what narrows it, so choosing another organization or turning
         // on archived senders re-baselines the arrival cues: rows the browser
@@ -82,15 +83,15 @@ export function SendersPanel({ feeds, accountId, includeArchived, registered = n
         }
         renderRow={(sender, tick) => {
           const archived = senderIsRetired(sender);
-          const unregistered = !archived && notRegisteredWithAzure(sender.address, registered);
+          const refused = archived ? "" : senderRefusalWord(checks?.get(sender.id) ?? "");
           return (
             <RecordRow
               icon={<AtSign size={16} aria-hidden />}
               name={<span className="os-mono">{senderLabel(sender)}</span>}
               secondary={sender.fromName}
-              state={archived ? WORDS.archived : unregistered ? WORDS.notRegistered : WORDS.active}
-              tone={archived ? "muted" : unregistered ? "warn" : "accent"}
-              current={!archived && !unregistered}
+              state={archived ? WORDS.archived : refused || WORDS.active}
+              tone={archived ? "muted" : refused ? "warn" : "accent"}
+              current={!archived && !refused}
               dim={archived}
               stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
               onOpen={() => onOpen(sender.id)}

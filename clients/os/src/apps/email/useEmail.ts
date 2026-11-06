@@ -11,6 +11,7 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSession } from "../../chrome/access";
+import { senderRefusalFrom, type SenderRefusal } from "./senderChecks";
 import { absent, countFigure, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
@@ -907,6 +908,42 @@ export function useSendingReadiness(accountId: string, senderIdentityId = "", ca
 
 /** What `useSendingReadiness` answers, for a page to pass down. */
 export type SendingReadiness = ReturnType<typeof useSendingReadiness>;
+
+const NO_SENDER_CHECKS: ReadonlyMap<string, SenderRefusal> = new Map();
+
+/**
+ * Whether a send as each of these senders would be refused for a reason a
+ * person fixes on the sender or its domain (`SenderRefusal`), by sender id:
+ * the engine's own sending check, `campaignSendingReadiness` for one sender,
+ * read a few at a time (`readEach`). Anyone who may send may ask it, so a page
+ * flags a sender for every such person, not only for those who can read the
+ * sending domain.
+ *
+ * Read again when a sender's address or name changes, and when `revision`
+ * does (a page that knows the domain changed); otherwise only when asked, so
+ * the surface mounts `AutoRefresh` beside it. A check that could not be made is
+ * no refusal: nothing is flagged, or blocked, on a guess.
+ */
+export function useSenderChecks(accountId: string, senders: readonly { id: string; address: string; fromName: string }[], revision = ""): Reading<ReadonlyMap<string, SenderRefusal>> {
+  const connection = useOsConnection();
+  const { readiness } = useSession();
+  const live = readiness?.loaded && readiness.state === "live";
+  // The SET as it stands, not the array: callers hand a new one every render.
+  const signature = [...new Set(senders.filter(sender => sender.id !== "").map(sender => [sender.id, sender.address, sender.fromName].join("\u001f")))].sort().join("\n");
+  const read = useMemo(() => {
+    if (!connection || !live || !accountId || !signature) return null;
+    const ids = [...new Set(signature.split("\n").map(line => line.split("\u001f")[0]!))];
+    return async (signal: AbortSignal) => new Map(await readEach(ids, async (senderIdentityId): Promise<[string, SenderRefusal]> => {
+      try {
+        return [senderIdentityId, senderRefusalFrom((await connection.query.campaignSendingReadiness({ accountId, senderIdentityId }, { signal })).rows()[0] ?? {})];
+      } catch (err) {
+        if (signal.aborted) throw err;
+        return [senderIdentityId, ""];
+      }
+    }, signal));
+  }, [connection, live, accountId, signature, revision]);
+  return useReading<ReadonlyMap<string, SenderRefusal>>(NO_SENDER_CHECKS, read, [read]);
+}
 
 const NO_CONCEPTS: Concept[] = [];
 
