@@ -114,7 +114,7 @@ describe("Brand in Settings", () => {
     const follows = (a: HTMLElement, b: HTMLElement) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
     expect(follows(screen.getByRole("heading", { level: 4, name: "Senders" }), brand)).toBe(true);
     expect(follows(brand, await screen.findByRole("heading", { level: 4, name: "Testing" }))).toBe(true);
-    expect(await within(section).findByText("Set up")).toBeTruthy();
+    expect(await within(section).findByText("Ready")).toBeTruthy();
     // One row, and nothing in it to press but the row.
     expect(within(section).getAllByRole("button")).toHaveLength(1);
     expect(conn.query.brandKitForAccount).toHaveBeenCalledWith({ accountId: "self" }, expect.anything());
@@ -166,7 +166,7 @@ describe("Brand in Settings", () => {
 
     conn.query.brandKitForAccount.mockResolvedValueOnce(rowsResult([kitRow()]));
     fireEvent.click(within(section).getByRole("button", { name: "Try again" }));
-    expect(await within(section).findByText("Set up")).toBeTruthy();
+    expect(await within(section).findByText("Ready")).toBeTruthy();
   });
 });
 
@@ -214,7 +214,7 @@ describe("The Brand page", () => {
     expect(conn.query.campaignSaveBrandKit.mock.calls[1]![0].expectedRevision).toBe("2026-11-05T09:00:01Z");
   });
 
-  it("creates a kit with an empty revision, from an uploaded logo, and Settings then says Set up", async () => {
+  it("creates a kit with an empty revision, from an uploaded logo, and Settings then says Ready", async () => {
     const conn = fakeConnection();
     const uploads = uploader("logo-1");
     mount(conn, uploads);
@@ -239,7 +239,7 @@ describe("The Brand page", () => {
     await waitFor(() => expect(within(bar()).getByText("Saved")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
-    expect(await within(await brandSection()).findByText("Set up")).toBeTruthy();
+    expect(await within(await brandSection()).findByText("Ready")).toBeTruthy();
   });
 
   it("shows contrast warnings beside the preview, and they do not keep Save away", async () => {

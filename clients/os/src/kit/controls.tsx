@@ -595,14 +595,14 @@ export function Select({
   /** Close and put focus back where it came from. Commits nothing. */
   function dismiss(): void {
     close();
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
   }
 
   function commit(index: number): void {
     const option = options[index];
     if (option === undefined || option.disabled) return;
     close();
-    triggerRef.current?.focus();
+    triggerRef.current?.focus({ preventScroll: true });
     // NATIVE PARITY, AND IT EARNS ITS KEEP HERE. A `<select>` fires `change`
     // only when the value actually changes, and the handlers behind this
     // control are not all local state: one grants a cluster role, another

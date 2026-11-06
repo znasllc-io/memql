@@ -338,3 +338,24 @@ describe("navigation focus shared by every wizard", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Elsewhere" }));
   });
 });
+
+describe("the wizard scrolls its own column", () => {
+  it("a wizard step change does not call scrollIntoView", () => {
+    const spy = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      const draw = (open: string) => (
+        <Wizard layout="split" icon={<svg />} title="Setup" label="Setting up" open={open} onOpen={() => {}} status={{ word: "Working" }} steps={[
+          { id: "wait", name: "Waiting", state: "done", body: <p>Waiting</p> },
+          { id: "domain", name: "Domain", state: "open", body: <p>Domain</p> },
+        ]} />
+      );
+      const view = render(draw("wait"));
+      view.rerender(draw("domain"));
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});

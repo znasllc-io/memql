@@ -133,7 +133,7 @@ export function ContextMenu({
 
   useEffect(() => {
     const el = ref.current;
-    el?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    el?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus({ preventScroll: true });
     // The node lives under `document.body` now, so a listener on the shell
     // root would never see a pointerdown inside the menu. This one is on
     // `window` in the capture phase and tests containment against the
@@ -155,10 +155,10 @@ export function ContextMenu({
       onClose();
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      buttons[(at + 1) % buttons.length]?.focus();
+      buttons[(at + 1) % buttons.length]?.focus({ preventScroll: true });
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      buttons[(at - 1 + buttons.length) % buttons.length]?.focus();
+      buttons[(at - 1 + buttons.length) % buttons.length]?.focus({ preventScroll: true });
     }
   }
 

@@ -69,6 +69,16 @@ beforeEach(() => {
 });
 
 describe("the desktop lands (spec K bullet 1)", () => {
+  it("desktop stays at scroll zero", () => {
+    renderShell();
+    const desktop = document.querySelector("[data-os-desktop]") as HTMLElement;
+    desktop.scrollLeft = 120;
+    desktop.scrollTop = 40;
+    fireEvent.scroll(desktop);
+    expect(desktop.scrollLeft).toBe(0);
+    expect(desktop.scrollTop).toBe(0);
+  });
+
   it("shows the desk world and none of the slot chrome", () => {
     renderShell();
     expect(document.querySelector("[data-os-desktop]")).not.toBeNull();

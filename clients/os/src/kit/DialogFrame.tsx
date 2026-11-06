@@ -97,7 +97,7 @@ export function DialogFrame({
     // behaviour behind it.
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
-    focusRef.current?.(dialog)?.focus();
+    focusRef.current?.(dialog)?.focus({ preventScroll: true });
     return () => {
       closing.current = true;
       if (dialog.hasAttribute("open")) {

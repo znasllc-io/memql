@@ -30,7 +30,7 @@ export function BrandPanel({ brand, onOpen }: {
           <RecordRow
             icon={<Palette size={16} aria-hidden />}
             name="Brand"
-            state={brand.value === null ? "Not set up" : "Set up"}
+            state={brand.value === null ? "Not set up" : "Ready"}
             tone={brand.value === null ? "warn" : "accent"}
             current={brand.value !== null}
             onOpen={onOpen}

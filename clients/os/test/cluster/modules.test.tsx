@@ -267,7 +267,7 @@ describe("the cluster-wide readiness column", () => {
   });
 
   // A NODE THE FOLD SET ASIDE IS COUNTED, NOT VOTED. The verdict reads as it
-  // would without it -- "Set up" -- and a quiet count says how many nodes are
+  // would without it -- "Ready" -- and a quiet count says how many nodes are
   // behind or could not check, so the operator knows there is something to
   // read in the detail without a warning colour on a working module.
   it("counts the nodes the fold set aside beside an unchanged verdict", async () => {
@@ -293,7 +293,7 @@ describe("the cluster-wide readiness column", () => {
           : null,
     };
     mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
-    expect(await screen.findByText("Set up")).toBeTruthy();
+    expect(await screen.findByText("Ready")).toBeTruthy();
     // ONE label, the more actionable of the two; the rest is in the title.
     const label = screen.getByText("1 could not check");
     expect(label.getAttribute("title")).toMatch(/2 nodes catching up: edge-a, identity-a/);
@@ -332,7 +332,7 @@ describe("the cluster-wide readiness column", () => {
     await click(await screen.findByText("storage"));
 
     expect(await screen.findByText("Across the cluster")).toBeTruthy();
-    expect(screen.getByText("Set up. The one node that counts says so.")).toBeTruthy();
+    expect(screen.getByText("Ready. The one node that counts says so.")).toBeTruthy();
     const list = screen.getByRole("list", { name: "storage on each live node" });
     const rows = Array.from(list.querySelectorAll(".os-record-row"));
     expect(rows.map((r) => r.querySelector(".os-row-name")?.textContent)).toEqual(["agent-a", "edge-a", "bff-b"]);

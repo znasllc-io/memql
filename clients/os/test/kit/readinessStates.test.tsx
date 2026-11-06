@@ -108,12 +108,17 @@ describe("markToneFor", () => {
 });
 
 describe("stateWords", () => {
+  it("readiness says Ready and Not set up", () => {
+    expect(stateWords(verdict("ai", "configured"))).toBe("Ready");
+    expect(stateWords(verdict("ai", "unconfigured"))).toBe("Not set up");
+  });
+
   it("tells not-reported apart from not-set-up", () => {
     expect(stateWords(null)).toBe("Not reported");
     expect(stateWords(verdict("ai", "unreported"))).toBe("Not reported");
     expect(stateWords(verdict("ai", "unconfigured"))).toBe("Not set up");
     expect(stateWords(verdict("ai", "partial"))).toBe("Partly set up");
-    expect(stateWords(verdict("ai", "configured"))).toBe("Set up");
+    expect(stateWords(verdict("ai", "configured"))).toBe("Ready");
   });
 
   // TWO CAUSES OF `partial`, TWO NAMES (memql#5259). Nodes that DIFFER --
@@ -149,7 +154,7 @@ describe("stateWords", () => {
   it("does not let a stale node change the words", () => {
     const withStale = verdict("ai", "configured");
     withStale.stale = ["edge-a"];
-    expect(stateWords(withStale)).toBe("Set up");
+    expect(stateWords(withStale)).toBe("Ready");
     expect(verdictDetail(withStale)).toMatch(/1 node catching up: edge-a\./);
     expect(setAsideLabel(withStale)).toBe("1 catching up");
     // A node that could not check outranks one catching up, and a verdict
@@ -230,22 +235,21 @@ describe("SetupGroup", () => {
         "owner",
       ),
     );
-    expect(screen.getByRole("heading", { name: "Set up" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Setup" })).toBeTruthy();
     expect(screen.getByText("Inference")).toBeTruthy();
     expect(screen.getByText("Not set up")).toBeTruthy();
     expect(screen.getByText("Storage")).toBeTruthy();
-    // "Set up" is both the group's heading and a row's state word, so this
-    // asserts the ROW carries it rather than matching the heading again.
+    // The ROW carries the state word, apart from the group's heading.
     const rowStates = Array.from(document.querySelectorAll(".os-setup-state")).map(
       (el) => el.textContent,
     );
-    expect(rowStates).toContain("Set up");
+    expect(rowStates).toContain("Ready");
     // No OsProvider in this test, so the act is the words, not a button --
     // a button with no window to open into would go nowhere.
     expect(screen.getByText("Settings, under Vendors")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Open Vendors" })).toBeNull();
     // And the CONFIGURED module carries no act at all: "Set in the
-    // deployment" beside a row that says "Set up" is an instruction with
+    // deployment" beside a row that says "Ready" is an instruction with
     // nothing behind it.
     expect(screen.queryByText("Set in the deployment")).toBeNull();
   });

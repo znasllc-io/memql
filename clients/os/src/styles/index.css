@@ -182,12 +182,13 @@ button:not(:disabled):active {
   inset: 0;
   background: var(--os-ground);
   color: var(--os-ink);
+  overflow: clip;
 }
 
 .os-desktop {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .os-wallpaper {
@@ -217,6 +218,7 @@ button:not(:disabled):active {
   position: absolute;
   inset: 0;
   display: flex;
+  overflow: clip;
   transition: transform var(--os-duration-med) var(--os-ease);
 }
 

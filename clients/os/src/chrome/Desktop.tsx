@@ -125,6 +125,20 @@ export function Desktop({
     [config.domain, connection, handoffPorts, authSource],
   );
 
+  // The desktop is a strip of plates that only the pager moves. Anything that
+  // scrolls it (a focus call, a reveal) is undone at once.
+  const desktopRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = desktopRef.current;
+    if (!el) return;
+    const stayPut = () => {
+      if (el.scrollLeft !== 0) el.scrollLeft = 0;
+      if (el.scrollTop !== 0) el.scrollTop = 0;
+    };
+    el.addEventListener("scroll", stayPut);
+    return () => el.removeEventListener("scroll", stayPut);
+  }, []);
+
   useEffect(() => {
     if (!noAnswerFor) return;
     const t = setTimeout(() => setNoAnswerFor(null), 8000);
@@ -482,7 +496,7 @@ export function Desktop({
 
   return (
     <>
-      <div className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
+      <div ref={desktopRef} className="os-desktop" data-os-desktop data-dragging-window={draggingWindow || undefined}>
         <FoldWallpaper />
         <div
           className="os-plates"

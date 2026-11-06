@@ -211,7 +211,15 @@ export function Wizard({
     // Side by side the rail does not move, so it is the STAGE that starts again
     // at its top; in one column it is the step's own line that may be out of view.
     const target = column.current?.querySelector<HTMLElement>('.os-wizard-stage') ?? column.current?.querySelector<HTMLElement>('.os-rail-stage[data-open="true"]');
-    target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    // The wizard moves its OWN scroller. scrollIntoView walks every ancestor,
+    // and one of them is the desktop strip, which must never move sideways.
+    const scroller = target?.closest<HTMLElement>(".os-wizard-scroll");
+    if (target && scroller) {
+      const above = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      const below = target.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom;
+      if (above < 0) scroller.scrollTop += above;
+      else if (below > 0) scroller.scrollTop += Math.min(below, above);
+    }
   }, [open]);
 
   // THE FIRST QUESTION TAKES THE CURSOR. Somebody pressed Add and the next

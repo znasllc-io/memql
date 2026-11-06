@@ -76,7 +76,7 @@ export function markToneFor(gate: Gate): DotTone | null {
 }
 
 /**
- * Sentence-case words for a verdict, the Set up group's vocabulary.
+ * Sentence-case words for a verdict, the Setup group's vocabulary.
  *
  * `partial` HAS TWO CAUSES AND THEY GET TWO NAMES (memql#5259). Some nodes
  * set up and others not is a difference BETWEEN nodes, and "Partly set up"
@@ -96,7 +96,7 @@ export function markToneFor(gate: Gate): DotTone | null {
 export function stateWords(v: Verdict | null): string {
   if (v === null) return "Not reported";
   if (v.state === "unreported") return v.unknown.length > 0 ? "Could not check" : "Not reported";
-  if (v.state === "configured") return "Set up";
+  if (v.state === "configured") return "Ready";
   if (v.state === "partial") return setUpOnSomeNodes(v) ? "Set up on some nodes" : "Partly set up";
   return "Not set up";
 }
@@ -370,7 +370,7 @@ export function SetupGroup({
   if (ids.length === 0) return null;
   return (
     <Panel label={`Set up ${app}`}>
-      <Subhead>Set up</Subhead>
+      <Subhead>Setup</Subhead>
       {!readiness || !readiness.loaded ? (
         <RecordListSkeleton label="Loading cluster setup" />
       ) : (
