@@ -187,8 +187,10 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	// The audience's lock is taken first and held to the end of the writes: the
 	// operator's add and the signup form take the same one, so an address one of
 	// them is adding cannot be added here as well after this read missed it.
+	var hold gateHold
 	if w.newsletterGate != nil {
-		hold, err := w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
+		var err error
+		hold, err = w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
 		if errors.Is(err, memql.ErrWriteGateBusy) {
 			return nil, fmt.Errorf("campaigns.importRecipients: %w", signupsBusy)
 		}
@@ -250,7 +252,15 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	if audience.Confirmation == "required" {
 		subscription = "pending"
 	}
-	for _, row := range pending {
+	for i, row := range pending {
+		// The lock was taken before the roster was read. Asked again every
+		// hundred rows: a session PostgreSQL ended takes it away silently, and
+		// the rest of the batch must not be written without it.
+		if hold != nil && i%100 == 0 {
+			if err := hold.Verify(ctx); err != nil {
+				return nil, fmt.Errorf("campaigns.importRecipients: the audience's lock was lost after %d rows were added; run the import again, it skips the people already added: %w", result.Added, err)
+			}
+		}
 		recipientID := id.NewShortId()
 		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, subscription, row.fields); err != nil {
 			return nil, fmt.Errorf("campaigns.importRecipients: adding %s: %w", redactAddress(row.normalized), err)

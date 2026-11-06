@@ -2,9 +2,12 @@ package emailrules
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // lateMemberEngine answers the first lookup of the mailbox with nobody and every
@@ -50,4 +53,73 @@ func TestRowAddressEnrolmentRechecksTheMailboxUnderTheAudienceLock(t *testing.T)
 	if ids := e.sendsTo(); len(ids) != 1 || ids[0] != "added-by-hand" {
 		t.Fatalf("the send went to %v", ids)
 	}
+}
+
+// A busy audience lock attempts nothing, so a created rule's one-time claim goes
+// back with it and the row fires once the audience is free.
+func TestABusyAudienceLockReleasesACreatedRulesClaim(t *testing.T) {
+	noPauses(t)
+	rule := rowAddressRule()
+	rule["eventKind"] = "created"
+	e := &busySends{rowAddressEngine: rowAddressEngine{fireEngine: fireEngine{rule: rule}}}
+	claims := &releasableClaims{}
+	busy := true
+	gate := func(context.Context, string) (func(), error) {
+		if busy {
+			return nil, memql.ErrWriteGateBusy
+		}
+		return func() {}, nil
+	}
+	firer := NewFirer(e).WithFirstFireClaim(claims.claim).WithFirstFireRelease(claims.release).WithMembershipGate(gate)
+	out, err := firer.Fire(context.Background(), busyRule, busyRow, busyEvent())
+	if err != nil || !out.Busy || out.Sent != 0 {
+		t.Fatalf("a busy audience lock: %+v %v", out, err)
+	}
+	if claims.isHeld(busyRule, busyRow) {
+		t.Fatal("the row's claim is still held: the welcome for this row can never be sent")
+	}
+	busy = false
+	out, err = firer.Fire(context.Background(), busyRule, busyRow, busyEvent())
+	if err != nil || out.Duplicate || out.Sent != 1 {
+		t.Fatalf("the row could not fire once the audience was free: %+v %v", out, err)
+	}
+}
+
+// Any other failure to take the lock is an error, not "busy".
+func TestAnAudienceLockThatCannotBeTakenIsNotReportedBusy(t *testing.T) {
+	noPauses(t)
+	e := &busySends{rowAddressEngine: rowAddressEngine{fireEngine: fireEngine{rule: rowAddressRule()}}}
+	gate := func(context.Context, string) (func(), error) { return nil, errors.New("no write-gate pool") }
+	out, err := NewFirer(e).WithMembershipGate(gate).Fire(context.Background(), busyRule, busyRow, busyEvent())
+	if err == nil || out.Busy {
+		t.Fatalf("a missing pool was reported as busy: %+v %v", out, err)
+	}
+}
+
+// The lock is given back before the send: a send can pause for seconds.
+func TestTheAudienceLockIsReleasedBeforeTheSend(t *testing.T) {
+	e := &sendWatcher{rowAddressEngine: rowAddressEngine{fireEngine: fireEngine{rule: rowAddressRule()}}}
+	gate := func(context.Context, string) (func(), error) {
+		e.held = true
+		return func() { e.held = false }, nil
+	}
+	out, err := NewFirer(e).WithMembershipGate(gate).Fire(context.Background(), busyRule, busyRow, busyEvent())
+	if err != nil || out.Sent != 1 {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if e.heldAtSend {
+		t.Fatal("the audience lock was still held while the email was sent")
+	}
+}
+
+type sendWatcher struct {
+	rowAddressEngine
+	held, heldAtSend bool
+}
+
+func (e *sendWatcher) Execute(ctx context.Context, q string) (any, error) {
+	if strings.HasPrefix(q, "builtin campaignSendToRecipient") && e.held {
+		e.heldAtSend = true
+	}
+	return e.rowAddressEngine.Execute(ctx, q)
 }

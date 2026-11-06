@@ -442,51 +442,68 @@ func (f *Firer) planRowAddress(ctx context.Context, rule Rule, event map[string]
 // from is the one thing this engine will not send. The enrolment names the rule's
 // organization, because the send refuses a recipient outside the campaign's.
 func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, plan rowAddressPlan, out *FireOutcome) error {
-	target := plan.target
-	if !plan.found {
-		// Not in the audience yet. Enrol, then send -- and note that the
-		// enrolment is what an unsubscribe later acts on, so a second firing
-		// for the same address consults the state the first one gave it.
-		target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
-		if f.members != nil {
-			// Under the audience's lock the mailbox is looked up again: an
-			// operator, an import or another firing may have added it since the
-			// plan read the audience.
-			release, err := f.members(ctx, rule.AudienceID)
-			if err != nil {
-				out.Refusals = append(out.Refusals, fmt.Sprintf("the audience is busy, so %q was not enrolled. Nothing was sent; try again later", rule.RecipientField))
-				return nil
-			}
-			defer release()
-			members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, plan.address)
-			if err != nil {
-				return err
-			}
-			if !complete {
-				out.Refusals = append(out.Refusals, fmt.Sprintf("could not check every membership for %q in the audience. Nothing was sent; try again later", rule.RecipientField))
-				return nil
-			}
-			if existing, found := mailboxTarget(members); found {
-				out.Recipients++
-				f.sendMarketing(ctx, rule, nodeID, existing, event, out)
-				return nil
-			}
-		}
-		confirmation, err := f.store.AudienceConfirmation(ctx, rule.AudienceID)
-		if err != nil {
-			return err
-		}
-		status := "subscribed"
-		if confirmation == "required" {
-			status = "pending"
-		}
-		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID), status); err != nil {
-			return err
-		}
+	target, refused, err := f.enrol(ctx, rule, event, plan, out)
+	if err != nil || refused {
+		return err
 	}
 	out.Recipients++
 	f.sendMarketing(ctx, rule, nodeID, target, event, out)
 	return nil
+}
+
+// enrol returns the row the send is addressed to, adding the address to the
+// audience when it is not there. The audience's lock is held for the decision
+// and the add only, and given back before the caller sends: a send can pause for
+// seconds, and nobody else adding to the audience should wait on that.
+func (f *Firer) enrol(ctx context.Context, rule Rule, event map[string]any, plan rowAddressPlan, out *FireOutcome) (target string, refused bool, err error) {
+	target = plan.target
+	if plan.found {
+		return target, false, nil
+	}
+	// Not in the audience yet. Enrol, then send -- and note that the
+	// enrolment is what an unsubscribe later acts on, so a second firing
+	// for the same address consults the state the first one gave it.
+	target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
+	if f.members != nil {
+		// Under the audience's lock the mailbox is looked up again: an
+		// operator, an import or another firing may have added it since the
+		// plan read the audience.
+		release, lockErr := f.members(ctx, rule.AudienceID)
+		if memql.IsWriteGateBusy(lockErr) {
+			// Nothing was attempted: Busy gives a created rule's claim back, so
+			// the row can fire again once the audience is free.
+			out.Busy = true
+			out.Refusals = append(out.Refusals, fmt.Sprintf("the audience is busy, so %q was not enrolled. Nothing was sent; try again later", rule.RecipientField))
+			return "", true, nil
+		}
+		if lockErr != nil {
+			return "", true, lockErr
+		}
+		defer release()
+		members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, plan.address)
+		if err != nil {
+			return "", true, err
+		}
+		if !complete {
+			out.Refusals = append(out.Refusals, fmt.Sprintf("could not check every membership for %q in the audience. Nothing was sent; try again later", rule.RecipientField))
+			return "", true, nil
+		}
+		if existing, found := mailboxTarget(members); found {
+			return existing, false, nil
+		}
+	}
+	confirmation, err := f.store.AudienceConfirmation(ctx, rule.AudienceID)
+	if err != nil {
+		return "", true, err
+	}
+	status := "subscribed"
+	if confirmation == "required" {
+		status = "pending"
+	}
+	if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID), status); err != nil {
+		return "", true, err
+	}
+	return target, false, nil
 }
 
 // mailboxTarget picks the row a send is addressed to: the first one that is not

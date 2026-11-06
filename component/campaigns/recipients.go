@@ -200,6 +200,16 @@ func (w *Worker) handleSetRecipientSubscription(ctx context.Context, args map[st
 		}
 	}
 	if status == "subscribed" && recipient.SubscriptionStatus != "subscribed" {
+		// Whatever the audience, an operator never subscribes someone who left or
+		// whose address is suppressed: only the person can, from the preferences
+		// page of their own emails.
+		switch recipient.SubscriptionStatus {
+		case "unsubscribed", "bounced", "complained":
+			return nil, fmt.Errorf("%s", blockedSentence)
+		}
+		if err := w.refuseBlockedConfirmation(ctx, recipient.AccountID, recipient.Email); err != nil {
+			return nil, err
+		}
 		audience, found, err := w.store.AudienceByID(ctx, recipient.AudienceID)
 		if err != nil {
 			return nil, err

@@ -323,3 +323,62 @@ func TestImportSkipsAddressesAlreadyInTheAudience(t *testing.T) {
 		t.Fatal("the address already in the audience was written again")
 	}
 }
+
+// The import holds the audience's lock for its whole batch and asks whether it
+// still has it; a lost lock stops the batch before anything more is written.
+func TestImportStopsWhenItsAudienceLockIsLost(t *testing.T) {
+	engine := &fakeEngine{}
+	w := importWorker(t, engine, "email\na@b.test\nc@d.test\n")
+	taken := 0
+	w.newsletterGate = func(_ context.Context, keys ...string) (gateHold, error) {
+		taken++
+		if len(keys) != 1 || keys[0] != newsletterLock("audience", testAudience) {
+			t.Errorf("the import took %v, not the audience's lock", keys)
+		}
+		return lostEmailGate{}, nil
+	}
+	if _, err := w.handleImportRecipients(importCtx(), map[string]any{"audienceId": testAudience, "artifactId": testArtifact}, 0); err == nil || !strings.Contains(err.Error(), "lock was lost") {
+		t.Fatalf("an import that lost its lock: %v", err)
+	}
+	if taken != 1 || wroteContaining(engine, "mutation addRecipient", "a@b.test") {
+		t.Fatalf("lock taken %d times; rows were written without the lock", taken)
+	}
+}
+
+// Nobody who left, or whose address is suppressed, is subscribed by hand in any
+// audience, including one that asks for no confirmation.
+func TestAnOperatorCannotSubscribeSomeoneWhoLeftInAnyAudience(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "resubscribe-open")
+	if err := n.addPerson(t, "left", "left@b.test", nil); err != nil {
+		t.Fatal(err)
+	}
+	id := n.suffix + "-left"
+	set := func(status string) error {
+		_, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": id, "subscriptionStatus": status}, 0)
+		return err
+	}
+	if err := set("unsubscribed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := set("subscribed"); err == nil || err.Error() != blockedSentence {
+		t.Fatalf("an unsubscribed person was subscribed by hand: %v", err)
+	}
+	// A pending person whose address was suppressed since is refused too.
+	if err := n.addPerson(t, "held", "held@b.test", map[string]any{"subscriptionStatus": "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.store.RecordOrganizationSuppression(n.owner, n.org, EmailDigest("held@b.test"), "unsubscribed", "example.test", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": n.suffix + "-held", "subscriptionStatus": "subscribed"}, 0)
+	if err == nil || err.Error() != blockedSentence {
+		t.Fatalf("a suppressed pending address was subscribed by hand: %v", err)
+	}
+	// A pending person with nothing against them is subscribed as before.
+	if err := n.addPerson(t, "fine", "fine@b.test", map[string]any{"subscriptionStatus": "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": n.suffix + "-fine", "subscriptionStatus": "subscribed"}, 0); err != nil {
+		t.Fatal(err)
+	}
+}
