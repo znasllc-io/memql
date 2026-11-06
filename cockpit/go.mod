@@ -9,7 +9,7 @@ require (
 	github.com/go-vgo/robotgo v1.0.2
 	github.com/jezek/xgb v1.3.1
 	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.2
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/znasllc-io/memql v0.0.0-20260623073124-7c7d1350e667
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
