@@ -2230,3 +2230,47 @@ func TestTemplateForSourceAsksForTheFileInTheOrganization(t *testing.T) {
 	}
 	requireParses(t, q)
 }
+
+// A mistyped merge tag is not filled in and goes out literally to everyone, so
+// publishing refuses it by name. A draft with the same tag still saves.
+func TestPublishRefusesAnUnknownMergeTag(t *testing.T) {
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	content := map[string]any{"subject": "Hello {{firstName}}", "textBody": "Plain.", "htmlBody": "<p>Plain.</p>"}
+
+	saved := tw.saved(saveTemplateArgs(content))
+	if saved.Status != "draft" {
+		t.Fatalf("a draft with an unknown tag must still save: %+v", saved)
+	}
+	_, err := tw.save(saveTemplateArgs(content, revised(saved.Revision, "publish")))
+	if err == nil || !strings.Contains(err.Error(), "{{firstName}} is not a tag this email can fill in.") {
+		t.Fatalf("publishing error = %v", err)
+	}
+	if got := len(tw.engine.writes()); got != 1 {
+		t.Fatalf("a refused publication wrote: %v", tw.engine.writes())
+	}
+
+	// The body counts too, and once the tag is right the same call publishes.
+	content["subject"] = "Hello {{displayName}}"
+	content["htmlBody"] = "<p>Hi {{ displayName }}</p>"
+	saved = tw.saved(saveTemplateArgs(content, revised(saved.Revision, "save")))
+	if _, err = tw.save(saveTemplateArgs(content, revised(saved.Revision, "publish"))); err == nil || !strings.Contains(err.Error(), "{{ displayName }} is not a tag") {
+		t.Fatalf("publishing error = %v", err)
+	}
+	content["htmlBody"] = "<p>Hi {{displayName}}</p>"
+	saved = tw.saved(saveTemplateArgs(content, revised(saved.Revision, "save")))
+	if published := tw.saved(saveTemplateArgs(content, revised(saved.Revision, "publish"))); published.Status != "ready" {
+		t.Errorf("publication = %+v", published)
+	}
+}
+
+func TestPublishAcceptsKnownTagsAndFieldTags(t *testing.T) {
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	tags := "{{displayName}} {{email}} {{campaignName}} {{accountName}} {{unsubscribeUrl}} {{preferencesUrl}} {{viewUrl}} {{confirmUrl}} {{fields.plan}} {{fields.Company Name}}"
+	content := map[string]any{"subject": "Hello {{displayName}}", "textBody": tags, "htmlBody": "<p>" + tags + "</p>"}
+	saved := tw.saved(saveTemplateArgs(content))
+	if published := tw.saved(saveTemplateArgs(content, revised(saved.Revision, "publish"))); published.Status != "ready" {
+		t.Errorf("publication = %+v", published)
+	}
+}

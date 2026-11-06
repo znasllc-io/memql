@@ -385,6 +385,35 @@ func UnresolvedMergeTags(bodies ...string) []string {
 	return out
 }
 
+// knownMergeTags are exactly the tags mergeReplacers fills besides
+// fields.<key>.
+var knownMergeTags = map[string]bool{
+	"displayName": true, "email": true, "campaignName": true, "accountName": true,
+	tagUnsubscribeURL: true, tagPreferencesURL: true, tagViewURL: true, tagConfirmURL: true,
+}
+
+// UnknownMergeTags reports the {{...}} tags in the bodies that no send fills
+// in, deduplicated in first-seen order. Unlike UnresolvedMergeTags it needs no
+// recipient: a tag is known by its name alone, so it can gate publishing.
+func UnknownMergeTags(bodies ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, body := range bodies {
+		for _, m := range unresolvedTagPattern.FindAllStringSubmatch(body, -1) {
+			name := m[1]
+			if knownMergeTags[name] || (strings.HasPrefix(name, mergeFieldsPrefix) && strings.TrimSpace(name[len(mergeFieldsPrefix):]) != "" && name == strings.TrimSpace(name)) {
+				continue
+			}
+			tag := mergeTagPrefix + name + mergeTagSuffix
+			if !seen[tag] {
+				seen[tag] = true
+				out = append(out, tag)
+			}
+		}
+	}
+	return out
+}
+
 // TrackingRender is the per-message half of open/click tracking
 // (memql#4823): a base origin plus the minting function that turns one
 // (kind, url) pair into a signed token.

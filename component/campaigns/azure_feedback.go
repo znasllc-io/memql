@@ -40,6 +40,18 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 			return err
 		}
 		if delivery == nil {
+			// The mailbox is known from the authenticated, correlated report
+			// even though its ledger row is not. A permanent failure must be
+			// suppressed now: Event Grid stops retrying, and a bounce that waits
+			// for a row that never arrives would never be suppressed. The report
+			// itself stays retryable so the ledger still catches up.
+			if report.Status == "bounced" || report.Status == "suppressed" {
+				if err := write(func(commit context.Context) error {
+					return w.store.RecordSuppression(commit, digest, "hard_bounce", EmailDomain(report.Email), "", "Azure reported a permanent delivery failure.")
+				}); err != nil {
+					return err
+				}
+			}
 			return fmt.Errorf("the original campaign delivery is not recorded yet")
 		}
 		if campaignID := bare(str(delivery, "campaignId")); campaignID != "" {
@@ -97,8 +109,14 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 		return nil
 	}
 	values := map[string]any{"deliveryId": report.DeliveryID, "providerStatus": report.Status, "providerAt": report.OccurredAt.UTC().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(delivery["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)}
-	if templateTime(delivery["sentAt"]).IsZero() && !report.AcceptedAt.IsZero() {
-		values["sentAt"] = report.AcceptedAt.UTC().Format(time.RFC3339Nano)
+	if templateTime(delivery["sentAt"]).IsZero() {
+		// A delivered report proves the message went, even for a row recorded
+		// failed because its submission response was lost.
+		if !report.AcceptedAt.IsZero() {
+			values["sentAt"] = report.AcceptedAt.UTC().Format(time.RFC3339Nano)
+		} else if report.Status == "delivered" && !report.OccurredAt.IsZero() {
+			values["sentAt"] = report.OccurredAt.UTC().Format(time.RFC3339Nano)
+		}
 	}
 	if str(delivery, "status") != "sent" && str(delivery, "campaignId") != "" {
 		values["providerCountersPending"] = true
@@ -118,7 +136,10 @@ func (w *Worker) AzureDeliveryGateKey(ctx context.Context, deliveryID string) (s
 		return "", err
 	}
 	if row == nil {
-		return "", fmt.Errorf("the original campaign delivery is not recorded yet")
+		// No ledger row yet means no campaign gate to take. Apply still has
+		// to run so a permanent failure is suppressed before it answers that
+		// the row is not recorded yet.
+		return "", nil
 	}
 	if campaignID := bare(str(row, "campaignId")); campaignID != "" {
 		return providerLedgerLock(campaignID), nil

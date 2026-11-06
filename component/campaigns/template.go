@@ -389,6 +389,13 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 		if req.action == "publish" && len(issues) > 0 {
 			return nil, publishRefusal(issues)
 		}
+		if req.action == "publish" {
+			// Publishing gates what goes out; sending of an already published
+			// template is not re-checked here.
+			if unknown := UnknownMergeTags(content.subject, content.preheader, content.textBody, content.htmlBody); len(unknown) > 0 {
+				return nil, unknownTagRefusal(unknown)
+			}
+		}
 		// A call that names no file keeps the one the template has.
 		if content.sourceArtifactID == "" {
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
@@ -599,6 +606,15 @@ func publishRefusal(issues []emaildoc.Issue) error {
 	}
 	text := "fix these before publishing: " + strings.Join(messages, " ")
 	if more := len(issues) - len(shown); more > 0 {
+		text += fmt.Sprintf(" And %d more.", more)
+	}
+	return errors.New(text)
+}
+
+// unknownTagRefusal names the first mistyped merge tag, and counts the rest.
+func unknownTagRefusal(tags []string) error {
+	text := tags[0] + " is not a tag this email can fill in."
+	if more := len(tags) - 1; more > 0 {
 		text += fmt.Sprintf(" And %d more.", more)
 	}
 	return errors.New(text)

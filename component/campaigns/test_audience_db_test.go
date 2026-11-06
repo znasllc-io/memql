@@ -68,7 +68,7 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 		execute(owner, call("mutation", "createAudience", arg{"audienceId", audience}, arg{"accountId", org}, arg{"name", audience}))
 	}
 	execute(owner, call("mutation", "createSenderIdentity", arg{"senderIdentityId", identity}, arg{"accountId", org}, arg{"address", "news@client.test"}, arg{"fromName", "Client"}))
-	templateArgs := map[string]any{"templateId": template, "accountId": org, "name": "Test mail", "content": map[string]any{"subject": "Hello {{name}}", "textBody": "For {{email}}", "htmlBody": "<p>Hello {{name}}</p>"}}
+	templateArgs := map[string]any{"templateId": template, "accountId": org, "name": "Test mail", "content": map[string]any{"subject": "Hello {{displayName}}", "textBody": "For {{email}}", "htmlBody": "<p>Hello {{displayName}}</p>"}}
 	nodes, err := workers[0].handleSaveTemplate(owner, templateArgs, 0)
 	if err != nil {
 		t.Fatal(err)
