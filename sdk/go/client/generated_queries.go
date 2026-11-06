@@ -4495,6 +4495,34 @@ func JourneyEnrollmentCountsBuild(args JourneyEnrollmentCountsArgs) string {
 	return b.String()
 }
 
+// JourneyEnrollmentsByStatus -- Organization-authorized email automation read: the runs of one automation in one status, newest first. The concept's @rowAuthz scopes it, as it does journeyEnrollmentCounts.
+//
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentsByStatus"] in generated_concepts.go).
+type JourneyEnrollmentsByStatusArgs struct {
+	JourneyId string
+	Status    string
+}
+
+// JourneyEnrollmentsByStatus calls the engine query journeyEnrollmentsByStatus.
+func (qc *QueryClient) JourneyEnrollmentsByStatus(ctx context.Context, args JourneyEnrollmentsByStatusArgs) (*Result, error) {
+	call := JourneyEnrollmentsByStatusBuild(args)
+	return qc.executeNamed(ctx, "journeyEnrollmentsByStatus", call)
+}
+
+func JourneyEnrollmentsByStatusBuild(args JourneyEnrollmentsByStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyEnrollmentsByStatus(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Journeys -- Organization-authorized email automation read.
 //
 // Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.go).

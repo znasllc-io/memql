@@ -596,6 +596,7 @@ export const BoundConcepts = {
   invocationsForWorkerAsOperator: "v1:worker:invocation",
   journeyById: "v1:campaigns:journey",
   journeyEnrollmentCounts: "v1:campaigns:journeyEnrollment",
+  journeyEnrollmentsByStatus: "v1:campaigns:journeyEnrollment",
   journeys: "v1:campaigns:journey",
   knowledgeDomainsAll: "v1:knowledge:knowledgeDomain",
   ladderPolicyCurrent: "v1:authoring:ladderPolicy",

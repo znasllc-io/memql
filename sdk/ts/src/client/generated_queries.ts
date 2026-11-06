@@ -4439,6 +4439,30 @@ QueryClient.prototype.journeyEnrollmentCounts = function (this: QueryClient, arg
   return this.executeNamed("journeyEnrollmentCounts", buildJourneyEnrollmentCounts(args), opts);
 };
 
+/** Organization-authorized email automation read: the runs of one automation in one status, newest first. The concept's @rowAuthz scopes it, as it does journeyEnrollmentCounts. */
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentsByStatus"] in generated_concepts.ts).
+export interface JourneyEnrollmentsByStatusArgs {
+  journeyId: string;
+  status: string;
+}
+
+export function buildJourneyEnrollmentsByStatus(args: JourneyEnrollmentsByStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  return "query journeyEnrollmentsByStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeyEnrollmentsByStatus(args: JourneyEnrollmentsByStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeyEnrollmentsByStatus = function (this: QueryClient, args: JourneyEnrollmentsByStatusArgs = {} as JourneyEnrollmentsByStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeyEnrollmentsByStatus", buildJourneyEnrollmentsByStatus(args), opts);
+};
+
 /** Organization-authorized email automation read. */
 // Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.ts).
 export interface JourneysArgs {

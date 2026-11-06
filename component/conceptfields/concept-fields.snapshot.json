@@ -1308,7 +1308,8 @@
       "enums": {
         "status": [
           "attempting",
-          "complete"
+          "complete",
+          "failed"
         ]
       }
     },

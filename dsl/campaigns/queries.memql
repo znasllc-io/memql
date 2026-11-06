@@ -859,6 +859,19 @@ query journeyEnrollment journeyEnrollmentCounts {
  count
 }
 
+/// Organization-authorized email automation read: the runs of one automation in one status, newest first. The concept's @rowAuthz scopes it, as it does journeyEnrollmentCounts.
+@actor
+query journeyEnrollment journeyEnrollmentsByStatus {
+ args {
+ journeyId string!
+ status string!
+ }
+ filter row => (row.journeyId == args.journeyId && row.status == args.status)
+ sort "row.createdAt", "desc"
+ paginate 50
+ shape journeyEnrollmentFull
+}
+
 /// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
