@@ -7,6 +7,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/emailconfig"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 )
@@ -21,11 +22,12 @@ func azureConnectionSummary(connection azureConnection) map[string]any {
 }
 
 // summary is the connection's summary as a page listing its senders reads it:
-// with where replies to each sender go, when the sender records can be read.
+// with where replies to each sender go, and what the organization has recorded
+// at each address, when the sender records can be read.
 func (a *azureSetup) summary(ctx context.Context, connection azureConnection) map[string]any {
 	summary := azureConnectionSummary(connection)
-	if replies := a.senderReplies(ctx, connection); replies != nil {
-		summary["replies"] = replies
+	if replies, recorded := a.senderRecordsSummary(ctx, connection); replies != nil {
+		summary["replies"], summary["recorded"] = replies, recorded
 	}
 	return summary
 }
@@ -292,13 +294,43 @@ func (c *azureConnection) defaultCandidate(address string) (string, error) {
 // adding a sender as the default does. identityID is the sender's Campaigns
 // record. Nothing else changes -- not the senders or their names, not the
 // credential -- and nothing in it needs Azure, so it needs no Microsoft session.
+//
+// THE CONNECTION STAYS ONE THAT SENDS. A sender's own Reply-To is free text
+// ("Support Desk <desk@acme.com>"), but a connection's is one bare mailbox, so
+// the address is what is kept; one that names no mailbox refuses the change.
+// The new configuration must build as finish's does before anything changes:
+// a connection that cannot send would refuse every message of the
+// organization, and nothing on the page would say why.
 func (c *azureConnection) makeDefault(address, replyTo, identityID string) error {
 	address, err := c.defaultCandidate(address)
 	if err != nil {
 		return err
 	}
-	c.Config.Default = address
-	c.Config.ReplyTo, c.ReplyTo = replyTo, replyTo
+	bare, err := azureReplyAddress(replyTo)
+	if err != nil {
+		return fmt.Errorf("the reply address of %s, %q, is not one mailbox address; correct that sender's Reply to, then make it the default", address, strings.TrimSpace(replyTo))
+	}
+	next := c.Config
+	next.Default, next.ReplyTo = address, bare
+	if _, err := NewACSSender(next); err != nil {
+		return fmt.Errorf("this connection could not send with %s as its default, so nothing was changed; check the sending domain in Azure", address)
+	}
+	c.Config = next
+	c.ReplyTo = bare
 	c.SenderIdentityID = identityID
 	return nil
+}
+
+// azureReplyAddress is the one bare mailbox a free-text Reply-To names, the
+// only form a connection's Reply-To takes; "" for none.
+func azureReplyAddress(replyTo string) (string, error) {
+	replyTo = strings.TrimSpace(replyTo)
+	if replyTo == "" {
+		return "", nil
+	}
+	mailbox, err := mail.ParseAddress(replyTo)
+	if err != nil || headerUnsafe(mailbox.Address) {
+		return "", fmt.Errorf("not one mailbox address")
+	}
+	return mailbox.Address, nil
 }

@@ -53,8 +53,10 @@ func azureSenderRecord(records []map[string]any, account, address string) map[st
 // OVER a record the organization already has for the address -- one recorded
 // by hand before Azure had it -- rather than writing a second: automations and
 // campaigns name that record, and every send uses its display name, so it is
-// the one that must carry the name Azure holds. A record recorded and then
-// archived is left as it is.
+// the one that must carry the name Azure holds. The record takes the Reply-To
+// it was given, none included: the page that adds it starts from what the
+// record holds (the summary's `recorded`) and says what changes. A record
+// recorded and then archived is left as it is.
 func (a *azureSetup) saveSenderIdentity(ctx context.Context, account string, sender azureSender) (string, error) {
 	records, err := a.senderRecords(ctx, account)
 	if err != nil {
@@ -82,25 +84,51 @@ func (a *azureSetup) saveSenderIdentity(ctx context.Context, account string, sen
 		}
 		mutation = "updateSenderIdentity"
 	}
-	if _, err = a.store.engine.Execute(ctx, renderConfigCall(mutation, values)); err != nil {
+	call := renderConfigCall(mutation, values)
+	if mutation == "updateSenderIdentity" && values["replyTo"] == "" {
+		// An update keeps a field it leaves out, and a Reply-To left out would
+		// keep the old address while the page that added the sender said it has
+		// none: an explicit empty one is a value, and blanks the stored one.
+		call = strings.TrimSuffix(call, ")") + `, replyTo: "")`
+	}
+	if _, err = a.store.engine.Execute(ctx, call); err != nil {
 		return "", fmt.Errorf("could not save the organization's sending identity; check your organization permissions and try again")
 	}
 	return identityID, nil
 }
 
-// senderReplies says where replies to each sender the domain has registered go,
-// for a page that lists them. Nil when the sender records cannot be read, so the
-// page says nothing rather than something untrue.
-func (a *azureSetup) senderReplies(ctx context.Context, connection azureConnection) map[string]string {
+// senderRecordsSummary is what a page listing the domain's senders reads from
+// the organization's sender records: where replies to each registered sender
+// go, and what the organization has recorded at each address. Nil maps when the
+// records cannot be read, so the page says nothing rather than something untrue.
+func (a *azureSetup) senderRecordsSummary(ctx context.Context, connection azureConnection) (map[string]string, map[string]map[string]string) {
 	if len(connection.Config.Senders) == 0 {
-		return nil
+		return nil, nil
 	}
 	records, err := a.senderRecords(ctx, connection.AccountID)
 	if err != nil {
 		slog.Warn("email: the sending domain's sender records could not be read, so its page shows no reply addresses", "error", err)
-		return nil
+		return nil, nil
 	}
-	return azureReplies(connection, records)
+	return azureReplies(connection, records), azureRecorded(connection.AccountID, records)
+}
+
+// azureRecorded is what the organization has recorded at each address, from the
+// record that speaks for it: its display name and reply address. A domain's Add
+// a sender starts from it, so taking a record over changes only what the person
+// was shown it would change.
+func azureRecorded(account string, records []map[string]any) map[string]map[string]string {
+	recorded := map[string]map[string]string{}
+	for _, row := range records {
+		address := strings.ToLower(strings.TrimSpace(argString(row, "address")))
+		if _, done := recorded[address]; done || address == "" {
+			continue
+		}
+		if record := azureSenderRecord(records, account, address); record != nil {
+			recorded[address] = map[string]string{"fromName": argString(record, "fromName"), "replyTo": argString(record, "replyTo")}
+		}
+	}
+	return recorded
 }
 
 // azureReplies answers senderReplies from the organization's sender records. A

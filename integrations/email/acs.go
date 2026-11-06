@@ -524,7 +524,7 @@ func permanentSendRefusal(detail string) error {
 // not by trying again. Each is its own sentence so SenderRefusal can name it.
 const (
 	refusalUnregistered   = "choose a verified sender belonging to this organization"
-	refusalRenamed        = "update this sender's display name in the Azure email connection before sending"
+	refusalRenamed        = "Azure sends this sender's address under a different display name; give the sender the display name Azure has"
 	refusalAzureOwnDomain = "this organization sends through Azure's own domain, which sends only as its own sender; choose that sender, or set up a sending domain of the organization's own"
 )
 

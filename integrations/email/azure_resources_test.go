@@ -281,6 +281,64 @@ func TestMakeDefaultMovesTheDefault(t *testing.T) {
 	}
 }
 
+// A sender's own Reply-To is free text, a connection's is one bare mailbox:
+// Make default keeps the address, and never leaves a connection that cannot send.
+func TestMakeDefaultKeepsTheConnectionSending(t *testing.T) {
+	ready := func() azureConnection {
+		cfg := sendingConfig()
+		cfg.Senders["hello@client.example"] = "Client Hello"
+		return azureConnection{Status: "ready", AccountID: "client", Plan: azurePlanFixture(), Config: cfg, ReplyTo: cfg.ReplyTo, SenderIdentityID: "news-record"}
+	}
+	connection := ready()
+	if err := connection.makeDefault("hello@client.example", "Support Desk <desk@client.example>", "hello-record"); err != nil {
+		t.Fatal(err)
+	}
+	if connection.Config.ReplyTo != "desk@client.example" || connection.ReplyTo != "desk@client.example" || exportedReplyTo(connection) != "desk@client.example" {
+		t.Fatalf("kept a display name in the connection's Reply-To: %q / %q", connection.Config.ReplyTo, connection.ReplyTo)
+	}
+	// And the organization still sends, with the bare address as its Reply-To.
+	sender, err := NewACSSender(connection.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.operations = &memoryACSOperations{}
+	var replyTo any
+	sender.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		replyTo = payload["replyTo"]
+		return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"status":"Running"}`))}, nil
+	})
+	if err := sender.Send(context.Background(), Message{To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}, SendAs{AccountID: "client"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := json.Marshal(replyTo); string(got) != `[{"address":"desk@client.example"}]` {
+		t.Fatalf("sent with Reply-To %s", got)
+	}
+
+	// A Reply-To that names no mailbox is refused, pointing at it, and nothing changes.
+	for _, bad := range []string{"desk at client", "Desk <desk@client.example>, Other <other@client.example>"} {
+		connection = ready()
+		err := connection.makeDefault("hello@client.example", bad, "hello-record")
+		if err == nil || !strings.Contains(err.Error(), "hello@client.example") || !strings.Contains(err.Error(), "Reply to") {
+			t.Fatalf("%q: %v", bad, err)
+		}
+		if connection.Config.Default != "news@client.example" || connection.Config.ReplyTo != "help@client.example" || connection.ReplyTo != "help@client.example" || connection.SenderIdentityID != "news-record" {
+			t.Fatalf("%q changed the connection: %+v", bad, connection)
+		}
+	}
+	// A configuration that would not build is refused before anything changes.
+	connection = ready()
+	connection.Config.Endpoint = "https://elsewhere.example"
+	if err := connection.makeDefault("hello@client.example", "", "hello-record"); err == nil || connection.Config.Default != "news@client.example" || connection.ReplyTo != "help@client.example" {
+		t.Fatalf("made a default the connection cannot send with: %v", err)
+	}
+}
+
+func exportedReplyTo(c azureConnection) string { return publicEmailDomain(c, "Client").Sender.ReplyTo }
+
 func TestAzureProvisioningRefusesSameOrganizationInAnotherCluster(t *testing.T) {
 	p := azurePlanFixture()
 	a := newAzureProtocol("")

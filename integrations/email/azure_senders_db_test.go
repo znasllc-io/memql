@@ -61,6 +61,13 @@ func TestTheDomainsSenderActsKeepTheDefaultAndRecordEachSender(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The test database is shared: a ready organization left behind joins every
+	// later delivery-feedback scan (which reads 50 at a time), so it goes when done.
+	t.Cleanup(func() {
+		if _, err := setup.connectionAction(owner, account, "disconnect", nil); err != nil {
+			t.Errorf("could not disconnect the test organization: %v", err)
+		}
+	})
 	session := azureSession{AccountID: account, ClusterID: plan.ClusterID, AccessToken: "token"}
 	add := func(username, displayName, replyTo string) map[string]any {
 		t.Helper()
@@ -189,5 +196,52 @@ func TestTheDomainsSenderActsKeepTheDefaultAndRecordEachSender(t *testing.T) {
 	}
 	if got := refusal(); got != "" || len(recordsFor("support@client.example")) != 1 {
 		t.Fatalf("still refused after taking Azure's name: %q", got)
+	}
+
+	// The summary says what is recorded at each address, so the page that adds a
+	// sender starts from it; a takeover then writes what that page was given,
+	// a Reply-To left empty included.
+	record(suffix+"-returns", "returns@client.example", "Returns Team", "back@client.example")
+	status, err = setup.connectionAction(owner, account, "status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := status["recorded"].(map[string]map[string]string)["returns@client.example"]; got["fromName"] != "Returns Team" || got["replyTo"] != "back@client.example" {
+		t.Fatalf("recorded: %v", status["recorded"])
+	}
+	add("returns", "Client Returns", "")
+	if returns := recordsFor("returns@client.example"); len(returns) != 1 || argString(returns[0], "fromName") != "Client Returns" || argString(returns[0], "replyTo") != "" {
+		t.Fatalf("the takeover kept a Reply-To it was not given: %v", returns)
+	}
+
+	// Make default keeps the bare mailbox of a free-text Reply-To...
+	update := func(id, address, fromName, replyTo string) {
+		t.Helper()
+		if _, err := e.Execute(owner, renderConfigCall("updateSenderIdentity", map[string]string{"senderIdentityId": id, "accountId": account, "address": address, "fromName": fromName, "replyTo": replyTo})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	update(azureSenderIdentityID(account, "billing@client.example"), "billing@client.example", "Client Billing", "Billing Desk <billing-desk@client.example>")
+	moved, err = setup.connectionAction(owner, account, "makeDefault", map[string]any{"sender": "billing@client.example"})
+	if err != nil || moved["sender"] != "billing@client.example" || moved["replyTo"] != "billing-desk@client.example" {
+		t.Fatalf("make default with a display-name Reply-To: %v %v", moved, err)
+	}
+	if _, _, err := setup.store.read(owner, "organization:"+account, &current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewACSSender(current.Config); err != nil || current.Config.ReplyTo != "billing-desk@client.example" {
+		t.Fatalf("make default left a connection that cannot send: %v %q", err, current.Config.ReplyTo)
+	}
+	// ...and refuses one that names no mailbox, writing nothing.
+	update(azureSenderIdentityID(account, "hello@client.example"), "hello@client.example", "Client Hello", "the help desk")
+	if _, err := setup.connectionAction(owner, account, "makeDefault", map[string]any{"sender": "hello@client.example"}); err == nil || !strings.Contains(err.Error(), "the help desk") {
+		t.Fatalf("made a sender with an unusable Reply-To the default: %v", err)
+	}
+	var after azureConnection
+	if _, _, err := setup.store.read(owner, "organization:"+account, &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Config.Default != "billing@client.example" || after.Config.ReplyTo != "billing-desk@client.example" || after.ReplyTo != "billing-desk@client.example" {
+		t.Fatalf("a refused make default changed the connection: %q, %q", after.Config.Default, after.Config.ReplyTo)
 	}
 }

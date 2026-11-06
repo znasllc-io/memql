@@ -391,6 +391,12 @@ func TestSenderRefusalNamesWhatToFix(t *testing.T) {
 	if got := check("news@client.test", "Client News"); got != "renamed" {
 		t.Fatalf("a display name other than Azure's: %q", got)
 	}
+	// Its sentence, shown on campaigns and failed runs, points at the fix: the
+	// sender's own display name, not the Azure connection.
+	renamed := s.CheckSender(context.Background(), SendAs{AccountID: "client", Address: "news@client.test", FromName: "Client News"}).Error()
+	if !strings.Contains(renamed, "give the sender the display name Azure has") || strings.Contains(renamed, "connection") {
+		t.Fatalf("the renamed sentence points elsewhere: %q", renamed)
+	}
 	if got := SenderRefusal(s.CheckSender(context.Background(), SendAs{AccountID: "another", Address: "news@client.test"})); got != "" {
 		t.Fatalf("another organization's sender is not a sender to fix: %q", got)
 	}
