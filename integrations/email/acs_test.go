@@ -366,3 +366,40 @@ func TestASenderWithNoRecordOfItsSubmissionsSaysSo(t *testing.T) {
 		t.Fatalf("an Azure sender with no receipt storage answered %v (%v), want unrecorded", outcome, err)
 	}
 }
+
+// The refusals a person fixes on the sender or its domain are named, so a page
+// can say which; the address is compared without regard to case, as sends do.
+func TestSenderRefusalNamesWhatToFix(t *testing.T) {
+	s := acsFixture(t) // Azure has news@client.test as "Client"
+	check := func(address, fromName string) string {
+		t.Helper()
+		err := s.CheckSender(context.Background(), SendAs{AccountID: "client", Address: address, FromName: fromName})
+		if err != nil && !IsPermanent(err) {
+			t.Fatalf("%s: a sender refusal must not be retried: %v", address, err)
+		}
+		if err == nil {
+			return "ready"
+		}
+		return SenderRefusal(err)
+	}
+	if got := check("News@Client.TEST", "Client"); got != "ready" {
+		t.Fatalf("an address differing only in case was refused: %s", got)
+	}
+	if got := check("hello@client.test", "Client"); got != "unregistered" {
+		t.Fatalf("an address Azure does not have: %q", got)
+	}
+	if got := check("news@client.test", "Client News"); got != "renamed" {
+		t.Fatalf("a display name other than Azure's: %q", got)
+	}
+	if got := SenderRefusal(s.CheckSender(context.Background(), SendAs{AccountID: "another", Address: "news@client.test"})); got != "" {
+		t.Fatalf("another organization's sender is not a sender to fix: %q", got)
+	}
+	// Azure's own domain registers no other sender: that is its own refusal.
+	s.azureOwnDomain = true
+	if got := check("hello@client.test", "Client"); got != "azureOwnDomain" {
+		t.Fatalf("Azure's own domain: %q", got)
+	}
+	if got := check("news@client.test", "Client"); got != "ready" {
+		t.Fatalf("Azure's own sender on its own domain: %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/emailconfig"
 	"net/http"
 	"net/url"
@@ -33,7 +34,8 @@ func (a *azureSetup) summary(ctx context.Context, connection azureConnection) ma
 // MemQL permission but no live Microsoft session. Disconnect drops the active
 // credential; it never deletes Azure resources, changes DNS, or cancels
 // billing on the user's behalf. Make default only chooses among the senders
-// Azure has already registered, so it asks Azure nothing.
+// Azure has already registered, so it asks Azure nothing; the sender's own
+// Reply-To comes from its Campaigns record.
 func (a *azureSetup) connectionAction(ctx context.Context, account, action string, options map[string]any) (map[string]any, error) {
 	var connection azureConnection
 	if action == "makeDefault" {
@@ -41,7 +43,19 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 			if !found || connection.AccountID != account {
 				return fmt.Errorf("finish this organization's sending domain before choosing its default sender")
 			}
-			return connection.makeDefault(argString(options, "sender"))
+			address, err := connection.defaultCandidate(argString(options, "sender"))
+			if err != nil {
+				return err
+			}
+			records, err := a.senderRecords(ctx, account)
+			if err != nil {
+				return fmt.Errorf("could not read this sender's reply address; try again")
+			}
+			identityID, replyTo := azureSenderIdentityID(account, address), ""
+			if record := azureSenderRecord(records, account, address); record != nil {
+				identityID, replyTo = memql.BareShortId(argString(record, "id")), strings.TrimSpace(argString(record, "replyTo"))
+			}
+			return connection.makeDefault(address, replyTo, identityID)
 		}); err != nil {
 			return nil, err
 		}
@@ -259,19 +273,32 @@ func (a *azureSetup) claimResources(ctx context.Context, account string, plan az
 	return nil
 }
 
-// makeDefault moves the connection's default, the address mail that names
-// none goes out as, to a sender the domain has registered with Azure. It
-// changes nothing else: not the senders or their names, not the Reply-To, not
-// the credential. Nothing in it needs Azure, so it needs no Microsoft session.
-func (c *azureConnection) makeDefault(address string) error {
+// defaultCandidate is the address a sender becomes the default under: one the
+// domain has registered with Azure, on a domain that is sending.
+func (c *azureConnection) defaultCandidate(address string) (string, error) {
 	if c.Status != "ready" {
-		return fmt.Errorf("finish this organization's sending domain before choosing its default sender")
+		return "", fmt.Errorf("finish this organization's sending domain before choosing its default sender")
 	}
 	address = strings.ToLower(strings.TrimSpace(address))
 	if _, registered := c.Config.Senders[address]; !registered {
-		return fmt.Errorf("choose a sender this domain has registered with Azure")
+		return "", fmt.Errorf("choose a sender this domain has registered with Azure")
+	}
+	return address, nil
+}
+
+// makeDefault moves the connection's default, the address mail that names
+// none goes out as, to a sender the domain has registered with Azure, and the
+// connection's Reply-To with it: that sender's own (replyTo, "" for none), as
+// adding a sender as the default does. identityID is the sender's Campaigns
+// record. Nothing else changes -- not the senders or their names, not the
+// credential -- and nothing in it needs Azure, so it needs no Microsoft session.
+func (c *azureConnection) makeDefault(address, replyTo, identityID string) error {
+	address, err := c.defaultCandidate(address)
+	if err != nil {
+		return err
 	}
 	c.Config.Default = address
-	c.SenderIdentityID = azureSenderIdentityID(c.AccountID, address)
+	c.Config.ReplyTo, c.ReplyTo = replyTo, replyTo
+	c.SenderIdentityID = identityID
 	return nil
 }

@@ -28,15 +28,19 @@ func (w *Worker) handleSendingReadiness(ctx context.Context, args map[string]any
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 		return nil, err
 	}
-	reason := w.cfg.RequireUnsubscribe()
+	// senderRefusal names a refusal of the sender itself that a person fixes on
+	// the sender or its domain (email.SenderRefusal), so a page can say which
+	// without reading the sentence. Anyone who may send may ask, and it is the
+	// check a real send makes of the sender.
+	reason, senderRefusal := w.cfg.RequireUnsubscribe(), ""
 	if reason == "" {
 		identity, refusal := w.resolveSendIdentity(ctx, campaign)
 		reason = refusal.Reason
 		if reason == "" {
 			if err := email.CheckSender(ctx, w.resolveSender(), identity.SendAs); err != nil {
-				reason = err.Error()
+				reason, senderRefusal = err.Error(), email.SenderRefusal(err)
 			}
 		}
 	}
-	return resultNode("campaignSendingReadiness", map[string]any{"accountId": campaign.AccountID, "campaignId": campaign.ID, "ready": reason == "", "reason": reason, "capture": email.CapturesMessages(w.resolveSender())})
+	return resultNode("campaignSendingReadiness", map[string]any{"accountId": campaign.AccountID, "campaignId": campaign.ID, "ready": reason == "", "reason": reason, "senderRefusal": senderRefusal, "capture": email.CapturesMessages(w.resolveSender())})
 }

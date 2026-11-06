@@ -47,6 +47,9 @@ type ACSSender struct {
 	client     *http.Client
 	now        func() time.Time
 	operations acsOperationStore
+	// azureOwnDomain is a connection on Azure's own domain for the
+	// installation, which has the one sender Azure made and registers no other.
+	azureOwnDomain bool
 }
 
 func NewACSSender(cfg ACSConfig) (*ACSSender, error) {
@@ -517,6 +520,37 @@ func permanentSendRefusal(detail string) error {
 	return &SendError{Permanent: true, NotAccepted: true, Detail: detail}
 }
 
+// The refusals of a sender that a person fixes on the sender or on its domain,
+// not by trying again. Each is its own sentence so SenderRefusal can name it.
+const (
+	refusalUnregistered   = "choose a verified sender belonging to this organization"
+	refusalRenamed        = "update this sender's display name in the Azure email connection before sending"
+	refusalAzureOwnDomain = "this organization sends through Azure's own domain, which sends only as its own sender; choose that sender, or set up a sending domain of the organization's own"
+)
+
+// SenderRefusal names why an organization's Azure connection refuses to send
+// as a sender, when it is one a person fixes rather than one to try again:
+// "unregistered" (the domain has not registered the address), "renamed" (it
+// has, under another display name, which is the only one Azure sends with) or
+// "azureOwnDomain" (Azure's own domain, which registers no other sender). It is
+// "" for any other error and for none. Readiness reports it, so a page can say
+// what to fix without reading the sentence.
+func SenderRefusal(err error) string {
+	var se *SendError
+	if !errors.As(err, &se) {
+		return ""
+	}
+	switch se.Detail {
+	case refusalUnregistered:
+		return "unregistered"
+	case refusalRenamed:
+		return "renamed"
+	case refusalAzureOwnDomain:
+		return "azureOwnDomain"
+	}
+	return ""
+}
+
 // unconfirmedSend is a delivery Azure may have accepted although nothing said so.
 // Permanent, so no caller retries it blindly; not NotAccepted, so nothing submits
 // it again until Azure's record of the operation says it was not accepted.
@@ -548,13 +582,16 @@ func (s *ACSSender) identity(as SendAs) (string, error) {
 	}
 	displayName, verified := s.cfg.Senders[address]
 	if !verified {
-		return "", permanentSendRefusal("choose a verified sender belonging to this organization")
+		if s.azureOwnDomain {
+			return "", permanentSendRefusal(refusalAzureOwnDomain)
+		}
+		return "", permanentSendRefusal(refusalUnregistered)
 	}
 	// ACS controls the display name on the sender username resource; it does
 	// not accept a display-name override in emails:send. Refuse a mismatch
 	// instead of silently mailing under a different brand.
 	if as.FromName != "" && as.FromName != displayName {
-		return "", permanentSendRefusal("update this sender's display name in the Azure email connection before sending")
+		return "", permanentSendRefusal(refusalRenamed)
 	}
 	return address, nil
 }

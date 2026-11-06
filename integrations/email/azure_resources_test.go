@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/emailconfig"
 )
 
 func azurePlanFixture() azurePlan {
@@ -226,6 +228,10 @@ func TestAddingASenderKeepsTheDefault(t *testing.T) {
 }
 
 func TestMakeDefaultMovesTheDefault(t *testing.T) {
+	// The domain's package names the default sender with the connection's
+	// Reply-To, so the two must move together.
+	exported := func(c azureConnection) emailconfig.Sender { return *publicEmailDomain(c, "Client").Sender }
+
 	// Asked for while adding: the new sender is the default, with its Reply-To.
 	registered := map[string]string{"news": "Client"}
 	a := azureDomainFake(t, "client", "", registered)
@@ -236,27 +242,41 @@ func TestMakeDefaultMovesTheDefault(t *testing.T) {
 	if cfg.Default != "hello@client.example" || cfg.ReplyTo != "replies@client.example" {
 		t.Fatalf("make default left the default at %q, replies to %q", cfg.Default, cfg.ReplyTo)
 	}
+	if got := exported(azureConnection{Status: "ready", AccountID: "client", Plan: azurePlanFixture(), Config: cfg, ReplyTo: cfg.ReplyTo}); got != (emailconfig.Sender{Username: "hello", DisplayName: "Client Hello", ReplyTo: "replies@client.example"}) {
+		t.Fatalf("the package pairs the default with another Reply-To: %+v", got)
+	}
 
-	// Make default on a sender the domain already has changes the default and
-	// nothing else, and needs no Azure call.
+	// Make default on a sender the domain already has moves the default and
+	// takes that sender's own Reply-To with it; nothing else changes, and it
+	// needs no Azure call.
 	ready := sendingConfig()
 	ready.Senders["hello@client.example"] = "Client Hello"
-	connection := azureConnection{Status: "ready", AccountID: "client", Config: ready, ReplyTo: ready.ReplyTo, SenderIdentityID: azureSenderIdentityID("client", "news@client.example")}
-	if err := connection.makeDefault(" Hello@Client.example "); err != nil {
+	connection := azureConnection{Status: "ready", AccountID: "client", Plan: azurePlanFixture(), Config: ready, ReplyTo: ready.ReplyTo, SenderIdentityID: azureSenderIdentityID("client", "news@client.example")}
+	if err := connection.makeDefault(" Hello@Client.example ", "replies@client.example", "hello-record"); err != nil {
 		t.Fatal(err)
 	}
-	if connection.Config.Default != "hello@client.example" || connection.SenderIdentityID != azureSenderIdentityID("client", "hello@client.example") {
+	if connection.Config.Default != "hello@client.example" || connection.SenderIdentityID != "hello-record" {
 		t.Fatalf("make default did not move the default: %q", connection.Config.Default)
 	}
-	if connection.ReplyTo != "help@client.example" || connection.Config.ReplyTo != "help@client.example" || len(connection.Config.Senders) != 2 || connection.Config.Senders["hello@client.example"] != "Client Hello" || connection.Config.AccessKey != ready.AccessKey || connection.Status != "ready" {
+	if connection.ReplyTo != "replies@client.example" || connection.Config.ReplyTo != "replies@client.example" {
+		t.Fatalf("make default left the old default's Reply-To: %q / %q", connection.ReplyTo, connection.Config.ReplyTo)
+	}
+	if len(connection.Config.Senders) != 2 || connection.Config.Senders["hello@client.example"] != "Client Hello" || connection.Config.Senders["news@client.example"] != "Client" || connection.Config.AccessKey != ready.AccessKey || connection.Status != "ready" {
 		t.Fatalf("make default changed more than the default: %+v", connection)
 	}
+	if got := exported(connection); got != (emailconfig.Sender{Username: "hello", DisplayName: "Client Hello", ReplyTo: "replies@client.example"}) {
+		t.Fatalf("the package pairs the default with another Reply-To: %+v", got)
+	}
+	// A sender with no Reply-To of its own takes none: replies go to it.
+	if err := connection.makeDefault("news@client.example", "", "news-record"); err != nil || connection.ReplyTo != "" || connection.Config.ReplyTo != "" || exported(connection).ReplyTo != "" {
+		t.Fatalf("kept another sender's Reply-To: %q, %v", connection.ReplyTo, err)
+	}
 	// Only to a sender the domain has registered, and only on a sending domain.
-	if err := connection.makeDefault("someone@client.example"); err == nil || connection.Config.Default != "hello@client.example" {
+	if err := connection.makeDefault("someone@client.example", "x@client.example", "x"); err == nil || connection.Config.Default != "news@client.example" || connection.ReplyTo != "" {
 		t.Fatal("made a sender Azure does not have the default")
 	}
 	connection.Status = "dns"
-	if err := connection.makeDefault("news@client.example"); err == nil || connection.Config.Default != "hello@client.example" {
+	if err := connection.makeDefault("hello@client.example", "replies@client.example", "hello-record"); err == nil || connection.Config.Default != "news@client.example" {
 		t.Fatal("chose a default on a domain that is not sending")
 	}
 }

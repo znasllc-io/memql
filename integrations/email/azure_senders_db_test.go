@@ -100,7 +100,8 @@ func TestTheDomainsSenderActsKeepTheDefaultAndRecordEachSender(t *testing.T) {
 		t.Fatalf("sender records: %v", records)
 	}
 
-	// Make default asks Azure nothing and changes only the default.
+	// Make default asks Azure nothing, and moves the default with that sender's
+	// own Reply-To.
 	before := azureCalls
 	moved, err := setup.connectionAction(owner, account, "makeDefault", map[string]any{"sender": "hello@client.example"})
 	if err != nil {
@@ -109,18 +110,84 @@ func TestTheDomainsSenderActsKeepTheDefaultAndRecordEachSender(t *testing.T) {
 	if azureCalls != before {
 		t.Fatal("make default called Azure")
 	}
-	if moved["sender"] != "hello@client.example" || moved["replyTo"] != "help@client.example" || len(moved["senders"].(map[string]string)) != 3 {
+	if moved["sender"] != "hello@client.example" || moved["replyTo"] != "replies@client.example" || len(moved["senders"].(map[string]string)) != 3 {
 		t.Fatalf("make default: %v", moved)
 	}
 	status, err := setup.connectionAction(owner, account, "status", nil)
-	if err != nil || status["sender"] != "hello@client.example" || status["replies"] == nil {
+	if err != nil || status["sender"] != "hello@client.example" || status["replyTo"] != "replies@client.example" || status["replies"] == nil {
 		t.Fatalf("status after make default: %v %v", status, err)
 	}
 	if _, err := setup.connectionAction(owner, account, "makeDefault", map[string]any{"sender": "someone@client.example"}); err == nil {
 		t.Fatal("made a sender Azure does not have the default")
 	}
-	// A later sender still keeps the default where Make default put it.
-	if out := add("orders", "Client Orders", ""); out["sender"] != "hello@client.example" {
+
+	// A sender recorded by hand before Azure had it is TAKEN OVER when it is
+	// added on the domain: one record, under its own id, with the name Azure
+	// holds, and what the domain does not set (its notes) kept.
+	record := func(id, address, fromName, replyTo string) {
+		t.Helper()
+		if _, err := e.Execute(owner, renderConfigCall("createSenderIdentity", map[string]string{"senderIdentityId": id, "accountId": account, "address": address, "fromName": fromName, "replyTo": replyTo, "notes": "recorded by hand"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordsFor := func(address string) []map[string]any {
+		t.Helper()
+		rows, err := setup.senderRecords(owner, account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found []map[string]any
+		for _, row := range rows {
+			if strings.EqualFold(argString(row, "address"), address) {
+				found = append(found, row)
+			}
+		}
+		return found
+	}
+	handID := suffix + "-orders"
+	record(handID, "Orders@Client.example", "Orders Team", "desk@client.example")
+	// Someone also adds support@ in Azure directly; the next add lists it.
+	registered["support"] = "Client Support"
+	if out := add("orders", "Client Orders", "desk@client.example"); out["sender"] != "hello@client.example" {
 		t.Fatalf("adding a sender after make default moved it to %v", out["sender"])
+	}
+	orders := recordsFor("orders@client.example")
+	if len(orders) != 1 || memql.BareShortId(argString(orders[0], "id")) != handID || argString(orders[0], "fromName") != "Client Orders" || argString(orders[0], "address") != "orders@client.example" || argString(orders[0], "replyTo") != "desk@client.example" || argString(orders[0], "notes") != "recorded by hand" {
+		t.Fatalf("the hand record was not taken over: %v", orders)
+	}
+
+	// A record whose name differs from the one Azure holds stays refused --
+	// the check every send makes -- until it carries Azure's name.
+	record(suffix+"-support", "support@client.example", "Support", "")
+	if _, err := setup.resourceAction(owner, session, "sender", map[string]any{"username": "support", "displayName": "Support", "planId": azurePlanID(connection)}); err == nil {
+		t.Fatal("registered a display name Azure does not hold")
+	}
+	var current azureConnection
+	if _, _, err := setup.store.read(owner, "organization:"+account, &current); err != nil {
+		t.Fatal(err)
+	}
+	sender, err := NewACSSender(current.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusal := func() string {
+		support := recordsFor("support@client.example")
+		if len(support) != 1 {
+			t.Fatalf("support records: %v", support)
+		}
+		return SenderRefusal(sender.CheckSender(owner, SendAs{AccountID: account, Address: "support@client.example", FromName: argString(support[0], "fromName")}))
+	}
+	if got := refusal(); got != "renamed" {
+		t.Fatalf("a name Azure does not hold: %q", got)
+	}
+	add("support", "Client Support", "")
+	if _, _, err := setup.store.read(owner, "organization:"+account, &current); err != nil {
+		t.Fatal(err)
+	}
+	if sender, err = NewACSSender(current.Config); err != nil {
+		t.Fatal(err)
+	}
+	if got := refusal(); got != "" || len(recordsFor("support@client.example")) != 1 {
+		t.Fatalf("still refused after taking Azure's name: %q", got)
 	}
 }

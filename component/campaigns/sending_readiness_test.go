@@ -2,8 +2,10 @@ package campaigns
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/integrations/email"
@@ -87,6 +89,54 @@ func TestSendingReadinessReportsCaptureWithoutSending(t *testing.T) {
 			}
 			if !reply.Ready || reply.Capture != test.capture {
 				t.Fatalf("incorrect transport readiness: %+v", reply)
+			}
+		})
+	}
+}
+
+// Readiness names the Azure refusal of a sender that a person fixes on the
+// sender or its domain, from the same check a real send makes, so a page can
+// flag the sender for anyone who may send.
+func TestSendingReadinessNamesTheSenderRefusal(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	for _, test := range []struct {
+		name    string
+		senders map[string]string // what Azure has registered for client-a
+		refusal string
+	}{
+		{"registered", map[string]string{"hello@client-a.test": "Client A"}, ""},
+		{"case", map[string]string{"hello@client-a.test": "Client A"}, ""},
+		{"unregistered", map[string]string{"news@client-a.test": "Client A"}, "unregistered"},
+		{"renamed", map[string]string{"hello@client-a.test": "Client A News"}, "renamed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			primary := ""
+			for address := range test.senders {
+				primary = address
+			}
+			sender, err := email.NewACSSender(email.ACSConfig{AccountID: "client-a", Endpoint: "https://client-a.communication.azure.com", AccessKey: key, Senders: test.senders, Default: primary})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := organizationSendEngine()
+			if test.name == "case" {
+				e.senderIdentities["sender"]["address"] = "Hello@Client-A.test"
+			}
+			w := newTestWorker(t, e, sender)
+			rows, err := w.handleSendingReadiness(importCtx(), map[string]any{"accountId": "client-a", "senderIdentityId": "sender"}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reply struct {
+				Ready         bool   `json:"ready"`
+				Reason        string `json:"reason"`
+				SenderRefusal string `json:"senderRefusal"`
+			}
+			if err := json.Unmarshal(rows[0].Payload, &reply); err != nil {
+				t.Fatal(err)
+			}
+			if reply.SenderRefusal != test.refusal || reply.Ready != (test.refusal == "") || (!reply.Ready && reply.Reason == "") {
+				t.Fatalf("%+v", reply)
 			}
 		})
 	}
