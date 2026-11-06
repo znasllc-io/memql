@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -176,6 +177,11 @@ type linkRequest struct {
 	// email is given one: it is a request to start mailing somebody, and it
 	// expires confirmLinkLifetime from now.
 	Confirm bool
+
+	// ConfirmExpiresAt, when set, is when the confirm link expires, in place of
+	// confirmLinkLifetime from now. The view page sets it to the end of the
+	// member's own window, so reading an old email never lengthens it.
+	ConfirmExpiresAt time.Time
 }
 
 // messageLinks builds the links of one message.
@@ -223,7 +229,11 @@ func (w *Worker) messageLinks(req linkRequest) (MessageLinks, error) {
 
 	if req.Confirm {
 		confirm := page
-		confirm.ExpiresAt = w.nowUTC().Add(confirmLinkLifetime).Unix()
+		expires := w.nowUTC().Add(confirmLinkLifetime)
+		if !req.ConfirmExpiresAt.IsZero() {
+			expires = req.ConfirmExpiresAt
+		}
+		confirm.ExpiresAt = expires.Unix()
 		if links.Confirm, err = ConfirmURL(w.cfg, confirm); err != nil {
 			return MessageLinks{}, err
 		}

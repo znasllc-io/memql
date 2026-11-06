@@ -877,6 +877,26 @@ using the unsubscribe signing key and its previous-key ring. Key rotation keeps
 links valid while their key remains in that ring. Forwarding a link gives its
 holder that link's authority, so treat recipient links as private.
 
+The pages carry the organization's look: its name in the page title, its logo
+(only an absolute `https://` address is shown) and its primary colour on the
+button, read from the organization's brand kit. Anything in the kit that is not
+a plain hex colour or an `https://` logo address is left out, and a kit that
+cannot be read leaves the page plain; an opt-out page always works. A page that
+cannot help names the organization's default sender as the contact: that
+sender's Reply-To, else its address, never the installation's own identity.
+When the organization has no sender of its own, or the link did not verify, the
+page says to reply to the email the link came from.
+
+The link host is one host for the whole cluster, the unsubscribe base URL
+(`MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL`, default `https://api.<MEMQL_DOMAIN>`).
+Every organization's recipient links use it, so the address bar shows the
+cluster's host and not the organization's own domain.
+
+A pending member can confirm from the preferences page, or from the view-in-browser
+copy of a confirmation email, only for 30 days after joining. Past that the page
+says the sign-up expired and offers no button. The unsubscribed pages offer a link
+back to the member's preferences page.
+
 The one-click unsubscribe endpoint retains its existing RFC 8058 behavior.
 Confirmation, preferences and unsubscribe share mailbox coordination so
 concurrent choices cannot clear an opt-out in another audience accidentally.

@@ -108,6 +108,8 @@ type emailPageEngine struct {
 	historical map[string]any
 	journey    map[string]any
 	fail       string
+	brandKit   map[string]any
+	senders    []map[string]any
 }
 
 func (e *emailPageEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -119,6 +121,13 @@ func (e *emailPageEngine) Execute(ctx context.Context, q string) (any, error) {
 		return nil, errors.New("storage unavailable")
 	}
 	switch {
+	case strings.HasPrefix(q, "query brandKitForAccount"):
+		if e.brandKit != nil {
+			return rowsEnvelope([]map[string]any{e.brandKit}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query senderIdentitiesForAccount"):
+		return rowsEnvelope(e.senders), nil
 	case strings.HasPrefix(q, "query journeyById"):
 		if e.journey != nil {
 			return rowsEnvelope([]map[string]any{e.journey}), nil
@@ -168,6 +177,8 @@ func (e *emailPageEngine) Execute(ctx context.Context, q string) (any, error) {
 func newEmailPageEngine(status string) (*emailPageEngine, *EmailLinkHandler) {
 	e := &emailPageEngine{fakeEngine: emailPageFixture()}
 	e.roster[0]["subscriptionStatus"] = status
+	// Joined recently: a pending member is inside the window to confirm.
+	e.roster[0]["joinedAt"] = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
 	h := NewEmailLinkHandler(e, Config{UnsubscribeSecret: testSecret, UnsubscribeBaseURL: "https://example.test"}, quietLogger(), nil)
 	h.gate = unitEmailGate
 	h.enrollments = unitEmailGate

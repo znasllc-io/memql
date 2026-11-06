@@ -99,11 +99,13 @@ func (h *UnsubscribeHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 
 func (h *UnsubscribeHandler) serveGet(rw http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
-	if _, err := h.parseToken(token); err != nil {
+	payload, err := h.parseToken(token)
+	if err != nil {
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return
 	}
-	h.render(rw, http.StatusOK, pageConfirm, token)
+	brand, _ := h.pageFor(r.Context(), payload)
+	h.renderFor(rw, http.StatusOK, pageConfirm, token, brand, "")
 }
 
 // parseToken verifies the token against the configured key ring and
@@ -179,7 +181,8 @@ func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Req
 	if err != nil {
 		h.logger.Error("campaigns: unsubscribe coordination unavailable", "error", err)
 		rw.Header().Set("Retry-After", "30")
-		h.render(rw, 503, pageRetry, "")
+		brand, _ := h.pageFor(r.Context(), payload)
+		h.renderFor(rw, 503, pageRetry, "", brand, "")
 		return
 	}
 	defer hold.Release()
@@ -188,10 +191,12 @@ func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Req
 	if err := h.suppress(r.Context(), payload); err != nil {
 		h.logger.Error("campaigns: unsubscribe failed after a valid token", "campaign", payload.CampaignID, "error", err)
 		rw.Header().Set("Retry-After", "30")
-		h.render(rw, http.StatusServiceUnavailable, pageRetry, "")
+		brand, _ := h.pageFor(r.Context(), payload)
+		h.renderFor(rw, http.StatusServiceUnavailable, pageRetry, "", brand, "")
 		return
 	}
-	h.render(rw, http.StatusOK, pageDone, "")
+	brand, back := h.pageFor(r.Context(), payload)
+	h.renderFor(rw, http.StatusOK, pageDone, "", brand, back)
 }
 
 // suppress first persists the authoritative suppression. Recipient convergence
@@ -262,14 +267,45 @@ const (
 	pageRetry
 )
 
-// render writes a minimal self-contained page. No external assets: this
-// is rendered in a browser reached from a link in an email, often on a
-// network that will not load a stylesheet from anywhere else.
+// pageFor is what a verified token lets a page borrow: the organization's brand
+// and the way back to the member's preferences. A token that did not verify, or
+// one minted before tokens named an organization, gets neither: it cannot say
+// whose page this is.
+func (h *UnsubscribeHandler) pageFor(ctx context.Context, payload UnsubscribePayload) (pageBrand, string) {
+	if payload.AccountID == "" || payload.EmailDigest == "" {
+		return pageBrand{}, ""
+	}
+	owner := ownerActorContext(ctx, payload.OwnerUserID)
+	org, err := h.store.AccountName(owner, payload.AccountID)
+	if err != nil {
+		h.logger.Warn("campaigns: an unsubscribe page could not read its organization's name", "account", bare(payload.AccountID), "error", err)
+		org = ""
+	}
+	brand := h.store.brandFor(owner, h.logger, payload.AccountID, org)
+	back, err := PreferencesURL(h.cfg, LinkPayload{OwnerUserID: payload.OwnerUserID, RecipientID: bare(payload.RecipientID), CampaignID: bare(payload.CampaignID), AccountID: payload.AccountID, EmailDigest: payload.EmailDigest})
+	if err != nil {
+		back = ""
+	}
+	return brand, back
+}
+
+// render writes a minimal self-contained page. No external assets beyond the
+// organization's own logo: this is rendered in a browser reached from a link in
+// an email, often on a network that will not load a stylesheet from anywhere
+// else.
 func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page unsubscribePage, token string) {
+	h.renderFor(rw, status, page, token, pageBrand{}, "")
+}
+
+func (h *UnsubscribeHandler) renderFor(rw http.ResponseWriter, status int, page unsubscribePage, token string, brand pageBrand, preferencesURL string) {
 	var body string
 	switch page {
 	case pageConfirm:
-		body = `<h1>Unsubscribe</h1><p>Confirm that you no longer want to receive these emails.</p>` +
+		detail := "Confirm that you no longer want to receive these emails."
+		if brand.Org != "" {
+			detail = "Confirm that you no longer want to receive emails from " + html.EscapeString(brand.Org) + "."
+		}
+		body = `<h1>Unsubscribe</h1><p>` + detail + `</p>` +
 			// html.EscapeString directly at the sink rather than through the
 			// package helper: this is the one value on this page that came off
 			// the wire, so the sanitizer is spelled out where a reader (and a
@@ -280,12 +316,12 @@ func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page uns
 		body = `<h1>Please try again</h1><p>We could not save your unsubscribe request. Please try this link again shortly.</p>`
 	case pageDone:
 		body = `<h1>Unsubscribed</h1><p>You will not receive further emails from this sender. ` +
-			`It may take a short time for a send already in progress to stop.</p>`
+			`It may take a short time for a send already in progress to stop.</p>` + changedYourMind(preferencesURL)
 	default:
 		body = `<h1>This link is not valid</h1><p>The unsubscribe link could not be verified. ` +
 			`It may have been altered in transit. Replying to the message and asking to be removed will also work.</p>`
 	}
-	writeEmailPage(rw, status, "Unsubscribe", body)
+	writeBrandedPage(rw, status, brand.title("Unsubscribe", "Unsubscribe from %s"), body, brand)
 }
 
 func emailPageHeaders(rw http.ResponseWriter) {
@@ -303,11 +339,36 @@ func emailPageHeaders(rw http.ResponseWriter) {
 // writeEmailPage keeps every recipient action page independent of scripts,
 // cookies and external assets, matching the original unsubscribe surface.
 func writeEmailPage(rw http.ResponseWriter, status int, title, body string) {
+	writeBrandedPage(rw, status, title, body, pageBrand{})
+}
+
+// writeBrandedPage is the shared shell. The brand adds the organization's logo
+// above the page and its colour to the button, and widens the policy by images
+// from https and nothing else: no scripts, no fonts, no remote styles.
+func writeBrandedPage(rw http.ResponseWriter, status int, title, body string, brand pageBrand) {
 	emailPageHeaders(rw)
+	style := `body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem;overflow-wrap:anywhere}` +
+		`h1{font-size:1.6rem;line-height:1.25}button{font:inherit;padding:.6rem 1.1rem;cursor:pointer}button:focus-visible{outline:2px solid currentColor;outline-offset:3px}`
+	if brand.Color != "" {
+		style += `button{background:` + brand.Color + `;color:` + buttonText(brand.Color) + `;border:0;border-radius:.4rem}`
+	}
+	logo := ""
+	if brand.Logo != "" {
+		rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src https:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		style += `.logo{display:block;max-width:14rem;max-height:4rem;margin:0 0 1.5rem}`
+		logo = `<img class="logo" src="` + html.EscapeString(brand.Logo) + `" alt="` + html.EscapeString(brand.Org) + `">`
+	}
 	rw.WriteHeader(status)
 	_, _ = rw.Write([]byte(`<!doctype html><html lang="en"><head><meta charset="utf-8">` +
 		`<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>` + html.EscapeString(title) + `</title>` +
-		`<style>body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem;overflow-wrap:anywhere}` +
-		`h1{font-size:1.6rem;line-height:1.25}button{font:inherit;padding:.6rem 1.1rem;cursor:pointer}button:focus-visible{outline:2px solid currentColor;outline-offset:3px}</style></head><body>` +
-		body + `</body></html>`))
+		`<style>` + style + `</style></head><body><main>` + logo + body + `</main></body></html>`))
+}
+
+// changedYourMind is the way back from an unsubscribed page: a link to the
+// member's own preferences page, empty when there is none to offer.
+func changedYourMind(preferencesURL string) string {
+	if preferencesURL == "" {
+		return ""
+	}
+	return `<p>Changed your mind? <a href="` + html.EscapeString(preferencesURL) + `">Manage your email preferences.</a></p>`
 }

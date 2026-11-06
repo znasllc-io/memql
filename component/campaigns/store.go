@@ -387,7 +387,24 @@ func (s *Store) SenderIdentityByID(ctx context.Context, senderIdentityID string)
 	if err != nil || len(rows) == 0 {
 		return SenderIdentity{}, false, err
 	}
-	r := rows[0]
+	return toSenderIdentity(rows[0]), true, nil
+}
+
+// SenderIdentitiesForAccount reads the sending identities filed under one
+// organization, newest first, under the caller's actor.
+func (s *Store) SenderIdentitiesForAccount(ctx context.Context, accountID string) ([]SenderIdentity, error) {
+	rows, err := s.rows(ctx, call("query", "senderIdentitiesForAccount", arg{"accountId", accountID}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SenderIdentity, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toSenderIdentity(r))
+	}
+	return out, nil
+}
+
+func toSenderIdentity(r map[string]any) SenderIdentity {
 	return SenderIdentity{
 		ID:          bare(str(r, "id")),
 		OwnerUserID: bare(str(r, "ownerUserId")),
@@ -402,7 +419,7 @@ func (s *Store) SenderIdentityByID(ctx context.Context, senderIdentityID string)
 		// the field, and the refusal is terminal.
 		Status: strOr(r, "status", "active"),
 		Notes:  str(r, "notes"),
-	}, true, nil
+	}
 }
 
 // AccountName resolves one account's display name. COMPOSITE tier, issued
