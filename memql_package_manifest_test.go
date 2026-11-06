@@ -504,8 +504,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if (step.Placement != pipelines.PlacementCluster && step.Placement != pipelines.PlacementPool) || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
 					t.Errorf("step %s must use a Linux amd64 container on the cluster or the pool: %+v", step.Key, step)
 				}
-				if step.Placement == pipelines.PlacementPool && (step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
-					t.Errorf("pool step %s must carry no verification flag or credential: %+v", step.Key, step)
+				// A pool step may carry verification (the owner's decision, 2026-11-06):
+				// its pass counts between pushes, and a release runs it on the cluster
+				// and stands only on a cluster pass. It never carries a credential, which
+				// must not leave the cluster for a placement the policy chooses.
+				if step.Placement == pipelines.PlacementPool && (len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
+					t.Errorf("pool step %s must carry no credential: %+v", step.Key, step)
 				}
 				// A pool step names its memory, because the two places it can run
 				// default differently: the memql-pipelines namespace's LimitRange
@@ -887,11 +891,13 @@ func engineSetMinus(a, b []string) []string {
 
 // Mac editor hosts, Linux installer fixtures and the external public-site
 // probe require fleet consent. Other portable checks run in containers: on the
-// cluster, or through the Fleet-first pool (the owner's decision, 2026-11-05;
-// memql-package.yaml's header). A pool step may start on an owner's machine, so
-// it carries no credential, no image build and no verification flag: reusable
-// verification is cluster-only (component/pipelines/verification.go), and a
-// credential must not leave the cluster for a placement the policy chooses.
+// cluster, or through the Fleet-first pool (the owner's decisions, 2026-11-05 and
+// 2026-11-06; memql-package.yaml's header). A pool step may start on an owner's
+// machine, so it carries no credential and no image build: a credential must not
+// leave the cluster for a placement the policy chooses. It may carry
+// verification: a Fleet pass counts between pushes, and a release runs the step
+// on the cluster and stands only on a cluster pass
+// (component/pipelines/verification.go).
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
@@ -926,8 +932,8 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 			switch pipelines.PlacementOf(step) {
 			case pipelines.PlacementCluster:
 			case pipelines.PlacementPool:
-				if step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "" || step.ImageBuild != nil || step.SARIF != nil || step.RepositoryChange != nil {
-					t.Errorf("pool check %s must carry no verification flag, credential, image build or external effect: %+v", step.Name, step)
+				if len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "" || step.ImageBuild != nil || step.SARIF != nil || step.RepositoryChange != nil {
+					t.Errorf("pool check %s must carry no credential, image build or external effect: %+v", step.Name, step)
 				}
 			default:
 				t.Errorf("portable check %s requires a host", step.Name)

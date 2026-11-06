@@ -52,8 +52,11 @@ func TestEngineVerificationStepsCompileTheSameForAPullRequestAndARelease(t *test
 		}
 		reusable++
 		// Pure by the compiler's contract (pipelines.validateVerification): nothing
-		// here makes an artifact or runs natively on a machine.
-		if len(step.Artifacts) > 0 || step.ImageBuild != nil || step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer {
+		// here makes an artifact or runs natively on a machine. A pool step is pure
+		// too (the owner's decision, 2026-11-06): it is the same container wherever
+		// it runs, and a release runs it on the cluster and reuses only a pass the
+		// cluster produced (pipelines.InspectReusedReleaseReceipt).
+		if len(step.Artifacts) > 0 || step.ImageBuild != nil || (step.Placement != pipelines.PlacementCluster && step.Placement != pipelines.PlacementPool) || step.Execution != pipelines.ExecutionContainer {
 			t.Errorf("%s declares verification and is not a pure check: %+v", key, step)
 		}
 		other, ok := fromPull[key]

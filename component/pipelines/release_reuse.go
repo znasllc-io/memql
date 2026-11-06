@@ -133,6 +133,14 @@ func SameTreeProblem(reuser, source SameTreeRun, at time.Time) string {
 // agree with the source row SameTreeProblem judged. So the tree comes from the
 // journal, which every receipt's digest covers, and a row that disagrees with the
 // journal is refused rather than believed.
+//
+// And the pass must have been produced on the cluster (the owner's decision,
+// 2026-11-06). A verification step may be a pool step, whose pass can come from
+// one of the owner's machines; that pass counts between pushes, but a release
+// does not stand on it and runs the step on the cluster itself. Where the pass
+// ran is the surface of the step's last attempt, the one that passed
+// (PassingAttemptSurface). Both halves of reuse call this function, so the
+// runner never plans a skip the candidate proof would refuse.
 func InspectReusedReleaseReceipt(owner, runID, stepKey string, run, step map[string]any, source SameTreeRun) (ReleaseWorkReceipt, error) {
 	out, err := inspectPipelineStepReceipt(owner, runID, stepKey, run, step, admitReleased)
 	if err != nil {
@@ -141,12 +149,42 @@ func InspectReusedReleaseReceipt(owner, runID, stepKey string, run, step map[str
 	if out.StepKind != string(StepCommand) || out.Status != "done" || len(out.ArtifactIntentIDs) != 0 || !ValidTreeHash(out.TreeHash) {
 		return ReleaseWorkReceipt{}, errors.New("a reused release receipt requires an executed, artifact-free successful command on a known tree")
 	}
+	if where := PassingAttemptSurface(step); where != "" && where != PlacementCluster {
+		return ReleaseWorkReceipt{}, errors.New("a reused release receipt must have been produced on the cluster; this pass ran on one of the owner's machines, so the release runs the step itself")
+	}
 	input, _ := run["input"].(map[string]any)
 	if input["pipelineRunId"] != source.ID || input["pipelineId"] != source.PipelineID ||
 		out.Repository != source.Repository || out.Commit != source.SHA || out.TreeHash != source.TreeHash {
 		return ReleaseWorkReceipt{}, errors.New("a reused release receipt must be the source run's own, at its commit and tree")
 	}
 	return out, nil
+}
+
+// PassingAttemptSurface is where a step row's last attempt ran ("cluster" or
+// "fleet"), read from the attempts its binding records
+// (component/pipelinerun/attempts.go, attemptRecord.asMap), or "" when the row
+// records none. For a passed step the last attempt is the one that passed,
+// because a pass ends a step's attempts.
+//
+// "" is not a refusal on its own. Every attempt of an executed step is recorded
+// since attempts existed (0.31.12), so a row without one comes from an engine
+// whose verification steps could run on the cluster only. That keeps a candidate
+// assembled then provable when it is read again at publication or installation.
+func PassingAttemptSurface(step map[string]any) string {
+	binding, _ := step["binding"].(map[string]any)
+	var last map[string]any
+	switch attempts := binding["attempts"].(type) {
+	case []any:
+		if len(attempts) > 0 {
+			last, _ = attempts[len(attempts)-1].(map[string]any)
+		}
+	case []map[string]any:
+		if len(attempts) > 0 {
+			last = attempts[len(attempts)-1]
+		}
+	}
+	surface, _ := last["surface"].(string)
+	return surface
 }
 
 // ReusedEvidenceRun is the run a step row reused, or "" for a row that names none.
