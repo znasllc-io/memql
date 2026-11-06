@@ -117,8 +117,12 @@ version on every use. A sealed email connection state (`v1:email:connectionState
 is re-sealed and written only when its re-serialized plaintext differs from what
 was read: sealing draws a fresh nonce, so every maintenance callback that
 changed nothing used to store a new ciphertext (`connectionStore.change`,
-`integrations/email`). These guards keep normal idle polling from creating
-business history.
+`integrations/email`). A Shopify reconciliation pass reads each row it maps
+and writes only those that differ from the mirror, apart from its own
+`syncedAt` and a fetch-time `updatedAt` (`heal` and `mirrorHolds`,
+`integrations/shopify/mirror.go`); an hourly re-list of an unchanged price list
+used to append a version of every price and quantity rule. These guards keep
+normal idle polling from creating business history.
 
 ## Shared row schemas
 
