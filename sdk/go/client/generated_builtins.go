@@ -400,7 +400,7 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
-// CampaignAddRecipient -- Add one person to an audience. An address (compared without regard to case or surrounding spaces) that is already in the audience is refused with 'This address is already in this audience.', whatever state that membership is in. In an audience that asks people to confirm, the person is added as pending and receives the confirmation; subscriptionStatus 'subscribed' is accepted there only with alreadyConfirmed true, which records the confirmation and a consent event so automations triggered on confirmation enroll them. Repeating a call with the same recipientId returns the person already added. Needs the same organization write permission as sending.
+// CampaignAddRecipient -- Add one person to an audience. An address (compared without regard to case or surrounding spaces) that is already in the audience is refused with 'This address is already in this audience.', whatever state that membership is in. An address that unsubscribed or is suppressed is never added as subscribed. In an audience that asks people to confirm, the person is added as pending and receives the confirmation; subscriptionStatus 'subscribed' is accepted there only with alreadyConfirmed true, which records the confirmation and a consent event so automations triggered on confirmation enroll them. A recipientId that already names someone else (in another audience, at another address or in another organization) is refused, and nothing is written over them; repeating a call with the same recipientId, audience and address returns that person as they are now. Needs the same organization write permission as sending.
 type CampaignAddRecipientArgs struct {
 	// The id for the new membership, chosen by the caller so a retry is the same add.
 	RecipientId string
@@ -1359,9 +1359,10 @@ func CampaignSetJourneyStateBuild(args CampaignSetJourneyStateArgs) string {
 	return b.String()
 }
 
-// CampaignSetRecipientSubscription -- Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, every change to subscribed needs alreadyConfirmed and goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation; an address that unsubscribed or is suppressed is refused. Every other change is written as given.
+// CampaignSetRecipientSubscription -- Change one person's subscription state to subscribed, pending or unsubscribed: honour an unsubscribe by hand, or mark a pending person confirmed. A person who unsubscribed, bounced or complained is never moved to another state: only they can subscribe again, from the link in their emails. In an audience that asks people to confirm, every change to subscribed needs alreadyConfirmed and goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation. An address that is suppressed is never made subscribed. Every other change is written as given.
 type CampaignSetRecipientSubscriptionArgs struct {
-	RecipientId        string
+	RecipientId string
+	// 'subscribed', 'pending' or 'unsubscribed'. Bounced and complained are the provider's to record, not an operator's.
 	SubscriptionStatus string
 	// When the person left, if that happened earlier than now.
 	UnsubscribedAt string

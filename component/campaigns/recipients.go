@@ -19,10 +19,18 @@ import (
 //     mailbox is looked up by its digest (and, for rows that carry none, by
 //     comparing addresses), and a membership in ANY state refuses the add.
 //     Existing duplicate rows stay readable; nothing here deletes them.
+//   - An add writes only a person nobody has yet. An id that already names
+//     someone (in another audience, at another address, in another
+//     organization) is refused; the same add made again is answered with the
+//     person as they are.
 //   - A person is subscribed in a confirm-first audience only by confirming.
 //     The confirmation path records confirmedAt and a consent event, which is
 //     what automations triggered on confirmation start from, and wakes an
 //     automation waiting on it.
+//   - Nobody who left is brought back by hand. A person who is unsubscribed,
+//     bounced or complained stays so whatever an operator sets, and an address
+//     on the suppression list is never added or set subscribed: only the person
+//     can subscribe again, from the link in their emails.
 
 // alreadyInAudience is the sentence the operator reads, here and in the Add
 // people form (which asks recipientInAudienceByDigest before submitting).
@@ -35,6 +43,20 @@ const confirmFirstSentence = "This audience asks people to confirm. Say they alr
 // blockedSentence is the refusal for an address that has opted out or cannot be
 // emailed: only the person can subscribe again, from the link in their emails.
 const blockedSentence = "This address has unsubscribed or cannot be emailed, so only the person can subscribe again, from the link in their emails."
+
+// operatorStatesSentence is the refusal of a state an operator does not set: a
+// bounce or a complaint is the provider's verdict, never a choice made by hand.
+const operatorStatesSentence = "A person can be set to subscribed, pending or unsubscribed."
+
+// audienceBusy is what an operator reads when the audience's lock could not be
+// taken in time: an import is writing a batch, or somebody else is adding a
+// person. Nothing was written, and asking again shortly is the right thing to do.
+const audienceBusy = visitorMessage("This audience is busy with an import or another change. Try again shortly.")
+
+// idTakenSentence is the refusal of an add whose person id already names someone
+// else: another audience, another address or another organization. The add
+// would write over them, so nothing is written.
+const idTakenSentence = "This id already belongs to someone else, so the person was not added. Add them again."
 
 func truthy(v any) bool {
 	switch x := v.(type) {
@@ -100,9 +122,14 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	if w.newsletterGate == nil {
 		return nil, fmt.Errorf("adding people is unavailable right now")
 	}
-	hold, err := w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
+	// The audience's lock, which every writer of a membership takes (the signup
+	// form, an import batch, an automation's enrolment), then the person's and
+	// the mailbox's, which a send and the pages behind email links take: the
+	// person is written whole before a drain can act on them, and the mailbox
+	// cannot opt out between the suppression check below and the write.
+	hold, err := w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID), "campaign-journey:recipient:"+recipientID, "campaign-email-mailbox:"+organizationSuppressionID(audience.AccountID, EmailDigest(normalized)))
 	if errors.Is(err, memql.ErrWriteGateBusy) {
-		return nil, signupsBusy
+		return nil, audienceBusy
 	}
 	if err != nil {
 		return nil, err
@@ -111,6 +138,22 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	phase, cancel := context.WithTimeout(ctx, signupLockedPhase)
 	defer cancel()
 
+	// The write is an insert that merges into a row that already has this id, so
+	// an id that names somebody is read first, whoever's they are (the cluster's
+	// read: a row the caller cannot see is still a row the insert would write
+	// over). The same person in the same audience at the same address is a retry
+	// of this add, and gets them back as they are; anyone else is refused.
+	existing, taken, err := w.store.RecipientByID(memql.ContextWithFreshRead(w.systemActorContext(phase)), recipientID)
+	if err != nil {
+		return nil, err
+	}
+	if taken {
+		if bare(existing.AudienceID) != audienceID || NormalizeEmail(existing.Email) != normalized || !sameOrganization(existing.AccountID, audience.AccountID) {
+			return nil, fmt.Errorf("%s", idTakenSentence)
+		}
+		return resultNode("campaignRecipientAdded", map[string]any{"recipientId": recipientID, "audienceId": audienceID, "subscriptionStatus": existing.SubscriptionStatus})
+	}
+
 	members, err := w.store.MailboxMembers(phase, audienceID, normalized)
 	if errors.Is(err, ErrMailboxUndecidable) {
 		return nil, fmt.Errorf("this audience cannot be checked for duplicates right now; try again later")
@@ -118,50 +161,73 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	if err != nil {
 		return nil, err
 	}
-	for _, member := range members {
-		if member.ID != recipientID {
-			return nil, fmt.Errorf("%s", alreadyInAudience)
-		}
+	if len(members) > 0 {
+		// The id is nobody's yet, so every row this mailbox holds is somebody else.
+		return nil, fmt.Errorf("%s", alreadyInAudience)
 	}
-	if confirmFirst && status == "subscribed" {
+	if status == "subscribed" {
+		// Whatever the audience, nobody whose address opted out or cannot be
+		// emailed is added as a subscriber by hand.
 		if err := w.refuseBlockedConfirmation(phase, audience.AccountID, normalized); err != nil {
 			return nil, err
 		}
 	}
-	if len(members) == 0 {
-		if err := hold.Verify(phase); err != nil {
-			return nil, signupsBusy
-		}
-		// A person who already confirmed is written pending first and confirmed
-		// after: a write cut short leaves someone who still has to confirm,
-		// never someone who skipped it, and the retry (same recipientId) finishes.
-		written := status
-		if confirmFirst && status == "subscribed" {
-			written = "pending"
-		}
-		if err := detachedWrite(phase, func(write context.Context) error {
-			return w.store.AddRecipient(write, recipientID, audienceID, address, strings.TrimSpace(argString(args, "displayName")), orDefault(argString(args, "source"), "manual"), audience.AccountID, written, fields)
-		}); err != nil {
-			return nil, err
-		}
+	if err := hold.Verify(phase); err != nil {
+		return nil, audienceBusy
 	}
-	if confirmFirst && status == "subscribed" {
-		recipient, found, err := w.store.RecipientByID(phase, recipientID)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("the person was added but could not be read back to record the confirmation; add them again to finish")
-		}
-		if recipient.SubscriptionStatus == "pending" {
-			if err := detachedWrite(phase, func(write context.Context) error {
-				return w.recordConfirmation(write, recipient, w.nowUTC())
-			}); err != nil {
-				return nil, err
-			}
-		}
+	// A person who already confirmed is written pending first and confirmed
+	// after: the consent event names the person, so it can only be recorded once
+	// they exist, and it is recorded before they are subscribed (recordConfirmation).
+	// Both writes are made under the person's lock, which a drain takes before it
+	// sends to them, so no drain acts between them: a confirmation is never sent
+	// to someone the operator says already confirmed. A write cut short leaves
+	// someone who still has to confirm, never someone who skipped it, and marking
+	// them subscribed (saying they already confirmed) finishes it.
+	confirming := confirmFirst && status == "subscribed"
+	written := status
+	if confirming {
+		written = "pending"
+	}
+	if err := detachedWrite(phase, func(write context.Context) error {
+		return w.store.AddRecipient(write, recipientID, audienceID, address, strings.TrimSpace(argString(args, "displayName")), orDefault(argString(args, "source"), "manual"), audience.AccountID, written, fields)
+	}); err != nil {
+		return nil, err
+	}
+	if !confirming {
+		return resultNode("campaignRecipientAdded", map[string]any{"recipientId": recipientID, "audienceId": audienceID, "subscriptionStatus": status})
+	}
+	recipient, found, err := w.store.RecipientByID(phase, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("the person was added but could not be read back to record the confirmation; mark them subscribed to finish")
+	}
+	if err := hold.Verify(phase); err != nil {
+		return nil, audienceBusy
+	}
+	if err := detachedWrite(phase, func(write context.Context) error {
+		return w.recordConfirmation(write, recipient, w.nowUTC())
+	}); err != nil {
+		return nil, err
+	}
+	// Then, as a confirmation by hand does, the locks are let go and a run waiting
+	// on this person's confirmation is woken: none can have begun while the locks
+	// were held, but one could if a lock was lost on the way.
+	hold.Release()
+	if err := w.nudgeConfirmed(ctx, recipient.ID); err != nil {
+		w.logger.Warn("campaigns: a person added as confirmed is recorded, but a run waiting on their confirmation could not be woken; it goes on at its timeout", "recipient", recipient.ID, "error", err)
 	}
 	return resultNode("campaignRecipientAdded", map[string]any{"recipientId": recipientID, "audienceId": audienceID, "subscriptionStatus": status})
+}
+
+// nudgeConfirmed wakes the runs waiting on a person's confirmation, taking the
+// locks the drain takes for each, in its order.
+func (w *Worker) nudgeConfirmed(ctx context.Context, recipientID string) error {
+	enrollments := func(ctx context.Context, journeyID, recipientID, enrollmentID string) (gateHold, error) {
+		return w.newsletterGate(ctx, journeyLock(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
+	}
+	return w.store.NudgeWaitingEnrollments(w.systemActorContext(ctx), recipientID, w.nowUTC(), enrollments)
 }
 
 // recordConfirmation is the confirmation path for a person confirmed by hand:
@@ -187,6 +253,12 @@ func (w *Worker) handleSetRecipientSubscription(ctx context.Context, args map[st
 	if callerUserID(ctx) == "" || !templateIDPattern.MatchString(recipientID) || status == "" {
 		return nil, fmt.Errorf("choose a person and a subscription state while signed in")
 	}
+	switch status {
+	case "subscribed", "pending", "unsubscribed":
+	default:
+		// Bounced and complained are the provider's verdicts, never a choice.
+		return nil, fmt.Errorf("%s", operatorStatesSentence)
+	}
 	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
 	if err != nil {
 		return nil, err
@@ -199,14 +271,22 @@ func (w *Worker) handleSetRecipientSubscription(ctx context.Context, args map[st
 			return nil, fmt.Errorf("changing a subscription requires write permission in this organization")
 		}
 	}
-	if status == "subscribed" && recipient.SubscriptionStatus != "subscribed" {
-		// Whatever the audience, an operator never subscribes someone who left or
-		// whose address is suppressed: only the person can, from the preferences
-		// page of their own emails.
-		switch recipient.SubscriptionStatus {
-		case "unsubscribed", "bounced", "complained":
+	switch recipient.SubscriptionStatus {
+	case "unsubscribed", "bounced", "complained":
+		// Whatever the audience, an operator never moves someone who left, or whose
+		// address the provider gave up on, to any other state: pending is one step
+		// from subscribed, and an operator's unsubscribe writes no suppression to
+		// catch the next. Only the person can come back, from the preferences page
+		// of their own emails. Saying again what they already are changes nothing.
+		if status != recipient.SubscriptionStatus {
 			return nil, fmt.Errorf("%s", blockedSentence)
 		}
+		return resultNode("campaignRecipientSubscription", map[string]any{"recipientId": recipientID, "subscriptionStatus": status})
+	}
+	if status == "subscribed" && recipient.SubscriptionStatus != "subscribed" {
+		// Whatever the audience, an operator never subscribes someone whose
+		// address is suppressed: only the person can, from the preferences page of
+		// their own emails.
 		if err := w.refuseBlockedConfirmation(ctx, recipient.AccountID, recipient.Email); err != nil {
 			return nil, err
 		}
@@ -290,10 +370,7 @@ func (w *Worker) confirmByHand(ctx context.Context, recipient Recipient) error {
 		}
 	}
 	release()
-	enrollments := func(ctx context.Context, journeyID, recipientID, enrollmentID string) (gateHold, error) {
-		return w.newsletterGate(ctx, journeyLock(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
-	}
-	return w.store.NudgeWaitingEnrollments(w.systemActorContext(ctx), recipient.ID, w.nowUTC(), enrollments)
+	return w.nudgeConfirmed(ctx, recipient.ID)
 }
 
 // refuseBlockedConfirmation is the public confirmation page's rule for the

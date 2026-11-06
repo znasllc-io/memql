@@ -345,6 +345,268 @@ func TestImportStopsWhenItsAudienceLockIsLost(t *testing.T) {
 	}
 }
 
+// An operator never brings back someone who left. Moving them to pending first,
+// and to subscribed from there, used to get round the refusal: the row ended
+// subscribed and the next drain mailed them. Nothing moves a person out of
+// unsubscribed, bounced or complained by hand; only the person can come back.
+func TestAnOperatorCannotBringBackSomeoneWhoLeftThroughPending(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "left-pending", oneEmail)
+	id := a.suffix + "-member"
+	set := func(id, status string) error {
+		_, err := a.worker.handleSetRecipientSubscription(a.owner, map[string]any{"recipientId": id, "subscriptionStatus": status}, 0)
+		return err
+	}
+	if err := set(id, "unsubscribed"); err != nil {
+		t.Fatal(err)
+	}
+	versions, _ := versionsOf(t, a.db, id)
+	for _, status := range []string{"pending", "subscribed"} {
+		if err := set(id, status); err == nil || err.Error() != blockedSentence {
+			t.Fatalf("a person who unsubscribed was moved to %s by hand: %v", status, err)
+		}
+	}
+	if got, _ := versionsOf(t, a.db, id); got != versions || str(storedRecipient(t, a.store, a.owner, id), "subscriptionStatus") != "unsubscribed" {
+		t.Fatalf("a refused change wrote the person (%d versions, then %d): %v", versions, got, storedRecipient(t, a.store, a.owner, id))
+	}
+	// Saying it again is no change, and is not refused.
+	if err := set(id, "unsubscribed"); err != nil {
+		t.Fatalf("an unsubscribe of someone already unsubscribed: %v", err)
+	}
+	if got, _ := versionsOf(t, a.db, id); got != versions {
+		t.Fatalf("an unsubscribe of someone already unsubscribed wrote them again (%d versions, then %d)", versions, got)
+	}
+	a.drain(t)
+	if a.azure.submissions() != 0 {
+		t.Fatal("the drain mailed a person who left")
+	}
+	// The provider's verdicts are the same: a bounce or a complaint stays what it is.
+	for _, verdict := range []string{"bounced", "complained"} {
+		gone := a.suffix + "-" + verdict
+		if err := a.store.AddRecipient(a.owner, gone, a.audience, verdict+"@example.test", "", "manual", a.org, "subscribed", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.store.SetRecipientSubscription(a.owner, gone, verdict, a.now); err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range []string{"pending", "subscribed", "unsubscribed"} {
+			if err := set(gone, status); err == nil || err.Error() != blockedSentence {
+				t.Fatalf("a person who %s was moved to %s by hand: %v", verdict, status, err)
+			}
+		}
+		if got := str(storedRecipient(t, a.store, a.owner, gone), "subscriptionStatus"); got != verdict {
+			t.Fatalf("a refused change left the person %s, want %s", got, verdict)
+		}
+	}
+}
+
+// An operator sets a person subscribed, pending or unsubscribed. The provider's
+// verdicts, and anything else, are not theirs to write.
+func TestAnOperatorSetsOnlySubscribedPendingOrUnsubscribed(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "set-states")
+	if err := n.addPerson(t, "here", "here@b.test", nil); err != nil {
+		t.Fatal(err)
+	}
+	id := n.suffix + "-here"
+	for _, status := range []string{"bounced", "complained", "archived"} {
+		_, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": id, "subscriptionStatus": status}, 0)
+		if err == nil || err.Error() != operatorStatesSentence {
+			t.Fatalf("an operator set a person %s: %v", status, err)
+		}
+	}
+	if got := str(storedRecipient(t, n.store, n.owner, id), "subscriptionStatus"); got != "subscribed" {
+		t.Fatalf("a refused change left the person %s", got)
+	}
+	for _, status := range []string{"pending", "subscribed", "unsubscribed"} {
+		if _, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": id, "subscriptionStatus": status}, 0); err != nil {
+			t.Fatalf("an operator set a person %s: %v", status, err)
+		}
+	}
+}
+
+// An add names the person it writes by id, and the write merges into a row that
+// already has the id. An id that already names a person somewhere else -- another
+// audience, another address, another organization -- is refused before anything
+// is written, so nobody is moved, renamed or brought back by an add.
+func TestAnAddNeverWritesOverAnotherPerson(t *testing.T) {
+	f := newDigestFixture(t)
+	n := f.newEmptyNewsletter(t, "add-over")
+	other := n.suffix + "-aud2"
+	n.execute(t, n.owner, call("mutation", "createAudience", arg{"audienceId", other}, arg{"accountId", n.org}, arg{"name", "Other list"}))
+	if err := n.addPerson(t, "left", "left@b.test", nil); err != nil {
+		t.Fatal(err)
+	}
+	id := n.suffix + "-left"
+	if _, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": id, "subscriptionStatus": "unsubscribed"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	versions, _ := versionsOf(t, n.db, id)
+	for _, c := range []struct{ name, audience, address string }{
+		{"into another audience", other, "left@b.test"},
+		{"into another audience under another address", other, "fresh@b.test"},
+		{"under another address", n.audience, "fresh@b.test"},
+	} {
+		_, err := n.worker.handleAddRecipient(n.owner, map[string]any{"recipientId": id, "audienceId": c.audience, "email": c.address}, 0)
+		if err == nil || err.Error() != idTakenSentence {
+			t.Fatalf("an add %s with the id of a person who left: %v", c.name, err)
+		}
+	}
+	row := storedRecipient(t, n.store, n.owner, id)
+	if got, _ := versionsOf(t, n.db, id); got != versions || bare(str(row, "audienceId")) != n.audience || str(row, "subscriptionStatus") != "unsubscribed" || str(row, "email") != "left@b.test" {
+		t.Fatalf("a refused add wrote the person (%d versions, then %d): %v", versions, got, row)
+	}
+	if roster, err := n.store.Roster(memql.ContextWithFreshRead(n.owner), other); err != nil || len(roster) != 0 {
+		t.Fatalf("the other audience holds %v (%v), want nobody", roster, err)
+	}
+	// Another organization's person is not this operator's to write either.
+	stranger := f.newDigestTenant(t, "add-over-stranger")
+	theirs := stranger.suffix + "-theirs"
+	if err := stranger.store.AddRecipient(stranger.owner, theirs, stranger.audience, "theirs@b.test", "", "manual", stranger.org, "subscribed", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := stranger.store.SetRecipientSubscription(stranger.owner, theirs, "unsubscribed", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	theirVersions, _ := versionsOf(t, n.db, theirs)
+	_, err := n.worker.handleAddRecipient(n.owner, map[string]any{"recipientId": theirs, "audienceId": n.audience, "email": "theirs@b.test"}, 0)
+	if err == nil || err.Error() != idTakenSentence {
+		t.Fatalf("an add with another organization's person's id: %v", err)
+	}
+	if got, _ := versionsOf(t, n.db, theirs); got != theirVersions {
+		t.Fatalf("a refused add wrote another organization's person (%d versions, then %d)", theirVersions, got)
+	}
+}
+
+// A retry of an add -- the same id, the same audience, the same address -- is the
+// person already added: it answers with them as they are and writes nothing, even
+// if they have left since.
+func TestARetriedAddAnswersWithThePersonAsTheyAre(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "add-retry")
+	if err := n.addPerson(t, "again", "again@b.test", map[string]any{"subscriptionStatus": "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	id := n.suffix + "-again"
+	retry := func(want string) {
+		t.Helper()
+		versions, _ := versionsOf(t, n.db, id)
+		nodes, err := n.worker.handleAddRecipient(n.owner, map[string]any{"recipientId": id, "audienceId": n.audience, "email": " Again@B.test ", "subscriptionStatus": "subscribed"}, 0)
+		if err != nil {
+			t.Fatalf("a retry of the same add: %v", err)
+		}
+		if got := str(decodeResult(t, nodes), "subscriptionStatus"); got != want {
+			t.Fatalf("the retry answered %q, want the person as they are (%s)", got, want)
+		}
+		if got, _ := versionsOf(t, n.db, id); got != versions {
+			t.Fatalf("a retry wrote the person again (%d versions, then %d)", versions, got)
+		}
+		if got := str(storedRecipient(t, n.store, n.owner, id), "subscriptionStatus"); got != want {
+			t.Fatalf("after the retry the person is %s, want %s", got, want)
+		}
+	}
+	retry("pending")
+	if _, err := n.worker.handleSetRecipientSubscription(n.owner, map[string]any{"recipientId": id, "subscriptionStatus": "unsubscribed"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	retry("unsubscribed")
+}
+
+// afterWrite runs then once, right after the first statement that begins with
+// statement has been executed.
+type afterWrite struct {
+	Engine
+	statement string
+	then      func()
+	once      sync.Once
+}
+
+func (e *afterWrite) Execute(ctx context.Context, statement string) (any, error) {
+	result, err := e.Engine.Execute(ctx, statement)
+	if strings.HasPrefix(statement, e.statement) {
+		e.once.Do(e.then)
+	}
+	return result, err
+}
+
+// Someone the operator says already confirmed is written pending and then
+// confirmed, both under the person's lock, which a drain takes before it sends to
+// them: a drain that runs while they are being added sends them no confirmation.
+// Should one get in all the same (the add's lock was lost on the way), the run it
+// left waiting for a confirmation is woken once they are confirmed, as a
+// confirmation by hand wakes it, and does not wait a week for its timeout.
+func TestAddingSomeoneWhoAlreadyConfirmedNeverSendsThemAConfirmation(t *testing.T) {
+	f := newDigestFixture(t)
+	for _, c := range []struct {
+		name     string
+		lockLost bool
+		sent     int
+	}{
+		{"a drain while they are added waits for them", false, 0},
+		{"a run a drain left waiting anyway is woken", true, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			n := f.newEmptyNewsletter(t, "add-agreed-drain")
+			n.requireConfirmation(t)
+			journeyID := n.confirmJourney(t)
+			wait := newsletterGateWait
+			newsletterGateWait = 300 * time.Millisecond
+			defer func() { newsletterGateWait = wait }()
+			// Another node drains the automation the moment the person is written.
+			other := newGatedWorker(t, n.engine, n.db, n.sender)
+			other.journeyGate = NewWorker(other.store.engine, nil, nil, quietLogger(), gatePoolFor(t)).journeyGate
+			if c.lockLost {
+				other.newsletterGate = func(context.Context, ...string) (gateHold, error) { return openGate{}, nil }
+			}
+			drained := false
+			actual := n.worker.store.engine
+			n.worker.store.engine = &afterWrite{Engine: actual, statement: "mutation addRecipient", then: func() {
+				drained = true
+				// It may find the person held by the add, and try again on its next pass.
+				_ = other.runJourney(context.Background(), n.system, map[string]any{"id": journeyID})
+			}}
+			err := n.addPerson(t, "agreed", "agreed@b.test", map[string]any{"subscriptionStatus": "subscribed", "alreadyConfirmed": true})
+			n.worker.store.engine = actual
+			if err != nil || !drained {
+				t.Fatalf("the add (drained between: %v): %v", drained, err)
+			}
+			if err := n.worker.runJourney(context.Background(), n.system, map[string]any{"id": journeyID}); err != nil {
+				t.Fatal(err)
+			}
+			if n.sender.count() != c.sent {
+				t.Fatalf("a person who already confirmed was sent %d confirmation emails, want %d", n.sender.count(), c.sent)
+			}
+			id := n.suffix + "-agreed"
+			person := storedRecipient(t, n.store, n.owner, id)
+			if str(person, "subscriptionStatus") != "subscribed" || str(person, "confirmedAt") == "" {
+				t.Fatalf("the person is %v, want them subscribed and confirmed", person)
+			}
+			run, err := n.worker.newsletterRow(n.system, "journeyEnrollmentById", "enrollmentId", journeyEnrollmentID(journeyID, id, templateTime(person["joinedAt"])))
+			if err != nil || run == nil || str(run, "status") != "completed" {
+				t.Fatalf("the person's run is %v (%v), want it past the confirmation and finished, not waiting for one", run, err)
+			}
+		})
+	}
+}
+
+// The suppression list stands in front of every add as subscribed, whether or not
+// the audience asks people to confirm: an address that opted out, or that the
+// provider gave up on, is never added as a subscriber by hand.
+func TestAnOperatorCannotAddASuppressedAddressAsSubscribedInAnyAudience(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "add-suppressed-open")
+	if err := n.store.RecordOrganizationSuppression(n.owner, n.org, EmailDigest("gone@b.test"), "unsubscribed", "example.test", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []string{"gone@b.test", " Gone@B.test "} {
+		if err := n.addPerson(t, "gone", spelling, nil); err == nil || err.Error() != blockedSentence {
+			t.Fatalf("a suppressed address (%q) was added as subscribed to an audience that asks for no confirmation: %v", spelling, err)
+		}
+	}
+	if rows, _ := n.store.rows(memql.ContextWithFreshRead(n.owner), call("query", "recipientById", arg{"recipientId", n.suffix + "-gone"})); len(rows) != 0 {
+		t.Fatal("the refused add wrote a row")
+	}
+	if err := n.addPerson(t, "fine", "fine@b.test", nil); err != nil {
+		t.Fatalf("an address nothing blocks: %v", err)
+	}
+}
+
 // Nobody who left, or whose address is suppressed, is subscribed by hand in any
 // audience, including one that asks for no confirmation.
 func TestAnOperatorCannotSubscribeSomeoneWhoLeftInAnyAudience(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -88,6 +89,10 @@ const (
 	// invisible.
 	utf8BOM = "\ufeff"
 )
+
+// importBatchRows is how many rows an import writes under one hold of its
+// audience's lock. A variable only so a test can make the batches small.
+var importBatchRows = 100
 
 // blobReader is the read half of object storage. Its own narrow interface
 // rather than a dependency on component/edge's BlobClient, because this
@@ -184,22 +189,12 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	// mistake -- while the walk is unavoidable, because "is this address
 	// already here" is not a question a count can answer.
 	//
-	// The audience's lock is taken first and held to the end of the writes: the
-	// operator's add and the signup form take the same one, so an address one of
-	// them is adding cannot be added here as well after this read missed it.
-	var hold gateHold
-	if w.newsletterGate != nil {
-		var err error
-		hold, err = w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
-		if errors.Is(err, memql.ErrWriteGateBusy) {
-			return nil, fmt.Errorf("campaigns.importRecipients: %w", signupsBusy)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("campaigns.importRecipients: %w", err)
-		}
-		defer hold.Release()
-		ctx = memql.ContextWithFreshRead(ctx)
-	}
+	// The walk is the import's plan, read before any lock. The audience's lock
+	// is taken a batch at a time below (importBatch), and every row is looked up
+	// again under it before it is written: the operator's add, the signup form and
+	// an automation's enrolment take the same lock, so between two batches they
+	// can add a person, and the import never adds that address a second time.
+	ctx = memql.ContextWithFreshRead(ctx)
 	existingSize, err := w.store.RosterSize(ctx, audienceID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.importRecipients: %w", err)
@@ -252,18 +247,64 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	if audience.Confirmation == "required" {
 		subscription = "pending"
 	}
-	for i, row := range pending {
-		// The lock was taken before the roster was read. Asked again every
-		// hundred rows: a session PostgreSQL ended takes it away silently, and
-		// the rest of the batch must not be written without it.
-		if hold != nil && i%100 == 0 {
-			if err := hold.Verify(ctx); err != nil {
-				return nil, fmt.Errorf("campaigns.importRecipients: the audience's lock was lost after %d rows were added; run the import again, it skips the people already added: %w", result.Added, err)
+	for start := 0; start < len(pending); start += importBatchRows {
+		batch := pending[start:min(start+importBatchRows, len(pending))]
+		if err := w.importBatch(ctx, audienceID, accountID, subscription, now, batch, &result); err != nil {
+			return nil, err
+		}
+	}
+
+	return resultNode("campaignImport", map[string]any{
+		"audienceId":   audienceID,
+		"artifactId":   artifactID,
+		"added":        result.Added,
+		"duplicates":   result.Duplicates,
+		"invalid":      result.Invalid,
+		"total":        result.Total,
+		"invalidLines": invalidLinePayload(result.InvalidLines),
+	})
+}
+
+// importBatch writes one batch of an import under the audience's lock, held for
+// this batch only: an import of a long file does not keep everyone else adding
+// to the audience waiting for its whole run. Under the lock each row's mailbox
+// is looked up again, by its digest, right before the row is written: a person
+// added since the import read the roster is counted as a duplicate and skipped.
+// (Every writer stamps the digest, so a row written since that read carries it;
+// the rows that carry none were all in the roster the import read.)
+func (w *Worker) importBatch(ctx context.Context, audienceID, accountID, subscription string, now time.Time, batch []parsedRow, result *importResult) error {
+	var hold gateHold
+	if w.newsletterGate != nil {
+		var err error
+		hold, err = w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
+		if errors.Is(err, memql.ErrWriteGateBusy) {
+			if result.Added == 0 {
+				return fmt.Errorf("campaigns.importRecipients: %w", audienceBusy)
 			}
+			return fmt.Errorf("campaigns.importRecipients: %s The import stopped part way; running it again adds the rest and skips the people already added.", audienceBusy)
+		}
+		if err != nil {
+			return fmt.Errorf("campaigns.importRecipients: %w", err)
+		}
+		defer hold.Release()
+		// Asked before the batch is written: a session PostgreSQL ended takes the
+		// lock away silently, and the batch must not be written without it.
+		if err := hold.Verify(ctx); err != nil {
+			return fmt.Errorf("campaigns.importRecipients: the audience's lock was lost after %d rows were added; run the import again, it skips the people already added: %w", result.Added, err)
+		}
+	}
+	for _, row := range batch {
+		stamped, err := w.store.RecipientsInAudienceByDigest(ctx, audienceID, EmailDigest(row.normalized))
+		if err != nil {
+			return fmt.Errorf("campaigns.importRecipients: checking %s after %d rows were added; run the import again, it skips the people already added: %w", redactAddress(row.normalized), result.Added, err)
+		}
+		if len(holdingMailbox(stamped, row.normalized)) > 0 {
+			result.Duplicates++
+			continue
 		}
 		recipientID := id.NewShortId()
 		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, subscription, row.fields); err != nil {
-			return nil, fmt.Errorf("campaigns.importRecipients: adding %s: %w", redactAddress(row.normalized), err)
+			return fmt.Errorf("campaigns.importRecipients: adding %s: %w", redactAddress(row.normalized), err)
 		}
 		result.Added++
 		if subscription == "pending" {
@@ -289,16 +330,7 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 				"audience", audienceID, "error", err)
 		}
 	}
-
-	return resultNode("campaignImport", map[string]any{
-		"audienceId":   audienceID,
-		"artifactId":   artifactID,
-		"added":        result.Added,
-		"duplicates":   result.Duplicates,
-		"invalid":      result.Invalid,
-		"total":        result.Total,
-		"invalidLines": invalidLinePayload(result.InvalidLines),
-	})
+	return nil
 }
 
 // headerAsserted reports whether the caller left hasHeader alone or said
