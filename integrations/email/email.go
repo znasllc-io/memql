@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/core/env"
 
@@ -76,6 +77,16 @@ const (
 // implement it, and its caller reads that as OutcomeUnrecorded.
 type DeliveryOutcomes interface {
 	DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error)
+}
+
+// AcceptanceTimes is implemented by a DeliveryOutcomes sender whose record also
+// says when the provider took a message it accepted (Azure's send receipt keeps
+// when the message was submitted, the time its delivery reports carry as the
+// acceptance). The zero time means the record does not say, or the message was
+// not accepted; a caller then dates the acceptance by when it learned of it. A
+// sender that cannot say does not implement it.
+type AcceptanceTimes interface {
+	AcceptedAt(ctx context.Context, msg Message, as SendAs) (time.Time, error)
 }
 
 // SendAs names the mailbox a message leaves from (design D5, memql#4821).
@@ -180,8 +191,16 @@ type Message struct {
 	// DeliveryID binds authenticated provider feedback to the campaign ledger.
 	// It is internal metadata, never an email header or provider argument.
 	DeliveryID string
-	To         string
-	Subject    string
+	// Revised says this message is not the one an earlier submission under the
+	// same IntentID carried: its caller changed what the delivery sends (another
+	// sender or template) after the provider definitely did not accept the
+	// earlier one. A transport that keeps a record per IntentID submits it under a
+	// fresh provider operation, never under the id that named the message it
+	// replaces -- and still never while the provider may have accepted the earlier
+	// one. Internal metadata, never an email header.
+	Revised bool
+	To      string
+	Subject string
 	// TextBody is the plain-text alternative. Required.
 	TextBody string
 	// HTMLBody is optional; when set the message goes out as

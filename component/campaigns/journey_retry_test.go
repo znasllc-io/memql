@@ -259,6 +259,102 @@ func TestRetryEnrollmentsDoesNotResendWhatTheProviderAccepted(t *testing.T) {
 	if got := str(a.receipt(t, "welcome"), "status"); got != receiptComplete {
 		t.Fatalf("the accepted attempt's receipt is %q, want complete", got)
 	}
+	// The ledger says what the provider says, as a reconciled send's does.
+	if row := a.delivery(t, "welcome"); str(row, "status") != "sent" || str(row, "lastError") != "" || !templateTime(row["sentAt"]).Equal(a.now) {
+		t.Fatalf("the ledger says %v after the retry, want sent at %s", row, a.now)
+	}
 	a.drain(t)
 	a.sentOnceAndAdvanced(t, 1)
+}
+
+// changeSender does what the automation page tells an operator to do about a
+// step its provider keeps refusing: pause the automation, give the step another
+// sender, and turn it on again.
+func (a *automation) changeSender(t *testing.T, address string) string {
+	t.Helper()
+	a.setJourneyState(t, "pause")
+	sender := a.suffix + "-other-sender"
+	a.execute(t, a.owner, call("mutation", "createSenderIdentity", arg{"senderIdentityId", sender}, arg{"accountId", a.org}, arg{"address", address}, arg{"fromName", "Client news"}))
+	journey := a.journey(t)
+	nodes, err := a.worker.handleSaveJourney(a.owner, map[string]any{"journeyId": a.journeyID, "accountId": a.org, "name": "Welcome", "trigger": map[string]any{"kind": "joined", "audienceId": a.audience},
+		"steps":            []map[string]any{{"id": "welcome", "kind": "send", "templateId": a.templateID, "senderIdentityId": sender}},
+		"expectedRevision": templateTime(journey["createdAt"]).Format(time.RFC3339Nano)}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, _ := decodeResult(t, nodes)["issues"].([]any); len(issues) != 0 {
+		t.Fatalf("the changed automation cannot be turned on: %v", issues)
+	}
+	a.setJourneyState(t, "activate")
+	return sender
+}
+
+// TestRetryAfterTheStepsSenderChangedSendsTheNewMessageOnce: the provider refused a
+// step every time, so its run failed. The operator changes the step's sender and
+// retries the run, as the automation page says to. Nothing was accepted under the
+// refused attempts, so the changed message goes, exactly once, from the new
+// sender, and tells the transport it is a new message (a fresh provider operation,
+// never the refused one's).
+func TestRetryAfterTheStepsSenderChangedSendsTheNewMessageOnce(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "journey-retry-sender", oneEmail)
+	a.azure.answers = []int{http.StatusBadRequest, http.StatusBadRequest, http.StatusBadRequest}
+	for range journeyMaxAttempts {
+		a.drain(t)
+		a.later(time.Hour)
+	}
+	if row := a.enrollment(t, a.member); str(row, "status") != "failed" || a.azure.submissions() != journeyMaxAttempts {
+		t.Fatalf("after %d refusals the run is %v, want it failed", a.azure.submissions(), row)
+	}
+	refused := a.receipt(t, "welcome")
+	if str(refused, "status") != receiptFailed {
+		t.Fatalf("the refused step's receipt is %v, want failed", refused)
+	}
+	a.changeSender(t, "news@client.test")
+	if got := a.retry(t); got != 1 {
+		t.Fatalf("retried %d, want 1", got)
+	}
+	a.drain(t)
+	if a.azure.submissions() != journeyMaxAttempts+1 || a.azure.count() != 1 {
+		t.Fatalf("after the retry Azure was asked %d times and accepted %d, want one more submission, accepted", a.azure.submissions(), a.azure.count())
+	}
+	a.azure.mu.Lock()
+	sent, as := a.azure.sent[0], a.azure.sentAs[0]
+	a.azure.mu.Unlock()
+	if as.Address != "news@client.test" || !sent.Revised {
+		t.Fatalf("the retry sent from %q (revised: %v), want the new sender's changed message", as.Address, sent.Revised)
+	}
+	if row := a.enrollment(t, a.member); str(row, "status") != "completed" {
+		t.Fatalf("the run is %v after the retry, want it finished", row)
+	}
+	receipt := a.receipt(t, "welcome")
+	if str(receipt, "status") != receiptComplete || str(receipt, "fingerprint") == str(refused, "fingerprint") {
+		t.Fatalf("the receipt is %v, want it complete for the changed message", receipt)
+	}
+	a.drain(t)
+	if a.azure.submissions() != journeyMaxAttempts+1 {
+		t.Fatal("the changed message was sent again")
+	}
+}
+
+// TestASendThatMayHaveGoneKeepsRefusingAChangedMessage: a step whose answer was
+// lost may have been accepted, so its receipt keeps saying an attempt began. A
+// changed step is refused under that receipt exactly as before, and nothing is
+// submitted: only a definite refusal frees the request for a different message.
+func TestASendThatMayHaveGoneKeepsRefusingAChangedMessage(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "journey-uncertain-changed", oneEmail)
+	a.azure.answers = []int{answerLost}
+	a.drain(t)
+	if got := str(a.receipt(t, "welcome"), "status"); got != receiptAttempting {
+		t.Fatalf("a lost answer left the receipt %q, want it attempting", got)
+	}
+	a.changeSender(t, "news@client.test")
+	a.later(6 * time.Minute)
+	a.drain(t)
+	row := a.enrollment(t, a.member)
+	if a.azure.submissions() != 1 || !strings.Contains(str(row, "lastError"), "already names a different message") {
+		t.Fatalf("a changed step under an attempting receipt: %d submissions, run %v; want it refused, nothing submitted", a.azure.submissions(), row)
+	}
+	if got := str(a.receipt(t, "welcome"), "status"); got != receiptAttempting {
+		t.Fatalf("the refusal changed the receipt to %q", got)
+	}
 }

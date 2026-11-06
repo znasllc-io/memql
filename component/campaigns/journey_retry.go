@@ -144,12 +144,17 @@ func (w *Worker) retryEnrollment(ctx, system context.Context, j journeyRow, scan
 	if len(receipts) > 0 && str(receipts[0], "status") == receiptAttempting {
 		receipt := &singleSendReceipt{id: receiptID, fingerprint: str(receipts[0], "fingerprint"), accountID: str(receipts[0], "accountId"), prior: templateTime(receipts[0]["createdAt"]), hold: hold}
 		status, result := receiptFailed, map[string]any(nil)
-		if w.priorOutcome(ownerCtx, receipt) == email.OutcomeAccepted {
+		accepted := w.priorOutcome(ownerCtx, receipt) == email.OutcomeAccepted
+		if accepted {
 			status = receiptComplete
 			result = map[string]any{"sent": true, "skipped": false, "recipientId": bare(str(row, "recipientId")), "emailRuleId": ""}
 		}
 		if err = w.saveReceiptHeld(ownerCtx, receipt, status, result); err != nil {
 			return false, err
+		}
+		if accepted {
+			// The ledger says what the provider says, as a reconciled send's does.
+			w.settleAcceptedDelivery(ownerCtx, receipt, journeyRequestID(id, str(row, "stepId")), bare(str(row, "recipientId")))
 		}
 	}
 	if err = hold.Verify(phase); err != nil {

@@ -202,6 +202,94 @@ func TestARefusedSendIsSubmittedAgainUnderItsOperationId(t *testing.T) {
 	}
 }
 
+// TestARevisedMessageGoesUnderAFreshOperationId: after Azure refused a delivery,
+// its caller changed what the delivery sends (another sender, another template)
+// and says so (Message.Revised). Nothing was accepted under the refused
+// submission, and its Operation-Id names a different message, so the revised one
+// goes under a fresh id. The same message sent again keeps its id
+// (TestARefusedSendIsSubmittedAgainUnderItsOperationId); a revised message whose
+// earlier submission Azure may have accepted is not submitted at all.
+func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
+	t.Run("after a refusal", func(t *testing.T) {
+		s := acsFixture(t)
+		ops := s.operations.(*memoryACSOperations)
+		var posted []string
+		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+			posted = append(posted, r.Header.Get("Operation-Id"))
+			if len(posted) == 1 {
+				return &http.Response{StatusCode: 400, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			}
+			return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		})
+		msg := Message{IntentID: "campaign-single:revised", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
+			t.Fatalf("a refusal is not a definite non-acceptance: %v", err)
+		}
+		msg.Subject, msg.TextBody, msg.Revised = "Welcome", "Welcome aboard", true
+		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+			t.Fatalf("the revised message: %v", err)
+		}
+		if len(posted) != 2 || posted[0] == posted[1] || !azureUUID.MatchString(posted[1]) {
+			t.Fatalf("the refused and the revised message went under Operation-Ids %q, want two different ones", posted)
+		}
+		if op := ops.rows[s.operationKey(msg.IntentID)]; op.ID != posted[1] || op.Status != "accepted" {
+			t.Fatalf("the receipt is %+v, want the revised message's operation, accepted", op)
+		}
+	})
+	for _, status := range []string{"submitting", "unknown", "accepted", "succeeded"} {
+		t.Run("not while Azure may have the earlier one ("+status+")", func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			msg := Message{IntentID: "campaign-single:revised-" + status, To: "reader@example.test", Subject: "Welcome", TextBody: "Welcome aboard", Revised: true}
+			op := "12345678-1234-1234-1234-123456789012"
+			ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the earlier message", Intent: msg.IntentID, Status: status}}
+			posts := 0
+			s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+				posts++
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err == nil || IsNotAccepted(err) || posts != 0 {
+				t.Fatalf("a revised message whose earlier submission Azure may have: %v after %d posts, want it held back unsent", err, posts)
+			}
+			if got := ops.rows[s.operationKey(msg.IntentID)]; got.ID != op || got.Status != status {
+				t.Fatalf("the receipt became %+v", got)
+			}
+		})
+	}
+}
+
+// TestAnAcceptedSendSaysWhenAzureTookIt: the receipt of a send Azure accepted says
+// when it was submitted, the time Azure's delivery reports carry as its acceptance.
+// Nothing else does: a send not accepted, another organization's, or one with no
+// receipt answers the zero time.
+func TestAnAcceptedSendSaysWhenAzureTookIt(t *testing.T) {
+	submitted := time.Date(2026, 10, 1, 11, 59, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		status  string
+		account string
+		want    time.Time
+	}{
+		{"accepted", "client", submitted},
+		{"succeeded", "client", submitted},
+		{"running", "client", submitted},
+		{"unknown", "client", time.Time{}},
+		{"rejected", "client", time.Time{}},
+		{"accepted", "another", time.Time{}},
+	} {
+		t.Run(tc.status+" for "+tc.account, func(t *testing.T) {
+			s := acsFixture(t)
+			msg := Message{IntentID: "campaign-single:taken"}
+			s.operations.(*memoryACSOperations).rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: "12345678-1234-1234-1234-123456789012", AccountID: "client", Status: tc.status, SubmittedAt: submitted}}
+			if got, err := s.AcceptedAt(context.Background(), msg, SendAs{AccountID: tc.account}); err != nil || !got.Equal(tc.want) {
+				t.Fatalf("AcceptedAt = %s (%v), want %s", got, err, tc.want)
+			}
+		})
+	}
+	if got, err := acsFixture(t).AcceptedAt(context.Background(), Message{IntentID: "campaign-single:none"}, SendAs{AccountID: "client"}); err != nil || !got.IsZero() {
+		t.Fatalf("a send with no receipt says it was taken at %s (%v)", got, err)
+	}
+}
+
 // TestAnAmbiguousAnswerIsNeverSubmittedAgain: no answer, a redirect and a 409 say
 // nothing about whether Azure accepted the message. A second Send does not POST;
 // it waits for Azure's own record of the operation.

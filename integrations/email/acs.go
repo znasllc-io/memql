@@ -154,7 +154,7 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if len(body) > 10<<20 {
 		return permanentSendRefusal("email exceeds the Azure message size limit")
 	}
-	return s.submitOnce(withACSMessage(ctx, msg, address), msg.IntentID, body)
+	return s.submitOnce(withACSMessage(ctx, msg, address), msg.IntentID, body, msg.Revised)
 }
 
 func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) error {
@@ -338,10 +338,16 @@ func (s *ACSSender) asksToWait(op acsOperation) error {
 // operation. Azure's repeatable-request headers are not sent: Azure matches a
 // repeat by its content, and a retry's content is never the original's.
 //
+// A REVISED message (Message.Revised: its caller changed what the delivery sends
+// after Azure definitely did not accept it) goes under a new Operation-Id too:
+// nothing was accepted under the old one, and the old one names a different
+// message.
+//
 // A delivery Azure may have accepted -- an answer was lost, or is still being
 // confirmed -- is never submitted again, by this caller or any other, until
-// Azure's record of the operation says it was not accepted (acs_operations.go).
-func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) error {
+// Azure's record of the operation says it was not accepted (acs_operations.go);
+// revised or not.
+func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, revised bool) error {
 	if s.operations == nil {
 		return permanentSendRefusal("Azure send receipt storage is unavailable")
 	}
@@ -380,7 +386,7 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		if err := s.asksToWait(op); err != nil {
 			return err
 		}
-		if op.Status == "failed" || op.Status == "canceled" {
+		if op.Status == "failed" || op.Status == "canceled" || revised {
 			op.ID = id.NewShortId()
 		}
 		op.Endpoint, op.ResourceID, op.Digest = s.cfg.Endpoint, s.cfg.ResourceID, digest
@@ -487,6 +493,28 @@ func (s *ACSSender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs)
 		return OutcomeNotAccepted, nil
 	}
 	return OutcomeUnknown, nil
+}
+
+// AcceptedAt is when this delivery's Azure receipt says the message was submitted,
+// for a message the receipt records as accepted (AcceptanceTimes): the time Azure's
+// delivery reports carry as the acceptance. Zero when it was not accepted, or the
+// receipt does not say. Like DeliveryOutcome it submits nothing and takes no lock.
+func (s *ACSSender) AcceptedAt(ctx context.Context, msg Message, as SendAs) (time.Time, error) {
+	if s.operations == nil || msg.IntentID == "" {
+		return time.Time{}, nil
+	}
+	account := strings.TrimSpace(as.AccountID)
+	if account == "" {
+		account = "self"
+	}
+	if account != s.cfg.AccountID {
+		return time.Time{}, nil
+	}
+	op, _, found, err := s.operations.read(ctx, s.operationKey(msg.IntentID))
+	if err != nil || !found || !acsAccepted(op.Status) {
+		return time.Time{}, err
+	}
+	return op.SubmittedAt, nil
 }
 
 // acsAccepted says whether a receipt with this status records a message Azure

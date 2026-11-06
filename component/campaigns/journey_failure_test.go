@@ -41,6 +41,9 @@ type azureLike struct {
 	waits      map[string]time.Time
 	lost       map[string]email.Message
 	verdicts   map[string]email.Outcome
+	// acceptedAt is when Azure's record says it took a message it accepted;
+	// zero when the record does not say.
+	acceptedAt time.Time
 }
 
 // answerLost is an answer that never came back: the connection dropped after the
@@ -119,6 +122,16 @@ func (a *azureLike) DeliveryOutcome(_ context.Context, msg email.Message, _ emai
 	a.gate.Lock()
 	defer a.gate.Unlock()
 	return a.verdicts[msg.IntentID], nil
+}
+
+// AcceptedAt is when Azure's record says it took a message it accepted.
+func (a *azureLike) AcceptedAt(_ context.Context, msg email.Message, _ email.SendAs) (time.Time, error) {
+	a.gate.Lock()
+	defer a.gate.Unlock()
+	if a.verdicts[msg.IntentID] != email.OutcomeAccepted {
+		return time.Time{}, nil
+	}
+	return a.acceptedAt, nil
 }
 
 func (a *azureLike) submissions() int {
@@ -239,6 +252,16 @@ func (a *automation) receipt(t *testing.T, stepID string) map[string]any {
 		t.Fatalf("receipt %v %v", rows, err)
 	}
 	return rows[0]
+}
+
+// delivery is the delivery-ledger row of the member's step.
+func (a *automation) delivery(t *testing.T, stepID string) map[string]any {
+	t.Helper()
+	row, err := a.worker.newsletterRow(a.system, "providerDeliveryById", "deliveryId", singleDeliveryRowID(journeyRequestID(a.member, stepID), a.suffix+"-member"))
+	if err != nil || row == nil {
+		t.Fatalf("delivery %v %v", row, err)
+	}
+	return row
 }
 
 func (a *automation) template(t *testing.T) map[string]any {
@@ -507,6 +530,45 @@ func TestAnUncertainSendWaitsForTheOperationResult(t *testing.T) {
 			t.Fatalf("the automation says %q", got)
 		}
 	})
+}
+
+// TestTheLedgerSaysSentOnceTheProviderSaysItAccepted: a send whose answer was lost
+// is written to the delivery ledger as failed. Once the provider's own record says
+// it accepted the email, the ledger says sent -- without waiting for a delivery
+// report that may never come -- dated as a delivery report dates it: when the
+// provider took it, if its record says, else when its record was read.
+func TestTheLedgerSaysSentOnceTheProviderSaysItAccepted(t *testing.T) {
+	f := newDigestFixture(t)
+	for _, providerSays := range []bool{true, false} {
+		name := "dated when the record was read"
+		if providerSays {
+			name = "dated when the provider took it"
+		}
+		t.Run(name, func(t *testing.T) {
+			a := newAutomation(t, f, "journey-ledger-accepted", oneEmail)
+			a.azure.answers = []int{answerLost}
+			a.drain(t)
+			if row := a.delivery(t, "welcome"); str(row, "status") != "failed" || str(row, "lastError") == "" {
+				t.Fatalf("a send whose answer was lost is in the ledger as %v, want failed", row)
+			}
+			submitted := a.now
+			if providerSays {
+				a.azure.acceptedAt = submitted
+			}
+			a.azure.poll(email.OutcomeAccepted)
+			a.later(6 * time.Minute)
+			a.drain(t)
+			a.sentOnceAndAdvanced(t, 1)
+			want := a.now
+			if providerSays {
+				want = submitted
+			}
+			row := a.delivery(t, "welcome")
+			if str(row, "status") != "sent" || str(row, "lastError") != "" || !templateTime(row["sentAt"]).Equal(want) {
+				t.Fatalf("the ledger says %v, want sent at %s with no error", row, want)
+			}
+		})
+	}
 }
 
 // TestAnUncertainSendWithoutAProviderRecordFailsAtOnce: a transport that keeps no

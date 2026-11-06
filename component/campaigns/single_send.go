@@ -48,6 +48,12 @@ type singleSendReceipt struct {
 	// says an attempt began is written only if the hold says its lock is still held
 	// (recordAttempt).
 	hold gateHold
+
+	// revised says the stored receipt is a failed attempt at a different message:
+	// the message changed after the provider refused it. This send is the changed
+	// message's, and tells the transport so (email.Message.Revised), so it goes
+	// under a fresh provider operation and never the refused one's.
+	revised bool
 }
 
 // Event automations supply a stable requestId for one intended message. The
@@ -171,7 +177,16 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, r
 	if len(rows) > 0 {
 		row := rows[0]
 		if str(row, "fingerprint") != receipt.fingerprint {
-			return nil, fmt.Errorf("campaigns.sendToRecipient: this request identifier already names a different message")
+			// A request names one message. The one exception is an attempt the
+			// provider definitely did not accept: it sent nothing, so when the message
+			// has changed since (its step was given another sender or template, and
+			// the run retried) the request is the changed message's now, and the
+			// receipt is written for it. A receipt whose attempt may have been
+			// accepted, or was, keeps refusing a different message.
+			if str(row, "status") != receiptFailed {
+				return nil, fmt.Errorf("campaigns.sendToRecipient: this request identifier already names a different message")
+			}
+			receipt.revised = true
 		}
 		if err := w.requireSendAuthority(ctx, str(row, "accountId")); err != nil {
 			return nil, err
@@ -189,7 +204,7 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, r
 			// submits it again, as a new version of the same receipt.
 			receipt.prior = templateTime(row["createdAt"])
 		default:
-			return w.reconcileAttempt(ctx, row, receipt, values)
+			return w.reconcileAttempt(ctx, row, receipt, values, argString(args, "requestId"))
 		}
 	}
 	nodes, err := w.sendToRecipient(ctx, args, receipt, opts)
@@ -227,13 +242,14 @@ var errPriorSendNotAccepted = errors.New("campaigns.sendToRecipient: the provide
 // provider's own record of the submission can say (email.DeliveryOutcomes), and
 // nothing is submitted again while it says nothing.
 //
-// Accepted: the receipt is completed and the send replays as sent, with no second
-// submission. Not accepted: the receipt says so, and the next attempt submits the
-// message again (errPriorSendNotAccepted). Otherwise the send is uncertain, as it
-// always was. It says when its attempt began (attemptedAt), so a caller can stop
-// waiting for an answer that will not come, and whether there is a record to wait
-// for at all (recorded: false for a transport that keeps none).
-func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, receipt *singleSendReceipt, values map[string]string) ([]memorynodes.MemoryNode, error) {
+// Accepted: the receipt is completed, the delivery ledger says sent, and the send
+// replays as sent, with no second submission. Not accepted: the receipt says so,
+// and the next attempt submits the message again (errPriorSendNotAccepted).
+// Otherwise the send is uncertain, as it always was. It says when its attempt
+// began (attemptedAt), so a caller can stop waiting for an answer that will not
+// come, and whether there is a record to wait for at all (recorded: false for a
+// transport that keeps none).
+func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, receipt *singleSendReceipt, values map[string]string, requestID string) ([]memorynodes.MemoryNode, error) {
 	receipt.prior, receipt.accountID = templateTime(row["createdAt"]), str(row, "accountId")
 	outcome := w.priorOutcome(ctx, receipt)
 	switch outcome {
@@ -244,6 +260,7 @@ func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, recei
 			// receipt that still says an attempt began never submits it again.
 			w.logger.Warn("campaigns: an accepted single send could not be recorded as complete", "receipt", receipt.id, "error", err)
 		}
+		w.settleAcceptedDelivery(ctx, receipt, requestID, values["recipientId"])
 		result["replayed"] = true
 		return resultNode("campaignRecipientSend", result)
 	case email.OutcomeNotAccepted:
@@ -274,6 +291,66 @@ func (w *Worker) priorOutcome(ctx context.Context, receipt *singleSendReceipt) e
 		return email.OutcomeUnknown
 	}
 	return outcome
+}
+
+// priorAcceptedAt is when the provider took the message a receipt's attempt
+// submitted, as far as its record says (email.AcceptanceTimes); the zero time
+// when it does not say.
+func (w *Worker) priorAcceptedAt(ctx context.Context, receipt *singleSendReceipt) time.Time {
+	times, ok := w.resolveSender().(email.AcceptanceTimes)
+	if !ok {
+		return time.Time{}
+	}
+	at, err := times.AcceptedAt(ctx, email.Message{IntentID: singleSendIntent(receipt.id)}, email.SendAs{AccountID: bare(receipt.accountID)})
+	if err != nil {
+		w.logger.Warn("campaigns: the provider's record of when it accepted a send could not be read; the ledger dates it when its acceptance was learned", "receipt", receipt.id, "error", err)
+		return time.Time{}
+	}
+	return at
+}
+
+// settleAcceptedDelivery moves the delivery-ledger row of a send the provider's
+// own record says it accepted to sent. The row was written failed when the send's
+// answer was lost, and without a delivery report -- one may never come -- it would
+// say so for good. It is dated as a delivery report dates it (ApplyAzureDelivery):
+// when the provider took the message, if its record says, else now, when the
+// record was read. A row that already says sent (a delivery report came first) is
+// left alone, and a row a report already dated keeps its date. Made under the
+// receipt's lock, like every write about the send, and best effort, like every
+// ledger write of a single send: the email went whatever becomes of the row.
+func (w *Worker) settleAcceptedDelivery(ctx context.Context, receipt *singleSendReceipt, requestID, recipientID string) {
+	if requestID == "" || recipientID == "" {
+		return
+	}
+	id := singleDeliveryRowID(requestID, recipientID)
+	row, err := w.newsletterRow(auth.ContextWithInternalOrigin(w.systemActorContext(ctx)), "providerDeliveryById", "deliveryId", id)
+	if err != nil {
+		w.logger.Warn("campaigns: an accepted send's ledger row could not be read; it keeps what it says until a delivery report corrects it", "receipt", receipt.id, "error", err)
+		return
+	}
+	if row == nil || str(row, "status") == "sent" {
+		return
+	}
+	now := w.nowUTC()
+	values := map[string]any{"deliveryId": id, "status": "sent", "lastError": "", "skipReason": "", "attempts": max(1, integer(row, "attempts")), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), now).Format(time.RFC3339Nano)}
+	if templateTime(row["sentAt"]).IsZero() {
+		sentAt := w.priorAcceptedAt(ctx, receipt)
+		if sentAt.IsZero() {
+			sentAt = now
+		}
+		values["sentAt"] = sentAt.UTC().Format(time.RFC3339Nano)
+	}
+	if receipt.hold != nil {
+		if err := receipt.hold.Verify(ctx); err != nil {
+			w.logger.Warn("campaigns: an accepted send's ledger row was not corrected: the send's lock is not held", "receipt", receipt.id, "error", err)
+			return
+		}
+	}
+	if err := detachedWrite(ctx, func(write context.Context) error {
+		return w.newsletterWrite(w.systemActorContext(write), "settleDeferredSingleSend", values)
+	}); err != nil {
+		w.logger.Warn("campaigns: an accepted send's ledger row could not be corrected; it keeps what it says until a delivery report corrects it", "receipt", receipt.id, "error", err)
+	}
 }
 
 func (w *Worker) saveSingleSendReceipt(ctx context.Context, receipt *singleSendReceipt, status string, result map[string]any) error {

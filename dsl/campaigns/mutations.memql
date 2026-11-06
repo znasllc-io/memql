@@ -1601,8 +1601,9 @@ mutation recipient restartRecipientMembership {
  update { accept { subscriptionStatus, joinedAt, confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId } }
 }
 
-/// Terminal verdict on an existing deferred request; no send or attribution change.
-/// actor.userId cannot finish a request after its owner loses authority. The worker reads it fresh under its receipt lock, checks pending status and verifies the lock before this internal write.
+/// Terminal verdict on an existing single-send delivery row: a deferred request, or a row written
+/// failed for a send the provider's own record says it accepted. No send or attribution change.
+/// actor.userId cannot finish a request after its owner loses authority. The worker reads the row fresh under its receipt lock, checks its status and verifies the lock before this internal write.
 @actor
 @serverOnly
 mutation delivery settleDeferredSingleSend {

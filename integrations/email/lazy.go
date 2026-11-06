@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 )
 
 // VariableResolver resolves a named global plaintext variable from
@@ -117,6 +118,20 @@ func (l *LazySender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs
 		return outcomes.DeliveryOutcome(ctx, msg, as)
 	}
 	return OutcomeUnrecorded, nil
+}
+
+// AcceptedAt asks the Sender this wrapper resolves to for the identity when the
+// provider took a message it accepted (AcceptanceTimes). One that cannot say
+// answers the zero time.
+func (l *LazySender) AcceptedAt(ctx context.Context, msg Message, as SendAs) (time.Time, error) {
+	sender, err := l.senderFor(ctx, as)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if times, ok := sender.(AcceptanceTimes); ok {
+		return times.AcceptedAt(ctx, msg, as)
+	}
+	return time.Time{}, nil
 }
 
 // senderFor is the Sender a message from this identity goes through: the

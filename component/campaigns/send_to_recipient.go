@@ -358,6 +358,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// again, for a message that never went out.
 	if receipt != nil {
 		msg.IntentID = singleSendIntent(receipt.id)
+		msg.Revised = receipt.revised
 		msg.DeliveryID = singleDeliveryRowID(argString(args, "requestId"), recipient.ID)
 		receipt.accountID = campaign.AccountID
 		reserved, giveBack, err := w.reserveDelivery(ctx, msg, identity.SendAs)
