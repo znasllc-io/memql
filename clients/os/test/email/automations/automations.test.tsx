@@ -63,11 +63,13 @@ describe("Automation pages", () => {
     await waitFor(() => expect(conn.query.campaignRetryEnrollments).toHaveBeenLastCalledWith({ journeyId: "j", enrollmentIds: [] }));
     await screen.findByText("This organization is not active, so these emails are held.");
   });
-  it("shows Turn on disabled with the reason while the automation has something to fix", async () => {
+  it("leaves Turn on absent and says why in the bar while the automation has something to fix", async () => {
     mount(setup({ journeys: [{ ...journey, steps: [{ id: "send1", kind: "send", templateId: "t1", senderIdentityId: "" }] }], templates: [templateRow({ id: "t1", accountId: "self", name: "Welcome", status: "draft" })] }));
     fireEvent.click(await screen.findByText("Welcome series"));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Turn on" }) as HTMLButtonElement).disabled).toBe(true));
-    expect(screen.getAllByText(/Publish “Welcome” before turning this on\./).length).toBeGreaterThan(0);
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toMatch(/Can't turn on yet: Publish “Welcome” before turning this on\./));
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    expect(document.querySelector("button:disabled")).toBeNull();
   });
   it("shows an event-rule refusal once and keeps code and failure context without internal facts", async () => {
     const sentence = "arming this rule is refused"; const row = ruleRow({ id: "r", name: "New admin", status: "failed", condition: 'row.role == "admin"', lastError: `emailrules: ${sentence}` });

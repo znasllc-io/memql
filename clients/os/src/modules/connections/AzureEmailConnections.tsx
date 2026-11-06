@@ -143,7 +143,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   clusterNotice?: boolean;
 }) {
   const formID = useId();
-  const { call, cancel, busy, error } = useAzureEmailCall(accountId);
+  const { call, quiet, cancel, busy, error } = useAzureEmailCall(accountId);
   // Leaving the wizard ends any automatic retry, so a later visit can start its own request.
   const lastView = useRef(view);
   useEffect(() => { if (lastView.current === "setup" && view !== "setup") cancel(); lastView.current = view; }, [view, cancel]);
@@ -193,7 +193,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     if (view === "setup" && open === "dns" && connected && !records) void call("domainStatus").then(apply);
   }, [view, open, connected, records, call, apply]);
   // Reading the records' state is safe to repeat; the verify act is not, and stays a press.
-  const recheck = useCallback(async () => { apply(await call("domainStatus")); }, [call, apply]);
+  const recheck = useCallback(async () => { apply(await quiet("domainStatus")); }, [quiet, apply]);
   const provisionPaused = provisionChecks >= MAX_PROVISION_CHECKS;
   const advancing = view === "setup" && provisioning && connected && !error && !provisionPaused;
   const now = useNow(advancing ? 1000 : 60_000);
@@ -258,7 +258,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
       <Field label="Email domain"><Input id={`${formID}-domain`} label="Email domain" placeholder="client.com" value={domain} onChange={value => { setDomain(value); const base = value.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 45); setEmailService(`${base}-email`); setCommunicationService(`${base}-delivery`); }}/></Field>
       <details><summary>Resource names</summary><Field label="Email service"><Input id={`${formID}-email-service`} label="Email service" value={emailService} onChange={setEmailService}/></Field><Field label="Delivery service"><Input id={`${formID}-delivery-service`} label="Delivery service" value={communicationService} onChange={setCommunicationService}/></Field></details>
     </>}</div> },
-    { id: "dns", name: "Verify domain", sentence: "Records that prove it is yours", answer: phase === "sender" ? "Verified" : records?.length ? `${records.filter(record => record.status === "Verified").length} of ${records.length} verified` : undefined, body: <div className="os-app-stack"><AutoRefresh intervalMs={DNS_RECHECK_MS} enabled={view === "setup" && phase === "dns" && open === "dns" && connected} busy={busy} onRefresh={recheck}/><AzureEmailDomainRecords domain={plan.domain || domain} records={records} lastChecked={checkedAt} stillChecking={checkingSince !== null && Date.now() - checkingSince >= STILL_CHECKING_MS}/></div> },
+    { id: "dns", name: "Verify domain", sentence: "Records that prove it is yours", answer: phase === "sender" ? "Verified" : records?.length ? `${records.filter(record => record.status === "Verified").length} of ${records.length} verified` : undefined, body: <div className="os-app-stack"><AutoRefresh intervalMs={DNS_RECHECK_MS} enabled={view === "setup" && phase === "dns" && open === "dns" && connected && !busy} onRefresh={recheck}/><AzureEmailDomainRecords domain={plan.domain || domain} records={records} lastChecked={checkedAt} stillChecking={checkingSince !== null && Date.now() - checkingSince >= STILL_CHECKING_MS}/></div> },
     { id: "sender", name: "Sender", sentence: "The address people see", body: <div className="os-app-stack"><Field label="Sender address"><Input id={`${formID}-sender`} label="Sender address" value={username} onChange={setUsername}/><span className="os-caption">@{plan.domain}</span></Field><Field label="Display name"><Input id={`${formID}-name`} label="Display name" value={displayName} onChange={setDisplayName}/></Field><Field label="Reply address"><Input id={`${formID}-reply`} label="Reply address" placeholder={`help@${plan.domain}`} value={replyTo} onChange={setReplyTo}/></Field><p className="os-caption">Replies need a mailbox that already receives mail.</p></div> },
   ].map(step => ({ ...step, state: step.id === phase ? busy || advancing ? "current" as const : error ? "stopped" as const : "open" as const : order.indexOf(step.id) < order.indexOf(phase) ? "done" as const : "ahead" as const }))}/>;
 }

@@ -95,5 +95,20 @@ export function useAzureEmailCall(accountId: string) {
       if (generation === epoch.current) setBusy(false);
     }
   }, [connection, accountId]);
-  return { call, cancel, busy, error };
+  /**
+   * A read that changes nothing on screen but its answer: no busy state, no error,
+   * no retries, and none while a request the person made is in flight. For timed
+   * re-checks, which must not disable or flicker anything. A failure answers null;
+   * the next tick asks again.
+   */
+  const quiet = useCallback(async (action: string): Promise<AzureEmailReply | null> => {
+    if (!connection || pending.current) return null;
+    const generation = epoch.current;
+    try {
+      const row = (await connection.query.emailAzureSetup({ accountId, action, options: {}, sessionId: "" })).rows()[0];
+      const reply = row ? flatten(row) as unknown as AzureEmailReply : null;
+      return generation === epoch.current && reply && typeof reply.status === "string" ? reply : null;
+    } catch { return null; }
+  }, [connection, accountId]);
+  return { call, quiet, cancel, busy, error };
 }

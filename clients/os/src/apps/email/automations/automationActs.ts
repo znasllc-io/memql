@@ -10,7 +10,7 @@ export function journeyActs(j: JourneyRow, dirty: boolean, issues: readonly Issu
   if (j.status === "archived") return [];
   if (dirty) return dirtyActs;
   if (asking) return confirmActs(asking);
-  return [{ id: "retire", label: "Retire", text: true }, ...(j.status === "active" ? [{ id: "pause", label: "Pause", tone: "primary" as const }] : [{ id: "turn-on", label: "Turn on", tone: "primary" as const, disabled: issues.length > 0, title: issues[0]?.text }])];
+  return [{ id: "retire", label: "Retire", text: true }, ...(j.status === "active" ? [{ id: "pause", label: "Pause", tone: "primary" as const }] : !issues.length ? [{ id: "turn-on", label: "Turn on", tone: "primary" as const }] : [])];
 }
 export function journeyReading(j: JourneyRow, dirty: boolean, issues: readonly Issue[]): { word: string; detail: string; tone: ActionBarTone } {
   return { word: dirty ? "Unsaved changes" : emailState("journey", j.status), detail: issues.length ? `Can't turn on yet: ${issues[0]!.text}${issues.length > 1 ? ` ${issues.length - 1} more to fix.` : ""}` : "", tone: j.status === "active" ? "live" : j.status === "paused" ? "paused" : "none" };

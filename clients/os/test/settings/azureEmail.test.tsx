@@ -371,7 +371,15 @@ describe("one Azure configuration per cluster", () => {
     expect(screen.getByText(/Last checked/)).toBeTruthy();
     const checks = () => call.mock.calls.filter(([args]) => args.action === "domainStatus").length;
     const before = checks();
+    // A timed re-check is quiet: while it is in flight the bar is not busy and nothing is disabled.
+    const answer = vi.fn(); let release: () => void = () => {};
+    call.mockImplementationOnce(async (args) => { answer(args.action); await new Promise<void>(done => { release = done; }); return rowsResult([{ status: "dns", plan, records }]); });
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(answer).toHaveBeenCalledWith("domainStatus");
+    expect(screen.queryByText("Working")).toBeNull();
+    expect(document.querySelector("button:disabled")).toBeNull();
+    expect(screen.getByRole("button", { name: "Check domain records" })).toBeTruthy();
+    await act(async () => { release(); });
     expect(checks()).toBe(before + 1);
     expect(screen.queryByText(/Still checking/)).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000 * 10); });

@@ -23,9 +23,6 @@ export interface ActSpec {
   tone?: "primary" | "danger";
   /** Drawn as a quiet label rather than a button: the way out, or a lesser act. */
   text?: boolean;
-  /** Offered but unavailable, with the reason in `title`. Only where the page says why. */
-  disabled?: boolean;
-  title?: string;
 }
 
 /**
@@ -41,8 +38,6 @@ export function toKitActs(specs: readonly ActSpec[], run: (id: string) => void, 
     label: spec.label,
     tone: spec.tone,
     text: spec.text,
-    disabled: spec.disabled,
-    title: spec.title,
     busy: spec.id === busyId,
     onAct: () => run(spec.id),
   }));
