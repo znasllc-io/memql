@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../../live/connection";
 import { flatten } from "../../../kit/rows";
 import { notifyGrantWritten } from "../../../system/roles";
+import { refusalFrom, type Refusal } from "../../users/refusals";
 import {
   grantFromRow as roleGrantFromRow,
   groupFromRow,
@@ -16,10 +17,10 @@ import {
   type PersonRow,
   type RoleRow,
 } from "../../users/rows";
-import { bareId, grantFromRow, type AccessGrant, type GrantRefusal, type Subject } from "./model";
+import { accessRowFrom, bareId, grantFromRow, type AccessGrant, type AccessRow, type GrantRefusal, type Subject } from "./model";
 
 // SETTINGS > ACCESS, THE READS AND THE TWO WRITES (epic memql#5289, task
-// memql#5307).
+// memql#5307; access clarity, 2026-11-06).
 //
 // ===========================================================================
 // ON-DEMAND READS, RE-READ AFTER EVERY WRITE
@@ -30,7 +31,11 @@ import { bareId, grantFromRow, type AccessGrant, type GrantRefusal, type Subject
 // when the subject or the resource changes and again after a write -- the
 // write's reply is the engine's decision, and the re-read is what shows it
 // took. The roster and the catalog are read once per connection; the
-// subject's memberships and grants are read per subject.
+// subject's answers, memberships and own grants are read per subject.
+//
+// The ANSWERS are the engine's (`effectiveAccessForSubject`). The subject's
+// own grants are read beside them for the one thing the answers do not
+// carry: the id of the grant "Use role" or "Remove" revokes.
 //
 // A write also tells the session scope (`notifyGrantWritten`), so the
 // viewer's OWN effective set is re-read: a grant to a group the viewer is
@@ -106,12 +111,94 @@ export function useAccessRoster(): AccessRoster {
   return { people, groups, roles, catalog, state, error, reload };
 }
 
-/** What one subject holds: their own grants and, for a person, every grant of every group they are in. */
+/**
+ * What the engine answers for one subject (`effectiveAccessForSubject`): every
+ * answer for a person, a group's own grants for a group -- or, in their place,
+ * why it would not answer.
+ */
+export interface EffectiveAccess {
+  /** The rows answering THIS subject; empty until they arrive. */
+  rows: AccessRow[];
+  /**
+   * "loading" until the first answer for this subject is in; a re-read after a
+   * write keeps the answer on screen ("ready" or "refused") while it runs.
+   */
+  state: "idle" | "loading" | "ready" | "refused";
+  /** Why there is no answer: the engine's refusal, or the read's failure. */
+  refusal: Refusal | null;
+  /** A read for this subject is in flight, the first or a re-read. */
+  pending: boolean;
+  reload: () => void;
+}
+
+const NO_ROWS: AccessRow[] = [];
+
+export function useEffectiveAccess(subject: Subject | null): EffectiveAccess {
+  const connection = useOsConnection();
+  const [answer, setAnswer] = useState<{ key: string; rows: AccessRow[]; refusal: Refusal | null } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+
+  const kind = subject?.kind ?? "user";
+  const id = subject?.id ?? "";
+  const key = id === "" ? "" : `${kind}:${id}`;
+
+  useEffect(() => {
+    const query = connection?.query ?? null;
+    if (query === null || id === "") {
+      setPending(false);
+      return;
+    }
+    const controller = new AbortController();
+    let live = true;
+    setPending(true);
+    void (async () => {
+      try {
+        const result = await query.effectiveAccessForSubject({ subjectKind: kind, subjectId: id }, { signal: controller.signal });
+        if (!live) return;
+        const rows = (result.rows() as Row[]).map(accessRowFrom).filter((r) => r.verb !== "" && r.resource !== "");
+        setAnswer({ key: `${kind}:${id}`, rows, refusal: null });
+      } catch (err: unknown) {
+        if (!live) return;
+        setAnswer({ key: `${kind}:${id}`, rows: [], refusal: readRefusal(err) });
+      } finally {
+        if (live) setPending(false);
+      }
+    })();
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [connection, kind, id, nonce]);
+
+  // AN ANSWER BELONGS TO ITS SUBJECT. The one held is drawn only while the
+  // same subject is chosen, so picking somebody else never shows the last
+  // person's answers under the new name while the read runs.
+  const current = answer !== null && answer.key === key ? answer : null;
+  const state = key === "" ? "idle" : current === null ? "loading" : current.refusal !== null ? "refused" : "ready";
+  return { rows: current?.rows ?? NO_ROWS, state, refusal: current?.refusal ?? null, pending, reload };
+}
+
+/**
+ * A refused read, split into its code and the server's sentence.
+ *
+ * The engine refuses by ERROR, `"<code>: <sentence>"` (integrations/rbac,
+ * `accessRefusal`), and two frames reach the client around it: the call's name
+ * (QueryClient.executeNamed) and the server's wrapper around an engine error
+ * ("MemQL engine failed to execute query. Details: "). `refusalSentence` takes
+ * both off; the copy for the code is the Users table's, where every code the
+ * rbac package raises has its home.
+ */
+function readRefusal(err: unknown): Refusal {
+  return refusalFrom(refusalSentence(err, "effectiveAccessForSubject"));
+}
+
+/** What one subject holds by grant: their own grants and, for a person, the groups they are in. */
 export interface SubjectGrants {
   own: AccessGrant[];
-  /** The subject's groups (a person); the group ids the group-level grants came from. */
+  /** The groups a person is in, bare; empty for a group. */
   groupIds: string[];
-  groupLevel: AccessGrant[];
   state: "idle" | "loading" | "ready" | "error";
   error: string;
   reload: () => void;
@@ -121,7 +208,6 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
   const connection = useOsConnection();
   const [own, setOwn] = useState<AccessGrant[]>([]);
   const [groupIds, setGroupIds] = useState<string[]>([]);
-  const [groupLevel, setGroupLevel] = useState<AccessGrant[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState("");
   const [nonce, setNonce] = useState(0);
@@ -136,7 +222,6 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
       setState("idle");
       setOwn([]);
       setGroupIds([]);
-      setGroupLevel([]);
       return;
     }
     const controller = new AbortController();
@@ -147,26 +232,18 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
         const ownResult = await query.grantsForSubject({ subjectKind: kind, subjectId: id }, { signal: controller.signal });
         const ownGrants = (ownResult.rows() as Row[]).map(grantFromRow).filter((g) => g.id !== "");
         let ids: string[] = [];
-        let viaGroups: AccessGrant[] = [];
         if (kind === "user") {
           const memberships = await query.groupsForUser({ userId: id, includeRemoved: false }, { signal: controller.signal });
-          // BARE, at the seam: a membership's `groupId` is what the next
-          // `grantsForSubject` filters on, and grant rows store the bare
-          // spelling -- a canonical one matches no row, and the group's
-          // grants would silently read as none.
+          // BARE, at the seam: the groups are named against the roster, and
+          // the comparison there is on the bare spelling.
           ids = (memberships.rows() as Row[])
             .map(membershipFromRow)
             .filter((m) => m.status === "active" && m.groupId !== "")
             .map((m) => bareId(m.groupId));
-          const perGroup = await Promise.all(
-            ids.map((groupId) => query.grantsForSubject({ subjectKind: "group", subjectId: groupId }, { signal: controller.signal })),
-          );
-          viaGroups = perGroup.flatMap((r) => (r.rows() as Row[]).map(grantFromRow).filter((g) => g.id !== ""));
         }
         if (!live) return;
         setOwn(ownGrants);
         setGroupIds(ids);
-        setGroupLevel(viaGroups);
         setState("ready");
         setError("");
       } catch (err: unknown) {
@@ -181,7 +258,7 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
     };
   }, [connection, kind, id, nonce]);
 
-  return { own, groupIds, groupLevel, state, error, reload };
+  return { own, groupIds, state, error, reload };
 }
 
 /** Who holds one resource by grant, for the by-app view. */

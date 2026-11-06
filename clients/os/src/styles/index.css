@@ -13662,76 +13662,46 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /* ---- Settings > Access (epic memql#5289) ------------------------------- */
 
-/* The matrix is the Users grid's sibling: same table, same marks, one
- * column instead of five -- an app is opened or it is not -- and beside the
- * mark the one thing the role grid cannot say, where the answer came from. */
-.os-access-grid tbody th {
-  font-weight: 500;
+/* ONE ROW PER APP OR PART, THE ANSWER IN WORDS UNDER ITS NAME. The list is
+ * the kit's record list on a surface without dividers (the section root sets
+ * `data-os-dividers="none"`): rows stand apart by their spacing, and the acts
+ * sit in each row's own act column, never where the answer is read. */
+
+/* The list takes the window (`os-settings-wide`); the picker and the
+ * sentences keep their own measure (DESIGN.md rule 9). */
+.os-access .os-form-field {
+  max-width: 34rem;
 }
 
-/* A part sits under its app: indented, in the muted ink, so the app's door
- * and the things inside it read as a tree without a second table. */
-.os-access-part {
-  display: inline-block;
+.os-access .os-caption {
+  max-width: 80ch;
+}
+
+/* A part sits under its app: indented, at the reading weight, so the app's
+ * door and the things inside it read as a tree without a second list. */
+.os-access-list li[data-part] .os-record-identity {
   padding-left: 16px;
-  color: var(--os-muted);
+}
+
+.os-access-list li[data-part] .os-row-name {
   font-weight: 400;
 }
 
+/* One line per answer: one, or one per organization the engine answered. */
 .os-access-answer {
-  text-align: left;
-  white-space: nowrap;
+  display: block;
 }
 
-.os-access-answer .os-access-mark {
-  vertical-align: middle;
-  margin-right: 8px;
-  cursor: default;
+/* What the person CAN open is in the reading ink and the rest stays quiet,
+ * so "can they open only Email and Deployables?" is read down the list at a
+ * glance. The words say it either way; the ink is never the only signal. */
+.os-access-answer[data-held] .os-access-verdict {
+  color: var(--os-ink);
 }
 
-/* A GRANT'S ANSWER IS DRAWN SOLID, an inherited one hairline: the mark says
- * which level decided at a glance, and the sentence beside it says who. A
- * denied-by-grant mark is the solid ring with nothing in it -- a bar, not an
- * absence. */
-.os-grid-cell[data-state="grantedOn"] .os-grid-mark {
-  border-color: var(--os-accent);
-  background: var(--os-accent-soft);
-}
-
-.os-grid-cell[data-state="grantedOff"] .os-grid-mark {
-  border-color: var(--os-ink);
-  border-style: solid;
-}
-
-.os-access-from {
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
-.os-access-acts {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.os-access-acts > * + * {
-  margin-left: 12px;
-}
-
-.os-access-acts .os-link,
-.os-access-grant .os-link {
-  font: inherit;
-  font-size: var(--os-text-sm);
-}
-
-.os-access-acts .os-link:disabled,
-.os-access-grant .os-link:disabled {
-  color: var(--os-muted);
-  cursor: default;
-}
-
-.os-access-refusal td {
-  text-align: left;
-  padding: 6px 10px 10px;
+/* An act's refusal sits under the row that asked. */
+.os-access-list li > .os-notice {
+  margin: 0 4px 8px;
 }
 
 .os-access-holders {
@@ -13742,34 +13712,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-access-roles {
   margin: 0;
   font-size: var(--os-text-sm);
-}
-
-.os-access-grant-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.os-access-grant {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-}
-
-.os-access-grant + .os-access-grant {
-  border-top: 1px solid var(--os-line);
-}
-
-.os-access-grant-who {
-  flex: none;
-}
-
-.os-access-grant > .os-access-from {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 /* ---- the pickers -------------------------------------------------------- */

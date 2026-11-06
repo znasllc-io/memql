@@ -152,6 +152,31 @@ const COPY: Record<string, RefusalCopy> = {
     title: "No active grant by that id",
     next: "",
   },
+
+  // ---- reading what somebody can open (integrations/rbac effectiveAccessForSubject)
+  //
+  // A read, so it refuses by ERROR, like the groups plug-in. Settings > Access
+  // draws the refusal in place of that person's or group's answers.
+  access_caller_not_permitted: {
+    title: "Your role cannot read what other people can open",
+    next: "That takes a cluster role at admin rank or above. An organization's own roles cannot read it, whatever their rank.",
+  },
+  access_subject_outranks_caller: {
+    title: "They rank above you",
+    next: "Only somebody at their rank or above can read what they can open.",
+  },
+  access_unknown_subject: {
+    title: "That person or group is not on this cluster",
+    next: "They may have been deactivated, or the group archived, since the list was read.",
+  },
+  access_invalid: {
+    title: "That is not a person or a group",
+    next: "",
+  },
+  access_unavailable: {
+    title: "What they can open could not be worked out",
+    next: "A read behind the answer failed, and part of an answer would be a wrong one. Open Access again in a moment.",
+  },
 };
 
 /**

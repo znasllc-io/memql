@@ -1,71 +1,92 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { LocalTabs } from "../../kit/LocalTabs";
 import type { OsAppProps } from "../../system/registry";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { Caption, RecordList, RecordRow, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { holds } from "../../system/roles";
+import type { Refusal } from "../users/refusals";
 import { personName, type GroupRow, type PersonRow } from "../users/rows";
 import {
+  accessNames,
   accessResources,
   bareId,
   grantRefusalCopy,
-  resolveAnswer,
+  groupActs,
+  groupAnswer,
+  groupAnswerWords,
+  personActs,
+  personAnswers,
+  personAnswerWords,
   rolesHolding,
+  type AccessActs,
   type AccessGrant,
+  type AccessNames,
   type AccessResource,
-  type Answer,
+  type AccessRow,
   type GrantRefusal,
   type Subject,
 } from "./access/model";
-import { useAccessRoster, useGrantWrites, useResourceGrants, useSubjectGrants } from "./access/useAccess";
+import { useAccessRoster, useEffectiveAccess, useGrantWrites, useResourceGrants, useSubjectGrants } from "./access/useAccess";
 
 // SETTINGS > ACCESS (epic memql#5289, task memql#5307; design section 4
-// "Administration surface, minimal"; DESIGN.md).
+// "Administration surface, minimal"; access clarity, 2026-11-06; DESIGN.md).
 //
 // ===========================================================================
 // WHAT THIS SCREEN IS FOR, AND WHAT IT IS NOT
 // ===========================================================================
 // Two people share a cluster and one of them wants to hand the other an app,
 // or a part of one, without changing their role. This is where that is done
-// and where the answer to "does Ada have Deployables?" is read: one subject
-// at a time, every app and part in a column, each cell saying what the
-// answer is AND where it came from -- the role, a group, or a grant by name.
-// The by-app view is the same rows turned around: one resource, who holds it.
+// and where the answer to "can Ada open Deployables?" is read: one subject at
+// a time, every app and part in a list, each row saying the answer in words
+// and where it came from -- the role, a group, a grant to the person, an
+// organization role's limit, or nothing at all -- and, where the engine
+// answers per organization, which organization. The answer is the ENGINE's
+// (`effectiveAccessForSubject`, access/model.ts says why it is no longer
+// restated here). The by-app view is the rows turned around: one resource,
+// who holds it.
 //
 // Minimal by the owner's instruction: no drag and drop, no bulk edit, no
 // invitations from here. The Users app is where people and groups are made.
 //
 // ===========================================================================
-// THE ACTS FOLLOW THE STATE, AND ONLY THE ACT THAT CHANGES IT IS OFFERED
+// THE ANSWER IS READ, THE ACT IS PRESSED, AND THE TWO NEVER SHARE A PLACE
 // ===========================================================================
-// A row whose answer is inherited offers the one act that would flip it:
-// Deny on a held app, Allow on one the role lacks. A row a grant decided
-// offers the flip and "Use role", which revokes the grant. Never both Allow
-// and Deny beside an answer that is already one of them -- a button that
-// would write what already stands is a button somebody has to read past.
-// Absent for a viewer whose role does not write grants (rule 12: an act
-// that is not legal is absent, never disabled), and the caption says why.
+// The blue "Allow" this screen used to draw beside a faint mark read as the
+// answer: an organization's moderator looked able to open every app. So the
+// answer is words under the app's name -- "Can open in Acme, from the group
+// Acme" -- and the acts are the kit's buttons in the row's own act column,
+// each labelled with what it does.
 //
 // ===========================================================================
-// THE REFUSAL SITS BESIDE THE ROW THAT ASKED
+// ONLY AN ACT THAT CHANGES AN ANSWER IS OFFERED
+// ===========================================================================
+// Deny where something can be opened, Allow where a grant would open it,
+// "Use role" over the person's own grant (for a group, "Remove"). None on a
+// pair a role's limit bars, which no grant lifts; none that would write what
+// already stands. Absent for a viewer whose role does not write grants
+// (rule 12: an act that is not legal is absent, never disabled), and the
+// caption says why. A grant to a person counts in every organization they
+// are in, so a pair's acts are drawn once for the pair, never beside one
+// organization's answer.
+//
+// ===========================================================================
+// A REFUSED READ IS SAID, NEVER DRAWN AS AN EMPTY LIST
+// ===========================================================================
+// The engine refuses the read to a viewer below admin or holding an
+// organization's role (an organization's own admin can open this screen), and
+// a person who outranks the viewer. The refusal stands in place of the
+// answers, and nothing about that person is drawn: no rows, no acts.
+//
+// ===========================================================================
+// THE REFUSAL OF AN ACT SITS BESIDE THE ROW THAT ASKED
 // ===========================================================================
 // The engine's governance codes (integrations/rbac/grants.go) are printed
 // under the row whose act was refused, with copy this build carries and the
 // server's own sentence beneath. A refusal at the bottom of a twenty-row
-// table is a refusal nobody connects to the click.
-//
-// ===========================================================================
-// THE ONE SIGNATURE ELEMENT IS THE PROVENANCE
-// ===========================================================================
-// The Users app's role grid says whether a role holds a pair. This screen
-// adds the one thing that grid cannot: where the answer came from, in words
-// beside the mark. Everything else -- the table, the marks, the select, the
-// notice -- is the kit's, so the screen reads as the Users grid's sibling
-// rather than as a second permissions language.
+// list is a refusal nobody connects to the click.
 //
 // ===========================================================================
 // EVERY "IS THIS YOU" COMPARISON IS MADE ON BARE IDS
@@ -77,8 +98,9 @@ import { useAccessRoster, useGrantWrites, useResourceGrants, useSubjectGrants } 
 // `===` between the two forms is false for the one person it most needs to be
 // true for, and it fails QUIETLY in both directions: Allow and Deny stay
 // offered beside your own name (the engine then refuses `grant_self`, so the
-// screen advertises an act the cluster will not perform), and "by you"
-// degrades to your own display name as though a colleague had written it.
+// screen advertises an act the cluster will not perform), and the by-app
+// view's "by you" degrades to your own display name as though a colleague had
+// written it.
 // `bareId` is applied on BOTH sides of every self/you decision here, the way
 // `integrations/rbac/grants.go` compares with `sameUser` and Deployables'
 // attribution compares with `bare`.
@@ -113,25 +135,36 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
 
   const subject = useMemo<Subject | null>(() => subjectFromKey(subjectKey, roster.people, roster.groups), [subjectKey, roster.people, roster.groups]);
   const subjectGrants = useSubjectGrants(subject);
+  const effective = useEffectiveAccess(subject);
   const resources = useMemo(
-    () => accessResources(registry, roster.catalog, [...subjectGrants.own, ...subjectGrants.groupLevel].map((g) => g.resource)),
-    [registry, roster.catalog, subjectGrants.own, subjectGrants.groupLevel],
+    () => accessResources(registry, roster.catalog, [...effective.rows.map((r) => r.resource), ...subjectGrants.own.map((g) => g.resource)]),
+    [registry, roster.catalog, effective.rows, subjectGrants.own],
   );
   const resourceGrants = useResourceGrants(view === "resource" ? resourceKey : "");
 
+  const reloadEffective = effective.reload;
   const onWritten = useCallback(() => {
+    reloadEffective();
     subjectGrants.reload();
     resourceGrants.reload();
-  }, [subjectGrants, resourceGrants]);
+  }, [reloadEffective, subjectGrants, resourceGrants]);
   const writes = useGrantWrites(onWritten);
 
   const nameOf = useMemo(() => namer(roster.people, roster.groups, viewerUserId), [roster.people, roster.groups, viewerUserId]);
+  const names = useMemo(() => accessNames(roster.roles, roster.groups), [roster.roles, roster.groups]);
   // THE SUBJECT IS THE VIEWER: the one state in which no act is offered,
   // because rule 4 of the engine's governance (`grant_self`) refuses it.
   const viewingSelf = subject !== null && subject.kind === "user" && bareId(subject.id) === viewerUserId;
+  const acting = canWrite && !viewingSelf;
+  // A PERSON ANSWERED PER ORGANIZATION: their acts reach every one of those
+  // organizations at once, which the page says once rather than on each row.
+  const perOrganization = subject !== null && subject.kind === "user" && effective.rows.some((r) => r.accountId !== "" && r.resource.startsWith("app:"));
 
   return (
-    <div className="os-settings">
+    // A LIST TAKES THE WINDOW (DESIGN.md rules 1 and 9): at the settings
+    // measure the rows fall under the record list's narrow layout, and every
+    // act drops onto a line of its own, away from the answer it changes.
+    <div className="os-settings os-settings-wide os-access" data-os-dividers="none">
       <Head title="Access" />
       <LocalTabs label="Access views" value={view} onChange={value => { writes.clear(); setView(value); }} options={[["subject", "By person or group"], ["resource", "By app"]]} />
       <Caption>
@@ -145,8 +178,8 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
 
       {canWrite ? null : (
         <Caption>
-          You can read who holds what. Writing a grant takes <span className="os-mono">update</span> on{" "}
-          <span className="os-mono">principal</span>, which your role does not carry.
+          Writing a grant takes <span className="os-mono">update</span> on <span className="os-mono">principal</span>, which
+          your role does not carry.
         </Caption>
       )}
 
@@ -176,22 +209,28 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
           </Select>
           </Field>
 
-          {subject === null ? (roster.state === "loading" ? <RecordListSkeleton label="Reading the roster." /> : <Caption>{"Pick somebody to see what they may open, and where each answer comes from."}</Caption>) : (
+          {subject === null ? (roster.state === "loading" ? <RecordListSkeleton label="Reading the roster." /> : <Caption>{"Pick somebody to see what they may open, and where each answer comes from."}</Caption>) : effective.state === "refused" ? (
+            // IN PLACE OF THE ANSWERS, and in place of everything else about
+            // them: the reads behind the scope line are refused to this
+            // viewer too, and a line saying "in no group" would be a guess.
+            <ReadRefusalNotice refusal={effective.refusal} />
+          ) : effective.state !== "ready" ? (
+            <RecordListSkeleton label="Reading what they can open." />
+          ) : (
             <>
               <Caption>{subjectSentence(subject, subjectGrants.groupIds, roster.groups, roster.roles)}</Caption>
               {subjectGrants.state === "error" ? (
                 <Notice tone="warn" sentence="Their grants could not be read." detail={subjectGrants.error} />
               ) : null}
-              <AccessMatrix
+              {perOrganization && acting ? <Caption>A grant to a person counts in every organization they are in.</Caption> : null}
+              <AccessAnswers
                 subject={subject}
                 resources={resources}
-                catalog={roster.catalog}
-                groupGrants={subjectGrants.groupLevel}
+                rows={effective.rows}
                 ownGrants={subjectGrants.own}
-                groupNameOf={(id) => roster.groups.find((g) => bareId(g.id) === bareId(id))?.name ?? "a group"}
-                nameOf={nameOf}
-                canWrite={canWrite && !viewingSelf}
-                busy={writes.busy || subjectGrants.state === "loading"}
+                names={names}
+                canWrite={acting}
+                busy={writes.busy || effective.pending || subjectGrants.state === "loading"}
                 refusal={writes.refusal}
                 onAllow={(r) => void writes.set(subject, r.verb, r.resource, "allow")}
                 onDeny={(r) => void writes.set(subject, r.verb, r.resource, "deny")}
@@ -240,17 +279,50 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
 }
 
 // ---------------------------------------------------------------------------
-// The matrix
+// The answers
 // ---------------------------------------------------------------------------
 
-function AccessMatrix({
+/** One row of the list: an app or a part, what the subject meets there, and what could change it. */
+interface AnswerItem {
+  resource: AccessResource;
+  lines: { key: string; held: boolean; verdict: string; reason: string }[];
+  acts: AccessActs;
+}
+
+/**
+ * The subject's rows, in the order `accessResources` gives (each app's door,
+ * then its parts and sections). A person's row is drawn where the engine
+ * answered the pair, with one line per answer -- one, or one per
+ * organization, sorted by the organization's name. A group's row is drawn for
+ * every resource: its own grant, or none.
+ */
+function answerItems(
+  subject: Subject,
+  resources: readonly AccessResource[],
+  rows: readonly AccessRow[],
+  ownGrants: readonly AccessGrant[],
+  names: AccessNames,
+): AnswerItem[] {
+  return resources.flatMap((resource): AnswerItem[] => {
+    if (subject.kind === "group") {
+      const answer = groupAnswer(rows, resource);
+      return [{ resource, lines: [{ key: "group", held: answer === "allow", verdict: groupAnswerWords(answer), reason: "" }], acts: groupActs(answer, ownGrants, resource) }];
+    }
+    const answers = personAnswers(rows, resource);
+    if (answers.length === 0) return [];
+    const lines = answers
+      .map((a) => ({ key: a.accountId, held: a.canOpen, organization: a.accountId === "" ? "" : names.organization(a.accountId), ...personAnswerWords(a, names) }))
+      .sort((a, b) => a.organization.localeCompare(b.organization));
+    return [{ resource, lines, acts: personActs(answers, ownGrants, resource) }];
+  });
+}
+
+function AccessAnswers({
   subject,
   resources,
-  catalog,
-  groupGrants,
+  rows,
   ownGrants,
-  groupNameOf,
-  nameOf,
+  names,
   canWrite,
   busy,
   refusal,
@@ -260,11 +332,10 @@ function AccessMatrix({
 }: {
   subject: Subject;
   resources: readonly AccessResource[];
-  catalog: Parameters<typeof resolveAnswer>[3];
-  groupGrants: readonly AccessGrant[];
+  rows: readonly AccessRow[];
   ownGrants: readonly AccessGrant[];
-  groupNameOf: (groupId: string) => string;
-  nameOf: (userId: string) => string;
+  names: AccessNames;
+  /** The viewer writes grants and is not looking at themselves. */
   canWrite: boolean;
   busy: boolean;
   refusal: (GrantRefusal & { resource: string }) | null;
@@ -275,98 +346,74 @@ function AccessMatrix({
   if (resources.length === 0) {
     return <Caption>The catalog names no app yet, so there is nothing to grant.</Caption>;
   }
+  const items = answerItems(subject, resources, rows, ownGrants, names);
+  if (items.length === 0) {
+    return <Caption>The cluster answered no app for them.</Caption>;
+  }
   return (
-    <table className="os-grid os-access-grid" aria-label={`What ${subject.name} may open`}>
-      <thead>
-        <tr>
-          <th scope="col">
-            <span className="os-visually-hidden">App or part</span>
-          </th>
-          <th scope="col">
-            <span className="os-visually-hidden">Answer, and where it came from</span>
-          </th>
-          <th scope="col">
-            <span className="os-visually-hidden">Change</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {resources.map((r) => {
-          const answer = resolveAnswer(subject, r.verb, r.resource, catalog, groupGrants, ownGrants);
-          const state = cellState(answer);
-          const refused = refusal !== null && refusal.resource === r.resource ? refusal : null;
-          return [
-            <tr key={r.resource} data-resource={r.resource} data-part={r.part === "" ? undefined : ""}>
-              <th scope="row">
-                {r.part === "" ? r.label : <span className="os-access-part">{r.label}</span>}
-              </th>
-              <td className="os-grid-cell os-access-answer" data-state={state} data-source={answer.source}>
-                <span className="os-grid-mark os-access-mark" aria-hidden>
-                  {answer.held ? <Check size={12} aria-hidden /> : null}
-                </span>
-                <span className="os-access-from">{answerSentence(subject, answer, groupNameOf, nameOf)}</span>
-              </td>
-              <td className="os-access-acts">
-                {canWrite ? (
-                  <>
-                    {answer.source === "user" && answer.grant !== null ? (
-                      <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(answer.grant!, r)} aria-label={`Use the role's answer for ${r.label}`}>
-                        Use role
-                      </button>
-                    ) : null}
-                    {answer.held ? (
-                      <button type="button" className="os-link" disabled={busy} onClick={() => onDeny(r)} aria-label={`Deny ${r.label} to ${subject.name}`}>
-                        Deny
-                      </button>
-                    ) : (
-                      <button type="button" className="os-link" disabled={busy} onClick={() => onAllow(r)} aria-label={`Allow ${r.label} to ${subject.name}`}>
-                        Allow
-                      </button>
-                    )}
-                  </>
-                ) : null}
-              </td>
-            </tr>,
-            refused === null ? null : (
-              <tr key={`${r.resource}:refusal`} className="os-access-refusal">
-                <td colSpan={3}>
-                  <RefusalNotice refusal={refused} />
-                </td>
-              </tr>
+    <RecordList as="ul" density="compact" className="os-access-list" label={subject.kind === "group" ? `What ${subject.name} grants` : `What ${subject.name} can open`}>
+      {items.map(({ resource: r, lines, acts }) => {
+        const refused = refusal !== null && refusal.resource === r.resource ? refusal : null;
+        const buttons: ReactNode[] = [];
+        if (canWrite && acts.own !== null) {
+          const grant = acts.own;
+          buttons.push(
+            subject.kind === "group" ? (
+              <Button key="revoke" disabled={busy} onClick={() => onRevoke(grant, r)} ariaLabel={`Remove ${subject.name}'s grant for ${r.label}`}>
+                Remove
+              </Button>
+            ) : (
+              <Button key="revoke" disabled={busy} onClick={() => onRevoke(grant, r)} ariaLabel={`Use the role's answer for ${r.label}`}>
+                Use role
+              </Button>
             ),
-          ];
-        })}
-      </tbody>
-    </table>
+          );
+        }
+        if (canWrite && acts.allow) {
+          buttons.push(
+            <Button key="allow" disabled={busy} onClick={() => onAllow(r)} ariaLabel={`Allow ${r.label} to ${subject.name}`}>
+              Allow
+            </Button>,
+          );
+        }
+        if (canWrite && acts.deny) {
+          buttons.push(
+            <Button key="deny" disabled={busy} onClick={() => onDeny(r)} ariaLabel={`Deny ${r.label} to ${subject.name}`}>
+              Deny
+            </Button>,
+          );
+        }
+        return (
+          <li key={r.resource} data-resource={r.resource} data-part={r.part === "" ? undefined : ""}>
+            <RecordRow
+              name={r.label}
+              secondary={lines.map((line) => (
+                <span key={line.key} className="os-access-answer" data-held={line.held ? "" : undefined}>
+                  <span className="os-access-verdict">{line.verdict}</span>
+                  {line.reason === "" ? null : `, ${line.reason}`}
+                </span>
+              ))}
+              actions={buttons.length === 0 ? undefined : buttons}
+            />
+            {refused === null ? null : <RefusalNotice refusal={refused} />}
+          </li>
+        );
+      })}
+    </RecordList>
   );
 }
 
-/** The mark's drawn state: held or not, and whether a grant decided it. */
-function cellState(answer: Answer): "on" | "off" | "grantedOn" | "grantedOff" {
-  if (answer.source === "role") return answer.held ? "on" : "off";
-  return answer.held ? "grantedOn" : "grantedOff";
-}
-
-/** The provenance, in words: what the answer is and who gave it. */
-function answerSentence(
-  subject: Subject,
-  answer: Answer,
-  groupNameOf: (groupId: string) => string,
-  nameOf: (userId: string) => string,
-): string {
-  if (answer.source === "role") {
-    // The mark says held or not; the scope line above says which role. What
-    // is left to say here is only that the role decided it.
-    if (subject.kind === "group") return answer.held ? "allowed" : "nothing of its own";
-    return `${subject.role || "unknown"} role`;
-  }
-  const word = answer.held ? "allowed" : "denied";
-  const by = answer.grant === null ? "" : nameOf(answer.grant.grantedBy);
-  if (answer.source === "group") {
-    const group = answer.grant === null ? "a group" : groupNameOf(answer.grant.subjectId);
-    return `${word}, through ${group}${by === "" ? "" : ` by ${by}`}`;
-  }
-  return `${word}, by ${by === "" ? "a grant" : by}`;
+/** The engine's refusal to answer for somebody, in place of their answers. */
+function ReadRefusalNotice({ refusal }: { refusal: Refusal | null }) {
+  const detail = refusal === null || refusal.detail === "" ? undefined : refusal.code === "" ? refusal.detail : `${refusal.code}: ${refusal.detail}`;
+  return (
+    <Notice
+      tone="warn"
+      sentence={refusal !== null && refusal.title !== "" ? refusal.title : "What they can open could not be read."}
+      next={refusal === null || refusal.next === "" ? undefined : refusal.next}
+      detail={detail}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +464,7 @@ function ResourceHolders({
             return (
               <RecordRow key={grant.id} name={who} state={grant.effect === "allow" ? "allowed" : "denied"} tone={grant.effect === "allow" ? "accent" : "muted"}
                 secondary={`${grant.subjectKind === "group" ? "a group" : "a person"}${nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}`}
-                actions={canWrite && !namesTheViewer(grant, viewerUserId) ? <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>Revoke</button> : undefined} />
+                actions={canWrite && !namesTheViewer(grant, viewerUserId) ? <Button disabled={busy} onClick={() => onRevoke(grant)} ariaLabel={`Revoke ${grant.effect} for ${who}`}>Revoke</Button> : undefined} />
             );
           })}
         </RecordList>
