@@ -342,10 +342,13 @@ func (s *ACSSender) asksToWait(op acsOperation) error {
 // A REVISED message (Message.Revised: its caller changed what the delivery sends
 // after Azure definitely did not accept it) goes under a new Operation-Id only when
 // the receipt proves Azure took nothing under the old one: Azure refused the
-// request (rejected, throttled). After Azure said it had no record of the
-// operation (notfound) the id is kept, revised or not: a 404 proves nothing was
-// taken only for a submission under the same id, so a first POST Azure took late
-// is matched by it, and the person gets at most the earlier message, once.
+// request itself (a client refusal) or throttled it, as the receipt recorded when
+// it marked the refusal (acsOperation.Refusal). After a server error, which can
+// follow a request Azure took, after Azure said it had no record of the operation
+// (notfound), or on a receipt that recorded no class, the id is kept, revised or
+// not: a 404 proves nothing was taken only for a submission under the same id, so
+// a first POST Azure took after all is matched by it, and the person gets at most
+// the earlier message, once.
 //
 // Azure answering that it already holds an operation under a kept id (409) means
 // this message was not taken and an earlier submission was: the receipt goes on
@@ -397,10 +400,10 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 			return err
 		}
 		// A new id only when the receipt proves Azure took nothing under the old one
-		// that the old id could still match: it took and could not finish the
-		// operation (failed, canceled: the id names that failed operation), or, for a
-		// revised message, it refused the request (rejected, throttled).
-		if op.Status == "failed" || op.Status == "canceled" || revised && (op.Status == "rejected" || op.Status == "throttled") {
+		// that the old id could still match: Azure recorded the operation as failed or
+		// canceled (the id names that failed operation), or, for a revised message,
+		// it refused or throttled the request itself (acsTookNothing).
+		if op.Status == "failed" || op.Status == "canceled" || revised && acsTookNothing(op) {
 			op.ID = id.NewShortId()
 		}
 		op.Endpoint, op.ResourceID, op.Digest = s.cfg.Endpoint, s.cfg.ResourceID, digest
@@ -412,6 +415,7 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
+	op.Refusal = "" // a new submission; an earlier refusal's class is not its
 	if err = scope.hold.Verify(ctx); err != nil {
 		return notSubmitted(err)
 	}
@@ -436,9 +440,9 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		if wait < time.Second {
 			wait = time.Minute
 		}
-		op.Status, op.NextPollAt = "throttled", s.now().UTC().Add(wait)
+		op.Status, op.NextPollAt, op.Refusal = "throttled", s.now().UTC().Add(wait), refusalClass(sendErr)
 	case IsNotAccepted(sendErr):
-		op.Status, op.Detail = "rejected", "Azure refused this send request."
+		op.Status, op.Detail, op.Refusal = "rejected", "Azure refused this send request.", refusalClass(sendErr)
 	default:
 		op.Status, op.Detail = "unknown", "Azure has not confirmed whether it accepted this message. It is not submitted again unless Azure has no record of it."
 		if HeldEarlier(sendErr) && found && op.ID == earlier.ID {
@@ -467,6 +471,34 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		return unconfirmedSend("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}
 	return sendErr
+}
+
+// refusalClass is what kind of refusal Azure's answer was, as a receipt records it
+// (acsOperation.Refusal): "client" for a 4xx that refused the request itself (any
+// but 408, 409 and 429), "throttle" for a 429, "server" for a 5xx. "" for any
+// other answer.
+func refusalClass(err error) string {
+	var se *SendError
+	if !errors.As(err, &se) {
+		return ""
+	}
+	switch code := se.StatusCode; {
+	case code == http.StatusTooManyRequests:
+		return "throttle"
+	case code >= 500:
+		return "server"
+	case code >= 400 && code != http.StatusRequestTimeout && code != http.StatusConflict:
+		return "client"
+	}
+	return ""
+}
+
+// acsTookNothing says whether a receipt's refusal proves Azure took nothing under
+// its Operation-Id: it refused the request itself, or throttled it. A server error
+// can follow a request Azure took, and a receipt that recorded no class (written
+// before refusals had one) proves nothing either way.
+func acsTookNothing(op acsOperation) bool {
+	return op.Status == "rejected" && op.Refusal == "client" || op.Status == "throttled" && op.Refusal == "throttle"
 }
 
 // acsMaySubmitAgain says whether a delivery whose receipt has this status was

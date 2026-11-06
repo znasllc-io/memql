@@ -51,9 +51,14 @@ type azureLike struct {
 // request was sent.
 const answerLost = 0
 
+// answerTakenAfterAll is a 504 Azure answered for a request it took all the same:
+// the answer says the message was not accepted, and Azure delivers it.
+const answerTakenAfterAll = -1
+
 // A 409 (http.StatusConflict) is Azure saying it already holds an earlier
-// submission of the delivery under its Operation-Id: one whose answer was lost.
-// This message is not taken, and the earlier one's outcome is Azure's record.
+// submission of the delivery under its Operation-Id: one whose answer was lost, or
+// one it took despite answering 504. This message is not taken, and the earlier
+// one's outcome is Azure's record.
 
 // quietWait is how long a throttle that names no Retry-After keeps a delivery
 // waiting: longer than the first retry's backoff, as Azure's receipt can be.
@@ -77,7 +82,7 @@ func (a *azureLike) Send(ctx context.Context, msg email.Message, as email.SendAs
 		answer, a.answers = a.answers[0], a.answers[1:]
 	}
 	switch answer {
-	case answerLost:
+	case answerLost, answerTakenAfterAll:
 		if a.lost == nil {
 			a.lost, a.lostAs = map[string]email.Message{}, map[string]email.SendAs{}
 		}
@@ -102,6 +107,8 @@ func (a *azureLike) Send(ctx context.Context, msg email.Message, as email.SendAs
 		return a.recordingSender.Send(ctx, msg, as)
 	case answerLost:
 		return &email.SendError{Permanent: true, Detail: "Azure email acceptance is unknown; check the Azure delivery log before retrying"}
+	case answerTakenAfterAll:
+		return &email.SendError{StatusCode: http.StatusGatewayTimeout, NotAccepted: true, Detail: "Azure did not accept the message"}
 	case http.StatusConflict:
 		return &email.SendError{StatusCode: answer, Permanent: true, HeldEarlier: true, Detail: "Azure already has an operation for this send; its outcome is being confirmed"}
 	case http.StatusTooManyRequests:

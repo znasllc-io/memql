@@ -24,6 +24,12 @@ type acsOperation struct {
 	DeliveryEvents                                        map[string]time.Time
 	Status, Detail                                        string
 	SubmittedAt, CheckedAt, NextPollAt                    time.Time
+	// Refusal is what kind of refusal a rejected or throttled receipt records:
+	// "client" (a 4xx other than 408, 409 and 429: the request itself was
+	// refused), "throttle" (429) or "server" (5xx, which can follow a request
+	// Azure took). Empty for every other status, for a refusal of neither kind,
+	// and on a receipt written before refusals had a class.
+	Refusal string `json:",omitempty"`
 }
 
 type acsOperationGate interface {

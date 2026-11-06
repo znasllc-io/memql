@@ -202,44 +202,88 @@ func TestARefusedSendIsSubmittedAgainUnderItsOperationId(t *testing.T) {
 	}
 }
 
-// TestARevisedMessageGoesUnderAFreshOperationId: after Azure refused a delivery,
-// its caller changed what the delivery sends (another sender, another template)
-// and says so (Message.Revised). Azure refused the earlier submission, so nothing
-// was taken under its Operation-Id, which names a different message: the revised
-// one goes under a fresh id. After Azure said it had NO RECORD of the earlier
-// submission (notfound), the id is kept: a 404 proves nothing was taken only for a
-// submission under the same id, so a first POST Azure took late is matched by it
-// and the person gets at most the earlier message, once. The same message sent
-// again keeps its id (TestARefusedSendIsSubmittedAgainUnderItsOperationId); a
-// revised message whose earlier submission Azure may have accepted is not
+// TestARevisedMessageGoesUnderAFreshOperationId: after Azure did not accept a
+// delivery, its caller changed what the delivery sends (another sender, another
+// template) and says so (Message.Revised). Only a refusal that proves Azure took
+// nothing under the earlier Operation-Id -- a client refusal (a 4xx other than
+// 408, 409 and 429) or a throttle (429), as the receipt recorded it -- gives the
+// revised message a fresh id. After a server error, a timeout, a refusal the
+// receipt recorded no class for, or Azure saying it had NO RECORD of the earlier
+// submission (notfound), the id is kept: a first POST Azure took after all is
+// matched by it, and the person gets at most the earlier message, once. The same
+// message sent again keeps its id (TestARefusedSendIsSubmittedAgainUnderItsOperationId);
+// a revised message whose earlier submission Azure may have accepted is not
 // submitted at all.
 func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
-	t.Run("after a refusal", func(t *testing.T) {
-		s := acsFixture(t)
-		ops := s.operations.(*memoryACSOperations)
-		var posted []string
-		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
-			posted = append(posted, r.Header.Get("Operation-Id"))
-			if len(posted) == 1 {
-				return &http.Response{StatusCode: 400, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	// Each case: Azure answers the first submission with code (Retry-After as
+	// given), the receipt records what kind of refusal it was, and the revised
+	// message goes under a fresh id only if that proves Azure took nothing under the
+	// old one: a client refusal or a throttle. A server error can follow a request
+	// Azure took, and a timeout says nothing either way: the id is kept, so a
+	// request Azure did take is matched by it and not taken twice.
+	for _, tc := range []struct {
+		name, retryAfter, class string
+		code                    int
+		fresh                   bool
+	}{
+		{"after a client refusal (400)", "", "client", 400, true},
+		{"after a throttle (429)", "15", "throttle", 429, true},
+		{"not after a server error (503)", "", "server", 503, false},
+		{"not after a server error that names a wait (503)", "15", "server", 503, false},
+		{"not after a server error (504)", "", "server", 504, false},
+		{"not after a timeout (408)", "", "", 408, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			var posted []string
+			s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				posted = append(posted, r.Header.Get("Operation-Id"))
+				if len(posted) == 1 {
+					return &http.Response{StatusCode: tc.code, Header: http.Header{"Retry-After": []string{tc.retryAfter}}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+				}
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			msg := Message{IntentID: "campaign-single:revised", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
+				t.Fatalf("a %d is not a definite non-acceptance: %v", tc.code, err)
 			}
-			return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			if got := ops.rows[s.operationKey(msg.IntentID)].Refusal; got != tc.class {
+				t.Fatalf("the receipt records a %d as a %q refusal, want %q", tc.code, got, tc.class)
+			}
+			later := s.now().Add(time.Hour) // past any wait Azure named
+			s.now = func() time.Time { return later }
+			msg.Subject, msg.TextBody, msg.Revised = "Welcome", "Welcome aboard", true
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+				t.Fatalf("the revised message: %v", err)
+			}
+			if len(posted) != 2 || (posted[0] != posted[1]) != tc.fresh || !azureUUID.MatchString(posted[1]) {
+				t.Fatalf("after a %d the earlier and the revised message went under Operation-Ids %q, want a fresh id: %v", tc.code, posted, tc.fresh)
+			}
+			if op := ops.rows[s.operationKey(msg.IntentID)]; op.ID != posted[1] || op.Status != "accepted" || op.Refusal != "" {
+				t.Fatalf("the receipt is %+v, want the revised message's operation, accepted, with no refusal", op)
+			}
 		})
-		msg := Message{IntentID: "campaign-single:revised", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
-		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
-			t.Fatalf("a refusal is not a definite non-acceptance: %v", err)
-		}
-		msg.Subject, msg.TextBody, msg.Revised = "Welcome", "Welcome aboard", true
-		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
-			t.Fatalf("the revised message: %v", err)
-		}
-		if len(posted) != 2 || posted[0] == posted[1] || !azureUUID.MatchString(posted[1]) {
-			t.Fatalf("the refused and the revised message went under Operation-Ids %q, want two different ones", posted)
-		}
-		if op := ops.rows[s.operationKey(msg.IntentID)]; op.ID != posted[1] || op.Status != "accepted" {
-			t.Fatalf("the receipt is %+v, want the revised message's operation, accepted", op)
-		}
-	})
+	}
+	// A receipt written before refusals had a class says nothing that proves Azure
+	// took nothing: the id is kept.
+	for _, status := range []string{"rejected", "throttled"} {
+		t.Run("not after a refusal of no recorded class ("+status+")", func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			msg := Message{IntentID: "campaign-single:revised-legacy-" + status, To: "reader@example.test", Subject: "Welcome", TextBody: "Welcome aboard", Revised: true}
+			op := "12345678-1234-1234-1234-123456789012"
+			ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the earlier message", Intent: msg.IntentID, Status: status}}
+			var posted []string
+			s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				posted = append(posted, r.Header.Get("Operation-Id"))
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || len(posted) != 1 || posted[0] != op {
+				t.Fatalf("a revised message after a %s receipt with no class went under %q (%v), want the receipt's id %q", status, posted, err, op)
+			}
+		})
+	}
 	// Azure's poller found no operation under the receipt's id: the earlier POST
 	// was lost, and may yet be taken.
 	missing := func(t *testing.T) (*ACSSender, *memoryACSOperations, Message, acsOperation) {
@@ -304,21 +348,6 @@ func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
 		}
 		if at, err := s.AcceptedAt(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || !at.Equal(earlier.SubmittedAt) {
 			t.Fatalf("the delivery was taken at %s (%v), want when the earlier message was submitted", at, err)
-		}
-	})
-	t.Run("throttled earlier: a fresh id", func(t *testing.T) {
-		s := acsFixture(t)
-		ops := s.operations.(*memoryACSOperations)
-		msg := Message{IntentID: "campaign-single:revised-throttled", To: "reader@example.test", Subject: "Welcome", TextBody: "Welcome aboard", Revised: true}
-		op := "12345678-1234-1234-1234-123456789012"
-		ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the earlier message", Intent: msg.IntentID, Status: "throttled"}}
-		var posted []string
-		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
-			posted = append(posted, r.Header.Get("Operation-Id"))
-			return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
-		})
-		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || len(posted) != 1 || posted[0] == op || !azureUUID.MatchString(posted[0]) {
-			t.Fatalf("a revised message after a throttle went under %q (%v), want a fresh id", posted, err)
 		}
 	})
 	for _, status := range []string{"submitting", "unknown", "accepted", "succeeded"} {
