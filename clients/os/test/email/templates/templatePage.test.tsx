@@ -21,7 +21,7 @@ const { lifecycleContent, templateActs, templateEditorURL } = await import("../.
 const { templateFromRow, templateRecordFromRow } = await import("../../../src/apps/email/rows");
 const { saveEditorPreference } = await import("../../../src/items/editorPreference");
 const { VSCODE_NO_ANSWER_MESSAGE, browserHandoffPorts } = await import("../../../src/items/vscode");
-const { fakeConnection, rowsResult, templateRow, withSession } = await import("../harness");
+const { fakeConnection, rowsResult, ruleRow, templateRow, withSession } = await import("../harness");
 
 // ONE TEMPLATE'S PAGE (memql#6033, Task 11): what it is, the email as it is
 // sent -- rendered by the engine's one renderer, isolated in a sandboxed frame
@@ -90,6 +90,25 @@ describe("a template's page", () => {
     await openPage("Goodbye");
     await waitFor(() => expect(conn.query.templateById).toHaveBeenCalledWith({ templateId: "t2" }, expect.anything()));
     expect(screen.queryByText(/holds its emails/)).toBeNull();
+  });
+  it("one notice says what each kind of automation does while the template is a draft", async () => {
+    const step = (templateId: string) => [{ id: "send1", kind: "send", templateId, senderIdentityId: "s1" }];
+    const journey = (id: string, name: string, status: string, templateId: string) => ({ id, accountId: "self", name, description: "", status, trigger: { kind: "joined", audienceId: "a1" }, steps: step(templateId), createdAt: "2026-10-11T00:00:00Z" });
+    const conn = fakeConnection({
+      templates: [templateRow({ id: "t1", name: "Welcome" }), templateRow({ id: "t2", name: "Receipt" })],
+      journeys: [journey("j1", "Welcome series", "active", "t1")],
+      emailRules: [ruleRow({ id: "r1", name: "Order shipped", status: "active", templateId: "t1" }), ruleRow({ id: "r2", name: "Old order note", status: "paused", templateId: "t1" }), ruleRow({ id: "r3", name: "Receipt sent", status: "active", templateId: "t2" })],
+      templateContent: { t1: { document: DOCUMENT }, t2: { document: DOCUMENT } },
+      render: RENDERED,
+    });
+    mount(conn);
+    await openPage("Welcome");
+    // A series holds its emails; an event automation's emails are not sent at all while it is a draft.
+    expect(await screen.findByText("Saving changes makes this template a draft again, and the automation “Welcome series” holds its emails until the template is published. While it is a draft, the automation “Order shipped” sends none of its emails, and they are not sent later.")).toBeTruthy();
+    expect(screen.queryByText(/Old order note/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Templates" }));
+    await openPage("Receipt");
+    expect(await screen.findByText("Saving changes makes this template a draft again. While it is a draft, the automation “Receipt sent” sends none of its emails, and they are not sent later.")).toBeTruthy();
   });
   it("previews through emailRender in a sandboxed frame, with a plain-text tab", async () => {
     const conn = fakeConnection({

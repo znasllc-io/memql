@@ -7,6 +7,7 @@ import { journeyIssues } from "../../../src/apps/email/automations/issues";
 import { journeyActs } from "../../../src/apps/email/automations/automationActs";
 import { journeyFromRow, audienceFromRow, templateFromRow, senderIdentityFromRow } from "../../../src/apps/email/rows";
 import { addSteps } from "../../../src/apps/email/automations/addModel";
+import { RUN_STATUSES } from "../../../src/apps/email/useEmail";
 import { audienceRow, templateRow, senderRow } from "../harness";
 
 const steps: FlowStep[] = [{ id: "one", kind: "send", templateId: "t1" }, { id: "two", kind: "wait", days: 3 }];
@@ -22,6 +23,17 @@ describe("Automation step model", () => {
     expect(queries.find(q => q.cardId === "w")?.args).toEqual({ journeyId: "j", status: "active", stepId: "s" });
     expect(queries.find(q => q.cardId === "c")?.args).toEqual({ journeyId: "j", status: "waiting", stepId: "c" });
     expect(queries.filter(q => q.cardId === "end")).toHaveLength(3);
+  });
+  it("names each run state with the words the People section uses", () => {
+    // `waiting` is a run waiting for the person to confirm (the engine writes it
+    // only at a confirm step); a wait step's runs are running, sitting in the wait.
+    const label = (cardId: string, status?: string) => countQueries("j", [{ id: "c", kind: "confirm" }, { id: "w", kind: "wait" }, { id: "s", kind: "send" }]).find(q => q.cardId === cardId && q.args.status === status)?.label;
+    expect(label("c", "waiting")).toBe(RUN_STATUSES.find(([status]) => status === "waiting")?.[1].toLowerCase());
+    expect(label("c", "waiting")).toBe("waiting to confirm");
+    expect(label("end", "completed")).toBe(RUN_STATUSES.find(([status]) => status === "completed")?.[1].toLowerCase());
+    expect(label("end", "completed")).toBe("finished");
+    expect(label("end", "exited")).toBe(RUN_STATUSES.find(([status]) => status === "exited")?.[1].toLowerCase());
+    expect(label("w", "active")).toBe("waiting");
   });
   it("makes activation absent while dirty or invalid, and archived has no acts", () => {
     const j = journeyFromRow({ id: "j", status: "paused" });

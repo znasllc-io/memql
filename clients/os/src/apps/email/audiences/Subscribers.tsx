@@ -8,8 +8,10 @@ import type { CampaignWrites } from "../actions";
 import type { useAudienceRecipients } from "../useEmail";
 
 export const SUBSCRIPTION_STATES = [{ value: "subscribed", label: "Subscribed" }, { value: "pending", label: "Pending confirmation" }, { value: "unsubscribed", label: "Unsubscribed" }, { value: "bounced", label: "Bounced" }, { value: "complained", label: "Reported as spam" }];
-/** People who left. The engine refuses to subscribe them again: only they can, so no change is offered. */
+/** People who left. The engine refuses to move them to any other state: only they can come back, so no change is offered. */
 const LEFT = new Set(["unsubscribed", "bounced", "complained"]);
+/** The states a person can be set to here. Bounced and reported as spam are the provider's verdicts, which the engine refuses from a person. */
+const SETTABLE = SUBSCRIPTION_STATES.filter(s => !["bounced", "complained"].includes(s.value));
 export function Subscribers({ audience, pinned = null, roster, writes, onAdd, archived }: { audience: AudienceRow; pinned?: Row | null; roster: ReturnType<typeof useAudienceRecipients>; writes: CampaignWrites; onAdd: () => void; archived: boolean }) {
   const [search, setSearch] = useState("");
   const [state, setState] = useState("");
@@ -45,7 +47,7 @@ export function Subscribers({ audience, pinned = null, roster, writes, onAdd, ar
   </>}>People</Subhead>
     {roster.state === "loading" && !roster.readAt ? <RecordListSkeleton label="Loading people" /> : null}
     {roster.error ? <Notice tone="warn" sentence={refusalSentence(roster.error)}><Button busy={roster.state === "loading"} onClick={() => { void roster.reload(); }}>Try again</Button></Notice> : null}
-    <RecordList label="People in this audience">{filtered.slice(0, limit).map(person => <RecordRow key={person.id} name={person.email} secondary={person.displayName} state={SUBSCRIPTION_STATES.find(s => s.value === person.subscriptionStatus)?.label} actions={!archived && !LEFT.has(person.subscriptionStatus) ? <Select id={`email-person-${person.id}`} label={`Subscription state for ${person.email}`} value={person.subscriptionStatus} onChange={next => { void change(person, next); }}>{SUBSCRIPTION_STATES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</Select> : undefined} />)}</RecordList>
+    <RecordList label="People in this audience">{filtered.slice(0, limit).map(person => <RecordRow key={person.id} name={person.email} secondary={person.displayName} state={SUBSCRIPTION_STATES.find(s => s.value === person.subscriptionStatus)?.label} actions={!archived && !LEFT.has(person.subscriptionStatus) ? <Select id={`email-person-${person.id}`} label={`Subscription state for ${person.email}`} value={person.subscriptionStatus} onChange={next => { void change(person, next); }}>{SETTABLE.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</Select> : undefined} />)}</RecordList>
     {filtered.length > limit ? <div className="os-panel-actions"><Button onClick={() => setLimit(n => n + 50)}>Show more</Button></div> : null}
     {roster.state === "ready" && !filtered.length ? <p className="os-caption">{people.length ? "No matching people." : "Nobody on this list yet."}</p> : null}
     {blocked ? <p className="os-caption">{blocked} of these can't be mailed. They stay on the list so a later import can't add them back.</p> : null}

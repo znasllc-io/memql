@@ -59,7 +59,7 @@ describe("Automation pages", () => {
     mount(conn); fireEvent.click(await screen.findByText("Welcome series"));
     const people = await screen.findByRole("region", { name: "People" });
     await within(people).findByText("one@acme.test");
-    for (const [label, count] of [["In a run", "3"], ["Waiting", "0"], ["Finished", "7"], ["Left early", "0"], ["Failed", "2"]] as const) expect(within(people).getByText(label).parentElement?.textContent).toContain(count);
+    for (const [label, count] of [["In a run", "3"], ["Waiting to confirm", "0"], ["Finished", "7"], ["Left early", "0"], ["Failed", "2"]] as const) expect(within(people).getByText(label).parentElement?.textContent).toContain(count);
     expect(within(people).getByText("The sender is turned off.")).toBeTruthy(); expect(within(people).getByText("The template is a draft.")).toBeTruthy();
     expect(within(people).getAllByText("Send Welcome").length).toBe(2);
     enrollmentCounts[":failed"] = 1; conn.query.journeyEnrollmentsByStatus.mockResolvedValue(rowsResult([failedRun("e2", "r2", "The template is a draft.")]));

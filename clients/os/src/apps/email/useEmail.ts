@@ -1,4 +1,4 @@
-import { countQueries, type FlowStep } from "./automations/flowModel";
+import { countQueries, RUN_STATUSES, type FlowStep } from "./automations/flowModel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRowByConceptAndId,
@@ -1392,8 +1392,8 @@ export function useEnrollmentCounts(journeyId: string, steps: readonly FlowStep[
   }, [connection, journeyId, signature]);
   return useReading<Array<ReturnType<typeof countQueries>[number] & { figure: Figure }>>([], read, [read]);
 }
-/** The statuses an automation run can be in, in the order people read them, with the words for each. */
-export const RUN_STATUSES = [["active", "In a run"], ["waiting", "Waiting"], ["completed", "Finished"], ["exited", "Left early"], ["failed", "Failed"]] as const;
+/** The statuses an automation run can be in, with their words (kept with the Flow's counts, which say them too). */
+export { RUN_STATUSES };
 
 export interface FailedRun { id: string; stepId: string; lastError: string; address: string }
 export interface PeopleReading { counts: ReadonlyMap<string, Figure>; failed: FailedRun[] }

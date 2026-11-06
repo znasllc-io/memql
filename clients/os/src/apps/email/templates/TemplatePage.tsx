@@ -49,17 +49,34 @@ const LOST: Record<Lifecycle, string> = {
   retry: "Couldn't confirm that it was started again.",
 };
 
-/** The warning for editing a template that automations send: saving makes it a draft, and they hold their emails. */
-export function holdWarning(automations: readonly string[]): string {
-  const names = automations.map((name) => `“${name}”`);
-  const list = names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `Saving changes makes this template a draft again, and ${names.length === 1 ? `the automation ${list} holds its emails` : `the automations ${list} hold their emails`} until the template is published.`;
+/** The active automations that send a template: series hold their emails while it is a draft; event automations send none. */
+export interface SendingAutomations {
+  /** Series (journeys): a step waits until the template is published. */
+  held: readonly string[];
+  /** Event automations (rules): an event while it is a draft sends nothing, and is not sent later. */
+  unsent: readonly string[];
 }
 
-export function TemplatePage({ template, layouts, activeAutomations = [], onBack, onReread }: {
+const NO_AUTOMATIONS: SendingAutomations = { held: [], unsent: [] };
+
+/** “A”, “A” and “B”, “A”, “B” and “C”: automations by name, with the noun they take. */
+function automationsNamed(names: readonly string[]): string {
+  const quoted = names.map((name) => `“${name}”`);
+  const list = quoted.length < 3 ? quoted.join(" and ") : `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
+  return `${quoted.length === 1 ? "the automation" : "the automations"} ${list}`;
+}
+
+/** The warning for editing a template that active automations send: saving makes it a draft, and what each kind does then. */
+export function holdWarning({ held, unsent }: SendingAutomations): string {
+  const first = held.length === 0 ? "Saving changes makes this template a draft again." : `Saving changes makes this template a draft again, and ${automationsNamed(held)} ${held.length === 1 ? "holds its emails" : "hold their emails"} until the template is published.`;
+  if (unsent.length === 0) return first;
+  return `${first} While it is a draft, ${automationsNamed(unsent)} ${unsent.length === 1 ? "sends none of its emails" : "send none of their emails"}, and they are not sent later.`;
+}
+
+export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, onBack, onReread }: {
   template: TemplateRow;
-  /** Names of the active automations that send this template. */
-  activeAutomations?: readonly string[];
+  /** The active automations that send this template, by kind. */
+  automations?: SendingAutomations;
   /** The organizations' layout readings, which name the layout it was made from. */
   layouts: EmailLayouts;
   /** Back to the templates. */
@@ -257,7 +274,7 @@ export function TemplatePage({ template, layouts, activeAutomations = [], onBack
     <div className="os-action-pane" data-os-dividers="none" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
-        {activeAutomations.length > 0 && !archived ? <Notice tone="warn" sentence={holdWarning(activeAutomations)} /> : null}
+        {automations.held.length + automations.unsent.length > 0 && !archived ? <Notice tone="warn" sentence={holdWarning(automations)} /> : null}
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
         {outcomeNotice()}
         <Panel label="Template details">

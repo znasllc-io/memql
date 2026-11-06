@@ -14,9 +14,9 @@ import { useAudienceLifecycle, type CampaignWrites } from "../actions";
 import { toKitActs } from "../acts";
 import { organizationName } from "../organizations";
 import { journeyFromRow, type AudienceRow } from "../rows";
-import { useAudienceRecipients, useReading, useSubscriberCounts, type EmailFeeds, type EmailRecordFeeds } from "../useEmail";
+import { listKnowledge, useAudienceRecipients, useReading, useSubscriberCounts, type EmailFeeds, type EmailRecordFeeds } from "../useEmail";
 import { audienceActs } from "./audienceActs";
-import { AddPeopleWizard } from "./AddPeopleWizard";
+import { AddPeopleWizard, confirmationSender } from "./AddPeopleWizard";
 import { Subscribers } from "./Subscribers";
 import { ConnectSignupFormWizard, SignupFormPage, SignupForms } from "./SignupForms";
 
@@ -49,7 +49,7 @@ export function AudiencePage({ audience, feeds, recordFeeds, writes, uploads, si
       else setError("The audience wasn't changed.");
     } finally { working.current = false; setBusy(false); }
   }
-  if (view === "people") return <AddPeopleWizard audience={audience} writes={writes} uploads={uploads} onBack={() => setView("")} onOpenPerson={person => { setLookFor(person); setView(""); }} onDone={() => { setView(""); void roster.reload(); void counts.reload(); void size.reload(); }} />;
+  if (view === "people") return <AddPeopleWizard audience={audience} confirmation={listKnowledge(feeds.journeys) === "known" ? confirmationSender(feeds.journeys.snapshot.rows.map(journeyFromRow), audience.id) : { state: "unknown" }} writes={writes} uploads={uploads} onBack={() => setView("")} onOpenPerson={person => { setLookFor(person); setView(""); }} onDone={() => { setView(""); void roster.reload(); void counts.reload(); void size.reload(); }} />;
   if (view === "connect") return <ConnectSignupFormWizard {...shared} onBack={() => setView("")} onDone={() => setView("")} />;
   if (binding) return <SignupFormPage {...shared} binding={binding} onBack={() => setView("")} />;
   const question = asking === "archive" ? `Archive “${audience.name}”? It leaves the campaign and automation pickers; its history stays.` : asking === "confirmation" ? audience.confirmation === "required" ? "Stop asking to confirm? New signups are subscribed right away." : "Ask people to confirm? New signups wait as pending until they confirm." : "";

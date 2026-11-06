@@ -16,6 +16,15 @@ export function stepSentence(s: FlowStep, names: { template: string }): string {
   return s.kind === "confirm" ? `Send ${names.template} and wait for confirmation, up to ${s.timeoutDays ?? 7} days` : `Send ${names.template}`;
 }
 export interface CardCount { cardId: string; label: string; args: { journeyId: string; status?: string; stepId?: string } }
+/**
+ * The statuses an automation run can be in, in the order people read them, with
+ * the words for each: the People section's, and, lower-cased, the Flow's counts.
+ * `waiting` is a run waiting for the person to confirm: the engine writes it only
+ * at a confirm step, once the confirmation email went out. A wait step's own
+ * count is something else, the running runs sitting in that wait.
+ */
+export const RUN_STATUSES = [["active", "In a run"], ["waiting", "Waiting to confirm"], ["completed", "Finished"], ["exited", "Left early"], ["failed", "Failed"]] as const;
+const STATE_WORDS: Readonly<Record<string, string>> = Object.fromEntries(RUN_STATUSES.map(([status, words]) => [status, words.toLowerCase()]));
 export function countQueries(journeyId: string, steps: readonly FlowStep[]): CardCount[] {
-  return [{ cardId: "trigger", label: "enrolled", args: { journeyId } }, ...steps.flatMap((step, i): CardCount[] => step.kind === "confirm" ? [{ cardId: step.id, label: "waiting", args: { journeyId, status: "waiting", stepId: step.id } }] : step.kind === "wait" ? [{ cardId: step.id, label: "waiting", args: { journeyId, status: "active", stepId: steps[i + 1]?.id ?? "" } }] : []), ...["completed", "exited", "failed"].map(status => ({ cardId: "end", label: status === "exited" ? "left early" : status, args: { journeyId, status } }))];
+  return [{ cardId: "trigger", label: "enrolled", args: { journeyId } }, ...steps.flatMap((step, i): CardCount[] => step.kind === "confirm" ? [{ cardId: step.id, label: STATE_WORDS.waiting!, args: { journeyId, status: "waiting", stepId: step.id } }] : step.kind === "wait" ? [{ cardId: step.id, label: "waiting", args: { journeyId, status: "active", stepId: steps[i + 1]?.id ?? "" } }] : []), ...["completed", "exited", "failed"].map(status => ({ cardId: "end", label: STATE_WORDS[status]!, args: { journeyId, status } }))];
 }

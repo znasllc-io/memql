@@ -249,8 +249,8 @@ export function moduleActFor(args: {
   here?: SetupPlace;
 }): ModuleAct {
   const { id, verdict, sectionsOf, canOpenWindows, here } = args;
-  // A module that is SET UP needs no act. Saying where it would be
-  // configured, to somebody looking at a row that says "Set up", is an
+  // A module that is configured needs no act. Saying where it would be
+  // configured, to somebody looking at a row that says "Ready", is an
   // instruction with nothing behind it -- and a column of them beside every
   // finished row is the furniture rule 10 exists to keep out.
   if (verdict?.state === "configured") return { kind: "none" };

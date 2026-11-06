@@ -9,8 +9,10 @@ import { useAccountOptionsFeed } from "../../accounts/tie";
 import { recordNamed, useOpenRequest, type OpenRequest } from "../openRequest";
 import { organizationName, selectableOrganizations } from "../organizations";
 import {
+  emailRuleFromRow,
   isWriting,
   journeyFromRow,
+  ruleName,
   templateFromRow,
   templateIsArchived,
   templateProjection,
@@ -104,11 +106,19 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
   const shownOrganizations = organizationsOf(source?.snapshot.rows ?? []);
   const openTemplate = useMemo(() => recordNamed(rows, templateFromRow, openId), [rows, openId]);
 
-  // The active automations that send the open template: editing it holds their emails.
+  // The active automations that send the open template. Editing it makes it a
+  // draft: a series holds its emails until it is published again, and an event
+  // automation sends none of its emails meanwhile (they are not sent later).
   const journeyRows = feeds.journeys.snapshot.rows;
-  const activeAutomations = useMemo(
-    () => openTemplate === null ? [] : journeyRows.map(journeyFromRow).filter((journey) => journey.status === "active" && journey.steps.some((step) => step.templateId === openTemplate.id)).map((journey) => journey.name),
-    [journeyRows, openTemplate],
+  const ruleRows = feeds.rules.snapshot.rows;
+  const sendingAutomations = useMemo(
+    () => openTemplate === null
+      ? undefined
+      : {
+          held: journeyRows.map(journeyFromRow).filter((journey) => journey.status === "active" && journey.steps.some((step) => step.templateId === openTemplate.id)).map((journey) => journey.name),
+          unsent: ruleRows.map(emailRuleFromRow).filter((rule) => rule.status === "active" && rule.templateId === openTemplate.id).map(ruleName),
+        },
+    [journeyRows, ruleRows, openTemplate],
   );
 
   function openTemplatePage(id: string) {
@@ -147,7 +157,7 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
           key={openTemplate.id}
           template={openTemplate}
           layouts={layouts}
-          activeAutomations={activeAutomations}
+          automations={sendingAutomations}
           onBack={() => {
             setOpenId("");
             setRequested("");
