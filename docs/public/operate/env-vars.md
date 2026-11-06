@@ -491,6 +491,15 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
+Two settings belong to the nightly closed-chunk compaction, which gives back
+the space retention deletes leave inside closed `MemoryNodes` chunks
+([Closed-chunk compaction](database-platform.md#closed-chunk-compaction)):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MEMQL_CHUNK_COMPACTION_ENABLED` | `true` | `false` stops chunk rewrites: every pass answers `disabled` before it opens a session. A value that is not a boolean stops them too. Dry runs still measure and report. A running rewrite is stopped by cancelling its backend, not by this. |
+| `MEMQL_CHUNK_COMPACTION_VOLUME_BYTES` | unset | The data volume's size in bytes, used only when no `database-health` report observed within 15 minutes exists. Unset, such an installation never rewrites a chunk (`room_unknown`). Set it to the declared size (`33Gi` is `35433480192`); a larger value can fill the disk. |
+
 `MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE` defaults to `false` and is read
 at startup. It permits the **first activation** of shared row-schema references;
 it does not select a reader format. Every upgraded replica advertises reader

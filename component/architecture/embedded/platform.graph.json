@@ -131,6 +131,7 @@
 {"id":"automation:purgeExpiredOutputScreenings","kind":"automation","label":"purgeExpiredOutputScreenings","attrs":{"origin":"safety/automations.memql","publishes":"safety.outputScreening.retention.observed","schedule":"0 40 2 * * *","stratum":"0"}},
 {"id":"automation:purgeExpiredSafetyClassifications","kind":"automation","label":"purgeExpiredSafetyClassifications","attrs":{"origin":"safety/automations.memql","publishes":"safety.classification.retention.observed","schedule":"0 35 2 * * *","stratum":"0"}},
 {"id":"automation:pursueResponsibilities","kind":"automation","label":"pursueResponsibilities","attrs":{"origin":"planner/automations.memql","schedule":"@every 45s","stratum":"0"}},
+{"id":"automation:reclaimClosedChunkSpace","kind":"automation","label":"reclaimClosedChunkSpace","attrs":{"origin":"platform/automations.memql","schedule":"0 20 4 * * *","stratum":"0"}},
 {"id":"automation:reconcileAccountDomains","kind":"automation","label":"reconcileAccountDomains","attrs":{"origin":"accounts/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:reconcileAccountFrontDoors","kind":"automation","label":"reconcileAccountFrontDoors","attrs":{"origin":"platform/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
 {"id":"automation:reconcileCustomDomains","kind":"automation","label":"reconcileCustomDomains","attrs":{"origin":"platform/automations.memql","schedule":"0 */2 * * * *","stratum":"0"}},
