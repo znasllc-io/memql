@@ -5365,6 +5365,29 @@ QueryClient.prototype.releaseInstallationStatus = function (this: QueryClient, a
   return this.executeNamed("releaseInstallationStatus", buildReleaseInstallationStatus(args), opts);
 };
 
+/** Confirm the exact saved installation pin with its connected GitHub owner. Only explicitly configured owner-push repositories support this operation. Landing makes a revision selectable; applying remains a separate action. */
+export interface ReleaseLandInstallationProposalArgs {
+  proposalId: string;
+  expectedCommit: string;
+}
+
+export function buildReleaseLandInstallationProposal(args: ReleaseLandInstallationProposalArgs): string {
+  const parts: string[] = [];
+  parts.push("proposalId: " + renderMemQLValue(args.proposalId));
+  parts.push("expectedCommit: " + renderMemQLValue(args.expectedCommit));
+  return "builtin releaseLandInstallationProposal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseLandInstallationProposal(args: ReleaseLandInstallationProposalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseLandInstallationProposal = function (this: QueryClient, args: ReleaseLandInstallationProposalArgs = {} as ReleaseLandInstallationProposalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseLandInstallationProposal", buildReleaseLandInstallationProposal(args), opts);
+};
+
 /** List verified published releases; identified developers, admins and owners may read. */
 export interface ReleaseListPublishedCandidatesArgs {
   cursor?: string;
@@ -5827,6 +5850,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.repositoryChangeAccess = function (this: QueryClient, args: RepositoryChangeAccessArgs = {} as RepositoryChangeAccessArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("repositoryChangeAccess", buildRepositoryChangeAccess(args), opts);
+};
+
+/** Explicitly land this maintainer's exact saved proposal when pull requests are disabled. Uses the connected person's grant, never the installation identity. No rebase, force push, release or deployment is implied. Retry the same commit after an uncertain answer; a changed default branch requires a new proposal. */
+export interface RepositoryChangeLandArgs {
+  requestId: string;
+  expectedCommit: string;
+}
+
+export function buildRepositoryChangeLand(args: RepositoryChangeLandArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("expectedCommit: " + renderMemQLValue(args.expectedCommit));
+  return "builtin repositoryChangeLand(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeLand(args: RepositoryChangeLandArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeLand = function (this: QueryClient, args: RepositoryChangeLandArgs = {} as RepositoryChangeLandArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeLand", buildRepositoryChangeLand(args), opts);
 };
 
 /** Authenticated peer request intake; sender ownership and decisions are never imported. */

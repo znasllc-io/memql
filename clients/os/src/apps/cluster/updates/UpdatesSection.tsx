@@ -13,11 +13,14 @@ import { detail, page, sources, title, type Release, type Source } from "./model
 
 export type UpdateQueries = Pick<QueryClient, "releaseSources" | "releaseDiscoverPublishedCandidates" | "releaseReadDiscoveredCandidate">;
 
-export function UpdatesSection({ visible = true }: { visible?: boolean }) {
+export function UpdatesSection({ visible = true, releaseSelection, clearReleaseSelection }: { visible?: boolean; releaseSelection?: ProposedRelease | null; clearReleaseSelection?: () => void }) {
   const connection = useOsConnection(), status = useConnectionStatus();
   const { access } = useSession();
   const [section, setSection] = useState("installation");
   const [proposedRelease, setProposedRelease] = useState<ProposedRelease | null>(null);
+  useEffect(() => {
+    if (releaseSelection) { setProposedRelease(releaseSelection); setSection("installation"); clearReleaseSelection?.(); }
+  }, [releaseSelection, clearReleaseSelection]);
   const navigation = <LocalTabs label="Updates" value={section} onChange={setSection} options={[["installation", "This installation"], ["publishers", "Published releases"]]} />;
   if (!access || !["owner", "admin", "developer"].includes(access.role)) return <div className="os-cluster"><Head title="Updates" /><Notice sentence="A developer, admin or owner can check for updates." /></div>;
   return section === "installation" ? <div className="os-cluster"><Head title="Updates" />{navigation}<InstallationUpdates query={connection?.query ?? null} connected={status === "connected"} visible={visible} proposedRelease={proposedRelease} onClearProposedRelease={() => setProposedRelease(null)} /></div> : <UpdateBrowser key={access.userId} onPrepare={release => { setProposedRelease({ candidateId: release.candidateId, catalogDigest: release.catalogDigest, label: title(release) }); setSection("installation"); }} navigation={navigation} query={connection?.query ?? null} connected={status === "connected"} visible={visible} />;
@@ -60,7 +63,7 @@ export function UpdateBrowser({ query, connected, visible = true, navigation, on
       </div> : null}
     </> : release.value ? <>
       {release.value.components.map(c => <Panel key={c.name} label={c.name}><Subhead>{c.name}</Subhead><Facts><Fact label="Version" value={c.version} /><Fact label="Source" value={c.repository} /><Fact label="Commit" value={c.commit} /></Facts></Panel>)}
-      <Caption>Prepare a draft update pull request for this installation. After that change is reviewed and merged, you can review the installation plan and choose when to apply it.</Caption>
+      <Caption>Prepare the exact update proposal for this installation. After its changes are reviewed and landed, review the installation plan and choose when to apply it.</Caption>
       {onPrepare ? <Button tone="primary" disabled={!release.fresh} onClick={() => onPrepare(release.value!)}>Select for this installation</Button> : null}
     </> : null}
   </div>;

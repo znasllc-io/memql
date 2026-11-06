@@ -5000,3 +5000,21 @@ unit checks do not count as MemQL performing its own feature work or as a live
 utility lookup. Required-database checks and native CI must cover the final
 revision before integration. Shared test/runtime capacity and the active Ask
 run are not changed by this work.
+
+
+## Interactive owner landing and bounded drafting (2026-11-06)
+
+The installed recipe chooses the change and review order. Native `EditFiles`
+expands exact unique spans inside the approved source scope; native `Land` owns
+actor checks, immutable proposal identity and durable provider reconciliation.
+Landing is absent from the drafting recipe's allowed operations and rejects a
+Work run context. The GitHub adapter uses the current person's grant and a
+single-parent, fast-forward-only update. A changed base fails rather than rebasing.
+This is an explicit UI command, not a release train or standing approval.
+
+Database regressions cover foreign owners, live workflow callers, revoked and
+expired requests, changed provider permission and routing, and recovery on another
+replica. Protocol tests exercise a pull-request-disabled provider, lost ref replies,
+current owner credentials and a changed default branch. UI tests verify the
+confirmation interval, exact commit argument, retained failures, sealed-release
+history after profile changes and separate installation apply authority.

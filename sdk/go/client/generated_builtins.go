@@ -6978,6 +6978,32 @@ func ReleaseInstallationStatusBuild(args ReleaseInstallationStatusArgs) string {
 	return "builtin releaseInstallationStatus()"
 }
 
+// ReleaseLandInstallationProposal -- Confirm the exact saved installation pin with its connected GitHub owner. Only explicitly configured owner-push repositories support this operation. Landing makes a revision selectable; applying remains a separate action.
+type ReleaseLandInstallationProposalArgs struct {
+	ProposalId     string
+	ExpectedCommit string
+}
+
+// ReleaseLandInstallationProposal calls the engine builtin releaseLandInstallationProposal.
+func (qc *QueryClient) ReleaseLandInstallationProposal(ctx context.Context, args ReleaseLandInstallationProposalArgs) (*Result, error) {
+	call := ReleaseLandInstallationProposalBuild(args)
+	return qc.executeNamed(ctx, "releaseLandInstallationProposal", call)
+}
+
+func ReleaseLandInstallationProposalBuild(args ReleaseLandInstallationProposalArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseLandInstallationProposal(")
+	b.WriteString("proposalId: ")
+	b.WriteString(quoteMemQL(args.ProposalId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedCommit: ")
+	b.WriteString(quoteMemQL(args.ExpectedCommit))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseListPublishedCandidates -- List verified published releases; identified developers, admins and owners may read.
 type ReleaseListPublishedCandidatesArgs struct {
 	Cursor string
@@ -7509,6 +7535,32 @@ func RepositoryChangeAccessBuild(args RepositoryChangeAccessArgs) string {
 	b.WriteString("builtin repositoryChangeAccess(")
 	b.WriteString("sourceId: ")
 	b.WriteString(quoteMemQL(args.SourceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RepositoryChangeLand -- Explicitly land this maintainer's exact saved proposal when pull requests are disabled. Uses the connected person's grant, never the installation identity. No rebase, force push, release or deployment is implied. Retry the same commit after an uncertain answer; a changed default branch requires a new proposal.
+type RepositoryChangeLandArgs struct {
+	RequestId      string
+	ExpectedCommit string
+}
+
+// RepositoryChangeLand calls the engine builtin repositoryChangeLand.
+func (qc *QueryClient) RepositoryChangeLand(ctx context.Context, args RepositoryChangeLandArgs) (*Result, error) {
+	call := RepositoryChangeLandBuild(args)
+	return qc.executeNamed(ctx, "repositoryChangeLand", call)
+}
+
+func RepositoryChangeLandBuild(args RepositoryChangeLandArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin repositoryChangeLand(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedCommit: ")
+	b.WriteString(quoteMemQL(args.ExpectedCommit))
 	b.WriteString(")")
 	return b.String()
 }

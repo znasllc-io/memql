@@ -548,6 +548,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin repositoryChangeRequests(")) return builtinReply("repositoryChangeRequests", [{requests:seed.changeRequests ?? []} as Row]);
       if (call.startsWith("builtin repositoryChangeStatus(")) return builtinReply("repositoryChangeStatus", seed.changeRequests?.slice(0,1) ?? []);
+      if (call.startsWith("builtin repositoryChangeLand(")) {
+        if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
+        const receipt = seed.changeRequests?.[0];
+        if (!receipt) throw new Error("Missing proposal");
+        const proposal = receipt.proposal as Record<string, unknown>;
+        receipt.proposal = { ...proposal, landedCommit: proposal.commit };
+        return builtinReply("repositoryChangeLand", [receipt]);
+      }
       if (call.startsWith("builtin repositoryChangeRequest(")) {
         if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
         const receipt = {id:"request-one", operation: /operation: "([^"]*)"/.exec(call)?.[1] ?? "", repository:"acme/shop", repositoryId:42, state:seed.repositoryAuthority?.canWrite ? "approved" : "pending", statement:"Improve the requested component", paths:["clients/os/"], goalId:"goal-request", reason:"", expiresAt:"2026-12-01T00:00:00Z"} as Row;

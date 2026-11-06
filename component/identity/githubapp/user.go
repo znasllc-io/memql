@@ -61,17 +61,18 @@ type Installation struct {
 // from. InstallationId is stamped by the caller rather than by GitHub: the
 // listing is per installation, so the id is known from the request.
 type Repository struct {
-	ID            int64                 `json:"id"`
-	NodeID        string                `json:"node_id"`
-	Permissions   RepositoryPermissions `json:"permissions"`
-	FullName      string                `json:"full_name"`
-	Name          string                `json:"name"`
-	Private       bool                  `json:"private"`
-	Visibility    string                `json:"visibility"`
-	DefaultBranch string                `json:"default_branch"`
-	PushedAt      string                `json:"pushed_at"`
-	HTMLURL       string                `json:"html_url"`
-	Owner         struct {
+	HasPullRequests *bool                 `json:"has_pull_requests"`
+	ID              int64                 `json:"id"`
+	NodeID          string                `json:"node_id"`
+	Permissions     RepositoryPermissions `json:"permissions"`
+	FullName        string                `json:"full_name"`
+	Name            string                `json:"name"`
+	Private         bool                  `json:"private"`
+	Visibility      string                `json:"visibility"`
+	DefaultBranch   string                `json:"default_branch"`
+	PushedAt        string                `json:"pushed_at"`
+	HTMLURL         string                `json:"html_url"`
+	Owner           struct {
 		Login string `json:"login"`
 	} `json:"owner"`
 	InstallationId int64 `json:"-"`

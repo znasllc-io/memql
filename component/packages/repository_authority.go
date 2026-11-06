@@ -8,10 +8,11 @@ import (
 // RepositoryAuthority is a fresh provider observation, never a transferable
 // grant. A caller cannot serialize this value to authorize a later write.
 type RepositoryAuthority struct {
-	RepositoryID   int64  `json:"repositoryId"`
-	Repository     string `json:"repository"`
-	InstallationID int64  `json:"installationId"`
-	CanWrite       bool   `json:"canWrite"`
+	PullRequestsDisabled bool   `json:"pullRequestsDisabled"`
+	RepositoryID         int64  `json:"repositoryId"`
+	Repository           string `json:"repository"`
+	InstallationID       int64  `json:"installationId"`
+	CanWrite             bool   `json:"canWrite"`
 }
 
 // RepositoryAccess resolves the connection under its actual owner and checks
@@ -54,7 +55,7 @@ func (d *Deps) repositoryAccess(ctx context.Context, credentialID, ownerUserID, 
 	if repository.ID <= 0 || !strings.EqualFold(repository.FullName, owner+"/"+repo) {
 		return out, refuse("repository_identity_unavailable", "GitHub did not confirm the requested repository's stable identity")
 	}
-	return RepositoryAuthority{RepositoryID: repository.ID, Repository: strings.ToLower(repository.FullName), InstallationID: installationID, CanWrite: repository.Permissions.CanWrite()}, nil
+	return RepositoryAuthority{PullRequestsDisabled: repository.HasPullRequests != nil && !*repository.HasPullRequests, RepositoryID: repository.ID, Repository: strings.ToLower(repository.FullName), InstallationID: installationID, CanWrite: repository.Permissions.CanWrite()}, nil
 }
 
 // RepositoryWriterToken is the only package-to-pipeline writer mint. A source
@@ -76,4 +77,39 @@ func (i *Integration) RepositoryWriterToken(ctx context.Context, credentialID, o
 	}
 	token, _, err := d.GitHubApp.ScopedInstallationToken(ctx, authority.InstallationID, []string{repo}, map[string]string{"contents": "write", "pull_requests": "write"})
 	return token, authority.InstallationID, err
+}
+
+// RepositoryOwnerWriterToken presents the connected person's own GitHub grant
+// for an explicitly confirmed default-branch update. It never substitutes an
+// installation token: GitHub must enforce that person's branch rules. Callers
+// must bind the actor, repository and immutable effect before using this port.
+func (i *Integration) RepositoryOwnerWriterToken(ctx context.Context, credentialID, ownerUserID, owner, repo string) (string, error) {
+	d, err := i.resolve()
+	if err != nil {
+		return "", err
+	}
+	authority, err := d.repositoryAccess(ctx, credentialID, ownerUserID, owner, repo)
+	if err != nil {
+		return "", err
+	}
+	if !authority.CanWrite || !authority.PullRequestsDisabled {
+		return "", refuse("repository_owner_push_not_authorized", "owner landing requires current write access and explicitly disabled pull requests")
+	}
+	credential, err := d.Credentials(ctx, credentialID, ownerUserID)
+	if err != nil {
+		return "", err
+	}
+	if !credential.IsGrant() || credential.Bearer == "" || credential.OwnerUserId != ownerUserID {
+		return "", refuse(CodeCredentialNotFound, "owner landing requires this owner's connected GitHub identity")
+	}
+	// Verify the exact token being returned, including a refresh/revocation that
+	// may have occurred since the access observation above.
+	repository, err := readGrantRepository(ctx, d.GitHubApp, credential, owner, repo, authority.InstallationID)
+	if err != nil {
+		return "", err
+	}
+	if repository.ID != authority.RepositoryID || !strings.EqualFold(repository.FullName, owner+"/"+repo) || !repository.Permissions.CanWrite() || repository.HasPullRequests == nil || *repository.HasPullRequests {
+		return "", refuse("repository_owner_push_not_authorized", "repository permission or delivery policy changed")
+	}
+	return credential.Bearer, nil
 }

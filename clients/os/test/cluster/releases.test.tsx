@@ -310,7 +310,7 @@ describe("draft release lifecycle", () => {
     const f = fileReleaseFixture("ready");
     render(<ReleaseBrowser query={f.query} connected />);
     await open();
-    expect(screen.getByText("MemQL 0.25.0")).toBeTruthy();
+    expect(await screen.findByText("MemQL 0.25.0")).toBeTruthy();
     expect(screen.getByText(/Verified desktop release/)).toBeTruthy();
     expect(screen.getByText("Select as latest")).toBeTruthy();
     await twice("Approve release");

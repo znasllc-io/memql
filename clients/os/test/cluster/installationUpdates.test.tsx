@@ -307,3 +307,26 @@ describe("selected installation restoration", () => {
     expect(() => readInstallationStatus(answer({ installationId: plan.installationId, currentRevision: "", choices: [] }))).toThrow(/incomplete/);
   });
 });
+
+
+describe("owner-push installation proposals", () => {
+  useFakeDate();
+  it("lands exact pins only after confirmation, then leaves applying separate", async () => {
+    let proposal = {proposalId:"proposal-one",installationId:"installation-one",candidateId:candidate.candidateId,catalogDigest:candidate.catalogDigest,state:"proposed",landingMode:"owner_push",repository:"acme/install",baseBranch:"main",expectedBaseRevision:"b".repeat(40),proposedCommit:"c".repeat(40)};
+    const executeNamed=vi.fn(async (name:string) => {
+      if(name==="releaseInstallationStatus") return answer({installationId:"installation-one",currentRevision:"b".repeat(40),choices:[],active:null,proposals:[proposal],proposalLandingMode:"owner_push"});
+      if(name==="releaseLandInstallationProposal") {proposal={...proposal,state:"landed"};return answer({...proposal,overlayRevision:proposal.proposedCommit});}
+      throw new Error("Unexpected effect");
+    });
+    render(<InstallationUpdates query={{executeNamed}} connected />);
+    fireEvent.click(await screen.findByRole("button",{name:"Land installation pins"}));
+    fireEvent.click(screen.getByRole("button",{name:"Confirm installation pins"}));
+    expect(executeNamed.mock.calls.some(c=>c[0]==="releaseLandInstallationProposal")).toBe(false);
+    await readTheBar();fireEvent.click(screen.getByRole("button",{name:"Confirm installation pins"}));
+    await screen.findByText("This update proposal landed and was verified. Its release is available for an installation plan.");
+    const calls=executeNamed.mock.calls as unknown as string[][];
+    expect(calls.filter(c=>c[0]==="releaseLandInstallationProposal")).toHaveLength(1);
+    expect(calls.find(c=>c[0]==="releaseLandInstallationProposal")?.[1]).toContain(`expectedCommit: "${proposal.proposedCommit}"`);
+    expect(calls.some(c=>c[0]==="releaseApplyInstallation" || c[0]==="releasePrepareInstallation")).toBe(false);
+  });
+});

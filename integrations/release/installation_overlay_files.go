@@ -69,6 +69,9 @@ func validateOverlayImages(images []overlayImage) error {
 	return nil
 }
 func validateOverlayConfiguration(c overlayConfiguration) error {
+	if c.LandingMode != "" && c.LandingMode != "pull_request" && c.LandingMode != "owner_push" {
+		return errors.New("installation overlay landing mode is unsupported")
+	}
 	if !installationIdentifier.MatchString(c.InstallationID) || !overlayRepository.MatchString(c.Repository) || c.CredentialID == "" || c.OwnerUserID == "" || len(c.BaseBranch) > 128 || c.BaseBranch == "" || c.ProposalWorkflow == "" || c.ObservationWorkflow == "" {
 		return errors.New("installation overlay requires an exact owner-bound configuration")
 	}

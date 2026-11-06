@@ -544,3 +544,10 @@ builtin releaseCancelInstallation { installationId string! planId string! }
 @sdk
 @executor("integration.release.rollbackInstallation")
 builtin releaseRollbackInstallation { installationId string! planId string! }
+
+/// Confirm the exact saved installation pin with its connected GitHub owner.
+/// Only explicitly configured owner-push repositories support this operation.
+/// Landing makes a revision selectable; applying remains a separate action.
+@sdk
+@executor("integration.release.landInstallationProposal")
+builtin releaseLandInstallationProposal { proposalId string! expectedCommit string! }

@@ -76,6 +76,12 @@ func (a *App) wireRepositoryAuthority() {
 			}
 			return readRepositoryChange(ctx, pkgs, grant, paths)
 		}
+		d.Land = func(ctx context.Context, grant repositoryauthority.Authorization, proposal repositoryauthority.Proposal, receipt repositoryauthority.ProposalReceipt, authorize func(context.Context) error) (string, error) {
+			if pkgs == nil {
+				return "", errors.New("repository connection is unavailable")
+			}
+			return landRepositoryChange(ctx, pkgs, grant, proposal, receipt, authorize)
+		}
 		d.Propose = func(ctx context.Context, grant repositoryauthority.Authorization, proposal repositoryauthority.Proposal) (repositoryauthority.ProposalReceipt, error) {
 			if pkgs == nil {
 				return repositoryauthority.ProposalReceipt{}, errors.New("repository connection is unavailable")

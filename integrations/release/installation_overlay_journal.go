@@ -11,34 +11,39 @@ import (
 )
 
 type savedOverlay struct {
-	Record                                     overlayRecord
-	BranchCommit, PullRequestURL, MergedCommit string
-	PullRequest                                int
+	Record                                                   overlayRecord
+	BranchCommit, PullRequestURL, MergedCommit, LandedCommit string
+	PullRequest                                              int
 }
 
 func (r savedOverlay) summary() InstallationProposal {
 	state := "prepared"
-	if r.PullRequest > 0 {
+	if r.PullRequest > 0 || (r.Record.Configuration.LandingMode == "owner_push" && r.BranchCommit != "") {
 		state = "proposed"
 	}
 	if r.MergedCommit != "" {
 		state = "merged"
 	}
-	return InstallationProposal{r.Record.ID, r.Record.Request.InstallationID, r.Record.Request.CandidateID, r.Record.Request.CatalogDigest, state, r.PullRequestURL, r.MergedCommit}
+	revision := r.MergedCommit
+	if r.LandedCommit != "" {
+		state = "landed"
+		revision = r.LandedCommit
+	}
+	return InstallationProposal{ProposalID: r.Record.ID, InstallationID: r.Record.Request.InstallationID, CandidateID: r.Record.Request.CandidateID, CatalogDigest: r.Record.Request.CatalogDigest, State: state, PullRequestURL: r.PullRequestURL, OverlayRevision: revision, LandingMode: r.Record.Configuration.LandingMode, Repository: r.Record.Configuration.Repository, BaseBranch: r.Record.Configuration.BaseBranch, ExpectedBaseRevision: r.Record.Request.ExpectedBaseRevision, ProposedCommit: r.BranchCommit}
 }
 func (s *overlayScope) load(ctx context.Context, key string) (savedOverlay, error) {
 	var r savedOverlay
 	var body []byte
-	var branch, url, merged sql.NullString
+	var branch, url, merged, landed sql.NullString
 	var number sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT record,branch_commit,pull_request,pull_request_url,merged_commit FROM release_installation_proposals WHERE proposal_id=$1 AND owner_user_id=$2`, key, s.owner).Scan(&body, &branch, &number, &url, &merged)
+	err := s.db.QueryRowContext(ctx, `SELECT record,branch_commit,pull_request,pull_request_url,merged_commit,landed_commit FROM release_installation_proposals WHERE proposal_id=$1 AND owner_user_id=$2`, key, s.owner).Scan(&body, &branch, &number, &url, &merged, &landed)
 	if err != nil {
 		return r, err
 	}
 	if decodeCandidateObject(body, &r.Record) != nil || r.Record.ID != key || r.Record.Owner != s.owner || r.Record.Snapshot == nil || r.Record.Snapshot.Contract != overlayContract || r.Record.Snapshot.CheckArgs(nil) != nil || r.Record.CreatedAt.IsZero() || validateOverlayRecordFiles(r.Record) != nil || r.Record.ID != overlayHash([]string{r.Record.Owner, r.Record.Request.InstallationID, r.Record.Request.RequestID}) {
 		return r, errors.New("stored installation overlay intent is invalid")
 	}
-	r.BranchCommit, r.PullRequestURL, r.MergedCommit = branch.String, url.String, merged.String
+	r.BranchCommit, r.PullRequestURL, r.MergedCommit, r.LandedCommit = branch.String, url.String, merged.String, landed.String
 	if number.Valid {
 		if number.Int64 < 1 || number.Int64 > 2147483647 {
 			return r, errors.New("stored installation proposal number is invalid")
@@ -47,6 +52,9 @@ func (s *overlayScope) load(ctx context.Context, key string) (savedOverlay, erro
 	}
 	if (branch.Valid && !installationCommit.MatchString(branch.String)) || (merged.Valid && !installationCommit.MatchString(merged.String)) || (number.Valid && (!branch.Valid || !url.Valid)) || (merged.Valid && !number.Valid) {
 		return r, errors.New("installation overlay journal contains incomplete effect history")
+	}
+	if r.Record.Configuration.LandingMode == "owner_push" && (r.Record.RepositoryID <= 0 || r.PullRequest != 0 || r.MergedCommit != "") || (landed.Valid && (r.Record.Configuration.LandingMode != "owner_push" || !branch.Valid || landed.String != branch.String)) {
+		return r, errors.New("installation owner landing journal is inconsistent")
 	}
 	return r, nil
 }
@@ -57,7 +65,15 @@ func (s *overlayScope) reserve(ctx context.Context, args map[string]any) (any, e
 	if len(s.replacements) == 0 || s.source == nil || s.snapshot == nil {
 		return nil, errors.New("installation overlay reserve requires verified exact bytes")
 	}
-	r := overlayRecord{ID: s.id, Owner: s.owner, Request: s.request, Configuration: s.configuration, CreatedAt: time.Now().UTC().Truncate(time.Second), Snapshot: s.snapshot}
+	var repositoryID int64
+	if s.configuration.LandingMode == "owner_push" {
+		info, e := s.ownerRepository(ctx)
+		if e != nil {
+			return nil, e
+		}
+		repositoryID = info.ID
+	}
+	r := overlayRecord{RepositoryID: repositoryID, ID: s.id, Owner: s.owner, Request: s.request, Configuration: s.configuration, CreatedAt: time.Now().UTC().Truncate(time.Second), Snapshot: s.snapshot}
 	if s.configuration.FormatVersion == 1 {
 		r.Replacement = s.replacements[0]
 	} else {

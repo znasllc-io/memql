@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
+import { readTheBar, useFakeDate } from "../readTheBar";
 import { RepositoryChange, validRequestPaths } from "../../src/apps/pipelines/RepositoryChange";
 import { fakeConnection, withSession } from "../deployables/harness";
 function mount(over: Parameters<typeof fakeConnection>[0] = {}) { const c = fakeConnection(over); h.connection=c; render(withSession(<RepositoryChange sourceId="source-one" />)); return c; }
@@ -169,5 +170,45 @@ describe("saved proposal navigation", () => {
     fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
     await screen.findByText("Independent review passed");
     expect(screen.queryByRole("link",{name:"Open pull request"})).toBeNull();
+  });
+});
+
+
+describe("explicit owner landing", () => {
+  useFakeDate();
+  const proposal = {state:"complete", landingMode:"owner_push", branch:"memql/change-proposal", commit:"a".repeat(40), expectedHead:"b".repeat(40), baseBranch:"main"};
+  const request = {...deliveryReceipt, operation:"propose_change", proposal};
+  const authority = {...permission, canWrite:true, route:"own", landingMode:"owner_push"};
+  it("reviews an exact change and confirms landing separately from drafting or releasing", async () => {
+    const c = mount({repositoryAuthority:authority, changeRequests:[{...request}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    const land = await screen.findByRole("button",{name:"Land change"});
+    expect(screen.getByRole("link",{name:"Review proposed changes"}).getAttribute("href")).toBe(`https://github.com/acme/shop/compare/${proposal.expectedHead}...${proposal.commit}`);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    fireEvent.click(land);
+    fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    await readTheBar(); fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    await screen.findByText("Change landed on main.");
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(1);
+    expect(c.callsNamed("repositoryChangeLand")[0]).toContain(`expectedCommit: "${proposal.commit}"`);
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(screen.queryByRole("button",{name:"Land change"})).toBeNull();
+  });
+  it("keeps a failed landing bound to the same reviewed commit", async () => {
+    const c = mount({repositoryAuthority:authority, changeRequests:[{...request}], repositoryChangeError:"default branch moved since review; prepare a new proposal"});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    fireEvent.click(await screen.findByRole("button",{name:"Land change"}));
+    await readTheBar(); fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    await screen.findByText(/default branch moved since review/);
+    expect(screen.queryByText("Change landed on main.")).toBeNull();
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(1);
+  });
+  it("does not offer owner landing to a requester or for unconfirmed policy", async () => {
+    const c=mount({repositoryAuthority:permission,changeRequests:[{...request}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByRole("link",{name:"Review proposed changes"});
+    expect(screen.queryByRole("button",{name:"Land change"})).toBeNull();
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
   });
 });

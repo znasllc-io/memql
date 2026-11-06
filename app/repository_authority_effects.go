@@ -105,9 +105,54 @@ func proposeRepositoryChange(ctx context.Context, access repositoryEffectAccess,
 	if err != nil {
 		return out, err
 	}
+	if info.HasPullRequests != nil && !*info.HasPullRequests {
+		return repositoryauthority.ProposalReceipt{State: "complete", Branch: branch, Commit: sha, LandingMode: "owner_push", ExpectedHead: p.ExpectedHead, BaseBranch: p.BaseBranch}, nil
+	}
 	pr, err := gh.EnsureAuthorizedChangePullRequest(ctx, token, owner, repo, branch, p.BaseBranch, p.Title, p.Body, refresh)
 	if err != nil {
 		return out, err
 	}
 	return repositoryauthority.ProposalReceipt{State: "complete", Branch: branch, Commit: sha, PullRequestURL: pr}, nil
+}
+
+// Owner landing uses the person's existing GitHub App grant. It cannot borrow
+// the App installation's identity or bypass the repository's protected branch.
+type repositoryOwnerAccess interface {
+	repositoryEffectAccess
+	RepositoryOwnerWriterToken(context.Context, string, string, string, string) (string, error)
+}
+
+func landRepositoryChange(ctx context.Context, access repositoryOwnerAccess, grant repositoryauthority.Authorization, p repositoryauthority.Proposal, receipt repositoryauthority.ProposalReceipt, authorize func(context.Context) error) (string, error) {
+	gh, owner, repo, err := repositoryEffectIdentity(access, grant)
+	if err != nil {
+		return "", err
+	}
+	if authorize == nil || receipt.LandingMode != "owner_push" || receipt.ExpectedHead != p.ExpectedHead || receipt.BaseBranch != p.BaseBranch || p.RequestID != grant.RequestID || receipt.Branch != "memql/change-"+grant.EffectID {
+		return "", errors.New("owner landing differs from the saved proposal")
+	}
+	refresh := func(c context.Context) (string, error) {
+		if err := authorize(c); err != nil {
+			return "", err
+		}
+		token, err := access.RepositoryOwnerWriterToken(c, grant.Source.CredentialID, grant.Source.OwnerUserID, owner, repo)
+		if err != nil {
+			return "", err
+		}
+		info, err := gh.Repository(c, token, owner, repo)
+		if err != nil {
+			return "", err
+		}
+		if info.ID != grant.RepositoryID || !strings.EqualFold(info.FullName, grant.Source.Repository) || info.DefaultBranch != p.BaseBranch || info.HasPullRequests == nil || *info.HasPullRequests {
+			return "", errors.New("repository identity or owner landing policy changed")
+		}
+		return token, nil
+	}
+	token, err := refresh(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := gh.LandChange(ctx, token, owner, repo, p.BaseBranch, p.ExpectedHead, receipt.Commit, refresh); err != nil {
+		return "", err
+	}
+	return receipt.Commit, nil
 }

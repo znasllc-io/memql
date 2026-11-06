@@ -28,7 +28,7 @@ export function ReleasesSection({ visible = true, ...navigation }: ReleaseViewPr
   const cluster = useAppReach("cluster");
   // The engine requires an owner, independently of any grant to open a section.
   if (access?.role !== "owner") return <div className="os-cluster"><Head title="Releases" /><Notice sentence="A cluster owner must review and publish releases." /></div>;
-  return <ReleaseBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} {...navigation} onUpdates={cluster.sections.includes("updates") ? () => cluster.open("updates") : undefined} />;
+  return <ReleaseBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} {...navigation} onUpdates={cluster.sections.includes("updates") ? release => cluster.open("updates", { release }) : undefined} />;
 }
 
 export function ReleaseBrowser({ query, connected, visible = true, openRequest, ...navigation }: { query: ReleaseQueries | null; connected: boolean } & ReleaseViewProps) {
@@ -54,13 +54,13 @@ export function ReleaseBrowser({ query, connected, visible = true, openRequest, 
   const page = useReleaseRead(`page:${cursor}`, available ? async (signal) => readPage(await query.releaseCandidates({ cursor, limit: 20 }, { signal })) : null, showingList, query);
   const builds = useReleaseRead("builds", available ? async signal => readReleaseBuilds(await buildCall(query, "releaseBuilds", { limit: 50 }, signal)) : null, showingList, query);
   const profiles = useReleaseRead("build-profiles", available ? async signal => readProfiles(await query.releaseCandidateProfiles({}, { signal })) : null, showingList, query);
-  const canStart = profiles.fresh && profiles.value?.some(p => p.build);
+  const canStart = profiles.value?.some(p => p.build);
   if (starting) return <StartRelease query={query} connected={connected} visible={visible} back={() => setStarting(false)} prepared={id => { setStarting(false); selectIntent(id); }} />;
   if (preparing) return <PrepareRelease query={query} connected={connected} visible={visible} back={() => setPreparing(false)} prepared={(id) => { setPreparing(false); select(id); }} />;
   if (selected) return <CandidatePage key={selected} candidateId={selected} query={query} connected={connected} visible={visible} back={() => select("")} backLabel={intentId ? "Cut release" : undefined} />;
   if (intentId) return <ReleaseJourney key={intentId} intentId={intentId} query={query} connected={connected} visible={visible} back={() => selectIntent("")} onCandidate={select} {...navigation} />;
   return <div className="os-cluster os-release-list" ref={list}>
-    <Head title="Releases">{available ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
+    <Head title="Releases">{available && (profiles.value !== null || profiles.error) ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
     {!available ? <Notice sentence="Disconnected. Releases will update when the cluster reconnects." /> : null}
     <ReadFailure error={page.error} retry={page.retry} />
     <ReadFailure error={builds.error} retry={builds.retry} />
@@ -84,7 +84,7 @@ function CandidatePage({ candidateId, query, connected, visible, back, backLabel
   const candidate = useReleaseRead(candidateId, available ? async (signal) => readCandidate(await query.releaseGetCandidate({ candidateId }, { signal }), candidateId) : null, visible, query);
   const history = useReleaseRead(candidateId, available ? async (signal) => readPublications(await query.releaseCandidatePublications({ candidateId }, { signal }), candidateId) : null, visible, query);
   const drafts = useReleaseRead(candidateId, available ? async (signal) => readDrafts(await query.releaseCandidateDrafts({ candidateId }, { signal }), candidateId) : null, visible, query);
-  const targets = useReleaseRead(candidateId, available ? async (signal) => readTargets(await query.releaseCandidateTargets({ candidateId }, { signal }), candidateId) : null, visible, query);
+  const targets = useReleaseRead(candidateId, available && (candidate.error || candidate.fresh && candidate.value?.catalog?.state !== "sealed") ? async (signal) => readTargets(await query.releaseCandidateTargets({ candidateId }, { signal }), candidateId) : null, visible, query);
   const [destination, openDestination] = useState<string | null>(null);
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -211,7 +211,7 @@ function CandidatePage({ candidateId, query, connected, visible, back, backLabel
       {record?.state === "archived" ? <Notice sentence="This release’s build inputs are archived. Its recorded approval and publication history remain available." /> : null}
       <ReadFailure error={candidate.error || history.error || drafts.error} retry={reread} />
       {record && history.fresh && drafts.fresh && !consistent ? <Notice tone="error" sentence="The recorded release history does not match this approval and its destinations." /> : null}
-      <ReadFailure error={targets.error} retry={targets.retry} />
+      <ReadFailure error={record?.catalog?.state === "sealed" ? "" : targets.error} retry={targets.retry} />
       {error ? <Notice tone="error" sentence={error} next="The request may have completed. Check the release status before trying again." /> : null}
       {!record && available && !candidate.error ? <ContentSkeleton label="Loading release" /> : null}
       {record && selected ? <PublicationDetails record={record} selected={selected} target={target} publication={publication} draft={draft} targetsKnown={targets.fresh} historyKnown={history.fresh} /> : record ? <ReviewDetails record={record} targets={targets.value} history={history.value} drafts={drafts.value} open={(d) => { confirm(null); setError(""); openDestination(destinationKey(d)); }} /> : null}

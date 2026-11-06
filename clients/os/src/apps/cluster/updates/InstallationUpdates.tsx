@@ -14,7 +14,7 @@ export interface InstallationPlan extends InstallationChoice {
   observation?: InstallationObservation;
 }
 export interface InstallationPreparation extends InstallationChoice { installationId: string; preparationId: string; requestId: string; expectedCurrentRevision: string; state: string; canResume: boolean }
-export interface InstallationStatus { applications: InstallationApplication[]; preparation: InstallationPreparation | null; installationId: string; currentRevision: string; choices: InstallationChoice[]; active: InstallationPlan | null; latest: InstallationPlan | null; proposalBaseRevision: string; proposals: InstallationProposal[]; choicesWarning: string; proposalWarning: string }
+export interface InstallationStatus { proposalLandingMode?: string; applications: InstallationApplication[]; preparation: InstallationPreparation | null; installationId: string; currentRevision: string; choices: InstallationChoice[]; active: InstallationPlan | null; latest: InstallationPlan | null; proposalBaseRevision: string; proposals: InstallationProposal[]; choicesWarning: string; proposalWarning: string }
 type InstallationQuery = Pick<QueryClient, "executeNamed">;
 
 function record(value: unknown): Record<string, unknown> {
@@ -66,7 +66,7 @@ export function readInstallationStatus(result: Result): InstallationStatus {
   const members = applications(v.applications);
   const mixed = v.currentRevision === "" && members.length > 1 && members.every(app => /^[a-f0-9]{40}$/.test(app.currentRevision)) && new Set(members.map(app => app.currentRevision)).size > 1;
   const currentRevision = mixed ? "" : required(v.currentRevision);
-  return { applications: members, choicesWarning: typeof v.choicesWarning === "string" ? v.choicesWarning : "", proposalWarning: typeof v.proposalWarning === "string" ? v.proposalWarning : "", preparation: v.preparation ? readPreparation(v.preparation) : null, installationId: required(v.installationId), currentRevision, choices: v.choices.map(choice), active: v.active ? readInstallationPlan(v.active) : null, latest: v.latest ? readInstallationPlan(v.latest) : null, proposalBaseRevision: typeof v.proposalBaseRevision === "string" ? v.proposalBaseRevision : "", proposals: Array.isArray(v.proposals) ? v.proposals.map(readInstallationProposal) : [] };
+  return { proposalLandingMode: typeof v.proposalLandingMode === "string" ? v.proposalLandingMode : "", applications: members, choicesWarning: typeof v.choicesWarning === "string" ? v.choicesWarning : "", proposalWarning: typeof v.proposalWarning === "string" ? v.proposalWarning : "", preparation: v.preparation ? readPreparation(v.preparation) : null, installationId: required(v.installationId), currentRevision, choices: v.choices.map(choice), active: v.active ? readInstallationPlan(v.active) : null, latest: v.latest ? readInstallationPlan(v.latest) : null, proposalBaseRevision: typeof v.proposalBaseRevision === "string" ? v.proposalBaseRevision : "", proposals: Array.isArray(v.proposals) ? v.proposals.map(readInstallationProposal) : [] };
 }
 type InstallationArguments = {
   releaseInstallationStatus: Record<string, never>;
@@ -78,6 +78,7 @@ type InstallationArguments = {
   releaseRollbackInstallation: Parameters<QueryClient["releaseRollbackInstallation"]>[0];
   releaseProposeInstallation: { installationId: string; requestId: string; candidateId: string; catalogDigest: string; expectedBaseRevision: string };
   releaseObserveInstallationProposal: { proposalId: string };
+  releaseLandInstallationProposal: Parameters<QueryClient["releaseLandInstallationProposal"]>[0];
 };
 export async function installationCall<Name extends keyof InstallationArguments>(query: InstallationQuery, name: Name, args: InstallationArguments[Name], signal?: AbortSignal) {
   return query.executeNamed(name, `builtin ${name}(${Object.entries(args).map(([key, value]) => `${key}: ${renderMemQLValue(value)}`).join(", ")})`, { signal });

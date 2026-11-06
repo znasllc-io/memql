@@ -77,3 +77,28 @@ func TestRepositoryAuthorityRequiresTheProvidersExactStableIdentity(t *testing.T
 		}
 	}
 }
+
+func TestRepositoryOwnerWriterUsesOnlyTheCurrentPersonGrant(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	hub := installedRepo(newGrantHub(), "acme", "widget")
+	hub.body("/repos/acme/widget", http.StatusOK, `{"id":123,"full_name":"acme/widget","has_pull_requests":false,"permissions":{"push":true}}`)
+	i, _, _, _ := grantHarness(t, hub, sealedGrantRow(t, grantRowOpts{}))
+	token, err := i.RepositoryOwnerWriterToken(context.Background(), grantCredentialId, grantOwner, "acme", "widget")
+	if err != nil || token == "" {
+		t.Fatalf("owner writer unavailable: %v", err)
+	}
+	if hub.hits("/app/installations/42/access_tokens") != 0 {
+		t.Fatal("owner action borrowed an installation token")
+	}
+	for _, body := range []string{
+		`{"id":123,"full_name":"acme/widget","has_pull_requests":true,"permissions":{"push":true}}`,
+		`{"id":123,"full_name":"acme/widget","permissions":{"push":true}}`,
+		`{"id":123,"full_name":"acme/widget","has_pull_requests":false,"permissions":{"pull":true}}`,
+	} {
+		hub.body("/repos/acme/widget", http.StatusOK, body)
+		token, err = i.RepositoryOwnerWriterToken(context.Background(), grantCredentialId, grantOwner, "acme", "widget")
+		if err == nil || token != "" {
+			t.Fatal("changed or unknown policy obtained owner writer")
+		}
+	}
+}

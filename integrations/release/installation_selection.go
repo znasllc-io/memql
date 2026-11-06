@@ -75,7 +75,7 @@ func (i *Integration) selectedInstallation(ctx context.Context) (*installation.P
 			return nil, cfg, e
 		}
 		for _, p := range proposals {
-			if p.State == "merged" && p.InstallationID == cfg.InstallationID && !seen[p.CandidateID] {
+			if (p.State == "merged" || p.State == "landed") && p.InstallationID == cfg.InstallationID && !seen[p.CandidateID] {
 				cfg.Choices = append(cfg.Choices, installationChoice{p.CandidateID, p.CatalogDigest, p.OverlayRevision, "Reviewed installation update"})
 				seen[p.CandidateID] = true
 			}
@@ -142,6 +142,7 @@ func (i *Integration) installationStatusView(ctx context.Context, status install
 		return out
 	}
 	out["proposalBaseRevision"] = head
+	out["proposalLandingMode"] = configuration.LandingMode
 	return out
 }
 func (i *Integration) handleInstallationPrepare(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

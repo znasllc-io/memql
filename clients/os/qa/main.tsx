@@ -413,7 +413,7 @@ function settingsStore() {
  * the wrong height, and a wizard judged outside a bounded body has no floor --
  * its action bar is only at the bottom of something that has a bottom.
  */
-function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
+function WindowBody({ fallback, children, width = new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
     <div className="os-window" role="dialog" aria-label={fallback} data-os-window={fallback === "Fleet" ? "fleet" : undefined} style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
@@ -946,6 +946,32 @@ function installationPreview(initial: "prepared" | "preparing" | "applying" | "c
   return () => <InstallationPreview />;
 }
 
+function repositoryOwnerView(state: "ready" | "landed" | "failure" | "empty") {
+  return {
+    seed: {
+      repositoryAuthority: { sourceId:"source-one",repository:"znasllc-io/memql",repositoryId:42,canWrite:true,canRequest:true,route:"own",landingMode:"owner_push",operations:["propose_change"] },
+      repositoryChangeError: state === "failure" ? "The default branch moved since review. Prepare a new proposal." : undefined,
+      changeRequests: state === "empty" ? [] : [{id:"version-request",operation:"propose_change",state:"approved",statement:"Bump engine to 0.31.19",repository:"znasllc-io/memql",paths:["VERSION"],expiresAt:"2026-12-01T12:00:00Z",proposal:{state:"complete",landingMode:"owner_push",branch:"memql/change-version",commit:"a".repeat(40),expectedHead:"b".repeat(40),baseBranch:"main",landedCommit:state === "landed" ? "a".repeat(40) : ""}}],
+    },
+    framed:true,
+    render: () => <WindowBody fallback="Pipelines"><RepositoryChange sourceId="source-one" /></WindowBody>,
+  };
+}
+function OwnerInstallationPreview() {
+  const query=useMemo(() => {
+    let landed=false;
+    const answer=(payload:object)=>new Result({bundle:{nodes:[{id:"installation",payload}]}} as never);
+    const proposal=()=>({proposalId:"proposal-one",installationId:"qa-installation",candidateId:"sha256:"+"a".repeat(64),catalogDigest:"sha256:"+"b".repeat(64),state:landed?"landed":"proposed",landingMode:"owner_push",repository:"znasllc-io/memql-znas",baseBranch:"main",expectedBaseRevision:"b".repeat(40),proposedCommit:"c".repeat(40),overlayRevision:landed?"c".repeat(40):""});
+    return {executeNamed:async(name:string)=>{
+      if(name === "releaseLandInstallationProposal") {landed=true;return answer(proposal());}
+      if(name === "releaseObserveInstallationProposal") return answer(proposal());
+      if(name !== "releaseInstallationStatus") throw new Error("No installation plan was requested in this fixture.");
+      return answer({installationId:"qa-installation",currentRevision:"b".repeat(40),choices:[],active:null,proposalLandingMode:"owner_push",proposals:[proposal()]});
+    }};
+  },[]);
+  return <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected /></WindowBody>;
+}
+
 function repositoryDeliveryView(state: "compose" | "waiting" | "attention" | "queued" | "merged") {
   const reason = { compose: "", waiting: 'Required check "ci-required" is still running.', attention: "A required GitHub review or CODEOWNER approval is still needed.", queued: "GitHub is verifying this change in the merge queue.", merged: "GitHub merged this reviewed change." }[state];
   return {
@@ -1143,6 +1169,11 @@ const VIEWS: Record<
   "nexus-readable-waiting": { connect: () => readableNexus("waiting"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-failed": { connect: () => readableNexus("failed"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-long": { connect: () => readableNexus("long"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "repository-owner-ready": repositoryOwnerView("ready"),
+  "repository-owner-landed": repositoryOwnerView("landed"),
+  "repository-owner-failure": repositoryOwnerView("failure"),
+  "repository-owner-empty": repositoryOwnerView("empty"),
+  "installation-owner-proposal": { render: () => <OwnerInstallationPreview /> },
   "repository-delivery-compose": repositoryDeliveryView("compose"),
   "repository-delivery-waiting": repositoryDeliveryView("waiting"),
   "repository-delivery-attention": repositoryDeliveryView("attention"),

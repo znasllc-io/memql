@@ -2595,6 +2595,18 @@ release catalog” records the signed publication evidence after confirmation. I
 completion comes from a fresh candidate read, including recovery from a lost reply.
 Unavailable catalog metadata does not hide candidate history or imply an absent
 record. Installation is a separate choice; publication alone does not update it.
+A sealed release does not re-resolve current publication targets when reopened
+after an engine upgrade. Its installation handoff carries the exact candidate,
+catalog digest and display label through the Cluster app intent; receiving native
+authority remains mandatory.
+
+Repository change requests support GitHub's explicit owner-push policy. A prepared
+branch has an exact diff link and a separate confirmation before `main` moves.
+The UI offers this only with fresh own-source authority and a fresh saved proposal.
+The server independently checks ownership, policy, revocation and the exact commit.
+Installation proposals use the same separate confirmation when operator configuration
+selects `landingMode: "owner_push"`. A landed pin becomes a reviewed installation
+choice; it does not apply a plan. Reconnecting and status refreshes never land changes.
 
 ### Mesh (epic memql#5338)
 

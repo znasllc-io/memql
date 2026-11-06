@@ -146,3 +146,25 @@ partial group starts, delayed request fencing, migration refusal and terminal
 rollback. It does not prove an installed Argo deployment, production catalog
 availability or actual serving continuity. Run the separate
 [continuity rehearsal](installation-continuity-rehearsal.md) for that evidence.
+
+
+## Owner-push installation proposals
+
+`MEMQL_RELEASE_INSTALLATION_OVERLAY` may explicitly select
+`landingMode: "owner_push"`. Omission retains the pull-request path. GitHub must
+report pull requests disabled and confirm the repository's stable identity and
+default branch. Preparation captures signed release pins on a deterministic
+branch. `releaseLandInstallationProposal` confirms that exact commit with the
+connected owner's GitHub user grant. The native fast-forward refuses changed
+bases and reconciles lost replies without rebasing or repeating a different
+change. The separate `landed_commit` receipt makes the revision selectable;
+observation cannot land it and landing cannot apply it.
+
+This does not configure a receiving installation. Activation still requires
+`MEMQL_INSTALLATION_CONFIG_NAME`, the named `installation.json`, authenticated
+catalog and serving probes, registry access, a digest-pinned TLS renderer,
+source capture, scoped Kubernetes permissions, and immutable healthy baseline
+revisions for every application. An Application tracking `main` must be deliberately
+pinned to its currently verified commit before activation. Preserve its UID,
+resource ownership, manual sync and prune protections. Do not advertise deployment
+readiness from a saved proposal or from a healthy Argo status alone.

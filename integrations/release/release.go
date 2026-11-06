@@ -98,6 +98,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "resumeBuild", Description: "Reconcile a saved release and prepare its verified candidate without replacing unknown effects.", Handler: i.handleBuildResume},
 		{Name: "publishBuild", Description: "Run the captured publication recipe for one separately approved release candidate.", Handler: i.handleBuildPublish},
 		{Name: "proposeInstallation", Description: "Propose exact signed image pins in the installation repository for review; never merge or install.", Handler: i.handleInstallationPropose},
+		{Name: "landInstallationProposal", Description: "Confirm the exact saved installation proposal using its connected owner; applying remains separate.", Handler: i.handleInstallationProposalLand},
 		{Name: "observeInstallationProposal", Description: "Verify the exact proposed pull request and make its merged commit selectable.", Handler: i.handleInstallationProposalObserve},
 		{Name: "installationHealth", Description: "Read authenticated receiving identity and verified migration readiness for a bounded continuity probe.", Handler: i.handleInstallationHealth},
 		{Name: "installationStatus", Description: "Read this installation and its available immutable release selections.", Handler: i.handleInstallationStatus},

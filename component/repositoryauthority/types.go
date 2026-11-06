@@ -59,6 +59,7 @@ type Receipt struct {
 	Proposal        *ProposalReceipt     `json:"proposal,omitempty"`
 }
 type Access struct {
+	LandingMode  string   `json:"landingMode"`
 	SourceID     string   `json:"sourceId"`
 	Repository   string   `json:"repository"`
 	RepositoryID int64    `json:"repositoryId"`
@@ -109,6 +110,7 @@ type Deps struct {
 	RemoteStatus  func(context.Context, string, string, string) (Receipt, error)
 	Read          func(context.Context, Authorization, []string) (RepositorySnapshot, error)
 	Propose       func(context.Context, Authorization, Proposal) (ProposalReceipt, error)
+	Land          func(context.Context, Authorization, Proposal, ProposalReceipt, func(context.Context) error) (string, error)
 	// CaptureReview returns the exact compiled prompt source closure and routing
 	// metadata. Review must execute this snapshot without installed fallback.
 	CaptureReview func(context.Context, string) (map[string]any, error)
@@ -136,6 +138,10 @@ type Proposal struct {
 	Files        []Replacement `json:"files"`
 }
 type ProposalReceipt struct {
+	LandingMode    string `json:"landingMode,omitempty"`
+	BaseBranch     string `json:"baseBranch,omitempty"`
+	ExpectedHead   string `json:"expectedHead,omitempty"`
+	LandedCommit   string `json:"landedCommit,omitempty"`
 	State          string `json:"state"`
 	Branch         string `json:"branch,omitempty"`
 	Commit         string `json:"commit,omitempty"`

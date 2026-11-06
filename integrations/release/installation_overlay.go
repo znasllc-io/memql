@@ -45,6 +45,7 @@ type overlayImage struct {
 	Repository string `json:"repository"`
 }
 type overlayConfiguration struct {
+	LandingMode         string                      `json:"landingMode,omitempty"`
 	FormatVersion       int                         `json:"formatVersion"`
 	InstallationID      string                      `json:"installationId"`
 	Repository          string                      `json:"repository"`
@@ -61,6 +62,7 @@ type overlayConfiguration struct {
 
 type overlayRequest struct{ InstallationID, RequestID, CandidateID, CatalogDigest, ExpectedBaseRevision string }
 type overlayRecord struct {
+	RepositoryID      int64                         `json:"repositoryId,omitempty"`
 	ID                string                        `json:"id"`
 	Owner             string                        `json:"owner"`
 	Request           overlayRequest                `json:"request"`
@@ -73,13 +75,18 @@ type overlayRecord struct {
 	FilePreconditions []overlayFilePrecondition     `json:"filePreconditions,omitempty"`
 }
 type InstallationProposal struct {
-	ProposalID      string `json:"proposalId"`
-	InstallationID  string `json:"installationId"`
-	CandidateID     string `json:"candidateId"`
-	CatalogDigest   string `json:"catalogDigest"`
-	State           string `json:"state"`
-	PullRequestURL  string `json:"pullRequestURL,omitempty"`
-	OverlayRevision string `json:"overlayRevision,omitempty"`
+	LandingMode          string `json:"landingMode,omitempty"`
+	Repository           string `json:"repository,omitempty"`
+	BaseBranch           string `json:"baseBranch,omitempty"`
+	ExpectedBaseRevision string `json:"expectedBaseRevision,omitempty"`
+	ProposedCommit       string `json:"proposedCommit,omitempty"`
+	ProposalID           string `json:"proposalId"`
+	InstallationID       string `json:"installationId"`
+	CandidateID          string `json:"candidateId"`
+	CatalogDigest        string `json:"catalogDigest"`
+	State                string `json:"state"`
+	PullRequestURL       string `json:"pullRequestURL,omitempty"`
+	OverlayRevision      string `json:"overlayRevision,omitempty"`
 }
 
 func (i *Integration) ConfigureInstallationOverlay(access OverlayAccess) error {
@@ -165,7 +172,7 @@ func (i *Integration) proposeOverlay(ctx context.Context, cfg overlayConfigurati
 		if prior.Record.Owner != s.owner || prior.Record.Request != r || overlayHash(prior.Record.Configuration) != overlayHash(cfg) {
 			return none, errors.New("installation proposal request was reused with changed input or authority")
 		}
-		if prior.PullRequest > 0 {
+		if prior.PullRequest > 0 || (prior.Record.Configuration.LandingMode == "owner_push" && prior.BranchCommit != "") {
 			return prior, nil
 		}
 		s.record = &prior.Record
@@ -423,6 +430,10 @@ func (s *overlayScope) propose(ctx context.Context, args map[string]any) (any, e
 	if err = s.recordEffect(ctx, `UPDATE release_installation_proposals SET branch_commit=$2 WHERE proposal_id=$1 AND (branch_commit IS NULL OR branch_commit=$2) RETURNING proposal_id`, s.id, commit); err != nil {
 		return nil, err
 	}
+	if s.configuration.LandingMode == "owner_push" {
+		s.proposed = true
+		return nil, nil
+	}
 	token, err = s.token(ctx, true)
 	if err != nil {
 		return nil, err
@@ -447,6 +458,10 @@ func (s *overlayScope) observe(ctx context.Context, args map[string]any) (any, e
 	saved, err := s.load(ctx, s.id)
 	if err != nil {
 		return nil, err
+	}
+	if s.configuration.LandingMode == "owner_push" {
+		// Observation never moves a ref, even when a landing reply was lost.
+		return map[string]any{"landed": saved.LandedCommit != ""}, nil
 	}
 	if saved.PullRequest < 1 || !installationCommit.MatchString(saved.BranchCommit) {
 		return nil, errors.New("installation proposal has no confirmed pull request")
