@@ -364,6 +364,14 @@ func (r *renderer) highlight(b Block, pad [4]float64) error {
 // for every other client. Its line height is 1.4 times its size to the tenth
 // of a pixel; Outlook's shape is that and the padding above and below, rounded
 // up, and the corners are half of it, rounded down.
+//
+// A BUTTON TO A LINK TAG HAS NO VML. A link tag is the recipient's own signed
+// address, and sending accepts one only as the whole href of an <a>
+// (component/campaigns/render_link_safety.go): a VML shape is not an <a>, so a
+// confirmation email whose button carried {{confirmUrl}} on it was refused at
+// send. Outlook gets the same cell and link as every other client instead,
+// padded by mso-padding-alt because Outlook ignores a link's padding, and its
+// corners are square because it ignores border-radius.
 func (r *renderer) button(b Block, pad [4]float64) {
 	link := r.link(b.Href)
 	if link == "" {
@@ -381,21 +389,41 @@ func (r *renderer) button(b Block, pad [4]float64) {
 	vh, radius := strconv.Itoa(int(math.Ceil(outer))), strconv.Itoa(int(math.Floor(outer/2)))
 	fill, ink := r.colour(b.Color, "primary"), r.colour(b.TextColor, "white")
 	href, label := attr(link), escapeText(b.Label)
-	r.out.WriteString(`<td` + r.dataBlock(b) + ` style="padding:` + padCSS(pad) + `"><table cellpadding="0" cellspacing="0" border="0" style="width:100%"><tbody><tr><td align="` + alignment(b.Align, "center") + `">` +
-		msoOpen(w) +
-		`<table cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:` + w + `px"><tbody><tr><td style="width:100%">` +
-		`<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="` + href + `" style="height:` + vh + `px;width:` + w + `px;v-text-anchor:middle;" arcsize="50%" fillcolor="` + fill + `">` +
-		`<v:stroke dashstyle="Solid" weight="0px" color="` + fill + `"/><w:anchorlock/><v:textbox inset="0px,0px,0px,0px">` +
-		`<center dir="false" style="color:` + ink + `;font-family:sans-serif;font-size:` + s + `px;font-weight:700">` + label + `</center></v:textbox></v:roundrect><![endif]-->` +
-		`<!--[if !mso]><!--><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:100%;border-collapse:separate;border-spacing:0"><tbody><tr>` +
-		`<td bgcolor="` + fill + `" style="background-color:` + fill + `;border-bottom:0px solid transparent;border-left:0px solid transparent;border-radius:` + radius + `px;border-right:0px solid transparent;border-top:0px solid transparent;mso-border-alt:none">` +
+	tagged := isLinkTag(link)
+	outlookPadding := ""
+	if tagged {
+		outlookPadding = ";mso-padding-alt:" + py + "px 8px"
+	}
+	cell := `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:100%;border-collapse:separate;border-spacing:0"><tbody><tr>` +
+		`<td bgcolor="` + fill + `" style="background-color:` + fill + `;border-bottom:0px solid transparent;border-left:0px solid transparent;border-radius:` + radius + `px;border-right:0px solid transparent;border-top:0px solid transparent;mso-border-alt:none` + outlookPadding + `">` +
 		`<a href="` + href + `" target="_blank" rel="noopener" style="color:` + ink + `;text-decoration:none;display:block;padding-top:` + py + `px;padding-bottom:` + py + `px;padding-left:8px;padding-right:8px;text-align:center;` +
 		r.fontFamily(b.Font, "heading") + `font-size:` + s + `px;font-weight:700;letter-spacing:0em;line-height:` + lh + `px;box-sizing:border-box;mso-line-height-rule:exactly">` +
 		`<span style="word-break:break-word;line-height:` + lh + `px;color:` + ink + `;mso-style-textfill-type:solid;mso-style-textfill-fill-color:` + ink + `">` + label + `</span></a>` +
-		`</td></tr></tbody></table><!--<![endif]-->` +
+		`</td></tr></tbody></table>`
+	if !tagged {
+		cell = `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="` + href + `" style="height:` + vh + `px;width:` + w + `px;v-text-anchor:middle;" arcsize="50%" fillcolor="` + fill + `">` +
+			`<v:stroke dashstyle="Solid" weight="0px" color="` + fill + `"/><w:anchorlock/><v:textbox inset="0px,0px,0px,0px">` +
+			`<center dir="false" style="color:` + ink + `;font-family:sans-serif;font-size:` + s + `px;font-weight:700">` + label + `</center></v:textbox></v:roundrect><![endif]-->` +
+			`<!--[if !mso]><!-->` + cell + `<!--<![endif]-->`
+	}
+	r.out.WriteString(`<td` + r.dataBlock(b) + ` style="padding:` + padCSS(pad) + `"><table cellpadding="0" cellspacing="0" border="0" style="width:100%"><tbody><tr><td align="` + alignment(b.Align, "center") + `">` +
+		msoOpen(w) +
+		`<table cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:` + w + `px"><tbody><tr><td style="width:100%">` +
+		cell +
 		`</td></tr></tbody></table>` +
 		msoClose +
 		`</td></tr></tbody></table></td>`)
+}
+
+// isLinkTag reports whether href is one of the four link tags, the addresses
+// sending fills in per recipient.
+func isLinkTag(href string) bool {
+	for _, tag := range linkTags {
+		if href == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // divider writes a rule across the column.

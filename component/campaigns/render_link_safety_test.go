@@ -1,6 +1,11 @@
 package campaigns
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
+)
 
 func TestRecipientLinksCannotEscapeThroughTemplateContexts(t *testing.T) {
 	for _, body := range []string{
@@ -25,5 +30,25 @@ func TestRecipientLinksCannotEscapeThroughTemplateContexts(t *testing.T) {
 	}
 	if err := validateRecipientLinkLocations(Template{TextBody: `https://outside.test/?q={{viewUrl}}`}); err == nil {
 		t.Fatal("plain-text token exfiltration admitted")
+	}
+}
+
+// TestEveryBuiltinLayoutCanBeSent: what the email builder writes for each of its
+// layouts has to pass the send check. The confirmation layout puts {{confirmUrl}}
+// on a button, and the builder used to draw Outlook's copy of a button as a VML
+// shape whose href carried the link: not an <a>, so every confirmation email
+// built in the app was refused at send ("a recipient link must be the whole href
+// of an email link").
+func TestEveryBuiltinLayoutCanBeSent(t *testing.T) {
+	for _, info := range emaildoc.Layouts() {
+		t.Run(info.ID, func(t *testing.T) {
+			r, err := emaildoc.Render(context.Background(), info.Document, nil, emaildoc.RenderOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateRecipientLinkLocations(Template{Subject: r.Subject, HTMLBody: r.HTML, TextBody: r.Text}); err != nil {
+				t.Errorf("cannot be sent: %v", err)
+			}
+		})
 	}
 }

@@ -2867,3 +2867,49 @@ func TestFooterLineGapZeroKeepsExistingOutput(t *testing.T) {
 		t.Fatalf("a lineGap of 0 is not written:\n%s", data)
 	}
 }
+
+// TestAButtonToARecipientLinkIsALinkInOutlookToo: a link tag is the
+// recipient's own signed address, and sending accepts one only as the whole
+// href of an <a> (component/campaigns/render_link_safety.go). Outlook's rounded
+// button is a VML shape, not an <a>, so a confirmation email whose button
+// carried {{confirmUrl}} on that shape was refused at send. A button to a link
+// tag therefore draws the table and <a> every other client gets for Outlook
+// too: square corners in desktop Outlook, padded by mso-padding-alt, still the
+// button's width, and sendable. A button to any other address keeps its
+// rounded VML shape.
+func TestAButtonToARecipientLinkIsALinkInOutlookToo(t *testing.T) {
+	ctx := context.Background()
+	only := func(b Block) Document { return Document{Subject: "Hello", Theme: neutral(), Blocks: []Block{b}} }
+	for _, tag := range LinkTags() {
+		r, err := Render(ctx, only(Block{ID: "b", Type: "button", Label: "Go", Href: tag}), nil, RenderOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(r.HTML, "v:roundrect") {
+			t.Errorf("%s: a VML shape carries the link", tag)
+		}
+		if n := strings.Count(r.HTML, `href="`+tag+`"`); n != 1 {
+			t.Errorf("%s: %d places carry the link, want one <a>", tag, n)
+		}
+		if strings.Contains(r.HTML, "<!--[if !mso]>") {
+			t.Errorf("%s: the link is hidden from Outlook", tag)
+		}
+		for _, want := range []string{`<a href="` + tag + `"`, `width="300" style="width:300px"`, "mso-padding-alt:11px 8px", "border-radius:25px"} {
+			if !strings.Contains(r.HTML, want) {
+				t.Errorf("%s: the button lacks %q", tag, want)
+			}
+		}
+		if !strings.Contains(r.Text, "Go: "+tag) {
+			t.Errorf("%s: the text part lost the link: %q", tag, r.Text)
+		}
+	}
+	r, err := Render(ctx, only(Block{ID: "b", Type: "button", Label: "Go", Href: "https://example.com"}), nil, RenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`<v:roundrect`, `href="https://example.com" style="height:50px;width:300px;`, "<!--[if !mso]><!-->"} {
+		if !strings.Contains(r.HTML, want) {
+			t.Errorf("a button to an ordinary address lost its Outlook shape: no %q", want)
+		}
+	}
+}
