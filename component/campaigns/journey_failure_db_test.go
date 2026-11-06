@@ -14,17 +14,17 @@ func TestJourneyPreflightFailuresStopWithoutSubmittingMail(t *testing.T) {
 	wired := NewWorker(n.worker.store.engine, nil, nil, quietLogger(), gatePoolFor(t))
 	n.worker.journeyGate = wired.journeyGate
 	template := n.suffix + "-tpl"
-	publish := func(status string) {
+	publish := func(htmlBody string) {
 		t.Helper()
 		rows, err := n.store.rows(memql.ContextWithFreshRead(n.owner), call("query", "templateById", arg{"templateId", template}))
 		if err != nil || len(rows) != 1 {
 			t.Fatalf("template %v %v", rows, err)
 		}
-		if err = n.worker.newsletterWrite(n.owner, "updateTemplate", map[string]any{"templateId": template, "name": "Welcome", "subject": "Welcome", "textBody": "Hello", "status": status, "versionTime": memql.VersionTimeAfter(templateTime(rows[0]["createdAt"]), time.Now()).Format(time.RFC3339Nano)}); err != nil {
+		if err = n.worker.newsletterWrite(n.owner, "updateTemplate", map[string]any{"templateId": template, "name": "Welcome", "subject": "Welcome", "textBody": "Hello", "htmlBody": htmlBody, "status": "ready", "versionTime": memql.VersionTimeAfter(templateTime(rows[0]["createdAt"]), time.Now()).Format(time.RFC3339Nano)}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	publish("ready")
+	publish("<p>Hello</p>")
 	journeyID := n.suffix + "-journey"
 	nodes, err := n.worker.handleSaveJourney(n.owner, map[string]any{"journeyId": journeyID, "accountId": n.org, "name": "Welcome", "trigger": map[string]any{"kind": "joined", "audienceId": n.audience}, "steps": []map[string]any{{"id": "welcome", "kind": "send", "templateId": template, "senderIdentityId": n.suffix + "-sender"}}}, 0)
 	if err != nil {
@@ -41,9 +41,12 @@ func TestJourneyPreflightFailuresStopWithoutSubmittingMail(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("recipient %v %v", found, err)
 	}
-	// A resource can become unready after activation. Recheck it before each
-	// delivery; the run must not submit an email from that now-draft template.
-	publish("draft")
+	// A resource can become unsendable after activation. Recheck it before each
+	// delivery; the run must not submit an email whose unsubscribe link cannot be
+	// placed. Unlike an unpublished template or a sender that is turned off, which
+	// hold the step (journey_failure_test.go), waiting changes nothing here: the
+	// step fails after its attempts.
+	publish("<p>Hello</p><!--")
 	now := time.Now()
 	n.worker.now = func() time.Time { return now }
 	enrollmentID := journeyEnrollmentID(journeyID, recipientID, recipient.JoinedAt)
@@ -59,7 +62,7 @@ func TestJourneyPreflightFailuresStopWithoutSubmittingMail(t *testing.T) {
 			t.Fatalf("attempt %d: %v", attempt, row)
 		}
 		if n.sender.count() != 0 {
-			t.Fatal("unpublished template reached transport")
+			t.Fatal("an unsendable template reached transport")
 		}
 		if attempt < journeyMaxAttempts {
 			if str(row, "status") != "active" || !templateTime(row["nextAt"]).After(now) {

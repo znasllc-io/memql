@@ -9,6 +9,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // send_to_recipient.go -- the marketing lane's primitive (memql#4829,
@@ -83,6 +84,49 @@ func isUndecided(err error) bool {
 	return errors.As(err, &u)
 }
 
+// sendHeld (errSendHeld) is a send refused because of configuration an operator
+// can fix where it stands: the template is not published (a draft, or archived),
+// the sender is turned off or no longer exists, or the organization is not
+// active. Nothing about the person or the message is wrong, and nothing was
+// attempted. An automation holds the step until the configuration is fixed,
+// spending no attempt on it, and says why with reason: a sentence for the
+// operator that names what to fix. Every other refusal is not held.
+type sendHeld struct{ reason string }
+
+func (h sendHeld) Error() string { return h.reason }
+
+// templateHeld is the hold of a send whose template is not published.
+func templateHeld(t Template) error {
+	name := strings.TrimSpace(t.Name)
+	if name == "" {
+		name = strings.TrimSpace(t.Subject)
+	}
+	if t.Status == "archived" {
+		return sendHeld{reason: fmt.Sprintf("“%s” is archived. Restore and publish it to send this email.", name)}
+	}
+	return sendHeld{reason: fmt.Sprintf("Publish “%s” to send this email.", name)}
+}
+
+// uncertainSend is a send whose outcome is not known: the provider may have
+// accepted the message although nothing said so -- no answer came back, or the
+// connection dropped after the request went out. Its receipt keeps saying that an
+// attempt began, so nothing submits it again until the provider's own record of
+// it says it was not accepted (reconcileAttempt). The text is the wrapped error's.
+type uncertainSend struct{ error }
+
+func (e uncertainSend) Unwrap() error { return e.error }
+
+// isUncertainSend reports whether err is a send that may have been accepted
+// (uncertainSend).
+func isUncertainSend(err error) bool {
+	var u uncertainSend
+	return errors.As(err, &u)
+}
+
+// singleSendIntent is the transport intent of a single send made under a receipt:
+// what its provider's own record of the submission is kept under.
+func singleSendIntent(receiptID string) string { return "campaign-single:" + receiptID }
+
 func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, opts singleSend) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
@@ -119,7 +163,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		tmpl = *opts.snapshot
 	}
 	if tmpl.Status != "ready" {
-		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
+		return nil, templateHeld(tmpl)
 	}
 
 	var recipient Recipient
@@ -199,6 +243,9 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	identity, refusal := w.resolveSendIdentityFor(ctx, campaign, opts.orderRecipient != nil && opts.installationSender)
 	if refusal.refused() {
+		if refusal.Held != "" {
+			return nil, sendHeld{reason: refusal.Held}
+		}
 		err := fmt.Errorf("campaigns.sendToRecipient: %s", refusal.Reason)
 		if !refusal.Terminal {
 			// An identity that could not be READ ("the send will retry"), as opposed
@@ -298,7 +345,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// record would leave a receipt saying an attempt began, which replay never sends
 	// again, for a message that never went out.
 	if receipt != nil {
-		msg.IntentID = "campaign-single:" + receipt.id
+		msg.IntentID = singleSendIntent(receipt.id)
 		msg.DeliveryID = singleDeliveryRowID(argString(args, "requestId"), recipient.ID)
 		receipt.accountID = campaign.AccountID
 		reserved, giveBack, err := w.reserveDelivery(ctx, msg, identity.SendAs)
@@ -307,6 +354,15 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		}
 		defer giveBack()
 		ctx = reserved
+	}
+	// The caller's last word, read under its locks right before the attempt: an
+	// automation re-reads whether it is still on (singleSend.beforeAttempt).
+	if opts.beforeAttempt != nil {
+		if err := opts.beforeAttempt(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if receipt != nil {
 		if err := w.recordAttempt(ctx, receipt); err != nil {
 			return nil, undecided(err)
 		}
@@ -320,7 +376,22 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		recordOutcome(Delivery{
 			Status: "failed", Attempts: 1, LastError: sendErr.Error(),
 		})
-		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
+		err := fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
+		if receipt == nil {
+			return nil, err
+		}
+		// Only a definite non-acceptance -- the provider refused it, or it was refused
+		// before anything went out -- lets the receipt say so, and the next attempt
+		// submit it again. Anything else may follow an acceptance nobody heard about:
+		// the receipt keeps saying an attempt began, and the provider's record decides.
+		if !email.IsNotAccepted(sendErr) {
+			return nil, uncertainSend{err}
+		}
+		if markErr := w.saveReceiptHeld(ctx, receipt, receiptFailed, nil); markErr != nil {
+			w.logger.Warn("campaigns.sendToRecipient: a refused send could not be recorded as refused; its provider's record decides it", "receipt", receipt.id, "error", markErr)
+			return nil, uncertainSend{err}
+		}
+		return nil, err
 	}
 
 	w.reputation.observeAs(now, identity.Label, recipient.Email, "accepted")
@@ -357,7 +428,22 @@ func (w *Worker) recordAttempt(ctx context.Context, receipt *singleSendReceipt) 
 		return fmt.Errorf("campaigns.sendToRecipient: the send's lock is not held, so its attempt is not recorded: %w", err)
 	}
 	return detachedWrite(ctx, func(ctx context.Context) error {
-		return w.saveSingleSendReceipt(ctx, receipt, "attempting", nil)
+		return w.saveSingleSendReceipt(ctx, receipt, receiptAttempting, nil)
+	})
+}
+
+// saveReceiptHeld writes what became of an attempt as recordAttempt writes that it
+// began: only while the receipt's lock is held, and on detachedWrite. A receipt
+// written after the lock was given back could land beside another replica's.
+func (w *Worker) saveReceiptHeld(ctx context.Context, receipt *singleSendReceipt, status string, result map[string]any) error {
+	if receipt.hold == nil {
+		return errors.New("campaigns.sendToRecipient: the send does not hold its receipt's lock, so its receipt is not written")
+	}
+	if err := receipt.hold.Verify(ctx); err != nil {
+		return fmt.Errorf("campaigns.sendToRecipient: the send's lock is not held, so its receipt is not written: %w", err)
+	}
+	return detachedWrite(ctx, func(ctx context.Context) error {
+		return w.saveSingleSendReceipt(ctx, receipt, status, result)
 	})
 }
 

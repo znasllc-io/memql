@@ -137,8 +137,9 @@ func RefuseLogOnly(stage string) error {
 //
 // Cause carries the sentinel through, so both questions a caller can ask --
 // "may I retry this?" via email.IsPermanent, and "is this the log-only
-// refusal?" via errors.Is -- are answerable from the one value.
+// refusal?" via errors.Is -- are answerable from the one value. Nothing was
+// handed to a provider, so it was not accepted either (NotAccepted).
 func refusalSendError(stage string) error {
 	err := RefuseLogOnly(stage)
-	return &SendError{Permanent: true, Detail: err.Error(), Cause: err}
+	return &SendError{Permanent: true, NotAccepted: true, Detail: err.Error(), Cause: err}
 }

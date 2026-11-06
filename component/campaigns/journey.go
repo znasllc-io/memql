@@ -17,6 +17,29 @@ const journeyEnrollLag = 2 * time.Minute
 const journeyDuePages = 5
 const journeyMaxAttempts = 3
 
+// How long a step waits before it is looked at again when its send cannot be
+// decided yet. A held step (sendHeld) waits for an operator to fix its template,
+// sender or organization. An uncertain one waits for the provider's record of its
+// submission; past journeyConfirmLimit without one, it fails.
+const (
+	journeyHeldRetry      = 15 * time.Minute
+	journeyUncertainRetry = 5 * time.Minute
+	journeyConfirmLimit   = 24 * time.Hour
+)
+
+// unconfirmedSendReason is why a step whose send the provider never confirmed
+// failed.
+const unconfirmedSendReason = "The send could not be confirmed: the provider did not say within 24 hours whether it accepted this email, so it is not sent again."
+
+// errJourneyNotActive stops a step's send whose automation was turned off after
+// the step began: nothing is attempted, and the step waits where it is.
+var errJourneyNotActive = errors.New("campaigns: the automation is no longer on")
+
+// journeyLock is the one lock of an automation. Turning it on, pausing, editing,
+// archiving, enrolling and every step's send take it, so a pause never lands
+// between a step's check that the automation is on and its email going out.
+func journeyLock(journeyID string) string { return "campaign-journey:journey:" + bare(journeyID) }
+
 func journeyEnrollmentID(journeyID, recipientID string, joinedAt time.Time) string {
 	return sha256Hex("campaign-journey-enrollment\x00" + bare(journeyID) + "\x00" + bare(recipientID) + "\x00" + joinedAt.UTC().Format(time.RFC3339Nano))
 }
@@ -81,10 +104,11 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 	if w.journeyGate == nil {
 		return fmt.Errorf("automation coordination is unavailable")
 	}
-	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), journeyLock(id))
 	if err != nil {
 		return err
 	}
+	held := false
 	err = func() error {
 		defer hold.Release()
 		row, err := w.newsletterRow(systemCtx, "journeyById", "journeyId", id)
@@ -100,7 +124,18 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 		}
 		actor := memql.ContextWithFreshRead(w.ownerActorContext(ctx, j.OwnerUserID))
 		if err = w.requireJourneyOrganization(actor, j.AccountID); err != nil {
-			return fmt.Errorf("journey owner=%q account=%q: %w", j.OwnerUserID, j.AccountID, err)
+			var inactive sendHeld
+			if !errors.As(err, &inactive) {
+				return fmt.Errorf("journey owner=%q account=%q: %w", j.OwnerUserID, j.AccountID, err)
+			}
+			// Nobody is enrolled or mailed while the organization is not active. The
+			// people already in the automation wait where they are, spending nothing,
+			// and the automation says why.
+			held = true
+			if j.LastError == inactive.reason {
+				return nil
+			}
+			return w.journeyWrite(systemCtx, hold, "recordJourneyDrain", map[string]any{"journeyId": id, "lastError": inactive.reason, "versionTime": memql.VersionTimeAfter(j.Revision, w.nowUTC()).Format(time.RFC3339Nano)})
 		}
 		newest, err := w.store.rows(systemCtx, call("query", "newestJourneyEnrollment", arg{"journeyId", id}))
 		if err != nil {
@@ -157,7 +192,7 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 		}
 		return nil
 	}()
-	if err != nil {
+	if err != nil || held {
 		return err
 	}
 	cursor := ""
@@ -197,7 +232,7 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 	// The sending transport may reserve one more. Concurrent drains therefore cannot
 	// exhaust the gate pool while waiting for their own nested receipt connection.
 	receiptID := singleSendReceiptID(owner, journeyRequestID(id, str(scanned, "stepId")))
-	hold, err := w.newsletterGate(context.WithoutCancel(ctx), "campaign-journey:journey:"+journey.ID, "campaign-journey:recipient:"+bare(str(scanned, "recipientId")), "campaign-journey:enrollment:"+id, singleSendLock(receiptID))
+	hold, err := w.newsletterGate(context.WithoutCancel(ctx), journeyLock(journey.ID), "campaign-journey:recipient:"+bare(str(scanned, "recipientId")), "campaign-journey:enrollment:"+id, singleSendLock(receiptID))
 	if err != nil {
 		return err
 	}
@@ -228,6 +263,9 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 	}
 	actor := memql.ContextWithFreshRead(w.ownerActorContext(phase, j.OwnerUserID))
 	if err = w.requireJourneyOrganization(actor, j.AccountID); err != nil {
+		if errors.As(err, new(sendHeld)) {
+			return nil // Made inactive since the drain looked: the step waits, and the next drain says why.
+		}
 		return err
 	}
 	index := integer(row, "stepIndex")
@@ -295,7 +333,6 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 			return w.newsletterWrite(w.systemActorContext(write), "advanceJourneyEnrollment", patch)
 		})
 	}
-	lastError := ""
 	advance := func(delay time.Duration) error {
 		next := index + 1
 		status := "active"
@@ -305,15 +342,62 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 		} else if delay == 0 {
 			status = "completed"
 		}
-		patch := map[string]any{"stepIndex": next, "stepId": nextID, "status": status, "nextAt": w.nowUTC().Add(delay).Format(time.RFC3339Nano), "attempts": 0, "lastError": lastError}
+		patch := map[string]any{"stepIndex": next, "stepId": nextID, "status": status, "nextAt": w.nowUTC().Add(delay).Format(time.RFC3339Nano), "attempts": 0, "lastError": ""}
 		if status == "completed" {
 			patch["completedAt"] = w.nowUTC().Format(time.RFC3339Nano)
 		}
 		return write(patch)
 	}
+	// noteJourney says on the automation, where its operator reads it, why its
+	// sends wait or failed -- or clears that once one goes out. It writes only a
+	// change: the automation's revision is what a person's next edit is checked
+	// against.
+	noteJourney := func(lastError string) error {
+		if j.LastError == lastError {
+			return nil
+		}
+		if err := hold.Verify(phase); err != nil {
+			return err
+		}
+		return detachedWrite(phase, func(write context.Context) error {
+			return w.newsletterWrite(w.systemActorContext(write), "recordJourneyDrain", map[string]any{"journeyId": j.ID, "lastError": lastError, "versionTime": memql.VersionTimeAfter(j.Revision, w.nowUTC()).Format(time.RFC3339Nano)})
+		})
+	}
+	// holdStep leaves the step where it is, due again after delay, spending no
+	// attempt.
+	holdStep := func(delay time.Duration, reason string) error {
+		return write(map[string]any{"status": "active", "attempts": integer(row, "attempts"), "lastError": reason, "nextAt": w.nowUTC().Add(delay).Format(time.RFC3339Nano)})
+	}
+	// unconfirmed waits for the provider's record of a send that may have been
+	// accepted -- it is never submitted again while that record says nothing -- and
+	// gives the step up once a day has passed without an answer.
+	unconfirmed := func(attemptedAt time.Time) error {
+		if attemptedAt.IsZero() || w.nowUTC().Before(attemptedAt.Add(journeyConfirmLimit)) {
+			return holdStep(journeyUncertainRetry, uncertainSendReason)
+		}
+		if err := write(map[string]any{"status": "failed", "attempts": integer(row, "attempts"), "lastError": unconfirmedSendReason}); err != nil {
+			return err
+		}
+		return noteJourney(unconfirmedSendReason)
+	}
 	fail := func(sendErr error) error {
+		if errors.Is(sendErr, errJourneyNotActive) {
+			return nil // Turned off since the step began: it waits, untouched, for the automation.
+		}
 		if errors.Is(sendErr, errCampaignRateLimited) || memql.IsWriteGateBusy(sendErr) || isUndecided(sendErr) || phase.Err() != nil {
 			return sendErr
+		}
+		// Configuration an operator can fix holds the step without spending an
+		// attempt, however long the fix takes.
+		var held sendHeld
+		if errors.As(sendErr, &held) {
+			if err := holdStep(journeyHeldRetry, held.reason); err != nil {
+				return err
+			}
+			return noteJourney(held.reason)
+		}
+		if isUncertainSend(sendErr) {
+			return unconfirmed(w.nowUTC())
 		}
 		attempts := integer(row, "attempts") + 1
 		status := "active"
@@ -323,13 +407,8 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 		if err := write(map[string]any{"status": status, "attempts": attempts, "lastError": sendErr.Error(), "nextAt": w.nowUTC().Add(backoffFor(attempts)).Format(time.RFC3339Nano)}); err != nil {
 			return err
 		}
-		if status == "failed" && j.LastError != sendErr.Error() {
-			if err := hold.Verify(phase); err != nil {
-				return err
-			}
-			return detachedWrite(phase, func(write context.Context) error {
-				return w.newsletterWrite(w.systemActorContext(write), "recordJourneyDrain", map[string]any{"journeyId": j.ID, "lastError": sendErr.Error(), "versionTime": memql.VersionTimeAfter(j.Revision, w.nowUTC()).Format(time.RFC3339Nano)})
-			})
+		if status == "failed" {
+			return noteJourney(sendErr.Error())
 		}
 		return nil
 	}
@@ -345,11 +424,22 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 			return nil, advance(time.Duration(step.Days)*24*time.Hour + time.Duration(step.Hours)*time.Hour)
 		},
 		"campaignJourneyAwaitConfirmation": func(_ context.Context, _ map[string]any) (any, error) {
-			return nil, write(map[string]any{"status": "waiting", "nextAt": w.nowUTC().Add(time.Duration(step.TimeoutDays) * 24 * time.Hour).Format(time.RFC3339Nano), "lastError": lastError, "attempts": 0})
+			return nil, write(map[string]any{"status": "waiting", "nextAt": w.nowUTC().Add(time.Duration(step.TimeoutDays) * 24 * time.Hour).Format(time.RFC3339Nano), "lastError": "", "attempts": 0})
 		},
 		"campaignJourneySend": func(_ context.Context, _ map[string]any) (any, error) {
 			args := map[string]any{"requestId": journeyRequestID(id, step.ID), "templateId": step.TemplateID, "recipientId": recipient.ID, "senderIdentityId": step.SenderIdentityID}
-			opts := singleSend{emailDigest: str(row, "emailDigest"), confirm: step.Kind == "confirm"}
+			opts := singleSend{emailDigest: str(row, "emailDigest"), confirm: step.Kind == "confirm", beforeAttempt: func(context.Context) error {
+				// Read again inside this step's hold, right before delivery: an
+				// automation that is no longer on sends nothing.
+				current, err := w.newsletterRow(systemCtx, "journeyById", "journeyId", j.ID)
+				if err != nil {
+					return undecided(err)
+				}
+				if current == nil || str(current, "status") != "active" {
+					return errJourneyNotActive
+				}
+				return nil
+			}}
 			receipt, ok, err := singleSendReceiptFor(actor, args, opts)
 			if err != nil || !ok {
 				return nil, fmt.Errorf("automation send identity is invalid")
@@ -367,9 +457,15 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 				return nil, err
 			}
 			if result["uncertain"] == true {
-				lastError = str(result, "reason")
+				return map[string]any{"advance": false, "skipped": false}, unconfirmed(templateTime(result["attemptedAt"]))
 			}
-			return map[string]any{"advance": result["sent"] == true || result["uncertain"] == true, "skipped": result["skipped"] == true}, nil
+			if result["sent"] == true {
+				// The automation's email goes out: whatever it said was wrong is not.
+				if err := noteJourney(""); err != nil {
+					w.logger.Warn("campaigns: an automation's last error could not be cleared after a send", "journey", j.ID, "error", err)
+				}
+			}
+			return map[string]any{"advance": result["sent"] == true, "skipped": result["skipped"] == true}, nil
 		},
 	}})
 	return err
@@ -380,7 +476,7 @@ func (w *Worker) retireJourney(ctx, systemCtx context.Context, scanned map[strin
 	if w.journeyGate == nil {
 		return fmt.Errorf("automation coordination is unavailable")
 	}
-	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), journeyLock(id))
 	if err != nil {
 		return err
 	}

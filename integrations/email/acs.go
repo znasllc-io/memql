@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,6 +115,9 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 			replyTo = []map[string]string{{"address": parsed.Address, "displayName": parsed.Name}}
 			continue
 		}
+		if strings.TrimSpace(value) == "" {
+			continue // An empty header says nothing (a single send has no campaign to name).
+		}
 		headers[name] = value
 	}
 	if len(replyTo) == 0 && s.cfg.ReplyTo != "" {
@@ -162,7 +166,7 @@ func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) e
 	if err != nil {
 		// A lost response can follow acceptance. Blindly retrying the POST
 		// duplicates mail. Leave this delivery for explicit reconciliation.
-		return permanentSendRefusal("Azure email acceptance is unknown; check the Azure delivery log before retrying")
+		return unconfirmedSend("Azure email acceptance is unknown; check the Azure delivery log before retrying")
 	}
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
@@ -171,13 +175,20 @@ func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) e
 	}
 	// Never return provider response bodies: they can echo message contents,
 	// addresses or request credentials into the persisted campaign error.
-	if response.StatusCode >= 500 || response.StatusCode == http.StatusRequestTimeout {
-		return permanentSendRefusal("Azure email acceptance is unknown; check the Azure delivery log before retrying")
+	if response.StatusCode == http.StatusConflict {
+		// Azure already holds an operation under this Operation-Id: an earlier
+		// submission of this delivery reached it. Its outcome is Azure's record.
+		return unconfirmedSend("Azure already has an operation for this send; its outcome is being confirmed")
 	}
 	if response.StatusCode < 400 {
-		return permanentSendRefusal("Azure returned an unexpected email response; no redirect was followed")
+		return unconfirmedSend("Azure returned an unexpected email response; no redirect was followed")
 	}
-	return classifyHTTPSend(response.StatusCode, response.Header.Get("Retry-After"), "Azure did not accept the message")
+	// Any other answer refused the request, a server error included: a request
+	// Azure did take despite answering with an error is not taken twice, because
+	// this delivery's next submission goes under the same Operation-Id (submitOnce).
+	refusal := classifyHTTPSend(response.StatusCode, response.Header.Get("Retry-After"), "Azure did not accept the message")
+	refusal.NotAccepted = true
+	return refusal
 }
 
 // acsHoldLimit bounds how long one delivery holds its receipt's lock: the POST (the
@@ -258,7 +269,7 @@ func (s *ACSSender) lockDelivery(ctx context.Context, key string, keys ...string
 		cancel()
 		if memql.IsWriteGateBusy(err) {
 			return nil, &SendError{
-				Throttled: true, RetryAfter: acsBusyRetryAfter,
+				Throttled: true, RetryAfter: acsBusyRetryAfter, NotAccepted: true,
 				Detail: "Azure send coordination is busy, so nothing was submitted; try again in a moment (" + memql.ErrWriteGateBusy.Error() + ")",
 				Cause:  err,
 			}
@@ -289,6 +300,20 @@ func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs, keys ...
 	return withHeldOperation(ctx, key, hold, keys), hold.Release, nil
 }
 
+// submitOnce submits one delivery under its Azure receipt.
+//
+// A delivery Azure definitely did not accept may be submitted again
+// (acsMaySubmitAgain): rendered afresh, as a retry is -- its links are minted again,
+// so its bytes differ -- and to the connection as it is now. It goes under the
+// receipt's Operation-Id, so a request Azure did take despite answering with an
+// error is not taken twice; only an operation Azure took and could not finish
+// (failed, canceled) goes under a new one, since its own id names that failed
+// operation. Azure's repeatable-request headers are not sent: Azure matches a
+// repeat by its content, and a retry's content is never the original's.
+//
+// A delivery Azure may have accepted -- an answer was lost, or is still being
+// confirmed -- is never submitted again, by this caller or any other, until
+// Azure's record of the operation says it was not accepted (acs_operations.go).
 func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) error {
 	if s.operations == nil {
 		return permanentSendRefusal("Azure send receipt storage is unavailable")
@@ -307,36 +332,41 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	if scope.key != key {
 		hold, err := s.lockDelivery(ctx, key)
 		if err != nil {
-			return err
+			return notSubmitted(err)
 		}
 		defer hold.Release()
 		scope = heldOperationScope{key: key, hold: hold}
 	}
 	op, prior, found, err := s.operations.read(ctx, key)
 	if err != nil {
-		return err
+		return notSubmitted(err)
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(body))
 	if found {
-		if op.AccountID != s.cfg.AccountID || op.Endpoint != s.cfg.Endpoint || op.Digest != digest {
-			return permanentSendRefusal("this delivery already has an Azure receipt for a different message or connection; it will not be sent again")
+		again := acsMaySubmitAgain(op.Status)
+		if op.AccountID != s.cfg.AccountID || !again && (op.Endpoint != s.cfg.Endpoint || op.Digest != digest) {
+			return unconfirmedSend("this delivery already has an Azure receipt for a different message or connection; it will not be sent again")
 		}
-		if op.Status != "throttled" {
+		if !again {
 			return operationSendOutcome(op)
 		}
-		if s.now().Before(op.NextPollAt) {
-			return &SendError{Throttled: true, RetryAfter: op.NextPollAt.Sub(s.now()), Detail: "Azure asked this delivery to wait"}
+		if op.Status == "throttled" && s.now().Before(op.NextPollAt) {
+			return &SendError{Throttled: true, NotAccepted: true, RetryAfter: op.NextPollAt.Sub(s.now()), Detail: "Azure asked this delivery to wait"}
 		}
+		if op.Status == "failed" || op.Status == "canceled" {
+			op.ID = id.NewShortId()
+		}
+		op.Endpoint, op.ResourceID, op.Digest = s.cfg.Endpoint, s.cfg.ResourceID, digest
 	} else {
 		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
 		op.ResourceID = s.cfg.ResourceID
-		if message, ok := ctx.Value(acsMessageKey{}).(acsMessageIdentity); ok {
-			op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
-		}
+	}
+	if message, ok := ctx.Value(acsMessageKey{}).(acsMessageIdentity); ok {
+		op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
 	if err = scope.hold.Verify(ctx); err != nil {
-		return err
+		return notSubmitted(err)
 	}
 	// The engine may finish a dispatched mutation after the caller stops
 	// waiting. Keep the reservation until this bounded receipt commit settles.
@@ -346,22 +376,24 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	}
 	finish()
 	if err != nil {
-		return err
-	} // No POST before its durable receipt.
+		// No POST before its durable receipt. (Should the write have landed after
+		// all, the receipt says "submitting" and Azure's record decides.)
+		return notSubmitted(err)
+	}
 	sendErr := s.post(ctx, op.ID, body)
 	op.CheckedAt = s.now().UTC()
-	if sendErr == nil {
+	switch wait, throttled := IsThrottled(sendErr); {
+	case sendErr == nil:
 		op.Status = "accepted"
-	} else if wait, throttled := IsThrottled(sendErr); throttled {
+	case throttled:
 		if wait < time.Second {
 			wait = time.Minute
 		}
 		op.Status, op.NextPollAt = "throttled", s.now().UTC().Add(wait)
-	} else {
-		op.Status, op.Detail = "unknown", "Azure acceptance could not be confirmed. This message will not be submitted again."
-		if e, ok := sendErr.(*SendError); ok && e.StatusCode >= 400 && e.StatusCode < 500 && e.StatusCode != 408 {
-			op.Status, op.Detail = "rejected", "Azure refused this send request."
-		}
+	case IsNotAccepted(sendErr):
+		op.Status, op.Detail = "rejected", "Azure refused this send request."
+	default:
+		op.Status, op.Detail = "unknown", "Azure has not confirmed whether it accepted this message. It is not submitted again unless Azure has no record of it."
 	}
 	// The outcome is written on a context the caller's cancellation does not end,
 	// under the lock this delivery has held since before its first receipt.
@@ -369,7 +401,7 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	defer cancel()
 	current, revision, exists, err := s.operations.read(persist, key)
 	if err != nil || !exists || current.ID != op.ID {
-		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+		return unconfirmedSend("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}
 	// A background GET may already know more than this delayed POST response.
 	if current.Status != "submitting" && current.Status != "unknown" {
@@ -377,23 +409,66 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	}
 	prior = revision
 	if err = scope.hold.Verify(persist); err != nil {
-		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+		return unconfirmedSend("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}
 	if _, err = s.operations.write(persist, key, op, prior); err != nil {
-		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+		return unconfirmedSend("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}
 	return sendErr
 }
 
-func operationSendOutcome(op acsOperation) error {
-	switch op.Status {
-	case "accepted", "running", "succeeded":
-		return nil
-	case "failed", "canceled", "rejected":
-		return permanentSendRefusal("Azure did not complete the previous send; this delivery will not be submitted again")
-	default:
-		return permanentSendRefusal("Azure acceptance is being reconciled; this delivery will not be submitted again")
+// acsMaySubmitAgain says whether a delivery whose receipt has this status was
+// definitely not accepted, so it may be submitted again: Azure refused the request
+// (rejected, throttled), has no record of the operation (notfound), or took it and
+// could not process it (failed, canceled).
+func acsMaySubmitAgain(status string) bool {
+	switch status {
+	case "rejected", "throttled", "notfound", "failed", "canceled":
+		return true
 	}
+	return false
+}
+
+// DeliveryOutcome reads what this delivery's Azure receipt says (DeliveryOutcomes).
+// It submits nothing and takes no lock: the receipt is written under the
+// delivery's lock, and a read that misses a newer version only waits for the next.
+//
+// A delivery with no receipt is unknown, not "not accepted": a receipt is looked up
+// by the identity the caller names, and one asked for under another organization's
+// connection would be missing for a message that went.
+func (s *ACSSender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error) {
+	account := strings.TrimSpace(as.AccountID)
+	if account == "" {
+		account = "self"
+	}
+	if s.operations == nil || msg.IntentID == "" || account != s.cfg.AccountID {
+		return OutcomeUnknown, nil
+	}
+	op, _, found, err := s.operations.read(ctx, s.operationKey(msg.IntentID))
+	switch {
+	case err != nil:
+		return OutcomeUnknown, err
+	case !found:
+		return OutcomeUnknown, nil
+	case acsAccepted(op.Status):
+		return OutcomeAccepted, nil
+	case acsMaySubmitAgain(op.Status):
+		return OutcomeNotAccepted, nil
+	}
+	return OutcomeUnknown, nil
+}
+
+// acsAccepted says whether a receipt with this status records a message Azure
+// accepted.
+func acsAccepted(status string) bool {
+	return status == "accepted" || status == "running" || status == "succeeded"
+}
+
+func operationSendOutcome(op acsOperation) error {
+	if acsAccepted(op.Status) {
+		return nil
+	}
+	return unconfirmedSend("Azure acceptance is being confirmed; this delivery is not submitted again meanwhile")
 }
 
 func (s *ACSSender) sign(req *http.Request, body []byte) {
@@ -408,8 +483,27 @@ func (s *ACSSender) sign(req *http.Request, body []byte) {
 	req.Header.Set("Authorization", "HMAC-SHA256 SignedHeaders=x-ms-date;host;x-ms-content-sha256&Signature="+base64.StdEncoding.EncodeToString(mac.Sum(nil)))
 }
 
+// permanentSendRefusal is a refusal made before anything was submitted: nothing
+// can have been accepted, and this exact message cannot succeed on a retry.
 func permanentSendRefusal(detail string) error {
+	return &SendError{Permanent: true, NotAccepted: true, Detail: detail}
+}
+
+// unconfirmedSend is a delivery Azure may have accepted although nothing said so.
+// Permanent, so no caller retries it blindly; not NotAccepted, so nothing submits
+// it again until Azure's record of the operation says it was not accepted.
+func unconfirmedSend(detail string) error {
 	return &SendError{Permanent: true, Detail: detail}
+}
+
+// notSubmitted is a failure that came before the POST, so nothing was submitted.
+// A failure already classified keeps its own classification.
+func notSubmitted(err error) error {
+	var se *SendError
+	if errors.As(err, &se) {
+		return err
+	}
+	return &SendError{NotAccepted: true, Detail: err.Error(), Cause: err}
 }
 
 func (s *ACSSender) identity(as SendAs) (string, error) {

@@ -3,6 +3,7 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 var singleSendRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,160}$`)
@@ -21,9 +23,25 @@ var singleSendRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,160}$`)
 // the caller's end does not reach, for at most this long.
 const completeReceiptLimit = 5 * time.Second
 
+// What a receipt says about its send. An attempt that began says "attempting"
+// until it is known how it ended: "complete" (the provider accepted it, and its
+// result is replayed) or "failed" (the provider definitely did not accept it, and
+// the next attempt submits it again). An "attempting" receipt is never submitted
+// again while the provider's record of it says nothing (reconcileAttempt).
+const (
+	receiptAttempting = "attempting"
+	receiptComplete   = "complete"
+	receiptFailed     = "failed"
+)
+
 type singleSendReceipt struct {
 	id, fingerprint, accountID string
-	revision                   time.Time
+	// revision is the version this call wrote, zero until it writes one: a send
+	// whose revision is set began.
+	revision time.Time
+	// prior is the stored version this call replaces -- a receipt that failed, or
+	// one whose attempt is being settled -- so the next version is written after it.
+	prior time.Time
 
 	// hold is the gate holding this receipt's lock (singleSendLock of id), set by
 	// whoever holds it before the send is made under the receipt. The receipt that
@@ -61,6 +79,10 @@ type singleSend struct {
 	// emailDigest, when set, is the digest of the address consent was recorded for;
 	// the send is refused if the recipient's address has since changed.
 	emailDigest string
+	// beforeAttempt, when set, is asked right before the attempt is recorded and
+	// the message handed over, under the caller's locks. An error stops the send
+	// with nothing attempted: an automation that was paused sends nothing.
+	beforeAttempt func(context.Context) error
 }
 
 // singleSendReceiptID is the identity of one single send's receipt, and of the lock
@@ -154,19 +176,21 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, r
 		if err := w.requireSendAuthority(ctx, str(row, "accountId")); err != nil {
 			return nil, err
 		}
-		if str(row, "status") == "complete" {
+		switch str(row, "status") {
+		case receiptComplete:
 			result := objectField(row, "result")
 			if result == nil || result["sent"] != true {
 				return nil, fmt.Errorf("campaigns.sendToRecipient: saved send receipt is unreadable; refusing to resubmit")
 			}
 			result["replayed"] = true
 			return resultNode("campaignRecipientSend", result)
+		case receiptFailed:
+			// The provider definitely did not accept the previous attempt. This one
+			// submits it again, as a new version of the same receipt.
+			receipt.prior = templateTime(row["createdAt"])
+		default:
+			return w.reconcileAttempt(ctx, row, receipt, values)
 		}
-		return resultNode("campaignRecipientSend", map[string]any{
-			"sent": false, "skipped": false, "uncertain": true, "replayed": true,
-			"reason":      "The previous send may have reached the provider. It will not be submitted again.",
-			"recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"],
-		})
 	}
 	nodes, err := w.sendToRecipient(ctx, args, receipt, opts)
 	if err != nil || len(nodes) != 1 {
@@ -190,8 +214,71 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, r
 	return nodes, nil
 }
 
+// uncertainSendReason is what a send that may have reached the provider says while
+// the provider's record of it says nothing.
+const uncertainSendReason = "The previous send may have reached the provider. It is not sent again until the provider says whether it accepted it."
+
+// errPriorSendNotAccepted is a previous attempt the provider's record says it did
+// not accept. It is a failed attempt: the next one submits the message again.
+var errPriorSendNotAccepted = errors.New("campaigns.sendToRecipient: the provider did not accept the previous attempt; the next attempt sends it again")
+
+// reconcileAttempt settles a receipt that says an attempt began and never said how
+// it ended: its answer was lost, or so was the node that waited for it. Only the
+// provider's own record of the submission can say (email.DeliveryOutcomes), and
+// nothing is submitted again while it says nothing.
+//
+// Accepted: the receipt is completed and the send replays as sent, with no second
+// submission. Not accepted: the receipt says so, and the next attempt submits the
+// message again (errPriorSendNotAccepted). Otherwise the send is uncertain, as it
+// always was, and says when its attempt began (attemptedAt) so a caller can stop
+// waiting for an answer that will not come.
+func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, receipt *singleSendReceipt, values map[string]string) ([]memorynodes.MemoryNode, error) {
+	receipt.prior, receipt.accountID = templateTime(row["createdAt"]), str(row, "accountId")
+	switch w.priorOutcome(ctx, receipt) {
+	case email.OutcomeAccepted:
+		result := map[string]any{"sent": true, "skipped": false, "recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"]}
+		if err := w.saveReceiptHeld(ctx, receipt, receiptComplete, result); err != nil {
+			// The provider has the message whatever becomes of this write, and a
+			// receipt that still says an attempt began never submits it again.
+			w.logger.Warn("campaigns: an accepted single send could not be recorded as complete", "receipt", receipt.id, "error", err)
+		}
+		result["replayed"] = true
+		return resultNode("campaignRecipientSend", result)
+	case email.OutcomeNotAccepted:
+		if err := w.saveReceiptHeld(ctx, receipt, receiptFailed, nil); err != nil {
+			return nil, undecided(err)
+		}
+		return nil, errPriorSendNotAccepted
+	}
+	return resultNode("campaignRecipientSend", map[string]any{
+		"sent": false, "skipped": false, "uncertain": true, "replayed": true,
+		"reason": uncertainSendReason, "attemptedAt": receipt.prior.UTC().Format(time.RFC3339Nano),
+		"recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"],
+	})
+}
+
+// priorOutcome asks the transport what became of the attempt a receipt records,
+// without submitting anything. A transport that keeps no record of its submissions,
+// or cannot read it now, knows nothing.
+func (w *Worker) priorOutcome(ctx context.Context, receipt *singleSendReceipt) email.Outcome {
+	outcomes, ok := w.resolveSender().(email.DeliveryOutcomes)
+	if !ok {
+		return email.OutcomeUnknown
+	}
+	outcome, err := outcomes.DeliveryOutcome(ctx, email.Message{IntentID: singleSendIntent(receipt.id)}, email.SendAs{AccountID: bare(receipt.accountID)})
+	if err != nil {
+		w.logger.Debug("campaigns: the provider's record of a send could not be read", "receipt", receipt.id, "error", err)
+		return email.OutcomeUnknown
+	}
+	return outcome
+}
+
 func (w *Worker) saveSingleSendReceipt(ctx context.Context, receipt *singleSendReceipt, status string, result map[string]any) error {
-	revision := memql.VersionTimeAfter(receipt.revision, w.nowUTC())
+	after := receipt.revision
+	if receipt.prior.After(after) {
+		after = receipt.prior
+	}
+	revision := memql.VersionTimeAfter(after, w.nowUTC())
 	if result == nil {
 		result = map[string]any{}
 	}

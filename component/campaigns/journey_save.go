@@ -217,8 +217,13 @@ func (w *Worker) requireJourneyOrganization(ctx context.Context, account string)
 	if err != nil {
 		return err
 	}
-	if len(rows) != 1 || str(rows[0], "status") != "active" {
+	if len(rows) != 1 {
 		return fmt.Errorf("organization is not active or accessible")
+	}
+	// An organization that is filed away comes back by an operator's decision; its
+	// automations hold their sends until then (sendHeld).
+	if str(rows[0], "status") != "active" {
+		return sendHeld{reason: "The organization is not active. Make it active again to send this email."}
 	}
 	return nil
 }
@@ -244,7 +249,7 @@ func (w *Worker) handleSaveJourney(ctx context.Context, args map[string]any, _ i
 	if w.journeyGate == nil {
 		return nil, fmt.Errorf("automation coordination is unavailable")
 	}
-	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), journeyLock(id))
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +320,7 @@ func (w *Worker) handleSetJourneyState(ctx context.Context, args map[string]any,
 	if !templateIDPattern.MatchString(id) || w.journeyGate == nil {
 		return nil, fmt.Errorf("select an automation while connected to the cluster")
 	}
-	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), journeyLock(id))
 	if err != nil {
 		return nil, err
 	}

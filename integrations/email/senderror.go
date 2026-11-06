@@ -50,6 +50,15 @@ type SendError struct {
 	Throttled bool
 	// Permanent reports that retrying this exact message cannot succeed.
 	Permanent bool
+	// NotAccepted reports that the message was definitely not accepted: the
+	// provider answered with a refusal, or the message was refused before
+	// anything was submitted. A caller may submit it again.
+	//
+	// Its absence says nothing either way. A request that got no answer, or a
+	// message an earlier submission of which is still being confirmed, may have
+	// been accepted, and is not submitted again until the provider's own record
+	// says it was not (DeliveryOutcomes).
+	NotAccepted bool
 	// Detail is the provider's own message, truncated by the caller
 	// before it is persisted.
 	Detail string
@@ -94,6 +103,15 @@ func IsPermanent(err error) bool {
 	return errors.As(err, &se) && se.Permanent
 }
 
+// IsNotAccepted reports whether err says the message was definitely not
+// accepted (SendError.NotAccepted), so that submitting it again cannot deliver
+// it twice. Anything else -- including an error that is not a SendError -- may
+// follow an acceptance nobody heard about.
+func IsNotAccepted(err error) bool {
+	var se *SendError
+	return errors.As(err, &se) && se.NotAccepted
+}
+
 // IsThrottled reports whether err is a provider rate-limit refusal, and
 // returns the requested wait when the provider supplied one.
 func IsThrottled(err error) (time.Duration, bool) {
@@ -120,20 +138,25 @@ func IsThrottled(err error) (time.Duration, bool) {
 // arriving at this point means the credential itself is wrong, and
 // retrying it per-recipient across a whole audience is a lockout risk
 // rather than a recovery.
+//
+// A throttle and every 4xx refused the REQUEST, so the message was not accepted
+// (NotAccepted). A plain 5xx is a server failing, and the status alone does not
+// say whether the request took effect first: a provider whose next submission
+// cannot be accepted twice (Azure's, under the same Operation-Id) says so itself.
 func classifyHTTPSend(status int, retryAfter string, detail string) *SendError {
 	se := &SendError{StatusCode: status, Detail: detail}
 	wait := parseRetryAfter(retryAfter)
 	switch {
 	case status == http.StatusTooManyRequests:
-		se.Throttled = true
-		se.RetryAfter = wait
+		se.Throttled, se.RetryAfter, se.NotAccepted = true, wait, true
 	case status == http.StatusServiceUnavailable && wait > 0:
-		se.Throttled = true
-		se.RetryAfter = wait
-	case status == http.StatusRequestTimeout, status >= 500:
+		se.Throttled, se.RetryAfter, se.NotAccepted = true, wait, true
+	case status == http.StatusRequestTimeout:
+		se.NotAccepted = true // retryable
+	case status >= 500:
 		// retryable; zero value
 	case status >= 400:
-		se.Permanent = true
+		se.Permanent, se.NotAccepted = true, true
 	}
 	return se
 }

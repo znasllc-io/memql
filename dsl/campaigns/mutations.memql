@@ -1216,7 +1216,7 @@ mutation singleSendReceipt recordCampaignSingleSend {
     receiptId string!
     accountId string!
     fingerprint string!
-    status enum("attempting", "complete")!
+    status enum("attempting", "complete", "failed")!
     result object!
     versionTime datetime!
   }

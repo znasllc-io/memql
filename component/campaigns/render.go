@@ -559,8 +559,12 @@ func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (ema
 			// as having no unsubscribe at all.
 			headerListUnsubscribe:     "<" + opts.Links.Unsubscribe + ">",
 			headerListUnsubscribePost: oneClickValue,
-			headerCampaignID:          c.ID,
 		},
+	}
+	// A single send with no rule behind it (a welcome, an automation step) has no
+	// campaign to name, and an empty header names nothing.
+	if strings.TrimSpace(c.ID) != "" {
+		msg.Headers[headerCampaignID] = c.ID
 	}
 	if strings.TrimSpace(t.HTMLBody) != "" {
 		// ORDER IS LOAD-BEARING. Substitute, then rewrite links for click

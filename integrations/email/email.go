@@ -47,6 +47,33 @@ type Reserver interface {
 	Reserve(ctx context.Context, msg Message, as SendAs, gateKeys ...string) (context.Context, func(), error)
 }
 
+// Outcome is what a Sender's own record says became of a message it was handed
+// earlier (DeliveryOutcomes).
+type Outcome int
+
+const (
+	// OutcomeUnknown: the record does not say yet, or there is no record to ask.
+	// The message may have been accepted, and is not submitted again.
+	OutcomeUnknown Outcome = iota
+	// OutcomeAccepted: the provider accepted the message.
+	OutcomeAccepted
+	// OutcomeNotAccepted: the provider never took the message, or took it and
+	// could not process it. It may be submitted again.
+	OutcomeNotAccepted
+)
+
+// DeliveryOutcomes is implemented by a Sender that keeps a durable record of
+// every submission (Azure's send receipt) and can say, without submitting
+// anything, what became of a message whose outcome its caller could not tell:
+// the answer was lost, or the connection dropped after the request went out.
+//
+// The caller asks with the message's IntentID and the identity it was sent as;
+// nothing else of the message is read. A sender with no such record does not
+// implement it, and its caller knows nothing more than it did.
+type DeliveryOutcomes interface {
+	DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error)
+}
+
 // SendAs names the mailbox a message leaves from (design D5, memql#4821).
 //
 // The ZERO VALUE means "the configured default sender", which is what every
@@ -276,7 +303,7 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message, as SendAs) error {
 			from, requested,
 			DefaultGraphEnvKeys().TenantId, DefaultGraphEnvKeys().ClientId,
 			DefaultGraphEnvKeys().ClientSecret, DefaultGraphEnvKeys().SenderAddr)
-		return &SendError{Permanent: true, Detail: err.Error(), Cause: err}
+		return &SendError{Permanent: true, NotAccepted: true, Detail: err.Error(), Cause: err}
 	}
 	_, fromName := resolveIdentity(as, from, s.cfg.FromName)
 	fromHeader := FromHeader(from, fromName)

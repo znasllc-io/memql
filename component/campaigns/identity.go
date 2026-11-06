@@ -102,6 +102,10 @@ type identityRefusal struct {
 	// Terminal marks an AUTHORING problem: retrying changes nothing, so the
 	// campaign fails rather than waiting. See the file doc.
 	Terminal bool
+	// Held, set for an identity that is turned off or no longer exists, is the
+	// sentence an automation shows while it holds its sends for an operator to fix
+	// the sender (sendHeld). A campaign fails on Reason as before.
+	Held string
 }
 
 func (r identityRefusal) refused() bool { return r.Reason != "" }
@@ -164,6 +168,7 @@ func (w *Worker) resolveSendIdentityFor(ownerCtx context.Context, campaign Campa
 					"Point the campaign at an identity that exists, or clear the field to use the configured default",
 				campaign.SenderIdentityID),
 			Terminal: true,
+			Held:     "The sender of this email no longer exists. Choose another sender to send it.",
 		}
 	}
 	transport := campaign.AccountID
@@ -182,6 +187,7 @@ func (w *Worker) resolveSendIdentityFor(ownerCtx context.Context, campaign Campa
 					"point the campaign at another identity",
 				identity.ID, redactAddress(identity.Address)),
 			Terminal: true,
+			Held:     fmt.Sprintf("The sender %s is turned off. Turn it on to send this email.", strings.TrimSpace(identity.Address)),
 		}
 	}
 

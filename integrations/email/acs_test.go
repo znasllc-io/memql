@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -79,31 +80,221 @@ func TestACSRefusesForeignOrganizationsAndUnverifiedSendersBeforeNetwork(t *test
 	}
 }
 
+// A refusal Azure answered with is a definite non-acceptance: the message may be
+// submitted again. Only an answer that says nothing about acceptance -- none came
+// back, a redirect, or 409 (Azure already has an operation under this
+// Operation-Id) -- is ambiguous, and an ambiguous POST is never retried blindly.
 func TestACSDoesNotRetryAmbiguousAcceptanceOrEchoProviderSecrets(t *testing.T) {
-	for _, code := range []int{400, 401, 403, 408, 429, 500, 503, 302} {
-		t.Run(http.StatusText(code), func(t *testing.T) {
+	for _, tc := range []struct {
+		code                           int
+		notAccepted, permanent, paused bool
+	}{
+		{code: 400, notAccepted: true, permanent: true},
+		{code: 401, notAccepted: true, permanent: true},
+		{code: 403, notAccepted: true, permanent: true},
+		{code: 408, notAccepted: true},
+		{code: 429, notAccepted: true, paused: true},
+		{code: 500, notAccepted: true},
+		{code: 503, notAccepted: true, paused: true},
+		{code: 302, permanent: true},
+		{code: 409, permanent: true},
+	} {
+		t.Run(http.StatusText(tc.code), func(t *testing.T) {
 			s := acsFixture(t)
 			s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
-				return &http.Response{StatusCode: code, Header: http.Header{"Retry-After": []string{"15"}}, Body: io.NopCloser(strings.NewReader("private-body-and-credential"))}, nil
+				return &http.Response{StatusCode: tc.code, Header: http.Header{"Retry-After": []string{"15"}}, Body: io.NopCloser(strings.NewReader("private-body-and-credential"))}, nil
 			})
 			err := s.Send(context.Background(), Message{To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}, SendAs{AccountID: "client"})
 			if err == nil || strings.Contains(err.Error(), "private-body") {
 				t.Fatal("unsafe provider failure", err)
 			}
-			if code == 429 {
-				if delay, throttle := IsThrottled(err); !throttle || delay != 15*time.Second {
-					t.Fatal("lost throttle", err)
-				}
-			} else if !IsPermanent(err) {
-				t.Fatal("unsafe retry", err)
+			if IsNotAccepted(err) != tc.notAccepted || IsPermanent(err) != tc.permanent {
+				t.Fatalf("not accepted %v, permanent %v, want %v and %v: %v", IsNotAccepted(err), IsPermanent(err), tc.notAccepted, tc.permanent, err)
+			}
+			if delay, throttle := IsThrottled(err); throttle != tc.paused || tc.paused && delay != 15*time.Second {
+				t.Fatal("lost throttle", err)
 			}
 		})
 	}
 	s := acsFixture(t)
 	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) { return nil, errors.New("network secret") })
 	err := s.Send(context.Background(), Message{To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}, SendAs{AccountID: "client"})
-	if !IsPermanent(err) || strings.Contains(err.Error(), "network secret") {
+	if !IsPermanent(err) || IsNotAccepted(err) || strings.Contains(err.Error(), "network secret") {
 		t.Fatal("uncertain POST must not blindly retry", err)
+	}
+}
+
+// TestASendWithoutACampaignHasNoCampaignHeader: a single send (a welcome, an
+// automation step) belongs to no campaign. An empty header says nothing, and is
+// not sent.
+func TestASendWithoutACampaignHasNoCampaignHeader(t *testing.T) {
+	s := acsFixture(t)
+	var headers map[string]any
+	s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		headers, _ = payload["headers"].(map[string]any)
+		return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	msg := Message{To: "reader@example.test", Subject: "Hello", TextBody: "Hello", Headers: map[string]string{
+		"X-Campaign-Id": "", "List-Unsubscribe": "<https://example.test/u>", "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+	}}
+	if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := headers["X-Campaign-Id"]; present {
+		t.Fatalf("an empty campaign header was sent: %v", headers)
+	}
+	if headers["List-Unsubscribe"] != "<https://example.test/u>" || headers["List-Unsubscribe-Post"] != "List-Unsubscribe=One-Click" {
+		t.Fatalf("the headers that say something were lost: %v", headers)
+	}
+}
+
+// TestARefusedSendIsSubmittedAgainUnderItsOperationId: after Azure refused a
+// delivery, its next submission goes -- rendered afresh, as a retry is (its links
+// are minted again) -- under the receipt's Operation-Id, so a request Azure did
+// accept despite answering with an error cannot be accepted a second time.
+func TestARefusedSendIsSubmittedAgainUnderItsOperationId(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		code       int
+		retryAfter string
+		saved      string
+	}{
+		{"a refusal", 400, "", "rejected"},
+		{"a throttle", 429, "15", "throttled"},
+		{"a server error", 500, "", "rejected"},
+		{"an unavailable service", 503, "", "rejected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			var posted []string
+			s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				posted = append(posted, r.Header.Get("Operation-Id"))
+				if len(posted) == 1 {
+					return &http.Response{StatusCode: tc.code, Header: http.Header{"Retry-After": []string{tc.retryAfter}}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+				}
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			msg := Message{IntentID: "campaign-single:refused", To: "reader@example.test", Subject: "Hello", TextBody: "Hello, token one"}
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
+				t.Fatalf("a refusal is not a definite non-acceptance: %v", err)
+			}
+			if got := ops.rows[s.operationKey(msg.IntentID)].Status; got != tc.saved {
+				t.Fatalf("the receipt says %q, want %q", got, tc.saved)
+			}
+			later := s.now().Add(time.Minute)
+			s.now = func() time.Time { return later }
+			msg.TextBody = "Hello, token two"
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+				t.Fatalf("the second submission: %v", err)
+			}
+			if len(posted) != 2 || posted[0] == "" || posted[0] != posted[1] {
+				t.Fatalf("submissions went under Operation-Ids %q, want two under one", posted)
+			}
+			if got := ops.rows[s.operationKey(msg.IntentID)].Status; got != "accepted" {
+				t.Fatalf("the receipt says %q after Azure accepted it, want accepted", got)
+			}
+		})
+	}
+}
+
+// TestAnAmbiguousAnswerIsNeverSubmittedAgain: no answer, a redirect and a 409 say
+// nothing about whether Azure accepted the message. A second Send does not POST;
+// it waits for Azure's own record of the operation.
+func TestAnAmbiguousAnswerIsNeverSubmittedAgain(t *testing.T) {
+	for name, answer := range map[string]func() (*http.Response, error){
+		"no answer": func() (*http.Response, error) { return nil, errors.New("connection reset") },
+		"a redirect": func() (*http.Response, error) {
+			return &http.Response{StatusCode: 302, Body: io.NopCloser(strings.NewReader(""))}, nil
+		},
+		"a conflict": func() (*http.Response, error) {
+			return &http.Response{StatusCode: 409, Body: io.NopCloser(strings.NewReader(""))}, nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := acsFixture(t)
+			posts := 0
+			s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) { posts++; return answer() })
+			msg := Message{IntentID: "campaign-single:ambiguous", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+			for range 2 {
+				if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err == nil || IsNotAccepted(err) {
+					t.Fatalf("an ambiguous answer reads as %v", err)
+				}
+			}
+			if posts != 1 {
+				t.Fatalf("an ambiguous submission was POSTed %d times", posts)
+			}
+			if outcome, err := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || outcome != OutcomeUnknown {
+				t.Fatalf("the outcome of an ambiguous submission is %v (%v), want unknown", outcome, err)
+			}
+		})
+	}
+}
+
+// TestAzureHavingNoRecordOfASendLetsItGoAgain: the poller asks Azure for the
+// operation of a submission whose answer was lost. No record means Azure never
+// took it, and the next submission goes under the same Operation-Id. An operation
+// Azure took and could not finish goes again under a new one: its own id names
+// that failed operation.
+func TestAzureHavingNoRecordOfASendLetsItGoAgain(t *testing.T) {
+	s := acsFixture(t)
+	op := "12345678-1234-1234-1234-123456789012"
+	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"private"}}`))}, nil
+	})
+	if status, _, err := s.getOperation(context.Background(), op); err != nil || status != "notfound" {
+		t.Fatalf("an operation Azure has no record of reads %q (%v), want notfound", status, err)
+	}
+	for _, tc := range []struct {
+		status   string
+		reuseID  bool
+		outcome  Outcome
+		resubmit bool
+	}{
+		{"notfound", true, OutcomeNotAccepted, true},
+		{"failed", false, OutcomeNotAccepted, true},
+		{"canceled", false, OutcomeNotAccepted, true},
+		{"accepted", true, OutcomeAccepted, false},
+		{"succeeded", true, OutcomeAccepted, false},
+		{"unknown", true, OutcomeUnknown, false},
+		{"unconfirmed", true, OutcomeUnknown, false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			msg := Message{IntentID: "campaign-single:" + tc.status, To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+			body := []byte(`{"stored":"elsewhere"}`)
+			key := s.operationKey(msg.IntentID)
+			ops.rows = map[string]acsOperation{key: {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: fmt.Sprintf("%x", sha256.Sum256(body)), Intent: msg.IntentID, Status: tc.status}}
+			if outcome, err := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || outcome != tc.outcome {
+				t.Fatalf("the outcome of a %s operation is %v (%v), want %v", tc.status, outcome, err, tc.outcome)
+			}
+			if outcome, _ := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "another"}); outcome != OutcomeUnknown {
+				t.Fatalf("another organization's connection read this delivery's receipt: %v", outcome)
+			}
+			var posted []string
+			s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				posted = append(posted, r.Header.Get("Operation-Id"))
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			err := s.Send(context.Background(), msg, SendAs{AccountID: "client"})
+			if !tc.resubmit {
+				if len(posted) != 0 {
+					t.Fatalf("a %s delivery was submitted again", tc.status)
+				}
+				return
+			}
+			if err != nil || len(posted) != 1 {
+				t.Fatalf("a %s delivery was not submitted again: %v, %d posts", tc.status, err, len(posted))
+			}
+			if (posted[0] == op) != tc.reuseID || !azureUUID.MatchString(posted[0]) {
+				t.Fatalf("a %s delivery went under Operation-Id %q (the receipt's is %q)", tc.status, posted[0], op)
+			}
+		})
 	}
 }
 

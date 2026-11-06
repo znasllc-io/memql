@@ -170,7 +170,9 @@ type Worker struct {
 	layoutGate   func(context.Context, string) (func(), error)
 	brandGate    func(context.Context, string) (func(), error)
 	// singleSendGate holds the receipt lock and verifies ownership before an attempt.
-	singleSendGate     func(context.Context, string) (gateHold, error)
+	singleSendGate func(context.Context, string) (gateHold, error)
+	// journeyGate takes an automation's one lock, journeyLock: the same name every
+	// step's send takes with its others through newsletterGate.
 	journeyGate        func(context.Context, string) (gateHold, error)
 	progressGate       func(context.Context, string) (gateHold, error)
 	providerLedgerGate func(context.Context, string) (gateHold, error)
@@ -321,7 +323,7 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			if err != nil {
 				return nil, err
 			}
-			return memql.AcquireGateHold(ctx, db, newsletterGateWait, "campaign-journey:"+key)
+			return memql.AcquireGateHold(ctx, db, newsletterGateWait, key)
 		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-series:"+key)

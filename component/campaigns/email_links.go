@@ -394,6 +394,6 @@ func newEmailEnrollmentGate(database func() *sql.DB) emailEnrollmentGate {
 		if err != nil {
 			return nil, err
 		}
-		return memql.AcquireGateHold(ctx, db, 0, "campaign-journey:journey:"+bare(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
+		return memql.AcquireGateHold(ctx, db, 0, journeyLock(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
 	}
 }

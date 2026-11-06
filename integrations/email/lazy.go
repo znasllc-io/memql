@@ -105,6 +105,20 @@ func (l *LazySender) Reserve(ctx context.Context, msg Message, as SendAs, gateKe
 	return ctx, func() {}, nil
 }
 
+// DeliveryOutcome asks the Sender this wrapper resolves to for the identity what
+// became of an earlier message (DeliveryOutcomes). One that keeps no record of
+// its submissions has nothing to say.
+func (l *LazySender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error) {
+	sender, err := l.senderFor(ctx, as)
+	if err != nil {
+		return OutcomeUnknown, err
+	}
+	if outcomes, ok := sender.(DeliveryOutcomes); ok {
+		return outcomes.DeliveryOutcome(ctx, msg, as)
+	}
+	return OutcomeUnknown, nil
+}
+
 // senderFor is the Sender a message from this identity goes through: the
 // organization's own connection when it has one, else the node's.
 func (l *LazySender) senderFor(ctx context.Context, as SendAs) (Sender, error) {
