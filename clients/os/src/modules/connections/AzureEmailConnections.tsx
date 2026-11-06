@@ -209,7 +209,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     if (!result) return;
     // A summary that does not say where replies go has no answer to that: the
     // last one is not shown beside senders it may no longer describe.
-    setState(old => ({ ...old, ...result, planId: result.planId || old?.planId, ...("senders" in result ? { replies: result.replies } : {}) }));
+    setState(old => ({ ...old, ...result, planId: result.planId || old?.planId, ...("senders" in result ? { replies: result.replies, recorded: result.recorded } : {}) }));
     if (result.plan) { setDomain(result.plan.domain); setEmailService(result.plan.emailService); setCommunicationService(result.plan.communicationService); }
     if (result.replyTo) setReplyTo(result.replyTo);
     if (result.requestedSender) { setUsername(result.requestedSender.username); setDisplayName(result.requestedSender.displayName); setReplyTo(result.requestedSender.replyTo || ""); }
@@ -275,7 +275,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   </section>;
   if (view === "add-sender" && state?.plan && addsSendersOnAzure(state)) return <AddAzureSenderWizard
     accountId={accountId} planId={state.planId || ""} domain={state.plan.domain} registered={Object.keys(state.senders ?? {})} defaultSender={state.sender || ""}
-    organization={name} connected={connected} recorded={recorded} backLabel={addFrom === "detail" ? state.plan.domain : backLabel}
+    organization={name} connected={connected} recorded={recorded} recordedAt={state.recorded ?? {}} backLabel={addFrom === "detail" ? state.plan.domain : backLabel}
     onBack={() => setView(addFrom)} onAdded={result => { apply(result); setView(addFrom); }}/>;
   if (view === "detail" || view === "add-sender") return <section className="os-action-pane">
     <Head title={state?.plan?.domain || "Sending domain"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
@@ -334,7 +334,8 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
  * does not change, and the list holds presses for a moment after what it
  * offers changes (the bar's own hold, `usePressHold`), so the second click of a
  * double-click on Make default cannot land on the Make default that appears on
- * the sender that was the default.
+ * the sender that was the default. While one Make default is on its way the
+ * others are absent: a press there could only be dropped (DESIGN.md rule 12).
  */
 function DomainSenders({ state, making, onAdd, onMakeDefault }: {
   state: AzureEmailReply;
@@ -353,7 +354,7 @@ function DomainSenders({ state, making, onAdd, onMakeDefault }: {
       <RecordList label="Senders on this domain" as="ul">
         {addresses.map(address => <RecordRow key={address} icon={<AtSign size={16} aria-hidden/>} name={<span className="os-mono">{address}</span>} secondary={senders[address]}
           state={address === state.sender ? "Default" : undefined} tone="accent" current={address === state.sender}
-          actions={address === state.sender ? undefined : <Button busy={making === address} ariaLabel={`Make ${address} the default sender`} onClick={() => onMakeDefault(address)}>Make default</Button>}>
+          actions={address === state.sender || (making !== "" && making !== address) ? undefined : <Button busy={making === address} ariaLabel={`Make ${address} the default sender`} onClick={() => onMakeDefault(address)}>Make default</Button>}>
           {state.replies?.[address] ? `Replies to ${state.replies[address]}` : null}
         </RecordRow>)}
       </RecordList>

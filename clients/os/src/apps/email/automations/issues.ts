@@ -15,15 +15,18 @@ export interface Issue { stepId: string; text: string; whileOn?: string }
 /**
  * The issue with sending as a sender the provider would refuse, for a reason a
  * person fixes on the sender or its sending domain; null when there is none.
+ * `retries`: whether this automation's failed sends can be tried again, as a
+ * series' runs can (Retry, on its page) and an event automation's sends cannot.
  */
-export function senderRefusalIssue(stepId: string, address: string, refusal: SenderRefusal): Issue | null {
+export function senderRefusalIssue(stepId: string, address: string, refusal: SenderRefusal, retries: boolean): Issue | null {
+  const then = retries ? " Failed runs can then be retried." : "";
   switch (refusal) {
     case "unregistered":
-      return { stepId, text: `The sender ${address} is not registered with Azure. Add it on the sending domain before turning this on.`, whileOn: `Sends from ${address} fail until it is added on the sending domain. Failed runs can then be retried.` };
+      return { stepId, text: `The sender ${address} is not registered with Azure. Add it on the sending domain before turning this on.`, whileOn: `Sends from ${address} fail until it is added on the sending domain.${then}` };
     case "renamed":
-      return { stepId, text: `Azure sends ${address} under a different name. Give the sender the display name Azure has before turning this on.`, whileOn: `Sends from ${address} fail until its display name is the one Azure has. Failed runs can then be retried.` };
+      return { stepId, text: `Azure sends ${address} under a different name. Give the sender the display name Azure has before turning this on.`, whileOn: `Sends from ${address} fail until its display name is the one Azure has.${then}` };
     case "azureOwnDomain":
-      return { stepId, text: `This organization sends through Azure's own domain, which sends only as its own sender, not ${address}. Choose that sender before turning this on.`, whileOn: `Sends from ${address} fail: Azure's own domain sends only as its own sender. Pause, choose that sender, then retry the failed runs.` };
+      return { stepId, text: `This organization sends through Azure's own domain, which sends only as its own sender, not ${address}. Choose that sender before turning this on.`, whileOn: `Sends from ${address} fail: Azure's own domain sends only as its own sender. ${retries ? "Pause, choose that sender, then retry the failed runs." : "Pause and choose that sender."}` };
     default:
       return null;
   }
@@ -65,7 +68,7 @@ export function journeyIssues(draft: { accountId: string; trigger: Trigger | nul
     else if (!sender || sender.accountId !== draft.accountId) add(step.id, "Choose a sender in this organization.");
     else if (sender.status === "disabled") add(step.id, `The sender ${sender.address} is turned off.`);
     else {
-      const refused = senderRefusalIssue(step.id, sender.address, feeds.checks?.get(sender.id) ?? "");
+      const refused = senderRefusalIssue(step.id, sender.address, feeds.checks?.get(sender.id) ?? "", true);
       if (refused) issues.push(refused);
     }
   }

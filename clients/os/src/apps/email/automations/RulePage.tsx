@@ -36,7 +36,8 @@ export function RulePage({ rule, feeds, writes, onBack }: { rule: EmailRuleRow; 
   // it on: a sender the provider would refuse keeps Turn on away, and says why.
   const sender = draft.recipientMode !== "cluster_roles" ? senders.find(s => s.id === draft.senderIdentityId && s.accountId === draft.accountId) : undefined;
   const checks = useSenderChecks(draft.accountId, sender ? [sender] : []);
-  const issue = sender ? senderRefusalIssue("email", sender.address, checks.value.get(sender.id) ?? "") : null;
+  // An event automation's failed sends are not tried again: its sentence says so by not offering it.
+  const issue = sender ? senderRefusalIssue("email", sender.address, checks.value.get(sender.id) ?? "", false) : null;
   const issues = issue ? [issue] : [];
   const failure = refusalSentence(rule.lastError);
   async function run(id: string) {

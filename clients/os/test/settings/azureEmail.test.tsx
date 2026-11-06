@@ -611,10 +611,12 @@ describe("senders on an Azure domain", () => {
     await click("Manage email for Client");
     await click("Make hello@client.example the default sender");
     expect(screen.getByRole("button", { name: "Make hello@client.example the default sender" }).getAttribute("aria-busy")).toBe("true");
-    expect((screen.getByRole("button", { name: "Make billing@client.example the default sender" }) as HTMLButtonElement).disabled).toBe(false);
+    // Another Make default could only be dropped while this one is on its way: it is not offered.
+    expect(screen.queryByRole("button", { name: "Make billing@client.example the default sender" })).toBeNull();
     // A reply that does not say where replies go clears what the page said.
     await act(async () => answer({ ...three, sender: "hello@client.example" }));
     expect(screen.queryByText(/^Replies to /)).toBeNull();
+    expect(screen.getByRole("button", { name: "Make billing@client.example the default sender" })).toBeTruthy();
     // The timed re-check of sends changes nothing on the page while it runs.
     vi.useFakeTimers();
     await click("Check sends");

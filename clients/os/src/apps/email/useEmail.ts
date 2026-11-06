@@ -910,6 +910,9 @@ export function useSendingReadiness(accountId: string, senderIdentityId = "", ca
 export type SendingReadiness = ReturnType<typeof useSendingReadiness>;
 
 const NO_SENDER_CHECKS: ReadonlyMap<string, SenderRefusal> = new Map();
+/** One round of sender checks, and what it was asked: the senders as they stood, and the page's revision. */
+interface SenderCheckRound { asked: string; refusals: ReadonlyMap<string, SenderRefusal> }
+const NO_SENDER_CHECK_ROUND: SenderCheckRound = { asked: "", refusals: NO_SENDER_CHECKS };
 
 /**
  * Whether a send as each of these senders would be refused for a reason a
@@ -923,6 +926,12 @@ const NO_SENDER_CHECKS: ReadonlyMap<string, SenderRefusal> = new Map();
  * does (a page that knows the domain changed); otherwise only when asked, so
  * the surface mounts `AutoRefresh` beside it. A check that could not be made is
  * no refusal: nothing is flagged, or blocked, on a guess.
+ *
+ * ONE READER PER ORGANIZATION. What is checked changing is a read again, not a
+ * new reading: the last answer stays on screen until the new one lands, so a
+ * flag never blinks back to Active while it is asked again. Until an answer
+ * covers what is asked now the state is still "loading", so a page that waits
+ * for the check before it offers Turn on still waits.
  */
 export function useSenderChecks(accountId: string, senders: readonly { id: string; address: string; fromName: string }[], revision = ""): Reading<ReadonlyMap<string, SenderRefusal>> {
   const connection = useOsConnection();
@@ -930,19 +939,33 @@ export function useSenderChecks(accountId: string, senders: readonly { id: strin
   const live = readiness?.loaded && readiness.state === "live";
   // The SET as it stands, not the array: callers hand a new one every render.
   const signature = [...new Set(senders.filter(sender => sender.id !== "").map(sender => [sender.id, sender.address, sender.fromName].join("\u001f")))].sort().join("\n");
+  const asked = `${signature}\n${revision}`;
+  const now = useRef({ asked, ids: [] as string[] });
+  now.current = { asked, ids: signature === "" ? [] : [...new Set(signature.split("\n").map(line => line.split("\u001f")[0]!))] };
   const read = useMemo(() => {
-    if (!connection || !live || !accountId || !signature) return null;
-    const ids = [...new Set(signature.split("\n").map(line => line.split("\u001f")[0]!))];
-    return async (signal: AbortSignal) => new Map(await readEach(ids, async (senderIdentityId): Promise<[string, SenderRefusal]> => {
-      try {
-        return [senderIdentityId, senderRefusalFrom((await connection.query.campaignSendingReadiness({ accountId, senderIdentityId }, { signal })).rows()[0] ?? {})];
-      } catch (err) {
-        if (signal.aborted) throw err;
-        return [senderIdentityId, ""];
-      }
-    }, signal));
-  }, [connection, live, accountId, signature, revision]);
-  return useReading<ReadonlyMap<string, SenderRefusal>>(NO_SENDER_CHECKS, read, [read]);
+    if (!connection || !live || !accountId) return null;
+    return async (signal: AbortSignal): Promise<SenderCheckRound> => {
+      const { asked, ids } = now.current;
+      return { asked, refusals: new Map(await readEach(ids, async (senderIdentityId): Promise<[string, SenderRefusal]> => {
+        try {
+          return [senderIdentityId, senderRefusalFrom((await connection.query.campaignSendingReadiness({ accountId, senderIdentityId }, { signal })).rows()[0] ?? {})];
+        } catch (err) {
+          if (signal.aborted) throw err;
+          return [senderIdentityId, ""];
+        }
+      }, signal)) };
+    };
+  }, [connection, live, accountId]);
+  const reading = useReading<SenderCheckRound>(NO_SENDER_CHECK_ROUND, read, [read]);
+  const lastAsked = useRef(asked);
+  const { reload } = reading;
+  useEffect(() => {
+    if (lastAsked.current === asked) return;
+    lastAsked.current = asked;
+    void reload();
+  }, [asked, reload]);
+  const answered = reading.value.asked === asked;
+  return { ...reading, value: reading.value.refusals, state: reading.state === "ready" && !answered ? "loading" : reading.state };
 }
 
 const NO_CONCEPTS: Concept[] = [];

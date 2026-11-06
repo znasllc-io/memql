@@ -16,6 +16,12 @@ export interface AzureEmailReply {
   senders?: Record<string, string>; tenantId?: string;
   /** Where replies to each sender's mail go: address -> reply address. Absent when not known. */
   replies?: Record<string, string>;
+  /**
+   * What the organization has recorded at each address, registered or not: the
+   * sender's display name and reply address. A domain's Add a sender starts from
+   * it, because adding an address recorded here updates that sender.
+   */
+  recorded?: Record<string, { fromName: string; replyTo: string }>;
   status: string; applicationReady?: boolean; capture?: boolean;
   sessionId?: string; userCode?: string; verificationUri?: string; interval?: number;
   subscriptionId?: string; resourceGroup?: string; dataLocation?: string;
@@ -47,11 +53,11 @@ export function azureOwnDomainSender(state: AzureEmailReply | null | undefined):
 }
 
 /**
- * The part of an address Azure registers on this domain: the username, when the
- * address is on the domain; "" when it is not, because Azure registers a domain's
- * senders on that domain alone.
+ * The part of an address Azure registers on this domain: the username, in lower
+ * case as every add sends it, when the address is on the domain; "" when it is
+ * not, because Azure registers a domain's senders on that domain alone.
  */
 export function usernameOnDomain(address: string, domain: string): string {
   const [username, on] = address.trim().split("@");
-  return username && on && on.toLowerCase() === domain.trim().toLowerCase() ? username : "";
+  return username && on && on.toLowerCase() === domain.trim().toLowerCase() ? username.toLowerCase() : "";
 }

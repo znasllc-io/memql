@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AtSign } from "lucide-react";
 
 import { Caption, Field, Input, Notice } from "../../kit";
@@ -20,6 +20,11 @@ import { senderSteps, type SenderStep } from "./senderSteps";
 // holds, which is the only one Azure sends with. It does not move the default:
 // the domain's page has Make default for that.
 //
+// AN ADDRESS ALREADY RECORDED STARTS FROM WHAT IT HOLDS. Its display name and
+// reply address fill the next steps, and Review says that this updates that
+// sender and what changes, because the sender gets exactly what Review says:
+// a reply address let go of is removed, and nothing is changed unsaid.
+//
 // REGISTER WITH AZURE is the same act opened from such a recorded sender, with
 // its address, display name and reply address already given.
 //
@@ -33,7 +38,7 @@ const USERNAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
 /** A sender already recorded, whose address, name and reply address the wizard starts from. */
 export interface RecordedSender { username: string; fromName: string; replyTo: string }
 
-export function AddAzureSenderWizard({ accountId, planId, domain, registered, defaultSender, organization, connected, recorded, backLabel, onBack, onAdded }: {
+export function AddAzureSenderWizard({ accountId, planId, domain, registered, defaultSender, organization, connected, recorded, recordedAt = {}, backLabel, onBack, onAdded }: {
   accountId: string;
   /** The plan the domain was set up from: the engine refuses an add made against another. */
   planId: string;
@@ -49,6 +54,8 @@ export function AddAzureSenderWizard({ accountId, planId, domain, registered, de
   connected: boolean;
   /** Opened from a recorded sender Azure does not have: register that one. */
   recorded?: RecordedSender | null;
+  /** What the organization has recorded at each address (lower case): what adding one updates. */
+  recordedAt?: Readonly<Record<string, { fromName: string; replyTo: string }>>;
   /** Where Back and Cancel go: the page this was opened from. */
   backLabel: string;
   onBack: () => void;
@@ -64,27 +71,50 @@ export function AddAzureSenderWizard({ accountId, planId, domain, registered, de
   const [fromName, setFromName] = useState(recorded?.fromName ?? organization);
   const [replyTo, setReplyTo] = useState(recorded?.replyTo ?? "");
 
-  const address = `${username.trim()}@${domain}`;
+  // Addresses are one case: Azure and MemQL keep a sender's in lower case.
+  const address = `${username.trim().toLowerCase()}@${domain}`;
   const taken = registered.some(known => known.toLowerCase() === address.toLowerCase());
   const addressed = USERNAME.test(username.trim()) && !taken;
   // A recorded sender has every answer already: it opens on Review.
   const [step, setStep] = useState<SenderStep>(registering && addressed && fromName.trim() !== "" ? "review" : "address");
+  // Leaving the address for an address already recorded, the next steps start
+  // from that sender's display name and reply address (once per address).
+  const existing = recordedAt[address.toLowerCase()];
+  const startedFrom = useRef(registering ? address.toLowerCase() : "");
+  const goTo = (next: SenderStep) => {
+    if (step === "address" && next !== "address" && existing && startedFrom.current !== address.toLowerCase()) {
+      startedFrom.current = address.toLowerCase();
+      setFromName(existing.fromName);
+      setReplyTo(existing.replyTo);
+    }
+    setStep(next);
+  };
+  const changes: string[] = [];
+  if (existing) {
+    if (fromName.trim() !== existing.fromName.trim()) changes.push(`its display name becomes “${fromName.trim()}”`);
+    const was = existing.replyTo.trim(), now = replyTo.trim();
+    if (was !== now) changes.push(now === "" ? `its reply address, ${was}, is removed` : was === "" ? `it replies to ${now}` : `its reply address becomes ${now}`);
+  }
+  const caption = existing
+    ? `${address} is already a sender here: this registers it with Azure${changes.length ? `, and ${changes.join(", and ")}` : " and keeps its display name and reply address"}.`
+    : registering ? "Registering adds the address to Azure under this display name, the one every send then uses."
+    : "Adding it registers the address with Azure and records the sender here.";
 
   async function add() {
-    const reply = await call("sender", { username: username.trim(), displayName: fromName.trim(), replyTo: replyTo.trim(), planId }, "", words.act);
+    const reply = await call("sender", { username: username.trim().toLowerCase(), displayName: fromName.trim(), replyTo: replyTo.trim(), planId }, "", words.act);
     if (reply) onAdded(reply);
   }
 
   const { steps, acts, word, reached } = senderSteps({
     step,
-    go: setStep,
+    go: goTo,
     address: {
       value: address,
       answered: addressed,
       word: taken ? "Already a sender on this domain" : "Enter the address",
       body: (
         <Field label="Address">
-          <Input id="email-azure-sender-address" label="Address" value={username} placeholder="news" onChange={setUsername} onEnter={() => { if (addressed) setStep("name"); }} />
+          <Input id="email-azure-sender-address" label="Address" value={username} placeholder="news" onChange={setUsername} onEnter={() => { if (addressed) goTo("name"); }} />
           <span className="os-caption">@{domain}</span>
         </Field>
       ),
@@ -95,11 +125,7 @@ export function AddAzureSenderWizard({ accountId, planId, domain, registered, de
     onReplyTo: setReplyTo,
     replyPlaceholder: `help@${domain}`,
     reviewLine: words.line,
-    review: (
-      <Caption>
-        {`${registering ? "Registering adds the address to Azure under this display name, the one every send then uses." : "Adding it registers the address with Azure and records the sender here."}${defaultSender ? ` ${defaultSender} stays the default.` : ""}`}
-      </Caption>
-    ),
+    review: <Caption>{`${caption}${defaultSender ? ` ${defaultSender} stays the default.` : ""}`}</Caption>,
     // Azure is asked through the cluster's connection: without it, there is no add to offer.
     add: connected ? { label: words.act, tone: "primary", busy, onAct: () => void add() } : null,
     reviewWord: busy ? words.busyWord : connected ? words.ready : "Cluster setup required",
@@ -116,7 +142,7 @@ export function AddAzureSenderWizard({ accountId, planId, domain, registered, de
       label="Adding a sender"
       steps={steps}
       open={step}
-      onOpen={(next) => { if (reached(next as SenderStep)) setStep(next as SenderStep); }}
+      onOpen={(next) => { if (reached(next as SenderStep)) goTo(next as SenderStep); }}
       status={{ word, tone: "none" }}
       acts={acts}
       notices={

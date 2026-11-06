@@ -552,8 +552,10 @@ makes, so it shows for anyone who can send: **Not registered with Azure** when
 Azure does not have the address (on Azure's own domain, which sends only as its
 own sender, it never will), and **Azure uses another name** when Azure sends the
 address under a different display name. An automation that sends as such a
-sender cannot be turned on; one already on fails those sends, and the failed
-runs can be retried once the sender is fixed.
+sender cannot be turned on, and one already on fails those sends. Once the
+sender is fixed, an automation people join can retry its failed runs from its
+page; an automation that something in MemQL starts does not send failed emails
+again.
 
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display

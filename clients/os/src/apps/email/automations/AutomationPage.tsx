@@ -57,7 +57,9 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
   }
   const failure = writes.save.error || writes.setState.error;
   const question = asking === "retire" ? `Retire “${journey.name}”? Everyone still in it leaves, and it can't be turned on again.` : asking === "turn-on" ? `Turn on “${journey.name}”? People who ${journey.trigger.kind === "joined" ? "join" : "confirm their subscription to"} ${audience} from now on get these emails.${journey.status === "paused" ? " People who joined while it was paused are included." : ""}` : "";
-  const specs = journeyActs(journey, dirty, issues, asking).filter(a => a.id !== "turn-on" || known).filter(a => a.id !== "save" || !!draft.name.trim());
+  // A re-check that finds something in the way while Turn on is being asked takes
+  // the answer away too (as the rule page does): Not yet is all that is left.
+  const specs = journeyActs(journey, dirty, issues, asking).filter(a => a.id !== "turn-on" || known).filter(a => a.id !== "confirm" || asking !== "turn-on" || (known && !issues.length)).filter(a => a.id !== "save" || !!draft.name.trim());
   return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`automation:${journey.id}`} title={journey.name} back={{ label: "Automations", onSelect: onBack }} />
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={counts.reload} busy={counts.state === "loading"} />
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={checks.reload} busy={checks.state === "loading"} />

@@ -47,7 +47,7 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   const ruleSender = choice === "event" && rule.recipientMode !== "cluster_roles" ? senders.find(s => s.id === rule.senderIdentityId && s.accountId === accountId) : undefined;
   const checks = useSenderChecks(accountId, choice === "event" ? (ruleSender ? [ruleSender] : []) : senders.filter(s => steps.some(step => step.senderIdentityId === s.id)));
   const issues = choice === "event" ? [] : [...journeyIssues({ accountId, trigger, steps }, { audiences, templates, senders, confirms: confirms.value, checks: checks.value }), ...serverIssues];
-  const ruleIssue = ruleSender ? senderRefusalIssue("", ruleSender.address, checks.value.get(ruleSender.id) ?? "") : null;
+  const ruleIssue = ruleSender ? senderRefusalIssue("", ruleSender.address, checks.value.get(ruleSender.id) ?? "", false) : null;
   const resourceKnown = [feeds.audiences, feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known");
   const known = resourceKnown && checks.state !== "loading" && (choice === "event" || confirms.state === "ready");
   const ruleDraft = { ...rule, accountId, name };

@@ -465,6 +465,29 @@ describe("Senders", () => {
     expect(screen.getByText(/Add one before this organization sends mail/)).toBeTruthy();
   });
 
+  it("keeps a sender's flag on screen while it is checked again", async () => {
+    const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
+    const refusedHere = { ready: false, reason: "not registered", senderRefusal: "unregistered" };
+    let answerDomain: (row: Row) => void = () => {};
+    const conn = fakeConnection({
+      senderIdentities: [senderRow({ id: "s1", address: "news@acme.com" })],
+      senderReadiness: { s1: refusedHere },
+      azure: (args) => (args.action === "clusterStatus" ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" } : new Promise<Row>((done) => { answerDomain = done; })),
+    });
+    mount(conn);
+    await waitFor(() => expect(sendersOf()).toEqual([{ address: "news@acme.com", state: "Not registered with Azure" }]));
+    const rounds = conn.query.campaignSendingReadiness.mock.calls.length;
+    // The domain answers, and the senders are checked again: slowly.
+    let answerCheck: () => void = () => {};
+    conn.query.campaignSendingReadiness.mockImplementation(async () => { await new Promise<void>((done) => { answerCheck = done; }); return rowsResult([refusedHere]); });
+    await act(async () => answerDomain({ status: "ready", plan, planId: "saved", sender: "hello@acme.com", senders: { "hello@acme.com": "Acme" } }));
+    await waitFor(() => expect(conn.query.campaignSendingReadiness.mock.calls.length).toBe(rounds + 1));
+    // While that check is on its way, the flag stays: it never blinks back to Active.
+    expect(sendersOf()).toEqual([{ address: "news@acme.com", state: "Not registered with Azure" }]);
+    await act(async () => answerCheck());
+    expect(sendersOf()).toEqual([{ address: "news@acme.com", state: "Not registered with Azure" }]);
+  });
+
   it("does not call a failed read an empty list", async () => {
     const conn = fakeConnection();
     conn.query.senderIdentities.mockRejectedValue(new Error("Senders are not yours to read."));
@@ -689,11 +712,37 @@ describe("Add a sender", () => {
     expect(conn.query.emailAzureSetup).not.toHaveBeenCalledWith(expect.objectContaining({ action: "sender" }), expect.anything());
   });
 
+  it("starts from a sender already recorded at the address, and says what adding it changes", async () => {
+    const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
+    const ready = { status: "ready", plan, planId: "saved", sender: "news@acme.com", senders: { "news@acme.com": "Acme News" }, recorded: { "news@acme.com": { fromName: "Acme News", replyTo: "" }, "orders@acme.com": { fromName: "Orders Team", replyTo: "desk@acme.com" } } };
+    const conn = fakeConnection({ azure: (args) => (args.action === "clusterStatus" ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" } : ready) });
+    mount(conn);
+    await screen.findByRole("button", { name: "Manage email for Operator organization" });
+    await openWizard();
+    type("Address", "Orders");
+    press("Next");
+    // What the recorded sender holds fills the next steps.
+    expect((screen.getByLabelText("Display name") as HTMLInputElement).value).toBe("Orders Team");
+    press("Next");
+    expect((screen.getByLabelText("Reply to") as HTMLInputElement).value).toBe("desk@acme.com");
+    press("Skip");
+    // Review says plainly that this updates that sender, and what changes.
+    expect(await screen.findByText("Send as Orders Team <orders@acme.com>.")).toBeTruthy();
+    expect(screen.getByText(/^orders@acme\.com is already a sender here: this registers it with Azure, and its reply address, desk@acme\.com, is removed\./)).toBeTruthy();
+    press("Add sender");
+    await waitFor(() =>
+      expect(conn.query.emailAzureSetup).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "sender", options: expect.objectContaining({ username: "orders", displayName: "Orders Team", replyTo: "" }) }),
+        expect.anything(),
+      ),
+    );
+  });
+
   it("registers a sender Azure does not have from its page, as that sender", async () => {
     const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
     const ready = { status: "ready", plan, planId: "saved", sender: "hello@acme.com", senders: { "hello@acme.com": "Acme" } };
     const conn = fakeConnection({
-      senderIdentities: [senderRow({ id: "s1", address: "news@acme.com", fromName: "Acme News", replyTo: "help@acme.com" })],
+      senderIdentities: [senderRow({ id: "s1", address: "News@acme.com", fromName: "Acme News", replyTo: "help@acme.com" })],
       senderReadiness: { s1: { ready: false, reason: "not registered", senderRefusal: "unregistered" } },
       azure: (args) =>
         args.action === "clusterStatus"
@@ -704,8 +753,8 @@ describe("Add a sender", () => {
     });
     mount(conn);
     await screen.findByRole("button", { name: "Manage email for Operator organization" });
-    fireEvent.click(await screen.findByText("news@acme.com"));
-    expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
+    fireEvent.click(await screen.findByText("News@acme.com"));
+    expect(await screen.findByRole("heading", { level: 3, name: "News@acme.com" })).toBeTruthy();
     await waitFor(() => expect(barButtons()).toContain("Register with Azure"));
     press("Register with Azure");
 

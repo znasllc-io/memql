@@ -169,6 +169,30 @@ describe("Automation pages", () => {
     expect(bar.textContent).not.toContain("sending domain before");
     expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
   });
+  it("tells an event automation that is on that its sends fail, and promises no retry it does not have", async () => {
+    const rule = ruleRow({ id: "r", name: "New admin", status: "active", recipientMode: "audience", audienceId: "a1", senderIdentityId: "s1", templateId: "t1" });
+    mount(setup({ emailRules: [rule], senderIdentities, senderReadiness: { s1: refused("unregistered") } }));
+    fireEvent.click(await screen.findByText("New admin"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Sends from news@acme.com fail until it is added on the sending domain."));
+    expect(document.body.textContent).not.toMatch(/retr(y|ied)/i);
+    expect(bar.textContent).not.toContain("Emails held");
+  });
+  it("drops a confirming Turn on when a check finds a refused sender while it is asked", async () => {
+    let refusing = false;
+    mount(setup({ journeys: [journey], senderIdentities, senderReadiness: id => id === "s1" && refusing ? refused("unregistered") : undefined }));
+    fireEvent.click(await screen.findByText("Welcome series"));
+    await screen.findByRole("button", { name: "Turn on" });
+    await press("Turn on");
+    expect(await screen.findByRole("button", { name: "Not yet" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Turn on" })).toBeTruthy();
+    // The sender is found refused while the question is open.
+    refusing = true;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull());
+    expect(screen.getByRole("button", { name: "Not yet" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "What you can do with this" }).textContent).toContain("is not registered with Azure");
+  });
   it("checks an event automation's sender before it is turned on", async () => {
     const rule = ruleRow({ id: "r", name: "New admin", recipientMode: "audience", audienceId: "a1", senderIdentityId: "s1", templateId: "t1" });
     mount(setup({ emailRules: [rule], senderIdentities, senderReadiness: { s1: refused("unregistered") } }));
@@ -261,6 +285,16 @@ describe("Adding and describing", () => {
     expect((screen.getByLabelText("Describe the automation") as HTMLTextAreaElement).value).toBe("Welcome newsletter subscribers"); await press("Draft it"); await screen.findByText("Welcome new subscribers.");
     expect(document.querySelector('[data-proposal="true"]')).toBeTruthy(); expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled(); expect(screen.queryByRole("button", { name: "Check it" })).toBeNull();
     await press("Edit as steps"); expect(screen.getByRole("button", { name: /Send Welcome/ })).toBeTruthy();
+  });
+  it("checks a described automation's senders before it can be turned on", async () => {
+    const conn = setup({ senderIdentities, senderReadiness: { s1: refused("unregistered") } }); mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" })); fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
+    fireEvent.change(screen.getByLabelText("Describe the automation"), { target: { value: "Welcome newsletter subscribers" } }); await press("Draft it"); await screen.findByText("Welcome new subscribers.");
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    await waitFor(() => expect(bar.textContent).toContain("Can't turn on yet: The sender news@acme.com is not registered with Azure. Add it on the sending domain before turning this on."));
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ accountId: "self", senderIdentityId: "s1" }, expect.anything());
+    expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled();
   });
   it("discards a proposal when the words change", async () => {
     mount(setup()); fireEvent.click(await screen.findByRole("button", { name: "Add an automation" })); fireEvent.click(screen.getByRole("button", { name: "Describe it instead" })); const text = screen.getByLabelText("Describe the automation"); fireEvent.change(text, { target: { value: "Welcome people" } }); await press("Draft it"); await screen.findByText("Welcome new subscribers."); fireEvent.change(text, { target: { value: "A different plan" } }); expect(document.querySelector('[data-proposal="true"]')).toBeNull(); expect(screen.getByRole("button", { name: "Draft it" })).toBeTruthy();
