@@ -590,7 +590,7 @@ func (s *Scheduler) scheduleAutomation(automation *Automation) error {
 				"automation", a.Name, "schedule", a.Schedule)
 			return
 		}
-		s.executeAutomation(a, "schedule", nil)
+		s.executeAutomation(a, TriggeredBySchedule, nil)
 	})
 	if err != nil {
 		return fmt.Errorf("invalid cron schedule %q: %w", automation.Schedule, err)
@@ -674,7 +674,7 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 			"topic", event.Topic,
 		)
 
-		s.executeAutomation(a, "event:"+event.Topic, &event)
+		s.executeAutomation(a, TriggeredByEventPrefix+event.Topic, &event)
 	}, events.WithSubscriberName("automation:"+a.Name))
 
 	s.mu.Lock()

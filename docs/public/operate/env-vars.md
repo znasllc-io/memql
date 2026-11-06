@@ -1160,7 +1160,7 @@ exception, on their own window.
 
 | Variable | Default | Records |
 | --- | --- | --- |
-| `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
+| `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned, goalless runs the scheduler fired on a schedule or on an event, their steps and closed approvals |
 | `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs and their work journals, steps and closed approvals, then the pipeline's goal once no run remains. Native artifact receipts keep their authorizing journals until byte and Library cleanup completes, and a live release candidate keeps every run it names, the runs it reused a step from and every attempt of its release. Generated files use [separate retention](pipelines-substrate.md#retention) |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
