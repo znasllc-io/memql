@@ -180,8 +180,9 @@ func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) e
 	// addresses or request credentials into the persisted campaign error.
 	if response.StatusCode == http.StatusConflict {
 		// Azure already holds an operation under this Operation-Id: an earlier
-		// submission of this delivery reached it. Its outcome is Azure's record.
-		return unconfirmedSend("Azure already has an operation for this send; its outcome is being confirmed")
+		// submission of this delivery reached it, and this one was not taken. Its
+		// outcome is Azure's record.
+		return &SendError{StatusCode: http.StatusConflict, Permanent: true, HeldEarlier: true, Detail: "Azure already has an operation for this send; its outcome is being confirmed"}
 	}
 	if response.StatusCode < 400 {
 		return unconfirmedSend("Azure returned an unexpected email response; no redirect was followed")
@@ -339,9 +340,17 @@ func (s *ACSSender) asksToWait(op acsOperation) error {
 // repeat by its content, and a retry's content is never the original's.
 //
 // A REVISED message (Message.Revised: its caller changed what the delivery sends
-// after Azure definitely did not accept it) goes under a new Operation-Id too:
-// nothing was accepted under the old one, and the old one names a different
-// message.
+// after Azure definitely did not accept it) goes under a new Operation-Id only when
+// the receipt proves Azure took nothing under the old one: Azure refused the
+// request (rejected, throttled). After Azure said it had no record of the
+// operation (notfound) the id is kept, revised or not: a 404 proves nothing was
+// taken only for a submission under the same id, so a first POST Azure took late
+// is matched by it, and the person gets at most the earlier message, once.
+//
+// Azure answering that it already holds an operation under a kept id (409) means
+// this message was not taken and an earlier submission was: the receipt goes on
+// describing that submission (its digest, sender, delivery and submission time),
+// so its delivery reports still match it, and its outcome decides the delivery.
 //
 // A delivery Azure may have accepted -- an answer was lost, or is still being
 // confirmed -- is never submitted again, by this caller or any other, until
@@ -375,6 +384,7 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		return notSubmitted(err)
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	earlier := op // the submission the receipt describes, before this one
 	if found {
 		again := acsMaySubmitAgain(op.Status)
 		if op.AccountID != s.cfg.AccountID || !again && (op.Endpoint != s.cfg.Endpoint || op.Digest != digest) {
@@ -386,7 +396,11 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		if err := s.asksToWait(op); err != nil {
 			return err
 		}
-		if op.Status == "failed" || op.Status == "canceled" || revised {
+		// A new id only when the receipt proves Azure took nothing under the old one
+		// that the old id could still match: it took and could not finish the
+		// operation (failed, canceled: the id names that failed operation), or, for a
+		// revised message, it refused the request (rejected, throttled).
+		if op.Status == "failed" || op.Status == "canceled" || revised && (op.Status == "rejected" || op.Status == "throttled") {
 			op.ID = id.NewShortId()
 		}
 		op.Endpoint, op.ResourceID, op.Digest = s.cfg.Endpoint, s.cfg.ResourceID, digest
@@ -427,6 +441,11 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		op.Status, op.Detail = "rejected", "Azure refused this send request."
 	default:
 		op.Status, op.Detail = "unknown", "Azure has not confirmed whether it accepted this message. It is not submitted again unless Azure has no record of it."
+		if HeldEarlier(sendErr) && found && op.ID == earlier.ID {
+			// Azure holds the earlier submission under this id, not this message.
+			op.Digest, op.DeliveryID, op.RecipientDigest, op.SenderDigest, op.SubmittedAt = earlier.Digest, earlier.DeliveryID, earlier.RecipientDigest, earlier.SenderDigest, earlier.SubmittedAt
+			op.Detail = "Azure already holds an earlier submission of this delivery under its Operation-Id. This message was not taken; the earlier one's outcome is being confirmed."
+		}
 	}
 	// The outcome is written on a context the caller's cancellation does not end,
 	// under the lock this delivery has held since before its first receipt.
@@ -625,14 +644,20 @@ func (s *ACSSender) identity(as SendAs) (string, error) {
 }
 
 // Contact is whom a person can write to about this connection's organization's
-// email (Contacts): the connection's reply address, else its default sender. ""
-// for any other organization.
+// email (Contacts): the connection's reply address, else its default sender --
+// except on Azure's own domain, whose sender is Azure's no-reply mailbox. "" for
+// any other organization.
 func (s *ACSSender) Contact(_ context.Context, accountID string) (string, error) {
 	if memql.BareShortId(strings.TrimSpace(accountID)) != s.cfg.AccountID {
 		return "", nil
 	}
 	if s.cfg.ReplyTo != "" {
 		return s.cfg.ReplyTo, nil
+	}
+	if s.azureOwnDomain {
+		// The one sender on Azure's own domain is Azure's no-reply mailbox: nobody
+		// reads it, so it is never a contact.
+		return "", nil
 	}
 	return s.cfg.Default, nil
 }

@@ -59,6 +59,12 @@ type SendError struct {
 	// been accepted, and is not submitted again until the provider's own record
 	// says it was not (DeliveryOutcomes).
 	NotAccepted bool
+	// HeldEarlier reports that the provider already holds an EARLIER submission
+	// of this delivery under the same key (Azure's 409 under a reused
+	// Operation-Id): this message was not taken, and the earlier one's outcome
+	// decides the delivery. Like any answer that is not NotAccepted, the earlier
+	// one may have been accepted.
+	HeldEarlier bool
 	// Detail is the provider's own message, truncated by the caller
 	// before it is persisted.
 	Detail string
@@ -110,6 +116,13 @@ func IsPermanent(err error) bool {
 func IsNotAccepted(err error) bool {
 	var se *SendError
 	return errors.As(err, &se) && se.NotAccepted
+}
+
+// HeldEarlier reports whether err says the provider already holds an earlier
+// submission of this delivery, so this message was not taken (SendError.HeldEarlier).
+func HeldEarlier(err error) bool {
+	var se *SendError
+	return errors.As(err, &se) && se.HeldEarlier
 }
 
 // IsThrottled reports whether err is a provider rate-limit refusal, and

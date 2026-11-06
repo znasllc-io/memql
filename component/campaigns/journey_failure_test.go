@@ -40,6 +40,7 @@ type azureLike struct {
 	refused    int // reservations refused inside a wait
 	waits      map[string]time.Time
 	lost       map[string]email.Message
+	lostAs     map[string]email.SendAs
 	verdicts   map[string]email.Outcome
 	// acceptedAt is when Azure's record says it took a message it accepted;
 	// zero when the record does not say.
@@ -49,6 +50,10 @@ type azureLike struct {
 // answerLost is an answer that never came back: the connection dropped after the
 // request was sent.
 const answerLost = 0
+
+// A 409 (http.StatusConflict) is Azure saying it already holds an earlier
+// submission of the delivery under its Operation-Id: one whose answer was lost.
+// This message is not taken, and the earlier one's outcome is Azure's record.
 
 // quietWait is how long a throttle that names no Retry-After keeps a delivery
 // waiting: longer than the first retry's backoff, as Azure's receipt can be.
@@ -74,9 +79,12 @@ func (a *azureLike) Send(ctx context.Context, msg email.Message, as email.SendAs
 	switch answer {
 	case answerLost:
 		if a.lost == nil {
-			a.lost = map[string]email.Message{}
+			a.lost, a.lostAs = map[string]email.Message{}, map[string]email.SendAs{}
 		}
-		a.lost[msg.IntentID] = msg
+		a.lost[msg.IntentID], a.lostAs[msg.IntentID] = msg, as
+	case http.StatusConflict:
+		// The receipt says the earlier submission's outcome is being confirmed again.
+		delete(a.verdicts, msg.IntentID)
 	case http.StatusTooManyRequests:
 		wait := a.retryAfter
 		if wait <= 0 {
@@ -94,6 +102,8 @@ func (a *azureLike) Send(ctx context.Context, msg email.Message, as email.SendAs
 		return a.recordingSender.Send(ctx, msg, as)
 	case answerLost:
 		return &email.SendError{Permanent: true, Detail: "Azure email acceptance is unknown; check the Azure delivery log before retrying"}
+	case http.StatusConflict:
+		return &email.SendError{StatusCode: answer, Permanent: true, HeldEarlier: true, Detail: "Azure already has an operation for this send; its outcome is being confirmed"}
 	case http.StatusTooManyRequests:
 		return &email.SendError{StatusCode: answer, Throttled: true, RetryAfter: named, NotAccepted: true, Detail: "Azure did not accept the message"}
 	default:
@@ -112,9 +122,23 @@ func (a *azureLike) poll(outcome email.Outcome) {
 	for intent, msg := range a.lost {
 		a.verdicts[intent] = outcome
 		if outcome == email.OutcomeAccepted {
-			_ = a.recordingSender.Send(context.Background(), msg, email.SendAs{})
+			_ = a.recordingSender.Send(context.Background(), msg, a.lostAs[intent])
 		}
 		delete(a.lost, intent)
+	}
+}
+
+// reportMissing is the operation poller finding no operation under the id of
+// every submission whose answer was lost (a 404): its record says not accepted,
+// and Azure may still take the request late.
+func (a *azureLike) reportMissing() {
+	a.gate.Lock()
+	defer a.gate.Unlock()
+	if a.verdicts == nil {
+		a.verdicts = map[string]email.Outcome{}
+	}
+	for intent := range a.lost {
+		a.verdicts[intent] = email.OutcomeNotAccepted
 	}
 }
 

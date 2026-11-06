@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -604,6 +605,63 @@ func TestAnOperatorCannotAddASuppressedAddressAsSubscribedInAnyAudience(t *testi
 	}
 	if err := n.addPerson(t, "fine", "fine@b.test", nil); err != nil {
 		t.Fatalf("an address nothing blocks: %v", err)
+	}
+}
+
+// losesAfter is a hold whose lock is lost once it has been verified ok times:
+// the session PostgreSQL ended between two of its holder's writes.
+type losesAfter struct {
+	gateHold
+	ok int
+}
+
+func (h *losesAfter) Verify(ctx context.Context) error {
+	if h.ok <= 0 {
+		return errors.New("held session was lost")
+	}
+	h.ok--
+	return h.gateHold.Verify(ctx)
+}
+
+// An add that loses its lock after the person was written pending does not say
+// the audience was busy -- that means nothing was written. It says they are
+// pending, and how to finish.
+func TestAnAddThatLosesItsLockAfterWritingSaysThePersonIsPending(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "add-lock-lost")
+	n.requireConfirmation(t)
+	gate := n.worker.newsletterGate
+	n.worker.newsletterGate = func(ctx context.Context, keys ...string) (gateHold, error) {
+		hold, err := gate(ctx, keys...)
+		if err != nil {
+			return nil, err
+		}
+		// Held for the pending write, lost before the confirmation.
+		return &losesAfter{gateHold: hold, ok: 1}, nil
+	}
+	err := n.addPerson(t, "agreed", "agreed@b.test", map[string]any{"subscriptionStatus": "subscribed", "alreadyConfirmed": true})
+	if err == nil || err.Error() != addedPendingSentence {
+		t.Fatalf("an add that lost its lock after writing the person answered %v, want %q", err, addedPendingSentence)
+	}
+	if got := storedRecipient(t, n.store, n.owner, n.suffix+"-agreed"); str(got, "subscriptionStatus") != "pending" || str(got, "confirmedAt") != "" {
+		t.Fatalf("the person is %v, want them pending, as the answer says", got)
+	}
+}
+
+// An import asks whether it still holds its audience's lock before each row it
+// writes, so a lock lost in the middle of a batch stops the import there, saying
+// how many people it added.
+func TestAnImportStopsAtTheRowWhereItsLockWasLost(t *testing.T) {
+	engine := &fakeEngine{}
+	w := importWorker(t, engine, "email\na@b.test\nc@d.test\ne@f.test\n")
+	w.newsletterGate = func(context.Context, ...string) (gateHold, error) {
+		return &losesAfter{gateHold: openGate{}, ok: 2}, nil
+	}
+	_, err := w.handleImportRecipients(importCtx(), map[string]any{"audienceId": testAudience, "artifactId": testArtifact}, 0)
+	if err == nil || !strings.Contains(err.Error(), "lock was lost after 2 rows were added") {
+		t.Fatalf("an import whose lock was lost at its third row: %v", err)
+	}
+	if !wroteContaining(engine, "mutation addRecipient", "c@d.test") || wroteContaining(engine, "mutation addRecipient", "e@f.test") {
+		t.Fatal("the import wrote past the row where its lock was lost, or not up to it")
 	}
 }
 

@@ -287,11 +287,6 @@ func (w *Worker) importBatch(ctx context.Context, audienceID, accountID, subscri
 			return fmt.Errorf("campaigns.importRecipients: %w", err)
 		}
 		defer hold.Release()
-		// Asked before the batch is written: a session PostgreSQL ended takes the
-		// lock away silently, and the batch must not be written without it.
-		if err := hold.Verify(ctx); err != nil {
-			return fmt.Errorf("campaigns.importRecipients: the audience's lock was lost after %d rows were added; run the import again, it skips the people already added: %w", result.Added, err)
-		}
 	}
 	for _, row := range batch {
 		stamped, err := w.store.RecipientsInAudienceByDigest(ctx, audienceID, EmailDigest(row.normalized))
@@ -301,6 +296,14 @@ func (w *Worker) importBatch(ctx context.Context, audienceID, accountID, subscri
 		if len(holdingMailbox(stamped, row.normalized)) > 0 {
 			result.Duplicates++
 			continue
+		}
+		// Asked immediately before each row is written: a session PostgreSQL ended
+		// takes the lock away silently, mid-batch as well, and no row is written
+		// without it.
+		if hold != nil {
+			if err := hold.Verify(ctx); err != nil {
+				return fmt.Errorf("campaigns.importRecipients: the audience's lock was lost after %d rows were added; run the import again, it skips the people already added: %w", result.Added, err)
+			}
 		}
 		recipientID := id.NewShortId()
 		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, subscription, row.fields); err != nil {

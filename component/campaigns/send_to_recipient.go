@@ -386,9 +386,14 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	cancel()
 
 	if sendErr != nil {
-		recordOutcome(Delivery{
-			Status: "failed", Attempts: 1, LastError: sendErr.Error(),
-		})
+		// A provider that already holds an earlier submission of this delivery took
+		// nothing now (email.HeldEarlier): the row keeps describing the earlier one,
+		// whose outcome decides the delivery, and is not rewritten as this message.
+		if !email.HeldEarlier(sendErr) {
+			recordOutcome(Delivery{
+				Status: "failed", Attempts: 1, LastError: sendErr.Error(),
+			})
+		}
 		err := fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
 		if receipt == nil {
 			return nil, err

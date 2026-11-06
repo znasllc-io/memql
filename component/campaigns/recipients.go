@@ -53,6 +53,12 @@ const operatorStatesSentence = "A person can be set to subscribed, pending or un
 // person. Nothing was written, and asking again shortly is the right thing to do.
 const audienceBusy = visitorMessage("This audience is busy with an import or another change. Try again shortly.")
 
+// addedPendingSentence is what an operator reads when the person they said already
+// confirmed was written pending but their confirmation was not recorded: the person
+// is in the audience, pending, and marking them subscribed (saying they already
+// confirmed) finishes the add.
+const addedPendingSentence = "The person was added, but their confirmation was not recorded, so they are pending. Mark them subscribed to finish."
+
 // idTakenSentence is the refusal of an add whose person id already names someone
 // else: another audience, another address or another organization. The add
 // would write over them, so nothing is written.
@@ -201,10 +207,11 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("the person was added but could not be read back to record the confirmation; mark them subscribed to finish")
+		return nil, fmt.Errorf("%s", addedPendingSentence)
 	}
 	if err := hold.Verify(phase); err != nil {
-		return nil, audienceBusy
+		// The person is written, pending: the audience was not too busy to add them.
+		return nil, fmt.Errorf("%s", addedPendingSentence)
 	}
 	if err := detachedWrite(phase, func(write context.Context) error {
 		return w.recordConfirmation(write, recipient, w.nowUTC())

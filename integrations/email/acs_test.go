@@ -204,11 +204,15 @@ func TestARefusedSendIsSubmittedAgainUnderItsOperationId(t *testing.T) {
 
 // TestARevisedMessageGoesUnderAFreshOperationId: after Azure refused a delivery,
 // its caller changed what the delivery sends (another sender, another template)
-// and says so (Message.Revised). Nothing was accepted under the refused
-// submission, and its Operation-Id names a different message, so the revised one
-// goes under a fresh id. The same message sent again keeps its id
-// (TestARefusedSendIsSubmittedAgainUnderItsOperationId); a revised message whose
-// earlier submission Azure may have accepted is not submitted at all.
+// and says so (Message.Revised). Azure refused the earlier submission, so nothing
+// was taken under its Operation-Id, which names a different message: the revised
+// one goes under a fresh id. After Azure said it had NO RECORD of the earlier
+// submission (notfound), the id is kept: a 404 proves nothing was taken only for a
+// submission under the same id, so a first POST Azure took late is matched by it
+// and the person gets at most the earlier message, once. The same message sent
+// again keeps its id (TestARefusedSendIsSubmittedAgainUnderItsOperationId); a
+// revised message whose earlier submission Azure may have accepted is not
+// submitted at all.
 func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
 	t.Run("after a refusal", func(t *testing.T) {
 		s := acsFixture(t)
@@ -234,6 +238,87 @@ func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
 		}
 		if op := ops.rows[s.operationKey(msg.IntentID)]; op.ID != posted[1] || op.Status != "accepted" {
 			t.Fatalf("the receipt is %+v, want the revised message's operation, accepted", op)
+		}
+	})
+	// Azure's poller found no operation under the receipt's id: the earlier POST
+	// was lost, and may yet be taken.
+	missing := func(t *testing.T) (*ACSSender, *memoryACSOperations, Message, acsOperation) {
+		t.Helper()
+		s := acsFixture(t)
+		s.cfg.Senders["hello@client.test"] = "Client"
+		ops := s.operations.(*memoryACSOperations)
+		msg := Message{IntentID: "campaign-single:revised-missing", DeliveryID: "delivery-1", To: "reader@example.test", Subject: "Welcome", TextBody: "Welcome aboard", Revised: true}
+		earlier := acsOperation{ID: "12345678-1234-1234-1234-123456789012", AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the earlier message", Intent: msg.IntentID,
+			DeliveryID: "delivery-1", RecipientDigest: azureMailboxDigest("reader@example.test"), SenderDigest: azureMailboxDigest("news@client.test"),
+			Status: "notfound", SubmittedAt: s.now().Add(-time.Hour)}
+		ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): earlier}
+		return s, ops, msg, earlier
+	}
+	t.Run("not after Azure had no record of the earlier one: same id", func(t *testing.T) {
+		s, ops, msg, earlier := missing(t)
+		var posted []string
+		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+			posted = append(posted, r.Header.Get("Operation-Id"))
+			return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		})
+		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client", Address: "hello@client.test"}); err != nil {
+			t.Fatalf("the revised message: %v", err)
+		}
+		if len(posted) != 1 || posted[0] != earlier.ID {
+			t.Fatalf("after Azure had no record of the earlier submission the revised one went under %q, want the receipt's id %q", posted, earlier.ID)
+		}
+		if op := ops.rows[s.operationKey(msg.IntentID)]; op.ID != earlier.ID || op.Status != "accepted" || op.SenderDigest != azureMailboxDigest("hello@client.test") {
+			t.Fatalf("the receipt is %+v, want the revised message accepted under the same id", op)
+		}
+	})
+	t.Run("not after Azure had no record of the earlier one, which it then took late", func(t *testing.T) {
+		s, ops, msg, earlier := missing(t)
+		posts := 0
+		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+			posts++
+			if got := r.Header.Get("Operation-Id"); got != earlier.ID {
+				t.Errorf("the revised message went under %q, want the receipt's id %q", got, earlier.ID)
+			}
+			return &http.Response{StatusCode: 409, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		})
+		err := s.Send(context.Background(), msg, SendAs{AccountID: "client", Address: "hello@client.test"})
+		if err == nil || IsNotAccepted(err) || !HeldEarlier(err) || posts != 1 {
+			t.Fatalf("Azure holding the earlier submission under the id: %v after %d posts, want this message not taken and the earlier one being confirmed", err, posts)
+		}
+		// The receipt still describes the submission Azure holds, so its delivery
+		// reports (matched on the id and the sender) and its acceptance time are
+		// the earlier message's, and nothing is said about the revised one.
+		op := ops.rows[s.operationKey(msg.IntentID)]
+		if op.ID != earlier.ID || op.Status != "unknown" || op.Digest != earlier.Digest || op.SenderDigest != earlier.SenderDigest || op.DeliveryID != earlier.DeliveryID || !op.SubmittedAt.Equal(earlier.SubmittedAt) {
+			t.Fatalf("the receipt is %+v, want the earlier submission's, being confirmed (%+v)", op, earlier)
+		}
+		if outcome, _ := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); outcome != OutcomeUnknown {
+			t.Fatalf("while Azure's outcome is being confirmed the delivery reads %v, want unknown", outcome)
+		}
+		// Once the poller finds the earlier operation succeeded, the delivery was
+		// taken, once, when the earlier message was submitted.
+		op.Status = "succeeded"
+		ops.rows[s.operationKey(msg.IntentID)] = op
+		if outcome, _ := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); outcome != OutcomeAccepted {
+			t.Fatalf("after the poller's answer the delivery reads %v, want accepted", outcome)
+		}
+		if at, err := s.AcceptedAt(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || !at.Equal(earlier.SubmittedAt) {
+			t.Fatalf("the delivery was taken at %s (%v), want when the earlier message was submitted", at, err)
+		}
+	})
+	t.Run("throttled earlier: a fresh id", func(t *testing.T) {
+		s := acsFixture(t)
+		ops := s.operations.(*memoryACSOperations)
+		msg := Message{IntentID: "campaign-single:revised-throttled", To: "reader@example.test", Subject: "Welcome", TextBody: "Welcome aboard", Revised: true}
+		op := "12345678-1234-1234-1234-123456789012"
+		ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the earlier message", Intent: msg.IntentID, Status: "throttled"}}
+		var posted []string
+		s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+			posted = append(posted, r.Header.Get("Operation-Id"))
+			return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		})
+		if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || len(posted) != 1 || posted[0] == op || !azureUUID.MatchString(posted[0]) {
+			t.Fatalf("a revised message after a throttle went under %q (%v), want a fresh id", posted, err)
 		}
 	})
 	for _, status := range []string{"submitting", "unknown", "accepted", "succeeded"} {
@@ -472,6 +557,17 @@ func TestAnOrganizationsContactIsItsOwnConnections(t *testing.T) {
 	}
 	if got, err := Contact(ctx, s, "another"); err != nil || got != "" {
 		t.Fatalf("another organization's connection named %q (%v)", got, err)
+	}
+	// A connection on Azure's own domain sends from Azure's no-reply mailbox:
+	// that is never a contact. With a reply address of its own it names that.
+	managed := acsFixture(t)
+	managed.azureOwnDomain = true
+	if got, err := Contact(ctx, managed, "client"); err != nil || got != "" {
+		t.Fatalf("a connection on Azure's own domain with no reply address named %q (%v), want nobody", got, err)
+	}
+	managed.cfg.ReplyTo = "help@client.test"
+	if got, err := Contact(ctx, managed, "client"); err != nil || got != "help@client.test" {
+		t.Fatalf("a connection on Azure's own domain with a reply address named %q (%v), want it", got, err)
 	}
 	lazy := NewLazySender(&ACSSender{cfg: ACSConfig{AccountID: "self", Default: "ops@install.test"}}, nil, nil, nil)
 	if got, err := Contact(ctx, lazy, "client"); err != nil || got != "" {

@@ -358,3 +358,56 @@ func TestASendThatMayHaveGoneKeepsRefusingAChangedMessage(t *testing.T) {
 		t.Fatalf("the refusal changed the receipt to %q", got)
 	}
 }
+
+// TestARevisedSendAfterAMissingFirstSendTakesNothingTwice: a step's first send was
+// lost and Azure then said it had no record of it, so the step is due again; the
+// operator gives it another sender. The changed message goes under the receipt's
+// Operation-Id, and Azure, which took the first send late after all, refuses it as
+// a duplicate: the person gets one email, the first. Until Azure's record says
+// what became of it, the receipt keeps saying an attempt may have gone and the
+// ledger keeps the first send's row, failed; then both say sent: of the first
+// message, from the first sender, when it was taken.
+func TestARevisedSendAfterAMissingFirstSendTakesNothingTwice(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "journey-revised-missing", oneEmail)
+	a.azure.answers = []int{answerLost, http.StatusConflict}
+	a.drain(t)
+	first := a.now
+	a.azure.reportMissing()
+	a.later(6 * time.Minute)
+	a.drain(t)
+	if row := a.enrollment(t, a.member); str(row, "status") != "active" || integer(row, "attempts") != 1 || str(a.receipt(t, "welcome"), "status") != receiptFailed {
+		t.Fatalf("after Azure said it had no record the step is %v, want it due again with its receipt failed", row)
+	}
+	a.changeSender(t, "news@client.test")
+	a.later(2 * time.Minute)
+	a.drain(t)
+	if a.azure.submissions() != 2 || a.azure.count() != 0 {
+		t.Fatalf("Azure was asked %d times and accepted %d, want the changed message asked once and refused as a duplicate", a.azure.submissions(), a.azure.count())
+	}
+	if got := str(a.receipt(t, "welcome"), "status"); got != receiptAttempting {
+		t.Fatalf("while Azure's outcome is being confirmed the receipt is %q, want it saying an attempt may have gone", got)
+	}
+	if row := a.delivery(t, "welcome"); str(row, "status") != "failed" || bare(str(row, "senderIdentityId")) != a.sender {
+		t.Fatalf("while Azure's outcome is being confirmed the ledger says %v, want the first send's row, failed", row)
+	}
+	// Azure took the first send late, and its record now says so.
+	a.azure.acceptedAt = first
+	a.azure.poll(email.OutcomeAccepted)
+	a.later(6 * time.Minute)
+	a.drain(t)
+	if a.azure.submissions() != 2 || a.azure.count() != 1 {
+		t.Fatalf("Azure was asked %d times and delivered %d, want the first email only", a.azure.submissions(), a.azure.count())
+	}
+	a.azure.mu.Lock()
+	from := a.azure.sentAs[0].Address
+	a.azure.mu.Unlock()
+	if from != "hello@client.test" {
+		t.Fatalf("the email that went is from %q, want the first sender's", from)
+	}
+	if row := a.enrollment(t, a.member); str(row, "status") != "completed" || str(a.receipt(t, "welcome"), "status") != receiptComplete {
+		t.Fatalf("after Azure's answer the run is %v, want it finished with its receipt complete", row)
+	}
+	if row := a.delivery(t, "welcome"); str(row, "status") != "sent" || bare(str(row, "senderIdentityId")) != a.sender || !templateTime(row["sentAt"]).Equal(first) {
+		t.Fatalf("the ledger says %v, want the first send, sent at %s", row, first)
+	}
+}
