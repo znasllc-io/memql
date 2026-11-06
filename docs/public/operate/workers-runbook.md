@@ -666,6 +666,18 @@ cockpit predating the message looks like (its dispatcher ignores the `Ping`). Th
 OS shows "round trip 12 ms, checked 40 s ago" beside the heartbeat, and shows
 nothing as a number while the pair is absent.
 
+**A heartbeat replaces the registration's current observation; it does not add
+a version.** `lastSeenAt`, the connection fields (`lastConnectedFromIP`,
+`connectedNodeId`, `activeCount`), the round trip and clock skew, the credential
+expiry, `hardware`, `capacity`, `setup` and the stream holder's
+`sharingActivity` counts are kept as one current row per machine, rewritten in
+place, and every read merges it with the registration. Everything else is still
+a new version of the registration: a rename, labels, sharing, a changed
+permission decision (the snapshot each heartbeat carries is written only when a
+decision or its detail changes, not for its fresh `checked_at`), the app
+inventory, the router's selection stamps, a revocation. An idle connected
+machine's history therefore no longer grows by a version every 15 seconds.
+
 ### 5.5 Pairing a machine from MemQL OS: the guided install
 
 Fleet -> Machines -> **Add machine** replaces the list with a page (design

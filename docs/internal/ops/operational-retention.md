@@ -64,7 +64,12 @@ handshake: readers already merge `memory_liveness` for every listed concept
 (`HasLiveness` in `component/database/memory-nodes/liveness.go`). Adding a
 concept does. `TestWorkerLiveReportsAreObservationsNotRegistrationVersions`
 (`component/memql`) drives the three reports from two engines and counts both
-tables.
+tables. A machine's permission snapshot is not an observation: a changed
+decision is history. The heartbeat writes it only when it differs from the
+snapshot the stream last wrote apart from `checked_at`, the baseline being the
+one its own register wrote (`component/worker/server.go`,
+`TestHeartbeatPermissionsAreWrittenOnlyWhenTheEvidenceChanges`). Before that,
+every beat's fresh `checked_at` appended a version.
 
 The first record and changes outside the closed observation-field list still
 append to `MemoryNodes`. A business change clears its preceding observation in
