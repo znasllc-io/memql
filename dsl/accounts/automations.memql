@@ -65,10 +65,37 @@ automation seedSelfAccount {
 // idempotency, and it comes from the derived id acct-<accountShortId> rather
 // than from any of the three callers being careful.
 
-/// Give a new account its group.
+// ---- Why these two fire rarely and leave nothing behind when they write nothing ----
+//
+// EVERY WRITE TO AN ACCOUNT PUBLISHES node.created, carrying `firstVersion`
+// (the store is append-only: component/memql/executor_mutation.go), and every
+// update() also publishes node.updated. Unfiltered, ensureAccountGroup ran on
+// every version of every account, beside refreshAccountGroup, and both are
+// event handlers whose run and step rows were journaled up front: on
+// production (2026-11-06) one account written 1,439 times in a day by its two
+// sweeps started 2,880 journaled runs, each finding its group already in place.
+//
+// So ensureAccountGroup fires on an account's FIRST version only, the forge's
+// recordRouted pattern (dsl/forge/automations.memql). Nothing is lost by it:
+// refreshAccountGroup still calls the same idempotent builtin on every later
+// write to an active account, and the boot backfill covers every active
+// account whatever was missed.
+//
+// And both carry @journalOnWrite: a run whose builtin wrote nothing -- the
+// group already exists and its name already matches -- leaves no v1:work:run
+// and no v1:work:step at all. groupEnsureForAccount writes its group through
+// the engine (integrations/groups' WriteGroup), so a run that does create or
+// rename one still opens its journal at that write, and a failure is journaled
+// as before. Allowed here: neither is @journalRequired, a before-write hook or
+// triggered by a v1:work:* row (component/automations/journal_required.go).
+
+/// Give a new account its group, on the account's first version.
 @trigger(event="node.created", concept="v1:accounts:account")
+@filter(row => args.firstVersion == true)
+@journalOnWrite
 automation ensureAccountGroup {
   args {
+    firstVersion bool
     id any
   }
 
@@ -79,6 +106,7 @@ automation ensureAccountGroup {
 /// nothing when the name already matches, and never adds permissions.
 @trigger(event="node.updated", concept="v1:accounts:account")
 @filter(row => row.status == "active")
+@journalOnWrite
 automation refreshAccountGroup {
   args { id any }
   ensure := builtin groupEnsureForAccount(accountId: args.id)
