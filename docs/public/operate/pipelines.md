@@ -1852,16 +1852,40 @@ Version-2 admission writing likewise follows deployment of its readers on every
 agent and workbench; a partial upgrade is not permission to bypass either gate.
 The engine and every machine's Cockpit switch to worker contract 5 together,
 behind a hold ([Contract 5 switches in lockstep](pipelines-substrate.md#contract-5-switches-in-lockstep)).
-A `verification: true` step cannot be `pool`: reusable verification requires
-`placement: cluster`, so such a step is refused with `pipeline_step_invalid`.
-Retries need no activation: the deploy turns them on with the portable limits.
+A `verification: true` step may be `cluster` or `pool`; a `fleet` one is refused
+with `pipeline_step_invalid`, because a native step's pass is not a function of
+its image. A pass a `pool` step produced on one of the owner's machines counts
+as evidence between runs that are not releases: same-commit reuse and a push's
+carry-forward accept it. A release does not. It reuses only a pass the cluster
+produced, read from the step's attempt that passed, and it runs every `pool`
+step of its own on the cluster, whatever the installed policy's `cloudFallback`
+says. So a release over a tree whose push ran a check on the Fleet runs that
+check again, and everything a release records or pins is produced on the
+cluster. Retries need no activation: the deploy turns them on with the portable
+limits.
 
 The engine repository's own `memql-package.yaml` took the second step on
-2026-11-05. Its portable checks that carry no credential, image build,
-verification flag or release output are `pool`; its `verification: true` steps,
-its release builds and its credentialed steps stay `cluster`. A `pool` step
-under an installed policy without the `computePlacement` role is Fleet-only and
-never falls back, so select that policy before marking any step `pool`.
+2026-11-05, and moved its `verification: true` steps to `pool` in a separate
+change once an engine that accepts them (0.31.17) ran in production: the
+deployed engine plans every run, and an older one refuses a verification step
+that is not `cluster`.
+Its portable checks that carry no credential, image build or release output are
+`pool`; its release builds and its credentialed steps stay `cluster`. A `pool`
+step under an installed policy without the `computePlacement` role is
+Fleet-only and never falls back, so select that policy before marking any step
+`pool`.
+
+A `pool` step's services do not get the same container on both surfaces: the
+cluster gives each service the pipelines namespace's default container limits
+(2 CPUs and 4 GiB where they were measured), and Cockpit runs every service with
+2 CPUs and 2 GB. Anything a service image derives from its own container therefore
+differs by where the step ran, so pin it in the service's `env`. The engine's
+Postgres service tunes itself on first start (timescaledb-tune), and left to
+derive it took 50 connections on the cluster and 25 on the Fleet; a database
+suite that opens 27 failed only on the Fleet (2026-11-06). Its manifest pins
+`TS_TUNE_MEMORY`, `TS_TUNE_NUM_CPUS` and `TS_TUNE_MAX_CONNS`, so the database is
+the same on both, sized to the Fleet's cap
+(`TestEngineManifestPostgresServiceTunesTheSameOnEverySurface`).
 
 ## The check run
 

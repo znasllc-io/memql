@@ -3015,8 +3015,17 @@ workflow is in
   (`releaseProducer`). Rejected: reusing any artifact-free step by normalizing its
   environment, because a step that receives `MEMQL_EVENT` may branch on it, as the
   vulnerability scans do. So `go-checks` (reads `MEMQL_BASE_SHA`), `fuzz`,
-  `mcp-conformance` and the two Cockpit lanes keep running. Extending reuse to
-  evidence a machine produced is the owner's open decision from the fleet-first work.
+  `mcp-conformance` and the two Cockpit lanes keep running.
+- **Where the pass ran (the owner's decision, 2026-11-06).** A verification step
+  may be `pool`. A pass one of the owner's machines produced counts for every
+  reuse but a release's: `pipelines.InspectReusedReleaseReceipt`, which both the
+  runner (`reuseGroup`) and the candidate proof (`ProveReusedStep`) call, refuses a
+  receipt whose passing attempt (the last one the step's binding records) ran
+  anywhere but the cluster, so the two halves cannot disagree. A row that records
+  no attempt is admitted: every attempt is recorded since 0.31.12, and before this
+  decision verification ran on the cluster only, so a candidate assembled earlier
+  stays provable. Where the pass ran is no part of the receipt's digest
+  (`TestWhereAPassRanIsNoPartOfItsDigest`).
 - **Vulnerability scans run in every release.** They declare artifacts, they branch
   on the event (#6381), and they are not a function of the tree. A freshness bound
   was defensible, and rejected because the release would ship a report older than
@@ -4100,16 +4109,45 @@ separate verification against the selected deployment.
   lanes, `mcp-conformance`, `proving`, `gate-inputs`, the ruleset audits, the CodeQL
   analyses and the SBOM. The order matters: under a policy without the role a
   `pool` step is Fleet-only and never falls back.
-- *What stays `cluster`, and why.* `verification: true` steps, because release
-  reuse and carry-forward accept only cluster evidence
-  (`component/pipelines/verification.go`). Dropping their flag would move them but
-  cost every push its carry-forward and every release its reuse, so moving them
-  waits on the owner's decision about Fleet evidence. Release output (images,
-  release files, Cockpit release builds, fixtures), so a published artifact is
-  built on the cluster. Steps with a repository token or SARIF upload, so no
-  credential leaves the cluster.
-- *Invariant.* A `pool` step carries no verification flag, credential or image
-  build: `TestEngineManifestCompilesForEveryOpening` and
+- *What stays `cluster`, and why.* Release output (images, release files, Cockpit
+  release builds, fixtures), so a published artifact is built on the cluster.
+  Steps with a repository token or SARIF upload, so no credential leaves the
+  cluster.
+- *Verification steps may move (decided 2026-11-06,* the owner's "Yes, all three",
+  after asking for more checks to run at once). The engine accepts the 20
+  `verification: true` steps as `pool` under one rule with two halves. The
+  manifest moved them in its own later change, once an engine with this rule ran
+  in production: a run is planned by the deployed engine, and before it one refuses a
+  verification step that is not `cluster`, so landing both together would leave
+  main's push run unplannable and the release that fixes it unreleasable. The
+  rule's two halves:
+  - *Evidence.* A Fleet pass counts between pushes (same-commit reuse and
+    carry-forward have no surface condition) and never for a release
+    (`pipelines.InspectReusedReleaseReceipt`, the reusable-verification scope
+    bullet above). The alternative, dropping the flag to move them, would have
+    cost every push its carry-forward and every release its reuse.
+  - *Execution.* A release runs every `pool` step on the cluster
+    (`component/pipelinerun` `executionStep`, used by `request`, `runStep`,
+    `resumeAttempts` and `continueAttempts`). The plan, the journal and every
+    fingerprint keep the manifest's `pool` step, because a fingerprint binds the
+    step's placement and a release reuses a push's pass only when their tree
+    fingerprints agree; only what the executor is handed and how its attempts are
+    retried see the cluster. It hands a cluster step rather than a cluster
+    attempt placement, which the executor refuses for a `pool` step when the
+    installation's `cloudFallback` is off, and a release must run regardless.
+    This covers every `pool` step of a release, not only verification: a
+    release's scanner reports and SBOM are its own record too, and a release
+    runs once a day, so the Fleet buys it little.
+  - *Cost.* A release over a tree its push ran on the Fleet executes those checks
+    again on the cluster.
+  - *Tests.* `TestAReleaseDoesNotStandOnAPassTheFleetProduced`,
+    `TestAReleaseRunsItsPoolStepsOnTheCluster` and
+    `TestAPushCarriesForwardAPassTheFleetProduced` (`component/pipelinerun`);
+    `TestAVerificationStepMayBeAPoolStep`,
+    `TestAReleaseReusesOnlyAPassTheClusterProduced` and
+    `TestTheReleaseProofRefusesAPassTheFleetProduced` (`component/pipelines`).
+- *Invariant.* A `pool` step carries no credential or image build, and names
+  `memoryMiB`: `TestEngineManifestCompilesForEveryOpening` and
   `TestEngineManifestRequiresConsentForMacEditorHosts`, with the reviewed contract
   in `test/fixtures/pipelines/delivery-after-bootstrap.yaml`.
 - *Memory, found by the first run (2026-11-06).* `go-checks` ran on CyberPC and
@@ -4121,10 +4159,38 @@ separate verification against the selected deployment.
   `pipelines.container_memory_mib` is lower refuses the step before it starts
   (`refused_before_start`), and the pool runs it on the cluster: the Fleet takes
   these steps only once a machine's policy allows their memory.
-- *Not yet verified.* No push run has completed under the new placement. Linux
-  container capacity on the Fleet was one machine (CyberPC) on 2026-11-05. The
-  cost guard still writes version-1 admission, so a cost hold still stops Fleet
-  work too.
+- *Tools and history, found by the re-run (2026-11-06).* With CyberPC and MSI
+  Raider allowing 8 GiB, two more pool steps reached the Fleet and failed on MSI
+  Raider. `inventory.sbom` could not find `cyclonedx-gomod`: a Fleet container runs
+  as the machine's user with `HOME=/tmp`, so `go install` writes to `/tmp/go/bin`,
+  which the image's `PATH` lacks; the cluster runs as the image's user, whose
+  `GOPATH/bin` is on it. `sbom` and `go-vulnerabilities` now put
+  `$(go env GOPATH)/bin` on `PATH` after installing. `secrets-current.gitleaks`
+  timed out three times fetching the repository's full history from GitHub
+  (exit 124, 17 minutes), against under two minutes on the cluster, so both
+  gitleaks scans are `cluster` again.
+- *Service tuning, found by the first push with verification on `pool`
+  (3fe2e0ee1, 2026-11-06).* `tests.db-tests#4` failed on CyberPC with
+  `too many clients` in `integrations/library`'s `TestDocumentRevisionWorkflow`,
+  having passed on the cluster in every earlier run. The CI Postgres image tunes
+  itself on first start (timescaledb-tune 0.19.0) from its container: the cluster
+  gives a service the LimitRange's 4 GiB, which tuned to 50 connections, and
+  Cockpit runs every service with `--memory=2g`, which tuned to 25. The suite
+  peaks at 27 to 28: against the same image under Cockpit's limits it failed at
+  25 and passed with the limit pinned at 100. The manifest pins
+  `TS_TUNE_MEMORY: 2GB`, `TS_TUNE_NUM_CPUS: "2"` and `TS_TUNE_MAX_CONNS: "100"`,
+  so both surfaces start the same database, sized to the Fleet's cap
+  (`TestEngineManifestPostgresServiceTunesTheSameOnEverySurface`). Raising
+  Cockpit's service memory instead would need a Cockpit release and still leave
+  the tuning to each machine: the image's tune script drops its cgroup reading
+  when the host has less free memory than the limit.
+- *Not yet verified.* No release has run since verification steps became `pool`
+  (the source tests above are the only evidence for the release rule). The first
+  verification steps a push runs under it reuse nothing from earlier pushes, whose
+  fingerprints bound `placement: cluster`. Linux container capacity on the Fleet
+  is two machines (CyberPC and MSI Raider, 2026-11-06), and Cockpit runs one
+  pipeline step per machine at a time (its exclusive `pipeline.lock`). The cost
+  guard still writes version-1 admission, so a cost hold still stops Fleet work too.
 
 Fleet CI owns the host build lock exclusively against workspaces and local
 builds. Local model calls take no part in it, by the owner's decision of

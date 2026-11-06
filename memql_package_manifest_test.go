@@ -12,6 +12,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -504,8 +505,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				if (step.Placement != pipelines.PlacementCluster && step.Placement != pipelines.PlacementPool) || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
 					t.Errorf("step %s must use a Linux amd64 container on the cluster or the pool: %+v", step.Key, step)
 				}
-				if step.Placement == pipelines.PlacementPool && (step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
-					t.Errorf("pool step %s must carry no verification flag or credential: %+v", step.Key, step)
+				// A pool step may carry verification (the owner's decision, 2026-11-06):
+				// its pass counts between pushes, and a release runs it on the cluster
+				// and stands only on a cluster pass. It never carries a credential, which
+				// must not leave the cluster for a placement the policy chooses.
+				if step.Placement == pipelines.PlacementPool && (len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "") {
+					t.Errorf("pool step %s must carry no credential: %+v", step.Key, step)
 				}
 				// A pool step names its memory, because the two places it can run
 				// default differently: the memql-pipelines namespace's LimitRange
@@ -662,6 +667,36 @@ func TestEngineManifestPostgresServiceDoesNotWaitOnTheDisk(t *testing.T) {
 		if !strings.Contains(args, " -c "+setting+" ") {
 			t.Errorf("services.%s.env.POSTGRES_INITDB_ARGS does not set -c %s, so a commit waits on a shared disk", manifestPostgresService, setting)
 		}
+	}
+}
+
+// The step's Postgres is the same database wherever the step runs. The image
+// tunes itself on first start (timescaledb-tune) from the memory and CPUs its
+// container is given, and the two surfaces give different amounts: the cluster's
+// LimitRange gives a service 4 GiB, Cockpit runs every service with --memory=2g.
+// Left to derive them, the cluster got max_connections=50 and the Fleet 25, and
+// integrations/library's TestDocumentRevisionWorkflow needs about 27: db-tests#4
+// failed "too many clients" on CyberPC (3fe2e0ee1's run, 2026-11-06) after
+// passing on the cluster in every run before. Pinning the three inputs makes the
+// tuning a function of this manifest alone. Memory is the Fleet's hard cap, so
+// shared_buffers and work_mem never assume more than a Fleet service may use.
+func TestEngineManifestPostgresServiceTunesTheSameOnEverySurface(t *testing.T) {
+	postgres, ok := engineManifest(t).Pipeline.Services[manifestPostgresService]
+	if !ok {
+		t.Fatalf("the pipeline declares no %q service", manifestPostgresService)
+	}
+	for key, want := range map[string]string{"TS_TUNE_MEMORY": "2GB", "TS_TUNE_NUM_CPUS": "2"} {
+		if postgres.Env[key] != want {
+			t.Errorf("services.%s.env.%s = %q, want %q: the image would tune from whatever its surface gives it", manifestPostgresService, key, postgres.Env[key], want)
+		}
+	}
+	// Every db suite has passed at 50 on the cluster; the measured peak is 27.
+	conns, err := strconv.Atoi(postgres.Env["TS_TUNE_MAX_CONNS"])
+	if err != nil || conns < 50 {
+		t.Errorf("services.%s.env.TS_TUNE_MAX_CONNS = %q; pin a whole number of at least 50, or a Fleet service tunes itself to 25 connections", manifestPostgresService, postgres.Env["TS_TUNE_MAX_CONNS"])
+	}
+	if postgres.Env["NO_TS_TUNE"] != "" {
+		t.Errorf("services.%s.env.NO_TS_TUNE skips tuning, which leaves the image's untuned defaults rather than the pinned ones", manifestPostgresService)
 	}
 }
 
@@ -887,11 +922,13 @@ func engineSetMinus(a, b []string) []string {
 
 // Mac editor hosts, Linux installer fixtures and the external public-site
 // probe require fleet consent. Other portable checks run in containers: on the
-// cluster, or through the Fleet-first pool (the owner's decision, 2026-11-05;
-// memql-package.yaml's header). A pool step may start on an owner's machine, so
-// it carries no credential, no image build and no verification flag: reusable
-// verification is cluster-only (component/pipelines/verification.go), and a
-// credential must not leave the cluster for a placement the policy chooses.
+// cluster, or through the Fleet-first pool (the owner's decisions, 2026-11-05 and
+// 2026-11-06; memql-package.yaml's header). A pool step may start on an owner's
+// machine, so it carries no credential and no image build: a credential must not
+// leave the cluster for a placement the policy chooses. It may carry
+// verification: a Fleet pass counts between pushes, and a release runs the step
+// on the cluster and stands only on a cluster pass
+// (component/pipelines/verification.go).
 func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
@@ -926,8 +963,8 @@ func TestEngineManifestRequiresConsentForMacEditorHosts(t *testing.T) {
 			switch pipelines.PlacementOf(step) {
 			case pipelines.PlacementCluster:
 			case pipelines.PlacementPool:
-				if step.Verification || len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "" || step.ImageBuild != nil || step.SARIF != nil || step.RepositoryChange != nil {
-					t.Errorf("pool check %s must carry no verification flag, credential, image build or external effect: %+v", step.Name, step)
+				if len(step.Secrets) != 0 || step.GitHubReadToken || step.ImagePullSecret != "" || step.ImageBuild != nil || step.SARIF != nil || step.RepositoryChange != nil {
+					t.Errorf("pool check %s must carry no credential, image build or external effect: %+v", step.Name, step)
 				}
 			default:
 				t.Errorf("portable check %s requires a host", step.Name)

@@ -1064,7 +1064,9 @@ func (dr *runDriver) resumeAttempts(t *stepTrack, row WorkStep) string {
 	if at.ended {
 		before = at.records[:len(at.records)-1]
 	}
-	placement, ok := placementOf(t.step, dr.retryPolicy(), before)
+	// Recomputed from the step as runStep placed it (executionStep), so a takeover
+	// of a release places its pool steps where the first driver did.
+	placement, ok := placementOf(dr.executionStep(t.step), dr.retryPolicy(), before)
 	if !ok {
 		return fmt.Sprintf("the attempts recorded for step %s are not ones this run's retry rules make", t.step.Key)
 	}
@@ -1425,7 +1427,10 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if dr.lease.isLost() || dr.lease.isCancelled() || dr.cleanupFailed.Load() {
 		return
 	}
-	step := t.step
+	// The step as its attempts are placed and retried: a release's pool step is
+	// a cluster step here (executionStep), while t.step, which the journal and
+	// every fingerprint read, stays the manifest's.
+	step := dr.executionStep(t.step)
 	if err := dr.qualificationFence(ctx); err != nil {
 		dr.settle(ctx, t, failReceipt(qualificationRefusal, err.Error()))
 		return
@@ -1588,8 +1593,9 @@ func (dr *runDriver) continueAttempts(ctx context.Context, t *stepTrack, policy 
 	history := t.snapshot().Attempts
 	nextAt := t.nextAttemptAt
 	t.betweenAttempts, t.nextAttemptAt = false, time.Time{}
-	last := dr.endingReceipt(t.step, policy, history, dr.recordReceipt(history[len(history)-1]))
-	next, _, ok := chooseNext(t.step, policy, history)
+	placed := dr.executionStep(t.step) // as runStep placed it
+	last := dr.endingReceipt(placed, policy, history, dr.recordReceipt(history[len(history)-1]))
+	next, _, ok := chooseNext(placed, policy, history)
 	switch {
 	case !ok:
 		dr.log.Warn("pipelines: a resumed step has no next attempt by its retry rules; it ends with the attempt its row records",
@@ -2059,9 +2065,39 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		Domain:           f.domain,
 		InstallationID:   f.installation,
 		Compute:          f.compute,
-		Step:             t.step,
+		Step:             dr.executionStep(t.step),
 		Secrets:          secrets,
 	}
+}
+
+// executionStep is the step as its attempts are placed: a release runs a pool
+// step on the cluster (the owner's decision, 2026-11-06).
+//
+//   - Why: a verification step may be pool, and a pass the Fleet produced counts
+//     between pushes but is not evidence a release stands on
+//     (pipelines.InspectReusedReleaseReceipt). A release's own receipts are the
+//     ones a later release reuses and a candidate pins, so every pool step of a
+//     release is produced where they always were. A release runs once a day, so
+//     the Fleet buys it little; pushes keep the Fleet-first preference.
+//   - Why here, and not in the plan: the step's fingerprints bind its placement
+//     (definitionForRun takes the whole step), and a release reuses a push's pass
+//     only when the two declare the same tree fingerprint. Compiling the release's
+//     step as cluster would make every pool verification step unreusable. So the
+//     plan, the journal and every fingerprint keep the manifest's step, and only
+//     what the executor is handed (request) and the attempt history it is retried
+//     from (runStep) see the cluster. Both replicas of a takeover derive the same
+//     answer from the run's event, which the recovery definition binds.
+//   - Why not an attempt placement of "cluster": the executor refuses a pool
+//     step's cluster attempt unless the installation's policy allows cloud
+//     fallback, and a release must run whatever that policy says. A cluster step
+//     needs no such consent, exactly as these steps did before they were pool.
+//
+// Covered by TestAReleaseRunsItsPoolStepsOnTheCluster.
+func (dr *runDriver) executionStep(step pipelines.Step) pipelines.Step {
+	if dr.run.Event == pipelines.EventRelease && step.Placement == pipelines.PlacementPool {
+		step.Placement = pipelines.PlacementCluster
+	}
+	return step
 }
 
 // ---------------------------------------------------------------------------

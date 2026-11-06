@@ -14,15 +14,21 @@
 # `placement: pool`: the installed compute policy (memql-znas
 # znasFleetFirstDeliveryProfile) gives it 60 s to start on an opted-in Fleet
 # machine, then runs it as a Workbench Job, so the cluster is the fallback and
-# its admitted slots are left to the steps that must stay there. Three kinds
-# stay `cluster`:
-#   - `verification: true` steps, because a release and carry-forward reuse
-#     only evidence the cluster produced (component/pipelines/verification.go
-#     refuses any other placement). Moving them is the owner's open decision on
-#     Fleet evidence;
+# its admitted slots are left to the steps that must stay there.
+# `verification: true` steps are pool too (since the engine accepted them,
+# 0.31.17; the owner's decision, 2026-11-06): a Fleet pass counts between
+# pushes, and a release runs them on the cluster and stands only on a cluster
+# pass. These stay `cluster`:
 #   - release output (images, release files, Cockpit release builds, fixtures),
 #     so a published artifact is built on the cluster;
-#   - steps with a repository token or SARIF upload.
+#   - steps with a repository token or SARIF upload;
+#   - the two gitleaks history scans. They fetch the whole repository history
+#     from GitHub, which timed out three times from a Fleet machine
+#     (2026-11-06); on the cluster the push scan takes under two minutes.
+# A Fleet container runs as the machine's own user with HOME=/tmp, so
+# `go install` writes to /tmp/go/bin, which is not on the image's PATH. A pool
+# step that installs a tool puts $(go env GOPATH)/bin on PATH itself (on the
+# cluster it already is).
 # Under a resolver without the computePlacement role a pool step is Fleet-only
 # and never falls back, so this file relies on that profile being installed.
 # Every pool step names memoryMiB: a cluster container defaults to 4 GiB (the
@@ -73,6 +79,16 @@ pipeline:
         # These change only what survives a crash, never what a query sees.
         # initdb takes -c from PostgreSQL 16, which the image runs.
         POSTGRES_INITDB_ARGS: -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+        # The same database wherever the step runs. The image tunes itself on
+        # first start from the memory and CPUs its container gets, and the
+        # surfaces differ: the cluster gives a service 4 GiB, Cockpit 2 GB.
+        # Derived, that was 50 connections on the cluster and 25 on the Fleet,
+        # below the 27 integrations/library uses (db-tests#4 failed "too many
+        # clients" on CyberPC, 2026-11-06). Memory is the Fleet's hard cap, so
+        # no setting assumes more than a Fleet service may use.
+        TS_TUNE_MEMORY: 2GB
+        TS_TUNE_NUM_CPUS: "2"
+        TS_TUNE_MAX_CONNS: "100"
       # Over TCP, the way the step connects. The image's first start runs its
       # initialization on a server listening on its socket alone and then
       # restarts it, so a socket probe can pass before the server the step will
@@ -237,7 +253,8 @@ pipeline:
         # every change.
         - name: path-routing
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -247,7 +264,8 @@ pipeline:
             python3 -m unittest discover -s scripts/ci -p repository_proposal_test.py
         - name: build-identity
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -257,7 +275,8 @@ pipeline:
             go vet -tags identity github.com/znasllc-io/memql/...
         - name: build-mcp
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -267,7 +286,8 @@ pipeline:
             go vet -tags mcp github.com/znasllc-io/memql/...
         - name: build-agent
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -277,7 +297,8 @@ pipeline:
             go vet -tags agent github.com/znasllc-io/memql/...
         - name: build-planner
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -287,7 +308,8 @@ pipeline:
             go vet -tags planner github.com/znasllc-io/memql/...
         - name: build-workbench
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -305,7 +327,8 @@ pipeline:
         # installer-lifecycle.pipelines leg.
         - name: build-clustere2e
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -319,7 +342,8 @@ pipeline:
             go test -tags clustere2e,agent -count=1 -run '^TestPipelinesSubstrate$' ./test/clustere2e/
         - name: module-boundaries
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 60m
           run: |
             set -eu
@@ -328,7 +352,8 @@ pipeline:
             bash scripts/ci/module-integrity.sh
         - name: bash32-smoke
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 10m
           image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
           caches: []
@@ -414,6 +439,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             mkdir -p .memql-security/go
             go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
             govulncheck -version > .memql-security/go/scanner.txt
             export GOMEMLIMIT=7GiB GOGC=100
             status=0
@@ -451,7 +477,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           timeout: 30m
           cpuMilli: 3000
           memoryMiB: 6144
@@ -472,7 +498,7 @@ pipeline:
         # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
           verification: true
-          placement: cluster
+          placement: pool
           packages: affected
           only: not-db-gated
           shards: 4
@@ -498,7 +524,8 @@ pipeline:
         # budgets without carrying engine fixture rows into unrelated tests.
         - name: db-tests
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Keep three Go execution threads after the heap-budget fix, with
           # a quarter-core of admission headroom per shard. Including Postgres,
           # each shard reserves three cores; two leave room in a 6.5-core pool
@@ -689,7 +716,8 @@ pipeline:
           run: bash scripts/ci/editor-host.sh productivity-desktop stable
         - name: sdk-ts-typecheck
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make sdk-ts-install
@@ -697,7 +725,8 @@ pipeline:
             make sdk-ts-test
         - name: viewkit-checks
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           run: |
             set -eu
             scripts/ci/retry.sh -- make viewkit-install
@@ -755,7 +784,8 @@ pipeline:
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
         - name: test-agent
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           # Agent-tagged persistence cases are absent from untagged DB shards.
           # A dedicated service and required DB mode prevent a skipped green.
           services: [postgres]
@@ -780,7 +810,8 @@ pipeline:
             go test -tags agent -count=1 -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
         - name: test-bff
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -789,7 +820,8 @@ pipeline:
             go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-edge
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -798,7 +830,8 @@ pipeline:
             go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
         - name: test-identity
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -807,7 +840,8 @@ pipeline:
             go test -tags identity -timeout=300s ./app/ ./component/node/
         - name: test-mcp
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -816,7 +850,8 @@ pipeline:
             go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
         - name: test-planner
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -825,7 +860,8 @@ pipeline:
             go test -tags planner -timeout=300s ./app/ ./component/node/
         - name: test-workbench
           verification: true
-          placement: cluster
+          placement: pool
+          memoryMiB: 4096
           timeout: 30m
           run: |
             set -eu
@@ -993,7 +1029,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           # Restart scanners after each commit: large historical patches
@@ -1062,6 +1098,7 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
             go install github.com/anchore/syft/cmd/syft@v1.54.1
+            export PATH="$(go env GOPATH)/bin:$PATH"
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
 
     - name: security-reports

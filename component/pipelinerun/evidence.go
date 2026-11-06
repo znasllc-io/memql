@@ -137,9 +137,13 @@ func (dr *runDriver) evidenceAdmitted(ctx context.Context, source Run, age time.
 //     proof refused would cost the release its version, because a successful
 //     release run is never replaced (adoptableBuildRun), and that is how 0.31.4
 //     and 0.31.5 were lost.
-//   - Scope: only what declares verification, which is a pinned cluster container
-//     with no secrets, no artifacts and no run identity in its environment, so
-//     every release build, vulnerability scan and native fleet lane still runs.
+//   - Scope: only what declares verification, which is a pinned cluster or pool
+//     container with no secrets, no artifacts and no run identity in its
+//     environment, so every release build, vulnerability scan and native fleet
+//     lane still runs. And only a pass the cluster produced: a pool step's pass
+//     that ran on one of the owner's machines counts between pushes and not for a
+//     release (the owner's decision, 2026-11-06), so the release runs that step
+//     itself, on the cluster (executionStep).
 //   - Choice: the installed policy still decides, source by source, after the
 //     native rules. Mode is the policy's to weigh rather than a native gate: a
 //     pull request runs affected, and the fingerprint already binds what the step
