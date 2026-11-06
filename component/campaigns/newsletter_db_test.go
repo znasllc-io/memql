@@ -65,7 +65,7 @@ func TestNewsletterEnrollmentAndWelcomeAcrossReplicas(t *testing.T) {
 	system := auth.ContextWithInternalOrigin(auth.ContextWithToken(auth.ContextWithAccess(context.Background(), auth.SystemActor("single-send-test")), &auth.TokenInfo{Subject: "single-send-test"}))
 	execute := func(ctx context.Context, q string) {
 		t.Helper()
-		if _, err := engines[0].Execute(ctx, q); err != nil {
+		if _, err := engines[0].Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 			t.Fatal(err)
 		}
 	}

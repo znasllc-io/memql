@@ -42,81 +42,6 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 	return b.String()
 }
 
-// AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest).
-//
-// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
-type AddRecipientArgs struct {
-	// Enum: subscribed | pending
-	SubscriptionStatus string
-	RecipientId        string
-	AudienceId         string
-	Email              string
-	DisplayName        string
-	Fields             map[string]any
-	Source             string
-	AccountId          string
-}
-
-// AddRecipient calls the engine mutation addRecipient.
-func (qc *QueryClient) AddRecipient(ctx context.Context, args AddRecipientArgs) (*Result, error) {
-	call := AddRecipientBuild(args)
-	return qc.executeNamed(ctx, "addRecipient", call)
-}
-
-func AddRecipientBuild(args AddRecipientArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation addRecipient(")
-	if args.SubscriptionStatus != "" {
-		b.WriteString("subscriptionStatus: ")
-		b.WriteString(quoteMemQL(args.SubscriptionStatus))
-	}
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("recipientId: ")
-	b.WriteString(quoteMemQL(args.RecipientId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("audienceId: ")
-	b.WriteString(quoteMemQL(args.AudienceId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("email: ")
-	b.WriteString(quoteMemQL(args.Email))
-	if args.DisplayName != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("displayName: ")
-		b.WriteString(quoteMemQL(args.DisplayName))
-	}
-	if args.Fields != nil {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("fields: ")
-		b.WriteString(renderMemQLValue(args.Fields))
-	}
-	if args.Source != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("source: ")
-		b.WriteString(quoteMemQL(args.Source))
-	}
-	if args.AccountId != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("accountId: ")
-		b.WriteString(quoteMemQL(args.AccountId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AdvanceMemoryConsolidationCursor -- Advance the per-owner v1:memory:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier).
 //
 // Bound concept: v1:memory:consolidationCursor (machine-readable: BoundConcepts["advanceMemoryConsolidationCursor"] in generated_concepts.go).
@@ -11956,41 +11881,6 @@ func SetQuoteStatusBuild(args SetQuoteStatusArgs) string {
 	}
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetRecipientSubscription -- Change one recipient's subscription state -- the write behind an operator honouring an unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
-// unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later, an unsubscribe forwarded by support) and stamping the clock would date every one of those to the moment the operator got round to it.
-//
-// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["setRecipientSubscription"] in generated_concepts.go).
-type SetRecipientSubscriptionArgs struct {
-	RecipientId        string
-	SubscriptionStatus string
-	UnsubscribedAt     string
-}
-
-// SetRecipientSubscription calls the engine mutation setRecipientSubscription.
-func (qc *QueryClient) SetRecipientSubscription(ctx context.Context, args SetRecipientSubscriptionArgs) (*Result, error) {
-	call := SetRecipientSubscriptionBuild(args)
-	return qc.executeNamed(ctx, "setRecipientSubscription", call)
-}
-
-func SetRecipientSubscriptionBuild(args SetRecipientSubscriptionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setRecipientSubscription(")
-	b.WriteString("recipientId: ")
-	b.WriteString(quoteMemQL(args.RecipientId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("subscriptionStatus: ")
-	b.WriteString(quoteMemQL(args.SubscriptionStatus))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("unsubscribedAt: ")
-	b.WriteString(quoteMemQL(args.UnsubscribedAt))
 	b.WriteString(")")
 	return b.String()
 }

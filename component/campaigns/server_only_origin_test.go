@@ -117,6 +117,12 @@ func serverOnlyWrites() []struct {
 				CampaignID: "c1", DeliveryID: "d1", Kind: "open", OccurredAt: time.Now().UTC(),
 			})
 		}},
+		{"setRecipientSubscription", func(s *Store, ctx context.Context) error {
+			return s.SetRecipientSubscription(ctx, "r1", "unsubscribed", time.Now().UTC())
+		}},
+		{"addRecipient", func(s *Store, ctx context.Context) error {
+			return s.AddRecipient(ctx, "r1", "a1", "a@b.test", "", "manual", "", "subscribed", nil)
+		}},
 		// Not this domain's mutation -- platform's -- but this store issues it,
 		// and it is @serverOnly (memql#5707 follow-up). The ingester is a
 		// builtin a client may call directly (it is gated by configuration, not
@@ -176,9 +182,6 @@ func TestOrdinaryWritesAreNotStamped(t *testing.T) {
 			return s.EnqueueSend(ctx, SendJob{
 				CampaignID: "c1", CampaignOwnerUserID: "u1", AudienceID: "a1", TemplateID: "t1",
 			})
-		}},
-		{"setRecipientSubscription", func(s *Store, ctx context.Context) error {
-			return s.SetRecipientSubscription(ctx, "r1", "unsubscribed", time.Now().UTC())
 		}},
 	}
 	for _, c := range cases {

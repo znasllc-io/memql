@@ -89,7 +89,12 @@ mutation audience restoreAudience {
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
 /// concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest)
 /// so the membership can be found by it (recipientInAudienceByDigest).
+///
+/// @serverOnly: actor.userId scoping cannot make an address unique in an audience (two adds race
+/// past any per-row check) or know whether the audience asks people to confirm. campaignAddRecipient
+/// checks both under the audience's lock before it comes here, and is what a client calls.
 @actor
+@serverOnly
 @createOnly("joinedAt")
 mutation recipient addRecipient {
   args {
@@ -133,7 +138,13 @@ mutation recipient addRecipient {
 /// mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later,
 /// an unsubscribe forwarded by support) and stamping the clock would date every one of those to
 /// the moment the operator got round to it.
+///
+/// @serverOnly: actor.userId scoping cannot tell a pending person's confirmation from any other
+/// change. A pending person in a confirm-first audience becomes subscribed only through
+/// confirmation (confirmedAt, a consent event, a nudge for a waiting automation).
+/// campaignSetRecipientSubscription routes that case and writes every other change through here.
 @actor
+@serverOnly
 mutation recipient setRecipientSubscription {
   args {
     recipientId         string!

@@ -106,10 +106,10 @@ func TestAudienceRestoreAndSubscriberCount(t *testing.T) {
 	people := make([]string, 3)
 	for i, address := range []string{"subscribed@example.test", "left@example.test", "bounced@example.test"} {
 		people[i] = fmt.Sprintf("%s-person-%d", suffix, i)
-		mustRun(owner, call("mutation", "addRecipient", arg{"recipientId", people[i]}, arg{"audienceId", audience}, arg{"accountId", org}, arg{"email", address}, arg{"source", "manual"}))
+		mustRun(auth.ContextWithInternalOrigin(owner), call("mutation", "addRecipient", arg{"recipientId", people[i]}, arg{"audienceId", audience}, arg{"accountId", org}, arg{"email", address}, arg{"source", "manual"}))
 	}
-	mustRun(owner, call("mutation", "setRecipientSubscription", arg{"recipientId", people[1]}, arg{"subscriptionStatus", "unsubscribed"}))
-	mustRun(owner, call("mutation", "setRecipientSubscription", arg{"recipientId", people[2]}, arg{"subscriptionStatus", "bounced"}))
+	mustRun(auth.ContextWithInternalOrigin(owner), call("mutation", "setRecipientSubscription", arg{"recipientId", people[1]}, arg{"subscriptionStatus", "unsubscribed"}))
+	mustRun(auth.ContextWithInternalOrigin(owner), call("mutation", "setRecipientSubscription", arg{"recipientId", people[2]}, arg{"subscriptionStatus", "bounced"}))
 	if got := count("audienceRosterSize"); got != 3 {
 		t.Fatalf("audienceRosterSize = %d, want 3: everyone on the list, whatever their state", got)
 	}

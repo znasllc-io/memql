@@ -29,43 +29,6 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
   return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
 };
 
-/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
-// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
-export interface AddRecipientArgs {
-  // Enum: subscribed | pending
-  subscriptionStatus?: string;
-  recipientId: string;
-  audienceId: string;
-  email: string;
-  displayName?: string;
-  fields?: Record<string, unknown>;
-  source?: string;
-  accountId?: string;
-}
-
-export function buildAddRecipient(args: AddRecipientArgs): string {
-  const parts: string[] = [];
-  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
-  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
-  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
-  parts.push("email: " + renderMemQLValue(args.email));
-  if (args.displayName !== undefined) parts.push("displayName: " + renderMemQLValue(args.displayName));
-  if (args.fields !== undefined) parts.push("fields: " + renderMemQLValue(args.fields));
-  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
-  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
-  return "mutation addRecipient(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    addRecipient(args: AddRecipientArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.addRecipient = function (this: QueryClient, args: AddRecipientArgs = {} as AddRecipientArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("addRecipient", buildAddRecipient(args), opts);
-};
-
 /** Advance the per-owner v1:memory:consolidationCursor watermark to the engine-computed max(createdAt) of the batch just consolidated -- the incremental-cost mechanism (next run reads only episodes newer than this). Upserts on a stable per-owner id so it creates the cursor on first run and advances it thereafter. episodesSeen takes the engine-computed running total. ownerUserId stamped from actor.userId (owned tier). */
 // Bound concept: v1:memory:consolidationCursor (machine-readable: BoundConcepts["advanceMemoryConsolidationCursor"] in generated_concepts.ts).
 export interface AdvanceMemoryConsolidationCursorArgs {
@@ -6943,33 +6906,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setQuoteStatus = function (this: QueryClient, args: SetQuoteStatusArgs = {} as SetQuoteStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setQuoteStatus", buildSetQuoteStatus(args), opts);
-};
-
-/** Change one recipient's subscription state -- the write behind an operator honouring an unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
-unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later, an unsubscribe forwarded by support) and stamping the clock would date every one of those to the moment the operator got round to it. */
-// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["setRecipientSubscription"] in generated_concepts.ts).
-export interface SetRecipientSubscriptionArgs {
-  recipientId: string;
-  subscriptionStatus: string;
-  unsubscribedAt?: string;
-}
-
-export function buildSetRecipientSubscription(args: SetRecipientSubscriptionArgs): string {
-  const parts: string[] = [];
-  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
-  parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
-  if (args.unsubscribedAt !== undefined) parts.push("unsubscribedAt: " + renderMemQLValue(args.unsubscribedAt));
-  return "mutation setRecipientSubscription(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setRecipientSubscription(args: SetRecipientSubscriptionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setRecipientSubscription = function (this: QueryClient, args: SetRecipientSubscriptionArgs = {} as SetRecipientSubscriptionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setRecipientSubscription", buildSetRecipientSubscription(args), opts);
 };
 
 /** Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived). Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier). */

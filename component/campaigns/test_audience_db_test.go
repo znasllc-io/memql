@@ -58,7 +58,7 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 	system := auth.ContextWithInternalOrigin(workers[0].systemActorContext(context.Background()))
 	execute := func(ctx context.Context, q string) {
 		t.Helper()
-		if _, err := engines[0].Execute(ctx, q); err != nil {
+		if _, err := engines[0].Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 			t.Fatal(err)
 		}
 	}

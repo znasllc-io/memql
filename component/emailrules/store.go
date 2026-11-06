@@ -23,6 +23,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
@@ -519,7 +520,8 @@ func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email
 	if accountID != "" {
 		args = append(args, arg{"accountId", accountID})
 	}
-	return s.exec(ctx, call("mutation", "addRecipient", args...))
+	// addRecipient is @serverOnly: the rule enrols the address its own lookup found absent.
+	return s.exec(auth.ContextWithInternalOrigin(ctx), call("mutation", "addRecipient", args...))
 }
 
 // UsersInRoles reads the cluster people the operational lane mails.

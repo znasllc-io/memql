@@ -6,6 +6,7 @@ package campaigns
 const (
 	ConsentSourceDoubleOptIn = "double_opt_in"
 	ConsentSourcePreferences = "preferences"
+	ConsentSourceOperator    = "operator"
 	ConsentGrant             = "grant"
 	ConsentWithdraw          = "withdraw"
 	ConsentBounce            = "bounce"

@@ -52,7 +52,7 @@ func TestRuleDeliveryPersistsOrganizationAndOwnerWithoutFalseCampaign(t *testing
 	system = auth.ContextWithToken(system, &auth.TokenInfo{Subject: "rule-ledger-test"})
 	execute := func(ctx context.Context, q string) {
 		t.Helper()
-		if _, err := eng.Execute(ctx, q); err != nil {
+		if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestSingleSendDeliveriesAreKeyedByTheirRequestInTheDatabase(t *testing.T) {
 	system = auth.ContextWithToken(system, &auth.TokenInfo{Subject: "request-ledger-test"})
 	execute := func(ctx context.Context, q string) {
 		t.Helper()
-		if _, err := eng.Execute(ctx, q); err != nil {
+		if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}

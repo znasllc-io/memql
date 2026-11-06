@@ -148,7 +148,7 @@ func newDigestTenantOn(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, name st
 
 func (d *digestTenant) execute(t *testing.T, ctx context.Context, q string) {
 	t.Helper()
-	if _, err := d.engine.Execute(ctx, q); err != nil {
+	if _, err := d.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 		t.Fatal(err)
 	}
 }

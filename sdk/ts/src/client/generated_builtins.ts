@@ -337,6 +337,51 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Add one person to an audience. An address (compared without regard to case or surrounding spaces) that is already in the audience is refused with 'This address is already in this audience.', whatever state that membership is in. In an audience that asks people to confirm, the person is added as pending and receives the confirmation; subscriptionStatus 'subscribed' is accepted there only with alreadyConfirmed true, which records the confirmation and a consent event so automations triggered on confirmation enroll them. Repeating a call with the same recipientId returns the person already added. Needs the same organization write permission as sending. */
+export interface CampaignAddRecipientArgs {
+  /** The id for the new membership, chosen by the caller so a retry is the same add. */
+  recipientId: string;
+  /** The audience to add to. The caller must be able to read it. */
+  audienceId: string;
+  /** The address. Shape-validated; stored as typed after trimming. */
+  email: string;
+  displayName?: string;
+  /** Per-person merge data, reachable from a template as {{fields.<key>}}. */
+  fields?: Record<string, unknown>;
+  /** Where the person came from. Defaults to 'manual'. */
+  source?: string;
+  /** 'subscribed' or 'pending'. Defaults to 'subscribed', or to 'pending' in an audience that asks people to confirm. */
+  subscriptionStatus?: string;
+  /** True when the person has already confirmed outside this system. Only meaningful, and required for 'subscribed', in an audience that asks people to confirm. */
+  alreadyConfirmed?: boolean;
+  /** Ignored: the organization is the audience's. */
+  accountId?: string;
+}
+
+export function buildCampaignAddRecipient(args: CampaignAddRecipientArgs): string {
+  const parts: string[] = [];
+  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("email: " + renderMemQLValue(args.email));
+  if (args.displayName !== undefined) parts.push("displayName: " + renderMemQLValue(args.displayName));
+  if (args.fields !== undefined) parts.push("fields: " + renderMemQLValue(args.fields));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
+  if (args.alreadyConfirmed !== undefined) parts.push("alreadyConfirmed: " + renderMemQLValue(args.alreadyConfirmed));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "builtin campaignAddRecipient(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignAddRecipient(args: CampaignAddRecipientArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignAddRecipient = function (this: QueryClient, args: CampaignAddRecipientArgs = {} as CampaignAddRecipientArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignAddRecipient", buildCampaignAddRecipient(args), opts);
+};
+
 /** Preview a brand kit before it is saved: a built-in layout with the kit applied, rendered as emailRender renders it, and the kit's warnings as campaignSaveBrandKit gives them. Answers {html, warnings: [{code, message}]}. Library pictures (artifact:<id>) are read as you read them. Never saves anything. */
 export interface CampaignBrandPreviewArgs {
   /** The organization the kit is for. You need read access to its data. */
@@ -700,6 +745,29 @@ QueryClient.prototype.campaignRetryComposition = function (this: QueryClient, ar
   return this.executeNamed("campaignRetryComposition", buildCampaignRetryComposition(args), opts);
 };
 
+/** Retry email automation runs that failed. Each one starts its step again with no attempts spent; an unsubscribed or suppressed person still leaves instead of being mailed. Leave enrollmentIds empty to retry every failed run of the automation. */
+export interface CampaignRetryEnrollmentsArgs {
+  journeyId: string;
+  enrollmentIds?: string[];
+}
+
+export function buildCampaignRetryEnrollments(args: CampaignRetryEnrollmentsArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  if (args.enrollmentIds !== undefined) parts.push("enrollmentIds: " + renderMemQLValue(args.enrollmentIds));
+  return "builtin campaignRetryEnrollments(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetryEnrollments(args: CampaignRetryEnrollmentsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetryEnrollments = function (this: QueryClient, args: CampaignRetryEnrollmentsArgs = {} as CampaignRetryEnrollmentsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetryEnrollments", buildCampaignRetryEnrollments(args), opts);
+};
+
 /** Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain. */
 export interface CampaignRetryNewsletterWelcomeArgs {
   signupId: string;
@@ -945,6 +1013,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignSetJourneyState = function (this: QueryClient, args: CampaignSetJourneyStateArgs = {} as CampaignSetJourneyStateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignSetJourneyState", buildCampaignSetJourneyState(args), opts);
+};
+
+/** Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, changing a pending person to subscribed goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation. Every other change is written as given. */
+export interface CampaignSetRecipientSubscriptionArgs {
+  recipientId: string;
+  subscriptionStatus: string;
+  /** When the person left, if that happened earlier than now. */
+  unsubscribedAt?: string;
+}
+
+export function buildCampaignSetRecipientSubscription(args: CampaignSetRecipientSubscriptionArgs): string {
+  const parts: string[] = [];
+  parts.push("recipientId: " + renderMemQLValue(args.recipientId));
+  parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
+  if (args.unsubscribedAt !== undefined) parts.push("unsubscribedAt: " + renderMemQLValue(args.unsubscribedAt));
+  return "builtin campaignSetRecipientSubscription(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSetRecipientSubscription(args: CampaignSetRecipientSubscriptionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSetRecipientSubscription = function (this: QueryClient, args: CampaignSetRecipientSubscriptionArgs = {} as CampaignSetRecipientSubscriptionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSetRecipientSubscription", buildCampaignSetRecipientSubscription(args), opts);
 };
 
 /** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */

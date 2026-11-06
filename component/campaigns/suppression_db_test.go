@@ -54,7 +54,7 @@ func TestOrganizationUnsubscribeIsVisibleOnAnotherReplica(t *testing.T) {
 	owner := auth.ContextWithToken(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})
 	run := func(ctx context.Context, q string) {
 		t.Helper()
-		if _, err := engines[0].Execute(ctx, q); err != nil {
+		if _, err := engines[0].Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}

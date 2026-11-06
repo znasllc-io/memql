@@ -1059,7 +1059,7 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 	if !at.IsZero() {
 		args = append(args, arg{"unsubscribedAt", at.UTC().Format(time.RFC3339)})
 	}
-	return s.exec(ctx, call("mutation", "setRecipientSubscription", args...))
+	return s.execServerOnly(ctx, call("mutation", "setRecipientSubscription", args...))
 }
 
 // AddRecipient inserts one address into an audience. OWNED tier: issued
@@ -1093,7 +1093,7 @@ func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email
 	if accountID != "" {
 		args = append(args, arg{"accountId", accountID})
 	}
-	return s.exec(ctx, call("mutation", "addRecipient", args...))
+	return s.execServerOnly(ctx, call("mutation", "addRecipient", args...))
 }
 
 // ConsentRecord is one append-only consent event.
