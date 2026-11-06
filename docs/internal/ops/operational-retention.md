@@ -52,6 +52,20 @@ engine read path merges this table with `MemoryNodes` before filtering, sorting,
 authorization and pagination. Its `createdAt` remains the observation version,
 so live feeds and reads from another replica order updates consistently.
 
+A worker registration's observation fields are `lastSeenAt`,
+`lastConnectedFromIP`, `connectedNodeId`, `activeCount`, `hardware`, `rttMs`,
+`rttAt`, `clockSkewMs` and `credentialExpiresAt`, plus, since migration
+`20261106150000_worker_registration_observations`, `sharingActivity` (the
+stream holder's model-call counts, republished every 15 s), `capacity` and
+`setup` (both re-asserted on every heartbeat flush with a fresh `reportedAt`).
+Before that migration each of the last three appended a registration version on
+every report. Adding a field to an existing concept's list needs no reader
+handshake: readers already merge `memory_liveness` for every listed concept
+(`HasLiveness` in `component/database/memory-nodes/liveness.go`). Adding a
+concept does. `TestWorkerLiveReportsAreObservationsNotRegistrationVersions`
+(`component/memql`) drives the three reports from two engines and counts both
+tables.
+
 The first record and changes outside the closed observation-field list still
 append to `MemoryNodes`. A business change clears its preceding observation in
 the same transaction. Every engine write to these concepts carries a version
