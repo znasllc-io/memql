@@ -195,7 +195,7 @@ describe("the pipelines reading", () => {
 
     const configured = readPipelines(pipelines("configured", null));
     expect(configured.steps.map((s) => s.reading)).toEqual(["done", "done", "done"]);
-    expect([configured.words, configured.detail]).toEqual(["Set up", "3 of 3 done"]);
+    expect([configured.words, configured.detail]).toEqual(["Ready", "3 of 3 done"]);
 
     // Reported as not set up, but not which: the item says so, and no stop
     // claims to be the missing one.
@@ -313,7 +313,7 @@ describe("Settings > Pipelines", () => {
     connect({});
     mount(pipelines("configured", null));
     expect(stopStates()).toEqual(["done", "done", "done"]);
-    expect(within(bar()).getByText("Set up")).toBeTruthy();
+    expect(within(bar()).getByText("Ready")).toBeTruthy();
     expect(within(bar()).getByText("3 of 3 done")).toBeTruthy();
     expect(bar().getAttribute("data-tone")).toBe("live");
   });

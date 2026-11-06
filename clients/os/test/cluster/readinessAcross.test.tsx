@@ -39,7 +39,7 @@ describe("readinessNodeLines", () => {
       {
         nodeId: "agent-a",
         nodeType: "agent",
-        words: "Set up",
+        words: "Ready",
         note: "checked 8s ago",
         counted: true,
         at: "2026-09-09T15:42:54Z",

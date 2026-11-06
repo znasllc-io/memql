@@ -82,7 +82,7 @@ describe("stopsFor: which stops exist", () => {
 describe("stopsFor: what each stop says", () => {
   it("reads a configured module as done", () => {
     const s = stopsFor(facts({ readiness: core("configured", "unconfigured", "unconfigured") }));
-    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "done", answer: "Set up" });
+    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "done", answer: "Ready" });
   });
 
   it("keeps a partial module waiting, and says so", () => {
@@ -121,7 +121,7 @@ describe("stopsFor: what each stop says", () => {
     const behind = verdict("ai", "configured");
     behind.stale = ["edge-a", "bff-product-a"];
     const s = stopsFor(facts({ readiness: readiness(true, [behind, verdict("storage", "configured"), verdict("email", "configured")]) }));
-    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "done", answer: "Set up" });
+    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "done", answer: "Ready" });
   });
 });
 
@@ -134,7 +134,7 @@ describe("the passkey stop", () => {
 
   it("is done once one is held", () => {
     const s = stopsFor(facts({ passkeys: "held" }));
-    expect(s[0]).toMatchObject({ id: "passkey", state: "done", answer: "Set up" });
+    expect(s[0]).toMatchObject({ id: "passkey", state: "done", answer: "Ready" });
   });
 
   it("carries the one ordering law as its sentence", () => {

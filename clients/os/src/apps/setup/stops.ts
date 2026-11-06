@@ -107,18 +107,18 @@ function passkeyStop(facts: StopFacts): SetupStop {
     };
   }
   if (facts.passkeys === "unknown") return { ...base, state: "unknown", answer: "" };
-  if (facts.passkeys === "held") return { ...base, state: "done", answer: "Set up" };
+  if (facts.passkeys === "held") return { ...base, state: "done", answer: "Ready" };
   return { ...base, state: "waiting", answer: "Not set up" };
 }
 
 function moduleStop(id: ModuleId, verdict: Verdict | null): SetupStop {
   const base = { id: id as StopId, name: MODULE_NAMES[id], sentence: MODULE_DESCRIPTIONS[id] };
   const state = verdict?.state ?? "unreported";
-  if (state === "configured") return { ...base, state: "done", answer: "Set up" };
+  if (state === "configured") return { ...base, state: "done", answer: "Ready" };
   if (state === "notApplicable") return { ...base, state: "skipped", answer: "Not applicable" };
   // THE KIT'S WORDS for the two states that have two causes each -- "Set up
   // on some nodes" or "Partly set up", "Could not check" or "Not reported" --
-  // so the rail and the Set up group read one vocabulary (rule 7).
+  // so the rail and the Setup group read one vocabulary (rule 7).
   if (state === "partial") return { ...base, state: "waiting", answer: stateWords(verdict) };
   // `unreported` STAYS WAITING rather than becoming unknown. A module whose
   // hosting node is down has told us nothing, and the wizard says exactly

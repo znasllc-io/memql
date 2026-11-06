@@ -218,7 +218,6 @@ button:not(:disabled):active {
   position: absolute;
   inset: 0;
   display: flex;
-  overflow: clip;
   transition: transform var(--os-duration-med) var(--os-ease);
 }
 

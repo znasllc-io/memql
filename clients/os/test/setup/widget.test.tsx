@@ -153,9 +153,9 @@ describe("the rail a fresh cluster shows", () => {
     expect(done.querySelector("button")).toBeNull();
     // ...and it still reads as a row: the name and the state word in the same
     // columns as every other stop's. Falling back to the plain label-and-note
-    // form would have replaced "Set up" with the stop's whole sentence.
+    // form would have replaced "Ready" with the stop's whole sentence.
     expect(done.querySelector(".os-rail-label")?.textContent).toBe("Your passkey");
-    expect(done.querySelector(".os-rail-answer")?.textContent).toBe("Set up");
+    expect(done.querySelector(".os-rail-answer")?.textContent).toBe("Ready");
     expect(done.querySelector(".os-rail-chev")).toBeNull();
     // ...while the one with something to do still is one.
     const waiting = rail.querySelector('li[data-state="open"]') as HTMLElement;

@@ -319,9 +319,9 @@ export function readinessNodeLines(v: Verdict, now: Date): ReadinessNodeLine[] {
   return lines;
 }
 
-/** A single node's state, in the Set up vocabulary. */
+/** A single node's state, in the kit's state vocabulary. */
 function nodeStateWords(state: string): string {
-  if (state === "configured") return "Set up";
+  if (state === "configured") return "Ready";
   if (state === "partial") return "Partly set up";
   if (state === "unconfigured") return "Not set up";
   // A state this build does not know is rendered verbatim rather than mapped

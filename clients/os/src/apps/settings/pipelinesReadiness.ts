@@ -72,7 +72,7 @@ const STEPS: Record<SubStepId, Omit<SubStep, "reading">> = {
 };
 
 const WORDS: Record<Exclude<ItemState, "notReported">, string> = {
-  setUp: "Set up",
+  setUp: "Ready",
   partlySetUp: "Partly set up",
   notSetUp: "Not set up",
 };
