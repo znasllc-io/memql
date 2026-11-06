@@ -70,8 +70,24 @@ concept pipeline {
 /// node claims under a lease and drives over the work spine, and the GitHub check run reports. A
 /// re-run is a NEW row with the attempt incremented; a finished row is never reopened, so the rows of
 /// one run key are the literal history of what was attempted.
+///
+/// ONLY THE NEWEST VERSION OF A RUN OUTLIVES A DAY: @retention(ttl="1d", keepLatest=true,
+/// archive="none"). The history worth keeping is the ROWS above, one per attempt; the VERSIONS of one
+/// row are its driver's bookkeeping. The driver rewrites the row on a 30-second lease heartbeat
+/// (driverHeartbeatAt) and after every step (stages), and every version copies the whole row,
+/// policySnapshot included -- the full source of every workflow construct the run may execute, about
+/// 14 KB that never changes after open. On production on 2026-11-06 that was 3,831 versions of 30
+/// runs in a day, ~17 KB each, and 1.7 GB in the week of October 29. Nothing reads a superseded
+/// version: every query takes the newest per id, and the row-version fences compare only the newest
+/// createdAt (component/pipelinerun/store_dsl.go). So superseded versions expire after a day and are
+/// not archived; the newest version of every run stays, and the whole-run operational retention
+/// (MEMQL_PIPELINES_RUN_RETENTION_DAYS, integrations/work) still archives and retires a completed run
+/// later. A day rather than less keeps the last day's progress readable to whoever debugs a stuck
+/// drive, and is short enough that most expired versions sit in the chunk still taking inserts,
+/// whose freed space PostgreSQL reuses.
 @serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="sha", secondary="title", tertiary="conclusion", status="status")
 concept run {
   ownerUserId        string  @serverSet  @description("v1:identity:user.id of the pipeline's owner, stamped from the actor by createPipelineRun -- the run is written under the owner's borrowed authority, so this is always the person whose grant drives it.")

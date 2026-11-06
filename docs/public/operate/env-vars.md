@@ -1158,6 +1158,12 @@ the records. Active parent work, goals and user-owned runs remain protected; a
 finished pipeline's runs, and its goal once no run of it remains, are the one
 exception, on their own window.
 
+These windows govern whole records. The superseded versions of a pipeline run
+row expire much sooner, after one day, through the run concept's own
+[declared retention](../language/memql.md#version-retention): the driver rewrites
+the row on a heartbeat and after every step, and only its newest version is ever
+read.
+
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |

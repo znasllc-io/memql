@@ -23,6 +23,18 @@ concept into the shared version-retirement sweep. The required archive uses
 `MEMQL_AZURE_BLOB_CONTAINER`; `archive="none"` explicitly makes the selected
 history disposable. Unmarked concepts keep their current policies.
 
+Two status rows declare `@retention(ttl="1d", keepLatest=true, archive="none")`:
+`v1:pipelines:run` and `v1:worker:appSession`. Their holders rewrite them on a
+heartbeat and after every step, and each write appends a full version (a
+pipeline run's copies its ~14 KB `policySnapshot`); on 2026-11-06 the two
+accounted for 1.9 GB in one week. Nothing reads a superseded version: a pipeline
+run's attempt history is its rows, one per attempt, and a session's record is its
+steps and Library transcript. The newest version of each stays; a day keeps
+recent progress readable to whoever debugs a stuck drive, and keeps most expired
+versions in the chunk still taking inserts, where PostgreSQL reuses their space.
+Pins: `component/memql/status_row_retention_test.go`; behaviour under the real
+admission: `component/retention/status_rows_db_test.go`.
+
 The hourly platform automation invokes `integration.retention.sweep` under
 cluster-owner authority. Each page scans at most 100 versions, has a 20-second
 deadline and a 32 MiB archive budget, and compares downloaded bytes before an

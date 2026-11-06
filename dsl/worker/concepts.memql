@@ -175,7 +175,17 @@ concept registration {
 /// limit. Owner-tier with the cluster-owner gate ORed in: an operator debugging a delegated run
 /// must be able to read it, and a plain owner tier would hide every other user's sessions from
 /// them.
+///
+/// ONLY THE NEWEST VERSION OF A SESSION OUTLIVES A DAY: @retention(ttl="1d", keepLatest=true,
+/// archive="none"). The holder advances the row every two seconds while the app runs
+/// (recordAppSessionProgress: heartbeat, recording counters, the step seq), and each version copies
+/// the whole row, ~10 KB on production: 757 versions of 6 sessions on 2026-11-06, 284 MB in the week
+/// of October 29. What a session did is recorded elsewhere and kept: its steps on the recording
+/// run, its transcript as a Library file. A superseded version is nobody's evidence -- every reader
+/// takes the newest per id, including the seq allocation -- so it expires after a day unarchived,
+/// and the newest version of every session stays.
 @rowAuthz(owner="ownerUserId", clusterOwner)
+@retention(ttl="1d", keepLatest=true, archive="none")
 @displayCard(primary="app", secondary="kind", tertiary="startedAt", status="status")
 concept appSession {
   toolScope object @description("Server-created delegated tool contract and original execution context. Written only when the session opens; never supplied by the app.")
