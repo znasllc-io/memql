@@ -844,7 +844,10 @@ func ToMinimalStepResults(steps map[string]*StepResult) map[string]*MinimalStepR
 				// ExecuteResult holds flat builtin/logic output in a private
 				// field. Serializing its wrapper discards the returned value,
 				// so rehydrate the same value downstream evaluation sees.
-				minResult.Result = UnwrapStepResult(result.Result)
+				// A Bundle-backed result is recorded without its nodes'
+				// schemas, and not at all when Value holds its rows
+				// (journaledResult says why a resume needs neither).
+				minResult.Result = journaledResult(UnwrapStepResult(result.Result), result.BoundRecorded)
 			}
 		}
 		minResult.Value = result.Bound

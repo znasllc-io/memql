@@ -4872,6 +4872,43 @@ it. The row stays whole; what is bounded is the copy of its event on the mesh
   loaded only on node types that did not write the row does not fire for a row
   this large, and the bridge's warning names every such row.
 
+## A receipt records an engine result's rows once, without schemas (2026-11-06)
+
+The decision above keeps a step's value whole. What a receipt stopped recording
+is narrower: the parts of a query's or mutation's engine result that nothing reads
+back (`component/automations/journal_step_result.go`).
+
+- **Trigger:** a step whose result is a Bundle-backed `*memql.ExecuteResult` (a
+  query's rows, the row a mutation wrote). Its receipt carried every node's
+  concept schema and, for a statement that binds a name, the rows a second time
+  beside `value`. Production's journaled mutation steps were about 5 KB each; a
+  real `createWorkRun` result measured 12,030 bytes and its receipt now 510.
+- **Chosen path:** never record a node's `schema`; record no `result` when
+  `value` was recorded (`BoundRecorded`), since `value` holds the same rows in
+  plain form. An unbound statement keeps its nodes, edges, root ids and meta
+  minus the schemas. Flat outputs (a logic's or builtin's return, the 308 KB
+  answer above) and the live `StepResult` are unchanged, and `resultFingerprint`
+  is still taken from the live result.
+- **Why resume does not need them:** a statement body rebinds each finished name
+  from `value` (`resumedStatements`); `result` reaches only the resumed
+  execution's record of steps it did not run again; a query too large to record
+  as a value is read again. Readers of receipts read `value` first (Nexus step
+  presentation, `work_follow`, replan evidence, compose).
+- **Alternatives:** dropping a flat output's duplicate too was rejected: the
+  answer validator and the replan prompt read `result.result` of those steps.
+  Capping sizes breaks resume, as above.
+- **Survives a retry or a replica change:** nothing moves. Rows written before
+  the change keep their old receipts and resume from `value` as before.
+- **Known limit:** `shouldIncludeResult`'s 100-node cut-off only recognizes a
+  decoded map, so a query of more than 100 rows whose value was not recorded is
+  still recorded whole in `result` (now without schemas). Resume reads such a
+  query again rather than using it.
+- **Tests:** `TestAMutationReceiptRecordsItsRowOnceAndNoSchema`,
+  `TestBundleWithoutSchemasKeepsEveryOtherNodeField`,
+  `TestJournaledResultLeavesEveryOtherResultAlone` and the Postgres-backed
+  `TestResumeV1_DB_AMutationReceiptHoldsItsRowOnceAndNoSchema`, which resumes
+  over a real mutation's stored receipt.
+
 ## Current-step operation completion and retained partial effects
 
 An execution previously could finish after an honest answer said its requested
