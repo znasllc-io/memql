@@ -183,6 +183,21 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	// against -- measuring a page and calling it a total is the memql#3460
 	// mistake -- while the walk is unavoidable, because "is this address
 	// already here" is not a question a count can answer.
+	//
+	// The audience's lock is taken first and held to the end of the writes: the
+	// operator's add and the signup form take the same one, so an address one of
+	// them is adding cannot be added here as well after this read missed it.
+	if w.newsletterGate != nil {
+		hold, err := w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("audience", audienceID))
+		if errors.Is(err, memql.ErrWriteGateBusy) {
+			return nil, fmt.Errorf("campaigns.importRecipients: %w", signupsBusy)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("campaigns.importRecipients: %w", err)
+		}
+		defer hold.Release()
+		ctx = memql.ContextWithFreshRead(ctx)
+	}
 	existingSize, err := w.store.RosterSize(ctx, audienceID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.importRecipients: %w", err)

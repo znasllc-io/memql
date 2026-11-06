@@ -74,6 +74,18 @@ type Firer struct {
 	claim   FirstFireClaim
 	release FirstFireRelease
 	gate    FiringGate
+	members MembershipGate
+}
+
+// MembershipGate holds the audience's membership lock -- the one the operator's
+// add, the signup form and the import take -- until the returned release is called.
+type MembershipGate func(ctx context.Context, audienceID string) (release func(), err error)
+
+// WithMembershipGate returns the Firer with the lock an enrolment is made under.
+// Without one, an enrolment is made unlocked, as before.
+func (f *Firer) WithMembershipGate(g MembershipGate) *Firer {
+	f.members = g
+	return f
 }
 
 func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
@@ -436,6 +448,30 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.
 		target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
+		if f.members != nil {
+			// Under the audience's lock the mailbox is looked up again: an
+			// operator, an import or another firing may have added it since the
+			// plan read the audience.
+			release, err := f.members(ctx, rule.AudienceID)
+			if err != nil {
+				out.Refusals = append(out.Refusals, fmt.Sprintf("the audience is busy, so %q was not enrolled. Nothing was sent; try again later", rule.RecipientField))
+				return nil
+			}
+			defer release()
+			members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, plan.address)
+			if err != nil {
+				return err
+			}
+			if !complete {
+				out.Refusals = append(out.Refusals, fmt.Sprintf("could not check every membership for %q in the audience. Nothing was sent; try again later", rule.RecipientField))
+				return nil
+			}
+			if existing, found := mailboxTarget(members); found {
+				out.Recipients++
+				f.sendMarketing(ctx, rule, nodeID, existing, event, out)
+				return nil
+			}
+		}
 		confirmation, err := f.store.AudienceConfirmation(ctx, rule.AudienceID)
 		if err != nil {
 			return err

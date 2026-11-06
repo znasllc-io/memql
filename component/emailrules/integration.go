@@ -18,6 +18,7 @@ package emailrules
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -75,6 +76,7 @@ func init() {
 			logger: pctx.Logger,
 			gate:   newFiringGate(firingGateDB(pctx), pctx.Logger),
 		}
+		i.members = newMembershipGate(pctx.GateDB)
 		i.claim, i.release = newFirstFireClaims(pctx.BunDB, pctx.Logger)
 		return i, nil
 	})
@@ -145,12 +147,13 @@ type Integration struct {
 	claim   FirstFireClaim
 	release FirstFireRelease
 	gate    FiringGate
+	members MembershipGate
 }
 
 // firer is the Firer this node's fire builtin runs: the created rule's
 // once-per-row claim and the firing gate, both wired from the node's database.
 func (i *Integration) firer() *Firer {
-	return NewFirer(i.engine).WithFirstFireClaim(i.claim).WithFirstFireRelease(i.release).WithFiringGate(i.gate)
+	return NewFirer(i.engine).WithFirstFireClaim(i.claim).WithFirstFireRelease(i.release).WithFiringGate(i.gate).WithMembershipGate(i.members)
 }
 
 func (i *Integration) IntegrationName() string { return IntegrationName }
@@ -295,3 +298,26 @@ func resultNode(kind string, payload map[string]any) ([]memorynodes.MemoryNode, 
 }
 
 var _ = boundSince
+
+// membershipLockPrefix is campaigns' newsletterLock("audience", id): the key the
+// operator's add, the signup form and the import hold while they add a person, so
+// an enrolment made here cannot race one of them into two rows for one address.
+const membershipLockPrefix = "campaign-newsletter:audience:"
+
+// newMembershipGate is nil when the node has no write-gate pool.
+func newMembershipGate(database func() *sql.DB) MembershipGate {
+	if database == nil {
+		return nil
+	}
+	return func(ctx context.Context, audienceID string) (func(), error) {
+		db, err := memql.ResolveWriteGatePool(database, "email rule enrolment", "pass PluginContext.GateDB")
+		if err != nil {
+			return nil, err
+		}
+		hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, membershipLockPrefix+memql.BareShortId(audienceID))
+		if err != nil {
+			return nil, err
+		}
+		return hold.Release, nil
+	}
+}

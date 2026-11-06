@@ -28,6 +28,14 @@ import (
 // people form (which asks recipientInAudienceByDigest before submitting).
 const alreadyInAudience = "This address is already in this audience."
 
+// confirmFirstSentence is what an operator reads when they try to subscribe
+// someone to an audience that asks people to confirm without saying they did.
+const confirmFirstSentence = "This audience asks people to confirm. Say they already confirmed, or leave them pending so they get the confirmation email."
+
+// blockedSentence is the refusal for an address that has opted out or cannot be
+// emailed: only the person can subscribe again, from the link in their emails.
+const blockedSentence = "This address has unsubscribed or cannot be emailed, so only the person can subscribe again, from the link in their emails."
+
 func truthy(v any) bool {
 	switch x := v.(type) {
 	case bool:
@@ -76,7 +84,7 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	status := requested
 	switch {
 	case confirmFirst && requested == "subscribed" && !confirmed:
-		return nil, fmt.Errorf("This audience asks people to confirm. Add them as pending, or say they already confirmed.")
+		return nil, fmt.Errorf("%s", confirmFirstSentence)
 	case confirmFirst && requested != "subscribed":
 		status = "pending"
 	case status == "":
@@ -113,6 +121,11 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	for _, member := range members {
 		if member.ID != recipientID {
 			return nil, fmt.Errorf("%s", alreadyInAudience)
+		}
+	}
+	if confirmFirst && status == "subscribed" {
+		if err := w.refuseBlockedConfirmation(phase, audience.AccountID, normalized); err != nil {
+			return nil, err
 		}
 	}
 	if len(members) == 0 {
@@ -186,12 +199,16 @@ func (w *Worker) handleSetRecipientSubscription(ctx context.Context, args map[st
 			return nil, fmt.Errorf("changing a subscription requires write permission in this organization")
 		}
 	}
-	if status == "subscribed" && recipient.SubscriptionStatus == "pending" {
+	if status == "subscribed" && recipient.SubscriptionStatus != "subscribed" {
 		audience, found, err := w.store.AudienceByID(ctx, recipient.AudienceID)
 		if err != nil {
 			return nil, err
 		}
 		if found && audience.Confirmation == "required" {
+			// Every way to subscribed in a confirm-first audience is a confirmation.
+			if !truthy(args["alreadyConfirmed"]) {
+				return nil, fmt.Errorf("%s", confirmFirstSentence)
+			}
 			if err := w.confirmByHand(ctx, recipient); err != nil {
 				return nil, err
 			}
@@ -237,10 +254,24 @@ func (w *Worker) confirmByHand(ctx context.Context, recipient Recipient) error {
 	phase, cancel := context.WithTimeout(ctx, signupLockedPhase)
 	defer cancel()
 	current, found, err := w.store.RecipientByID(phase, recipient.ID)
-	if err != nil || !found {
+	if err != nil {
 		return err
 	}
-	if current.SubscriptionStatus == "pending" {
+	if !found {
+		return fmt.Errorf("this person can no longer be found; refresh and try again")
+	}
+	alreadyDone := current.SubscriptionStatus == "subscribed" && !current.ConfirmedAt.IsZero()
+	if !alreadyDone {
+		if current.SubscriptionStatus != recipient.SubscriptionStatus {
+			return fmt.Errorf("this person's subscription changed while you were editing it; refresh and try again")
+		}
+		switch current.SubscriptionStatus {
+		case "unsubscribed", "bounced", "complained":
+			return fmt.Errorf("%s", blockedSentence)
+		}
+		if err := w.refuseBlockedConfirmation(phase, current.AccountID, current.Email); err != nil {
+			return err
+		}
 		if err := hold.Verify(phase); err != nil {
 			return signupsBusy
 		}
@@ -253,4 +284,18 @@ func (w *Worker) confirmByHand(ctx context.Context, recipient Recipient) error {
 		return w.newsletterGate(ctx, journeyLock(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
 	}
 	return w.store.NudgeWaitingEnrollments(w.systemActorContext(ctx), recipient.ID, w.nowUTC(), enrollments)
+}
+
+// refuseBlockedConfirmation is the public confirmation page's rule for the
+// operator's hand: an address on the suppression list (the organization's or the
+// cluster's) is never marked confirmed.
+func (w *Worker) refuseBlockedConfirmation(ctx context.Context, accountID, address string) error {
+	_, blocked, err := w.store.SuppressionForSend(memql.ContextWithFreshRead(w.systemActorContext(ctx)), accountID, EmailDigest(address))
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return fmt.Errorf("%s", blockedSentence)
+	}
+	return nil
 }

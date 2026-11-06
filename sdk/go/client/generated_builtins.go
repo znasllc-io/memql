@@ -1359,12 +1359,15 @@ func CampaignSetJourneyStateBuild(args CampaignSetJourneyStateArgs) string {
 	return b.String()
 }
 
-// CampaignSetRecipientSubscription -- Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, changing a pending person to subscribed goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation. Every other change is written as given.
+// CampaignSetRecipientSubscription -- Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, every change to subscribed needs alreadyConfirmed and goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation; an address that unsubscribed or is suppressed is refused. Every other change is written as given.
 type CampaignSetRecipientSubscriptionArgs struct {
 	RecipientId        string
 	SubscriptionStatus string
 	// When the person left, if that happened earlier than now.
 	UnsubscribedAt string
+	// Required to make someone subscribed in an audience that asks people to confirm: true says they confirmed, and records it. A person who unsubscribed or whose address is suppressed is refused; only they can subscribe again.
+	AlreadyConfirmed    bool
+	AlreadyConfirmedSet bool // set true to send alreadyConfirmed; required because zero-value bool is ambiguous
 }
 
 // CampaignSetRecipientSubscription calls the engine builtin campaignSetRecipientSubscription.
@@ -1388,6 +1391,13 @@ func CampaignSetRecipientSubscriptionBuild(args CampaignSetRecipientSubscription
 	}
 	b.WriteString("unsubscribedAt: ")
 	b.WriteString(quoteMemQL(args.UnsubscribedAt))
+	if args.AlreadyConfirmedSet {
+		if b.Len() > 41 {
+			b.WriteString(", ")
+		}
+		b.WriteString("alreadyConfirmed: ")
+		b.WriteString(fmt.Sprintf("%v", args.AlreadyConfirmed))
+	}
 	b.WriteString(")")
 	return b.String()
 }

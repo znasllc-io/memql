@@ -167,13 +167,14 @@ builtin campaignAddRecipient {
   accountId           string   @description("Ignored: the organization is the audience's.")
 }
 
-@description("Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, changing a pending person to subscribed goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation. Every other change is written as given.")
+@description("Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, every change to subscribed needs alreadyConfirmed and goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation; an address that unsubscribed or is suppressed is refused. Every other change is written as given.")
 @sdk
 @executor("integration.campaigns.setRecipientSubscription")
 builtin campaignSetRecipientSubscription {
   recipientId         string!
   subscriptionStatus  string!
   unsubscribedAt      datetime  @description("When the person left, if that happened earlier than now.")
+  alreadyConfirmed    bool      @description("Required to make someone subscribed in an audience that asks people to confirm: true says they confirmed, and records it. A person who unsubscribed or whose address is suppressed is refused; only they can subscribe again.")
 }
 
 @description("Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.")

@@ -1015,12 +1015,14 @@ QueryClient.prototype.campaignSetJourneyState = function (this: QueryClient, arg
   return this.executeNamed("campaignSetJourneyState", buildCampaignSetJourneyState(args), opts);
 };
 
-/** Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, changing a pending person to subscribed goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation. Every other change is written as given. */
+/** Change one person's subscription state: honour an unsubscribe by hand, or mark a pending person confirmed. In an audience that asks people to confirm, every change to subscribed needs alreadyConfirmed and goes through confirmation: it records confirmedAt and a consent event, and wakes an automation waiting on the confirmation; an address that unsubscribed or is suppressed is refused. Every other change is written as given. */
 export interface CampaignSetRecipientSubscriptionArgs {
   recipientId: string;
   subscriptionStatus: string;
   /** When the person left, if that happened earlier than now. */
   unsubscribedAt?: string;
+  /** Required to make someone subscribed in an audience that asks people to confirm: true says they confirmed, and records it. A person who unsubscribed or whose address is suppressed is refused; only they can subscribe again. */
+  alreadyConfirmed?: boolean;
 }
 
 export function buildCampaignSetRecipientSubscription(args: CampaignSetRecipientSubscriptionArgs): string {
@@ -1028,6 +1030,7 @@ export function buildCampaignSetRecipientSubscription(args: CampaignSetRecipient
   parts.push("recipientId: " + renderMemQLValue(args.recipientId));
   parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
   if (args.unsubscribedAt !== undefined) parts.push("unsubscribedAt: " + renderMemQLValue(args.unsubscribedAt));
+  if (args.alreadyConfirmed !== undefined) parts.push("alreadyConfirmed: " + renderMemQLValue(args.alreadyConfirmed));
   return "builtin campaignSetRecipientSubscription(" + parts.join(", ") + ")";
 }
 
