@@ -351,10 +351,12 @@ describe("Sending domain", () => {
     expect(within(row).getByText("Ready")).toBeTruthy();
     fireEvent.click(row);
 
-    // The domain's page replaces the list rather than standing beneath it.
+    // The domain's page replaces the list rather than standing beneath it: its
+    // own Senders are the domain's, and Settings' subjects are not drawn.
     expect(await screen.findByRole("heading", { level: 3, name: "client.example" })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "Settings" })).toBeNull();
-    expect(screen.queryByRole("heading", { level: 4, name: "Senders" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Senders" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 4, name: "Testing" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
     expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 4, name: "Senders" })).toBeTruthy();
@@ -610,6 +612,45 @@ describe("Add a sender", () => {
     expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
     act(() => conn.subscriptions.emit(SENDER, senderRow({ id, address: "news@acme.com", fromName: "Acme News" })));
     expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
+  });
+
+  it("settings plus opens the azure add sender", async () => {
+    const plan = { domain: "acme.com", subscriptionId: "s", resourceGroup: "mail", emailService: "e", communicationService: "c", dataLocation: "United States" };
+    const ready = { status: "ready", plan, planId: "saved", sender: "news@acme.com", senders: { "news@acme.com": "Acme News" } };
+    const conn = fakeConnection({
+      azure: (args) =>
+        args.action === "clusterStatus"
+          ? { status: "connected", resourceGroup: "mail", dataLocation: "United States" }
+          : args.action === "sender"
+            ? { ...ready, senders: { ...ready.senders, "hello@acme.com": "Acme Hello" } }
+            : ready,
+    });
+    mount(conn);
+    // The organization sends through its Azure domain.
+    await screen.findByRole("button", { name: "Manage email for Operator organization" });
+    await openWizard();
+
+    // The domain's own Add a sender: the address is on the domain, and adding
+    // registers it with Azure rather than only recording it.
+    expect(screen.getByText("@acme.com")).toBeTruthy();
+    expect(screen.queryByText(/only records it here/)).toBeNull();
+    type("Address", "hello");
+    press("Next");
+    type("Display name", "Acme Hello");
+    press("Next");
+    press("Skip");
+    expect(await screen.findByText("Send as Acme Hello <hello@acme.com>.")).toBeTruthy();
+    press("Add sender");
+    await waitFor(() =>
+      expect(conn.query.emailAzureSetup).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "self", action: "sender", options: expect.objectContaining({ username: "hello", displayName: "Acme Hello", planId: "saved" }) }),
+        expect.anything(),
+      ),
+    );
+    expect(conn.query.createSenderIdentity).not.toHaveBeenCalled();
+    // Added, it goes back to Settings, where the new sender arrives on the live feed.
+    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 4, name: "Senders" })).toBeTruthy();
   });
 
   it("asks which organization only when there is a choice, starting from the page's", async () => {

@@ -32,11 +32,13 @@ const draftOf = (sender: SenderIdentityRow): Draft => ({
   notes: sender.notes,
 });
 
-export function SenderPage({ sender, organization, writes, onBack }: {
+export function SenderPage({ sender, organization, writes, unregistered = false, onBack }: {
   sender: SenderIdentityRow;
   /** The organization's name, resolved by the page that holds this. */
   organization: string;
   writes: CampaignWrites;
+  /** Azure sends the organization's mail and does not have this address. */
+  unregistered?: boolean;
   onBack: () => void;
 }) {
   const archived = senderIsRetired(sender);
@@ -104,7 +106,7 @@ export function SenderPage({ sender, organization, writes, onBack }: {
     }
   }
 
-  const state = editingNow ? "Editing" : archived ? WORDS.archived : WORDS.active;
+  const state = editingNow ? "Editing" : archived ? WORDS.archived : unregistered ? WORDS.notRegistered : WORDS.active;
   const detail = editingNow && !named ? "Add a display name" : undefined;
 
   return (
@@ -176,7 +178,7 @@ export function SenderPage({ sender, organization, writes, onBack }: {
       <ActionBar
         state={state}
         detail={detail}
-        tone={archived || editingNow ? "none" : "live"}
+        tone={archived || editingNow || unregistered ? "none" : "live"}
         acts={toKitActs(specs, run, busyId)}
       >
         {asking === "archive" && !editingNow && !archived ? (

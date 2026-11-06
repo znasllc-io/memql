@@ -533,6 +533,17 @@ use its saved sending identities.
    `help@client.com`. ACS sends outbound mail; it does not create receiving
    mailboxes. `no-reply` is optional. The verified sender appears in Email.
 
+Further senders are added in one place. The domain's page lists every sender
+Azure has registered, with its display name, where its replies go, and which is
+the default: the address mail that names no sender goes out as. **Add a sender**
+registers another username with Azure and records its sender in Email in one
+step, and keeps the default where it is; **Make default** on another sender
+moves only the default and needs no Microsoft sign-in. For an organization with
+an Azure domain, the plus on **Email → Settings → Senders** opens the same Add a
+sender. A sender recorded at an address Azure does not have reads **Not
+registered with Azure**, and an automation that sends as it cannot be turned on
+until the address is added on the domain.
+
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display
 name on the sender resource; a campaign override that differs is refused.

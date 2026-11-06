@@ -17,6 +17,12 @@ import { organizationName } from "../organizations";
 //   Organization (only when there is a choice) -> Address -> Display name
 //   -> Reply to (optional) -> Review
 //
+// THIS ONE ONLY RECORDS. It is for an organization whose mail no Azure domain
+// here sends: its provider is set up elsewhere. An organization with an Azure
+// domain adds senders through that domain's own Add a sender
+// (modules/connections/AddAzureSenderWizard), which registers the address with
+// Azure as it records it, so a sender is never recorded that Azure cannot send as.
+//
 // One question a step. The forward act lives on the floor and nowhere else, and
 // it is ABSENT until the step is answered: the words on the left say what is
 // missing. Nothing is written until Review, so Cancel is simply going.
@@ -33,7 +39,7 @@ type Step = "organization" | "address" | "name" | "reply" | "review";
 const looksLikeAddress = (value: string) => /^[^\s@]+@[^\s@]+$/.test(value.trim());
 
 /** The sentence Review says, which is also what the sender will do. */
-function sendAs(fromName: string, address: string, replyTo: string): string {
+export function sendAs(fromName: string, address: string, replyTo: string): string {
   const base = `Send as ${fromName.trim()} <${address.trim()}>`;
   return replyTo.trim() === "" ? `${base}.` : `${base}, replies to ${replyTo.trim()}.`;
 }

@@ -538,3 +538,61 @@ describe("one Azure configuration per cluster", () => {
     expect(screen.getByText(/An owner or developer/)).toBeTruthy(); expect(call).not.toHaveBeenCalled();
   });
 });
+
+describe("senders on an Azure domain", () => {
+  /** The domain page's senders, top to bottom: the address, its state word, and whether it offers Make default. */
+  const domainSenders = () => within(screen.getByRole("list", { name: "Senders on this domain" })).getAllByRole("listitem").map(item => ({
+    address: item.querySelector(".os-row-name")?.textContent,
+    state: item.querySelector(".os-record-status")?.textContent ?? "",
+    makeDefault: within(item).queryByRole("button", { name: /^Make .* the default sender$/ }) !== null,
+  }));
+  it("domain page adds a sender without changing the default", async () => {
+    const ready = { status: "ready", plan, planId: "saved", sender: "news@client.example", replyTo: "help@client.example", senders: { "news@client.example": "Client" }, replies: { "news@client.example": "help@client.example" } };
+    const added = { ...ready, senders: { ...ready.senders, "hello@client.example": "Client Hello" }, replies: { ...ready.replies, "hello@client.example": "replies@client.example" } };
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "sender" ? added : args.action === "makeDefault" ? { ...added, sender: "hello@client.example" } : ready);
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Manage email for Client");
+    // Every sender Azure has, its name and where replies go, and which one is the default.
+    expect(domainSenders()).toEqual([{ address: "news@client.example", state: "Default", makeDefault: false }]);
+    const list = screen.getByRole("list", { name: "Senders on this domain" });
+    expect(within(list).getByText("Client")).toBeTruthy();
+    expect(within(list).getByText("Replies to help@client.example")).toBeTruthy();
+    // Senders are added here, not through the wizard that set the domain up.
+    expect(screen.queryByRole("button", { name: "Manage senders" })).toBeNull();
+
+    await click("Add a sender");
+    expect(await screen.findByRole("heading", { level: 3, name: "Add a sender" })).toBeTruthy();
+    expect(screen.getByText("@client.example")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Address"), { target: { value: "hello" } });
+    await click("Next");
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Client Hello" } });
+    await click("Next");
+    fireEvent.change(screen.getByLabelText("Reply to"), { target: { value: "replies@client.example" } });
+    await click("Next");
+    expect(screen.getByText("Send as Client Hello <hello@client.example>, replies to replies@client.example.")).toBeTruthy();
+    expect(screen.getByText(/news@client\.example stays the default/)).toBeTruthy();
+    await click("Add sender");
+
+    // One act registers it with Azure and records it, and leaves the default alone.
+    const adds = call.mock.calls.filter(([args]) => args.action === "sender");
+    expect(adds).toHaveLength(1);
+    expect(adds[0]![0]).toMatchObject({ accountId: "client", sessionId: "", options: { username: "hello", displayName: "Client Hello", replyTo: "replies@client.example", planId: "saved" } });
+    expect(adds[0]![0].options?.makeDefault).toBeUndefined();
+    expect(await screen.findByRole("heading", { level: 3, name: "client.example" })).toBeTruthy();
+    expect(domainSenders()).toEqual([
+      { address: "news@client.example", state: "Default", makeDefault: false },
+      { address: "hello@client.example", state: "", makeDefault: true },
+    ]);
+    expect(screen.getByText("Replies to replies@client.example")).toBeTruthy();
+
+    // Make default moves the default, and is gone from the sender that now has it.
+    await click("Make hello@client.example the default sender");
+    expect(call.mock.calls.find(([args]) => args.action === "makeDefault")?.[0]).toMatchObject({ accountId: "client", options: { sender: "hello@client.example" } });
+    await waitFor(() => expect(domainSenders()).toEqual([
+      { address: "hello@client.example", state: "Default", makeDefault: false },
+      { address: "news@client.example", state: "", makeDefault: true },
+    ]));
+    expect(call.mock.calls.filter(([args]) => args.action === "sender")).toHaveLength(1);
+  });
+});

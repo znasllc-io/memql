@@ -3,7 +3,7 @@ import { isPublished } from "../rows";
 import { useRef, useState } from "react";
 import { Workflow } from "lucide-react";
 import { newShortId, refusalSentence } from "@znasllc-io/memql-sdk-core/client";
-import { ChoiceStack, Field, Input, Notice } from "../../../kit";
+import { AutoRefresh, ChoiceStack, Field, Input, Notice } from "../../../kit";
 import { Wizard } from "../../../kit/Wizard";
 import type { Stop } from "../../../kit/Rail";
 import type { Act } from "../../../kit/ActionBar";
@@ -12,12 +12,13 @@ import { useDefaultOrganization } from "../../accounts/organization";
 import { organizationName, selectableOrganizations, isOperatorOrganization } from "../organizations";
 import { useJourneyWrites, type CampaignWrites } from "../actions";
 import { audienceProjection, senderProjection, templateProjection, ruleSentence, emailRuleFromRow } from "../rows";
-import { listKnowledge, useConfirmTemplates, type EmailFeeds } from "../useEmail";
+import { EMAIL_REFRESH_MS, listKnowledge, useConfirmTemplates, type EmailFeeds } from "../useEmail";
 import { useOpenRecord } from "../openRequest";
 import { addSteps, type AddStep, type TriggerChoice } from "./addModel";
 import { Flow } from "./Flow";
 import { newStep, triggerSentence, type FlowStep, type Trigger } from "./flowModel";
 import { journeyIssues, type Issue } from "./issues";
+import { useAzureRegisteredSenders } from "../../../modules/connections/azureEmailSetup";
 import { emptyRule, RuleField } from "./ruleFields";
 import { DescribeAutomationPage, type Proposal } from "./DescribeAutomationPage";
 
@@ -42,9 +43,10 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   const audience = audiences.find(a => a.id === audienceId);
   const trigger: Trigger = { kind: choice === "confirmed" ? "confirmed" : "joined", audienceId };
   const confirms = useConfirmTemplates(steps, feeds.templates.snapshot.rows);
-  const issues = choice === "event" ? [] : [...journeyIssues({ accountId, trigger, steps }, { audiences, templates, senders, confirms: confirms.value }), ...serverIssues];
+  const azure = useAzureRegisteredSenders(accountId);
+  const issues = choice === "event" ? [] : [...journeyIssues({ accountId, trigger, steps }, { audiences, templates, senders, confirms: confirms.value, registered: azure.registered }), ...serverIssues];
   const resourceKnown = [feeds.audiences, feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known");
-  const known = resourceKnown && (choice === "event" || confirms.state === "ready");
+  const known = resourceKnown && (choice === "event" || confirms.state === "ready" && azure.settled);
   const ruleDraft = { ...rule, accountId, name };
   const ruleReady = !!rule.triggerConcept && !!rule.templateId && templates.some(t => t.id === rule.templateId && t.accountId === accountId && isPublished(t)) && (rule.recipientMode === "cluster_roles" || (isOperatorOrganization(accountId) || senders.some(s => s.id === rule.senderIdentityId && s.accountId === accountId && s.status !== "disabled")) && (rule.recipientMode === "audience" ? !!rule.audienceId : !!rule.recipientField.trim()));
   const clean = known && (choice === "event" ? ruleReady : !issues.length) && !!name.trim();
@@ -84,5 +86,5 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   if (describing) return <DescribeAutomationPage accountId={accountId} feeds={feeds} onBack={() => setDescribing(false)} onEdit={editProposal} onDone={onDone} />;
   const error = journeyWrites.save.error || journeyWrites.setState.error || writes.createRule.error || writes.updateRule.error || writes.ruleArming.error || confirms.error;
   const stops: Stop[] = order.map((id, i) => ({ id, name: label[id], sentence: AUTOMATION_SUBTITLES[id], state: id === open ? "open" : i < order.indexOf(open) ? "done" : "ahead", body: body(id) }));
-  return <Wizard title="Add an automation" icon={<Workflow size={20} aria-hidden />} label="Adding an automation" back={{ label: "Automations", onSelect: onBack }} steps={stops} open={open} onOpen={id => setStep(id as AddStep)} status={{ word: busy ? "Saving" : revision ? "Saved as a draft" : open === "review" ? "Review the automation" : label[open], tone: busy ? "busy" : undefined }} acts={acts} confirm={asking ? asking === "cancel" ? "Retire this draft? It stays in history." : `Turn on “${name}”? It sends email to people automatically from now on.` : undefined} notices={<>{serverIssues.length ? <Notice tone="warn" sentence="Saved as a draft. It wasn't turned on." /> : null}{error ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}</>} />;
+  return <><AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={azure.reload} /><Wizard title="Add an automation" icon={<Workflow size={20} aria-hidden />} label="Adding an automation" back={{ label: "Automations", onSelect: onBack }} steps={stops} open={open} onOpen={id => setStep(id as AddStep)} status={{ word: busy ? "Saving" : revision ? "Saved as a draft" : open === "review" ? "Review the automation" : label[open], tone: busy ? "busy" : undefined }} acts={acts} confirm={asking ? asking === "cancel" ? "Retire this draft? It stays in history." : `Turn on “${name}”? It sends email to people automatically from now on.` : undefined} notices={<>{serverIssues.length ? <Notice tone="warn" sentence="Saved as a draft. It wasn't turned on." /> : null}{error ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}</>} /></>;
 }

@@ -16,6 +16,12 @@ export const WORDS = {
   active: "Active",
   /** A thing put away: never deleted, and brought back with Restore. */
   archived: "Archived",
+  /**
+   * A sender of an organization whose mail Azure sends, at an address Azure
+   * does not have: every email sent as it is refused until it is added on the
+   * organization's sending domain.
+   */
+  notRegistered: "Not registered with Azure",
 
   /**
    * The one sentence for sending that is not set up for an organization. The

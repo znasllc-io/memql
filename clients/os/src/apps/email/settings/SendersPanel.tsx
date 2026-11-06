@@ -4,6 +4,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Button, EmptyState, LiveList, Notice, RecordRow, Subhead } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { useLiveView } from "../../../live/liveView";
+import { notRegisteredWithAzure } from "../../../modules/connections/azureEmailSetup";
 import { isOperatorOrganization } from "../organizations";
 import { senderFingerprint, senderIdentityFromRow, senderIsRetired, senderLabel, type SenderIdentityRow } from "../rows";
 import type { EmailFeeds } from "../useEmail";
@@ -26,11 +27,16 @@ function newestFirst(senders: SenderIdentityRow[]): SenderIdentityRow[] {
   return [...senders].sort((a, b) => at(b) - at(a));
 }
 
-export function SendersPanel({ feeds, accountId, includeArchived, onOpen, onAdd }: {
+export function SendersPanel({ feeds, accountId, includeArchived, registered = null, onOpen, onAdd }: {
   feeds: EmailFeeds;
   /** The organization the page is on. */
   accountId: string;
   includeArchived: boolean;
+  /**
+   * What the organization's Azure domain can send as, when Azure sends its mail.
+   * A sender at any other address says so. Null when that is not known.
+   */
+  registered?: ReadonlySet<string> | null;
   onOpen: (senderId: string) => void;
   onAdd: () => void;
 }) {
@@ -76,14 +82,15 @@ export function SendersPanel({ feeds, accountId, includeArchived, onOpen, onAdd 
         }
         renderRow={(sender, tick) => {
           const archived = senderIsRetired(sender);
+          const unregistered = !archived && notRegisteredWithAzure(sender.address, registered);
           return (
             <RecordRow
               icon={<AtSign size={16} aria-hidden />}
               name={<span className="os-mono">{senderLabel(sender)}</span>}
               secondary={sender.fromName}
-              state={archived ? WORDS.archived : WORDS.active}
-              tone={archived ? "muted" : "accent"}
-              current={!archived}
+              state={archived ? WORDS.archived : unregistered ? WORDS.notRegistered : WORDS.active}
+              tone={archived ? "muted" : unregistered ? "warn" : "accent"}
+              current={!archived && !unregistered}
               dim={archived}
               stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
               onOpen={() => onOpen(sender.id)}

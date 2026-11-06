@@ -1,9 +1,15 @@
 import { isPublished } from "../rows";
 import type { AudienceRow, TemplateRow, SenderIdentityRow } from "../rows";
 import { isOperatorOrganization } from "../organizations";
+import { notRegisteredWithAzure } from "../../../modules/connections/azureEmailSetup";
 import { STEP_ID, type FlowStep, type Trigger } from "./flowModel";
 export interface Issue { stepId: string; text: string }
-export function journeyIssues(draft: { accountId: string; trigger: Trigger | null; steps: readonly FlowStep[] }, feeds: { audiences: AudienceRow[]; templates: TemplateRow[]; senders: SenderIdentityRow[]; confirms?: ReadonlyMap<string, boolean> }): Issue[] {
+/**
+ * What stands between an automation and turning it on, by step. `registered` is
+ * what the organization's Azure domain can send as when Azure sends its mail
+ * (null when that is not known): an email sent as any other address is refused.
+ */
+export function journeyIssues(draft: { accountId: string; trigger: Trigger | null; steps: readonly FlowStep[] }, feeds: { audiences: AudienceRow[]; templates: TemplateRow[]; senders: SenderIdentityRow[]; confirms?: ReadonlyMap<string, boolean>; registered?: ReadonlySet<string> | null }): Issue[] {
   const issues: Issue[] = [];
   const add = (stepId: string, text: string) => issues.push({ stepId, text });
   const audience = feeds.audiences.find(a => a.id === draft.trigger?.audienceId);
@@ -33,6 +39,7 @@ export function journeyIssues(draft: { accountId: string; trigger: Trigger | nul
     if (!step.senderIdentityId) { if (!isOperatorOrganization(draft.accountId)) add(step.id, "Choose a sender."); }
     else if (!sender || sender.accountId !== draft.accountId) add(step.id, "Choose a sender in this organization.");
     else if (sender.status === "disabled") add(step.id, `The sender ${sender.address} is turned off.`);
+    else if (notRegisteredWithAzure(sender.address, feeds.registered ?? null)) add(step.id, `The sender ${sender.address} is not registered with Azure. Add it on the sending domain before turning this on.`);
   }
   return issues;
 }

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useSession } from "../../../chrome/access";
 import { ContentSkeleton, Field, Head, SetupGroup, canConfigure } from "../../../kit";
 import { OrganizationSendingDomain } from "../../../modules/connections/AzureEmailConnections";
+import { addsSendersOnAzure, azureRegisteredSenders, notRegisteredWithAzure, type AzureEmailReply } from "../../../modules/connections/azureEmailSetup";
 import { CampaignPackageConfig } from "../../../modules/connections/CampaignPackageConfig";
 import type { UploadProvider } from "../../../items/upload";
 import { AccountPicker } from "../../accounts/AccountPicker";
@@ -11,7 +12,7 @@ import { useAccountOptionsFeed } from "../../accounts/tie";
 import type { CampaignWrites } from "../actions";
 import { organizationName, selectableOrganizations } from "../organizations";
 import { recordNamed, useOpenSettingsRequest, type SettingsRequest } from "../openRequest";
-import { senderIdentityFromRow } from "../rows";
+import { senderIdentityFromRow, senderIsRetired } from "../rows";
 import { EMAIL_REQUIRES, EMAIL_WANTS, type EmailSettings } from "../settings";
 import { useBrandKit, type EmailFeeds, type EmailRecordFeeds } from "../useEmail";
 import { AddSenderWizard } from "./AddSenderWizard";
@@ -39,6 +40,12 @@ import { TestingPanel } from "./TestingPanel";
 // pane, so a page drawn beneath Settings' own heading would have no way back.
 // What Settings drew stays MOUNTED behind them, parked, so an unsaved choice
 // survives a visit.
+//
+// SENDERS ON AN AZURE DOMAIN ARE ADDED IN ONE PLACE. The sending domain says what
+// it is; for an organization whose mail Azure sends, the Senders' plus opens the
+// domain's own Add a sender, which registers the address with Azure as it records
+// the sender, and a sender at an address Azure does not have says so. The
+// record-only wizard is for an organization with no Azure domain here.
 
 type Page = { kind: "list" } | { kind: "add" } | { kind: "sender"; id: string } | { kind: "brand" };
 
@@ -69,6 +76,10 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
   // Bumped when a package is imported, which prepares an organization's domain
   // and so makes the domain read itself again.
   const [imported, setImported] = useState(0);
+  // The organization's sending domain, as its section last read it, and a
+  // request for the domain's Add a sender (a new number each time).
+  const [domain, setDomain] = useState<{ accountId: string; state: AzureEmailReply | null } | null>(null);
+  const [addOnDomain, setAddOnDomain] = useState(0);
 
   useOpenSettingsRequest(request, (accountId) => {
     setChosen(accountId);
@@ -87,6 +98,9 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
         : "";
   useEffect(() => { onOrganization(accountId); }, [accountId, onOrganization]);
   const organization = organizationName(accounts, accountId);
+  const hearDomain = useCallback((state: AzureEmailReply | null) => setDomain({ accountId, state }), [accountId]);
+  const azureDomain = domain?.accountId === accountId ? domain.state : null;
+  const registered = useMemo(() => azureRegisteredSenders(azureDomain), [azureDomain]);
   const mayConfigure = canConfigure(access?.role ?? "");
   // The organization's brand kit: its row here and its page read the same one.
   const brand = useBrandKit(accountId);
@@ -131,6 +145,8 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
             name={organization}
             backLabel="Settings"
             onPane={setDomainOpen}
+            onState={hearDomain}
+            addSender={addOnDomain}
           />
         )}
 
@@ -141,8 +157,9 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
                 feeds={feeds}
                 accountId={accountId}
                 includeArchived={settings.includeArchived}
+                registered={registered}
                 onOpen={(id) => setPage({ kind: "sender", id })}
-                onAdd={() => setPage({ kind: "add" })}
+                onAdd={() => (addsSendersOnAzure(azureDomain) ? setAddOnDomain((asked) => asked + 1) : setPage({ kind: "add" }))}
               />
               <BrandPanel brand={brand} onOpen={() => setPage({ kind: "brand" })} />
               <TestingPanel key={`testing:${accountId}`} accountId={accountId} audiences={feeds.audiences} testSettings={recordFeeds.testSettings} />
@@ -186,6 +203,7 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
           sender={sender}
           organization={organizationName(accounts, sender.accountId)}
           writes={writes}
+          unregistered={sender.accountId === accountId && !senderIsRetired(sender) && notRegisteredWithAzure(sender.address, registered)}
           onBack={() => setPage({ kind: "list" })}
         />
       )}
