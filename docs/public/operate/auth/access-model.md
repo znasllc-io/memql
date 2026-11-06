@@ -991,19 +991,21 @@ words: "Can open" or "Can't open", where it came from (a role, a group, a
 grant to the person, an organization role's limit, or nothing granting it),
 and the organization when the engine answers per organization, one line for
 each. An organization's door (Email, Deployables) reads "Can open" there only
-where the person can also read that organization's data, as the shell opens
-it. By group, each row says whether the group's own grant allows it, denies
-it, or grants nothing. By app, the roles that hold it and everyone granted it
-by name. The acts are buttons in each row's act column, never where the
-answer is read, and only an act that changes an answer is offered: Allow,
-Deny, and "Use role" to revoke a person's own grant ("Remove" for a group's).
-A grant to a person counts in every organization they are in, so a pair's
-acts are drawn once, never per organization. None is offered on a pair a
-role's limit bars, to a viewer whose role lacks `update` on `principal`, or
-for the viewer themselves. When the read refuses -- a viewer below admin or
-holding an organization's role, or a person who outranks the viewer -- a
-notice stands in place of that person's answers. The governance refusal
-codes of a write render beside the row that asked.
+where the person can also read that organization's data, and a part of one
+only where that door is open there and the organization's data can be
+changed too, as the shell draws them. By group, each row says whether the
+group's own grant allows it, denies it, or grants nothing. By app, the roles
+that hold it and everyone granted it by name. The acts are buttons in each
+row's act column, never where the answer is read, and only an act that
+changes an answer is offered: Allow, Deny, and "Use role" to revoke a
+person's own grant ("Remove" for a group's). A grant to a person counts in
+every organization they are in, so a pair's acts are drawn once, never per
+organization, and withheld only where they change nothing in any of them.
+None is offered on a pair a role's limit bars, to a viewer whose role lacks
+`update` on `principal`, or for the viewer themselves. When the read refuses
+-- a viewer below admin or holding an organization's role, or a person who
+outranks the viewer -- a notice stands in place of that person's answers.
+The governance refusal codes of a write render beside the row that asked.
 
 ### Deliberately not in the model
 

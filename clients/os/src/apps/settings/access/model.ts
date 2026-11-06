@@ -23,9 +23,10 @@ import { roleHolds } from "../../users/rows";
 // alone. The restatement could not see an organization role's limits or the
 // per-organization answers, so an organization's moderator read as able to
 // open every app. Nothing here decides an answer now. It reads the rows,
-// joins the two the shell itself joins (an organization's door opens there
-// only where that organization's data can be read too), says each answer in
-// words, and works out which acts could change one.
+// joins them where the shell itself joins them (an organization's door opens
+// there only where that organization's data can be read too, and a part of
+// it only through that door, with the data changeable too), says each answer
+// in words, and works out which acts could change one.
 //
 // ===========================================================================
 // THE ROWS ARE RESOURCES, AND A RESOURCE EXISTS BY BEING SEEDED
@@ -220,17 +221,29 @@ export function accessRowFrom(raw: Row): AccessRow {
   };
 }
 
-/** What an organization's door needs besides itself: reading that organization's data. */
+/** The organization's records, which its doors read and its parts change. */
 const DATA_RESOURCE = "data";
+
+/**
+ * What an answer in an organization needs besides the pair itself, as the
+ * shell asks it; "" when the pair is the whole answer.
+ *
+ *   - `data-read`:   a door, and that organization's data cannot be read.
+ *   - `door`:        a part, and its app's door there is shut (not held, or
+ *                    its data cannot be read).
+ *   - `data-update`: a part whose door is open, and that organization's data
+ *                    cannot be changed.
+ */
+export type Missing = "" | "data-read" | "door" | "data-update";
 
 /** One answer a person meets for one pair: once, or in one organization. */
 export interface PersonAnswer {
   /** "" for a pair answered once; the organization's bare account id otherwise. */
   accountId: string;
-  /** What the person meets: the pair, and for an organization's door its data read there too. */
+  /** What the person meets: the pair held, and nothing else missing there. */
   canOpen: boolean;
-  /** An organization's door whose data the person cannot read in that organization. */
-  dataUnread: boolean;
+  /** What else the answer needs in that organization; "" when nothing. */
+  missing: Missing;
   /** The engine's row for the pair itself, which says where the answer came from. */
   row: AccessRow;
 }
@@ -239,25 +252,32 @@ export interface PersonAnswer {
  * A person's answers for one resource: one, or one per organization the
  * engine answered it in.
  *
- * THE DOOR AND THE DATA, IN AN ORGANIZATION. The shell opens an
- * organization's door -- Email, Deployables -- there only where `read data`
- * holds too (system/roles.ts, `availableInAnyOrganization`), so the door's
- * own row is not the answer a person meets. The engine answers both pairs per
- * organization; this joins them, organization by organization, and never
- * across organizations. A door answered once (an operator's, or a person
- * whose scope reaches no organization) is the shell's global answer and needs
- * no data row, which the engine does not send there.
+ * IN AN ORGANIZATION, THE PAIR ALONE IS NOT WHAT THE SHELL OPENS. An
+ * organization's door -- Email, Deployables -- opens there only where `read
+ * data` holds too (system/roles.ts, `availableInAnyOrganization`). A part of
+ * one is drawn there only through that door, with the data read AND `update
+ * data` holding there (apps/deployables/parts.ts, `partsForOrganization`), so
+ * a part the role holds is no answer while its door is shut. Each
+ * organization is joined on its own rows and never on another's. The shell
+ * asks an organization's own answers only (`holdsForOrganization`), so a door
+ * the engine answers once, not per organization, does not open a part there.
+ * A pair answered once (an operator's, or a person whose scope reaches no
+ * organization) is the shell's global answer and needs nothing else.
  */
 export function personAnswers(rows: readonly AccessRow[], resource: AccessResource): PersonAnswer[] {
-  const door = resource.part === "";
+  const heldIn = (verb: string, pair: string, accountId: string) =>
+    rows.some((r) => r.verb === verb && r.resource === pair && r.accountId === accountId && r.held);
+  const missingIn = (accountId: string): Missing => {
+    const dataRead = heldIn(OPEN_VERB, DATA_RESOURCE, accountId);
+    if (resource.part === "") return dataRead ? "" : "data-read";
+    if (!dataRead || !heldIn(OPEN_VERB, `app:${resource.appId}`, accountId)) return "door";
+    return heldIn("update", DATA_RESOURCE, accountId) ? "" : "data-update";
+  };
   return rows
     .filter((r) => r.verb === resource.verb && r.resource === resource.resource)
     .map((row) => {
-      const dataUnread =
-        door &&
-        row.accountId !== "" &&
-        !rows.some((d) => d.verb === OPEN_VERB && d.resource === DATA_RESOURCE && d.accountId === row.accountId && d.held);
-      return { accountId: row.accountId, canOpen: row.held && !dataUnread, dataUnread, row };
+      const missing = row.accountId === "" ? "" : missingIn(row.accountId);
+      return { accountId: row.accountId, canOpen: row.held && missing === "", missing, row };
     });
 }
 
@@ -280,7 +300,7 @@ const NO_ACTS: AccessActs = { allow: false, deny: false, own: null };
  *     role's -- offers nothing: no grant lifts it, and a grant already there
  *     changes nothing either.
  *   - Deny only where some answer is "can open"; Allow only where it would
- *     make one so: the door is shut there and nothing else is missing. That
+ *     make one so: the pair is shut there and nothing else is missing. That
  *     is also why neither is offered over the person's own grant that already
  *     says it: theirs decides last, in every organization, so their allow
  *     leaves nothing shut that a grant could open and their deny leaves
@@ -290,15 +310,18 @@ const NO_ACTS: AccessActs = { allow: false, deny: false, own: null };
  *     carry none.
  *
  * ONCE PER PAIR. A grant to a person counts in every organization they are
- * in, so the acts belong to the pair and never to one organization's answer.
+ * in, so the acts belong to the pair and never to one organization's answer,
+ * and an act is withheld only when it changes nothing in ANY of them: a
+ * part's door shut in Beta does not take away the Deny that closes it in
+ * Acme.
  */
-export function personActs(answers: readonly PersonAnswer[], ownGrants: readonly AccessGrant[], resource: AccessResource): AccessActs {
+export function personActs(answers: readonly PersonAnswer[], ownGrants: readonly AccessGrant[], resource: AccessResource, subject: Subject): AccessActs {
   const barred = answers.some((a) => a.row.source === "scoped-role-limit" || (a.row.source === "role" && !a.row.held));
   if (answers.length === 0 || barred) return NO_ACTS;
   return {
-    allow: answers.some((a) => !a.canOpen && !a.dataUnread),
+    allow: answers.some((a) => !a.canOpen && a.missing === ""),
     deny: answers.some((a) => a.canOpen),
-    own: ownGrant(ownGrants, resource),
+    own: ownGrant(ownGrants, resource, subject),
   };
 }
 
@@ -314,16 +337,30 @@ export function groupAnswer(rows: readonly AccessRow[], resource: AccessResource
  * The acts a group's answer admits: the one that flips it, and "Remove" over
  * a grant it holds. A group has no role, so there is no "Use role".
  */
-export function groupActs(answer: GroupAnswer, ownGrants: readonly AccessGrant[], resource: AccessResource): AccessActs {
+export function groupActs(answer: GroupAnswer, ownGrants: readonly AccessGrant[], resource: AccessResource, subject: Subject): AccessActs {
   return {
     allow: answer !== "allow",
     deny: answer === "allow",
-    own: answer === null ? null : ownGrant(ownGrants, resource),
+    own: answer === null ? null : ownGrant(ownGrants, resource, subject),
   };
 }
 
-function ownGrant(grants: readonly AccessGrant[], resource: AccessResource): AccessGrant | null {
-  return grants.find((g) => g.active && g.verb === resource.verb && g.resource === resource.resource) ?? null;
+/**
+ * The subject's own active grant on the pair: THEIRS, by kind and bare id, as
+ * well as on the pair. A revoke acts on the id it is handed, so a grant read
+ * that answered for somebody else must never supply one.
+ */
+function ownGrant(grants: readonly AccessGrant[], resource: AccessResource, subject: Subject): AccessGrant | null {
+  return (
+    grants.find(
+      (g) =>
+        g.active &&
+        g.subjectKind === subject.kind &&
+        bareId(g.subjectId) === bareId(subject.id) &&
+        g.verb === resource.verb &&
+        g.resource === resource.resource,
+    ) ?? null
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -335,19 +372,23 @@ export interface AccessNames {
   role: (slug: string) => string;
   group: (groupId: string) => string;
   organization: (accountId: string) => string;
+  /** An app's name by its id, as its door is labelled in the list. */
+  app: (appId: string) => string;
 }
 
 /**
- * Names from the reads the screen already has: the roles, and the groups --
- * an organization's own group carries the organization's name
- * (integrations/groups/ensure.go keeps the two in step).
+ * Names from the reads the screen already has: the roles, the groups -- an
+ * organization's own group carries the organization's name
+ * (integrations/groups/ensure.go keeps the two in step) -- and the list's
+ * own resources, whose doors carry the apps' names.
  */
-export function accessNames(roles: readonly RoleRow[], groups: readonly GroupRow[]): AccessNames {
+export function accessNames(roles: readonly RoleRow[], groups: readonly GroupRow[], resources: readonly AccessResource[]): AccessNames {
   return {
     role: (slug) => roles.find((r) => r.slug === slug || r.aliases.includes(slug))?.name || slug,
     group: (groupId) => groups.find((g) => bareId(g.id) === bareId(groupId))?.name || bareId(groupId),
     organization: (accountId) =>
       groups.find((g) => g.kind === "account" && bareId(g.accountId) === bareId(accountId))?.name || bareId(accountId),
+    app: (appId) => resources.find((r) => r.appId === appId && r.part === "")?.label || appId,
   };
 }
 
@@ -357,15 +398,34 @@ export interface AnswerWords {
   reason: string;
 }
 
-const DATA_UNREAD = "they can't read its data";
-
 /** "Can open in Acme", "from the group Acme". */
 export function personAnswerWords(answer: PersonAnswer, names: AccessNames): AnswerWords {
   const where = answer.accountId === "" ? "" : ` in ${names.organization(answer.accountId)}`;
   const from = sourceWords(answer.row, names);
+  const missing = missingWords(answer, names);
+  // What else is missing is the reason when the pair itself holds; when it
+  // does not, both are said, so an absent Allow is never left unexplained.
   let reason = from;
-  if (answer.dataUnread) reason = answer.row.held || from === "" ? DATA_UNREAD : `${from} and ${DATA_UNREAD}`;
+  if (missing !== "") reason = answer.row.held || from === "" ? missing : `${from} and ${missing}`;
   return { verdict: `${answer.canOpen ? "Can open" : "Can't open"}${where}`, reason };
+}
+
+function missingWords(answer: PersonAnswer, names: AccessNames): string {
+  switch (answer.missing) {
+    case "data-read":
+      return "they can't read its data";
+    case "door":
+      return `they can't open ${names.app(appIdOf(answer.row.resource))} there`;
+    case "data-update":
+      return "they can't change its data";
+    default:
+      return "";
+  }
+}
+
+/** `app:deployables/deploy` -> `deployables`. */
+function appIdOf(resource: string): string {
+  return resource.replace(/^app:/, "").split("/")[0] ?? "";
 }
 
 function sourceWords(row: AccessRow, names: AccessNames): string {

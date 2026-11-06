@@ -111,6 +111,10 @@ interface State {
   memberships: Record<string, Row[]>;
   /** The admin-floored grant and membership reads refuse this viewer too. */
   grantReadsRefused: boolean;
+  /** Subjects (`<kind>:<id>`) whose own grants cannot be read, while everything else answers. */
+  failingGrantReads: string[];
+  /** Subjects (`<kind>:<id>`) whose own grants have not answered yet. */
+  pendingGrantReads: string[];
   setReply: Row;
   revokeReply: Row;
   calls: { name: string; call: string }[];
@@ -139,9 +143,13 @@ function fakeConnection(state: State) {
           if (!Array.isArray(answer)) throw new Error(`${name}: MemQL engine failed to execute query. Details: ${answer.refusal}`);
           return rows(answer);
         }
-        case "grantsForSubject":
+        case "grantsForSubject": {
+          const key = `${argOf(call, "subjectKind")}:${argOf(call, "subjectId")}`;
           if (state.grantReadsRefused) throw new Error(`${name}: MemQL engine failed to execute query. Details: below the rank this query requires`);
-          return rows(state.grantsBySubject[`${argOf(call, "subjectKind")}:${argOf(call, "subjectId")}`] ?? []);
+          if (state.failingGrantReads.includes(key)) throw new Error(`${name}: MemQL engine failed to execute query. Details: the grant rows could not be read`);
+          if (state.pendingGrantReads.includes(key)) return new Promise<never>(() => {});
+          return rows(state.grantsBySubject[key] ?? []);
+        }
         case "groupsForUser":
           if (state.grantReadsRefused) throw new Error(`${name}: MemQL engine failed to execute query. Details: below the rank this query requires`);
           return rows(state.memberships[argOf(call, "userId")] ?? []);
@@ -173,6 +181,8 @@ function freshState(over: Partial<State> = {}): State {
     grantsByResource: {},
     memberships: {},
     grantReadsRefused: false,
+    failingGrantReads: [],
+    pendingGrantReads: [],
     setReply: { ok: true, grantId: "grant-new", code: "", message: "" } as Row,
     revokeReply: { ok: true, grantId: "grant-1", code: "", message: "" } as Row,
     calls: [],
@@ -403,6 +413,94 @@ describe("by person: what they can open, in words", () => {
     expect(actsOf("app:deployables")).toEqual([]);
   });
 
+  it("an organization's part says can't open where its app's door is shut there", async () => {
+    // The shell draws a Deployables part in an organization only through the
+    // app's door there (apps/deployables/parts.ts, partsForOrganization), so a
+    // part the role holds is not the answer while the door is shut: in Acme
+    // because its data cannot be read, in Beta because Beta's group denies
+    // the door.
+    const state = freshState({
+      people: [ME, ADA, MAX],
+      groups: [ACME, BETA],
+      access: {
+        "user:u-max": [
+          accessRow({ resource: "app:deployables", held: false, source: "group", sourceId: "g-beta", accountId: "acct-2b9c" }),
+          accessRow({ resource: "app:deployables/deploy", verb: "execute", held: true, source: "role", sourceId: "writer", accountId: "acct-2b9c" }),
+          accessRow({ resource: "data", held: true, source: "role", sourceId: "writer", accountId: "acct-2b9c" }),
+          accessRow({ resource: "data", verb: "update", held: true, source: "role", sourceId: "writer", accountId: "acct-2b9c" }),
+          accessRow({ resource: "app:deployables", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "app:deployables/deploy", verb: "execute", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", held: false, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", verb: "update", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+        ],
+      },
+    });
+    mount(state);
+    await pickSubject("Max Planck");
+    await waitFor(() =>
+      expect(answersOf("app:deployables")).toEqual(["Can't open in Acme, they can't read its data", "Can't open in Beta, denied by the group Beta"]),
+    );
+    expect(answersOf("app:deployables/deploy")).toEqual([
+      "Can't open in Acme, they can't open Deployables there",
+      "Can't open in Beta, they can't open Deployables there",
+    ]);
+    // Neither a grant nor a deny on the part changes it in either organization.
+    expect(actsOf("app:deployables/deploy")).toEqual([]);
+  });
+
+  it("an organization's part keeps its acts where its door is open in another organization", async () => {
+    // A grant to a person counts in every organization, so an act is withheld
+    // only where it can change nothing in any of them: Deny still closes the
+    // part in Acme, while Allow could open it nowhere.
+    const state = freshState({
+      people: [ME, ADA, MAX],
+      groups: [ACME, BETA],
+      access: {
+        "user:u-max": [
+          accessRow({ resource: "app:deployables", held: false, source: "group", sourceId: "g-beta", accountId: "acct-2b9c" }),
+          accessRow({ resource: "app:deployables/reviews", verb: "execute", held: true, source: "group", sourceId: "g-beta", accountId: "acct-2b9c" }),
+          accessRow({ resource: "data", held: true, source: "role", sourceId: "writer", accountId: "acct-2b9c" }),
+          accessRow({ resource: "data", verb: "update", held: true, source: "role", sourceId: "writer", accountId: "acct-2b9c" }),
+          accessRow({ resource: "app:deployables", held: true, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
+          accessRow({ resource: "app:deployables/reviews", verb: "execute", held: true, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", verb: "update", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+        ],
+      },
+    });
+    mount(state);
+    await pickSubject("Max Planck");
+    await waitFor(() =>
+      expect(answersOf("app:deployables/reviews")).toEqual([
+        "Can open in Acme, from the group Acme",
+        "Can't open in Beta, they can't open Deployables there",
+      ]),
+    );
+    expect(actsOf("app:deployables/reviews")).toEqual(["Deny reviews to Max Planck"]);
+  });
+
+  it("an organization's part needs its data to be changeable there", async () => {
+    // The parts change an organization's records, and the shell draws them
+    // only where `update data` holds there too.
+    const state = freshState({
+      people: [ME, ADA, MAX],
+      access: {
+        "user:u-max": [
+          accessRow({ resource: "app:deployables", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "app:deployables/deploy", verb: "execute", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", held: true, source: "role", sourceId: "writer", accountId: "acct-7f3a" }),
+          accessRow({ resource: "data", verb: "update", held: false, source: "group", sourceId: "g-acme", accountId: "acct-7f3a" }),
+        ],
+      },
+    });
+    mount(state);
+    await pickSubject("Max Planck");
+    await waitFor(() => expect(answersOf("app:deployables/deploy")).toEqual(["Can't open in Acme, they can't change its data"]));
+    // The door itself opens: reading is enough for it.
+    expect(answersOf("app:deployables")).toEqual(["Can open in Acme, from the role Member"]);
+    expect(actsOf("app:deployables/deploy")).toEqual([]);
+  });
+
   it("reads an answer whether it crossed the wire as a boolean or as a word", async () => {
     // A scalar boolean has reached this client as the STRING "true" on a
     // builtin's reply row; read as the boolean alone, every door this person
@@ -502,6 +600,8 @@ describe("by person: the acts", () => {
           grantRow({ id: "grant-2", resource: "app:files", verb: "read", effect: "allow" }),
           // Revoked: the grant read still lists it, and nobody holds it.
           grantRow({ id: "grant-3", resource: "app:logs", verb: "read", effect: "deny", active: false }),
+          // Somebody else's, however it reached this answer: never Ada's to revoke.
+          grantRow({ id: "grant-x", subjectId: "u-max", resource: "app:logs", verb: "read", effect: "deny" }),
         ],
       },
     });
@@ -522,6 +622,54 @@ describe("by person: the acts", () => {
       fireEvent.click(within(rowFor("app:deployables/publish")).getByRole("button", { name: "Use the role's answer for publish" }));
     });
     await waitFor(() => expect(state.calls.find((c) => c.name === "grantRevoke")?.call).toContain('grantId: "grant-1"'));
+  });
+
+  it("never offers to revoke the last person's grant when the next one's cannot be read", async () => {
+    // Ada holds a deny on publish (grant-1). Max's own grants cannot be read
+    // while his answers can: his publish row must offer nothing that revokes,
+    // because the only grant id on hand would be Ada's.
+    const state = freshState({
+      people: [ME, ADA, MAX],
+      access: {
+        "user:u-ada": [accessRow({ resource: "app:deployables/publish", verb: "execute", held: false, source: "person", sourceId: "u-ada" })],
+        "user:u-max": [accessRow({ resource: "app:deployables/publish", verb: "execute", held: false, source: "not-granted" })],
+      },
+      grantsBySubject: { "user:u-ada": [grantRow({ id: "grant-1" })] },
+      memberships: { "u-ada": [membership("g-acme", "u-ada")] },
+      failingGrantReads: ["user:u-max"],
+    });
+    mount(state);
+    await pickSubject("Ada Lovelace");
+    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]));
+    await pickSubject("Max Planck");
+    await waitFor(() => expect(answersOf("app:deployables/publish")).toEqual(["Can't open, nothing grants it"]));
+    await screen.findByText("Their grants could not be read.");
+    expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Max Planck"]);
+    // Nor does the scope line name Ada's groups for him.
+    expect(screen.getByText("Max Planck holds the Member role.")).toBeTruthy();
+    expect(screen.queryByText(/Max Planck holds the Member role and is in/)).toBeNull();
+  });
+
+  it("holds nothing of the last person's grants while the next one's are read", async () => {
+    // Max's answers arrive while his own grant read has not: nothing of Ada's
+    // -- her grant to revoke, her groups -- stands in for his meanwhile.
+    const state = freshState({
+      people: [ME, ADA, MAX],
+      access: {
+        "user:u-ada": [accessRow({ resource: "app:deployables/publish", verb: "execute", held: false, source: "person", sourceId: "u-ada" })],
+        "user:u-max": [accessRow({ resource: "app:deployables/publish", verb: "execute", held: false, source: "not-granted" })],
+      },
+      grantsBySubject: { "user:u-ada": [grantRow({ id: "grant-1" })] },
+      memberships: { "u-ada": [membership("g-acme", "u-ada")] },
+      pendingGrantReads: ["user:u-max"],
+    });
+    mount(state);
+    await pickSubject("Ada Lovelace");
+    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]));
+    await pickSubject("Max Planck");
+    await waitFor(() => expect(answersOf("app:deployables/publish")).toEqual(["Can't open, nothing grants it"]));
+    expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Max Planck"]);
+    expect(screen.getByText("Max Planck holds the Member role.")).toBeTruthy();
   });
 
   it("a group's row flips its own grant, or removes it", async () => {

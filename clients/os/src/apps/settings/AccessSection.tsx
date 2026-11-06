@@ -151,7 +151,7 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
   const writes = useGrantWrites(onWritten);
 
   const nameOf = useMemo(() => namer(roster.people, roster.groups, viewerUserId), [roster.people, roster.groups, viewerUserId]);
-  const names = useMemo(() => accessNames(roster.roles, roster.groups), [roster.roles, roster.groups]);
+  const names = useMemo(() => accessNames(roster.roles, roster.groups, resources), [roster.roles, roster.groups, resources]);
   // THE SUBJECT IS THE VIEWER: the one state in which no act is offered,
   // because rule 4 of the engine's governance (`grant_self`) refuses it.
   const viewingSelf = subject !== null && subject.kind === "user" && bareId(subject.id) === viewerUserId;
@@ -218,7 +218,7 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
             <RecordListSkeleton label="Reading what they can open." />
           ) : (
             <>
-              <Caption>{subjectSentence(subject, subjectGrants.groupIds, roster.groups, roster.roles)}</Caption>
+              <Caption>{subjectSentence(subject, subjectGrants.state === "ready" ? subjectGrants.groupIds : null, roster.groups, roster.roles)}</Caption>
               {subjectGrants.state === "error" ? (
                 <Notice tone="warn" sentence="Their grants could not be read." detail={subjectGrants.error} />
               ) : null}
@@ -227,10 +227,13 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
                 subject={subject}
                 resources={resources}
                 rows={effective.rows}
+                // THIS SUBJECT'S OWN GRANTS, OR NONE: the read is keyed to its
+                // subject, so "Use role" and "Remove" are handed no grant id
+                // until it has answered for them, and none after it failed.
                 ownGrants={subjectGrants.own}
                 names={names}
                 canWrite={acting}
-                busy={writes.busy || effective.pending || subjectGrants.state === "loading"}
+                busy={writes.busy || effective.pending || subjectGrants.pending}
                 refusal={writes.refusal}
                 onAllow={(r) => void writes.set(subject, r.verb, r.resource, "allow")}
                 onDeny={(r) => void writes.set(subject, r.verb, r.resource, "deny")}
@@ -306,14 +309,14 @@ function answerItems(
   return resources.flatMap((resource): AnswerItem[] => {
     if (subject.kind === "group") {
       const answer = groupAnswer(rows, resource);
-      return [{ resource, lines: [{ key: "group", held: answer === "allow", verdict: groupAnswerWords(answer), reason: "" }], acts: groupActs(answer, ownGrants, resource) }];
+      return [{ resource, lines: [{ key: "group", held: answer === "allow", verdict: groupAnswerWords(answer), reason: "" }], acts: groupActs(answer, ownGrants, resource, subject) }];
     }
     const answers = personAnswers(rows, resource);
     if (answers.length === 0) return [];
     const lines = answers
       .map((a) => ({ key: a.accountId, held: a.canOpen, organization: a.accountId === "" ? "" : names.organization(a.accountId), ...personAnswerWords(a, names) }))
       .sort((a, b) => a.organization.localeCompare(b.organization));
-    return [{ resource, lines, acts: personActs(answers, ownGrants, resource) }];
+    return [{ resource, lines, acts: personActs(answers, ownGrants, resource, subject) }];
   });
 }
 
@@ -546,10 +549,15 @@ function subjectFromKey(key: string, people: readonly PersonRow[], groups: reado
   return person === undefined ? null : { kind: "user", id, name: personName(person), role: person.role };
 }
 
-/** The scope line under the picker: the role, and the groups the answers can come through. */
+/**
+ * The scope line under the picker: the role, and the groups the answers can
+ * come through. `groupIds` is null while this person's groups are not known
+ * (unread, or the read failed), and then the line names none: "in no group"
+ * would be a guess, and another person's groups a wrong one.
+ */
 function subjectSentence(
   subject: Subject,
-  groupIds: readonly string[],
+  groupIds: readonly string[] | null,
   groups: readonly GroupRow[],
   roles: readonly { slug: string; name: string; aliases: string[] }[],
 ): string {
@@ -558,6 +566,7 @@ function subjectSentence(
   }
   const rung = roles.find((r) => r.slug === subject.role || r.aliases.includes(subject.role));
   const roleName = rung?.name ?? subject.role ?? "no role";
+  if (groupIds === null) return `${subject.name} holds the ${roleName} role.`;
   const names = groupIds.map((id) => groups.find((g) => bareId(g.id) === bareId(id))?.name ?? "").filter((n) => n !== "");
   const inGroups = names.length === 0 ? "in no group" : `in ${names.join(", ")}`;
   return `${subject.name} holds the ${roleName} role and is ${inGroups}.`;

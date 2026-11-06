@@ -196,60 +196,66 @@ function readRefusal(err: unknown): Refusal {
 
 /** What one subject holds by grant: their own grants and, for a person, the groups they are in. */
 export interface SubjectGrants {
+  /** The subject's own grants; empty until they arrive, and after a read that failed. */
   own: AccessGrant[];
-  /** The groups a person is in, bare; empty for a group. */
+  /** The groups a person is in, bare; empty for a group, and until they arrive. */
   groupIds: string[];
+  /**
+   * "loading" until the first answer for THIS subject is in, "error" when its
+   * read failed; a re-read after a write keeps the answer ("ready") while it
+   * runs.
+   */
   state: "idle" | "loading" | "ready" | "error";
   error: string;
+  /** A read for this subject is in flight, the first or a re-read. */
+  pending: boolean;
   reload: () => void;
 }
 
+const NO_GRANTS: AccessGrant[] = [];
+const NO_GROUPS: string[] = [];
+
 export function useSubjectGrants(subject: Subject | null): SubjectGrants {
   const connection = useOsConnection();
-  const [own, setOwn] = useState<AccessGrant[]>([]);
-  const [groupIds, setGroupIds] = useState<string[]>([]);
-  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [error, setError] = useState("");
+  const [answer, setAnswer] = useState<{ key: string; own: AccessGrant[]; groupIds: string[]; error: string | null } | null>(null);
+  const [pending, setPending] = useState(false);
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   const kind = subject?.kind ?? "user";
   const id = subject?.id ?? "";
+  const key = id === "" ? "" : `${kind}:${id}`;
 
   useEffect(() => {
     const query = connection?.query ?? null;
     if (query === null || id === "") {
-      setState("idle");
-      setOwn([]);
-      setGroupIds([]);
+      setPending(false);
       return;
     }
     const controller = new AbortController();
     let live = true;
-    setState("loading");
+    setPending(true);
     void (async () => {
       try {
         const ownResult = await query.grantsForSubject({ subjectKind: kind, subjectId: id }, { signal: controller.signal });
-        const ownGrants = (ownResult.rows() as Row[]).map(grantFromRow).filter((g) => g.id !== "");
-        let ids: string[] = [];
+        const own = (ownResult.rows() as Row[]).map(grantFromRow).filter((g) => g.id !== "");
+        let groupIds: string[] = [];
         if (kind === "user") {
           const memberships = await query.groupsForUser({ userId: id, includeRemoved: false }, { signal: controller.signal });
           // BARE, at the seam: the groups are named against the roster, and
           // the comparison there is on the bare spelling.
-          ids = (memberships.rows() as Row[])
+          groupIds = (memberships.rows() as Row[])
             .map(membershipFromRow)
             .filter((m) => m.status === "active" && m.groupId !== "")
             .map((m) => bareId(m.groupId));
         }
         if (!live) return;
-        setOwn(ownGrants);
-        setGroupIds(ids);
-        setState("ready");
-        setError("");
+        setAnswer({ key: `${kind}:${id}`, own, groupIds, error: null });
       } catch (err: unknown) {
         if (!live) return;
-        setState("error");
-        setError(err instanceof Error ? err.message : String(err));
+        setAnswer({ key: `${kind}:${id}`, own: [], groupIds: [], error: err instanceof Error ? err.message : String(err) });
+      } finally {
+        if (live) setPending(false);
       }
     })();
     return () => {
@@ -258,7 +264,20 @@ export function useSubjectGrants(subject: Subject | null): SubjectGrants {
     };
   }, [connection, kind, id, nonce]);
 
-  return { own, groupIds, state, error, reload };
+  // THE GRANTS BELONG TO THEIR SUBJECT, as the answers do (useEffectiveAccess).
+  // "Use role" and "Remove" revoke the id they are handed: a previous
+  // subject's grants, held on while the next one's read runs or after it
+  // failed, would hand them somebody else's.
+  const current = answer !== null && answer.key === key ? answer : null;
+  const state = key === "" ? "idle" : current === null ? "loading" : current.error !== null ? "error" : "ready";
+  return {
+    own: current?.own ?? NO_GRANTS,
+    groupIds: current?.groupIds ?? NO_GROUPS,
+    state,
+    error: current?.error ?? "",
+    pending,
+    reload,
+  };
 }
 
 /** Who holds one resource by grant, for the by-app view. */
