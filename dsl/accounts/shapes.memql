@@ -63,8 +63,20 @@ shape account accountIdRef {
   row.id
 }
 
-/// The slice of an account the domain walk reads: the name to check, the token
-/// to check it with, and the reservation fields it stamps on success.
+/// The slice of an account the two account sweeps read: the domain walk's name
+/// to check, the token to check it with and the reservation it stamps on
+/// success, and the front-door sweep's reserved name, whether it is held and
+/// the reason it last recorded for one that is not.
+///
+/// EVERY FIELD EITHER SWEEP READS MUST BE HERE, for the reason this file's
+/// header gives: a field the shape leaves out reads as absent, and nothing says
+/// so. memqlReservationReason was missing. The front-door sweep compares the
+/// reason it is about to write with the one it read, so it saw "" on every
+/// pass: it rewrote `ownership_unproven` onto an unheld name every two minutes
+/// (one new version of the row each time) and never cleared the reason of a
+/// name that became held. TestEveryFieldTheAccountSweepsReadIsProjected
+/// (integrations/customdomain) reads both Go readers and fails on a field this
+/// shape does not project.
 @row
 shape account accountDomainWalk {
   row.id
@@ -73,4 +85,5 @@ shape account accountDomainWalk {
   domainStatus
   memqlDomain
   memqlReservedAt
+  memqlReservationReason
 }

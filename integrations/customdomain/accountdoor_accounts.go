@@ -35,6 +35,12 @@ type Reservation struct {
 	// this write, so a no-op write would still version the row -- and a row
 	// versioned every two minutes for every account is the strobe the arrival
 	// cue's own rule exists to prevent.
+	//
+	// The read is only as good as the shape the query projects through:
+	// accountDomainWalk did not carry this field, so it read "" on every pass,
+	// an unheld name's reason was rewritten every two minutes and a held
+	// name's was never cleared. TestEveryFieldTheAccountSweepsReadIsProjected
+	// fails on any key this function reads that the shape leaves out.
 	Reason string
 }
 
