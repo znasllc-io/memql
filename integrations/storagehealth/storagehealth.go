@@ -5,6 +5,7 @@ package storagehealth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 type clusterAPI interface {
@@ -29,15 +31,59 @@ type Integration struct {
 
 func init() {
 	memql.RegisterPlugin("storageHealth", func(memql.PluginContext) (memql.IntegrationProvider, error) {
-		api, err := deploycontrol.NewClusterAPI()
-		namespace, readErr := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-		i := &Integration{namespace: strings.TrimSpace(string(namespace))}
-		if err == nil && readErr == nil && i.namespace != "" {
-			i.api = api
-		}
-		return i, nil
+		return New(), nil
 	})
 }
+
+// New builds the reader the plug-in registers: the in-cluster Kubernetes client
+// and this pod's namespace, or neither, in which case every read answers that
+// monitoring is unavailable. Exported for the closed-chunk compaction's room
+// check (component/retention/compact.go), which reads the same report natively
+// behind its own cluster-owner gate rather than through the builtin.
+func New() *Integration {
+	api, err := deploycontrol.NewClusterAPI()
+	namespace, readErr := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	i := &Integration{namespace: strings.TrimSpace(string(namespace))}
+	if err == nil && readErr == nil && i.namespace != "" {
+		i.api = api
+	}
+	return i
+}
+
+// Reading is a database storage report the monitor published, verified as the
+// builtin verifies it: its source, the current database installation and
+// complete measurements.
+type Reading struct {
+	ObservedAt        time.Time
+	DataBytes         float64
+	DataCapacityBytes float64
+	WALBytes          float64
+	WALCapacityBytes  float64
+	Issues            []string
+}
+
+// Read returns the current report, or an error carrying the reason there is
+// none. It does not judge the report's age: what is fresh enough is the
+// caller's decision, as it is the OS's (fifteen minutes there).
+func (i *Integration) Read(ctx context.Context) (Reading, error) {
+	r := i.readReport(ctx)
+	if !r.Available {
+		return Reading{}, errors.New(r.Reason)
+	}
+	// A report measures seconds since the epoch as a float; a value past
+	// int64 saturates rather than wrapping (core/num), and the date it then
+	// names is far in the future, which no freshness rule accepts.
+	seconds, fraction := math.Modf(r.ObservedAt)
+	return Reading{
+		ObservedAt:        time.Unix(num.ClampFloat64ToInt64(seconds), num.ClampFloat64ToInt64(fraction*1e9)).UTC(),
+		DataBytes:         *r.DataBytes,
+		DataCapacityBytes: *r.DataCapacityBytes,
+		WALBytes:          *r.WALBytes,
+		WALCapacityBytes:  *r.WALCapacityBytes,
+		Issues:            append([]string(nil), r.Issues...),
+	}, nil
+}
+
 func (*Integration) IntegrationName() string { return "storageHealth" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{{Name: "read", Description: "Read this installation's database storage report. Cluster owner only.", Handler: i.read}}
