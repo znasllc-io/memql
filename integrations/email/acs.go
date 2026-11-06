@@ -340,20 +340,20 @@ func (s *ACSSender) asksToWait(op acsOperation) error {
 // repeat by its content, and a retry's content is never the original's.
 //
 // A REVISED message (Message.Revised: its caller changed what the delivery sends
-// after Azure definitely did not accept it) goes under a new Operation-Id only when
-// the receipt proves Azure took nothing under the old one: Azure refused the
-// request itself (a client refusal) or throttled it, as the receipt recorded when
-// it marked the refusal (acsOperation.Refusal). After a server error, which can
-// follow a request Azure took, after Azure said it had no record of the operation
-// (notfound), or on a receipt that recorded no class, the id is kept, revised or
-// not: a 404 proves nothing was taken only for a submission under the same id, so
-// a first POST Azure took after all is matched by it, and the person gets at most
-// the earlier message, once.
+// after Azure definitely did not accept it) goes under a new Operation-Id only
+// while the receipt proves that EVERY POST under the current id took nothing
+// (acsOperation.Untaken) and the latest was refused or throttled outright
+// (acsTookNothing). One server error, lost answer or notfound under the id, or a
+// receipt written before the proof existed, keeps the id for good, whatever is
+// answered later: a 404 proves nothing was taken only for a submission under the
+// same id, so a POST Azure took after all is matched by it, and the person gets
+// at most one of the messages, once.
 //
 // Azure answering that it already holds an operation under a kept id (409) means
 // this message was not taken and an earlier submission was: the receipt goes on
-// describing that submission (its digest, sender, delivery and submission time),
-// so its delivery reports still match it, and its outcome decides the delivery.
+// describing that submission (its digest, sender and delivery, and the time it was
+// made, kept apart in HeldSubmittedAt), so its delivery reports still match it and
+// its outcome decides the delivery. The poller's window starts at this POST.
 //
 // A delivery Azure may have accepted -- an answer was lost, or is still being
 // confirmed -- is never submitted again, by this caller or any other, until
@@ -402,20 +402,23 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 		// A new id only when the receipt proves Azure took nothing under the old one
 		// that the old id could still match: Azure recorded the operation as failed or
 		// canceled (the id names that failed operation), or, for a revised message,
-		// it refused or throttled the request itself (acsTookNothing).
-		if op.Status == "failed" || op.Status == "canceled" || revised && acsTookNothing(op) {
-			op.ID = id.NewShortId()
+		// every POST under the id took nothing and the latest was refused or
+		// throttled outright. A new id has had nothing posted under it.
+		if op.Status == "failed" || op.Status == "canceled" || revised && op.Untaken && acsTookNothing(op) {
+			op.ID, op.Untaken = id.NewShortId(), true
 		}
 		op.Endpoint, op.ResourceID, op.Digest = s.cfg.Endpoint, s.cfg.ResourceID, digest
 	} else {
-		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
+		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent, Untaken: true}
 		op.ResourceID = s.cfg.ResourceID
 	}
 	if message, ok := ctx.Value(acsMessageKey{}).(acsMessageIdentity); ok {
 		op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
-	op.Refusal = "" // a new submission; an earlier refusal's class is not its
+	// A new submission: an earlier answer's class, and an earlier 409's held time,
+	// are not its own. (The proof is about every POST under the id, and stays.)
+	op.Refusal, op.HeldSubmittedAt = "", time.Time{}
 	if err = scope.hold.Verify(ctx); err != nil {
 		return notSubmitted(err)
 	}
@@ -446,10 +449,18 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte, 
 	default:
 		op.Status, op.Detail = "unknown", "Azure has not confirmed whether it accepted this message. It is not submitted again unless Azure has no record of it."
 		if HeldEarlier(sendErr) && found && op.ID == earlier.ID {
-			// Azure holds the earlier submission under this id, not this message.
-			op.Digest, op.DeliveryID, op.RecipientDigest, op.SenderDigest, op.SubmittedAt = earlier.Digest, earlier.DeliveryID, earlier.RecipientDigest, earlier.SenderDigest, earlier.SubmittedAt
+			// Azure holds the earlier submission under this id, not this message. The
+			// time it was made is kept apart: SubmittedAt stays this POST's, so the
+			// poller asks Azure for the full window from now.
+			op.Digest, op.DeliveryID, op.RecipientDigest, op.SenderDigest = earlier.Digest, earlier.DeliveryID, earlier.RecipientDigest, earlier.SenderDigest
+			op.HeldSubmittedAt = earlier.heldSince()
 			op.Detail = "Azure already holds an earlier submission of this delivery under its Operation-Id. This message was not taken; the earlier one's outcome is being confirmed."
 		}
+	}
+	if !acsTookNothing(op) {
+		// Anything but an outright refusal or a throttle may have left Azure
+		// holding this POST: the id can never again be proved untaken.
+		op.Untaken = false
 	}
 	// The outcome is written on a context the caller's cancellation does not end,
 	// under the lock this delivery has held since before its first receipt.
@@ -493,10 +504,11 @@ func refusalClass(err error) string {
 	return ""
 }
 
-// acsTookNothing says whether a receipt's refusal proves Azure took nothing under
-// its Operation-Id: it refused the request itself, or throttled it. A server error
+// acsTookNothing says whether a receipt's latest answer proves Azure took nothing
+// from that POST: it refused the request itself, or throttled it. A server error
 // can follow a request Azure took, and a receipt that recorded no class (written
-// before refusals had one) proves nothing either way.
+// before refusals had one) proves nothing either way. Whether every earlier POST
+// under the id took nothing too is acsOperation.Untaken.
 func acsTookNothing(op acsOperation) bool {
 	return op.Status == "rejected" && op.Refusal == "client" || op.Status == "throttled" && op.Refusal == "throttle"
 }
@@ -565,7 +577,7 @@ func (s *ACSSender) AcceptedAt(ctx context.Context, msg Message, as SendAs) (tim
 	if err != nil || !found || !acsAccepted(op.Status) {
 		return time.Time{}, err
 	}
-	return op.SubmittedAt, nil
+	return op.heldSince(), nil
 }
 
 // acsAccepted says whether a receipt with this status records a message Azure

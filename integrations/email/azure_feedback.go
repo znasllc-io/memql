@@ -314,7 +314,7 @@ func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFee
 	// arrives later. A later failure never erases a confirmed MTA handoff.
 	rank := map[string]int{"expanded": 1, "failed": 2, "quarantined": 2, "filtered-spam": 2, "delivered": 3, "bounced": 4, "suppressed": 4}
 	if rank[status] > rank[op.DeliveryStatus] || (rank[status] == rank[op.DeliveryStatus] && data.AttemptTime.After(op.DeliveryAt)) {
-		report := AzureDeliveryReport{OperationID: op.ID, DeliveryID: op.DeliveryID, AccountID: op.AccountID, Email: data.Recipient, Status: status, OccurredAt: data.AttemptTime.UTC(), AcceptedAt: op.SubmittedAt, verify: hold.Verify, verifyGate: func(ctx context.Context, key string) error {
+		report := AzureDeliveryReport{OperationID: op.ID, DeliveryID: op.DeliveryID, AccountID: op.AccountID, Email: data.Recipient, Status: status, OccurredAt: data.AttemptTime.UTC(), AcceptedAt: op.heldSince(), verify: hold.Verify, verifyGate: func(ctx context.Context, key string) error {
 			for _, held := range keys[1:] {
 				if held == key {
 					return hold.Verify(ctx)
@@ -335,8 +335,9 @@ func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFee
 	}
 	op.DeliveryEvents[status] = data.AttemptTime.UTC()
 	// A recipient report is proof that the original operation was accepted and
-	// processed, even when the caller lost the POST response.
-	op.Status, op.Detail, op.CheckedAt = "succeeded", "", a.clock()
+	// processed, even when the caller lost the POST response: a POST under the id
+	// was taken.
+	op.Status, op.Detail, op.CheckedAt, op.Untaken = "succeeded", "", a.clock(), false
 	if err := hold.Verify(ctx); err != nil {
 		return err
 	}

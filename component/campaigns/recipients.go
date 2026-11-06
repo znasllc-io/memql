@@ -202,21 +202,27 @@ func (w *Worker) handleAddRecipient(ctx context.Context, args map[string]any, _ 
 	if !confirming {
 		return resultNode("campaignRecipientAdded", map[string]any{"recipientId": recipientID, "audienceId": audienceID, "subscriptionStatus": status})
 	}
+	// From here the person is written, pending: whatever stops the add now -- the
+	// read back, a lost lock, the confirmation's write -- leaves them pending, and
+	// the answer says so and how to finish, never that nothing was done.
+	pendingNow := func(cause error) ([]memorynodes.MemoryNode, error) {
+		w.logger.Warn("campaigns: a person added as already confirmed is pending: their confirmation was not recorded", "recipient", recipientID, "error", cause)
+		return nil, fmt.Errorf("%s", addedPendingSentence)
+	}
 	recipient, found, err := w.store.RecipientByID(phase, recipientID)
 	if err != nil {
-		return nil, err
+		return pendingNow(err)
 	}
 	if !found {
-		return nil, fmt.Errorf("%s", addedPendingSentence)
+		return pendingNow(errors.New("the person could not be read back"))
 	}
 	if err := hold.Verify(phase); err != nil {
-		// The person is written, pending: the audience was not too busy to add them.
-		return nil, fmt.Errorf("%s", addedPendingSentence)
+		return pendingNow(err)
 	}
 	if err := detachedWrite(phase, func(write context.Context) error {
 		return w.recordConfirmation(write, recipient, w.nowUTC())
 	}); err != nil {
-		return nil, err
+		return pendingNow(err)
 	}
 	// Then, as a confirmation by hand does, the locks are let go and a run waiting
 	// on this person's confirmation is woken: none can have begun while the locks

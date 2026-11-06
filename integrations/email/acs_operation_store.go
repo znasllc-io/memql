@@ -24,12 +24,39 @@ type acsOperation struct {
 	DeliveryEvents                                        map[string]time.Time
 	Status, Detail                                        string
 	SubmittedAt, CheckedAt, NextPollAt                    time.Time
-	// Refusal is what kind of refusal a rejected or throttled receipt records:
+	// Refusal is what kind of refusal Azure's answer to the latest POST was, as
+	// the receipt recorded it when it marked itself rejected or throttled:
 	// "client" (a 4xx other than 408, 409 and 429: the request itself was
 	// refused), "throttle" (429) or "server" (5xx, which can follow a request
-	// Azure took). Empty for every other status, for a refusal of neither kind,
-	// and on a receipt written before refusals had a class.
+	// Azure took). Empty for an answer of neither kind and on a receipt written
+	// before refusals had a class. A new submission clears it, but a later change
+	// of status can leave it in place (a delivery report turns a refused receipt
+	// succeeded without touching it), so it is read only together with a refused
+	// status (acsTookNothing).
 	Refusal string `json:",omitempty"`
+	// Untaken is the proof that EVERY POST made under the receipt's current
+	// Operation-Id provably took nothing. Minting an id sets it (nothing has been
+	// posted under it); a client refusal or a throttle keeps it; any other outcome
+	// clears it for good, until the next id: an acceptance, a server error, a
+	// timeout or lost answer, a 409, anything the poller learns or concludes
+	// (notfound included), a delivery report. A receipt written before the proof
+	// existed reads as not proven.
+	Untaken bool `json:",omitempty"`
+	// HeldSubmittedAt is when the submission Azure holds under the id was made,
+	// once a later POST under the same id drew a 409 (Azure holds an earlier
+	// submission): the time that submission's acceptance is dated by (heldSince).
+	// SubmittedAt stays the latest POST's, and the poller's window is measured
+	// from it. Zero otherwise.
+	HeldSubmittedAt time.Time
+}
+
+// heldSince is when the submission Azure holds under the receipt's id was made:
+// the earlier one a 409 named, else the receipt's own.
+func (op acsOperation) heldSince() time.Time {
+	if !op.HeldSubmittedAt.IsZero() {
+		return op.HeldSubmittedAt
+	}
+	return op.SubmittedAt
 }
 
 type acsOperationGate interface {

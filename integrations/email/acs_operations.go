@@ -157,6 +157,10 @@ func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore,
 			}
 		}
 	}
+	// Whatever the poller learns or concludes about a receipt it takes up -- one
+	// whose outcome was in doubt -- is no proof that every POST under the id took
+	// nothing.
+	op.Untaken = false
 	if err = hold.Verify(ctx); err != nil {
 		return err
 	}

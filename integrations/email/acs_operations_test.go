@@ -239,3 +239,58 @@ func TestAnAcceptedOperationAzureNoLongerReportsIsNeverSubmittedAgain(t *testing
 		})
 	}
 }
+
+// TestA409LongAfterTheEarlierPOSTIsStillAskedAbout: an unchanged retry a day after
+// the earlier POST draws a 409 (Azure holds that earlier submission). The poller's
+// window starts at this POST, as for any submission, so its first pass asks Azure
+// rather than giving up on a day-old clock; the earlier submission's time is kept
+// apart, and is what the delivery's acceptance is dated by.
+func TestA409LongAfterTheEarlierPOSTIsStillAskedAbout(t *testing.T) {
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ac", 32))
+	seal := func(value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, _, err := secret.Encrypt(string(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	s := acsFixture(t)
+	now := s.now()
+	store := pollStore{
+		emailStateID("organization:client"): seal(azureConnection{Status: "ready", AccountID: "client", Config: s.cfg, Plan: azurePlan{ClusterID: "cluster"}}),
+		emailStateID(azureClusterKey):       seal(azureClusterConnection{ID: "cluster", Status: "connected"}),
+	}
+	ops := s.operations.(*memoryACSOperations)
+	msg := Message{IntentID: "campaign-single:held-a-day", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+	key := s.operationKey(msg.IntentID)
+	op, earlier := "12345678-1234-1234-1234-123456789012", now.Add(-25*time.Hour)
+	ops.rows = map[string]acsOperation{key: {ID: op, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the first message", Intent: msg.IntentID, Status: "rejected", Refusal: "server", SubmittedAt: earlier}}
+	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 409, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !HeldEarlier(err) {
+		t.Fatalf("the retry Azure answered 409: %v", err)
+	}
+	if got := ops.rows[key]; got.Status != "unknown" || !got.SubmittedAt.Equal(now) || !got.HeldSubmittedAt.Equal(earlier) {
+		t.Fatalf("the receipt is %+v, want the window from this POST (%s) and the earlier submission's time (%s) kept apart", got, now, earlier)
+	}
+	gets := 0
+	a := &azureSetup{store: &connectionStore{engine: store}, now: func() time.Time { return now.Add(time.Minute) }, operationClient: &http.Client{Transport: acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		gets++
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"` + op + `","status":"Succeeded"}`))}, nil
+	})}}
+	if err := a.pollOperation(context.Background(), ops, key); err != nil {
+		t.Fatal(err)
+	}
+	if got := ops.rows[key]; gets != 1 || got.Status != "succeeded" {
+		t.Fatalf("the poller asked Azure %d times and left %q, want it asked, and the delivery succeeded", gets, got.Status)
+	}
+	if at, err := s.AcceptedAt(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || !at.Equal(earlier) {
+		t.Fatalf("the delivery was taken at %s (%v), want when the earlier message was submitted (%s)", at, err, earlier)
+	}
+}

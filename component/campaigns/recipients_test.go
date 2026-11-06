@@ -647,6 +647,54 @@ func TestAnAddThatLosesItsLockAfterWritingSaysThePersonIsPending(t *testing.T) {
 	}
 }
 
+// failingStatement fails the nth statement that begins with prefix, as a
+// database that stops answering does.
+type failingStatement struct {
+	Engine
+	prefix    string
+	nth, seen int
+}
+
+func (e *failingStatement) Execute(ctx context.Context, statement string) (any, error) {
+	if strings.HasPrefix(statement, e.prefix) {
+		e.seen++
+		if e.seen == e.nth {
+			return nil, errors.New("the database did not answer")
+		}
+	}
+	return e.Engine.Execute(ctx, statement)
+}
+
+// Whatever stops an add after the person was written pending -- the read back of
+// the person, or the write of their confirmation -- the answer says they are
+// pending and how to finish, never a bare error that reads as nothing done.
+func TestAnAddThatCannotFinishAfterWritingSaysThePersonIsPending(t *testing.T) {
+	f := newDigestFixture(t)
+	for _, tc := range []struct {
+		name, prefix string
+		nth          int
+	}{
+		// The first read by id is the add's own look for the id; the second reads the person back.
+		{"the read back fails", "query recipientById", 2},
+		{"the confirmation write fails", "mutation confirmRecipientSubscription", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := f.newEmptyNewsletter(t, "add-unfinished")
+			n.requireConfirmation(t)
+			actual := n.worker.store.engine
+			n.worker.store.engine = &failingStatement{Engine: actual, prefix: tc.prefix, nth: tc.nth}
+			err := n.addPerson(t, "agreed", "agreed@b.test", map[string]any{"subscriptionStatus": "subscribed", "alreadyConfirmed": true})
+			n.worker.store.engine = actual
+			if err == nil || err.Error() != addedPendingSentence {
+				t.Fatalf("an add stopped after writing the person answered %v, want %q", err, addedPendingSentence)
+			}
+			if got := storedRecipient(t, n.store, n.owner, n.suffix+"-agreed"); str(got, "subscriptionStatus") != "pending" || str(got, "confirmedAt") != "" {
+				t.Fatalf("the person is %v, want them pending, as the answer says", got)
+			}
+		})
+	}
+}
+
 // An import asks whether it still holds its audience's lock before each row it
 // writes, so a lock lost in the middle of a batch stops the import there, saying
 // how many people it added.

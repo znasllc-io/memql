@@ -331,9 +331,10 @@ func TestARevisedMessageGoesUnderAFreshOperationId(t *testing.T) {
 		}
 		// The receipt still describes the submission Azure holds, so its delivery
 		// reports (matched on the id and the sender) and its acceptance time are
-		// the earlier message's, and nothing is said about the revised one.
+		// the earlier message's, and nothing is said about the revised one. The
+		// poller's window starts at this POST.
 		op := ops.rows[s.operationKey(msg.IntentID)]
-		if op.ID != earlier.ID || op.Status != "unknown" || op.Digest != earlier.Digest || op.SenderDigest != earlier.SenderDigest || op.DeliveryID != earlier.DeliveryID || !op.SubmittedAt.Equal(earlier.SubmittedAt) {
+		if op.ID != earlier.ID || op.Status != "unknown" || op.Digest != earlier.Digest || op.SenderDigest != earlier.SenderDigest || op.DeliveryID != earlier.DeliveryID || !op.HeldSubmittedAt.Equal(earlier.SubmittedAt) || !op.SubmittedAt.Equal(s.now()) {
 			t.Fatalf("the receipt is %+v, want the earlier submission's, being confirmed (%+v)", op, earlier)
 		}
 		if outcome, _ := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); outcome != OutcomeUnknown {
@@ -401,6 +402,83 @@ func TestAnAcceptedSendSaysWhenAzureTookIt(t *testing.T) {
 	}
 	if got, err := acsFixture(t).AcceptedAt(context.Background(), Message{IntentID: "campaign-single:none"}, SendAs{AccountID: "client"}); err != nil || !got.IsZero() {
 		t.Fatalf("a send with no receipt says it was taken at %s (%v)", got, err)
+	}
+}
+
+// TestAnOperationIdIsRenewedOnlyWhileEveryPOSTUnderItTookNothing: the receipt's
+// latest refusal is not enough. A revised message gets a fresh Operation-Id only
+// while EVERY POST made under the receipt's current id provably took nothing --
+// each was a client refusal or a throttle. A server error, a lost answer, Azure
+// having no record (notfound), or a receipt written before the proof existed
+// leaves a POST under the id that Azure may have taken, and a later refusal under
+// the same id does not undo that: the id is kept, so that submission is matched by
+// it and the person gets at most one message. (The review's chains.)
+func TestAnOperationIdIsRenewedOnlyWhileEveryPOSTUnderItTookNothing(t *testing.T) {
+	answer := func(code int) *http.Response {
+		header := http.Header{}
+		if code == http.StatusTooManyRequests {
+			header.Set("Retry-After", "15")
+		}
+		return &http.Response{StatusCode: code, Header: header, Body: io.NopCloser(strings.NewReader("{}"))}
+	}
+	for _, tc := range []struct {
+		name string
+		// seed is the status of a receipt already there, written before refusals
+		// had a class or a proof; "" for none, the chain's first POST making it.
+		seed  string
+		chain []int // Azure's answers to the unchanged message, in order
+		fresh bool  // whether the revised message then gets a fresh id
+	}{
+		{"504 then 429", "", []int{504, 429}, false},
+		{"504 then 400", "", []int{504, 400}, false},
+		{"notfound then 429", "notfound", []int{429}, false},
+		{"legacy rejected then 429", "rejected", []int{429}, false},
+		{"legacy rejected then 400", "rejected", []int{400}, false},
+		{"400", "", []int{400}, true},
+		{"400 then 429", "", []int{400, 429}, true},
+		{"429", "", []int{429}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			msg := Message{IntentID: "campaign-single:chain", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+			first := ""
+			if tc.seed != "" {
+				first = "12345678-1234-1234-1234-123456789012"
+				ops.rows = map[string]acsOperation{s.operationKey(msg.IntentID): {ID: first, AccountID: "client", Endpoint: s.cfg.Endpoint, Digest: "the first message", Intent: msg.IntentID, Status: tc.seed}}
+			}
+			answers := append(append([]int(nil), tc.chain...), http.StatusAccepted)
+			var posted []string
+			s.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				posted = append(posted, r.Header.Get("Operation-Id"))
+				code := answers[0]
+				answers = answers[1:]
+				return answer(code), nil
+			})
+			clock := s.now()
+			s.now = func() time.Time { return clock }
+			for range tc.chain {
+				if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
+					t.Fatalf("an answer of the chain is not a definite non-acceptance: %v", err)
+				}
+				clock = clock.Add(time.Hour) // past any wait Azure named
+			}
+			if first == "" {
+				first = posted[0]
+			}
+			for _, id := range posted {
+				if id != first {
+					t.Fatalf("the unchanged message moved off its Operation-Id: %q", posted)
+				}
+			}
+			msg.Subject, msg.TextBody, msg.Revised = "Welcome", "Welcome aboard", true
+			if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+				t.Fatalf("the revised message: %v", err)
+			}
+			if revised := posted[len(posted)-1]; (revised != first) != tc.fresh {
+				t.Fatalf("after %s the revised message went under %q (the earlier id %q), want a fresh id: %v", tc.name, revised, first, tc.fresh)
+			}
+		})
 	}
 }
 
