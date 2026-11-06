@@ -498,6 +498,14 @@ builtin campaignSetJourneyState {
   expectedRevision  string!
 }
 
+@sdk
+@description("Retry email automation runs that failed. Each one starts its step again with no attempts spent; an unsubscribed or suppressed person still leaves instead of being mailed. Leave enrollmentIds empty to retry every failed run of the automation.")
+@executor("integration.campaigns.retryEnrollments")
+builtin campaignRetryEnrollments {
+  journeyId      string!
+  enrollmentIds  []string
+}
+
 /// One authorized automation enrollment operation, available only inside its native scope.
 @executor("integration.campaigns.campaignDrainJourneys")
 builtin campaignDrainJourneys {  }

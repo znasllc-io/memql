@@ -906,6 +906,19 @@ query journeyEnrollment openEnrollmentsForJourney {
  shape journeyEnrollmentFull
 }
 
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' failed work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment failedEnrollmentsForJourney {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && row.status == "failed")
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
 /// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly

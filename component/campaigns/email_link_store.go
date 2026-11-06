@@ -69,7 +69,7 @@ func (s *Store) nudgeEnrollment(ctx context.Context, recipientID string, at time
 	if err != nil {
 		return err
 	}
-	if journey.Status == "archived" || (!waiting && journey.Status != "active") {
+	if journey.Status == "archived" {
 		return nil
 	}
 	recipient, found, err := s.RecipientByID(ownerActorContext(phase, journey.OwnerUserID), recipientID)

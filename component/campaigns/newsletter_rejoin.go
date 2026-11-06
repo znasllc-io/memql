@@ -100,7 +100,7 @@ func (w *Worker) expiredMembership(ctx context.Context, recipient Recipient) (bo
 			if str(row, "status") == "active" || str(row, "status") == "waiting" {
 				return false, nil
 			}
-			if str(row, "status") == "exited" && str(row, "exitReason") == "not confirmed" {
+			if str(row, "status") == "failed" || (str(row, "status") == "exited" && str(row, "exitReason") == "not confirmed") {
 				expired = true
 			}
 		}

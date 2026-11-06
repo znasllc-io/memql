@@ -55,6 +55,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
 		{Name: "describeJourney", Description: "Draft an email automation for review without saving.", Handler: w.handleDescribeJourney},
 		{Name: "saveJourney", Description: "Save a revision of an email automation.", Handler: w.handleSaveJourney},
+		{Name: "retryEnrollments", Description: "Start failed email automation runs again.", Handler: w.handleRetryEnrollments},
 		{Name: "setJourneyState", Description: "Turn an email automation on, pause or archive it.", Handler: w.handleSetJourneyState},
 		{Name: "stageOperationalEmail", Description: "Render a published operational rule template into the server outbox.", Handler: w.handleStageOperationalEmail},
 		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},

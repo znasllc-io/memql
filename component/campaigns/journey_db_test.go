@@ -198,7 +198,9 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 		t.Fatal(response.Code, response.Body.String())
 	}
 	race()
-	if got := lateRow(); str(got, "status") != "exited" || n.sender.count() != 4 {
+	// The confirmation reopens the run even while paused; the drain sends nothing
+	// until the automation is on again.
+	if got := lateRow(); str(got, "status") != "active" || str(got, "stepId") != "welcome" || n.sender.count() != 4 {
 		t.Fatalf("paused recovered enrollment=%v sends=%d", got, n.sender.count())
 	}
 	state("activate")
