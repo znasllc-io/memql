@@ -114,6 +114,9 @@ func TestThePreferencesPageDoesNotConfirmAnExpiredSignUp(t *testing.T) {
 	})
 }
 
+// savedLogo is the logo a kit saved the normal way holds: a data: picture.
+const savedLogo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
 func TestEmailPagesCarryTheOrganizationsNameAndLogo(t *testing.T) {
 	kit := func(primary, logo string) map[string]any {
 		return map[string]any{"kit": map[string]any{"theme": map[string]any{"primary": primary}, "logo": map[string]any{"src": logo}}}
@@ -145,32 +148,36 @@ func TestEmailPagesCarryTheOrganizationsNameAndLogo(t *testing.T) {
 			return rr.Code, rr.Body.String(), rr.Header().Get("Content-Security-Policy")
 		}},
 	}
-	for _, pg := range pages {
-		t.Run(pg.name+" is branded", func(t *testing.T) {
-			e, h := newEmailPageEngine("subscribed")
-			if pg.name == "confirm" {
-				e.roster[0]["subscriptionStatus"] = "pending"
-			}
-			e.brandKit = kit("#0a7", "https://cdn.example.test/logo.png")
-			code, body, csp := pg.get(e, h)
-			if code != 200 || !strings.Contains(body, pg.title) {
-				t.Fatal(code, body)
-			}
-			if !strings.Contains(body, `<img class="logo" src="https://cdn.example.test/logo.png" alt="Example &amp; Co">`) || !strings.Contains(body, "background:#0a7") {
-				t.Fatal(body)
-			}
-			if !strings.Contains(body, "<main>") || !strings.Contains(body, "<h1>") {
-				t.Fatal(body)
-			}
-			if !strings.Contains(csp, "img-src https:") || !strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "script-src") || strings.Contains(csp, "font-src") || strings.Contains(csp, "style-src http") {
-				t.Fatal(csp)
-			}
-		})
+	for _, logo := range []string{"https://cdn.example.test/logo.png", savedLogo} {
+		for _, pg := range pages {
+			t.Run(pg.name+" is branded with "+logo[:10], func(t *testing.T) {
+				e, h := newEmailPageEngine("subscribed")
+				if pg.name == "confirm" {
+					e.roster[0]["subscriptionStatus"] = "pending"
+				}
+				e.brandKit = kit("#0a7", logo)
+				code, body, csp := pg.get(e, h)
+				if code != 200 || !strings.Contains(body, pg.title) {
+					t.Fatal(code, body)
+				}
+				if !strings.Contains(body, `<img class="logo" src="`+logo+`" alt="Example &amp; Co">`) || !strings.Contains(body, "background:#0a7") {
+					t.Fatal(body)
+				}
+				if !strings.Contains(body, "<main>") || !strings.Contains(body, "<h1>") {
+					t.Fatal(body)
+				}
+				if !strings.Contains(csp, "img-src data: https:") || !strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "script-src") || strings.Contains(csp, "font-src") || strings.Contains(csp, "style-src http") {
+					t.Fatal(csp)
+				}
+			})
+		}
 	}
 	t.Run("brand values that are not what they claim are left out", func(t *testing.T) {
 		for _, c := range []struct{ primary, logo string }{
 			{"red", "http://cdn.example.test/logo.png"},
-			{"#12", "data:image/png;base64,AAAA"},
+			{"#12", "data:image/svg+xml;base64,PHN2Zy8+"},
+			{"#12", "data:text/html;base64,PHNjcmlwdD4="},
+			{"#12", "data:image/png;base64,AAAA\"onerror=\"alert(1)"},
 			{"#0a7;}</style><script>alert(1)</script>", "https://x.test/a\"onerror=\"alert(1)"},
 			{"url(https://x.test)", "javascript:alert(1)"},
 			{"#abcd", "//cdn.example.test/logo.png"},

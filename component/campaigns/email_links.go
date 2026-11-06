@@ -220,7 +220,8 @@ func (h *EmailLinkHandler) preferencesLink(p LinkPayload) string {
 
 // inConfirmWindow reports whether a pending member can still confirm: the same
 // 30 days from joining that a confirmation email's own link lives. A member with
-// no recorded join cannot be shown to be inside it.
+// no recorded join cannot be shown to be inside it, so it is treated as outside:
+// the page fails closed rather than confirming a sign-up it cannot date.
 func inConfirmWindow(recipient Recipient, now time.Time) bool {
 	return !recipient.JoinedAt.IsZero() && now.Before(recipient.JoinedAt.Add(confirmLinkLifetime))
 }

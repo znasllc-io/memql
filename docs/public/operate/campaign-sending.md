@@ -878,9 +878,9 @@ links valid while their key remains in that ring. Forwarding a link gives its
 holder that link's authority, so treat recipient links as private.
 
 The pages carry the organization's look: its name in the page title, its logo
-(only an absolute `https://` address is shown) and its primary colour on the
+(the kit's own saved picture, or an absolute `https://` address) and its primary colour on the
 button, read from the organization's brand kit. Anything in the kit that is not
-a plain hex colour or an `https://` logo address is left out, and a kit that
+a plain hex colour, a saved png, jpeg or gif logo, or an `https://` logo address is left out, and a kit that
 cannot be read leaves the page plain; an opt-out page always works. A page that
 cannot help names the organization's default sender as the contact: that
 sender's Reply-To, else its address, never the installation's own identity.

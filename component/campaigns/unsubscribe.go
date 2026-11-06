@@ -344,7 +344,7 @@ func writeEmailPage(rw http.ResponseWriter, status int, title, body string) {
 
 // writeBrandedPage is the shared shell. The brand adds the organization's logo
 // above the page and its colour to the button, and widens the policy by images
-// from https and nothing else: no scripts, no fonts, no remote styles.
+// from data: and https: and nothing else: no scripts, no fonts, no remote styles.
 func writeBrandedPage(rw http.ResponseWriter, status int, title, body string, brand pageBrand) {
 	emailPageHeaders(rw)
 	style := `body{font:16px/1.5 system-ui,sans-serif;margin:4rem auto;max-width:34rem;padding:0 1rem;overflow-wrap:anywhere}` +
@@ -354,7 +354,7 @@ func writeBrandedPage(rw http.ResponseWriter, status int, title, body string, br
 	}
 	logo := ""
 	if brand.Logo != "" {
-		rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src https:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
 		style += `.logo{display:block;max-width:14rem;max-height:4rem;margin:0 0 1.5rem}`
 		logo = `<img class="logo" src="` + html.EscapeString(brand.Logo) + `" alt="` + html.EscapeString(brand.Org) + `">`
 	}

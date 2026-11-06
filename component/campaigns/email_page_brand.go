@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 )
 
 // email_page_brand.go -- how the pages behind email links look and who they
@@ -91,11 +93,22 @@ func buttonText(colour string) string {
 	return "#fff"
 }
 
-// logoSource is the logo address a brand kit's logo may be shown from, or "".
-// Only an absolute https address qualifies: the page's policy lets images load
-// from https and nowhere else.
+// logoPicture matches the pictures a saved kit holds: the media types
+// emaildoc.ParseBrandKit accepts for a logo (png, jpeg, gif) as base64, nothing
+// else. It is checked again at render because the page does not trust what the
+// kit row says it validated.
+var logoPicture = regexp.MustCompile(`^data:image/(?:png|jpeg|gif);base64,[A-Za-z0-9+/]+=*$`)
+
+// logoSource is the logo a brand kit's logo may be shown from, or "": the data:
+// picture a kit is saved with, or an absolute https address. Anything else
+// (another scheme, another media type, a quote or space that could leave the
+// attribute) is dropped. The page's policy lets images load from data: and
+// https: and nowhere else.
 func logoSource(src string) string {
 	src = strings.TrimSpace(src)
+	if logoPicture.MatchString(src) && len(src) <= emaildoc.MaxBytes {
+		return src
+	}
 	if !strings.HasPrefix(src, "https://") || len(src) <= len("https://") || strings.ContainsAny(src, " \t\r\n\"'<>") {
 		return ""
 	}
@@ -147,7 +160,8 @@ func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, or
 
 // defaultContact is who a page tells people to write to: the Reply-To of the
 // organization's own default sender, else that sender's address. The default is
-// the first sender the organization set up that is still on. A sender of another
+// the first sender the organization set up that is still on (the engine has no
+// "default" flag on a sender, so the oldest active one stands for it). A sender of another
 // organization, and the installation's own identity, are never offered: the
 // list is read by organization, and a row that names another is skipped.
 func defaultContact(senders []SenderIdentity, accountID string) string {
