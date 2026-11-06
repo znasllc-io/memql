@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -380,6 +381,47 @@ func TestResolveCredentialUnsealsUnderThePackageOwnerAndStampsTheHeartbeat(t *te
 	}
 	if strings.Contains(logs.String(), testToken) {
 		t.Fatalf("the token reached the log: %s", logs.String())
+	}
+}
+
+// The heartbeat is stamped at most once an hour (credentialTouchInterval).
+// The poll unseals once per package every ten minutes and a pipeline unseals
+// for every token it mints, and each stamp used to append a credential
+// version. The decision reads the stored stamp off the row the unseal already
+// read, so a fetch inside the hour issues the sealed read and nothing else.
+func TestResolveCredentialStampsTheHeartbeatAtMostHourly(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	now := time.Now().UTC()
+	for name, tc := range map[string]struct {
+		lastUsedAt any
+		stamped    bool
+	}{
+		"never used":             {nil, true},
+		"used ten minutes ago":   {now.Add(-10 * time.Minute).Format(time.RFC3339), false},
+		"used 59 minutes ago":    {now.Add(-59 * time.Minute).Format(time.RFC3339Nano), false},
+		"used two hours ago":     {now.Add(-2 * time.Hour).Format(time.RFC3339), true},
+		"a stamp it cannot read": {"last tuesday", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := sealedRow(t, credentialStatusActive)
+			if tc.lastUsedAt != nil {
+				row["lastUsedAt"] = tc.lastUsedAt
+			}
+			engine := &actorEngine{}
+			engine.rows = map[string][]map[string]any{"query sourceCredentialSealedById": {row}}
+			s := &store{engine: engine, logger: discardLogger()}
+
+			resolved, err := s.resolveCredential(context.Background(), "v1:platform:sourceCredential:abc", "v1:identity:user:alice")
+			if err != nil || resolved.Bearer != testToken {
+				t.Fatalf("resolve: %v (bearer %q)", err, resolved.Bearer)
+			}
+			if got := engine.sawStatement("mutation touchSourceCredential"); got != tc.stamped {
+				t.Fatalf("stamped = %v, want %v; statements: %v", got, tc.stamped, engine.statements())
+			}
+			if !tc.stamped && len(engine.statements()) != 1 {
+				t.Fatalf("a fetch inside the hour must cost the sealed read and nothing else: %v", engine.statements())
+			}
+		})
 	}
 }
 

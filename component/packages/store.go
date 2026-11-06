@@ -694,6 +694,8 @@ func (s *store) createSourceCredential(ctx context.Context, c credentialSeed) er
 // touchSourceCredential stamps the heartbeat after an unseal -- the engine's
 // own account of a fetch, which is why the mutation is @serverOnly and why the
 // caller treats a failure here as bookkeeping rather than as a failed fetch.
+// The caller decides whether to stamp at all: only when the stored stamp is an
+// hour old (credentialTouchDue).
 func (s *store) touchSourceCredential(ctx context.Context, credentialId string, at time.Time) error {
 	return s.writeInternal(ctx, fmt.Sprintf(
 		"mutation touchSourceCredential(credentialId: %s, lastUsedAt: %s)",

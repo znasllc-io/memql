@@ -125,7 +125,7 @@ const sourceCredentialConcept = "v1:platform:sourceCredential"
 
 // resolveCredential is the production CredentialResolver for a FETCH: the
 // unseal, plus the lastUsedAt heartbeat, because a fetch is what the heartbeat
-// records.
+// records -- stamped at most once an hour (credentialTouchInterval).
 func (s *store) resolveCredential(ctx context.Context, credentialId, ownerUserId string) (ResolvedCredential, error) {
 	return s.unsealCredential(ctx, credentialId, ownerUserId, true)
 }
@@ -229,14 +229,45 @@ func (s *store) unsealCredential(ctx context.Context, credentialId, ownerUserId 
 	// bookkeeping would be the wrong trade -- so a failure is a warning that
 	// names the credential and the error, never the value, and the fetch
 	// proceeds. A probe skips it entirely: the unseal above is the whole of
-	// what it needed, and it writes nothing.
-	if touch {
-		if terr := s.touchSourceCredential(readCtx, credentialId, time.Now().UTC()); terr != nil {
+	// what it needed, and it writes nothing. A fetch within an hour of the
+	// stored stamp skips it too (credentialTouchDue).
+	now := time.Now().UTC()
+	if touch && credentialTouchDue(row, now) {
+		if terr := s.touchSourceCredential(readCtx, credentialId, now); terr != nil {
 			s.log().Warn("packages: could not stamp lastUsedAt on a source credential",
 				"component", "packages.credentials", "credential", credentialId, "err", terr)
 		}
 	}
 	return resolved, nil
+}
+
+// credentialTouchInterval is how old the stored lastUsedAt must be before a
+// fetch stamps it again.
+//
+// Every unseal used to stamp it. The upstream poll unseals once per package
+// every ten minutes and a pipeline unseals for every token it mints, so one
+// credential behind a few packages appended a version every minute or two:
+// about 1,800 a day for the ONE credential on production (2026-11-06). The
+// field answers "is this credential still in use, and since when has it not
+// been", which an hour's resolution answers as well as a second's; the Sources
+// group shows it as a heartbeat and never treats it as news.
+//
+// The comparison reads the row the unseal already read (lastUsedAt is
+// projected by sourceCredentialSealed for exactly this), so it costs no query.
+// Two replicas unsealing in the same instant can both find the stamp stale and
+// both write it: at worst a second version in the hour, never a missed stamp.
+const credentialTouchInterval = time.Hour
+
+// credentialTouchDue reports whether a use at `now` should stamp lastUsedAt:
+// when the stored stamp is more than credentialTouchInterval old, absent (the
+// first use), or not a time this build can read. A stamp from a replica whose
+// clock runs ahead reads as recent and is left alone until it ages.
+func credentialTouchDue(row map[string]any, now time.Time) bool {
+	stored, err := time.Parse(time.RFC3339, rowString(row, "lastUsedAt"))
+	if err != nil {
+		return true
+	}
+	return now.Sub(stored) > credentialTouchInterval
 }
 
 // credentialKind reads the row's kind, answering "token" for an ABSENT value.

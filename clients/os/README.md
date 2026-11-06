@@ -546,10 +546,10 @@ of the Packages half this passage replaces and survived it unchanged.
   so a row that carried one would be dropped here rather than rendered. There
   is no chip, fact or tooltip in this app that could show a value.
   **`lastUsedAt` is the heartbeat rule's second sharpest case** after
-  `lastCheckedAt`: every fetch of every source under a credential writes it,
-  the ten-minute poll feed included, so naming it in the arrival-cue
-  fingerprint would ring the card on a timer for as long as anything tracks a
-  repository. The fingerprint is label, status, host and fingerprint;
+  `lastCheckedAt`: the fetches of every source under a credential write it,
+  the ten-minute poll feed included, once an hour while any of them runs, so
+  naming it in the arrival-cue fingerprint would ring the card on a timer for
+  as long as anything tracks a repository. The fingerprint is label, status, host and fingerprint;
   `lastUsedAt` and `revokedAt` are displayed and never rung.
 
 - **A STOP OWNS ITS OWN REFUSAL** (`page/stops/*`, one component per stop).

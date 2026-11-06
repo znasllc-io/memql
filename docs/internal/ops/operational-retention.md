@@ -109,8 +109,12 @@ Reputation flushes acknowledge successfully saved windows and skip unchanged
 ones; failed saves remain eligible for retry. The magic-link sweep excludes
 already consumed requests. Package polling writes only a changed upstream head
 or availability, and seed materialization compares against a fresh read rather
-than a replica's cached result. These guards keep normal idle polling from
-creating business history.
+than a replica's cached result. A source credential's `lastUsedAt` is stamped
+only when the stored value is more than an hour old, read off the row the
+unseal already fetched (`credentialTouchDue`, `component/packages`), so the
+ten-minute poll and pipeline token minting no longer append a credential
+version on every use. These guards keep normal idle polling from creating
+business history.
 
 ## Shared row schemas
 
