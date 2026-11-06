@@ -49,8 +49,17 @@ const LOST: Record<Lifecycle, string> = {
   retry: "Couldn't confirm that it was started again.",
 };
 
-export function TemplatePage({ template, layouts, onBack, onReread }: {
+/** The warning for editing a template that automations send: saving makes it a draft, and they hold their emails. */
+export function holdWarning(automations: readonly string[]): string {
+  const names = automations.map((name) => `“${name}”`);
+  const list = names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `Saving changes makes this template a draft again, and ${names.length === 1 ? `the automation ${list} holds its emails` : `the automations ${list} hold their emails`} until the template is published.`;
+}
+
+export function TemplatePage({ template, layouts, activeAutomations = [], onBack, onReread }: {
   template: TemplateRow;
+  /** Names of the active automations that send this template. */
+  activeAutomations?: readonly string[];
   /** The organizations' layout readings, which name the layout it was made from. */
   layouts: EmailLayouts;
   /** Back to the templates. */
@@ -248,6 +257,7 @@ export function TemplatePage({ template, layouts, onBack, onReread }: {
     <div className="os-action-pane" data-os-dividers="none" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
+        {activeAutomations.length > 0 && !archived ? <Notice tone="warn" sentence={holdWarning(activeAutomations)} /> : null}
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
         {outcomeNotice()}
         <Panel label="Template details">

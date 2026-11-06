@@ -579,13 +579,18 @@ export function useAudienceLifecycle() {
 }
 
 export interface AddRecipientState extends WriteState {
-  add: (audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed") => Promise<boolean>;
+  /**
+   * `alreadyConfirmed` is sent only when the operator has said the person agreed
+   * outside this system: an audience that asks people to confirm refuses
+   * `subscribed` without it, and with it records the agreement.
+   */
+  add: (audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed", alreadyConfirmed?: boolean) => Promise<boolean>;
 }
 
 export function useAddRecipient(): AddRecipientState {
   const { busy, error, reset, call } = useWrite(
-    async (query, audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed") => {
-      await query.addRecipient({
+    async (query, audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed", alreadyConfirmed?: boolean) => {
+      await query.campaignAddRecipient({
         recipientId: newShortId(),
         audienceId: audience.id,
         accountId: audience.accountId,
@@ -593,6 +598,7 @@ export function useAddRecipient(): AddRecipientState {
         displayName: omitBlank(displayName),
         source: "manual",
         subscriptionStatus: subscriptionStatus ?? "subscribed",
+        ...(alreadyConfirmed === true ? { alreadyConfirmed: true } : {}),
       });
       return true;
     },
@@ -602,7 +608,8 @@ export function useAddRecipient(): AddRecipientState {
 }
 
 export interface SetSubscriptionState extends WriteState {
-  set: (recipientId: string, subscriptionStatus: string) => Promise<boolean>;
+  /** `alreadyConfirmed` says the operator was told the person agreed; see `AddRecipientState`. */
+  set: (recipientId: string, subscriptionStatus: string, alreadyConfirmed?: boolean) => Promise<boolean>;
 }
 
 /**
@@ -616,12 +623,13 @@ export interface SetSubscriptionState extends WriteState {
  */
 export function useSetSubscription(): SetSubscriptionState {
   const { busy, error, reset, call } = useWrite(
-    async (query, recipientId: string, subscriptionStatus: string) => {
-      await query.setRecipientSubscription({
+    async (query, recipientId: string, subscriptionStatus: string, alreadyConfirmed?: boolean) => {
+      await query.campaignSetRecipientSubscription({
         recipientId,
         subscriptionStatus,
         unsubscribedAt:
           subscriptionStatus === "subscribed" ? undefined : new Date().toISOString(),
+        ...(alreadyConfirmed === true ? { alreadyConfirmed: true } : {}),
       });
       return true;
     },
@@ -1216,4 +1224,17 @@ export function useJourneyWrites() {
   }, null);
   const describe = useWrite(async (query, accountId: string, sentence: string) => flatten((await query.campaignDescribeJourney({ accountId, sentence })).rows()[0] ?? {}), null);
   return { save, setState, describe };
+}
+
+
+/**
+ * Start failed automation runs again. No ids retries every failed run; the
+ * engine answers how many it started, or with the sentence for why it will not
+ * (the organization is not active, the automation is retired).
+ */
+export function useRetryEnrollments() {
+  return useWrite(async (query, journeyId: string, enrollmentIds: readonly string[]): Promise<number> => {
+    const row = flatten((await query.campaignRetryEnrollments({ journeyId, enrollmentIds: [...enrollmentIds] })).rows()[0] ?? {});
+    return typeof row.retried === "number" ? row.retried : 0;
+  }, -1);
 }

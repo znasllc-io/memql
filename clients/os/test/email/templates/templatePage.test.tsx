@@ -74,6 +74,23 @@ afterEach(() => {
 });
 
 describe("a template's page", () => {
+  it("template used by an active automation warns before editing", async () => {
+    const step = (templateId: string) => [{ id: "send1", kind: "send", templateId, senderIdentityId: "s1" }];
+    const journey = (id: string, name: string, status: string, templateId: string) => ({ id, accountId: "self", name, description: "", status, trigger: { kind: "joined", audienceId: "a1" }, steps: step(templateId), createdAt: "2026-10-11T00:00:00Z" });
+    const conn = fakeConnection({
+      templates: [templateRow({ id: "t1", name: "Welcome" }), templateRow({ id: "t2", name: "Goodbye" })],
+      journeys: [journey("j1", "Welcome series", "active", "t1"), journey("j2", "Old goodbye", "paused", "t2")],
+      templateContent: { t1: { document: DOCUMENT }, t2: { document: DOCUMENT } },
+      render: RENDERED,
+    });
+    mount(conn);
+    await openPage("Welcome");
+    expect(await screen.findByText("Saving changes makes this template a draft again, and the automation “Welcome series” holds its emails until the template is published.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Templates" }));
+    await openPage("Goodbye");
+    await waitFor(() => expect(conn.query.templateById).toHaveBeenCalledWith({ templateId: "t2" }, expect.anything()));
+    expect(screen.queryByText(/holds its emails/)).toBeNull();
+  });
   it("previews through emailRender in a sandboxed frame, with a plain-text tab", async () => {
     const conn = fakeConnection({
       templates: [templateRow({ id: "t1", name: "Welcome 2", subject: "Glad you're here", preheader: "Three things to try", layoutId: "builtin:article" })],

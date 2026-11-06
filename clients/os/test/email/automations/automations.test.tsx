@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
-import { audienceRow, fakeConnection, rowsResult, ruleRow, senderRow, templateRow, withSession, type FakeSeed } from "../harness";
+import { audienceRow, fakeConnection, recipientRow, rowsResult, ruleRow, senderRow, templateRow, withSession, type FakeSeed } from "../harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../../src/live/connection", () => ({ useOsConnection: () => h.connection, bridgePathFor: (base: string) => base + "_memql/ws", osBridgePath: "/_memql/ws" }));
 vi.mock("../../../src/auth/context", () => ({ useAuthSource: () => ({ bearer: async () => "token", refresh: async () => {} }) }));
@@ -39,6 +39,35 @@ describe("Automation pages", () => {
     await waitFor(() => expect(conn.query.campaignSetJourneyState.mock.calls.map(c => c[0].action)).toEqual(["activate", "pause", "archive"]));
     expect(conn.query.journeyEnrollmentCounts).toHaveBeenCalledWith({ journeyId: "j" }, expect.anything());
     expect(document.querySelector("button:disabled")).toBeNull();
+  });
+  it("automation page shows people by status and retries failed ones", async () => {
+    const active = { ...journey, status: "active", activatedAt: "2026-10-11T01:00:00Z" };
+    const enrollmentCounts: Record<string, number> = { ":active": 3, ":completed": 7, ":failed": 2 };
+    const failedRun = (id: string, recipientId: string, lastError: string) => ({ id, journeyId: "j", recipientId, stepId: "send1", stepIndex: 0, status: "failed", lastError, createdAt: "2026-10-11T02:00:00Z" });
+    const conn = setup({ journeys: [active], enrollmentCounts, recipientsForAudience: [recipientRow({ id: "r1", email: "one@acme.test" }), recipientRow({ id: "r2", email: "two@acme.test" })],
+      enrollments: [failedRun("e1", "r1", "The sender is turned off."), failedRun("e2", "r2", "The template is a draft.")] });
+    conn.query.campaignRetryEnrollments.mockImplementation(async args => { if ((args.enrollmentIds as string[]).length === 0 || (args.enrollmentIds as string[])[0] === "e1") enrollmentCounts[":failed"] = 1; return rowsResult([{ retried: 1 }]); });
+    mount(conn); fireEvent.click(await screen.findByText("Welcome series"));
+    const people = await screen.findByRole("region", { name: "People" });
+    await within(people).findByText("one@acme.test");
+    for (const [label, count] of [["In a run", "3"], ["Waiting", "0"], ["Finished", "7"], ["Left early", "0"], ["Failed", "2"]] as const) expect(within(people).getByText(label).parentElement?.textContent).toContain(count);
+    expect(within(people).getByText("The sender is turned off.")).toBeTruthy(); expect(within(people).getByText("The template is a draft.")).toBeTruthy();
+    expect(within(people).getAllByText("Send Welcome").length).toBe(2);
+    enrollmentCounts[":failed"] = 1; conn.query.journeyEnrollmentsByStatus.mockResolvedValue(rowsResult([failedRun("e2", "r2", "The template is a draft.")]));
+    fireEvent.click(within(people).getByRole("button", { name: "Retry one@acme.test" }));
+    await waitFor(() => expect(conn.query.campaignRetryEnrollments).toHaveBeenCalledWith({ journeyId: "j", enrollmentIds: ["e1"] }));
+    await waitFor(() => expect(within(people).queryByText("one@acme.test")).toBeNull());
+    expect(within(people).getByText("Failed").parentElement?.textContent).toContain("1");
+    conn.query.campaignRetryEnrollments.mockRejectedValue(new Error("This organization is not active, so these emails are held."));
+    fireEvent.click(within(people).getByRole("button", { name: "Retry all" }));
+    await waitFor(() => expect(conn.query.campaignRetryEnrollments).toHaveBeenLastCalledWith({ journeyId: "j", enrollmentIds: [] }));
+    await screen.findByText("This organization is not active, so these emails are held.");
+  });
+  it("shows Turn on disabled with the reason while the automation has something to fix", async () => {
+    mount(setup({ journeys: [{ ...journey, steps: [{ id: "send1", kind: "send", templateId: "t1", senderIdentityId: "" }] }], templates: [templateRow({ id: "t1", accountId: "self", name: "Welcome", status: "draft" })] }));
+    fireEvent.click(await screen.findByText("Welcome series"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Turn on" }) as HTMLButtonElement).disabled).toBe(true));
+    expect(screen.getAllByText(/Publish “Welcome” before turning this on\./).length).toBeGreaterThan(0);
   });
   it("shows an event-rule refusal once and keeps code and failure context without internal facts", async () => {
     const sentence = "arming this rule is refused"; const row = ruleRow({ id: "r", name: "New admin", status: "failed", condition: 'row.role == "admin"', lastError: `emailrules: ${sentence}` });

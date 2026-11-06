@@ -85,6 +85,10 @@ export interface Act {
   tone?: ButtonTone;
   /** Shown while this act is in flight. */
   busy?: boolean;
+  /** Present but not available. Say why in `title` or the bar's `detail`: a greyed act with no reason is a dead end. */
+  disabled?: boolean;
+  /** A tooltip; the reason an act is `disabled`. */
+  title?: string;
   /** An icon, drawn before the label. */
   icon?: ReactNode;
   /** Overrides the accessible name where the label alone is ambiguous out of context. */
@@ -200,7 +204,8 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               type="button"
               className="os-actbar-text"
               data-tone={act.tone}
-              disabled={act.busy}
+              disabled={act.busy || act.disabled}
+              title={act.title}
               aria-busy={act.busy || undefined}
               aria-label={act.ariaLabel}
               onClick={() => act.onAct()}
@@ -213,6 +218,8 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               key={act.label}
               tone={act.tone}
               busy={act.busy}
+              disabled={act.disabled}
+              title={act.title}
               onClick={() => act.onAct()}
               ariaLabel={act.ariaLabel}
             >

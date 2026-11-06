@@ -12,7 +12,7 @@ import { AddButton } from "../../kit/AddButton";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import { ClusterAzureEmail } from "./ClusterAzureEmail";
-import { AzureEmailDomainRecords } from "./AzureEmailDomainRecords";
+import { AzureEmailDomainRecords, STILL_CHECKING_MS } from "./AzureEmailDomainRecords";
 import { PageHelp } from "../../kit/pageHelp";
 import { useAzureEmailCall, type AzureEmailPlan, type AzureEmailReply } from "./azureEmailSetup";
 import "./azureEmail.css";
@@ -21,6 +21,7 @@ import { CampaignPackageConfig } from "./CampaignPackageConfig";
 type ConnectionView = "list" | "detail" | "setup" | "cluster";
 const PROVISION_INTERVAL_MS = 10_000;
 const MAX_PROVISION_CHECKS = 60;
+const DNS_RECHECK_MS = 30_000;
 /** The Connections page's pages go back to the page they were opened from. */
 const CONNECTIONS_BACK = "Email settings";
 /** One cluster configuration; organizations own domains and sending identities. */
@@ -164,6 +165,11 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     if (result) setSendCheck(result);
   }, [call]);
   const [records, setRecords] = useState<AzureEmailReply["records"]>(undefined);
+  // When Azure last answered about the records, and since when it has been saying "Checking".
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const [checkingSince, setCheckingSince] = useState<number | null>(null);
+  const verifying = records?.some(record => record.status === "VerificationRequested" || record.status === "VerificationInProgress") ?? false;
+  useEffect(() => { setCheckingSince(since => verifying ? since ?? Date.now() : null); }, [verifying]);
   const [provisionChecks, setProvisionChecks] = useState(0);
   const [startedAt, setStartedAt] = useState(Date.now);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -174,7 +180,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
     if (result.replyTo) setReplyTo(result.replyTo);
     if (result.requestedSender) { setUsername(result.requestedSender.username); setDisplayName(result.requestedSender.displayName); setReplyTo(result.requestedSender.replyTo || ""); }
     else if (result.sender && result.senders) { setUsername(result.sender.split("@")[0] || ""); setDisplayName(result.senders[result.sender] || ""); }
-    if (result.records) setRecords(result.records);
+    if (result.records) { setRecords(result.records); setCheckedAt(Date.now()); }
   }, []);
   useEffect(() => { void call("status").then(apply); }, [call, apply]);
   const perform = useCallback((action: string, options: Record<string, unknown> = {}) => { void call(action, { ...options, planId: state?.planId || "" }).then(result => { apply(result); if (result?.status === "ready") setView("detail"); }); }, [call, state?.planId, apply, setView]);
@@ -186,6 +192,8 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
   useEffect(() => {
     if (view === "setup" && open === "dns" && connected && !records) void call("domainStatus").then(apply);
   }, [view, open, connected, records, call, apply]);
+  // Reading the records' state is safe to repeat; the verify act is not, and stays a press.
+  const recheck = useCallback(async () => { apply(await call("domainStatus")); }, [call, apply]);
   const provisionPaused = provisionChecks >= MAX_PROVISION_CHECKS;
   const advancing = view === "setup" && provisioning && connected && !error && !provisionPaused;
   const now = useNow(advancing ? 1000 : 60_000);
@@ -250,7 +258,7 @@ function OrganizationEmail({ accountDomain, accountId, name, view, setView, pick
       <Field label="Email domain"><Input id={`${formID}-domain`} label="Email domain" placeholder="client.com" value={domain} onChange={value => { setDomain(value); const base = value.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 45); setEmailService(`${base}-email`); setCommunicationService(`${base}-delivery`); }}/></Field>
       <details><summary>Resource names</summary><Field label="Email service"><Input id={`${formID}-email-service`} label="Email service" value={emailService} onChange={setEmailService}/></Field><Field label="Delivery service"><Input id={`${formID}-delivery-service`} label="Delivery service" value={communicationService} onChange={setCommunicationService}/></Field></details>
     </>}</div> },
-    { id: "dns", name: "Verify domain", sentence: "Records that prove it is yours", answer: phase === "sender" ? "Verified" : records?.length ? `${records.filter(record => record.status === "Verified").length} of ${records.length} verified` : undefined, body: <div className="os-app-stack"><AzureEmailDomainRecords domain={plan.domain || domain} records={records}/></div> },
+    { id: "dns", name: "Verify domain", sentence: "Records that prove it is yours", answer: phase === "sender" ? "Verified" : records?.length ? `${records.filter(record => record.status === "Verified").length} of ${records.length} verified` : undefined, body: <div className="os-app-stack"><AutoRefresh intervalMs={DNS_RECHECK_MS} enabled={view === "setup" && phase === "dns" && open === "dns" && connected} busy={busy} onRefresh={recheck}/><AzureEmailDomainRecords domain={plan.domain || domain} records={records} lastChecked={checkedAt} stillChecking={checkingSince !== null && Date.now() - checkingSince >= STILL_CHECKING_MS}/></div> },
     { id: "sender", name: "Sender", sentence: "The address people see", body: <div className="os-app-stack"><Field label="Sender address"><Input id={`${formID}-sender`} label="Sender address" value={username} onChange={setUsername}/><span className="os-caption">@{plan.domain}</span></Field><Field label="Display name"><Input id={`${formID}-name`} label="Display name" value={displayName} onChange={setDisplayName}/></Field><Field label="Reply address"><Input id={`${formID}-reply`} label="Reply address" placeholder={`help@${plan.domain}`} value={replyTo} onChange={setReplyTo}/></Field><p className="os-caption">Replies need a mailbox that already receives mail.</p></div> },
   ].map(step => ({ ...step, state: step.id === phase ? busy || advancing ? "current" as const : error ? "stopped" as const : "open" as const : order.indexOf(step.id) < order.indexOf(phase) ? "done" as const : "ahead" as const }))}/>;
 }

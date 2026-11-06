@@ -12,6 +12,7 @@ import { audienceProjection, senderProjection, templateProjection, type JourneyR
 import { listKnowledge, useConfirmTemplates, useEnrollmentCounts, type EmailFeeds } from "../useEmail";
 import { journeyActs, journeyReading, type Asking } from "./automationActs";
 import { Flow } from "./Flow";
+import { People } from "./People";
 import { triggerSentence } from "./flowModel";
 import { journeyIssues, type Issue } from "./issues";
 
@@ -57,6 +58,7 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
   return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head navigationKey={`automation:${journey.id}`} title={journey.name} back={{ label: "Automations", onSelect: onBack }} />
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={counts.reload} busy={counts.state === "loading"} />
     <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, journey.accountId)} />{journey.activatedAt ? <Fact label="Turned on" value={formatMoment(journey.activatedAt)} /> : null}</Facts></Panel>
+    {journey.status !== "draft" ? <People journey={journey} templates={templates} onRetried={() => { void counts.reload(); feeds.journeys.reseed(); }} /> : null}
     {journey.lastError ? <Notice tone="warn" sentence={refusalSentence(journey.lastError)} /> : null}
     {failure && refusalSentence(failure) !== refusalSentence(journey.lastError) ? <Notice tone="warn" sentence={refusalSentence(failure)} /> : null}
     {confirms.error ? <Notice tone="warn" sentence={refusalSentence(confirms.error)}><Button onClick={() => { void confirms.reload(); }}>Try again</Button></Notice> : null}

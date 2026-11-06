@@ -26,7 +26,7 @@ describe("Automation step model", () => {
   it("makes activation absent while dirty or invalid, and archived has no acts", () => {
     const j = journeyFromRow({ id: "j", status: "paused" });
     expect(journeyActs(j, true, [], "").map(a => a.id)).toEqual(["discard", "save"]);
-    expect(journeyActs(j, false, [{ stepId: "", text: "Fix" }], "").map(a => a.id)).toEqual(["retire"]);
+    expect(journeyActs(j, false, [{ stepId: "", text: "Fix" }], "").map(a => [a.id, a.disabled === true])).toEqual([["retire", false], ["turn-on", true]]);
     expect(journeyActs({ ...j, status: "archived" }, false, [], "")).toEqual([]);
   });
   it("has the event questions and omits sender for cluster recipients", () => {

@@ -114,6 +114,8 @@ export interface FakeSeed {
   emailRules?: Row[];
   journeys?: Row[];
   enrollmentCounts?: Record<string, number>;
+  /** Automation runs, as `journeyEnrollmentsByStatus` lists them (journeyEnrollmentFull). */
+  enrollments?: Row[];
   proposal?: Row;
   /** Pass an Error to make the on-demand read REFUSE, which is the
    *  interesting case: a refusal is not a zero. */
@@ -387,8 +389,13 @@ export function fakeConnection(seed: FakeSeed = {}) {
       restoreAudience: reader([]),
       setAudienceConfirmation: reader([]),
       archiveAudience: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
-      addRecipient: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
-      setRecipientSubscription: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      campaignAddRecipient: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      campaignSetRecipientSubscription: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      campaignRetryEnrollments: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ retried: 0 }])),
+      journeyEnrollmentsByStatus: reader(seed.enrollments, (row, args) => row.journeyId === args.journeyId && row.status === args.status),
+      // The seeded people, found by id and by the digest of their address.
+      recipientById: reader(seed.recipientsForAudience, (row, args) => row.id === args.recipientId),
+      recipientInAudienceByDigest: reader(seed.recipientsForAudience, (row, args) => row.emailDigest === args.emailDigest),
       campaignSaveTemplate: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true, revision: "2026-10-01T00:00:00Z" }])),
       // An email MemQL is writing (Task 23): cancelled, or written again.
       campaignCancelComposition: vi.fn(async (args: Record<string, unknown>) => rowsResult([{ templateId: args.templateId, revision: "2026-10-01T00:00:01Z", state: "failed" }])),

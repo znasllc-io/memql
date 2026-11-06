@@ -22,6 +22,8 @@ import { ConnectSignupFormWizard, SignupFormPage, SignupForms } from "./SignupFo
 
 export function AudiencePage({ audience, feeds, recordFeeds, writes, uploads, sites, onBack }: { audience: AudienceRow; feeds: EmailFeeds; recordFeeds: EmailRecordFeeds; writes: CampaignWrites; uploads: UploadProvider; sites: LiveCollectionHandle<Row>; onBack: () => void }) {
   const [view, setView] = useState("");
+  // An address the operator asked to see on the list, so the list opens already looking for it.
+  const [lookFor, setLookFor] = useState("");
   const [asking, setAsking] = useState<"" | "archive" | "confirmation">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -47,7 +49,7 @@ export function AudiencePage({ audience, feeds, recordFeeds, writes, uploads, si
       else setError("The audience wasn't changed.");
     } finally { working.current = false; setBusy(false); }
   }
-  if (view === "people") return <AddPeopleWizard audience={audience} writes={writes} uploads={uploads} onBack={() => setView("")} onDone={() => { setView(""); void roster.reload(); void counts.reload(); void size.reload(); }} />;
+  if (view === "people") return <AddPeopleWizard audience={audience} writes={writes} uploads={uploads} onBack={() => setView("")} onOpenPerson={address => { setLookFor(address); setView(""); }} onDone={() => { setView(""); void roster.reload(); void counts.reload(); void size.reload(); }} />;
   if (view === "connect") return <ConnectSignupFormWizard {...shared} onBack={() => setView("")} onDone={() => setView("")} />;
   if (binding) return <SignupFormPage {...shared} binding={binding} onBack={() => setView("")} />;
   const question = asking === "archive" ? `Archive “${audience.name}”? It leaves the campaign and automation pickers; its history stays.` : asking === "confirmation" ? audience.confirmation === "required" ? "Stop asking to confirm? New signups are subscribed right away." : "Ask people to confirm? New signups wait as pending until they confirm." : "";
@@ -55,7 +57,7 @@ export function AudiencePage({ audience, feeds, recordFeeds, writes, uploads, si
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={async () => { await Promise.all([roster.reload(), counts.reload(), size.reload()]); }} busy={roster.state === "loading" || size.state === "loading"} />
     <Panel label="Audience details"><Facts><Fact label="Organization" value={organizationName(accounts, audience.accountId)} /><Fact label="Description" value={audience.description} /><Fact label="Subscribers" value={figure(count)} /><Fact label="On the list" value={figure(size.value ?? undefined)} /><Fact label="Confirmation" value={audience.confirmation === "required" ? "Asks people to confirm" : "Doesn't ask"} /><Fact label="Created" value={formatMoment(audience.createdAt)} /></Facts></Panel>
     {size.error || counts.refusals.get(audience.id) ? <Notice tone="warn" sentence={refusalSentence(size.error || counts.refusals.get(audience.id) || "")} /> : null}
-    <Subscribers roster={roster} writes={writes} onAdd={() => setView("people")} archived={audience.status === "archived"} />
+    <Subscribers key={lookFor} audience={audience} lookFor={lookFor} roster={roster} writes={writes} onAdd={() => { setLookFor(""); setView("people"); }} archived={audience.status === "archived"} />
     {feeds.journeys.snapshot.rows.map(journeyFromRow).filter(j => j.status === "active" && j.trigger.kind === "joined" && j.trigger.audienceId === audience.id).map(j => <p className="os-caption" key={j.id}>People you add join “{j.name}”.</p>)}
     <SignupForms audience={audience} signupForms={recordFeeds.signupForms} sites={sites} onAdd={() => setView("connect")} onOpen={setView} />
     {error ? <Notice tone="warn" sentence={refusalSentence(lifecycle.error || writes.archiveAudience.error) || error} /> : null}

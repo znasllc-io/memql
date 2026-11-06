@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { chooseOption } from "../../selectControl";
 import { readTheBar } from "../../readTheBar";
+import { addressDigest } from "../../../src/apps/email/audiences/addressDigest";
 import { audienceRow, fakeConnection, recipientRow, rowsResult, withSession } from "../harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../../src/live/connection", () => ({ useOsConnection: () => h.connection, bridgePathFor: (base: string) => base + "_memql/ws", osBridgePath: "/_memql/ws" }));
@@ -57,8 +58,9 @@ describe("Email audiences", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: " subscriber@example.test " } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Subscriber" } });
+    await waitFor(() => expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalled());
     await press("Add");
-    await waitFor(() => expect(conn.query.addRecipient).toHaveBeenCalledWith(expect.objectContaining({ accountId: "other", subscriptionStatus: "pending", email: "subscriber@example.test" })));
+    await waitFor(() => expect(conn.query.campaignAddRecipient).toHaveBeenCalledWith(expect.objectContaining({ accountId: "other", subscriptionStatus: "pending", email: "subscriber@example.test" })));
     expect(conn.query.createAudience.mock.calls[0]?.[0]).toMatchObject({ accountId: "other", confirmation: "required" });
   });
   it("retains the CSV report until Done and uses the shell upload provider", async () => {
@@ -77,13 +79,65 @@ describe("Email audiences", () => {
     const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [recipientRow({ id: "r", email: "one@acme.test" })] }); mount(conn);
     fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("one@acme.test");
     chooseOption(screen.getByLabelText("Subscription state for one@acme.test"), "Unsubscribed");
-    await waitFor(() => expect(conn.query.setRecipientSubscription).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "r", subscriptionStatus: "unsubscribed" })));
+    await waitFor(() => expect(conn.query.campaignSetRecipientSubscription).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "r", subscriptionStatus: "unsubscribed" })));
     conn.query.recipientsForAudience.mockResolvedValue(rowsResult([recipientRow({ id: "r2", email: "two@acme.test", subscriptionStatus: "unsubscribed" })]));
     await act(async () => window.dispatchEvent(new Event("focus")));
     await screen.findByText("two@acme.test");
     expect(screen.getByText(/1 of these can't be mailed/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to Audiences" }));
     expect(await screen.findByText("Newsletter")).toBeTruthy();
+  });
+  it("add people refuses an address already in the audience", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [recipientRow({ id: "r", email: "one@acme.test", emailDigest: await addressDigest("one@acme.test") })] }); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("one@acme.test");
+    fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "  One@Acme.TEST " } });
+    await screen.findByText("This address is already in this audience.");
+    expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalledWith({ audienceId: "a", emailDigest: await addressDigest("one@acme.test") }, expect.anything());
+    await readTheBar(); expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show them in the list" }));
+    expect(await screen.findByLabelText("Subscription state for one@acme.test")).toBeTruthy();
+    expect(conn.query.campaignAddRecipient).not.toHaveBeenCalled();
+  });
+  it("offers Add for a new address and shows the engine's refusal verbatim", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })] });
+    conn.query.campaignAddRecipient.mockRejectedValue(new Error("This address is already in this audience.")); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@acme.test" } });
+    await waitFor(() => expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalled());
+    await readTheBar(); await waitFor(() => expect(screen.getByRole("button", { name: "Add" })).toBeTruthy()); fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await screen.findByText("This address is already in this audience.");
+    expect(conn.query.campaignAddRecipient).toHaveBeenCalledWith(expect.objectContaining({ email: "new@acme.test", subscriptionStatus: "subscribed" }));
+    expect(conn.query.campaignAddRecipient.mock.calls[0]?.[0]).not.toHaveProperty("alreadyConfirmed");
+  });
+  it("adds someone as subscribed in a confirming audience only after the operator says they agreed", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a", confirmation: "required" })] }); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@acme.test" } });
+    expect(screen.getByText(/confirmation email goes out/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: "Ask them to confirm" }));
+    await waitFor(() => expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalled()); await readTheBar();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: "They already agreed to receive these emails" })); await readTheBar();
+    fireEvent.click(await screen.findByRole("button", { name: "Add" }));
+    await waitFor(() => expect(conn.query.campaignAddRecipient).toHaveBeenCalledWith(expect.objectContaining({ subscriptionStatus: "subscribed", alreadyConfirmed: true })));
+  });
+  it("marks someone subscribed in a confirming audience only after the operator says they agreed", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a", confirmation: "required" })], recipientsForAudience: [recipientRow({ id: "r", email: "one@acme.test", subscriptionStatus: "pending" })] }); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("one@acme.test");
+    chooseOption(screen.getByLabelText("Subscription state for one@acme.test"), "Subscribed");
+    expect(conn.query.campaignSetRecipientSubscription).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Mark subscribed" })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: "They already agreed to receive these emails" })); await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Mark subscribed" }));
+    await waitFor(() => expect(conn.query.campaignSetRecipientSubscription).toHaveBeenCalledWith(expect.objectContaining({ recipientId: "r", subscriptionStatus: "subscribed", alreadyConfirmed: true })));
+  });
+  it("shows a refusal to resubscribe an unsubscribed address verbatim", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })], recipientsForAudience: [recipientRow({ id: "r", email: "one@acme.test", subscriptionStatus: "unsubscribed" })] });
+    conn.query.campaignSetRecipientSubscription.mockRejectedValue(new Error("This person unsubscribed. Only they can subscribe again.")); mount(conn);
+    fireEvent.click(await screen.findByText("Newsletter")); await screen.findByText("one@acme.test");
+    chooseOption(screen.getByLabelText("Subscription state for one@acme.test"), "Subscribed");
+    await screen.findByText("This person unsubscribed. Only they can subscribe again.");
   });
   it("shows a confirmation refusal verbatim and keeps the consequence", async () => {
     const conn = fakeConnection({ audiences: [audienceRow({ id: "a" })] });

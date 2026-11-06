@@ -10,6 +10,7 @@ import { recordNamed, useOpenRequest, type OpenRequest } from "../openRequest";
 import { organizationName, selectableOrganizations } from "../organizations";
 import {
   isWriting,
+  journeyFromRow,
   templateFromRow,
   templateIsArchived,
   templateProjection,
@@ -103,6 +104,13 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
   const shownOrganizations = organizationsOf(source?.snapshot.rows ?? []);
   const openTemplate = useMemo(() => recordNamed(rows, templateFromRow, openId), [rows, openId]);
 
+  // The active automations that send the open template: editing it holds their emails.
+  const journeyRows = feeds.journeys.snapshot.rows;
+  const activeAutomations = useMemo(
+    () => openTemplate === null ? [] : journeyRows.map(journeyFromRow).filter((journey) => journey.status === "active" && journey.steps.some((step) => step.templateId === openTemplate.id)).map((journey) => journey.name),
+    [journeyRows, openTemplate],
+  );
+
   function openTemplatePage(id: string) {
     setOpenId(id);
     setRequested("");
@@ -139,6 +147,7 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
           key={openTemplate.id}
           template={openTemplate}
           layouts={layouts}
+          activeAutomations={activeAutomations}
           onBack={() => {
             setOpenId("");
             setRequested("");

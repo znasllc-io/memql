@@ -353,6 +353,31 @@ describe("one Azure configuration per cluster", () => {
     expect(await screen.findByText("verification-proof")).toBeTruthy();
     expect(call.mock.calls.some(([args]) => ["begin", "poll", "prepare", "provision"].includes(args.action))).toBe(false);
   });
+  it("spf caption names -all and records re-check while open", async () => {
+    const records = [
+      { purpose: "Domain", name: "client.example", type: "TXT", value: "ms-domain-verification=proof", status: "Verified" },
+      { purpose: "SPF", name: "client.example", type: "TXT", value: "v=spf1 include:spf.protection.outlook.com -all", status: "VerificationInProgress" },
+    ];
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "domainStatus" ? { status: "dns", plan, records } : { status: "dns", plan, planId: "saved", records });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await screen.findByRole("button", { name: "Manage email for Client" });
+    vi.useFakeTimers();
+    await click("Manage email for Client");
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText(/one SPF record/)).toBeTruthy();
+    expect(screen.getByText(/-all/, { selector: ".os-caption" })).toBeTruthy();
+    expect(screen.getByText(/does not verify ~all/)).toBeTruthy();
+    expect(screen.getByText(/Last checked/)).toBeTruthy();
+    const checks = () => call.mock.calls.filter(([args]) => args.action === "domainStatus").length;
+    const before = checks();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(checks()).toBe(before + 1);
+    expect(screen.queryByText(/Still checking/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000 * 10); });
+    expect(checks()).toBeGreaterThan(before + 5);
+    expect(screen.getByText("Still checking: make sure there is one SPF record and it ends in -all.")).toBeTruthy();
+  });
   it("uses the Deployables record layout with exact copy values and readable verification states", async () => {
     const records = [
       { purpose: "Domain", name: "client.example", type: "TXT", value: "ms-domain-verification=proof", status: "Verified" },
