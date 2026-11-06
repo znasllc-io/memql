@@ -230,11 +230,13 @@ var errPriorSendNotAccepted = errors.New("campaigns.sendToRecipient: the provide
 // Accepted: the receipt is completed and the send replays as sent, with no second
 // submission. Not accepted: the receipt says so, and the next attempt submits the
 // message again (errPriorSendNotAccepted). Otherwise the send is uncertain, as it
-// always was, and says when its attempt began (attemptedAt) so a caller can stop
-// waiting for an answer that will not come.
+// always was. It says when its attempt began (attemptedAt), so a caller can stop
+// waiting for an answer that will not come, and whether there is a record to wait
+// for at all (recorded: false for a transport that keeps none).
 func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, receipt *singleSendReceipt, values map[string]string) ([]memorynodes.MemoryNode, error) {
 	receipt.prior, receipt.accountID = templateTime(row["createdAt"]), str(row, "accountId")
-	switch w.priorOutcome(ctx, receipt) {
+	outcome := w.priorOutcome(ctx, receipt)
+	switch outcome {
 	case email.OutcomeAccepted:
 		result := map[string]any{"sent": true, "skipped": false, "recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"]}
 		if err := w.saveReceiptHeld(ctx, receipt, receiptComplete, result); err != nil {
@@ -253,21 +255,22 @@ func (w *Worker) reconcileAttempt(ctx context.Context, row map[string]any, recei
 	return resultNode("campaignRecipientSend", map[string]any{
 		"sent": false, "skipped": false, "uncertain": true, "replayed": true,
 		"reason": uncertainSendReason, "attemptedAt": receipt.prior.UTC().Format(time.RFC3339Nano),
+		"recorded":    outcome != email.OutcomeUnrecorded,
 		"recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"],
 	})
 }
 
 // priorOutcome asks the transport what became of the attempt a receipt records,
-// without submitting anything. A transport that keeps no record of its submissions,
-// or cannot read it now, knows nothing.
+// without submitting anything. A transport that keeps no record of its submissions
+// says so (OutcomeUnrecorded); one whose record cannot be read now knows nothing yet.
 func (w *Worker) priorOutcome(ctx context.Context, receipt *singleSendReceipt) email.Outcome {
 	outcomes, ok := w.resolveSender().(email.DeliveryOutcomes)
 	if !ok {
-		return email.OutcomeUnknown
+		return email.OutcomeUnrecorded
 	}
 	outcome, err := outcomes.DeliveryOutcome(ctx, email.Message{IntentID: singleSendIntent(receipt.id)}, email.SendAs{AccountID: bare(receipt.accountID)})
 	if err != nil {
-		w.logger.Debug("campaigns: the provider's record of a send could not be read", "receipt", receipt.id, "error", err)
+		w.logger.Warn("campaigns: the provider's record of a send could not be read; it is asked again on the next attempt", "receipt", receipt.id, "error", err)
 		return email.OutcomeUnknown
 	}
 	return outcome

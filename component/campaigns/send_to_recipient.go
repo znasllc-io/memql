@@ -95,16 +95,22 @@ type sendHeld struct{ reason string }
 
 func (h sendHeld) Error() string { return h.reason }
 
-// templateHeld is the hold of a send whose template is not published.
+// templateHeld is the hold of a send whose template is not published. It names the
+// template, by its name or else its subject, or calls it "this template".
 func templateHeld(t Template) error {
 	name := strings.TrimSpace(t.Name)
 	if name == "" {
 		name = strings.TrimSpace(t.Subject)
 	}
-	if t.Status == "archived" {
-		return sendHeld{reason: fmt.Sprintf("“%s” is archived. Restore and publish it to send this email.", name)}
+	quoted, subject := "this template", "This template"
+	if name != "" {
+		quoted = "“" + name + "”"
+		subject = quoted
 	}
-	return sendHeld{reason: fmt.Sprintf("Publish “%s” to send this email.", name)}
+	if t.Status == "archived" {
+		return sendHeld{reason: subject + " is archived. Restore and publish it to send this email."}
+	}
+	return sendHeld{reason: "Publish " + quoted + " to send this email."}
 }
 
 // uncertainSend is a send whose outcome is not known: the provider may have
@@ -112,15 +118,21 @@ func templateHeld(t Template) error {
 // connection dropped after the request went out. Its receipt keeps saying that an
 // attempt began, so nothing submits it again until the provider's own record of
 // it says it was not accepted (reconcileAttempt). The text is the wrapped error's.
-type uncertainSend struct{ error }
+//
+// recorded says whether the transport keeps such a record at all. One that does
+// not (Graph, SMTP) can never say, and has no key that would make a second
+// submission safe.
+type uncertainSend struct {
+	error
+	recorded bool
+}
 
 func (e uncertainSend) Unwrap() error { return e.error }
 
-// isUncertainSend reports whether err is a send that may have been accepted
-// (uncertainSend).
-func isUncertainSend(err error) bool {
-	var u uncertainSend
-	return errors.As(err, &u)
+// uncertain is err, a send whose receipt keeps saying an attempt began, as an
+// uncertainSend that says whether its transport keeps a record to ask.
+func (w *Worker) uncertain(ctx context.Context, receipt *singleSendReceipt, err error) error {
+	return uncertainSend{error: err, recorded: w.priorOutcome(ctx, receipt) != email.OutcomeUnrecorded}
 }
 
 // singleSendIntent is the transport intent of a single send made under a receipt:
@@ -385,11 +397,11 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		// submit it again. Anything else may follow an acceptance nobody heard about:
 		// the receipt keeps saying an attempt began, and the provider's record decides.
 		if !email.IsNotAccepted(sendErr) {
-			return nil, uncertainSend{err}
+			return nil, w.uncertain(ctx, receipt, err)
 		}
 		if markErr := w.saveReceiptHeld(ctx, receipt, receiptFailed, nil); markErr != nil {
 			w.logger.Warn("campaigns.sendToRecipient: a refused send could not be recorded as refused; its provider's record decides it", "receipt", receipt.id, "error", markErr)
-			return nil, uncertainSend{err}
+			return nil, w.uncertain(ctx, receipt, err)
 		}
 		return nil, err
 	}

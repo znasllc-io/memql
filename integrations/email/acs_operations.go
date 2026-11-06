@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,11 +16,14 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
+// errOperationUnconfirmed is an answer that says nothing new about an operation.
+var errOperationUnconfirmed = errors.New("Azure has not confirmed this send status")
+
 // getOperation follows no provider-supplied URL. Credentials are signed for the
 // saved resource endpoint and client-selected UUID only. Succeeded means ACS
 // finished processing; recipient delivery still needs separate provider feedback.
-// Not found ("notfound") means Azure has no operation under the id: it never took
-// the request.
+// Not found ("notfound") means Azure has no operation under the id now; what that
+// proves depends on what the receipt already knew (pollOperation).
 func (s *ACSSender) getOperation(ctx context.Context, operationID string) (string, time.Duration, error) {
 	if !azureUUID.MatchString(operationID) {
 		return "", 0, fmt.Errorf("invalid Azure operation identity")
@@ -40,7 +44,7 @@ func (s *ACSSender) getOperation(ctx context.Context, operationID string) (strin
 	}
 	if response.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return "", 5 * time.Minute, fmt.Errorf("Azure has not confirmed this send status")
+		return "", 5 * time.Minute, errOperationUnconfirmed
 	}
 	var value struct {
 		ID     string `json:"id"`
@@ -112,10 +116,8 @@ func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore,
 	if !operationPending(op.Status) || now.Before(op.NextPollAt) {
 		return nil
 	}
-	// Retain the receipt indefinitely, but bound provider polling. An operation
-	// Azure has no record of was never taken (getOperation): the delivery may be
-	// submitted again, under the same Operation-Id, so a request Azure was still
-	// taking in is not taken twice. Past 24 hours nothing is concluded.
+	// Retain the receipt indefinitely, but bound provider polling. Past 24 hours
+	// nothing is concluded.
 	if !now.Before(op.SubmittedAt.Add(24 * time.Hour)) {
 		op.Status, op.Detail = "unconfirmed", "Azure processing could not be confirmed within 24 hours. This message will not be submitted again."
 	} else {
@@ -132,6 +134,15 @@ func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore,
 			request, cancel := context.WithTimeout(ctx, 20*time.Second)
 			status, wait, pollErr := sender.getOperation(request, op.ID)
 			cancel()
+			// No operation under the id proves Azure never took the request only while
+			// nothing has confirmed that it did: the delivery may then be submitted
+			// again, under the same Operation-Id, so a request Azure was still taking in
+			// is not taken twice. An operation Azure accepted that it no longer reports
+			// (its record expired) is no proof the message was not sent, and stays
+			// accepted: it is never submitted again.
+			if pollErr == nil && status == "notfound" && op.Status != "submitting" && op.Status != "unknown" {
+				status, wait, pollErr = "", 5*time.Minute, errOperationUnconfirmed
+			}
 			op.NextPollAt = now.Add(wait)
 			if pollErr != nil {
 				op.Detail = pollErr.Error()

@@ -307,3 +307,62 @@ func TestACSRejectsCredentialsDirectedOutsideAzure(t *testing.T) {
 		}
 	}
 }
+
+// TestADeliveryAzureAskedToWaitIsRefusedBeforeItIsAttempted: after a throttle,
+// Azure's receipt keeps the delivery waiting until the time Azure named. A caller
+// that reserves the delivery before recording an attempt is refused there, with
+// the wait, so it records no attempt and spends none; once the wait is over the
+// delivery is reserved and submitted again.
+func TestADeliveryAzureAskedToWaitIsRefusedBeforeItIsAttempted(t *testing.T) {
+	s := acsFixture(t)
+	ops := s.operations.(*memoryACSOperations)
+	posts := 0
+	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+		posts++
+		if posts == 1 {
+			return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": []string{"600"}}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		}
+		return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})
+	msg := Message{IntentID: "campaign-single:throttled", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+	if err := s.Send(context.Background(), msg, SendAs{AccountID: "client"}); !IsNotAccepted(err) {
+		t.Fatalf("a throttle is not a definite non-acceptance: %v", err)
+	}
+	start := s.now()
+	later := start.Add(2 * time.Minute)
+	s.now = func() time.Time { return later }
+	_, _, err := s.Reserve(context.Background(), msg, SendAs{AccountID: "client"})
+	if wait, throttled := IsThrottled(err); !throttled || !IsNotAccepted(err) || wait != 8*time.Minute {
+		t.Fatalf("a delivery inside Azure's wait was reserved: %v (throttled %v, wait %s)", err, throttled, wait)
+	}
+	if !ops.gate.TryLock() {
+		t.Fatal("the refusal kept the delivery's lock")
+	}
+	ops.gate.Unlock()
+	later = start.Add(11 * time.Minute)
+	reserved, release, err := s.Reserve(context.Background(), msg, SendAs{AccountID: "client"})
+	if err != nil {
+		t.Fatalf("a delivery whose wait is over was refused: %v", err)
+	}
+	err = s.Send(reserved, msg, SendAs{AccountID: "client"})
+	release()
+	if err != nil || posts != 2 {
+		t.Fatalf("the delivery after its wait: %v, %d submissions", err, posts)
+	}
+}
+
+// TestASenderWithNoRecordOfItsSubmissionsSaysSo: a transport that keeps no record
+// of what it submitted (Graph, SMTP, the log) can never say what became of a
+// message, and says that, rather than "not yet".
+func TestASenderWithNoRecordOfItsSubmissionsSaysSo(t *testing.T) {
+	msg := Message{IntentID: "campaign-single:unrecorded", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+	lazy := NewLazySender(NewLogSender(nil), nil, nil, nil)
+	if outcome, err := lazy.DeliveryOutcome(context.Background(), msg, SendAs{}); err != nil || outcome != OutcomeUnrecorded {
+		t.Fatalf("a transport with no record answered %v (%v), want unrecorded", outcome, err)
+	}
+	s := acsFixture(t)
+	s.operations = nil
+	if outcome, err := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || outcome != OutcomeUnrecorded {
+		t.Fatalf("an Azure sender with no receipt storage answered %v (%v), want unrecorded", outcome, err)
+	}
+}

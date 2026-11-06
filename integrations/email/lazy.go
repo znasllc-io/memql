@@ -106,8 +106,8 @@ func (l *LazySender) Reserve(ctx context.Context, msg Message, as SendAs, gateKe
 }
 
 // DeliveryOutcome asks the Sender this wrapper resolves to for the identity what
-// became of an earlier message (DeliveryOutcomes). One that keeps no record of
-// its submissions has nothing to say.
+// became of an earlier message (DeliveryOutcomes). One that keeps no record of its
+// submissions says so (OutcomeUnrecorded).
 func (l *LazySender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error) {
 	sender, err := l.senderFor(ctx, as)
 	if err != nil {
@@ -116,7 +116,7 @@ func (l *LazySender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs
 	if outcomes, ok := sender.(DeliveryOutcomes); ok {
 		return outcomes.DeliveryOutcome(ctx, msg, as)
 	}
-	return OutcomeUnknown, nil
+	return OutcomeUnrecorded, nil
 }
 
 // senderFor is the Sender a message from this identity goes through: the

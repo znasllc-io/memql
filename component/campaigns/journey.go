@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 const journeyEnrollLag = 2 * time.Minute
@@ -27,9 +28,17 @@ const (
 	journeyConfirmLimit   = 24 * time.Hour
 )
 
-// unconfirmedSendReason is why a step whose send the provider never confirmed
-// failed.
-const unconfirmedSendReason = "The send could not be confirmed: the provider did not say within 24 hours whether it accepted this email, so it is not sent again."
+// Why a step whose send may have been accepted failed: the provider did not say
+// within a day, or keeps no record that could ever say. Either way it is not sent
+// again on its own: it is for a person to check before they retry it.
+const (
+	unconfirmedSendReason = "The send could not be confirmed: the provider did not say within 24 hours whether it accepted this email, so it is not sent again."
+	unrecordedSendReason  = "The send could not be confirmed: the provider gave no answer that says whether it accepted this email, and keeps no record to ask. Check whether it arrived before retrying."
+)
+
+// throttledSendReason is what a step says while it waits out the time the provider
+// asked for.
+const throttledSendReason = "The provider asked to wait before this email is sent; it is sent after the wait."
 
 // errJourneyNotActive stops a step's send whose automation was turned off after
 // the step began: nothing is attempted, and the step waits where it is.
@@ -368,23 +377,37 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 	holdStep := func(delay time.Duration, reason string) error {
 		return write(map[string]any{"status": "active", "attempts": integer(row, "attempts"), "lastError": reason, "nextAt": w.nowUTC().Add(delay).Format(time.RFC3339Nano)})
 	}
-	// unconfirmed waits for the provider's record of a send that may have been
-	// accepted -- it is never submitted again while that record says nothing -- and
-	// gives the step up once a day has passed without an answer.
-	unconfirmed := func(attemptedAt time.Time) error {
-		if attemptedAt.IsZero() || w.nowUTC().Before(attemptedAt.Add(journeyConfirmLimit)) {
+	// unconfirmed handles a send that may have been accepted: it is never submitted
+	// again while nothing says it was not. It waits for the provider's record of the
+	// submission, and gives the step up once a day has passed without an answer --
+	// at once when the transport keeps no record to wait for.
+	unconfirmed := func(attemptedAt time.Time, recorded bool) error {
+		reason := unconfirmedSendReason
+		switch {
+		case !recorded:
+			reason = unrecordedSendReason
+		case attemptedAt.IsZero() || w.nowUTC().Before(attemptedAt.Add(journeyConfirmLimit)):
 			return holdStep(journeyUncertainRetry, uncertainSendReason)
 		}
-		if err := write(map[string]any{"status": "failed", "attempts": integer(row, "attempts"), "lastError": unconfirmedSendReason}); err != nil {
+		if err := write(map[string]any{"status": "failed", "attempts": integer(row, "attempts"), "lastError": reason}); err != nil {
 			return err
 		}
-		return noteJourney(unconfirmedSendReason)
+		return noteJourney(reason)
 	}
 	fail := func(sendErr error) error {
 		if errors.Is(sendErr, errJourneyNotActive) {
 			return nil // Turned off since the step began: it waits, untouched, for the automation.
 		}
-		if errors.Is(sendErr, errCampaignRateLimited) || memql.IsWriteGateBusy(sendErr) || isUndecided(sendErr) || phase.Err() != nil {
+		if errors.Is(sendErr, errCampaignRateLimited) || memql.IsWriteGateBusy(sendErr) || phase.Err() != nil {
+			return sendErr
+		}
+		if isUndecided(sendErr) {
+			// Nothing was attempted. When the provider asked this delivery to wait,
+			// the step waits as asked and spends nothing; anything else is tried again
+			// on the next drain.
+			if wait, throttled := email.IsThrottled(sendErr); throttled {
+				return holdStep(max(wait, time.Second), throttledSendReason)
+			}
 			return sendErr
 		}
 		// Configuration an operator can fix holds the step without spending an
@@ -396,15 +419,21 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 			}
 			return noteJourney(held.reason)
 		}
-		if isUncertainSend(sendErr) {
-			return unconfirmed(w.nowUTC())
+		var uncertain uncertainSend
+		if errors.As(sendErr, &uncertain) {
+			return unconfirmed(w.nowUTC(), uncertain.recorded)
 		}
 		attempts := integer(row, "attempts") + 1
 		status := "active"
 		if attempts >= journeyMaxAttempts {
 			status = "failed"
 		}
-		if err := write(map[string]any{"status": status, "attempts": attempts, "lastError": sendErr.Error(), "nextAt": w.nowUTC().Add(backoffFor(attempts)).Format(time.RFC3339Nano)}); err != nil {
+		// A throttle is an attempt, retried no sooner than the provider asked.
+		delay := backoffFor(attempts)
+		if wait, throttled := email.IsThrottled(sendErr); throttled && wait > delay {
+			delay = wait
+		}
+		if err := write(map[string]any{"status": status, "attempts": attempts, "lastError": sendErr.Error(), "nextAt": w.nowUTC().Add(delay).Format(time.RFC3339Nano)}); err != nil {
 			return err
 		}
 		if status == "failed" {
@@ -457,7 +486,7 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 				return nil, err
 			}
 			if result["uncertain"] == true {
-				return map[string]any{"advance": false, "skipped": false}, unconfirmed(templateTime(result["attemptedAt"]))
+				return map[string]any{"advance": false, "skipped": false}, unconfirmed(templateTime(result["attemptedAt"]), result["recorded"] != false)
 			}
 			if result["sent"] == true {
 				// The automation's email goes out: whatever it said was wrong is not.

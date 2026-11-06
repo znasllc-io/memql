@@ -60,6 +60,10 @@ const (
 	// OutcomeNotAccepted: the provider never took the message, or took it and
 	// could not process it. It may be submitted again.
 	OutcomeNotAccepted
+	// OutcomeUnrecorded: the sender keeps no record of its submissions (Graph,
+	// SMTP, the log), so what became of the message will never be known from it.
+	// It may have been accepted, and is not submitted again.
+	OutcomeUnrecorded
 )
 
 // DeliveryOutcomes is implemented by a Sender that keeps a durable record of
@@ -69,7 +73,7 @@ const (
 //
 // The caller asks with the message's IntentID and the identity it was sent as;
 // nothing else of the message is read. A sender with no such record does not
-// implement it, and its caller knows nothing more than it did.
+// implement it, and its caller reads that as OutcomeUnrecorded.
 type DeliveryOutcomes interface {
 	DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error)
 }

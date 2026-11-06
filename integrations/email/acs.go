@@ -183,9 +183,12 @@ func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) e
 	if response.StatusCode < 400 {
 		return unconfirmedSend("Azure returned an unexpected email response; no redirect was followed")
 	}
-	// Any other answer refused the request, a server error included: a request
-	// Azure did take despite answering with an error is not taken twice, because
-	// this delivery's next submission goes under the same Operation-Id (submitOnce).
+	// Any other answer refused the request, a server error included. For a caller
+	// that names its delivery with a stable IntentID (the campaign drain, a single
+	// send under a receipt), a request Azure did take despite answering with an
+	// error is not taken twice: the delivery's next submission goes under the same
+	// Operation-Id (submitOnce). A caller that names none (the transactional outbox)
+	// gets a fresh intent, and so a fresh Operation-Id, on every Send.
 	refusal := classifyHTTPSend(response.StatusCode, response.Header.Get("Retry-After"), "Azure did not accept the message")
 	refusal.NotAccepted = true
 	return refusal
@@ -288,6 +291,10 @@ func (s *ACSSender) lockDelivery(ctx context.Context, key string, keys ...string
 // attempt has begun (Reserver). The Send that follows, called with the context
 // returned here, does not ask for the lock again; the caller gives it back when the
 // delivery is over.
+//
+// A delivery Azure throttled is refused here until the time Azure named, with what
+// is left of the wait: before its caller records an attempt, so the caller spends
+// none, writes nothing, and waits as asked.
 func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs, keys ...string) (context.Context, func(), error) {
 	if s.operations == nil || msg.IntentID == "" {
 		return ctx, func() {}, nil
@@ -297,7 +304,24 @@ func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs, keys ...
 	if err != nil {
 		return nil, nil, err
 	}
+	op, _, found, err := s.operations.read(ctx, key)
+	if err == nil && found {
+		err = s.asksToWait(op)
+	}
+	if err != nil {
+		hold.Release()
+		return nil, nil, notSubmitted(err)
+	}
 	return withHeldOperation(ctx, key, hold, keys), hold.Release, nil
+}
+
+// asksToWait refuses a delivery Azure throttled until the time it named. Nothing is
+// submitted, and the refusal carries what is left of the wait.
+func (s *ACSSender) asksToWait(op acsOperation) error {
+	if op.Status == "throttled" && s.now().Before(op.NextPollAt) {
+		return &SendError{Throttled: true, NotAccepted: true, RetryAfter: op.NextPollAt.Sub(s.now()), Detail: "Azure asked this delivery to wait"}
+	}
+	return nil
 }
 
 // submitOnce submits one delivery under its Azure receipt.
@@ -350,8 +374,8 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		if !again {
 			return operationSendOutcome(op)
 		}
-		if op.Status == "throttled" && s.now().Before(op.NextPollAt) {
-			return &SendError{Throttled: true, NotAccepted: true, RetryAfter: op.NextPollAt.Sub(s.now()), Detail: "Azure asked this delivery to wait"}
+		if err := s.asksToWait(op); err != nil {
+			return err
 		}
 		if op.Status == "failed" || op.Status == "canceled" {
 			op.ID = id.NewShortId()
@@ -435,13 +459,17 @@ func acsMaySubmitAgain(status string) bool {
 //
 // A delivery with no receipt is unknown, not "not accepted": a receipt is looked up
 // by the identity the caller names, and one asked for under another organization's
-// connection would be missing for a message that went.
+// connection would be missing for a message that went. A sender with no receipt
+// storage keeps no record at all (OutcomeUnrecorded).
 func (s *ACSSender) DeliveryOutcome(ctx context.Context, msg Message, as SendAs) (Outcome, error) {
+	if s.operations == nil {
+		return OutcomeUnrecorded, nil
+	}
 	account := strings.TrimSpace(as.AccountID)
 	if account == "" {
 		account = "self"
 	}
-	if s.operations == nil || msg.IntentID == "" || account != s.cfg.AccountID {
+	if msg.IntentID == "" || account != s.cfg.AccountID {
 		return OutcomeUnknown, nil
 	}
 	op, _, found, err := s.operations.read(ctx, s.operationKey(msg.IntentID))

@@ -2,6 +2,8 @@ package email
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // Memory is a protocol-test fixture only. Production always uses PostgreSQL.
@@ -140,5 +144,98 @@ func TestACSDelayedPOSTDoesNotOverwriteAReconciledOperation(t *testing.T) {
 		if op.Status != "succeeded" {
 			t.Fatal("late POST regressed reconciled status")
 		}
+	}
+}
+
+// pollStore is the connection state the poller resolves an organization's sender
+// from, sealed as the connection store keeps it: state id to sealed value.
+type pollStore map[string]string
+
+func (s pollStore) Execute(_ context.Context, query string) (any, error) {
+	if strings.HasPrefix(query, "query clientAccountById") {
+		return []map[string]any{{"status": "active"}}, nil
+	}
+	for id, sealed := range s {
+		if strings.Contains(query, id) {
+			return []map[string]any{{"createdAt": time.Now().UTC(), "encryptedValue": sealed}}, nil
+		}
+	}
+	return []map[string]any{}, nil
+}
+
+// TestAnAcceptedOperationAzureNoLongerReportsIsNeverSubmittedAgain: a missing
+// operation means Azure never took the request only while nothing confirmed that
+// it did. An operation Azure accepted and no longer reports (its record expired)
+// stays accepted: it is never made resubmittable, and Send does not POST it again.
+func TestAnAcceptedOperationAzureNoLongerReportsIsNeverSubmittedAgain(t *testing.T) {
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ac", 32))
+	seal := func(value any) string {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, _, err := secret.Encrypt(string(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	cfg := acsFixture(t).cfg
+	store := pollStore{
+		emailStateID("organization:client"): seal(azureConnection{Status: "ready", AccountID: "client", Config: cfg, Plan: azurePlan{ClusterID: "cluster"}}),
+		emailStateID(azureClusterKey):       seal(azureClusterConnection{ID: "cluster", Status: "connected"}),
+	}
+	op := "12345678-1234-1234-1234-123456789012"
+	body := []byte(`{"stored":"elsewhere"}`)
+	for _, tc := range []struct {
+		before, after string
+		outcome       Outcome
+	}{
+		{"accepted", "accepted", OutcomeAccepted},
+		{"running", "running", OutcomeAccepted},
+		{"unknown", "notfound", OutcomeNotAccepted},
+		{"submitting", "notfound", OutcomeNotAccepted},
+	} {
+		t.Run(tc.before, func(t *testing.T) {
+			gets := 0
+			a := &azureSetup{store: &connectionStore{engine: store}, now: func() time.Time { return now }, operationClient: &http.Client{Transport: acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Fatalf("the poller sent a %s", r.Method)
+				}
+				gets++
+				return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"NotFound"}}`))}, nil
+			})}}
+			s := acsFixture(t)
+			ops := s.operations.(*memoryACSOperations)
+			msg := Message{IntentID: "campaign-single:polled", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}
+			key := s.operationKey(msg.IntentID)
+			ops.rows = map[string]acsOperation{key: {ID: op, AccountID: "client", Endpoint: cfg.Endpoint, Digest: fmt.Sprintf("%x", sha256.Sum256(body)), Intent: msg.IntentID, Status: tc.before, SubmittedAt: now.Add(-time.Minute), NextPollAt: now.Add(-time.Second)}}
+			if err := a.pollOperation(context.Background(), ops, key); err != nil {
+				t.Fatal(err)
+			}
+			if gets != 1 {
+				t.Fatalf("the poller asked Azure %d times, want once", gets)
+			}
+			if got := ops.rows[key].Status; got != tc.after {
+				t.Fatalf("a %s operation Azure has no record of is %q, want %q", tc.before, got, tc.after)
+			}
+			if outcome, err := s.DeliveryOutcome(context.Background(), msg, SendAs{AccountID: "client"}); err != nil || outcome != tc.outcome {
+				t.Fatalf("its outcome is %v (%v), want %v", outcome, err, tc.outcome)
+			}
+			if tc.outcome != OutcomeAccepted {
+				return
+			}
+			posts := 0
+			s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+				posts++
+				return &http.Response{StatusCode: 202, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			_ = s.Send(context.Background(), msg, SendAs{AccountID: "client"})
+			if posts != 0 {
+				t.Fatal("an operation Azure accepted was submitted again")
+			}
+		})
 	}
 }
