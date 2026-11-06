@@ -14,15 +14,21 @@
 # `placement: pool`: the installed compute policy (memql-znas
 # znasFleetFirstDeliveryProfile) gives it 60 s to start on an opted-in Fleet
 # machine, then runs it as a Workbench Job, so the cluster is the fallback and
-# its admitted slots are left to the steps that must stay there. Three kinds
-# stay `cluster`:
-#   - `verification: true` steps, because a release and carry-forward reuse
-#     only evidence the cluster produced (component/pipelines/verification.go
-#     refuses any other placement). Moving them is the owner's open decision on
-#     Fleet evidence;
+# its admitted slots are left to the steps that must stay there. These stay
+# `cluster`:
+#   - `verification: true` steps, until the engine that runs this file accepts
+#     them as pool (0.31.17, decided 2026-11-06): an older one refuses any
+#     other placement, and the deployed engine plans every run;
 #   - release output (images, release files, Cockpit release builds, fixtures),
 #     so a published artifact is built on the cluster;
-#   - steps with a repository token or SARIF upload.
+#   - steps with a repository token or SARIF upload;
+#   - the two gitleaks history scans. They fetch the whole repository history
+#     from GitHub, which timed out three times from a Fleet machine
+#     (2026-11-06); on the cluster the push scan takes under two minutes.
+# A Fleet container runs as the machine's own user with HOME=/tmp, so
+# `go install` writes to /tmp/go/bin, which is not on the image's PATH. A pool
+# step that installs a tool puts $(go env GOPATH)/bin on PATH itself (on the
+# cluster it already is).
 # Under a resolver without the computePlacement role a pool step is Fleet-only
 # and never falls back, so this file relies on that profile being installed.
 # Every pool step names memoryMiB: a cluster container defaults to 4 GiB (the
@@ -414,6 +420,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             mkdir -p .memql-security/go
             go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
             govulncheck -version > .memql-security/go/scanner.txt
             export GOMEMLIMIT=7GiB GOGC=100
             status=0
@@ -451,7 +458,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           timeout: 30m
           cpuMilli: 3000
           memoryMiB: 6144
@@ -993,7 +1000,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           # Restart scanners after each commit: large historical patches
@@ -1062,6 +1069,7 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
             go install github.com/anchore/syft/cmd/syft@v1.54.1
+            export PATH="$(go env GOPATH)/bin:$PATH"
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
 
     - name: security-reports

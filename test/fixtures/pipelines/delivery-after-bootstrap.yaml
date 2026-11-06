@@ -392,6 +392,7 @@ pipeline:
             bash scripts/identity/build-css.sh
             mkdir -p .memql-security/go
             go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            export PATH="$(go env GOPATH)/bin:$PATH"
             govulncheck -version > .memql-security/go/scanner.txt
             export GOMEMLIMIT=7GiB GOGC=100
             status=0
@@ -429,7 +430,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           timeout: 30m
           cpuMilli: 3000
           memoryMiB: 6144
@@ -971,7 +972,7 @@ pipeline:
       runAfterFailure: true
       steps:
         - name: gitleaks
-          placement: pool
+          placement: cluster
           # Full history runs on the weekly audit or on demand. Three CPUs
           # leave room for another Job and its services on the bounded pool.
           # Restart scanners after each commit: large historical patches
@@ -1040,6 +1041,7 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
             go install github.com/anchore/syft/cmd/syft@v1.54.1
+            export PATH="$(go env GOPATH)/bin:$PATH"
             python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom
 
     - name: security-reports

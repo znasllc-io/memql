@@ -4159,6 +4159,16 @@ separate verification against the selected deployment.
   `pipelines.container_memory_mib` is lower refuses the step before it starts
   (`refused_before_start`), and the pool runs it on the cluster: the Fleet takes
   these steps only once a machine's policy allows their memory.
+- *Tools and history, found by the re-run (2026-11-06).* With CyberPC and MSI
+  Raider allowing 8 GiB, two more pool steps reached the Fleet and failed on MSI
+  Raider. `inventory.sbom` could not find `cyclonedx-gomod`: a Fleet container runs
+  as the machine's user with `HOME=/tmp`, so `go install` writes to `/tmp/go/bin`,
+  which the image's `PATH` lacks; the cluster runs as the image's user, whose
+  `GOPATH/bin` is on it. `sbom` and `go-vulnerabilities` now put
+  `$(go env GOPATH)/bin` on `PATH` after installing. `secrets-current.gitleaks`
+  timed out three times fetching the repository's full history from GitHub
+  (exit 124, 17 minutes), against under two minutes on the cluster, so both
+  gitleaks scans are `cluster` again.
 - *Not yet verified.* No push run has completed under the new placement, and no
   release has run since verification steps became `pool` (the source tests above
   are the only evidence for the release rule). The first verification steps a
