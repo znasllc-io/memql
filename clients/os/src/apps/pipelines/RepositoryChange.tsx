@@ -6,6 +6,7 @@ import { useOsConnection } from "../../live/connection";
 import { useSession } from "../../chrome/access";
 import { holds } from "../../system/roles";
 import { useReleaseRead } from "../cluster/releases/useReleaseRead";
+import { runFromRow } from "../nexus/rows";
 
 export type ChangeOperation = "propose_change" | "deliver_change";
 export interface RepositoryAuthority { landingMode: "owner_push" | "pull_request" | ""; sourceId: string; repository: string; repositoryId: number; canWrite: boolean; canRequest: boolean; route: string; operations: ChangeOperation[] }
@@ -107,6 +108,16 @@ export function RepositoryChange({ sourceId, visible = true }: { sourceId: strin
   const current = status.value ?? saved;
   const pullRequestUrl = proposalLink(current);
   const proposal = current?.proposal;
+  const preparationRunId = current?.state === "approved" && proposal?.state !== "complete" ? current.runId : "";
+  // Scope approval is not execution success. Read this exact owned attempt so a
+  // draft/review refusal remains visible even before a proposal was recorded.
+  const preparation = useReleaseRead(`request-run:${preparationRunId}`, query && preparationRunId ? async signal => {
+    const result = await query.workRunSummaryForOwner({ runId: preparationRunId }, { signal });
+    const run = result.rows().map(runFromRow).find(row => row.id === preparationRunId && row.goalId === current?.goalId);
+    if (!run) throw new Error("The saved preparation attempt could not be read.");
+    return run;
+  } : null, visible, query);
+  const preparationStopped = preparation.value && ["failed", "abandoned", "cancelled"].includes(preparation.value.status);
   const ownerPush = authority.value?.landingMode === "owner_push";
   const reviewURL = current && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(current.repository) && /^[a-f0-9]{40}$/.test(proposal?.expectedHead ?? "") && /^[a-f0-9]{40}$/.test(proposal?.commit ?? "") ? `https://github.com/${current.repository}/compare/${proposal!.expectedHead}...${proposal!.commit}` : null;
   const canLand = ownerPush && authority.fresh && authority.value?.canWrite && authority.value.route === "own" && status.fresh && current?.state === "approved" && proposal?.state === "complete" && proposal.landingMode === "owner_push" && !proposal.landedCommit && !!reviewURL && holds("execute", "app:pipelines/requests");
@@ -156,8 +167,12 @@ export function RepositoryChange({ sourceId, visible = true }: { sourceId: strin
     {!composing && !current && history.value?.length ? <RecordList as="ul" label="Saved change requests">{history.value.map(item => <RecordRow key={item.id} name={item.statement || "Repository change request"} state={requestState(item)} onOpen={() => { setSaved(item); setConfirmLanding(null); }} />)}</RecordList> : null}
     {!composing && !current && history.error ? <Notice tone="warn" sentence="Saved change requests could not be read." detail={history.error}><Button tone="quiet" onClick={history.retry}>Read requests again</Button></Notice> : null}
     {current && !composing ? <section className="os-app-stack"><Subhead>{current.statement || "Change request"}</Subhead><Caption>{STATES[current.state] ?? "Request status unavailable"}</Caption>
-      <Caption>{operationSummary(current.operation, proposal?.landingMode === "owner_push")}</Caption>
+      <Caption>{operationSummary(current.operation, proposal?.landingMode === "owner_push" || !proposal && ownerPush)}</Caption>
       {current.reason ? <p>{current.reason}</p> : null}
+      {preparationStopped ? <Notice tone="warn" sentence="Proposal preparation stopped." detail={preparation.value?.errorMessage || "This attempt ended before a complete proposal was recorded."} next="Review the reason before starting a revised request. The saved attempt is kept.">
+        {operations.includes(current.operation as ChangeOperation) ? <Button tone="quiet" onClick={() => { setStatement(current.statement ?? ""); setPaths((current.paths ?? []).join("\n")); setOperation(current.operation as ChangeOperation); setSaved(null); setConfirmLanding(null); setError(""); request.current = null; setComposing(true); }}>Revise request</Button> : null}
+      </Notice> : preparation.value && ["queued", "running", "waiting"].includes(preparation.value.status) ? <Caption>Preparing the requested change…</Caption> : null}
+      {preparation.error ? <Notice tone="warn" sentence="Preparation progress is unavailable." detail={preparation.error}><Button tone="quiet" onClick={preparation.retry}>Read preparation again</Button></Notice> : null}
       {proposal?.landedCommit ? <Notice tone="info" sentence={`Change landed on ${proposal.baseBranch}.`} next="Wait for the default-branch checks to pass, then cut the release from Pipelines > Releases." /> : proposal?.landingMode === "owner_push" ? <>
         <Caption>The exact proposal is ready for review. Pull requests are disabled for this repository.</Caption>
         {reviewURL ? <a className="os-link" href={reviewURL} target="_blank" rel="noopener noreferrer">Review proposed changes</a> : null}

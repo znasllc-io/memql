@@ -173,6 +173,50 @@ describe("saved proposal navigation", () => {
   });
 });
 
+describe("proposal preparation progress", () => {
+  const authority = {...permission, canWrite:true, route:"own", landingMode:"owner_push"};
+  const request = {...deliveryReceipt, operation:"propose_change", id:"stopped-request", goalId:"draft-goal", runId:"draft-run"};
+  const stopped = {id:"draft-run", goalId:"draft-goal", status:"failed", errorMessage:"Independent review refused removal of the existing parent address."};
+  it("shows an execution refusal separately from scope approval and revises without replaying", async () => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[stopped]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Proposal preparation stopped.");
+    expect(screen.getByText(stopped.errorMessage)).toBeTruthy();
+    expect(screen.getByText("Approved for the requested work")).toBeTruthy();
+    expect(screen.queryByText(/Prepare a pull request within/)).toBeNull();
+    expect(c.callsNamed("workRunSummaryForOwner")[0]).toContain('runId: "draft-run"');
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button",{name:"Revise request"}));
+    expect((screen.getByLabelText("What should change?") as HTMLTextAreaElement).value).toBe(request.statement);
+    expect((screen.getByLabelText("Files or folders this request may change") as HTMLTextAreaElement).value).toBe("clients/os/");
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button",{name:"Start requested work"}));
+    await waitFor(()=>expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(1));
+    expect(c.callsNamed("repositoryChangeRequest")[0]).not.toContain('requestId: "stopped-request"');
+  });
+  it("keeps an unavailable attempt distinct from a failed attempt", async () => {
+    mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaryError:"Saved execution could not be read"});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparation progress is unavailable.");
+    expect(screen.queryByText("Proposal preparation stopped.")).toBeNull();
+    expect(screen.queryByRole("button",{name:"Revise request"})).toBeNull();
+  });
+  it("does not associate another goal's result with this request", async () => {
+    mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,goalId:"different-goal"}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparation progress is unavailable.");
+    expect(screen.queryByText(stopped.errorMessage)).toBeNull();
+  });
+  it("does not replace a complete native proposal with an execution failure", async () => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[{...request,proposal:{state:"complete",landingMode:"owner_push",branch:"memql/reviewed",commit:"a".repeat(40),expectedHead:"b".repeat(40),baseBranch:"main"}}],workRunSummaries:[stopped]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByRole("button",{name:"Land change"});
+    expect(screen.queryByText("Proposal preparation stopped.")).toBeNull();
+    expect(c.callsNamed("workRunSummaryForOwner")).toHaveLength(0);
+  });
+});
+
 
 describe("explicit owner landing", () => {
   useFakeDate();

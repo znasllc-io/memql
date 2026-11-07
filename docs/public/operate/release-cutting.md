@@ -113,6 +113,12 @@ pass before preparing the new release. The release
 flow never writes directly to `main`, increments a version silently or moves an
 existing tag.
 
+Approval authorizes the requested scope; it does not mean proposal preparation
+finished. A stopped draft or independent review appears in the request panel with
+its recorded reason. **Revise request** restores the statement and allowed paths
+to the form, preserving the old attempt. Submitting that form creates a new
+request; opening or refreshing the saved result never retries the failed work.
+
 The current native run identity includes repository, commit, mode and event; it
 does not distinguish two release tags on the same commit. Therefore two
 component releases that require separate full release runs need separate

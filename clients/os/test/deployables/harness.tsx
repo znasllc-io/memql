@@ -152,6 +152,8 @@ export interface FakeSeed {
   repositoryAuthorityError?: string;
   changeRequests?: Row[];
   repositoryChangeError?: string;
+  workRunSummaries?: Row[];
+  workRunSummaryError?: string;
   accounts?: Row[];
   sites?: Row[];
   sitesError?: string;
@@ -528,6 +530,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query workStepsForOwnerRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return rowsResult(seed.workSteps?.[id] ?? []);
+      }
+      if (call.startsWith("query workRunSummaryForOwner(")) {
+        if (seed.workRunSummaryError) throw new Error(seed.workRunSummaryError);
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult((seed.workRunSummaries ?? []).filter(row => row.id === id));
       }
       if (call.startsWith("query artifactsForRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
