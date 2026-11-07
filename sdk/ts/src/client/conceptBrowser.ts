@@ -10,6 +10,7 @@
 
 import type { QueryClient, QueryCallOptions } from "./query.js";
 import type { Row } from "./types.js";
+import { renderMemQLValue } from "./memqlValue.js";
 
 // A concept registry can hold far more than the engine's implicit
 // unmarked-list backstop (MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows), so the
@@ -101,9 +102,11 @@ export async function getRowByConceptAndId(
   if (rowId === "") {
     throw new Error("getRowByConceptAndId: rowId is required");
   }
+  // IDs are opaque strings. An unquoted digit-leading ID can fail to parse,
+  // leaving id-only live notifications unable to refresh the seeded row.
   const result = await query.executeNamed(
     "conceptRow",
-    `concept==${conceptId} && id==${rowId}`,
+    `concept==${conceptId} && id==${renderMemQLValue(rowId)}`,
     opts,
   );
   const nodes = result.rawNodes();

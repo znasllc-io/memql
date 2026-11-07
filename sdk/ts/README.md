@@ -135,6 +135,13 @@ still applies. Live collections with both `rereadEveryEvent` and `reread`
 request this automatically. Their background rereads share a limit of two
 active requests per connection and coalesce repeated updates for a row.
 
+`getRowByConceptAndId` treats the row ID as an opaque string and quotes it
+with the SDK's literal renderer. This matters for numeric and digit-leading
+IDs: an unquoted pipeline run ID can fail to parse and leave a live view at
+its seeded state. The Go helper follows the same rule. The concept-browser
+regressions in both SDKs cover numeric IDs and embedded quotes/operators;
+the Go regression also parses the emitted filter with the engine grammar.
+
 #### `seq` and `gapBefore` — continuity
 
 Every event carries `seq` (its position in **this connection's** delivery
