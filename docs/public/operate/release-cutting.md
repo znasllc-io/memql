@@ -108,7 +108,9 @@ version change is needed. Open the repository's change-request form, select
 version stamps. Review the resulting change before landing it. When GitHub
 reports pull requests disabled, **Land change** separately confirms the exact
 commit using the connected repository owner's GitHub grant. Otherwise use the
-repository's pull-request review path. Wait for the default-branch checks to
+repository's pull-request review path. Landing rechecks the credential's owner
+and current repository permissions; a different or missing owner is refused.
+Wait for the default-branch checks to
 pass before preparing the new release. The release
 flow never writes directly to `main`, increments a version silently or moves an
 existing tag.

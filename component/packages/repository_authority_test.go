@@ -102,3 +102,35 @@ func TestRepositoryOwnerWriterUsesOnlyTheCurrentPersonGrant(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryOwnerWriterMatchesStoredAndWireOwnerIdentity(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	for _, tc := range []struct {
+		name, storedOwner, requestedOwner string
+		allowed                           bool
+	}{
+		{"stored canonical, wire bare", grantOwner, "alice", true},
+		{"stored bare, caller canonical", "alice", grantOwner, true},
+		{"different owner", grantOwner, "bob", false},
+		{"missing stored owner", "", "alice", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := installedRepo(newGrantHub(), "acme", "widget")
+			hub.body("/repos/acme/widget", http.StatusOK, `{"id":123,"full_name":"acme/widget","has_pull_requests":false,"permissions":{"push":true}}`)
+			row := sealedGrantRow(t, grantRowOpts{})
+			row["ownerUserId"] = tc.storedOwner
+			i, _, _, _ := grantHarness(t, hub, row)
+			token, err := i.RepositoryOwnerWriterToken(context.Background(), grantCredentialId, tc.requestedOwner, "acme", "widget")
+			if tc.allowed {
+				if err != nil || token == "" {
+					t.Fatalf("same owner could not land: %v", err)
+				}
+			} else if token != "" || RefusalCode(err) != CodeCredentialNotFound {
+				t.Fatalf("different or missing owner obtained a writer: %v", err)
+			}
+			if hub.hits("/app/installations/42/access_tokens") != 0 {
+				t.Fatal("owner action borrowed an installation token")
+			}
+		})
+	}
+}

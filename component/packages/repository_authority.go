@@ -3,6 +3,8 @@ package packages
 import (
 	"context"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // RepositoryAuthority is a fresh provider observation, never a transferable
@@ -99,7 +101,11 @@ func (i *Integration) RepositoryOwnerWriterToken(ctx context.Context, credential
 	if err != nil {
 		return "", err
 	}
-	if !credential.IsGrant() || credential.Bearer == "" || credential.OwnerUserId != ownerUserID {
+	// Stored credential owners are canonical IDs; repository source projections
+	// carry bare IDs. Compare their identity, not their wire spelling, while still
+	// refusing an absent or different owner before exposing a writer token.
+	credentialOwner := memql.BareShortId(credential.OwnerUserId)
+	if !credential.IsGrant() || credential.Bearer == "" || credentialOwner == "" || credentialOwner != memql.BareShortId(ownerUserID) {
 		return "", refuse(CodeCredentialNotFound, "owner landing requires this owner's connected GitHub identity")
 	}
 	// Verify the exact token being returned, including a refresh/revocation that
