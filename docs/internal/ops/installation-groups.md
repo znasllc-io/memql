@@ -16,6 +16,15 @@ success for one member is not installation completion.
 
 ## Receiver configuration
 
+The serving node retains its existing private Library client during transport
+startup and binds the native receiver only after the cluster phase installs its
+authenticated Workbench router. The transport phase precedes that router; binding
+there leaves installation selection unavailable even when Workbench replicas are
+healthy. Missing storage, projected cluster identity or the remote router still
+refuses receiver setup, with no local execution fallback. The startup ordering
+regression is `TestTheClusterPhaseWiresInstallationAfterWorkbench`; receiver
+admission checks remain in `TestInstallationPreparerRefusesMissingNativeConfigurationAndIdentity`.
+
 `installation.json` format 2 replaces `application` with `applications`, a list
 of one to eight `{key, namespace, name}` objects. Keys are unique and at most
 48 characters. Applications share one Argo namespace, Git repository,

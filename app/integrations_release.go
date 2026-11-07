@@ -45,9 +45,22 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 	}}); err != nil {
 		a.Logger.Error("release candidate storage could not be configured", "error", err)
 	}
+	// Keep the same private Library transport for the receiver. Its executor
+	// needs the authenticated router installed later by the cluster phase.
+	a.installationUploader, a.installationBucket = uploader, bucket
+}
+
+func (a *App) wireInstallationSelection() {
 	// This native host is opt-in: no receiving configuration means no update surface.
+	if a == nil || a.engine == nil || a.installationUploader == nil || strings.TrimSpace(a.installationBucket) == "" {
+		return
+	}
 	if strings.TrimSpace(os.Getenv("MEMQL_INSTALLATION_CONFIG_NAME")) != "" {
-		preparer, err := a.installationPreparer(uploader, bucket)
+		provider, ok := a.engine.IntegrationByName("release").(*release.Integration)
+		if !ok {
+			return
+		}
+		preparer, err := a.installationPreparer(a.installationUploader, a.installationBucket)
 		if err != nil {
 			a.Logger.Error("installation selection could not be configured", "error", err)
 			return
@@ -56,5 +69,4 @@ func (a *App) wireReleaseCandidates(uploader server.FileUploader, bucket string)
 			a.Logger.Error("installation selection host could not be bound", "error", err)
 		}
 	}
-
 }

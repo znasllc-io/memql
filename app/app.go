@@ -171,6 +171,10 @@ type App struct {
 	// Phase 5: transport
 	grpcServer *memqlgrpc.Server
 	httpServer *server.Server
+	// The installer shares the transport phase's Library client, but cannot
+	// bind its executor until the cluster phase installs the Workbench router.
+	installationUploader server.FileUploader
+	installationBucket   string
 
 	// Phase 6: cluster
 	nodeIdentity *node.Identity

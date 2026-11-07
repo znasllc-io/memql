@@ -482,6 +482,12 @@ func (a *App) cluster() {
 		a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 	}
 
+	// The installer uses that exact authenticated router and the Library client
+	// retained during transport. Constructing it in transport silently left every
+	// receiver unconfigured because the router did not exist yet. A missing route
+	// still refuses configuration; there is no local-execution fallback.
+	a.wireInstallationSelection()
+
 	// The pipelines executor (epic memql#5478), on agent nodes: AFTER the
 	// workbench router above, which it forwards cluster steps over, and
 	// outside the mesh block, so an agent with no mesh still registers one

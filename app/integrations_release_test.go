@@ -35,6 +35,9 @@ func TestReleaseCandidatesWireTheNativeArtifactStore(t *testing.T) {
 	}
 	uploader := &pipelinesFakeUploader{}
 	app.wireReleaseCandidates(uploader, "release-wiring-fixture")
+	if app.installationUploader != uploader || app.installationBucket != "release-wiring-fixture" {
+		t.Fatal("receiver must retain the same private Library transport until the cluster phase")
+	}
 	store := app.pipelinesLibraryStoreFor(uploader, "release-wiring-fixture").(release.CandidateLibrary)
 	if err := integration.ConfigureCandidates(release.CandidateDependencies{Database: func() *sql.DB { return nil }, Library: store}); err == nil {
 		t.Fatal("app did not bind retained-artifact authority before serving")
