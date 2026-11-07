@@ -243,6 +243,7 @@ var reachedThroughAggregate = map[string]declaration{
 // exhaustiveness gate can still see it. What matters for membership is that the
 // BFF does not serve the path, not where the tag that arranges it happens to sit.
 var notServedByTheBFF = map[string]declaration{
+	"InstallationReadPaths": {"Only Identity mounts the bounded authenticated PAT read port, reached by its existing HTTPS host. Never route this path to the BFF or add it to PublicPaths.", server.InstallationReadPaths},
 	"AIHTTPPaths": {"returns nil: the legacy /si/* HTTP surface is retired in favour of " +
 		"MemqlService.Stream (component/server/nethttp.go).", server.AIHTTPPaths},
 	// Caught by TestEveryServerPathDeclarationIsClassified in production rather

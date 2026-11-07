@@ -9,9 +9,10 @@ import (
 
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/releasewire"
 )
 
-// HealthProbe is a native authenticated SDK adapter. It returns observations
+// HealthProbe is a native authenticated TLS adapter. It returns observations
 // from the receiving installation, never a caller-provided readiness boolean.
 type HealthProbe func(context.Context, string, string, string, string) (HealthObservation, error)
 type HealthObservation struct {
@@ -41,8 +42,8 @@ func (s *receiverSnapshot) healthCheck(ctx context.Context, probe HealthProbe, p
 		return out, errors.New("installation requires an authenticated continuity probe")
 	}
 	endpoint, err := url.Parse(h.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") {
-		return out, errors.New("installation health requires one authenticated HTTPS gRPC endpoint")
+	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/" && endpoint.Path != releasewire.ReadPath) {
+		return out, errors.New("installation health requires one HTTPS gRPC origin or the exact Identity installation-read endpoint")
 	}
 	release, err := published.Release()
 	if err != nil {

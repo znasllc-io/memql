@@ -267,6 +267,13 @@ does not half-serve the flow.
 - Long-lived by design -- there is no TTL on the token itself.
 - Issued from the identity web UI at `/me/tokens`.
 - **Identity-binary only.** See the warning at the top of this page.
+- The installer's retained PAT uses Identity's exact authenticated HTTPS path
+  `/release/installation-read` for signed catalog and continuity reads. That
+  bounded read port verifies the token's current owner on every call. It does
+  not accept arbitrary queries, mint a replacement credential, or make PATs
+  valid on the BFF's gRPC surface. See the
+  [installation credential contract](../../../internal/ops/installation-groups.md#catalog-and-continuity-credentials).
+
 
 ---
 

@@ -3,13 +3,16 @@ package releasecatalog
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/releasewire"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
 
@@ -35,7 +38,39 @@ type Page struct {
 	NextCursor string           `json:"nextCursor,omitempty"`
 }
 
-func (r *Reader) open(ctx context.Context, sourceID string) (*client.Connection, source, map[string]ed25519.PublicKey, error) {
+type publisherConnection struct {
+	connection      *client.Connection
+	endpoint, token string
+	roots           *x509.CertPool
+}
+
+func (p *publisherConnection) Close() {
+	if p.connection != nil {
+		p.connection.Close()
+	}
+}
+func (p *publisherConnection) read(ctx context.Context, request releasewire.Request) (client.Row, error) {
+	if p.connection == nil {
+		return ReadIdentityHTTP(ctx, p.endpoint, p.token, p.roots, request)
+	}
+	query := client.NewQueryClient(p.connection.Dispatcher())
+	var result *client.Result
+	var err error
+	switch request.Operation {
+	case "catalog":
+		result, err = query.ReleaseGetPublishedCandidate(ctx, client.ReleaseGetPublishedCandidateArgs{CandidateId: request.CandidateID})
+	case "list":
+		result, err = query.ReleaseListPublishedCandidates(ctx, client.ReleaseListPublishedCandidatesArgs{Cursor: request.Cursor, Limit: request.Limit})
+	default:
+		return nil, errors.New("invalid publisher read")
+	}
+	if err != nil {
+		return nil, transportError(ctx)
+	}
+	return oneRow(result)
+}
+
+func (r *Reader) open(ctx context.Context, sourceID string) (*publisherConnection, source, map[string]ed25519.PublicKey, error) {
 	cfg, err := r.configuration(ctx)
 	if err != nil {
 		return nil, source{}, nil, err
@@ -58,11 +93,19 @@ func (r *Reader) open(ctx context.Context, sourceID string) (*client.Connection,
 	if err != nil || token == "" || len(token) > 16<<10 || strings.ContainsAny(token, "\r\n\t ") {
 		return nil, source{}, nil, errors.New("release source credential is unavailable")
 	}
-	conn, err := client.Connect(ctx, client.ConnectConfig{Endpoint: selected.endpoint(), Token: token, RootCAs: roots})
+	endpoint := selected.endpoint()
+	u, _ := url.Parse(endpoint) // trust already validated the exact transport path
+	if u.Path == releasewire.ReadPath {
+		return &publisherConnection{endpoint: endpoint, token: token, roots: roots}, selected, keys, nil
+	}
+	if strings.HasPrefix(token, "mql_pat_") {
+		return nil, source{}, nil, errors.New("personal access tokens require the Identity installation-read HTTPS endpoint")
+	}
+	conn, err := client.Connect(ctx, client.ConnectConfig{Endpoint: endpoint, Token: token, RootCAs: roots})
 	if err != nil {
 		return nil, source{}, nil, transportError(ctx)
 	}
-	return conn, selected, keys, nil
+	return &publisherConnection{connection: conn}, selected, keys, nil
 }
 
 func transportError(ctx context.Context) error {
@@ -81,15 +124,11 @@ func oneRow(result *client.Result) (client.Row, error) {
 	return rows[0], nil
 }
 
-func get(ctx context.Context, query *client.QueryClient, s source, keys map[string]ed25519.PublicKey, candidateID, digest string) (pl.VerifiedPublishedRelease, error) {
+func get(ctx context.Context, query *publisherConnection, s source, keys map[string]ed25519.PublicKey, candidateID, digest string) (pl.VerifiedPublishedRelease, error) {
 	var zero pl.VerifiedPublishedRelease
-	result, err := query.ReleaseGetPublishedCandidate(ctx, client.ReleaseGetPublishedCandidateArgs{CandidateId: candidateID})
+	row, err := query.read(ctx, releasewire.Request{Operation: "catalog", CandidateID: candidateID})
 	if err != nil {
 		return zero, transportError(ctx)
-	}
-	row, err := oneRow(result)
-	if err != nil {
-		return zero, err
 	}
 	body, err := json.Marshal(row["envelope"])
 	if err != nil {
@@ -124,7 +163,7 @@ func (r *Reader) Get(ctx context.Context, sourceID, candidateID, expectedCatalog
 		return zero, err
 	}
 	defer conn.Close()
-	return get(ctx, client.NewQueryClient(conn.Dispatcher()), s, keys, candidateID, expectedCatalogDigest)
+	return get(ctx, conn, s, keys, candidateID, expectedCatalogDigest)
 }
 
 // List reads one page, then verifies each suggested record. Unsigned list
@@ -146,14 +185,10 @@ func (r *Reader) List(ctx context.Context, sourceID, cursor string, limit int) (
 	}
 	defer conn.Close()
 	out.Publisher = s.Publisher
-	query := client.NewQueryClient(conn.Dispatcher())
-	result, err := query.ReleaseListPublishedCandidates(ctx, client.ReleaseListPublishedCandidatesArgs{Cursor: cursor, Limit: limit})
+	query := conn
+	row, err := query.read(ctx, releasewire.Request{Operation: "list", Cursor: cursor, Limit: limit})
 	if err != nil {
 		return out, transportError(ctx)
-	}
-	row, err := oneRow(result)
-	if err != nil {
-		return out, err
 	}
 	body, err := json.Marshal(row["releases"])
 	var hints []ReleaseSummary

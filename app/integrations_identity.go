@@ -1103,6 +1103,12 @@ func (a *App) transportIdentity() {
 		a.fatal("transport mux not constructed before transportIdentity", "component", identity.ComponentName)
 	}
 	svc.RegisterRoutes(a.mux)
+	verifier, ok := svc.PATVerifier().(*pat.Verifier)
+	if !ok || verifier == nil {
+		a.fatal("Identity installation reader requires its PAT verifier")
+		return
+	}
+	a.mountIdentityInstallationReads(verifier)
 	a.Logger.Info("identity HTTP routes mounted", "component", identity.ComponentName)
 }
 

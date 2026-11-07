@@ -9,8 +9,8 @@ import (
 // NewSnapshot is a native receiving-adapter port, not a public capability. The
 // caller authenticates and versions the configuration and credential resource
 // before construction, and reobserves those versions before acting on results.
-// This reader owns one frozen source and credential, retaining the same SDK,
-// role gate, TLS verification and signed-envelope verification as discovery.
+// This reader owns one frozen source and credential, retaining discovery's
+// explicit SDK/Identity transport, role gate, TLS and envelope verification.
 func NewSnapshot(ctx context.Context, configuration []byte, credential string) (*Reader, error) {
 	if len(configuration) > 256<<10 || credential == "" || len(credential) > 16<<10 || strings.ContainsAny(credential, "\r\n\t ") {
 		return nil, errors.New("release snapshot requires bounded source configuration and credentials")

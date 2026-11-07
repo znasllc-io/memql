@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/releasewire"
 )
 
 // Declares which HTTP routes may be reachable without authentication, and on
@@ -119,6 +120,10 @@ func HandlerAuthorizedPaths() []string {
 	// The credential is a per-source shared secret rather than a MemQL
 	// identity, which is why this cannot be an ordinary authenticated route:
 	// the caller is a third party and has no user.
+	// Only Identity mounts this bounded PAT reader. It rejects missing/revoked
+	// credentials before its four fixed read operations; it is not a public or
+	// general query route and does not change the BFF's PAT rejection.
+	paths = append(paths, InstallationReadPaths()...)
 	paths = append(paths, InboundWebhookPaths()...)
 	// GET+POST /unsubscribe -- authorized by the HMAC-signed token in the
 	// request, never by a bearer (memql#3348). Fails closed with no
@@ -586,3 +591,8 @@ func surfacePathForms(p string) []string {
 	}
 	return forms
 }
+
+// InstallationReadPaths is an exact authenticated Identity path, not an open
+// prefix. Its handler requires a fresh active PAT and an identified privileged
+// actor; component/releasecatalog's HTTP tests exercise refusal before queries.
+func InstallationReadPaths() []string { return []string{releasewire.ReadPath} }

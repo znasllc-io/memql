@@ -98,6 +98,48 @@ The native image, compatibility, protected-resource, storage and serving-health
 requirements still apply. This configuration does not create a catalog,
 credentials, renderer, registry permission or GitHub write authority.
 
+### Catalog and continuity credentials
+
+A personal access token belongs to the Identity HTTP surface. The BFF's gRPC
+verifier intentionally rejects PATs, and Identity's general gRPC surface is
+operator-only. Pointing a PAT at either general query endpoint cannot qualify an
+installation. Do not widen those interceptors, borrow an operator identity or
+store an expiring interactive access token to make a rehearsal pass.
+
+For a retained PAT, configure both `catalog.endpoint` and `health.endpoint` as
+`https://identity.<installation-domain>/release/installation-read`. This exact
+HTTPS path selects the bounded Identity reader; an origin with no path retains
+the existing JWT/SDK gRPC transport. There is no transport or identity fallback
+after a refusal. Custom certificate roots remain explicit receiver inputs.
+
+The Identity handler freshly verifies the PAT and its active owning user on
+every request. It replaces the ambient bootstrap actor with that verified user
+and credential, then applies the developer/admin/owner gate. Its closed request
+schema permits only signed published-catalog get/list, native build/migration
+health and the authenticated user's own row. It accepts no arbitrary query,
+principal, credential operation, publication or installation write. It mints no
+token and adds no Kubernetes or object-store authority to Identity. The existing
+PAT activity/last-use accounting still runs during authentication.
+
+Catalog signatures and exact candidate/digest checks are shared with the SDK
+reader. The continuity probe checks the nonce, signed engine commit, completed
+migrations and original user/credential across installation. It now measures the
+configured Identity serving surface when using a PAT; the receiver's separate
+signed image bindings, controller readiness, storage preservation and complete
+Application-group checks remain mandatory. TLS verification, bounded bodies and
+redirect refusal prevent transport changes from moving the bearer or substituting
+evidence. Secret UID/resourceVersion fences remain unchanged.
+
+Regression coverage includes `TestIdentityReaderVerifiesSignedCatalogAcrossReplicasAndRevocation`,
+`TestIdentityReaderRefusesAuthorityAndProtocolConfusionBeforeQueries`,
+`TestIdentityReaderTransportNeverForwardsBearerOrTrustsMalformedReplies`,
+`TestInstallationPATReplacesAmbientSystemAuthorityAndRechecksRevocation`, and
+`TestInstallationContinuityUsesIdentityTLSAndOriginalPAT`. These local tests do
+not certify a production installation. Install the supporting engine first,
+retain the approved credential, update the two endpoint values, and require a
+fresh native preparation/apply/completion receipt before claiming readiness.
+
+
 ## Recipes and recovery
 
 Installation-owned recipes enumerate `installationApplications()` and invoke
