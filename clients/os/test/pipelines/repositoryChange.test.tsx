@@ -177,10 +177,11 @@ describe("proposal preparation progress", () => {
   const authority = {...permission, canWrite:true, route:"own", landingMode:"owner_push"};
   const request = {...deliveryReceipt, operation:"propose_change", id:"stopped-request", goalId:"draft-goal", runId:"draft-run"};
   const stopped = {id:"draft-run", goalId:"draft-goal", status:"failed", errorMessage:"Independent review refused removal of the existing parent address."};
-  it("shows an execution refusal separately from scope approval and revises without replaying", async () => {
-    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[stopped]});
+  it.each(["failed", "waiting"])("shows a %s execution refusal separately from scope approval and revises without replaying", async status => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,status}]});
     fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
-    await screen.findByText("Proposal preparation stopped.");
+    await screen.findByText(status === "waiting" ? "Proposal preparation needs attention." : "Proposal preparation stopped.");
+    expect(screen.queryByText("Preparing the requested change…")).toBeNull();
     expect(screen.getByText(stopped.errorMessage)).toBeTruthy();
     expect(screen.getByText("Approved for the requested work")).toBeTruthy();
     expect(screen.queryByText(/Prepare a pull request within/)).toBeNull();
@@ -194,6 +195,14 @@ describe("proposal preparation progress", () => {
     fireEvent.click(screen.getByRole("button",{name:"Start requested work"}));
     await waitFor(()=>expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(1));
     expect(c.callsNamed("repositoryChangeRequest")[0]).not.toContain('requestId: "stopped-request"');
+  });
+  it.each(["", "   "])("keeps a waiting attempt without an error in progress: %j", async errorMessage => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,status:"waiting",errorMessage}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparing the requested change…");
+    expect(screen.queryByRole("button",{name:"Revise request"})).toBeNull();
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
   });
   it("keeps an unavailable attempt distinct from a failed attempt", async () => {
     mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaryError:"Saved execution could not be read"});

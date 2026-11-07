@@ -1019,6 +1019,15 @@ request, and opens its saved Nexus goal or approval. Installed roles never
 establish upstream repository ownership. Request history is server-backed;
 connection failures do not become a claim of read-only access or empty history.
 
+Preparation reads the exact owned run, independently of scope approval. A
+terminal failure or a waiting run with a recorded error exposes its reason and
+**Revise request**; a waiting run without an error remains in progress. Revision
+preserves the statement and paths but creates a new immutable request only on
+explicit submission. A completed proposal takes precedence over an earlier
+execution error. `test/pipelines/repositoryChange.test.tsx` covers these states;
+the QA views `repository-preparation-waiting-error` and
+`repository-preparation-waiting` exercise the rendered distinction.
+
 - **TWO MORE FEEDS AT THE ROOT, AND TWO ON THE RUN PAGE.** The caller's
   pipelines and runs are retained by `DeployablesApp` like every other concept
   here; a run's work steps and Library files are retained by its page while it

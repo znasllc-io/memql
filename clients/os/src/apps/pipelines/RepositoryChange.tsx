@@ -117,7 +117,10 @@ export function RepositoryChange({ sourceId, visible = true }: { sourceId: strin
     if (!run) throw new Error("The saved preparation attempt could not be read.");
     return run;
   } : null, visible, query);
-  const preparationStopped = preparation.value && ["failed", "abandoned", "cancelled"].includes(preparation.value.status);
+  // A failed automation step may wait for owner input rather than terminate.
+  // Keep that recorded refusal actionable; an ordinary wait is still progress.
+  const preparationNeedsInput = preparation.value?.status === "waiting" && !!preparation.value.errorMessage.trim();
+  const preparationStopped = preparation.value && (["failed", "abandoned", "cancelled"].includes(preparation.value.status) || preparationNeedsInput);
   const ownerPush = authority.value?.landingMode === "owner_push";
   const reviewURL = current && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(current.repository) && /^[a-f0-9]{40}$/.test(proposal?.expectedHead ?? "") && /^[a-f0-9]{40}$/.test(proposal?.commit ?? "") ? `https://github.com/${current.repository}/compare/${proposal!.expectedHead}...${proposal!.commit}` : null;
   const canLand = ownerPush && authority.fresh && authority.value?.canWrite && authority.value.route === "own" && status.fresh && current?.state === "approved" && proposal?.state === "complete" && proposal.landingMode === "owner_push" && !proposal.landedCommit && !!reviewURL && holds("execute", "app:pipelines/requests");
@@ -169,7 +172,7 @@ export function RepositoryChange({ sourceId, visible = true }: { sourceId: strin
     {current && !composing ? <section className="os-app-stack"><Subhead>{current.statement || "Change request"}</Subhead><Caption>{STATES[current.state] ?? "Request status unavailable"}</Caption>
       <Caption>{operationSummary(current.operation, proposal?.landingMode === "owner_push" || !proposal && ownerPush)}</Caption>
       {current.reason ? <p>{current.reason}</p> : null}
-      {preparationStopped ? <Notice tone="warn" sentence="Proposal preparation stopped." detail={preparation.value?.errorMessage || "This attempt ended before a complete proposal was recorded."} next="Review the reason before starting a revised request. The saved attempt is kept.">
+      {preparationStopped ? <Notice tone="warn" sentence={preparationNeedsInput ? "Proposal preparation needs attention." : "Proposal preparation stopped."} detail={preparation.value?.errorMessage || "This attempt ended before a complete proposal was recorded."} next="Review the reason before starting a revised request. The saved attempt is kept.">
         {operations.includes(current.operation as ChangeOperation) ? <Button tone="quiet" onClick={() => { setStatement(current.statement ?? ""); setPaths((current.paths ?? []).join("\n")); setOperation(current.operation as ChangeOperation); setSaved(null); setConfirmLanding(null); setError(""); request.current = null; setComposing(true); }}>Revise request</Button> : null}
       </Notice> : preparation.value && ["queued", "running", "waiting"].includes(preparation.value.status) ? <Caption>Preparing the requested change…</Caption> : null}
       {preparation.error ? <Notice tone="warn" sentence="Preparation progress is unavailable." detail={preparation.error}><Button tone="quiet" onClick={preparation.retry}>Read preparation again</Button></Notice> : null}

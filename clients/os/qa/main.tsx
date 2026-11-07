@@ -946,13 +946,13 @@ function installationPreview(initial: "prepared" | "preparing" | "applying" | "c
   return () => <InstallationPreview />;
 }
 
-function repositoryOwnerView(state: "ready" | "landed" | "failure" | "empty" | "preparation-failed" | "preparation-running" | "preparation-unavailable") {
+function repositoryOwnerView(state: "ready" | "landed" | "failure" | "empty" | "preparation-failed" | "preparation-running" | "preparation-waiting-error" | "preparation-waiting" | "preparation-unavailable") {
   const preparing = state.startsWith("preparation-");
   return {
     seed: {
       repositoryAuthority: { sourceId:"source-one",repository:"znasllc-io/memql",repositoryId:42,canWrite:true,canRequest:true,route:"own",landingMode:"owner_push",operations:["propose_change"] },
       repositoryChangeError: state === "failure" ? "The default branch moved since review. Prepare a new proposal." : undefined,
-      workRunSummaries: preparing ? [{id:"draft-run",goalId:"draft-goal",status:state === "preparation-running" ? "running" : "failed",errorMessage:"Independent review refused removal of the existing parent address. Add the Workbench setting while preserving that address."}] : [],
+      workRunSummaries: preparing ? [{id:"draft-run",goalId:"draft-goal",status:state.startsWith("preparation-waiting") ? "waiting" : state === "preparation-running" ? "running" : "failed",errorMessage:state === "preparation-waiting" ? "" : "Independent review refused removal of the existing parent address. Add the Workbench setting while preserving that address."}] : [],
       workRunSummaryError: state === "preparation-unavailable" ? "The saved execution could not be read." : undefined,
       changeRequests: state === "empty" ? [] : [{id:"version-request",operation:"propose_change",state:"approved",statement:preparing ? "Enable the product Workbench route" : "Bump engine to 0.31.19",repository:"znasllc-io/memql",paths:preparing ? ["deploy/k8s/overlays/cloud/kustomization.yaml"] : ["VERSION"],goalId:preparing ? "draft-goal" : "",runId:preparing ? "draft-run" : "",expiresAt:"2026-12-01T12:00:00Z",proposal:preparing ? undefined :{state:"complete",landingMode:"owner_push",branch:"memql/change-version",commit:"a".repeat(40),expectedHead:"b".repeat(40),baseBranch:"main",landedCommit:state === "landed" ? "a".repeat(40) : ""}}],
     },
@@ -1176,6 +1176,8 @@ const VIEWS: Record<
   "repository-owner-landed": repositoryOwnerView("landed"),
   "repository-owner-failure": repositoryOwnerView("failure"),
   "repository-owner-empty": repositoryOwnerView("empty"),
+  "repository-preparation-waiting-error": repositoryOwnerView("preparation-waiting-error"),
+  "repository-preparation-waiting": repositoryOwnerView("preparation-waiting"),
   "repository-preparation-failed": repositoryOwnerView("preparation-failed"),
   "repository-preparation-running": repositoryOwnerView("preparation-running"),
   "repository-preparation-unavailable": repositoryOwnerView("preparation-unavailable"),
