@@ -212,11 +212,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         if (builtin instanceof Error) throw builtin;
         if (builtin !== undefined) return rowsResult([builtin]);
         if (name.startsWith("group") || name.startsWith("role")) return rowsResult([{ ok: "true" } as Row]);
-        // `getRowByConceptAndId` composes `concept==<c> && id==<id>`; the
+        // `getRowByConceptAndId` composes `concept==<c> && id=="<id>"`; the
         // harness answers from `byId` so a by-id re-read is a real round trip
-        // through the same helper the app calls.
-        const match = /id==(\S+)/.exec(call);
-        const wanted = match?.[1] ?? "";
+        // through the same helper the app calls. Decode the string literal so
+        // opaque IDs retain spaces and escapes instead of silently missing.
+        const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+        const wanted = match ? JSON.parse(match[1]!) as string : "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
       }),

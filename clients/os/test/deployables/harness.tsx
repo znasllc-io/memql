@@ -1039,9 +1039,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("sitePublishFromArtifact", [PUBLISH_RESULT as unknown as Row]);
       }
 
-      // `getRowByConceptAndId` composes `concept==<c> && id==<id>`.
-      const match = /id==(\S+)/.exec(call);
-      const wanted = match?.[1] ?? "";
+      // `getRowByConceptAndId` composes `concept==<c> && id=="<id>"`.
+      // Decode the literal: quotes, spaces and escapes belong to the opaque
+      // ID, and a missed lookup would silently retain the stale seeded row.
+      const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+      const wanted = match ? JSON.parse(match[1]!) as string : "";
       const row = wanted === "" ? undefined : seed.byId?.[wanted] ?? sourceConnections.find(row => row["id"] === wanted);
       return bundleResult(row ? [row] : []);
     }),
