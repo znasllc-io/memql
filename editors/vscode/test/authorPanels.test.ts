@@ -95,7 +95,10 @@ function connectionsWith(fake: FakeQuery): ConnectionManager {
           meta: () => ({ cursor: "" }),
         };
       }
-      const id = /id==(\S+)$/.exec(call)?.[1] ?? "";
+      // The real SDK quotes opaque IDs; decode the literal to load the clicked
+      // row even when it is outside the initial page or contains escaped text.
+      const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+      const id = match ? JSON.parse(match[1]!) as string : "";
       const row = fake.rows[id];
       return { rawNodes: () => (row === undefined ? [] : [row]), meta: () => ({}) };
     },

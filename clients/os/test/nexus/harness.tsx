@@ -261,8 +261,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
       decideApproval: builtinWrite("decideApproval", args => ({ approvalId: args.approvalId, decision: args.decision, runId: "run", runResumed: true })),
       refreshComputerPermission: builtinWrite("refreshComputerPermission", args => ({ approvalId: args.approvalId, permissionState: "review_ready" })),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
-        const match = /id==(\S+)/.exec(filter);
-        const wanted = match?.[1] ?? "";
+        // Decode the SDK's quoted ID so a reread does not retain stale seed data.
+        const match = /id==("(?:[^"\\]|\\.)*")$/.exec(filter);
+        const wanted = match ? JSON.parse(match[1]!) as string : "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
       }),

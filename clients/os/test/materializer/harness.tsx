@@ -220,8 +220,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
         if (name !== "executeNamed" && typeof handler === "function") {
           return (handler as (args: Record<string, unknown>) => Promise<Result>)(parseCall(call).args);
         }
-        const match = /id==(\S+)/.exec(call);
-        const wanted = match?.[1] ?? "";
+        // Decode the SDK's quoted ID so a reread does not retain stale seed data.
+        const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+        const wanted = match ? JSON.parse(match[1]!) as string : "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
       }),

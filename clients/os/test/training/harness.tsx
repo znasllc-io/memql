@@ -178,7 +178,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
-      // `getRowByConceptAndId` composes `concept==<c> && id==<id>`; nothing in
+      // `getRowByConceptAndId` composes `concept==<c> && id=="<id>"`; nothing in
       // these tests seeds a by-id re-read, so it answers empty rather than
       // throwing -- a null re-read means "keep what you have".
       return bundleResult([]);

@@ -141,8 +141,9 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (name === "libraryBackupList") return rowsResult([{ transfers: seed.transfers ?? [], nextCursor: "" } as never]);
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
-      const match = /id==(\S+)/.exec(call);
-      const wanted = match?.[1] ?? "";
+      // Decode the SDK's quoted ID so a reread does not retain stale seed data.
+      const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+      const wanted = match ? JSON.parse(match[1]!) as string : "";
       const row = wanted === "" ? undefined : seed.byId?.[wanted];
       return bundleResult(row ? [row] : []);
     }),

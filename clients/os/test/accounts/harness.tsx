@@ -164,8 +164,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
         return rowsResult(seed.membersOfGroup?.[groupId] ?? []);
       }),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
-        const match = /id==(\S+)/.exec(filter);
-        const wanted = match?.[1] ?? "";
+        // Decode the SDK's quoted ID so a reread does not retain stale seed data.
+        const match = /id==("(?:[^"\\]|\\.)*")$/.exec(filter);
+        const wanted = match ? JSON.parse(match[1]!) as string : "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
       }),

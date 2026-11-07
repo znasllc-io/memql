@@ -302,7 +302,7 @@ Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
 By-id live rereads use the SDK's quoted string literal for every opaque row ID.
-The Users and Deployables test connections decode that literal before looking
+The OS test connections decode that literal before looking
 up their seeded rows, including escaped characters and spaces. Treating the
 quoted value as a bare token silently misses the row and leaves stale UI data;
 opening a seeded detail alone cannot prove that its subsequent reread worked.

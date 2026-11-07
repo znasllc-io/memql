@@ -1154,6 +1154,9 @@ otherwise remove an action from the product with nothing noticing
 (`test/clusterMenus.test.ts`), and a welcome keyed on a misspelt context key
 renders permanently, because VS Code treats an unknown key as unset and
 `!unset` is true (`test/viewsWelcome.test.ts`).
+The concept-panel fixture decodes the SDK's quoted row ID before answering a
+by-id lookup. `test/authorPanels.test.ts` opens a clicked row outside the first
+page, so a stale bare-token fixture cannot pass by showing only the initial list.
 `vscode-test-host` (`editors/vscode/test-host/`) launches a real Extension
 Development Host to assert what a unit test structurally cannot reach -- that
 activation survives the host's runtime, that every command the manifest
