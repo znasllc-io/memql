@@ -35,6 +35,22 @@ API continues to accept one `expectedCurrentRevision` for this coherent group.
 A partially applied group reports each current revision separately and leaves
 the shared current revision empty.
 
+Discovery inventories bind the full resource contracts, with only the top-level
+`APIResourceList.resources` order normalized. On the installed Kubernetes cluster,
+Argo, CNPG and Cilium discovery returned identical entries in different orders;
+comparing their raw arrays refused preparation as changed discovery. The same
+canonical inventory feeds observation and recovery digests without modifying the
+captured response. Added, removed or duplicated resources, changed scopes, verbs,
+kinds, versions and extra fields still invalidate observation. Other arrays and
+the existing object UID/resourceVersion and Secret rotation fences remain exact.
+`TestReceiverDiscoveryResourceOrderIsStableAcrossReadsAndRecovery` and
+`TestReceiverDiscoveryStillRefusesResourceContractChanges` cover that boundary.
+For an explicit live read-only check, set
+`MEMQL_INSTALLATION_DISCOVERY_TEST_KUBECONFIG` to an absolute operator kubeconfig
+path and run `TestReceivingDiscoveryThroughInstalledKubernetes`. It reads only
+API discovery, never namespaced objects or credentials, and does not qualify
+installation application or completion.
+
 Each `imageBindings` entry must name its `application` key. Resource identities
 are unique across the combined render. A duplicate resource is refused rather
 than assigned to whichever Application was rendered first. Existing format 1

@@ -184,12 +184,12 @@ func (r *receiverReads) finish(ctx context.Context) (string, error) {
 			if read.uid == "" && !sameJSON(read.body, current) {
 				return "", errors.New("installation discovery changed during observation")
 			}
-		} else if !sameJSON(read.body, current) {
+		} else if !sameJSON(receiverDiscoveryIdentity(read.body), receiverDiscoveryIdentity(current)) {
 			return "", errors.New("installation discovery changed during observation")
 		}
 		stable := read.stable
 		if stable == nil {
-			stable = read.body
+			stable = receiverDiscoveryIdentity(read.body)
 			if _, collection := read.body["items"]; collection {
 				stable = receiverCollectionIdentity(read.body)
 			}
@@ -229,7 +229,7 @@ func (r *receiverReads) configurationInvariant(applications ...receiverNamed) (s
 		if binding, ok := appBindings[key]; ok {
 			stable = binding
 		} else if stable == nil {
-			stable = read.body
+			stable = receiverDiscoveryIdentity(read.body)
 			if _, collection := read.body["items"]; collection {
 				stable = receiverCollectionIdentity(read.body)
 			}
@@ -237,4 +237,31 @@ func (r *receiverReads) configurationInvariant(applications ...receiverNamed) (s
 		bindings = append(bindings, []any{key, stable})
 	}
 	return artifactHash("receiving-configuration-invariant-v1", bindings), nil
+}
+
+// CRD discovery can return the same APIResourceList in a different order on
+// each authenticated read. Bind every complete entry, including duplicates and
+// unknown fields, in canonical order for both reobservation and recovery. Only
+// this inventory order is immaterial: resource contracts, other arrays, object
+// versions and Secret rotation remain exact. Never mutate the captured body.
+func receiverDiscoveryIdentity(body map[string]any) any {
+	items, ok := body["resources"].([]any)
+	if resourceText(body, "kind") != "APIResourceList" || !ok {
+		return body
+	}
+	entries := make([]string, 0, len(items))
+	for _, item := range items {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return body
+		}
+		entries = append(entries, string(raw))
+	}
+	sort.Strings(entries)
+	identity := make(map[string]any, len(body))
+	for key, value := range body {
+		identity[key] = value
+	}
+	identity["resources"] = entries
+	return identity
 }
