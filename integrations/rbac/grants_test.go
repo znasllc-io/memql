@@ -1119,3 +1119,55 @@ func TestEffectiveAccessRefusesWhenAReadBehindTheAnswerFails(t *testing.T) {
 		refused(t, request, loner)
 	})
 }
+
+// failingSubjectReads is the recording engine with one subject read failing
+// the way a database that blinked fails it: the person's user row
+// (userByIdSystem) or the group's own row (groupById).
+type failingSubjectReads struct {
+	*recordingEngine
+	failing string // the rendered statement prefix that fails; empty fails none
+}
+
+var errSubjectRowUnreadable = errors.New("the subject's row could not be read")
+
+func (e failingSubjectReads) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if e.failing != "" && strings.HasPrefix(q, e.failing) {
+		return nil, errSubjectRowUnreadable
+	}
+	return e.recordingEngine.Execute(ctx, q)
+}
+
+// TestEffectiveAccessIsUnavailableWhenTheSubjectCannotBeRead (final review,
+// item 5): a read of the person's or the group's own row that FAILS has not
+// found that nobody is there. access_unknown_subject tells an operator the
+// person or group is not on this cluster -- that they may have been
+// deactivated -- and a database that blinked must not tell them a colleague
+// was. Each failed read refuses access_unavailable, carrying the failure; a
+// read that succeeds and finds nobody still refuses access_unknown_subject.
+func TestEffectiveAccessIsUnavailableWhenTheSubjectCannotBeRead(t *testing.T) {
+	i, eng := grantsEngine(t)
+	for _, tc := range []struct {
+		name, kind, subject, failing, code string
+	}{
+		{"the person's user row cannot be read", "user", "member", "query userByIdSystem", codeAccessUnavailable},
+		{"the group's row cannot be read", "group", "support", "query groupById", codeAccessUnavailable},
+		{"no active person by that id", "user", "nobody", "", codeAccessUnknownSubject},
+		{"no group by that id", "group", "nowhere", "", codeAccessUnknownSubject},
+		{"an archived group", "group", "archived", "", codeAccessUnknownSubject},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i.engine = failingSubjectReads{recordingEngine: eng, failing: tc.failing}
+			nodes, err := i.handleEffectiveAccessForSubject(asRole("admin"),
+				map[string]any{"subjectKind": tc.kind, "subjectId": tc.subject}, 0)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.code+": ") {
+				t.Fatalf("err = %v, want a refusal starting with %s", err, tc.code)
+			}
+			if failed := tc.failing != ""; failed != strings.Contains(err.Error(), errSubjectRowUnreadable.Error()) {
+				t.Fatalf("err = %v: the refusal must carry the failed read exactly when one failed (%v)", err, failed)
+			}
+			if len(nodes) != 0 {
+				t.Fatalf("a refusal answered %d rows", len(nodes))
+			}
+		})
+	}
+}

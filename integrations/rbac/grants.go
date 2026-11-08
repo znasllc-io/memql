@@ -322,7 +322,9 @@ func accessCallerRank(ctx context.Context) (int, error) {
 // developer looking at Access sees nothing for the owner. The person's role
 // comes off their user row under the synthetic operator, the grant guards'
 // read; a role that ranks nowhere cannot be compared, and "cannot compare"
-// refuses.
+// refuses. A user row that could not be read refuses access_unavailable, not
+// access_unknown_subject: that code says nobody active is there, and a read
+// that failed has not found that out.
 //
 // THEN THE ENGINE'S RESOLVER, FOR THEM. The subject is built the way role
 // testing builds one (component/identity/roletest/service.go): an
@@ -340,7 +342,8 @@ func accessCallerRank(ctx context.Context) (int, error) {
 //     organization's answer for all of them, which is the confusion this read
 //     exists to end. Which pairs those are is the engine's to say; the data
 //     verbs arrive this way too. An operator, and a person whose scope
-//     reaches no organization, has none, and keeps one row per pair.
+//     reaches no organization, has none: each app pair comes once with
+//     accountId empty, and no data verb has a row at all.
 //
 // EVERY READ BEHIND THE ANSWER, OR NO ANSWER. The grant and membership
 // readers answer from what they could read when a read fails, on purpose: a
@@ -357,7 +360,7 @@ func accessCallerRank(ctx context.Context) (int, error) {
 func (i *Integration) personAccess(ctx context.Context, callerRank int, userId string) ([]accessRow, error) {
 	role, found, err := i.userRole(ctx, userId)
 	if err != nil {
-		return nil, accessRefusal(codeAccessUnknownSubject, "the person could not be read: "+err.Error())
+		return nil, accessRefusal(codeAccessUnavailable, "the person could not be read: "+err.Error())
 	}
 	if !found {
 		return nil, accessRefusal(codeAccessUnknownSubject, "no active user by that id")
@@ -445,13 +448,14 @@ func accessRowFrom(d componentAuth.Decision, role, accountId string) accessRow {
 // No rank rule: a group is not a person, and the grant reads this replaces
 // for a group carry the admin floor alone. A group that is not there, or is
 // archived, refuses -- an archived group grants nobody anything, and an empty
-// answer would say it grants nothing for a different reason. The rows come
-// from the grant source the resolver folds at the group level, so the page
-// and the gates read one set.
+// answer would say it grants nothing for a different reason. A group row that
+// could not be read refuses access_unavailable instead, as the person's does.
+// The rows come from the grant source the resolver folds at the group level,
+// so the page and the gates read one set.
 func (i *Integration) groupAccess(ctx context.Context, groupId string) ([]accessRow, error) {
 	groups, err := i.rows(ctx, `query groupById(groupId: `+langparser.QuoteString(groupId)+`)`)
 	if err != nil {
-		return nil, accessRefusal(codeAccessUnknownSubject, "the group could not be read: "+err.Error())
+		return nil, accessRefusal(codeAccessUnavailable, "the group could not be read: "+err.Error())
 	}
 	if len(groups) == 0 {
 		return nil, accessRefusal(codeAccessUnknownSubject, "no active group by that id")
