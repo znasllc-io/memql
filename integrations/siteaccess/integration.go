@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -18,14 +21,20 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// integration.go -- the six DSL-callable capabilities:
+// integration.go -- the seven DSL-callable capabilities:
 //
-//	integration.siteAccess.create      mint a code             (dsl builtin siteAccessCodeCreate)
-//	integration.siteAccess.regenerate  replace its secret      (dsl builtin siteAccessCodeRegenerate)
-//	integration.siteAccess.setExpiry   move its expiry         (dsl builtin siteAccessCodeSetExpiry)
-//	integration.siteAccess.remove      end it                  (dsl builtin siteAccessCodeRemove)
-//	integration.siteAccess.gates       the gates a site opens  (dsl builtin siteAccessGates)
-//	integration.siteAccess.list        the codes of a site     (dsl builtin siteAccessCodesForSite)
+//	integration.siteAccess.create           mint a code             (dsl builtin siteAccessCodeCreate)
+//	integration.siteAccess.guestPassCreate  let guests in           (dsl builtin siteAccessGuestPassCreate)
+//	integration.siteAccess.regenerate       replace its secret      (dsl builtin siteAccessCodeRegenerate)
+//	integration.siteAccess.setExpiry        move its expiry         (dsl builtin siteAccessCodeSetExpiry)
+//	integration.siteAccess.remove           end it                  (dsl builtin siteAccessCodeRemove)
+//	integration.siteAccess.gates            the gates a site opens  (dsl builtin siteAccessGates)
+//	integration.siteAccess.list             the codes of a site     (dsl builtin siteAccessCodesForSite)
+//
+// A GUEST PASS IS A CODE THAT NOBODY HOLDS (design record 2026-11-08, deployable guest
+// access): a code's row marked guest, whose digest is its site's and no typed code's. It
+// is changed and ended by the acts that change and end a code, and it has no secret, so
+// nothing regenerates it.
 //
 // Every client-callable read and write on access codes is one of these, passing the shared
 // organization gate; the queries and mutations beneath them are @serverOnly. The list is a builtin,
@@ -56,6 +65,11 @@ import (
 // stream builds its context from the request (component/grpc, handleExecuteQuery) and
 // stamps no run, and the top-level builtin branch of executeWith adds none. The act of
 // re-timing or removing a code carries no code, so a run may do either.
+//
+// NOR ARE GUESTS LET IN INSIDE A RUN, for a reason of a pass's own. It has no code for a
+// journal to keep, but a pass opens a gate of a deployable to anybody who asks, and that
+// is an operator's act and never DSL's (design record 2026-11-08, G-D1): a run is DSL
+// acting, so it is refused, in words that give that reason.
 //
 // # A refusal is a sentence
 //
@@ -122,6 +136,20 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "guestPassCreate",
+			Description: "Let anyone open one gate of a deployable without a code, until an expiry, by writing its guest pass: " +
+				"an access code row marked guest, with no code at all. One at a time per deployable. Returns the pass's id " +
+				"and expiry, never a code.",
+			Handler: i.handleGuestPassCreate,
+			ArgsSchema: map[string]string{
+				"siteId":    "string (required) -- the deployable guests may open a part of.",
+				"label":     "string (required) -- the operator's name for the pass, 1 to 80 characters.",
+				"gate":      "string (required) -- the gate guests may open.",
+				"subject":   "string (optional) -- scope within the gate, at most 120 characters.",
+				"expiresAt": "datetime (required) -- when the pass stops letting guests in.",
+			},
+		},
+		{
 			Name: "regenerate",
 			Description: "Replace an access code's secret, keeping its id, label, gate and subject. " +
 				"Ends every session opened with the old secret. Returns the plain code once.",
@@ -176,7 +204,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // ---------------------------------------------------------------------------
 
 // minted is what a successful mint or regenerate hands back: the plain code, once,
-// and what the reply and the audit event say about the row.
+// and what the reply and the audit event say about the row. A guest pass leaves
+// Code empty, because there is none.
 type minted struct {
 	CodeID, Code, SiteID, Gate string
 	Generation                 int
@@ -185,25 +214,16 @@ type minted struct {
 
 // handleCreate mints a code.
 //
-// EVERY GATE RUNS BEFORE THE CODE IS MINTED, in the order a person would ask them:
-// is there a deployable I can see, is it one a code can belong to, does it declare
-// the gate, and are the name, the subject and the expiry inside their bounds. A
-// refusal at any of them has written nothing and minted nothing.
+// EVERY GATE RUNS BEFORE THE CODE IS MINTED (checkMint), and a refusal at any of them
+// has written nothing and minted nothing.
 //
 // THE WHOLE OF THAT IS RUN AGAIN IF THE WRITE LOSES THE FENCE. The witness is the
 // site's, so a loss means the site changed, and what changed may be the owner, the
 // organization or the package this mint copied from or was judged against.
 func (i *Integration) handleCreate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := refuseInARun(ctx, "Add it there."); err != nil {
-		return nil, err
-	}
-	actor, err := requireCaller(ctx)
+	actor, siteID, err := mintCaller(ctx, args, codeInARun+" Add it there.")
 	if err != nil {
 		return nil, err
-	}
-	siteID := memql.BareShortId(asString(args["siteId"]))
-	if siteID == "" {
-		return nil, refuse("Choose a deployable to add the access code to.")
 	}
 	var out minted
 	err = onceMore(func() (err error) {
@@ -227,21 +247,154 @@ func (i *Integration) handleCreate(ctx context.Context, args map[string]any, _ i
 }
 
 func (i *Integration) mint(ctx context.Context, actor, siteID string, args map[string]any) (minted, error) {
-	site, ok, err := i.store.siteForCaller(ctx, siteID)
+	asked, err := i.checkMint(ctx, actor, siteID, args)
 	if err != nil {
 		return minted{}, err
 	}
+	code, digest, hint, err := memql.MintAccessCode()
+	if err != nil {
+		return minted{}, err
+	}
+	row := asked.row(id.NewShortId(), actor)
+	row.Digest, row.Hint = digest, hint
+	if err := i.store.createCode(ctx, asked.site.OwnerUserID, row, asked.site.Version); err != nil {
+		return minted{}, err
+	}
+	return minted{CodeID: row.ID, Code: code, SiteID: asked.site.ID, Gate: asked.gate, Generation: 1, ExpiresAt: asked.expiresAt}, nil
+}
+
+// handleGuestPassCreate lets anyone open one gate of a deployable, by writing its guest
+// pass, and hands back the pass's id and expiry: there is no code to hand back.
+//
+// A PASS IS REFUSED FOR EVERYTHING A CODE IS (checkMint), because it is a code's row and
+// opens what a code for its gate would. Then for one thing more: a deployable has one
+// pass that is not removed at a time (G-D3), so there is one switch to reason about.
+//
+// TWO OPERATORS AT ONCE LEAVE ONE PASS. Both read the site's passes, both ask for the
+// same id (guestPassID), and the write refuses a row that is already there, so the one
+// that loses runs again from its first read, finds the other's pass and is told guests
+// are already in.
+func (i *Integration) handleGuestPassCreate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	actor, siteID, err := mintCaller(ctx, args, guestsInARun)
+	if err != nil {
+		return nil, err
+	}
+	var out minted
+	err = onceMore(func() (err error) {
+		out, err = i.mintGuestPass(ctx, actor, siteID, args)
+		return err
+	})
+	if err != nil {
+		return nil, i.failed("guestPassCreate", siteID, err,
+			"This deployable changed at the same moment, so guest access was not turned on. Reload the list and try again.")
+	}
+	i.audit(ctx, auditActionCreated, out.CodeID, map[string]any{
+		"act": "guestPassCreate", "siteId": out.SiteID, "gate": out.Gate, "generation": out.Generation, "expiresAt": wholeSecond(out.ExpiresAt),
+	})
+	return i.node("guestPassCreate:"+out.CodeID, map[string]any{
+		"codeId":    out.CodeID,
+		"expiresAt": wholeSecond(out.ExpiresAt),
+	})
+}
+
+func (i *Integration) mintGuestPass(ctx context.Context, actor, siteID string, args map[string]any) (minted, error) {
+	asked, err := i.checkMint(ctx, actor, siteID, args)
+	if err != nil {
+		return minted{}, err
+	}
+	// ONE READ ANSWERS BOTH QUESTIONS: whether a pass stands, and how many the site has
+	// had, which names the next one. It is livePassForSite's read, kept whole for the count.
+	passes, err := i.store.guestPassRows(ctx, asked.site.ID)
+	if err != nil {
+		return minted{}, err
+	}
+	if _, stands := livePass(asked.site.ID, passes); stands {
+		return minted{}, refuse("This deployable already lets guests in. Change when guest access ends, or turn it off first.")
+	}
+	// NO HINT: there is no code to tell apart, and codeHint takes an empty string.
+	row := asked.row(guestPassID(asked.site.ID, len(passes)+1), actor)
+	row.Digest, row.Guest = memql.AccessGuestPassDigest(asked.site.ID), true
+	if err := i.store.createCode(ctx, asked.site.OwnerUserID, row, asked.site.Version); err != nil {
+		return minted{}, err
+	}
+	return minted{CodeID: row.ID, SiteID: asked.site.ID, Gate: asked.gate, Generation: 1, ExpiresAt: asked.expiresAt}, nil
+}
+
+// guestPassID is the id of a site's nth guest pass, the same for every mint that asks.
+//
+// IT IS WHAT LETS THE WRITE TELL TWO MINTS APART. Two that read the same passes ask for
+// the same row, and createCode refuses a row that is already there. The ordinal counts
+// every pass the site has had, removed ones included, because they keep the digest the
+// next read finds them by, so a site that turns guest access off and on again moves on to
+// an id nobody has used. A name-based UUID, because ids here are UUIDs (core/id), and the
+// digest scrubber leaves one alone.
+func guestPassID(siteID string, ordinal int) string {
+	name := "memql:siteAccessGuestPass:" + memql.BareShortId(siteID) + ":" + strconv.Itoa(ordinal)
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(name)).String()
+}
+
+// mintCaller is what both mints ask before anything is read: that this is not a run,
+// that a person is asking, and which deployable. `inARun` is the refusal for a run,
+// which each mint words for itself because each has its own reason (see the file note).
+func mintCaller(ctx context.Context, args map[string]any, inARun string) (actor, siteID string, err error) {
+	if err := refuseInARun(ctx, inARun); err != nil {
+		return "", "", err
+	}
+	if actor, err = requireCaller(ctx); err != nil {
+		return "", "", err
+	}
+	siteID = memql.BareShortId(asString(args["siteId"]))
+	if siteID == "" {
+		return "", "", refuse("Choose a deployable to add the access code to.")
+	}
+	return actor, siteID, nil
+}
+
+// mintRequest is what checkMint established: a deployable an access code can belong to,
+// read under the caller, and the gate, name, subject and expiry the call asked for, each
+// inside its bounds.
+type mintRequest struct {
+	site                 siteView
+	gate, label, subject string
+	issuedAt, expiresAt  time.Time
+}
+
+// row is the row a mint writes, with what makes it a code or a guest pass (its digest,
+// its hint and its mark) left to the mint.
+func (m mintRequest) row(codeID, actor string) newCode {
+	return newCode{
+		ID:        codeID,
+		SiteID:    m.site.ID,
+		AccountID: m.site.AccountID,
+		Label:     m.label,
+		Gate:      m.gate,
+		Subject:   m.subject,
+		ChangedBy: actor,
+		IssuedAt:  m.issuedAt,
+		ExpiresAt: m.expiresAt,
+	}
+}
+
+// checkMint runs every gate a mint passes before it writes, for a code and a guest pass
+// alike, in the order a person would ask them: is there a deployable I can see, is it one
+// a code can belong to, does it declare the gate, and are the name, the subject and the
+// expiry inside their bounds.
+func (i *Integration) checkMint(ctx context.Context, actor, siteID string, args map[string]any) (mintRequest, error) {
+	site, ok, err := i.store.siteForCaller(ctx, siteID)
+	if err != nil {
+		return mintRequest{}, err
+	}
 	if !ok {
-		return minted{}, errSiteUnreadable()
+		return mintRequest{}, errSiteUnreadable()
 	}
 	// A SYSTEM-OWNED SITE IS ASKED ABOUT FIRST, though it usually has no owner either,
 	// because that is the reason worth saying: it is exempt from the whole axis, as it
 	// is from preview, and no owner it could be given would change the answer.
 	if site.SystemOwned {
-		return minted{}, refuse("This deployable is the surface the cluster is managed through, so it cannot have access codes. Add them to one of your own deployables.")
+		return mintRequest{}, refuse("This deployable is the surface the cluster is managed through, so it cannot have access codes. Add them to one of your own deployables.")
 	}
 	if site.OwnerUserID == "" {
-		return minted{}, refuse("This deployable has no owner, so it cannot have access codes. Give it an owner, then add the code.")
+		return mintRequest{}, refuse("This deployable has no owner, so it cannot have access codes. Give it an owner, then add the code.")
 	}
 	// A TEST PERSONA CAN ONLY MINT WHAT IS ITS OWN. The row is stamped with the site's
 	// owner by running as them, and a persona may not borrow anybody else
@@ -249,66 +402,45 @@ func (i *Integration) mint(ctx context.Context, actor, siteID string, args map[s
 	// and the sentence for that says to try again. The acts on a code that exists do not
 	// borrow anybody, so this one is all a persona loses against the role it stands in for.
 	if auth.IsRoleTestContext(ctx) && actor != site.OwnerUserID {
-		return minted{}, refuse("A test persona can only add an access code to a deployable it owns, because the code belongs to the deployable's owner. Add it as yourself.")
+		return mintRequest{}, refuse("A test persona can only add an access code to a deployable it owns, because the code belongs to the deployable's owner. Add it as yourself.")
 	}
 	if site.DeployableName == "" {
-		return minted{}, refuse("This deployable was not deployed from a package, so it has no gates for a code to open. Deploy it from a source that declares a gate with @accessGate, then add the code.")
+		return mintRequest{}, refuse("This deployable was not deployed from a package, so it has no gates for a code to open. Deploy it from a source that declares a gate with @accessGate, then add the code.")
 	}
 	gates, err := i.gatesOf(ctx, site)
 	if err != nil {
-		return minted{}, err
+		return mintRequest{}, err
 	}
 	if len(gates) == 0 {
-		return minted{}, refuse("This deployable declares no gates yet, or has not been deployed since access codes were added. Declare a gate with @accessGate and deploy it, then add the code.")
+		return mintRequest{}, refuse("This deployable declares no gates yet, or has not been deployed since access codes were added. Declare a gate with @accessGate and deploy it, then add the code.")
 	}
 	gate := strings.TrimSpace(asString(args["gate"]))
 	if !declaresGate(gates, gate) {
-		return minted{}, refuse("Choose a gate this deployable declares: %s.", gateNames(gates))
+		return mintRequest{}, refuse("Choose a gate this deployable declares: %s.", gateNames(gates))
 	}
 	label := strings.TrimSpace(asString(args["label"]))
 	if label == "" {
-		return minted{}, refuse("Enter a name for the access code.")
+		return mintRequest{}, refuse("Enter a name for the access code.")
 	}
 	if utf8.RuneCountInString(label) > maxLabelLength {
-		return minted{}, refuse("Shorten the name to %d characters or fewer.", maxLabelLength)
+		return mintRequest{}, refuse("Shorten the name to %d characters or fewer.", maxLabelLength)
 	}
 	subject := strings.TrimSpace(asString(args["subject"]))
 	if utf8.RuneCountInString(subject) > maxSubjectLength {
-		return minted{}, refuse("Shorten the subject to %d characters or fewer.", maxSubjectLength)
+		return mintRequest{}, refuse("Shorten the subject to %d characters or fewer.", maxSubjectLength)
 	}
 	expiresAt, given, err := expiryArgument(args)
 	if err != nil {
-		return minted{}, err
+		return mintRequest{}, err
 	}
 	if !given {
-		return minted{}, refuse("Choose when the access code should expire.")
+		return mintRequest{}, refuse("Choose when the access code should expire.")
 	}
 	now := time.Now().UTC()
 	if err := checkExpiry(now, expiresAt); err != nil {
-		return minted{}, err
+		return mintRequest{}, err
 	}
-
-	code, digest, hint, err := memql.MintAccessCode()
-	if err != nil {
-		return minted{}, err
-	}
-	row := newCode{
-		ID:        id.NewShortId(),
-		SiteID:    site.ID,
-		AccountID: site.AccountID,
-		Label:     label,
-		Gate:      gate,
-		Subject:   subject,
-		Digest:    digest,
-		Hint:      hint,
-		ChangedBy: actor,
-		IssuedAt:  now,
-		ExpiresAt: expiresAt,
-	}
-	if err := i.store.createCode(ctx, site.OwnerUserID, row, site.Version); err != nil {
-		return minted{}, err
-	}
-	return minted{CodeID: row.ID, Code: code, SiteID: site.ID, Gate: gate, Generation: 1, ExpiresAt: expiresAt}, nil
+	return mintRequest{site: site, gate: gate, label: label, subject: subject, issuedAt: now, expiresAt: expiresAt}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -392,7 +524,7 @@ func refuseIfEnded(t target) error {
 // is wanted is a person's decision to make with the list in front of them. A loss to
 // anything else (a re-timing, say) changes nothing this act decides from, and it retries.
 func (i *Integration) handleRegenerate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := refuseInARun(ctx, "Regenerate it there."); err != nil {
+	if err := refuseInARun(ctx, codeInARun+" Regenerate it there."); err != nil {
 		return nil, err
 	}
 	actor, err := requireCaller(ctx)
@@ -430,6 +562,12 @@ func (i *Integration) regenerate(ctx context.Context, actor, codeID string, args
 	t, err := i.readTarget(ctx, codeID)
 	if err != nil {
 		return minted{}, err
+	}
+	// A GUEST PASS HAS NO SECRET TO REPLACE, and that is said before refuseIfEnded's
+	// reasons because it is the one no later act can change: no state of a pass gives it
+	// a code. It is asked before any secret is minted.
+	if t.code.Guest {
+		return minted{}, refuse("Guest access has no code to regenerate. Change when it ends, or turn it off.")
 	}
 	if err := refuseIfEnded(t); err != nil {
 		return minted{}, err
@@ -690,6 +828,9 @@ func (i *Integration) handleList(ctx context.Context, args map[string]any, _ int
 // listRow is one row of the list. An absent field is absent rather than empty, which is
 // how `lastOpenedAt` says nobody has opened the code. The ids are bare, because a builtin's
 // reply is what a client reads directly.
+//
+// A GUEST PASS SAYS SO, as `guest: true`, and a code says nothing, which is how a code's
+// row read before guest passes existed. The OS keeps the pass out of the codes it lists.
 func listRow(code codeView, lastOpenedAt string) map[string]any {
 	row := map[string]any{
 		"id":         code.ID,
@@ -701,6 +842,9 @@ func listRow(code codeView, lastOpenedAt string) map[string]any {
 		"issuedAt":   code.IssuedAt,
 		"expiresAt":  code.ExpiresOn,
 		"createdAt":  code.Version.Format(time.RFC3339Nano),
+	}
+	if code.Guest {
+		row["guest"] = true
 	}
 	for key, value := range map[string]string{
 		"accountId":    code.AccountID,
@@ -898,13 +1042,21 @@ func gateNames(gates []memql.AccessGateSummary) string {
 }
 
 // refuseInARun is what a mint or a regenerate says inside a run: see the file note. It is
-// asked first, before anything is read or minted, and `instead` says what to do about it.
-func refuseInARun(ctx context.Context, instead string) error {
+// asked first, before anything is read or minted, and `sentence` says why and what to do.
+func refuseInARun(ctx context.Context, sentence string) error {
 	if _, inRun := common.RunFromContext(ctx); inRun {
-		return refuse("An access code is minted only by a person in Deployables, because a run's journal would keep it. %s", instead)
+		return refuse("%s", sentence)
 	}
 	return nil
 }
+
+// The two reasons a run is refused. A code's is the journal, which would keep the code,
+// and the act it comes from adds what to do. A guest pass has no code, and its reason is
+// that letting anybody in is an operator's decision.
+const (
+	codeInARun   = "An access code is minted only by a person in Deployables, because a run's journal would keep it."
+	guestsInARun = "Guests are let in only by a person in Deployables, because opening a deployable to anyone is an operator's decision and never a run's. Allow guests there."
+)
 
 // requireCaller is the person behind an act, bare, for `lastChangedBy`.
 //

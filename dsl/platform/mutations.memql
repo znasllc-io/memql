@@ -1206,6 +1206,11 @@ mutation sitePreviewObservation recordSitePreviewObservation {
 /// organization gate can decide an act on the code without reading the site again. `generation` is
 /// stamped 1, because a minted code is the first generation of itself and only rotateSiteAccessCode
 /// moves it.
+///
+/// `guest` IS AN ARGUMENT, and only the guest pass's mint (siteAccessGuestPassCreate) passes it, as
+/// `true`. That row's codeHash is its site's guest digest and its codeHint is empty, since there is no
+/// code to tell apart. A code's mint leaves it out, so a code reads as one. No update accepts it, so a
+/// code never becomes a pass and a pass never a code.
 @actor
 @serverOnly
 mutation siteAccessCode createSiteAccessCode {
@@ -1221,9 +1226,10 @@ mutation siteAccessCode createSiteAccessCode {
     issuedAt       datetime!
     expiresAt      datetime!
     lastChangedBy  string!
+    guest          bool
   }
   insert {
-    accept { siteId, accountId, label, gate, subject, codeHash, codeHint, issuedAt, expiresAt, lastChangedBy }
+    accept { siteId, accountId, label, gate, subject, codeHash, codeHint, issuedAt, expiresAt, lastChangedBy, guest }
     stamp {
       id:           args.codeId
       ownerUserId:  actor.userId

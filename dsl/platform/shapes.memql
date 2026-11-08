@@ -454,6 +454,10 @@ shape sitePreviewObservation sitePreviewObservationFull {
 /// code was last opened is the newest session of its current generation, which the list handler adds
 /// to each row as `lastOpenedAt` (siteAccessSessionLatestForCode) -- a fact about the sessions, not a
 /// field of this projection.
+///
+/// `guest` IS PRESENT because a guest pass is a code's row that must not be taken for a code: the list
+/// marks it, regenerate refuses it, and a reader of a site's guest digest keeps only the rows that
+/// carry it. Empty on every code, which reads as false.
 @row
 shape siteAccessCode siteAccessCodeView {
   row.id
@@ -467,6 +471,7 @@ shape siteAccessCode siteAccessCodeView {
   issuedAt
   expiresAt
   revokedAt
+  guest
   row.createdAt
 }
 
