@@ -90,18 +90,32 @@ export function AccessCodesPanel({ site, onBusyChange }: {
     const back = opener.current?.isConnected ? opener.current : named ?? root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
     back?.focus();
   }, [refocus]);
-  // A NEW GUEST PASS TAKES FOCUS WHEN ITS ROW ARRIVES: the form is gone, and the row comes with the re-read.
+  // A NEW GUEST PASS TAKES FOCUS WHEN THE RE-READ AFTER ITS CREATE SETTLES: the form is gone by then, and
+  // the row comes with that read. ARMED WHEN THE WRITE STARTS (`onWriting`), because the re-read can
+  // begin before the write's answer is handled, and DISARMED when that read settles, whether or not the
+  // pass came in, so a pass that arrives with any later read cannot pull focus. A pass that opens nothing
+  // has no Change end date, and the last resort is the panel, as everywhere here.
   const focusPass = useRef(false);
+  const sawRead = useRef(false);
+  const codesState = access.codes.state;
   const passId = access.guestPass?.id;
   useEffect(() => {
-    if (!focusPass.current || passId === undefined) return;
-    // Spent whatever is found, so it can never act on a later arrival. A pass that opens nothing has
-    // no Change end date, and the part's last resort is the panel, as everywhere here.
+    if (!focusPass.current) return;
+    if (codesState === "reading") {
+      sawRead.current = true;
+      return;
+    }
+    if (!sawRead.current || codesState === "unread" || adding !== null) return;
     focusPass.current = false;
+    sawRead.current = false;
     const part = root.current?.querySelector<HTMLElement>(".access-guest");
-    const target = part?.querySelector<HTMLElement>('button[aria-label="Change end date"]') ?? part?.querySelector<HTMLElement>('button[aria-label="Turn off"]') ?? root.current;
+    const target =
+      part?.querySelector<HTMLElement>('button[aria-label="Change end date"]') ??
+      part?.querySelector<HTMLElement>('button[aria-label="Turn off"]') ??
+      root.current?.querySelector<HTMLElement>(".os-add-button") ??
+      root.current;
     target?.focus();
-  }, [passId]);
+  }, [codesState, passId, adding]);
   const returnFocus = (): void => setRefocus((n) => n + 1);
 
   const askFor = (event: MouseEvent<HTMLElement>, codeId: string, act: RowAct): void => {
@@ -285,14 +299,17 @@ export function AccessCodesPanel({ site, onBusyChange }: {
             setAdding(null);
             returnFocus();
           }}
+          onWriting={(writing) => {
+            focusPass.current = writing;
+            sawRead.current = false;
+          }}
           onCreated={(outcome) => {
             setAdding(null);
             if (adding === "guest") {
               opener.current = null;
               backTo.current = null;
               // Created: the new row takes focus when it arrives. Not known: the list is what to look at.
-              if (outcome === "done") focusPass.current = true;
-              else returnFocus();
+              if (outcome !== "done") returnFocus();
               return;
             }
             // A new code takes focus for itself. Without one, nothing else will.
@@ -678,6 +695,7 @@ function AddCodeForm({
   access,
   onCancel,
   onCreated,
+  onWriting,
 }: {
   /** A code's form, or the same form for the guest pass: without the code, and said in its own words. */
   mode: "code" | "guest";
@@ -687,6 +705,8 @@ function AddCodeForm({
   access: AccessCodes;
   onCancel: () => void;
   onCreated: (outcome: WriteOutcome) => void;
+  /** The guest pass's write started (true), or did not land (false). */
+  onWriting: (writing: boolean) => void;
 }) {
   const guest = mode === "guest";
   const [name, setName] = useState(guest ? "Guests" : "");
@@ -714,9 +734,11 @@ function AddCodeForm({
     // From the press: a form left open must not shorten the code it makes.
     const expiresAt = expiryFromDraft(draft, Date.now());
     if (!complete || expiresAt === null) return;
+    if (guest) onWriting(true);
     const outcome = await (guest
       ? access.allowGuests({ label: name, gate, subject: usesSubject ? subject : "", expiresAt })
       : access.create({ label: name, gate, subject: usesSubject ? subject : "", expiresAt }));
+    if (guest && outcome !== "done") onWriting(false);
     if (outcome === "refused") return;
     answered.current = true;
     onCreated(outcome);

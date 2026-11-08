@@ -1629,22 +1629,62 @@ describe("guest access", () => {
     await waitFor(() => expect(document.activeElement).toBe(change));
   });
 
-  it("a pass that re-reads as opening nothing leaves focus on a control in the panel, and a later read does not move it", async () => {
+  const STALE_SITE = siteRow({ id: "site-desk", hostname: "desk.memql.example.com", packageId: "pkg-desk", packageDeployableName: "client-desk", accountId: "acme" } as never);
+  const inGuestPart = (): boolean => document.activeElement?.closest(".access-guest") != null;
+
+  it("a pass that re-reads as opening nothing leaves focus on a control in the panel", async () => {
     // The pass the fake writes copies no organization, so against this site it is the stale one.
-    const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [] }, { site: siteRow({ id: "site-desk", hostname: "desk.memql.example.com", packageId: "pkg-desk", packageDeployableName: "client-desk", accountId: "acme" } as never) });
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [] }, { site: STALE_SITE });
     await click(await screen.findByRole("button", { name: "Allow guests" }));
     await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
     const off = await screen.findByRole("button", { name: "Turn off" });
     expect(screen.queryByRole("button", { name: "Change end date" })).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(off));
-    // A later write re-reads, and the pass's id arriving again must not pull focus back.
-    const add = screen.getByRole("button", { name: "Add an access code" });
-    add.focus();
-    await click(add);
+  });
+
+  it("a second guest pass arriving with a later read does not pull focus to the guest row", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [] };
+    mountPanel(seed);
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    const change = await screen.findByRole("button", { name: "Change end date" });
+    await waitFor(() => expect(document.activeElement).toBe(change));
+    // Turn the first pass off, then a different pass appears on the next read, while focus is on Add.
+    const part = await guestPart();
+    await click(within(part).getByRole("button", { name: "Turn off" }));
+    await readTheBar();
+    await click(within(part).getByRole("button", { name: "Turn off guest access" }));
+    await within(part).findByText("Off. Only someone with a code can open it.");
+    seed.accessCodes!.push(guestPass({ id: "pass-other", label: "Other guests" }));
+    await click(await addControl());
     await typeInto(screen.getByLabelText("Name") as HTMLInputElement, "Later");
     await click(screen.getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(connection.callsNamed("siteAccessCodeCreate")).toHaveLength(1));
     await screen.findByText(/only time it is shown/);
-    expect(document.activeElement).not.toBe(screen.queryByRole("button", { name: "Turn off" }));
+    await within(await guestPart()).findByText("Other guests");
+    expect(inGuestPart()).toBe(false);
+  });
+
+  it("a create whose re-read brings no pass in leaves no pending focus for a later arrival", async () => {
+    const seed: FakeSeed = { accessGates: [DASHBOARD], accessCodes: [] };
+    const connection = fakeConnection(seed);
+    // The write lands, and the read that follows does not show it.
+    const real = connection.query.executeNamed.bind(connection.query);
+    connection.query.executeNamed = (async (name: string, call: string, opts?: object) => {
+      const answer = await real(name, call, opts);
+      if (name === "siteAccessGuestPassCreate") seed.accessCodes = (seed.accessCodes ?? []).filter((row) => row["guest"] !== true);
+      return answer;
+    }) as typeof connection.query.executeNamed;
+    mountPanel(seed, { connection });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    await waitFor(() => expect(connection.callsNamed("siteAccessGuestPassCreate")).toHaveLength(1));
+    await within(await guestPart()).findByText("Off. Only someone with a code can open it.");
+    seed.accessCodes!.push(guestPass({ id: "pass-late" }));
+    await click(await addControl());
+    await typeInto(screen.getByLabelText("Name") as HTMLInputElement, "Later");
+    await click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText(/only time it is shown/);
+    await within(await guestPart()).findByText("Ends in 12 days");
+    expect(inGuestPart()).toBe(false);
   });
 });
