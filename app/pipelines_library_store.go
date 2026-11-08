@@ -99,8 +99,10 @@ type pipelinesLibraryStore struct {
 	// Zero takes the Library's own, read at each call:
 	// server.LibraryMaxUploadBytes() and server.LibraryUserQuotaBytes().
 	maxBytes, quotaBytes int64
-	// Short transactions fence streaming uploads across replicas. No session
-	// advisory lock survives outside a transaction, so PgBouncer is supported.
+	// The gate pool carries journal transactions that fence uploads across
+	// replicas. Their independent engine/quota work needs the request pool;
+	// taking these locks there can fill it with waiters and starve the holder.
+	// No session lock survives outside a transaction, so PgBouncer is supported.
 	uploadDB func() *sql.DB
 }
 
@@ -135,12 +137,7 @@ func (a *App) pipelinesLibraryStoreFor(uploader server.FileUploader, bucket stri
 	if a.engine != nil {
 		store.notifyRetired = a.notifyRetiredPipelineFile
 	}
-	store.uploadDB = func() *sql.DB {
-		if db := a.BunDB(); db != nil {
-			return db.DB
-		}
-		return nil
-	}
+	store.uploadDB = a.gateDBGetter()
 	return store
 }
 

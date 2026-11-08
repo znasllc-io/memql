@@ -51,6 +51,22 @@ writing through the engine; another replica does not depend on process-local
 state or a cached Library read. These transaction-scoped locks work through
 transaction-mode pooling.
 
+Journal transactions use the dedicated coordination pool. Waiting uploads must
+not occupy the ordinary request connections that an active finalizer needs for
+its engine reads and writes. Synchronous nested quota and engine gates borrow
+the journal transaction on that same coordination pool; only the outer operation
+commits or rolls it back. The borrowed context never reaches the later blob
+transfer or a parallel upload, and using it after the transaction ends fails
+closed. A missing coordination pool refuses storage instead of falling back to
+the request pool. The existing 30-second owner-lock wait and Library phase
+deadline still apply; neither is extended to hide contention.
+
+`TestPipelineArtifactGatePoolSupportsNestedQuotaAndEngineWork` and
+`TestPipelineArtifactGatePoolConcurrentOwnersKeepRequestConnectionAvailable`
+exercise the App wiring with real PostgreSQL and one connection per pool,
+including concurrent uploads for the same and different owners. The quota test
+also rejects a stale borrowed transaction after its owner commits.
+
 The object adapter streams blocks, checks exact length and digest, commits with
 a create-only condition, and hashes the stored bytes under an ETag condition.
 The maximum is the smaller of the Library file limit and the verified adapter's

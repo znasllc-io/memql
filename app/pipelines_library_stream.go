@@ -18,6 +18,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/core/gatecontext"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
@@ -124,6 +125,10 @@ func (s *pipelinesLibraryStore) finalizeStream(ctx context.Context, db *sql.DB, 
 	if err := lockPipelineUploadOwner(ctx, tx, intent.Identity.OwnerUserID); err != nil {
 		return err
 	}
+	// Independent engine SQL still uses the request pool. Any synchronous
+	// nested gate borrows this transaction instead of waiting for another
+	// connection from the gate pool this finalizer already holds.
+	ctx = gatecontext.WithTransaction(ctx, db, tx)
 	current, err := readPipelineIntent(ctx, tx, intent.ID)
 	if err != nil {
 		return err
