@@ -705,6 +705,32 @@ func TestALongListIsCutByNameAndSaysSo(t *testing.T) {
 	}
 }
 
+// THE LIST READS BY WHAT PEOPLE ARE CALLED: their name, else their address --
+// what the admin panel shows for each -- whatever its case, then by id. A
+// person with no name sorts by their address among the named, not ahead of
+// them all, and two people called the same keep one order between reads.
+func TestTheListReadsByWhatPeopleAreCalled(t *testing.T) {
+	roster := shopRoster()
+	held := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	add := func(id, name, email string) {
+		roster.members["group-shop"] = append(roster.members["group-shop"], rosterMember("group-shop", id, "added", "active"))
+		row := rosterUser(id, name, "user", true)
+		row["primaryEmail"] = email
+		roster.users[id], roster.holds[id] = row, held
+	}
+	add("nell-1", "", "nell@example.com")
+	// Called the same but for case, with addresses that order against their ids.
+	add("dana-2", "dana", "a@example.com")
+	add("dana-1", "Dana", "z@example.com")
+	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,dana-1,dana-2,nell-1,mod-1" {
+		t.Fatalf("people = %s, want owner-1,dana-1,dana-2,nell-1,mod-1: by name, else address, in any case, then by id", got)
+	}
+}
+
 // A STORE WHOSE SITE BELONGS TO NO ORGANIZATION HAS NOBODY TO MODERATE IT, and
 // its people are never looked for.
 func TestReviewsPeopleOfAStoreInNoOrganizationIsNobody(t *testing.T) {

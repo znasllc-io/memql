@@ -308,9 +308,9 @@ const peopleActor = "reviews-people"
 
 // maxPeople bounds how many of the people who can moderate a store are listed:
 // the bound integrations/groups/people.go puts on its roster, put here on the
-// LIST, once every member has been judged and the list sorted by name
-// (moderatorsIn) -- never on the members before, where it kept the first ids
-// whoever they were. reviewsPeople says when it cut (truncated).
+// LIST, once every member has been judged and the list sorted by what each is
+// called (moderatorsIn) -- never on the members before, where it kept the
+// first ids whoever they were. reviewsPeople says when it cut (truncated).
 const maxPeople = 100
 
 // Moderator is one person who can moderate a store's reviews. Nothing else of
@@ -321,6 +321,15 @@ type Moderator struct {
 	Email       string `json:"email"`
 	// MayRemove: they are the store's removal approver (isRemovalApprover).
 	MayRemove bool `json:"mayRemove"`
+}
+
+// called is what a person is called on a list: their name, else their address,
+// as the admin panel names them (personCalled).
+func (m Moderator) called() string {
+	if m.DisplayName != "" {
+		return m.DisplayName
+	}
+	return m.Email
 }
 
 // organizationDecisions is what the engine answers about a NAMED person in
@@ -345,11 +354,12 @@ func (p *Provider) organizationResolver() (organizationDecisions, error) {
 }
 
 // people answers reviewsPeople: the people who can moderate one store's
-// reviews, each saying whether they are its removal approver, by name and at
-// most maxPeople of them (moderatorsIn). The v1:reviews:people receipt always
-// carries truncated: true when more people can moderate the store than are
-// listed, so a client never takes a cut list for everyone. A person left off
-// can still be named approver; the write asks about them directly.
+// reviews, each saying whether they are its removal approver, by what each is
+// called and at most maxPeople of them (moderatorsIn). The v1:reviews:people
+// receipt always carries truncated: true when more people can moderate the
+// store than are listed, so a client never takes a cut list for everyone. A
+// person left off can still be named approver; the write asks about them
+// directly.
 func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	storeID := strings.TrimSpace(asString(args["storeId"]))
 	if storeID == "" {
@@ -395,9 +405,14 @@ func storeOrganization(settings map[string]any, siteAccount string) string {
 }
 
 // moderatorsIn answers the people who can moderate a store's reviews in its
-// organization, by name: every active member of any of the organization's
-// groups on whom canModerate's verdict is yes, at most maxPeople of them, and
-// whether there were more (truncated). A store of no organization has nobody.
+// organization: every active member of any of the organization's groups on
+// whom canModerate's verdict is yes, at most maxPeople of them, and whether
+// there were more (truncated). A store of no organization has nobody.
+//
+// BY WHAT THEY ARE CALLED: their name, else their address (called), whatever
+// its case, then by id. A key that put the name before the address sorted
+// everybody with no name ahead of everybody with one, and broke a tie between
+// two people called the same on their addresses.
 //
 // THE LIST IS CUT, NOT THE ORGANIZATION. Every member is judged, and only the
 // list of those who can moderate is sorted and cut, so the people kept are the
@@ -447,7 +462,7 @@ func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderato
 		return nil, false, fmt.Errorf("reviews: a read behind who can moderate this store failed, so it cannot be answered: %w", err)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		a, b := strings.ToLower(out[i].DisplayName+" "+out[i].Email), strings.ToLower(out[j].DisplayName+" "+out[j].Email)
+		a, b := strings.ToLower(out[i].called()), strings.ToLower(out[j].called())
 		if a != b {
 			return a < b
 		}

@@ -171,7 +171,7 @@ builtin reviewsSettings {
 @requiresCapability("execute", "app:deployables/reviews")
 @executor("integration.reviews.people")
 @args(profile="object")
-@description("The people who can moderate one store's reviews, the people its removal approver is chosen from: every active member of the store's organization, in any of its groups, whom the engine answers able to moderate there -- the organization's data, its Deployables and the reviews part -- and never one of the cluster's operators or a role test's stand-in. Each is {userId, displayName, email, mayRemove}, mayRemove saying they are the store's removal approver. Listed by name, at most 100 of them; truncated is true when more can moderate the store than are listed. A store of no organization has nobody.")
+@description("The people who can moderate one store's reviews, the people its removal approver is chosen from: every active member of the store's organization, in any of its groups, whom the engine answers able to moderate there -- the organization's data, its Deployables and the reviews part -- and never one of the cluster's operators or a role test's stand-in. Each is {userId, displayName, email, mayRemove}, mayRemove saying they are the store's removal approver. Listed by what each is called -- their name, else their address -- at most 100 of them; truncated is true when more can moderate the store than are listed. A store of no organization has nobody.")
 builtin reviewsPeople {
   storeId  string  @required  @description("The store whose moderators to list.")
   siteId   string  @required  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
