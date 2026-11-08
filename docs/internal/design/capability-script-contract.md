@@ -120,14 +120,19 @@ the executor can drive it and record its result without scraping human prose.
      The refusal is also written to stderr, the one stream a substitution
      does not capture.
    - **A Makefile forwards a boolean variable's VALUE**, as
-     `$${PURGE:+--purge="$${PURGE}"}`. A bare `$${PURGE:+--purge}` turned
-     `make down PURGE=0` into `--purge`.
+     `$${PURGE:+--purge="$${PURGE}"}`, in every recipe that runs one of this
+     repo's scripts. A bare `$${PURGE:+--purge}` turned `make down PURGE=0`
+     into `--purge`, and `make release ALLOW_OVERWRITE=0` into permission to
+     overwrite a write-once release tag. A script that parses its own flags
+     (`scripts/release/release.sh`, `tag-submodules.sh`) reads the value with
+     `scripts/lib/bool_flag.sh`, which `TestBoolFlagAgreesWithCapBool` holds
+     to `cap_bool`'s answers, value for value.
 
    `TestCapabilityScriptsReadBooleansWithCapBool` enforces the first three
    (rules in `booleanReadFindings`, each with a fixture in
    `TestBooleanReadFindingsCatchEachShape`), and
-   `TestCapabilityRecipesForwardBooleanValues` the fourth. The library holds
-   itself to the same rule: `--params-stdin=false` reads no stdin.
+   `TestRecipesForwardBooleanValues` the fourth. The library holds itself to
+   the same rule: `--params-stdin=false` reads no stdin.
 
 5. **Structured result out.** On **stdout**, the script emits **exactly one**
    JSON envelope (its result) and **nothing else**. All human-readable logging
@@ -400,9 +405,8 @@ source `capability.sh`):
   (`TestCapabilityScriptsReadBooleansWithCapBool`); a refused `cap_bool_str`
   names the flag and value on stderr, and `--params-stdin=false` reads no
   stdin (`TestCapBoolStrRefusalNamesTheValue`, `TestCapParamsStdinIsABoolean`);
-- a Makefile recipe forwards a boolean variable's value to a capability
-  script, never a bare flag (`scripts/make`,
-  `TestCapabilityRecipesForwardBooleanValues`).
+- a Makefile recipe forwards a boolean variable's value to a script, never a
+  bare flag (`scripts/make`, `TestRecipesForwardBooleanValues`).
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt

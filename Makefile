@@ -286,9 +286,11 @@ up-refresh:
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
 		$${SWITCH:+--switch="$${SWITCH}"}
 
-# A boolean variable forwards its VALUE (--purge="$${PURGE}"), never a bare
-# --purge: the script reads it with cap_bool, and only the value can say false,
-# so PURGE=0 keeps the context. scripts/make/boolean_forwarding_test.go.
+# Every recipe forwards a boolean variable's VALUE (--purge="$${PURGE}"), never
+# a bare --purge: only the value can say false, so PURGE=0 keeps the context
+# and `make release ALLOW_OVERWRITE=0` keeps a release tag write-once. The
+# script interprets it, with cap_bool or scripts/lib/bool_flag.sh.
+# scripts/make/boolean_forwarding_test.go.
 
 ## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.
@@ -916,10 +918,10 @@ release:
 		$${VERSION:+--version=$$VERSION} \
 		$${REGISTRY:+--registry=$$REGISTRY} \
 		$${ACR:+--acr=$$ACR} \
-		$${PUSH:+--push} \
+		$${PUSH:+--push="$${PUSH}"} \
 		$${CONFIRM:+--confirm=$$CONFIRM} \
-		$${ALLOW_OVERWRITE:+--allow-overwrite} \
-		$${DRY_RUN:+--dry-run} \
+		$${ALLOW_OVERWRITE:+--allow-overwrite="$${ALLOW_OVERWRITE}"} \
+		$${DRY_RUN:+--dry-run="$${DRY_RUN}"} \
 		$(ARGS)
 
 ## Cut the Go module tags for the nested modules (memql#3245).
@@ -935,8 +937,8 @@ tag-submodules:
 		$${VERSION:+--version=$$VERSION} \
 		$${LINE:+--line=$$LINE} \
 		$${COMMIT:+--commit=$$COMMIT} \
-		$${NO_PUSH:+--no-push} \
-		$${DRY_RUN:+--dry-run} \
+		$${NO_PUSH:+--no-push="$${NO_PUSH}"} \
+		$${DRY_RUN:+--dry-run="$${DRY_RUN}"} \
 		$(ARGS)
 
 # The per-node `docker-*` targets (docker / docker-bff / docker-agent /
