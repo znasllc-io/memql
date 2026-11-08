@@ -11,7 +11,7 @@ import (
 // Compile a reviewable rule through the shipped local-only compiler prompt.
 // Its result takes the same validation and revision path as the fields editor.
 func (e *MemQLEngine) routingRuleDescribeBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if _, err := configurationAuthor(ctx); err != nil {
+	if _, err := RoutingConfigurationAuthor(ctx); err != nil {
 		return nil, err
 	}
 	sentence := stringArg(args, "sentence")
