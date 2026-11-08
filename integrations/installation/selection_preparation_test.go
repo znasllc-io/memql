@@ -63,6 +63,7 @@ func TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnoth
 	require.False(t, view.CanCancel)
 	require.Empty(t, executor.requests)
 	require.Len(t, files.retired, 4)
+	require.Len(t, files.purged, 4, "cancellation removes every retired capture's Library entries")
 	next := scope
 	next.RequestID = "successor-request"
 	for role, spec := range next.Captures {

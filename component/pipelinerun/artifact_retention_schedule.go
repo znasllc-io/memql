@@ -17,25 +17,105 @@ import (
 
 type artifactRetentionScan struct {
 	owner, work, after, lease string
+	// installation: the producer is an installation preparation's source run,
+	// not a pipeline's work run (see claimArtifactRetentionScan).
+	installation bool
 }
 
+// claimArtifactRetentionScan leases the least recently visited producer that
+// still has work. Two kinds of producer share the upload journal. A pipeline
+// run's steps upload under its v1:work:run, and the pass below resolves that
+// run's window. An installation preparation's source captures and their step
+// logs upload under the preparation's own source run
+// (installation_preparations.source_run_id, matched with its operator), which
+// is no work run: no window can be resolved for it, and only the
+// preparation's cleanup recipe may fence and retire those files
+// (integrations/installation). Such a producer is claimed only while a file
+// that cleanup retired still has Library entries, which the pass removes.
+// Claiming it for live files was a pass that failed on every rotation, for
+// every preparation, forever (found on production 2026-11-08).
 func claimArtifactRetentionScan(ctx context.Context, db *sql.DB) (*artifactRetentionScan, error) {
 	s := &artifactRetentionScan{lease: id.NewShortId()}
 	err := db.QueryRowContext(ctx, `WITH next AS (
  SELECT owner_user_id,work_run_id FROM pipeline_artifact_retention_queue q
  WHERE lease_until<clock_timestamp() AND EXISTS (
   SELECT 1 FROM pipeline_artifact_uploads a WHERE a.owner_user_id=q.owner_user_id
-   AND a.identity->>'WorkRunID'=q.work_run_id AND (a.state<>'retired' OR a.library_purged_at IS NULL))
+   AND a.identity->>'WorkRunID'=q.work_run_id AND (a.state<>'retired' OR a.library_purged_at IS NULL)
+   AND (a.state='retired' OR NOT EXISTS (SELECT 1 FROM installation_preparations p
+    WHERE p.source_run_id=q.work_run_id AND p.requested_by=q.owner_user_id)))
  ORDER BY visited_at,owner_user_id,work_run_id FOR UPDATE SKIP LOCKED LIMIT 1
 )
 UPDATE pipeline_artifact_retention_queue q SET lease_id=$1,
  lease_until=clock_timestamp()+interval '5 minutes',visited_at=clock_timestamp()
 FROM next WHERE q.owner_user_id=next.owner_user_id AND q.work_run_id=next.work_run_id
-RETURNING q.owner_user_id,q.work_run_id,q.after_intent_id`, s.lease).Scan(&s.owner, &s.work, &s.after)
+RETURNING q.owner_user_id,q.work_run_id,q.after_intent_id,EXISTS (SELECT 1 FROM installation_preparations p
+ WHERE p.source_run_id=q.work_run_id AND p.requested_by=q.owner_user_id)`, s.lease).Scan(&s.owner, &s.work, &s.after, &s.installation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return s, err
+}
+
+// holdsArtifactRetentionLease is checked immediately before a page's
+// effects: the lease may be renewed only by a new pass after this bounded
+// context ends, so a pass that outlived its lease must not act.
+func holdsArtifactRetentionLease(ctx context.Context, db *sql.DB, scan *artifactRetentionScan) error {
+	var held bool
+	if err := db.QueryRowContext(ctx, `SELECT lease_id=$3 AND lease_until>clock_timestamp()
+FROM pipeline_artifact_retention_queue WHERE owner_user_id=$1 AND work_run_id=$2`, scan.owner, scan.work, scan.lease).Scan(&held); err != nil {
+		return err
+	}
+	if !held {
+		return errors.New("artifact cleanup lease was lost")
+	}
+	return nil
+}
+
+// purgeRetiredInstallationArtifacts is the whole pass for an installation
+// preparation's producer: one bounded page of files its own cleanup already
+// retired, whose Library entries still point at zero-byte tombstones. No
+// window applies, because the bytes are gone, and there is no pipeline policy
+// snapshot to consult. It never fences or retires (artifactRetentionScope
+// refuses both on such a page), and the Library store re-confirms each
+// permanent tombstone before deleting anything. It reads no work journal and
+// keeps no cursor: a removed file leaves the page's predicate, and an
+// unconfirmed removal stops the page, so the next pass, on any replica,
+// starts again from the journal. Preparations cancelled before their cleanup
+// removed Library entries itself are reached only this way.
+func (i *Integration) purgeRetiredInstallationArtifacts(ctx context.Context, d Deps, db *sql.DB, scan *artifactRetentionScan) (map[string]any, error) {
+	if d.ArtifactRetention.Library == nil {
+		return nil, errors.New("native pipeline artifact retention is unavailable")
+	}
+	// ctx carries the internal origin SweepArtifacts requires, and borrowing
+	// the owner's actor keeps it: the Library store needs both, and this pass
+	// adds no stamp of its own (internal_origin_test.go).
+	ownerCtx := memql.ContextWithFreshRead(auth.ContextWithUserActor(ctx, scan.owner))
+	items, more, err := readArtifactJournalPage(ownerCtx, db, scan.owner, scan.work, "", retiredAwaitingLibraryCleanup)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		// Read retired from the journal; PurgeRetiredRunFile still requires
+		// the confirmed tombstone and its lease before it removes anything.
+		item.Retired = true
+	}
+	result := ArtifactRetentionResult{WorkRunID: scan.work, Inspected: len(items), HasMore: more}
+	if len(items) > 0 {
+		result.AfterID = items[len(items)-1].ID
+	}
+	if err := holdsArtifactRetentionLease(ownerCtx, db, scan); err != nil {
+		return nil, err
+	}
+	scope := &artifactRetentionScope{library: d.ArtifactRetention.Library, items: items, result: result, retiredElsewhere: true}
+	if _, err := workflowhost.Run(ownerCtx, "purgeRetiredPipelineArtifacts", nil, workflowhost.Options{
+		Load: d.LoadWorkflow, Operations: scope.operations(), Logger: d.Logger,
+	}); err != nil {
+		return nil, err
+	}
+	if !scope.observed {
+		return nil, errors.New("artifact cleanup recipe did not report native outcomes")
+	}
+	return retentionResultMap(scope.result), nil
 }
 
 func (i *Integration) handleSweepArtifacts(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -81,6 +161,9 @@ WHERE owner_user_id=$1 AND work_run_id=$2 AND lease_id=$3`, scan.owner, scan.wor
 			d.Logger.Warn("pipeline artifact cleanup lease release failed", "error", e)
 		}
 	}()
+	if scan.installation {
+		return i.purgeRetiredInstallationArtifacts(ctx, d, db, scan)
+	}
 	ownerCtx := memql.ContextWithFreshRead(auth.ContextWithUserActor(ctx, scan.owner))
 	raw, err := d.ArtifactRetention.Engine.Execute(ownerCtx, "query workRunForOwner(runId: "+langparser.QuoteString(scan.work)+")")
 	if err != nil {
@@ -118,15 +201,8 @@ WHERE owner_user_id=$1 AND work_run_id=$2 AND lease_id=$3`, scan.owner, scan.wor
 				return nil, errors.New("cleanup requires one terminal producer page")
 			}
 			called = true
-			// The lease may be renewed only by a new pass after this bounded
-			// context ends; check its ownership immediately before effects.
-			var held bool
-			if err := db.QueryRowContext(callCtx, `SELECT lease_id=$3 AND lease_until>clock_timestamp()
-FROM pipeline_artifact_retention_queue WHERE owner_user_id=$1 AND work_run_id=$2`, scan.owner, scan.work, scan.lease).Scan(&held); err != nil {
+			if err := holdsArtifactRetentionLease(callCtx, db, scan); err != nil {
 				return nil, err
-			}
-			if !held {
-				return nil, errors.New("artifact cleanup lease was lost")
 			}
 			out, err := i.RetireArtifacts(callCtx, run.ID, scan.after, false)
 			if err != nil {

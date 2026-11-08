@@ -1387,6 +1387,18 @@ failure preserves the journal for retry; it cannot produce a successful cleanup
 receipt. Never delete these tombstones or break their leases with a storage
 lifecycle rule.
 
+An installation preparation's source captures and their step logs are stored in
+the same journal, under the preparation's own run rather than a pipeline run, so
+none of the windows above applies to them and the sweep never retires them. The
+preparation's cleanup does: cancelling a preparation fences each capture,
+releases its reference, retires every file and then removes its Library
+entries, and the cancellation is not finished until each removal is confirmed.
+A promoted preparation keeps its captures for its rollback. The sweep visits such
+a producer only while a file that cleanup retired still has Library entries,
+and removes only those entries, 32 a pass, after confirming each file's
+tombstone. That covers preparations cancelled before their cleanup removed the
+entries itself.
+
 `pipelinesRetireArtifacts(runId, afterId, dryRun)` applies the same safeguards to
 one owner-selected completed run. `dryRun: true` reads a page without changing
 anything; the page count is not a promise that every file will qualify. Continue

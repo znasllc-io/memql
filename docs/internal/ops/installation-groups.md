@@ -79,8 +79,14 @@ replica's recovery. That test does not claim live installation completion.
 An unfinished preparation can be cancelled by its original operator from
 **Cluster > Updates**. `releaseCancelInstallationPreparation` runs one bounded
 pass of the existing installed retirement workflow: stop the scoped producer,
-fence its artifact writes, release its references, and confirm retirement of
-the complete inventory before releasing the installation reservation. Use
+fence its artifact writes, release its references, confirm retirement of the
+complete inventory and remove each retired file's Library entries before
+releasing the installation reservation. A removal needs the journal's own
+retirement receipt for that file, and an unconfirmed one keeps its page, so a
+cancelled preparation leaves no Library entry pointing at a retired file.
+Preparations cancelled before that step kept those entries; the pipeline
+artifact sweep removes them, and it never retires a preparation's files
+([Retention](../../public/operate/pipelines-substrate.md#retention)). Use
 **Resume cancellation** when cleanup remains pending. An uncertain reply must
 be reconciled from the saved preparation; it cannot authorize another capture.
 The cleanup entry does not depend on optional release choices or GitHub reads.
@@ -90,6 +96,10 @@ cleanup. Once cleanup starts, its recipe is bound to the executing engine;
 an incompatible engine change refuses resumption rather than changing a
 partially completed cleanup. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
 covers interrupted cleanup, a fresh host, ownership and a successor reservation.
+`TestRetirementWorkflowInstalledPassPurgesRetiredCapturesOnFreshHost` covers a
+lost Library removal reply repeated on a fresh host, and
+`TestArtifactRetentionPurgesARetiredPreparationsCapturesAcrossReplicas` the
+sweep's removal for an earlier cancellation.
 
 A private product root remains supported. Rendering mints a fresh GitHub App
 token limited to that root repository and `contents: read`, through the same

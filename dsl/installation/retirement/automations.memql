@@ -1,5 +1,6 @@
 /// Reconcile a bounded page of each capture, preserving native progress for another pass.
 /// Every external operation retains its journal, actor and immutable scope gates.
+/// Each artifact is retired, then loses its Library entries; its page advances after both.
 @template
 automation installationRetirementWorkflow {
   builtin installationRetirementBegin()
@@ -11,6 +12,7 @@ automation installationRetirementWorkflow {
     pending := builtin installationRetirementPage(role: capture.key)
     for artifact in pending.items {
       builtin installationRetirementArtifact(role: capture.key, intentId: artifact.intentId)
+      builtin installationRetirementPurge(role: capture.key, intentId: artifact.intentId)
     }
     builtin installationRetirementPage(role: capture.key)
   }

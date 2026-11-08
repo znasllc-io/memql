@@ -105,15 +105,17 @@ func TestAutomationInstallationProbeContracts(t *testing.T) {
 			require.False(t, record.Refused)
 			expected := []string{"installationRetirementBegin", "installationRetirementStop", "installationRetirementRequirements"}
 			for range 2 {
-				expected = append(expected, "installationRetirementFence", "installationRetirementRelease", "installationRetirementPage", "installationRetirementArtifact", "installationRetirementPage")
+				expected = append(expected, "installationRetirementFence", "installationRetirementRelease", "installationRetirementPage", "installationRetirementArtifact", "installationRetirementPurge", "installationRetirementPage")
 			}
 			expected = append(expected, "installationRetirementObserve")
 			if ready {
 				expected = append(expected, "installationRetirementComplete")
 			}
 			require.Equal(t, expected, names(record))
-			for n, call := range selected(record, "installationRetirementArtifact") {
-				require.Equal(t, map[string]any{"role": []string{"candidate", "rollback"}[n], "intentId": "artifact-1"}, call.Args)
+			for _, name := range []string{"installationRetirementArtifact", "installationRetirementPurge"} {
+				for n, call := range selected(record, name) {
+					require.Equal(t, map[string]any{"role": []string{"candidate", "rollback"}[n], "intentId": "artifact-1"}, call.Args, name)
+				}
 			}
 		})
 	}

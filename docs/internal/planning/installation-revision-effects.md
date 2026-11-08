@@ -212,7 +212,8 @@ authorize an external caller or replace the native workflow host.
 
 Separate bounded operations stop the preparation-owned Workbench run, fence
 each capture's artifact scope, permanently release its exact source consumer,
-load one inventory page, and retire one inventoried artifact. The native gates
+load one inventory page, retire one inventoried artifact, and then remove that
+retired artifact's Library entries. The native gates
 enforce those prerequisites; the cleanup recipe owns ordering and iteration.
 A capture without a recorded receipt can still have unknown uploads, so both
 capture scopes must reach a confirmed empty inventory after retirement. Pinning
@@ -221,8 +222,10 @@ before a delayed verifier can acquire another pin.
 
 Each page holds at most 128 intent IDs and native retirement receipt digests.
 A replacement host recovers a pending page after a lost reply. Advancing its
-cursor requires every receipt, and an external error preserves the unconfirmed
-entry. Parallel callbacks on different connections preserve each other's
+cursor requires every retirement receipt and every confirmed Library removal,
+which itself requires that artifact's retirement receipt, and an external error
+preserves the unconfirmed entry. An intent behind the cursor is not read again,
+so a removal skipped there would leave an entry pointing at a retired file. Parallel callbacks on different connections preserve each other's
 receipts. Only confirmed producer stop and completion of both capture scopes
 release the installation slot as `cancelled`. A lost final reply returns that
 history without touching a successor's head. Migration rollback refuses to

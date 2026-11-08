@@ -1,0 +1,51 @@
+{
+  "automation": "pipelines/automations.memql purgeRetiredPipelineArtifacts",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.purgeRetiredPipelineArtifacts"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionItems"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.purgeRetiredPipelineArtifacts"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineRetentionItems"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

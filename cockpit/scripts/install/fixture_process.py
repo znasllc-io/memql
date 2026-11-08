@@ -1,9 +1,11 @@
 """Bound offline installer fixtures by the enclosing suite, including children."""
 
+import argparse
 import os
 import shlex
 import signal
 import subprocess
+import sys
 import time
 
 DEADLINE_ENV = "MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS"
@@ -98,3 +100,25 @@ class FixtureProcesses:
 
 
 SUITE_PROCESSES = FixtureProcesses.from_environment()
+
+
+def main(argv=None):
+    """Run a shell suite with the Python fixtures' deadline and tree cleanup."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--program", required=True)
+    parser.add_argument("--script", required=True)
+    args = parser.parse_args(argv)
+    try:
+        result = SUITE_PROCESSES.run([args.program, args.script])
+    except AssertionError as error:
+        # run() includes captured output after terminating the entire group,
+        # even when its leader exited before a pipe-holding descendant.
+        print(error, file=sys.stderr)
+        return 1
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -148,10 +148,23 @@ func retentionProducerStopped(ctx context.Context, engine Engine, owner string, 
 	return errors.New("artifact cleanup refuses a producer that is still active")
 }
 
+// The two pages a producer can need, as fixed journal predicates.
+const (
+	// awaitingRetention: not yet retired, or retired with Library entries left.
+	awaitingRetention = `(state<>'retired' OR library_purged_at IS NULL)`
+	// retiredAwaitingLibraryCleanup: retired by the producer's own lifecycle,
+	// with Library entries left; see purgeRetiredInstallationArtifacts.
+	retiredAwaitingLibraryCleanup = `state='retired' AND library_purged_at IS NULL`
+)
+
 func readArtifactRetentionPage(ctx context.Context, db *sql.DB, owner, work, after string) ([]*artifactRetentionItem, bool, error) {
+	return readArtifactJournalPage(ctx, db, owner, work, after, awaitingRetention)
+}
+
+func readArtifactJournalPage(ctx context.Context, db *sql.DB, owner, work, after, predicate string) ([]*artifactRetentionItem, bool, error) {
 	rows, err := db.QueryContext(ctx, `SELECT intent_id,identity,size_bytes FROM pipeline_artifact_uploads
 WHERE owner_user_id=$1 AND identity->>'WorkRunID'=$2 AND intent_id COLLATE "C">$3
- AND (state<>'retired' OR library_purged_at IS NULL)
+ AND `+predicate+`
 ORDER BY intent_id COLLATE "C" LIMIT $4`, owner, work, after, artifactRetentionPageSize+1)
 	if err != nil {
 		return nil, false, err
@@ -187,6 +200,11 @@ type artifactRetentionScope struct {
 	items    []*artifactRetentionItem
 	result   ArtifactRetentionResult
 	observed bool
+	// retiredElsewhere: every item was retired by its producer's own
+	// lifecycle (an installation preparation's cleanup), so fencing and
+	// retiring are that lifecycle's decisions and this page refuses both. It
+	// only removes Library entries, and reports no retired files or bytes.
+	retiredElsewhere bool
 }
 
 func (s *artifactRetentionScope) item(args map[string]any) (*artifactRetentionItem, error) {
@@ -221,6 +239,9 @@ func (s *artifactRetentionScope) operations() map[string]workflowhost.Operation 
 			if s.result.DryRun {
 				return nil, errors.New("preview cannot fence a producer")
 			}
+			if s.retiredElsewhere {
+				return nil, errors.New("a producer outside a pipeline run is fenced by its own lifecycle")
+			}
 			if err := s.library.FenceRunFileScope(ctx, item.Scope); err != nil {
 				return nil, err
 			}
@@ -232,7 +253,7 @@ func (s *artifactRetentionScope) operations() map[string]workflowhost.Operation 
 			if err != nil {
 				return nil, err
 			}
-			if s.result.DryRun || !item.Fenced {
+			if s.result.DryRun || !item.Fenced || s.retiredElsewhere {
 				return nil, errors.New("retirement requires its producer fence")
 			}
 			_, err = s.library.RetireRunFile(ctx, item.Scope, item.ID)
@@ -276,9 +297,11 @@ func (s *artifactRetentionScope) operations() map[string]workflowhost.Operation 
 					if !item.Retired || !item.Purged {
 						return nil, errors.New("cleanup page has unconfirmed outcomes")
 					}
-					out.Retired++
 					out.Purged++
-					out.Bytes += item.Bytes
+					if !s.retiredElsewhere { // Those bytes were freed by their own lifecycle.
+						out.Retired++
+						out.Bytes += item.Bytes
+					}
 				}
 			}
 			s.result = out
