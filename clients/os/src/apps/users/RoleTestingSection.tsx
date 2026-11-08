@@ -3,41 +3,32 @@ import { deliverRoleTest, IdentityAdminClient } from "@znasllc-io/memql-sdk-core
 import { useOsConnection } from "../../live/connection";
 import { useSession } from "../../chrome/access";
 import { isRoleTestTab } from "../../auth/roleTest";
-import { roleRungOf } from "../../system/roles";
 import { Button, Head, Notice, RecordList, RecordRow, Subhead } from "../../kit";
-import { accountNameFrom, type AccountRow } from "../accounts/rows";
-import type { RoleRow } from "./rows";
-import { ladderDescending, type RoleCatalog } from "./useRoles";
 
 import { PageHelp } from "../../kit/pageHelp";
 
-const predefined = [{ id: "reader", name: "Viewer" }, { id: "writer", name: "Member" }, { id: "developer", name: "Developer" }, { id: "admin", name: "Admin" }];
-type Session = Awaited<ReturnType<IdentityAdminClient["roleTest"]>>["sessions"][number];
+type RoleTestAnswer = Awaited<ReturnType<IdentityAdminClient["roleTest"]>>;
+type Session = RoleTestAnswer["sessions"][number];
+type TestableRole = RoleTestAnswer["roles"][number];
 
-/** A custom role's name, and its organization's for an organization role. */
-function customName(role: RoleRow, accounts: readonly AccountRow[]): string {
-  return role.accountId === "" ? role.name : `${role.name} (${accountNameFrom(accounts, role.accountId)})`;
+/** A role as its row says it: its name, and an organization role's organization. */
+function roleLabel(role: TestableRole): string {
+  return role.organization === "" ? role.name : `${role.name} (${role.organization})`;
 }
 
-export function RoleTestingSection({ role, catalog, accounts }: { role: string; catalog: RoleCatalog; accounts: readonly AccountRow[] }) {
+export function RoleTestingSection({ role }: { role: string }) {
   const connection = useOsConnection();
   const { config } = useSession();
   const client = useMemo(() => connection?.dispatcher ? new IdentityAdminClient(connection.dispatcher) : null, [connection]);
   const allowed = !isRoleTestTab() && (role === "owner" || role === "developer");
-  // OFFERED BY THE EXISTING RULE AND NOTHING MORE: the predefined roles as
-  // before, Admin for an owner only, then every active custom role ranked
-  // strictly below the operator. Whether the operator holds everything the
-  // role would is the server's question alone; its refusal is the error Notice.
-  const operatorRank = roleRungOf(role)?.rank;
-  const roles = useMemo(() => [
-    ...predefined.filter(r => r.id !== "admin" || role === "owner"),
-    ...ladderDescending(catalog.roles)
-      .filter(r => !r.predefined && r.active && operatorRank !== undefined && r.rank < operatorRank)
-      .map(r => ({ id: r.slug, name: customName(r, accounts) })),
-  ], [role, operatorRank, catalog.roles, accounts]);
+  // THE SERVER'S LIST AND NOTHING ELSE: the roles this operator may test now,
+  // each decided as a start of it is decided, so no test it would refuse is
+  // drawn (DESIGN.md rule 12). Nothing here ranks or filters a role.
+  const [roles, setRoles] = useState<TestableRole[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const nameOf = (slug: string) => {
-    const custom = catalog.roles.find(r => r.slug === slug && !r.predefined);
-    return predefined.find(r => r.id === slug)?.name ?? (custom ? customName(custom, accounts) : slug);
+    const offered = roles.find(r => r.role === slug);
+    return offered ? roleLabel(offered) : slug;
   };
   const [sessions, setSessions] = useState<Session[]>([]);
   const [busy, setBusy] = useState("");
@@ -46,7 +37,12 @@ export function RoleTestingSection({ role, catalog, accounts }: { role: string; 
   const reload = useCallback(async () => {
     if (!client || !allowed) return;
     setLoading(true); setError("");
-    try { setSessions((await client.roleTest("list")).sessions); }
+    try {
+      const answer = await client.roleTest("list");
+      setSessions(answer.sessions);
+      setRoles(answer.roles);
+      setLoaded(true);
+    }
     finally { setLoading(false); }
   }, [client, allowed]);
   useEffect(() => { void reload().catch(e => setError(String(e))); }, [reload]);
@@ -78,10 +74,11 @@ export function RoleTestingSection({ role, catalog, accounts }: { role: string; 
     <PageHelp title="About role testing"><p>Each role uses a separate identity, created when first needed. Your original session stays signed in. Files and conversations remain for later tests; remove test items from Files or Ask when finished.</p><p>Owners can test every non-owner role. Developers can test Viewer, Member, Developer and the custom roles ranked below them, unless a restriction on their account prevents it or the role gives something their own account does not hold. A test of an organization's role joins that organization's group while it runs, so it sees what that organization's people see, and leaves it when the test ends. Tests cannot issue credentials or deploy the cluster. Use the browser editor; reloading a test tab ends its local session.</p></PageHelp>
     {!allowed ? <Notice tone="info" sentence="Owners and developers can start role tests from their own account." /> : <>
       <Notice tone="info" sentence="Tests use this cluster's real permissions. Changes are saved." />
-      <RecordList label="Test as role">
-        {roles.map(r => <RecordRow key={r.id} name={busy === r.id ? `Starting ${r.name}…` : `Test as ${r.name}`} disabled={!client || Boolean(busy)} onOpen={() => { void start(r.id); }} />)}
-      </RecordList>
-      {loading ? <p role="status">Loading active tests…</p> : null}
+      {loaded && roles.length > 0 ? <RecordList label="Test as role">
+        {roles.map(r => <RecordRow key={r.role} name={busy === r.role ? `Starting ${roleLabel(r)}…` : `Test as ${roleLabel(r)}`} disabled={!client || Boolean(busy)} onOpen={() => { void start(r.role); }} />)}
+      </RecordList> : null}
+      {loaded && roles.length === 0 ? <Notice tone="info" sentence="No role can be tested from your account, because it is restricted or lacks something each role would allow." /> : null}
+      {loading ? <p role="status">Loading role tests…</p> : null}
       {!loading && sessions.length > 0 ? <><Subhead>Active tests</Subhead><RecordList label="Active tests">{sessions.map(s => <RecordRow key={s.id}
         name={nameOf(s.role)}
         secondary={`Ends ${new Date(Number(s.expiresAt) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}

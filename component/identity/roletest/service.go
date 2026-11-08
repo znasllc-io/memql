@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,60 +115,105 @@ func integerClaim(value any) (int64, bool) {
 	}
 }
 
-// Developer sessions cannot restore capabilities denied to the operator. Read
-// the grant source explicitly so a failed read refuses instead of falling back
-// to a role default. A persona holds no grant of its own (verification refuses
-// one); an organization role's persona holds its organization group's grants.
+// mayTest is whether this operator may test this role: one role asked of the
+// gate the list answer asks about every role.
 func (s *Service) mayTest(ctx context.Context, operator *identity.UserRow, role string) bool {
 	if !auth.MayTestRole(auth.Role(operator.Role), auth.Role(role)) {
 		return false
 	}
-	if operator.Role == string(auth.RoleOwner) {
-		return true
+	return s.testingGate(ctx, operator).allows(ctx, role)
+}
+
+// testingGate is what deciding an operator's tests needs to know about the
+// operator, read once however many roles are asked: whether a restriction on
+// them, or a read about them that failed, refuses every test, and what they
+// hold. Developer sessions cannot restore capabilities denied to the operator,
+// so the grant source is read explicitly and a failed read refuses instead of
+// falling back to a role default.
+type testingGate struct {
+	operator *identity.UserRow
+	owner    bool
+	refused  bool
+	holds    map[auth.VerbResource]bool
+}
+
+func (s *Service) testingGate(ctx context.Context, operator *identity.UserRow) *testingGate {
+	g := &testingGate{operator: operator, owner: operator.Role == string(auth.RoleOwner)}
+	if g.owner {
+		return g
 	}
+	// Refused until every read about the operator has answered.
+	g.refused = true
 	src := auth.InstalledGrantSource()
 	if src == nil {
-		return false
+		return g
 	}
 	grants, err := src.ActiveGrantsForUser(fresh(ctx), operator.ID)
 	if err != nil {
-		return false
+		return g
 	}
 	// A restriction on a developer is intentionally a reason to use their
 	// real account, not to mint an unrestricted copy of their base role.
-	for _, g := range grants {
-		if !g.Inactive && g.Effect == auth.GrantDeny {
-			return false
+	for _, grant := range grants {
+		if !grant.Inactive && grant.Effect == auth.GrantDeny {
+			return g
 		}
 	}
-	ms := auth.InstalledMembershipSource()
-	if ms != nil {
+	if ms := auth.InstalledMembershipSource(); ms != nil {
 		checked, ok := ms.(auth.CheckedMembershipSource)
 		if !ok {
-			return false
+			return g
 		}
 		groups, err := checked.ActiveGroupIdsForUserChecked(fresh(ctx), operator.ID)
 		if err != nil {
-			return false
+			return g
 		}
 		groupGrants, err := src.ActiveGrantsForGroups(fresh(ctx), groups)
 		if err != nil {
-			return false
+			return g
 		}
-		for _, g := range groupGrants {
-			if !g.Inactive && g.Effect == auth.GrantDeny {
-				return false
+		for _, grant := range groupGrants {
+			if !grant.Inactive && grant.Effect == auth.GrantDeny {
+				return g
 			}
 		}
 	}
-	// EVERYTHING THE PERSONA WILL HOLD: its role's capabilities and, for an
-	// organization role, what that organization's group grants it -- the
-	// membership Start places. A read that fails while answering refuses.
+	// WHAT THE OPERATOR HOLDS, resolved once by the resolver every gate uses.
+	// A pair outside this set is one no role and no grant of theirs gives
+	// them, which is exactly the pairs CapableFor answers false for.
 	readCtx, failures := auth.ContextWithReadFailures(fresh(ctx))
 	subject, ok := auth.SubjectFromContext(auth.ContextWithAccess(readCtx, &auth.AccessContext{UserId: operator.ID, Role: auth.Role(operator.Role)}))
 	if !ok {
+		return g
+	}
+	g.holds = map[auth.VerbResource]bool{}
+	for _, d := range auth.EffectiveCapabilities(readCtx, subject) {
+		if d.Held {
+			g.holds[auth.VerbResource{Verb: d.Verb, Resource: d.Resource}] = true
+		}
+	}
+	g.refused = failures.Err() != nil
+	return g
+}
+
+// allows decides one role. A persona holds no grant of its own (verification
+// refuses one); an organization role's persona holds its organization group's
+// grants, so the operator must hold what the role AND that group give. A read
+// that fails while deciding the role leaves it refused.
+func (g *testingGate) allows(ctx context.Context, role string) bool {
+	if !auth.MayTestRole(auth.Role(g.operator.Role), auth.Role(role)) {
 		return false
 	}
+	if g.owner {
+		return true
+	}
+	if g.refused {
+		return false
+	}
+	// EVERYTHING THE PERSONA WILL HOLD: its role's capabilities and, for an
+	// organization role, what that organization's group grants it -- the
+	// membership Start places.
+	readCtx, failures := auth.ContextWithReadFailures(fresh(ctx))
 	persona := auth.Subject{Role: auth.Role(role)}
 	if groupID, _ := organizationGroupID(role); groupID != "" {
 		persona.GroupIds = []string{groupID}
@@ -181,11 +227,70 @@ func (s *Service) mayTest(ctx context.Context, operator *identity.UserRow, role 
 		if d.Verb == auth.VerbRead && d.Resource == auth.ResourceGroup {
 			continue
 		}
-		if d.Held && !auth.CapableFor(readCtx, subject, d.Verb, d.Resource) {
+		if d.Held && !g.holds[auth.VerbResource{Verb: d.Verb, Resource: d.Resource}] {
 			return false
 		}
 	}
 	return failures.Err() == nil
+}
+
+// testableRoles is every role this operator may test now, decided by the
+// gates Start applies -- the gate above, and an organization role's
+// organization having a group to join -- in the order a client draws them:
+// the predefined roles, then the custom ones strongest first. A role whose
+// decision a failed read left open is refused, never offered. (A persona
+// somebody tampered with -- deactivated, or re-roled -- still refuses at Start;
+// that is about one identity, not about whether the role may be tested.)
+func (s *Service) testableRoles(ctx context.Context, operator *identity.UserRow) []Role {
+	gate := s.testingGate(ctx, operator)
+	out := []Role{}
+	for _, slug := range candidateRoles() {
+		if !gate.allows(ctx, slug) {
+			continue
+		}
+		r := Role{Slug: slug, Name: roleName(slug)}
+		if groupID, _ := organizationGroupID(slug); groupID != "" {
+			group, err := s.organizationGroup(ctx, slug)
+			if err != nil || group == nil {
+				continue
+			}
+			r.AccountID, r.Organization = group.accountID, group.name
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// candidateRoles is every role a test could name: the predefined four, then
+// the catalog's other slugs strongest first. Only a list of names: retired,
+// base and out-of-rank slugs among them are refused by the gate like any other.
+func candidateRoles() []string {
+	out := []string{string(auth.RoleReader), string(auth.RoleWriter), string(auth.RoleDeveloper), string(auth.RoleAdmin)}
+	cat := auth.InstalledCapabilityCatalog()
+	lister, ok := cat.(interface{ Slugs() []string })
+	if cat == nil || !ok {
+		return out
+	}
+	seen := map[string]bool{}
+	for _, slug := range out {
+		seen[slug] = true
+	}
+	var custom []string
+	for _, slug := range lister.Slugs() {
+		if !seen[slug] {
+			seen[slug] = true
+			custom = append(custom, slug)
+		}
+	}
+	sort.SliceStable(custom, func(i, j int) bool {
+		ri, _ := cat.Rank(custom[i])
+		rj, _ := cat.Rank(custom[j])
+		if ri != rj {
+			return ri > rj
+		}
+		return custom[i] < custom[j]
+	})
+	return append(out, custom...)
 }
 
 // organizationGroupID is the group an organization role's persona joins -- the
@@ -302,10 +407,9 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 // provisioning, sessions and membership across BFF replicas.
 func personaLock(operatorID, role string) string { return "role-test:" + operatorID + ":" + role }
 
-// personaName is the persona's display name: the role's name and, for an
-// organization role, its organization's, which the organization's group
-// carries as its own name.
-func personaName(role string, group *organizationGroup) string {
+// roleName is a role's display name: the catalog's, or the predefined role's
+// own before the catalog is readable.
+func roleName(role string) string {
 	name := map[string]string{"reader": "Viewer", "writer": "Member", "developer": "Developer", "admin": "Admin"}[role]
 	if cat := auth.InstalledCapabilityCatalog(); cat != nil {
 		if catalogName := strings.TrimSpace(cat.Name(role)); catalogName != "" {
@@ -315,6 +419,14 @@ func personaName(role string, group *organizationGroup) string {
 	if name == "" {
 		name = role
 	}
+	return name
+}
+
+// personaName is the persona's display name: the role's name and, for an
+// organization role, its organization's, which the organization's group
+// carries as its own name.
+func personaName(role string, group *organizationGroup) string {
+	name := roleName(role)
 	if group != nil && group.name != "" {
 		name += " (" + group.name + ")"
 	}
@@ -604,29 +716,42 @@ func (s *Service) End(ctx context.Context, sessionID string) (err error) {
 	return err
 }
 
-func (s *Service) List(ctx context.Context) ([]Session, error) {
+// Role is one role an operator may test now, with what a client draws it by.
+type Role struct {
+	Slug         string // what a start names
+	Name         string // the role's display name
+	AccountID    string // an organization role's organization; empty for a global role
+	Organization string // that organization's name
+}
+
+// List is the operator's role-test answer: their live tests, and the roles
+// they may start now (testableRoles). Reads only.
+func (s *Service) List(ctx context.Context) ([]Session, []Role, error) {
 	db, err := s.db()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	u, err := s.actor(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows, err := db.QueryContext(ctx, `SELECT id,user_id,role,expires_at FROM identity_role_test_sessions WHERE operator_id=$1 AND revoked_at IS NULL AND expires_at>$2 ORDER BY created_at DESC`, u.ID, s.now())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var result []Session
 	for rows.Next() {
 		var r Session
 		if err := rows.Scan(&r.ID, &r.UserID, &r.Role, &r.ExpiresAt); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		result = append(result, r)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return result, s.testableRoles(ctx, u), nil
 }
 
 func (r Session) String() string { return fmt.Sprintf("role test %s (%s)", r.ID, r.Role) }

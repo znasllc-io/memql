@@ -13,11 +13,13 @@ document.documentElement.dataset.theme = params.get("mode") === "light" ? "light
 document.documentElement.dataset.osTheme = "graphite";
 applyPackStyles([]);
 let sessions = params.has("empty") ? [] : [{ id: "fixture", userId: "test-persona", role: "reader", expiresAt: String(Math.floor(Date.now()/1000)+1800) }];
+// What the server offers this operator; `none` is an operator offered nothing.
+const roles = params.has("none") ? [] : [{ role: "reader", name: "Viewer" }, { role: "writer", name: "Member" }, { role: "developer", name: "Developer" }, { role: "site-moderator", name: "Site moderator", accountId: "acct-fixture", organization: "Acme" }];
 installQaConnection({ dispatcher: { async sendAndWait(message: { identityAdmin: { roleTest: { operation: string } } }) {
   if (params.has("pending")) return new Promise(() => {});
   if (params.has("error")) throw new Error("The connection closed. Reopen Role testing to retry.");
   if (message.identityAdmin.roleTest.operation === "end") sessions = [];
   if (message.identityAdmin.roleTest.operation === "start") throw new Error("Starting sessions is unavailable in this fixture.");
-  return { identityAdminResult: { ok: true, roleTestSessions: sessions } };
+  return { identityAdminResult: { ok: true, roleTestSessions: sessions, roleTestRoles: roles } };
 } } });
 createRoot(document.getElementById("root")!).render(<SessionProvider value={{ access: null, config: UNKNOWN_RUNTIME_CONFIG }}><><RoleTestNotice role="Viewer" expiresAt={Math.floor(Date.now()/1000)+1800} disabled={false} error="" onEnd={() => {}} /><main style={{ margin: "96px auto", width: "min(100% - 24px, 680px)", padding: 20, background: "var(--os-glass-solid)", border: "1px solid var(--os-line)" }}><RoleTestingSection role={params.get("role") ?? "owner"} /></main></></SessionProvider>);

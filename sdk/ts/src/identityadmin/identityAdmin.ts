@@ -177,7 +177,10 @@ export type ClusterSettingsEdit = IdentityAdminClusterSettingsPayload;
 export class IdentityAdminClient {
   async roleTest(operation: "start" | "end" | "list", input: { role?: string; sessionId?: string } = {}, opts: IdentityAdminCallOptions = {}) {
     const { result, raw } = await this.callRaw("role testing", { roleTest: { operation, ...input } }, opts);
-    return { ...result, token: raw.roleTestToken ?? "", sessions: raw.roleTestSessions ?? [] };
+    // `list` carries the roles THIS operator may test now, decided by the
+    // server as it decides a start: a client offers exactly these.
+    const roles = (raw.roleTestRoles ?? []).map((r) => ({ role: r.role ?? "", name: r.name ?? "", accountId: r.accountId ?? "", organization: r.organization ?? "" }));
+    return { ...result, token: raw.roleTestToken ?? "", sessions: raw.roleTestSessions ?? [], roles };
   }
 
   /** Review a pending request through the server's serialized, audited gate. */

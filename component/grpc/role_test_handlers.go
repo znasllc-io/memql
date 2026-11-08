@@ -52,6 +52,7 @@ func (s *streamSession) roleTest(ctx context.Context, request *memqlv1.RoleTestR
 		return
 	}
 	var sessions []roletest.Session
+	var roles []roletest.Role
 	var err error
 	switch request.GetOperation() {
 	case "start":
@@ -64,7 +65,7 @@ func (s *streamSession) roleTest(ctx context.Context, request *memqlv1.RoleTestR
 	case "end":
 		err = svc.End(ctx, request.GetSessionId())
 	case "list":
-		sessions, err = svc.List(ctx)
+		sessions, roles, err = svc.List(ctx)
 	default:
 		out.ErrorCode = 3
 		out.ErrorMessage = "Unknown role-test operation"
@@ -83,4 +84,15 @@ func (s *streamSession) roleTest(ctx context.Context, request *memqlv1.RoleTestR
 	for _, session := range sessions {
 		out.RoleTestSessions = append(out.RoleTestSessions, &memqlv1.RoleTestSession{Id: session.ID, UserId: memqlengine.BareShortId(session.UserID), Role: session.Role, ExpiresAt: session.ExpiresAt.Unix()})
 	}
+	out.RoleTestRoles = roleTestRolesPayload(roles)
+}
+
+// roleTestRolesPayload is the roles the service decided this operator may test,
+// in its order, as the list answer carries them: a client draws exactly these.
+func roleTestRolesPayload(roles []roletest.Role) []*memqlv1.RoleTestRole {
+	out := make([]*memqlv1.RoleTestRole, 0, len(roles))
+	for _, r := range roles {
+		out = append(out, &memqlv1.RoleTestRole{Role: r.Slug, Name: r.Name, AccountId: memqlengine.BareShortId(r.AccountID), Organization: r.Organization})
+	}
+	return out
 }

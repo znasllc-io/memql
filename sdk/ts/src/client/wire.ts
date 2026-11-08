@@ -1024,9 +1024,12 @@ export interface DeployControlResultPayload {
 // auditEventId is present on a REFUSAL too -- the refusal is itself an audited
 // event, and an operator arguing about a denial needs its id.
 export interface RoleTestSessionPayload { id: string; userId: string; role: string; expiresAt: number | string }
+/** A role the operator may test now, as the server decided it. Empty strings are omitted on the wire. */
+export interface RoleTestRolePayload { role?: string; name?: string; accountId?: string; organization?: string }
 export interface IdentityAdminResultPayload {
   roleTestToken?: string;
   roleTestSessions?: RoleTestSessionPayload[];
+  roleTestRoles?: RoleTestRolePayload[];
   requestId?: string;
   ok?: boolean;
   errorCode?: number;

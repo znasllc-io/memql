@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -258,7 +259,7 @@ func TestRoleBoundaryAndConcurrentProvisioning(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, valid)
-	rows, err := one.List(owner)
+	rows, _, err := one.List(owner)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	latest, err := one.Start(owner, "reader")
@@ -675,7 +676,7 @@ func TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrE
 	service.Now = func() time.Time { return expired.ExpiresAt.Add(time.Minute) }
 	_, err = service.VerifyRoleTest(context.Background(), expired.Token)
 	require.ErrorIs(t, err, ErrInvalid)
-	rows, err := service.List(owner)
+	rows, _, err := service.List(owner)
 	require.NoError(t, err)
 	require.Empty(t, rows)
 	require.Equal(t, []string{acmeGroup}, activeGroups(t, expired.UserID), "nothing removes it inside a read")
@@ -692,6 +693,132 @@ func TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrE
 	require.Equal(t, []string{acmeGroup}, activeGroups(t, lapsed.UserID))
 	require.NoError(t, service.End(owner, other.ID))
 	require.Empty(t, activeGroups(t, lapsed.UserID), "the operator's next End removes it")
+}
+
+func offeredSlugs(t *testing.T, s *Service, ctx context.Context) []string {
+	t.Helper()
+	_, roles, err := s.List(ctx)
+	require.NoError(t, err)
+	out := []string{}
+	for _, r := range roles {
+		out = append(out, r.Slug)
+	}
+	return out
+}
+
+// everyRole is every role a test could name in the fixture cluster, the
+// refused spellings included.
+var everyRole = []string{"reader", "writer", "developer", "admin", "owner", "user", "viewer",
+	releaseCaptain, peopleSteward, supportLead, retiredHelper, siteModerator}
+
+// acceptedSlugs is the roles Start accepts for this operator, tried one by one.
+func acceptedSlugs(t *testing.T, s *Service, ctx context.Context) []string {
+	t.Helper()
+	out := []string{}
+	for _, role := range everyRole {
+		if _, err := s.Start(ctx, role); err == nil {
+			out = append(out, role)
+		} else {
+			require.ErrorIs(t, err, ErrDenied, role)
+		}
+	}
+	return out
+}
+
+// TestTheOfferedRolesAreExactlyTheOnesStartAccepts: the list answer carries the
+// roles THIS operator may test, decided by the gates Start applies, so a client
+// draws no test the server would refuse -- an act that is not legal is absent.
+// Every role the cluster knows is tried: a listed one starts, an unlisted one is
+// refused. The predefined roles first, then the custom ones strongest first.
+func TestTheOfferedRolesAreExactlyTheOnesStartAccepts(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup := organization(t, engine, acme, "Acme")
+	groupGrant(t, engine, acmeGroup, "read", "app:deployables")
+
+	owner := seedOperator(t, service, "owner")
+	require.Equal(t, []string{"reader", "writer", "developer", "admin", releaseCaptain, peopleSteward, supportLead, siteModerator},
+		offeredSlugs(t, service, owner), "an owner is offered every role below them")
+	require.ElementsMatch(t, offeredSlugs(t, service, owner), acceptedSlugs(t, service, owner))
+	_, roles, err := service.List(owner)
+	require.NoError(t, err)
+	labels := map[string]Role{}
+	for _, r := range roles {
+		labels[r.Slug] = r
+	}
+	require.Equal(t, Role{Slug: "reader", Name: "Viewer"}, labels["reader"])
+	require.Equal(t, Role{Slug: supportLead, Name: "Support lead"}, labels[supportLead])
+	require.Equal(t, Role{Slug: siteModerator, Name: "Site moderator", AccountID: acme, Organization: "Acme"}, labels[siteModerator])
+
+	developer := seedOperator(t, service, "developer")
+	require.Equal(t, []string{"reader", "writer", "developer", supportLead, siteModerator}, offeredSlugs(t, service, developer),
+		"no admin, no role above a developer, none holding what a developer lacks")
+	require.ElementsMatch(t, offeredSlugs(t, service, developer), acceptedSlugs(t, service, developer))
+
+	groupGrant(t, engine, acmeGroup, "update", "group")
+	require.Equal(t, []string{"reader", "writer", "developer", supportLead}, offeredSlugs(t, service, developer),
+		"an organization role whose group gives what the developer lacks is not offered")
+	require.ElementsMatch(t, offeredSlugs(t, service, developer), acceptedSlugs(t, service, developer))
+
+	deploymentExec(t, engine, fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Acme", kind: "account", accountId: %s, status: "archived")`,
+		langparser.QuoteString(acmeGroup), langparser.QuoteString(acme)))
+	require.NotContains(t, offeredSlugs(t, service, owner), siteModerator, "an organization with no active group has nothing to test in")
+	require.ElementsMatch(t, offeredSlugs(t, service, owner), acceptedSlugs(t, service, owner))
+
+	restricted := seedOperator(t, service, "developer")
+	ac, _ := auth.AccessFromContext(restricted)
+	deploymentExec(t, engine, fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "read", resourceType: "data", effect: "deny", grantedBy: "role-test-fixture")`,
+		langparser.QuoteString(auth.GrantRowID(auth.SubjectKindUser, ac.UserId, "read", "data")), langparser.QuoteString(ac.UserId)))
+	require.Empty(t, offeredSlugs(t, service, restricted), "a restricted developer is offered no role, and the answer is not an error")
+	require.Empty(t, acceptedSlugs(t, service, restricted))
+}
+
+// blinkingGrants fails the grant reads for the subjects it names and answers
+// every other read from the real source.
+type blinkingGrants struct {
+	auth.GrantSource
+	users, groups map[string]bool
+}
+
+func (b blinkingGrants) ActiveGrantsForUser(ctx context.Context, id string) ([]auth.Grant, error) {
+	if b.users[memql.BareShortId(id)] {
+		return nil, errors.New("grant read failed")
+	}
+	return b.GrantSource.ActiveGrantsForUser(ctx, id)
+}
+
+func (b blinkingGrants) ActiveGrantsForGroups(ctx context.Context, ids []string) ([]auth.Grant, error) {
+	for _, id := range ids {
+		if b.groups[memql.BareShortId(id)] {
+			return nil, errors.New("grant read failed")
+		}
+	}
+	return b.GrantSource.ActiveGrantsForGroups(ctx, ids)
+}
+
+// TestAFailedReadLeavesTheRoleOut: a read that fails while a role is decided
+// leaves that role out -- refuse, never admit. Failing to read the
+// organization group's grants loses that organization's role and nothing
+// else; failing to read the operator's own grants loses every role.
+func TestAFailedReadLeavesTheRoleOut(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup := organization(t, engine, acme, "Acme")
+	developer := seedOperator(t, service, "developer")
+	require.Equal(t, []string{"reader", "writer", "developer", supportLead, siteModerator}, offeredSlugs(t, service, developer))
+
+	source := auth.InstalledGrantSource()
+	t.Cleanup(func() { auth.SetGrantSource(source) })
+	auth.SetGrantSource(blinkingGrants{GrantSource: source, groups: map[string]bool{acmeGroup: true}})
+	require.Equal(t, []string{"reader", "writer", "developer", supportLead}, offeredSlugs(t, service, developer))
+	_, err := service.Start(developer, siteModerator)
+	require.ErrorIs(t, err, ErrDenied)
+
+	ac, _ := auth.AccessFromContext(developer)
+	auth.SetGrantSource(blinkingGrants{GrantSource: source, users: map[string]bool{memql.BareShortId(ac.UserId): true}})
+	require.Empty(t, offeredSlugs(t, service, developer))
 }
 
 type durableAudit struct {

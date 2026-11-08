@@ -3332,6 +3332,14 @@ message RoleTestSession {
   string role = 3;
   int64 expires_at = 4; // Unix seconds
 }
+// One role the operator may test now, decided as a start of it is decided, so
+// a client offers exactly these and never draws a test the server refuses.
+message RoleTestRole {
+  string role = 1; // the slug a start names
+  string name = 2; // the role's display name
+  string account_id = 3; // an organization role's organization (bare); empty for a global role
+  string organization = 4; // that organization's name
+}
 
 message ReviewAccessRequestRequest {
   string request_id = 1;
@@ -3434,6 +3442,7 @@ message IdentityAdminResult {
   string invitation_email_error = 12;
   string role_test_token = 13; // start only; keep in memory
   repeated RoleTestSession role_test_sessions = 14;
+  repeated RoleTestRole role_test_roles = 15; // list only: the roles this operator may test now
 }
 
 // IssueUserInvitationRequest mints a user-targeted invitation (memql#4270).

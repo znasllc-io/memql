@@ -176,7 +176,7 @@ export function UsersApp({
     [navigate],
   );
 
-  if (sectionId === "testing") return <RoleTestingSection role={viewerRole} catalog={catalog} accounts={accounts} />;
+  if (sectionId === "testing") return <RoleTestingSection role={viewerRole} />;
   if (sectionId === "settings") {
     return <UsersSettingsSection settings={settings} update={update} />;
   }
