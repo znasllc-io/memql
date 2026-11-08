@@ -1002,11 +1002,17 @@ func TestCapBash32ExpansionDeathIsAFailure(t *testing.T) {
 	}
 }
 
-// TestCapabilityTrapsHandCapOnExitTheRealStatus keeps _cap_on_exit reading
-// the script's own exit status when a script composes it with cleanup of its
-// own.
+// TestCapabilityTrapsHandCapOnExitTheRealStatus keeps capability.sh's result
+// guarantee in force wherever a capability script installs an EXIT trap of its
+// own. A trap replaces the one cap_init installs, so cleanup can drop the
+// guarantee in two ways, and both shipped.
 //
-// THE BUG. `trap 'cleanup_tmp; _cap_on_exit' EXIT` reads naturally and is
+// REPLACED. `trap 'rm -rf "$WORK"' EXIT` removes the guarantee outright: from
+// that line on, an abort reaches the caller with nothing on stdout.
+// scripts/deploy/render-diff.sh and scripts/deploy/seed-instance-secrets.sh did
+// that, with cleanup traps of their own.
+//
+// MISFED. `trap 'cleanup_tmp; _cap_on_exit' EXIT` reads naturally and is still
 // wrong: _cap_on_exit reads the status from $?, and by the time it runs, $? is
 // cleanup_tmp's, not the script's. scripts/install/hosts-entries.sh composed
 // its trap that way precisely so an abort would still emit an envelope
@@ -1015,23 +1021,28 @@ func TestCapBash32ExpansionDeathIsAFailure(t *testing.T) {
 // reported as a failure, the same composition would report an abort as an
 // exit 0 and blame the wrong thing.
 //
-// THE RULE. Inline, a trap that names _cap_on_exit names nothing else.
-// Anything that has to run first goes in a handler function that captures $?
-// as its first statement, turns errexit off, and restores the status with
-// `(exit "$rc")` immediately before calling _cap_on_exit -- _install_on_exit in
+// THE RULE. Every EXIT trap reaches _cap_on_exit. Inline, a trap that names
+// _cap_on_exit names nothing else. Anything that has to run first goes in a
+// handler function, defined in the script, that captures $? as its first
+// statement, turns errexit off, and restores the status with `(exit "$rc")`
+// immediately before calling _cap_on_exit -- _install_on_exit in
 // scripts/install/install-binary.sh is the reference. The `set +e` is not
 // optional: under errexit, `(exit "$rc")` is itself a failing command whenever
 // the status is non-zero, so the handler is abandoned there -- on exactly the
 // aborts it exists for -- before _cap_on_exit runs. Measured on bash 3.2 and 5.
-//
-// A trap that never calls _cap_on_exit is a different defect (the guarantee
-// is dropped, not misfed) and is not judged here.
+// Clearing the trap (`trap - EXIT`) is refused as well, except inside a
+// handler, where it only stops the handler running twice.
 func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 	inlineTrap := regexp.MustCompile(`^trap[ \t]+(?:'([^']*)'|"([^"]*)")[ \t]+EXIT\b`)
 	namedTrap := regexp.MustCompile(`^trap[ \t]+'?([A-Za-z_][A-Za-z0-9_]*)'?[ \t]+EXIT\b`)
+	clearsTrap := regexp.MustCompile(`^trap[ \t]+(-|''|"")[ \t]+EXIT\b`)
+	identifier := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	captures := regexp.MustCompile(`^local[ \t]+([A-Za-z_][A-Za-z0-9_]*)=\$\?$`)
 	errexitOff := regexp.MustCompile(`^set[ \t]+\+e([ \t;]|$)`)
 	callsCapOnExit := regexp.MustCompile(`^_cap_on_exit([ \t;]|$)`)
+	const repair = "Repair: put the cleanup in a handler function that starts `local rc=$?`, runs " +
+		"`set +e`, and runs `(exit \"$rc\")` right before _cap_on_exit, as _install_on_exit in " +
+		"scripts/install/install-binary.sh does, and install that with `trap <handler> EXIT`."
 
 	scripts := capabilityScripts(t)
 	if len(scripts) == 0 {
@@ -1045,45 +1056,49 @@ func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 		}
 		lines := strings.Split(string(body), "\n")
 
-		// Every function's code lines (no blanks, no comments), by name.
-		funcs := map[string][]string{}
-		var fn string
-		depth := 0
+		// Every function's code lines, by name, and the function each code
+		// line belongs to.
+		funcs := map[string][]bashCodeLine{}
+		enclosing := map[int]string{}
+		for _, fn := range bashFunctions(string(body)) {
+			funcs[fn.name] = fn.code
+			for _, c := range fn.code {
+				enclosing[c.number] = fn.name
+			}
+		}
+		handlers := map[string]bool{}
 		for _, raw := range lines {
-			trimmed := strings.TrimSpace(raw)
-			if depth == 0 {
-				// The header's own braces count: a one-line definition
-				// (`function kc() { kubectl ...; }`) closes where it opens, and
-				// starting from 1 would read the rest of the file as its body.
-				if m := bashFuncHeader.FindStringSubmatch(trimmed); m != nil {
-					if d := strings.Count(raw, "{") - strings.Count(raw, "}"); d > 0 {
-						fn, depth = m[1], d
-					}
-				}
-				continue
-			}
-			depth += strings.Count(raw, "{") - strings.Count(raw, "}")
-			if depth <= 0 {
-				fn, depth = "", 0
-				continue
-			}
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				funcs[fn] = append(funcs[fn], trimmed)
+			if m := namedTrap.FindStringSubmatch(strings.TrimSpace(raw)); m != nil {
+				handlers[m[1]] = true
 			}
 		}
 
 		for i, raw := range lines {
 			trimmed := strings.TrimSpace(raw)
 			where := rel(t, path) + ":" + strconv.Itoa(i+1)
+			if clearsTrap.MatchString(trimmed) {
+				if !handlers[enclosing[i+1]] {
+					t.Errorf("%s: this clears the EXIT trap, and with it capability.sh's guarantee of "+
+						"an envelope on every exit:\n    %s\nOnly an EXIT handler may clear it, to "+
+						"stop itself running twice.", where, trimmed)
+				}
+				continue
+			}
 			if m := inlineTrap.FindStringSubmatch(trimmed); m != nil {
 				inline := strings.TrimSpace(m[1] + m[2])
-				if strings.Contains(inline, "_cap_on_exit") && inline != "_cap_on_exit" {
+				switch {
+				case identifier.MatchString(inline):
+					// _cap_on_exit itself, or a named handler, judged below.
+				case strings.Contains(inline, "_cap_on_exit"):
 					t.Errorf("%s: an EXIT trap runs other commands with _cap_on_exit:\n    %s\n"+
 						"_cap_on_exit reads the script's status from $?, which the commands before it "+
-						"have replaced -- an abort is then reported as an exit 0, or not at all.\n"+
-						"Repair: move the cleanup into a handler that starts `local rc=$?`, runs "+
-						"`set +e`, and runs `(exit \"$rc\")` right before _cap_on_exit, as "+
-						"_install_on_exit in scripts/install/install-binary.sh does.", where, trimmed)
+						"have replaced -- an abort is then reported as an exit 0, or not at all.\n%s",
+						where, trimmed, repair)
+					continue
+				default:
+					t.Errorf("%s: an EXIT trap replaces capability.sh's result guarantee:\n    %s\n"+
+						"From this line on, an abort reaches the caller with nothing on stdout.\n%s",
+						where, trimmed, repair)
 					continue
 				}
 			}
@@ -1093,35 +1108,40 @@ func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 			}
 			code, defined := funcs[m[1]]
 			if !defined {
+				t.Errorf("%s: the EXIT handler %s() is not a multi-line function defined in this "+
+					"script, so nothing can check that it reaches _cap_on_exit.\n%s", where, m[1], repair)
 				continue
 			}
 			call := -1
 			for j, c := range code {
-				if callsCapOnExit.MatchString(c) {
+				if callsCapOnExit.MatchString(c.text) {
 					call = j
 					break
 				}
 			}
 			if call < 0 {
+				t.Errorf("%s: the EXIT handler %s() never calls _cap_on_exit, so it replaces "+
+					"capability.sh's result guarantee: an abort reaches the caller with nothing on "+
+					"stdout.\n%s", where, m[1], repair)
 				continue
 			}
 			checked++
-			first := captures.FindStringSubmatch(code[0])
+			first := captures.FindStringSubmatch(code[0].text)
 			if first == nil || call == 0 {
 				t.Errorf("%s: the EXIT handler %s() calls _cap_on_exit but does not begin by capturing "+
-					"the script's status (`local rc=$?`); it begins:\n    %s", where, m[1], code[0])
+					"the script's status (`local rc=$?`); it begins:\n    %s", where, m[1], code[0].text)
 				continue
 			}
 			restore := regexp.MustCompile(`^\(exit[ \t]+"?\$\{?` + first[1] + `\}?"?\)([ \t]+#.*)?$`)
-			if !restore.MatchString(code[call-1]) {
+			if !restore.MatchString(code[call-1].text) {
 				t.Errorf("%s: the EXIT handler %s() does not restore the status it captured right "+
 					"before calling _cap_on_exit -- `(exit \"$%s\")` must be the line before it; "+
-					"found:\n    %s", where, m[1], first[1], code[call-1])
+					"found:\n    %s", where, m[1], first[1], code[call-1].text)
 				continue
 			}
 			off := false
 			for _, c := range code[1 : call-1] {
-				off = off || errexitOff.MatchString(c)
+				off = off || errexitOff.MatchString(c.text)
 			}
 			if !off {
 				t.Errorf("%s: the EXIT handler %s() restores the status without `set +e` first. "+
