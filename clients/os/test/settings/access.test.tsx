@@ -403,9 +403,10 @@ describe("by person: what they can open, in words", () => {
   });
 
   it("an organization's door says can't open where its data can't be read", async () => {
-    // The shell opens Email or Deployables in an organization only where the
-    // person can read that organization's data too (system/roles.ts,
-    // availableInAnyOrganization), so the door alone is not the answer.
+    // The shell opens an organization's door -- Email, Deployables or
+    // Pipelines -- in an organization only where the person can read that
+    // organization's data too (system/roles.ts, availableInAnyOrganization),
+    // so the door alone is not the answer.
     const state = freshState({
       people: [ME, ADA, MAX],
       access: {

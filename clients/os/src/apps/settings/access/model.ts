@@ -266,11 +266,12 @@ export interface PersonAnswer {
  * engine answered it in.
  *
  * IN AN ORGANIZATION, THE PAIR ALONE IS NOT WHAT THE SHELL OPENS. An
- * organization's door -- Email, Deployables -- opens there only where `read
- * data` holds too (system/roles.ts, `availableInAnyOrganization`). A part of
- * one is drawn there only through that door, with the data read AND `update
- * data` holding there (apps/deployables/parts.ts, `partsForOrganization`), so
- * a part the role holds is no answer while its door is shut. Each
+ * organization's door -- Email, Deployables, Pipelines -- opens there only
+ * where `read data` holds too (system/roles.ts,
+ * `availableInAnyOrganization`). A part of one is drawn there only through
+ * that door, with the data read AND `update data` holding there
+ * (apps/deployables/parts.ts, `partsForOrganization`), so a part the role
+ * holds is no answer while its door is shut. Each
  * organization is joined on its own rows and never on another's. The shell
  * asks an organization's own answers only (`holdsForOrganization`), so a door
  * the engine answers once, not per organization, does not open a part there.
