@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -42,10 +43,18 @@ func TestInstallerScripts(t *testing.T) {
 	}
 }
 
-// Python fixtures share this deadline rather than imposing a shorter per-child
-// wall-clock limit. That preserves the lane budget on busy native workers.
+// Every fixture shares this deadline rather than imposing a shorter per-child
+// wall-clock limit. Shell suites use the same process-group runner as Python
+// fixtures: killing just Bash leaves loggers holding CombinedOutput's pipe,
+// hiding the suite's diagnostics until the Go binary itself times out.
 func suiteCommand(ctx context.Context, tool, file string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, tool, file)
+	if filepath.Base(tool) == "bash" {
+		cmd = exec.CommandContext(ctx, "python3", "fixture_process.py", "--program", tool, "--script", file)
+	}
+	// The fixture runner owns descendant cleanup. Also bound pipe draining if
+	// that runner fails, without extending or shortening a running suite's budget.
+	cmd.WaitDelay = time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		cmd.Env = append(os.Environ(), "MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS="+strconv.FormatInt(deadline.UnixMilli(), 10))
 	}
@@ -91,13 +100,15 @@ func TestASuiteRunsUntilShortlyBeforeTheBinaryDeadline(t *testing.T) {
 	}
 }
 
-func TestPythonFixturesInheritTheSuiteDeadline(t *testing.T) {
+func TestFixturesInheritTheSuiteDeadline(t *testing.T) {
 	ctx, cancel := suiteContext(t)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
-	cmd := suiteCommand(ctx, "python3", "ui_test.py")
 	want := "MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS=" + strconv.FormatInt(deadline.UnixMilli(), 10)
-	if cmd.Env[len(cmd.Env)-1] != want {
-		t.Fatalf("Python fixture must inherit the suite's deadline: got %v, want %s", cmd.Env[len(cmd.Env)-1], want)
+	for _, tool := range []string{"python3", "/bin/bash"} {
+		cmd := suiteCommand(ctx, tool, "fixture")
+		if cmd.Env[len(cmd.Env)-1] != want {
+			t.Fatalf("%s fixture must inherit the suite's deadline: got %v, want %s", tool, cmd.Env[len(cmd.Env)-1], want)
+		}
 	}
 }

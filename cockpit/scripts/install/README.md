@@ -58,8 +58,11 @@ offline discovery, renderer, shell-library and menu fixture suites. Missing
 Bash or Python fails that check. Fixtures use temporary homes and inert
 binaries; they never install a published release or enroll this machine.
 
-The Python fixtures inherit the Go suite's deadline through
-`MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS`. They spend one shared budget, with a
+The Python fixtures and shell suites inherit the Go suite's deadline through
+`MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS`. Shell suites run through the same
+`fixture_process.py` runner: stopping Bash alone can leave a diagnostic logger
+holding the captured output open, losing every assertion's output when the Go
+binary times out. Both paths spend one shared budget, with a
 small reserve to terminate fixture process groups and report captured output
 before Go stops the suite. Standalone Python runs have one ten-minute budget.
 The former 8/10/15/20-second child limits could reject healthy installers on a
@@ -68,7 +71,10 @@ busy native worker even while the enclosing lane still had time: the November
 at ten seconds. This changes fixture scheduling only; production network and
 operation timeouts stay in place. `fixture_process_test.py` verifies inherited
 and expired budgets, the cleanup reserve, retained diagnostics, and termination
-of descendants that keep output pipes open after their parent exits.
+of descendants that keep output pipes open while their parent runs or after it
+exits. The shell entry point preserves captured stdout, stderr and nonzero exit
+status. The Go wrapper also bounds final pipe draining to one second if the
+fixture runner fails; that reserve does not change a running suite's deadline.
 Cleanup operations share the reserve rather than each starting another timeout.
 Terminal fixtures also terminate their process group after EOF: macOS can report
 EOF with a live orphan, and can reject signals to a zombie-only group with

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """The fixture runner inherits one budget and reaps timed-out process trees."""
 
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -11,7 +13,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from fixture_process import DEADLINE_ENV, FixtureProcesses, SUITE_PROCESSES
+from fixture_process import DEADLINE_ENV, FixtureProcesses, SUITE_PROCESSES, main
 
 
 class FixtureProcessTest(unittest.TestCase):
@@ -92,6 +94,11 @@ class FixtureProcessTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
     def test_timeout_kills_pipe_holding_descendant_and_preserves_output(self):
+        for leader_running in (False, True):
+            with self.subTest(leader_running=leader_running):
+                self.assert_timeout_cleans_descendant(leader_running)
+
+    def assert_timeout_cleans_descendant(self, leader_running):
         with tempfile.TemporaryDirectory(prefix="memql-fixture-process-") as directory:
             ready = Path(directory) / "ready"
             child = ("import os,sys,time; from pathlib import Path; "
@@ -99,13 +106,22 @@ class FixtureProcessTest(unittest.TestCase):
                      "print('child stderr',file=sys.stderr,flush=True); "
                      "p=Path(sys.argv[1]+'.tmp'); p.write_text(str(os.getpid())); "
                      "p.rename(sys.argv[1]); time.sleep(600)")
-            # The leader exits immediately; its child keeps both capture pipes.
-            # Killing only the leader would leave communicate blocked forever.
+            # Cover both a blocked leader and one that already exited. Its
+            # child keeps both capture pipes; killing only the leader would
+            # leave communicate blocked forever in either case.
             command = [sys.executable, "-c",
-                       "import subprocess,sys; subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]])",
+                       "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]])"
+                       + ("; time.sleep(600)" if leader_running else ""),
                        child, str(ready)]
             processes = FixtureProcesses(SUITE_PROCESSES.deadline)
             calls = 0
+            started = []
+            real_popen = subprocess.Popen
+
+            def start(*args, **kwargs):
+                proc = real_popen(*args, **kwargs)
+                started.append(proc)
+                return proc
 
             def remaining():
                 nonlocal calls
@@ -117,9 +133,16 @@ class FixtureProcessTest(unittest.TestCase):
                 while not ready.exists():
                     SUITE_PROCESSES.remaining()
                     time.sleep(.01)
+                if not leader_running:
+                    # Prove the exact orphan-pipe shape: the leader is already
+                    # reaped before communicate reaches its short deadline.
+                    while started[0].poll() is None:
+                        SUITE_PROCESSES.remaining()
+                        time.sleep(.01)
                 return .01
 
-            with patch.object(processes, "remaining", side_effect=remaining):
+            with patch.object(processes, "remaining", side_effect=remaining), \
+                    patch("fixture_process.subprocess.Popen", side_effect=start):
                 with self.assertRaises(AssertionError) as raised:
                     processes.run(command)
             self.assertIn("shared suite deadline", str(raised.exception))
@@ -141,6 +164,27 @@ class FixtureProcessTest(unittest.TestCase):
                     break
                 time.sleep(min(.01, max(0, deadline - time.monotonic())))
             self.assertTrue(not state or state.startswith("Z"), state)
+
+    def test_shell_entrypoint_preserves_output_and_failure_status(self):
+        with tempfile.TemporaryDirectory(prefix="memql suite ") as directory:
+            script = Path(directory) / "failure.sh"
+            script.write_text("printf 'fixture stdout\\n'\nprintf 'fixture stderr\\n' >&2\nexit 7\n")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = main(["--program", "bash", "--script", str(script)])
+            self.assertEqual(code, 7)
+            self.assertEqual(stdout.getvalue(), "fixture stdout\n")
+            self.assertEqual(stderr.getvalue(), "fixture stderr\n")
+
+    def test_shell_entrypoint_reports_timeout_diagnostics_as_failure(self):
+        stderr = io.StringIO()
+        with patch.object(SUITE_PROCESSES, "run", side_effect=AssertionError(
+                "shared suite deadline\nstdout:\nlast passing assertion\nstderr:\nfixture error")), \
+                contextlib.redirect_stderr(stderr):
+            code = main(["--program", "bash", "--script", "fixture.sh"])
+        self.assertEqual(code, 1)
+        self.assertIn("last passing assertion", stderr.getvalue())
+        self.assertIn("fixture error", stderr.getvalue())
 
 
 if __name__ == "__main__":
