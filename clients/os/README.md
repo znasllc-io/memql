@@ -2216,6 +2216,16 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   voice and never paraphrased: the rule id is where somebody goes to change the
   policy.
 
+  **A routing review is nobody's own.** The nightly evidence fold raises it as
+  the cluster, so the person's own approval reads never list it; the inbox and
+  the overview merge it in from `workRoutingReviews`
+  (`useRoutingReviews`), which answers an owner or developer and nobody else.
+  Its buttons carry its own options ("Add the rule", "Remove the exclusion",
+  "Leave routing as it is"), because approving changes routing before the
+  decision is recorded. Row admission sends a row nobody owns to cluster
+  owners only, so a developer is sent no update when one is decided: the
+  section re-reads the routing reviews and the open review after deciding one.
+
   Progress-limit questions use ordinary feedback: **Keep working**, **Stop
   here**, or the person's own words in Ask. Work can earn three automatic
   continuation windows from new completed task operations, within its original

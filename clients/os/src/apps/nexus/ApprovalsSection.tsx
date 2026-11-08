@@ -3,6 +3,7 @@ export { isFailureQuestion } from "./approvalSearch";
 import { LoadMore } from "../../kit/LoadMore";
 import { useDebouncedValue } from "../../logs/useDebouncedValue";
 import { useApprovalDirectory, useWorkRecord, useRunRecords } from "./useNexusDirectory";
+import { ROUTING_REVIEW } from "./useNexus";
 import { useConstructRecord } from "./useAutomations";
 import { procedureFromRow } from "./ladder";
 import { isReportingFailure } from "./outcomeRecovery";
@@ -325,7 +326,15 @@ export function ApprovalsSection({
         const answer = decision === "approved"
           ? permission ? { permissionMode, permissionHash: selected.artifactHash } : undefined
           : isRepositoryReview(selected) && freeText.trim() ? { reason: freeText.trim() } : undefined;
-        void decide.decide(selected.id, decision, answer, documentReview);
+        void decide.decide(selected.id, decision, answer, documentReview).then((decided) => {
+          // A ROUTING REVIEW IS NOBODY'S OWN, and row admission sends its
+          // update to cluster owners only: a developer would go on seeing it
+          // waiting. So the inbox and the open review read it again.
+          if (decided && selected.kind === ROUTING_REVIEW) {
+            directory.routingReviews.reseed();
+            selectedFeed.reseed();
+          }
+        });
       };
       acts.push({
         label: labels.reject,
@@ -849,7 +858,10 @@ function decisionLabels(approval: ApprovalRow): { approve: string; reject: strin
   if (isRepositoryReview(approval)) return { approve: "Approve", reject: "Decline" };
   if (approval.kind === "scopeElevation") return { approve: executionDestinationChange(approval.subject)?.to === "workbench" ? "Use Workbench" : "Allow for this work", reject: "Reject" };
   if (approval.subject?.reviewType === "library-document") return { approve: "Apply all changes", reject: "Decline all" };
-  if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
+  // A promotion and a routing review say what their two options DO -- move to
+  // canary, add the rule, remove the exclusion -- so the buttons carry the
+  // options' own words rather than a generic Approve.
+  if (approval.kind !== PROCEDURE_PROMOTION && approval.kind !== ROUTING_REVIEW) return { approve: "Approve", reject: "Reject" };
   const offered = (value: string) => approval.options.find((o) => o.value === value)?.label.trim() ?? "";
   const approve = offered("approved");
   const reject = offered("rejected");
@@ -865,7 +877,8 @@ function approvalDecisionNext(approval: ApprovalRow): string {
     if (approval.decision === "rejected") return "This request will not proceed.";
     if (approval.decision === "approved") return "Work can continue within the approved scope. Production still requires a selected release.";
   }
-  return approvalDecidedNext(approval.kind, approval.decision);
+  const direction = approval.subject?.direction;
+  return approvalDecidedNext(approval.kind, approval.decision, typeof direction === "string" ? direction : "");
 }
 
 function repositoryReviewScope(approval: ApprovalRow): string {

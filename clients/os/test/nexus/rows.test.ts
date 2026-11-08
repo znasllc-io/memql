@@ -31,6 +31,7 @@ import {
   stepsOfRun,
 } from "../../src/apps/nexus/rows";
 import {
+  approvalDecidedNext,
   approvalKindMeaning,
   approvalKindWord,
   kindCalledAModel,
@@ -535,4 +536,14 @@ it("uses an excerpt without changing the full saved request", () => {
   expect(goalTitle(goal).endsWith("…")).toBe(true);
   expect(goal.statement).toBe(statement);
   expect(goalTitle(goalFromRow({ id: "g2", statement: "Check the result" }))).toBe("Check the result");
+});
+
+describe("a decided routing review", () => {
+  // Approving changes routing, in the direction the review proposed, so the
+  // notice under the decision says which change was made.
+  it("says what the decision changed", () => {
+    expect(approvalDecidedNext("routingReview", "approved", "demotion")).toBe("The rule was added.");
+    expect(approvalDecidedNext("routingReview", "approved", "promotion")).toBe("The exclusion was removed.");
+    expect(approvalDecidedNext("routingReview", "rejected", "demotion")).toBe("Routing was left as it is.");
+  });
 });

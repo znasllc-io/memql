@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -916,20 +917,24 @@ describe("a promotion's target and dry evidence", () => {
 });
 
 describe("the routing review", () => {
-  it("has a word of its own rather than the raw enum member", async () => {
-    mount(
-      fakeConnection({
-        approvals: [
-          approvalRow({
-            id: "a-route",
-            kind: "routingReview",
-            runId: "",
-            stepKey: "",
-            question: "gpt-x failed 17 of 41 structured calls at strong this week",
-          }),
-        ],
-      }),
-    );
+  // A ROUTING REVIEW IS NOBODY'S OWN: the nightly fold raises it as the
+  // cluster, so it never arrives with the person's own approvals. It is listed
+  // from workRoutingReviews, which answers an owner or developer.
+  const review = (over: Partial<Row> = {}) =>
+    approvalRow({
+      id: "a-route",
+      kind: "routingReview",
+      ownerUserId: "",
+      runId: "",
+      stepKey: "",
+      question: "gpt-x failed 17 of 41 structured calls at strong this week",
+      subject: { direction: "demotion", modelId: "gpt-x", level: "strong", ruleName: "evidenceDemotionStrongGptx1a2b3c4d", ruleSource: "rule evidenceDemotionStrongGptx1a2b3c4d { }" },
+      options: [{ label: "Add the rule", value: "approved" }, { label: "Leave routing as it is", value: "rejected" }],
+      ...over,
+    });
+
+  it("is listed from the routing reviews and says before the decision that approving changes routing", async () => {
+    mount(fakeConnection({ routingReviews: [review()] }));
     expect(await screen.findAllByText("Routing rule")).not.toHaveLength(0);
     expect(screen.queryByText("routingReview")).toBeNull();
     fireEvent.click(await screen.findByText("gpt-x failed 17 of 41 structured calls at strong this week"));
@@ -938,10 +943,24 @@ describe("the routing review", () => {
     expect(within(attached).queryByText("Run")).toBeNull();
     expect(within(attached).queryByText("Step")).toBeNull();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
-    expect(within(bar).getByRole("button", { name: /^Reject this: routing is left as it is/ })).toBeTruthy();
-    // Nothing applies an approved review yet, so the person must hear before
-    // deciding that approving leaves routing as it is.
-    expect(screen.getAllByText(/Approving records your decision but does not change routing/).length).toBeGreaterThan(0);
+    expect(within(bar).getByRole("button", { name: "Add the rule" })).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: /^Leave routing as it is: routing is left as it is/ })).toBeTruthy();
+    expect(screen.getAllByText(/Approving makes exactly this change/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/does not change routing/)).toBeNull();
+  });
+
+  it("re-reads the routing reviews after a decision, because a developer is sent no update for a row nobody owns", async () => {
+    const conn = fakeConnection({ routingReviews: [review()] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("gpt-x failed 17 of 41 structured calls at strong this week"));
+    const bar = await screen.findByRole("group", { name: "What you can do with this" });
+    const reads = conn.query.workRoutingReviews.mock.calls.length;
+    fireEvent.click(within(bar).getByRole("button", { name: "Add the rule" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "a-route", decision: "approved" }));
+    await waitFor(() => expect(conn.query.workRoutingReviews.mock.calls.length).toBeGreaterThan(reads));
+    expect((await screen.findAllByText("The rule was added.")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    await waitFor(() => expect(screen.queryByText("gpt-x failed 17 of 41 structured calls at strong this week")).toBeNull());
   });
 });
 
