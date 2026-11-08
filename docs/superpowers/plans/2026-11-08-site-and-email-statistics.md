@@ -41,8 +41,16 @@
 - **Periods.** Days are UTC.
   - Sites: `24h | 7d | 30d | 90d | 12m`. Email: `7d | 30d | 90d | 12m`.
   - Buckets: `24h` is hourly, `7d`/`30d`/`90d` daily, `12m` monthly.
-  - The previous period is the same length, immediately before.
+  - The previous period is the same length, immediately before, for every period except `12m`. `12m` has no previous period and spans the current month plus the 12 before it, 13 monthly buckets (spec D4). Reads return no `previous`/`previousSeries` for it, figures show no change, and the chart draws no previous line.
   - Defaults: Deployables `7d`, Email `30d`. The client scope defaults to `""` (All).
+- **Visits (spec D17).** A visit is one visitor's page views with no gap over 30 minutes. It is counted in the hour and day it started, and it splits at midnight UTC because the visitor hash changes.
+  - A bounce is a one-page visit.
+  - Views per visit is `page views / visits`; bounce rate is `bounces / visits`.
+- **Email attribution (spec D18).**
+  - Rule sends attribute through `delivery.emailRuleId`.
+  - Journey sends attribute through `delivery.requestId` = `journey-<64-hex enrollment>-<step>`, then the enrollment's `journeyId`.
+  - A subscribe or unsubscribe attributes through its recipient's `audienceId`.
+  - Open and click rates count campaign mail only.
 - **Absent is not zero.** An unmeasured number is JSON `null` in every payload. The OS draws it with kit `Measure` (em dash plus reason) and shows no change badge.
 - **Reads narrow under the caller.** Sites go through `readableSites`, email through `ResolveAccessGrant`. A caller with nothing in scope gets an answer with every figure `null`, never an error.
 - **System-owned sites** are never recorded and never get statistics.
@@ -439,9 +447,9 @@ make sdk-gen && bash scripts/os/build.sh deps
 
 **Files:**
 - Create the migration: `component/database/memory-nodes/migrations/20261108090200_edge_stats_rollups.up.sql` and `.down.sql`.
-  - `edge_stats_hourly (site_id TEXT NOT NULL, hour TIMESTAMPTZ NOT NULL, visitors BIGINT, page_views BIGINT, requests BIGINT NOT NULL, errors BIGINT NOT NULL, not_found BIGINT NOT NULL, bytes BIGINT NOT NULL, bot_requests BIGINT NOT NULL, duration_hist BIGINT[] NOT NULL, PRIMARY KEY (site_id, hour))`, indexed on `(hour)`.
+  - `edge_stats_hourly (site_id TEXT NOT NULL, hour TIMESTAMPTZ NOT NULL, visitors BIGINT, visits BIGINT, bounces BIGINT, page_views BIGINT, requests BIGINT NOT NULL, errors BIGINT NOT NULL, not_found BIGINT NOT NULL, bytes BIGINT NOT NULL, bot_requests BIGINT NOT NULL, duration_hist BIGINT[] NOT NULL, PRIMARY KEY (site_id, hour))`, indexed on `(hour)`.
   - `edge_stats_daily`: the same columns with `day DATE`, PK `(site_id, day)`, indexed on `(day)`.
-  - `edge_stats_daily_top (site_id TEXT, day DATE, dimension TEXT, value TEXT, visitors BIGINT NOT NULL, page_views BIGINT NOT NULL, PRIMARY KEY (site_id, day, dimension, value))`, indexed on `(day)`.
+  - `edge_stats_daily_top (site_id TEXT, day DATE, dimension TEXT, value TEXT, visitors BIGINT NOT NULL, visits BIGINT NOT NULL, page_views BIGINT NOT NULL, PRIMARY KEY (site_id, day, dimension, value))`, indexed on `(day)`.
   - These are plain tables (§5).
 - Create: `component/sitetraffic/histogram.go`, `histogram_test.go`, `histogram_db_test.go`
 
@@ -505,7 +513,7 @@ make sdk-gen && bash scripts/os/build.sh deps
   func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error)
   ```
 - What runs:
-  - Recompute the current and previous hour, and today. Recompute yesterday while `now < today 02:00 UTC`.
+  - Recompute every hour of today, and today itself. Do the same for yesterday's hours and yesterday while `now < today 02:00 UTC`. Every hour, because a visit is segmented over the whole day's page views (spec D17).
   - When `edge_stats_daily` is empty, backfill every day from `edge_request`'s oldest day, and every hour of the last 30 days.
   - Each range is one transaction: `SET LOCAL statement_timeout = '60s'`, delete the range's rows (and that day's top rows), insert the aggregates.
   - Then delete hourly rows older than `now-30d`, and daily and top rows older than `today-400d`.
@@ -517,7 +525,13 @@ make sdk-gen && bash scripts/os/build.sh deps
   not_found = count(*) FILTER (WHERE status >= 400 AND status < 500)
   bytes = coalesce(sum(bytes),0); bot_requests = count(*) FILTER (WHERE bot)
   duration_hist = 64-element array of counts per histogramBucketSQL(duration_ns)
+  visits, bounces = from the day's visits below, counted in the bucket of each visit's start; NULL when the bucket has no measured row
   ```
+- Visits are built per site and UTC day from `page_view AND visitor <> ''` rows ordered by `(visitor, served_at)`:
+  - A row starts a new visit when it has no previous row for that visitor that day, or the gap from the previous row is over 30 minutes. Use `lag(served_at) OVER (PARTITION BY site_id, visitor ORDER BY served_at)`, then a running `sum` of the start flags to number the visits.
+  - A visit's start is its first row's `served_at`. Its entry page and entry source come from its first row (the first row whose `source <> ''` for the source dimension). Its country, device, browser and OS come from its first row.
+  - A visit is a bounce when it has exactly one row.
+- Top rows gain `visits`: a visit counts once under its entry page, its entry source, and its first row's country, device, browser and OS.
 - Top rows come from `page_view` rows only:
   - Dimensions: `page` = path; `source` = source, with `''` excluded; `country`, `device`, `browser` and `os`, with `''` stored as `(unknown)`.
   - `visitors = count(DISTINCT visitor) FILTER (WHERE visitor <> '')`, `page_views = count(*)`.
@@ -533,10 +547,15 @@ make sdk-gen && bash scripts/os/build.sh deps
   - `TestYesterdayIsRecomputedUntilTwoAfterMidnight`: a late row for 23:59 yesterday counts at 00:30 and not at 02:30.
   - `TestRowsPastRetentionAreDeleted`.
   - `TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal`.
+  - `TestAGapOverThirtyMinutesStartsANewVisit`: views at 10:00, 10:20, 10:55 and 11:30 give two visits, both started in hour 10.
+  - `TestAOnePageVisitIsABounce`.
+  - `TestAVisitCountsInTheHourItStarted`: views at 10:50 and 11:10 give a visit in hour 10 and none in hour 11.
+  - `TestAVisitAcrossMidnightSplitsInTwo`.
+  - `TestTopRowsCountAVisitUnderItsEntryPageAndSource`.
 - [ ] **Step 2: Fail.**
 
   ```bash
-  go test -count=1 github.com/znasllc-io/memql/component/sitetraffic/ -run Rollup
+  go test -count=1 github.com/znasllc-io/memql/component/sitetraffic/ -run 'Rollup|Visit|Bounce|TopRows'
   ```
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Pass, and run the boot gates.**
@@ -620,25 +639,24 @@ make sdk-gen && bash scripts/os/build.sh deps
   ```go
   // core/statsperiod
   type Period string // "24h" "7d" "30d" "90d" "12m"
-  type Bounds struct{ Start, End, PrevStart, PrevEnd time.Time; Bucket string; Buckets int } // Bucket: hour|day|month
+  type Bounds struct{ Start, End, PrevStart, PrevEnd time.Time; Bucket string; Buckets int; HasPrevious bool } // Bucket: hour|day|month
   func Parse(s string, allowed ...Period) (Period, error)
   func For(p Period, now time.Time) Bounds
   ```
 - `For` rules:
-  - `24h`: `End` is the next whole hour after `now`.
-  - `7d`/`30d`/`90d`: `End` is the next UTC midnight.
-  - `12m`: `End` is the first of next month.
-  - `Start = End - span`; `Prev* = [Start - span, Start)`.
+  - `24h`: `End` is the next whole hour after `now`. `Start = End - 24h` and `Prev* = [Start - 24h, Start)`.
+  - `7d`/`30d`/`90d`: `End` is the next UTC midnight. `Start = End - N days` and `Prev* = [Start - N days, Start)`.
+  - `12m`: `End` is the first of next month and `Start` the first of the month 12 months before the current one, giving 13 buckets. `HasPrevious` is false and the `Prev*` times are zero (spec D4).
   ```go
   // sitetraffic
   type StatisticsQuery struct{ SiteIds, AccountIds []string; Period statsperiod.Period; Now time.Time }
-  type Totals struct{ Visitors, PageViews, Requests, Errors, NotFound, Bytes, BotRequests *int64; ViewsPerVisitor, MedianMs, P95Ms *float64 }
-  type Point struct{ At time.Time; Visitors, PageViews, Requests, Errors, NotFound *int64; P95Ms *float64 }
-  type TopEntry struct{ Value string; Visitors, PageViews int64 }
-  type SiteTotals struct{ SiteId string; Visitors, PageViews *int64 }
+  type Totals struct{ Visitors, Visits, Bounces, PageViews, Requests, Errors, NotFound, Bytes, BotRequests *int64; ViewsPerVisit, BounceRate, MedianMs, P95Ms *float64 }
+  type Point struct{ At time.Time; Visitors, Visits, Bounces, PageViews, Requests, Errors, NotFound *int64; P95Ms *float64 }
+  type TopEntry struct{ Value string; Visitors, Visits, PageViews int64 }
+  type SiteTotals struct{ SiteId string; Visitors, Visits, PageViews *int64 }
   type Statistics struct{ Period statsperiod.Period; Bucket string; Start, End, PrevStart, PrevEnd time.Time; MeasuredSince *time.Time; Totals, Previous Totals; Series, PreviousSeries []Point; Top map[string][]TopEntry; Sites []SiteTotals }
   func (r *Reader) Statistics(ctx context.Context, q StatisticsQuery) (Statistics, error)
-  func (s Statistics) Payload() map[string]any // nil -> JSON null; times RFC3339; measuredSince "YYYY-MM-DD"; top keys page,source,country,device,browser,os; every other key is the lowerCamel field name (pageViews, viewsPerVisitor, notFound, botRequests, medianMs, p95Ms, previousSeries, siteId), which Task 15 parses
+  func (s Statistics) Payload() map[string]any // nil -> JSON null; times RFC3339; measuredSince "YYYY-MM-DD"; top keys page,source,country,device,browser,os; every other key is the lowerCamel field name (visits, bounces, pageViews, viewsPerVisit, bounceRate, notFound, botRequests, medianMs, p95Ms, previousSeries, siteId), which Task 15 parses; previous and previousSeries are null when !HasPrevious
   func (r *Reader) readableSitesForAccounts(ctx context.Context, accountIds []string) ([]string, error)
   ```
 - `readableSitesForAccounts` runs `sitesAll` under the caller, drops system-owned rows, and keeps rows whose bare `accountId` is in the list when one is given.
@@ -647,11 +665,14 @@ make sdk-gen && bash scripts/os/build.sh deps
   - `24h`: `count(DISTINCT visitor)` over raw `edge_request` rows in range.
   - Other periods: the sum of daily visitors.
   - `null` when no measured row is in range.
+- Visits and bounces: the sum of the buckets' visits and bounces. Each visit is counted once, in the bucket it started.
+  - `ViewsPerVisit = PageViews / Visits` and `BounceRate = Bounces / Visits`, both `null` when there are no visits.
 - Series:
   - One point per bucket.
   - When the range has any row, a bucket with none is 0 for requests. Its visitors and page views are 0 too, unless the bucket is before `MeasuredSince`, when they are `null`.
   - A range with no rows is all `null`.
 - Top lists: `24h` computes them from raw rows; other periods sum `edge_stats_daily_top`. Keep 50 per dimension plus an `(other)` remainder.
+  - The 24h visits per value come from the same visit segmentation as Task 6. Make Task 6's segmentation SQL one builder in `rollup.go` that both call, never a second copy.
 - `MedianMs` and `P95Ms` come from the merged histograms.
 - `MeasuredSince` is `min(day)` with non-null visitors among the narrowed sites.
 
@@ -662,14 +683,15 @@ make sdk-gen && bash scripts/os/build.sh deps
     | --- | --- | --- | --- |
     | `24h` | `2026-11-07T11:00Z` | `2026-11-08T11:00Z` | hour |
     | `7d` | `2026-11-02` | `2026-11-09` | day |
-    | `12m` | `2025-12-01` | `2026-12-01` | month |
+    | `12m` | `2025-11-01` | `2026-12-01` | month (13 buckets, `HasPrevious` false) |
 
     Also check each previous range.
   - DB tests, with a real engine as in `reader_db_test.go`:
     - `TestStatisticsForOneSiteOverSevenDays`.
     - `TestStatisticsForTwentyFourHoursCountDistinctVisitorsFromRequests`.
     - `TestAPeriodBeforeVisitorCountingIsNullNotZero`.
-    - `TestTwelveMonthsSumsDaysIntoMonths`.
+    - `TestTwelveMonthsSumsDaysIntoMonths`: 13 points, with no `previous` and no `previousSeries`.
+    - `TestVisitsBouncesAndTheirRates`: views per visit and bounce rate come from the summed visits, bounces and page views.
     - `TestHealthPercentilesComeFromMergedHistograms`.
     - `TestAClientMemberGetsNothingForAnotherClientsSiteEvenById`: a member of account A asks for B's site by id, then by `accountIds: [B]`. Both answer an empty `Sites` and nil totals.
     - `TestStaffGetEverySiteWhenNoneAreNamed`.
@@ -692,7 +714,7 @@ make sdk-gen && bash scripts/os/build.sh deps
 
 **Files:**
 - Create the migration: `component/database/memory-nodes/migrations/20261108090300_email_stat_facts.up.sql` and `.down.sql`.
-  - `email_stat_fact (kind TEXT NOT NULL, source_id TEXT NOT NULL, account_id TEXT NOT NULL DEFAULT '', campaign_id TEXT NOT NULL DEFAULT '', rule_id TEXT NOT NULL DEFAULT '', day DATE NOT NULL, PRIMARY KEY (kind, source_id))`, indexed on `(account_id, day)` and on `(day)`.
+  - `email_stat_fact (kind TEXT NOT NULL, source_id TEXT NOT NULL, account_id TEXT NOT NULL DEFAULT '', campaign_id TEXT NOT NULL DEFAULT '', rule_id TEXT NOT NULL DEFAULT '', journey_id TEXT NOT NULL DEFAULT '', audience_id TEXT NOT NULL DEFAULT '', day DATE NOT NULL, PRIMARY KEY (kind, source_id))`, indexed on `(account_id, day)` and on `(day)`.
   - `email_stat_watermark (source TEXT PRIMARY KEY, through TIMESTAMPTZ NOT NULL)`.
 - Create the package `component/emailstats`: `doc.go`, `plugin.go` (`memql.RegisterPlugin("emailStats", ...)` with `pctx.Engine`, `pctx.BunDB`, `pctx.Logger`), `facts.go`, `rollup.go`, `main_dbschema_test.go`, `facts_test.go`, `rollup_db_test.go`.
 - Modify `app/plugins_core.go`: add `_ "github.com/znasllc-io/memql/component/emailstats"`.
@@ -701,6 +723,12 @@ make sdk-gen && bash scripts/os/build.sh deps
   - filters `row => actor.isClusterOwner == true && row.createdAt >= args.since`
   - uses `sort "row.createdAt", "asc"`, `paginate 500`
   - and shapes `deliveryFull`, `engagementEventFull` or `consentEventFull`
+- Also two `@actor @serverOnly @cache(0)` lookups for attribution (spec D18):
+  - `journeyEnrollmentsByIds { args { ids []string! } }` on `journeyEnrollment`, shaped by a new `enrollmentJourneyRef { row.id journeyId }`.
+  - `recipientAudiencesByIds { args { ids []string! } }` on `recipient`, shaped by a new `recipientAudienceRef { row.id audienceId }`.
+  - Each filters `row => actor.isClusterOwner == true && row.id in args.ids` and uses `sort "row.createdAt", "asc"`, `paginate 500`.
+  - Compare `row.id` the way existing by-id queries in `dsl/campaigns/queries.memql` do: bare ids resolve inbound.
+  - The two shapes go in `dsl/campaigns/shapes.memql`.
 - Modify `dsl/campaigns/builtins.memql`:
   ```memql
   @executor("integration.emailStats.rollup")
@@ -713,7 +741,7 @@ make sdk-gen && bash scripts/os/build.sh deps
   ```
 - Modify the gates:
   - the maintenance list, `want`, and `shippedAutomationCount` (+1)
-  - `test/dslconformance/server_only_parsed_test.go` `want` (the three queries)
+  - `test/dslconformance/server_only_parsed_test.go` `want` (the five queries)
   - the root `call_origin_conformance_test.go` allowlist (`component/emailstats`)
   - `module_taxonomy_test.go` (`"emailStats": kindComponent`, reason "reads the cluster's own rows and tables")
   - `scripts/ci/db-gated-packages.sh` `DB_GATED_TREES` (`"component/emailstats"`)
@@ -722,7 +750,9 @@ make sdk-gen && bash scripts/os/build.sh deps
 **Interfaces:**
 - Produces:
   ```go
-  type Fact struct{ Kind, SourceID, AccountID, CampaignID, RuleID string; Day time.Time }
+  type Fact struct{ Kind, SourceID, AccountID, CampaignID, RuleID, JourneyID, AudienceID string; Day time.Time }
+  func journeyEnrollmentOf(requestID string) (enrollmentID string, ok bool) // "journey-" + 64 lowercase hex + "-" + step
+  func attribute(ctx context.Context, engine Engine, facts []Fact, enrollmentOf, audienceOf map[string]string) error // fills JourneyID / AudienceID from two batched lookups per page
   func deliveryFacts(row map[string]any) []Fact
   func engagementFacts(row map[string]any) []Fact
   func consentFacts(row map[string]any) []Fact
@@ -734,9 +764,13 @@ make sdk-gen && bash scripts/os/build.sh deps
   - **Deliveries:**
     - `status sent` with `sentAt` gives `sent` on the `sentAt` day.
     - `failed` and `skipped` give their kind on the version's `row.createdAt` day.
+    - A skipped delivery whose `skipReason` is `hard_bounce`, `complaint`, `manual`, `bounced` or `complained` also gives `suppressed`. That is `campaignStats`' suppressed set (`component/campaigns/stats.go` `suppressedSkipReasons`); reference it, don't copy it.
+    - Every delivery fact carries `rule_id` from `emailRuleId`. When `requestId` matches `journeyEnrollmentOf`, it carries `journey_id` from the enrollment's `journeyId`.
     - Provider status `delivered|expanded` gives `delivered`, and `bounced|suppressed|quarantined|filtered-spam|failed` gives `undelivered`, both dated by `providerAt`, else `row.createdAt`.
   - **Engagement:** `open|click` keyed by the event id, plus `open_unique|click_unique` keyed by `deliveryId`, both dated by `occurredAt`.
   - **Consent:** `withdraw` gives `unsubscribe`, `bounce` and `complaint` keep their names, `grant` gives `subscribe`, and `suppress` gives nothing.
+    - `subscribe` and `unsubscribe` carry `audience_id` from the event's recipient's `audienceId`. An event with no `recipientId` keeps `audience_id` empty and counts in its organization's totals only.
+    - The enrollment and recipient lookups run once per page, in batches of at most 500 ids, under the same internal-origin context as the walk.
   - Every id is `memql.BareShortId`.
 - The walk, for each source:
   1. Set `since = watermark - 5m`, or `now - 400d` when there is no watermark.
@@ -753,11 +787,17 @@ make sdk-gen && bash scripts/os/build.sh deps
     - `TestEngagementGivesATotalAndAUniqueFact`.
     - `TestConsentKindsMapToTheirFacts`.
     - `TestIdsAreBare`.
+    - `TestASuppressedSkipIsASuppressedFact`.
+    - `TestJourneyEnrollmentOfParsesOnlyAJourneyRequestId`: `journey-<64 hex>-welcome` yields the enrollment; `journey-short-x`, `rule-...` and `""` do not.
   - DB, seeding through the campaigns mutations (`recordCampaignDelivery`, `recordEngagementEvent`, `recordConsentWithdraw`, ...) under internal origin and an owner actor:
     - `TestRollupRecordsFactsFromTheGraph`.
     - `TestRerunsCountNothingTwice`.
     - `TestTheWatermarkOverlapCatchesALateWrite`.
     - `TestTheFirstRunWalksAtMostFortyPagesPerSource`.
+    - `TestARuleSendIsAttributedToItsRule`.
+    - `TestAJourneySendIsAttributedToItsJourney`, through `enrollJourneyRecipient` and a delivery with `requestId` `journey-<enrollment>-<step>`.
+    - `TestASubscribeIsAttributedToItsRecipientsAudience`.
+    - `TestAConsentEventWithNoRecipientCountsOnlyInTotals`.
     - `TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal`.
 - [ ] **Step 2: Fail.**
 
@@ -798,25 +838,34 @@ make sdk-gen && bash scripts/os/build.sh deps
   ```go
   type GrantResolver interface{ ResolveAccessGrant(ctx context.Context) memql.AccessGrant } // asserted on pctx.Engine; absent -> every read answers nothing
   func allowedAccounts(grant memql.AccessGrant, requested []string) (ids []string, everything bool) // everything: staff with nothing requested (includes account_id '')
-  type EmailTotals struct{ Sent, Delivered, Undelivered, Failed, Skipped, Opens, Clicks, UniqueOpens, UniqueClicks, Unsubscribes, Bounces, Complaints, Subscribes *int64; OpenRate, ClickRate *float64 }
-  type EmailPoint struct{ At time.Time; Sent, UniqueOpens, UniqueClicks, Unsubscribes, Subscribes *int64; OpenRate, ClickRate *float64 }
-  type SourceFigures struct{ ID string; Sent, UniqueOpens, UniqueClicks int64; OpenRate, ClickRate *float64 }
-  type EmailStatistics struct{ Period statsperiod.Period; Bucket string; Start, End, PrevStart, PrevEnd time.Time; MeasuredSince *time.Time; Totals, Previous EmailTotals; Series, PreviousSeries []EmailPoint; Campaigns, Automations, Accounts []SourceFigures }
+  type EmailTotals struct{ Sent, Delivered, Undelivered, Failed, Skipped, Suppressed, Opens, Clicks, UniqueOpens, UniqueClicks, Unsubscribes, Bounces, Complaints, Subscribes *int64; OpenRate, ClickRate *float64 }
+  type EmailPoint struct{ At time.Time; Sent, UniqueOpens, UniqueClicks, Unsubscribes, Subscribes, Bounces, Complaints, Failed, Suppressed *int64; OpenRate, ClickRate *float64 }
+  type CampaignFigures struct{ ID string; Sent, UniqueOpens, UniqueClicks int64; OpenRate, ClickRate *float64 } // also the Accounts rows (ID = account)
+  type AutomationFigures struct{ ID, Kind string; Sent, Failed, Suppressed int64 } // Kind: "rule" | "journey"
+  type AudienceFigures struct{ ID string; Subscribes, Unsubscribes, Net int64 }
+  type EmailStatistics struct{ Period statsperiod.Period; Bucket string; Start, End, PrevStart, PrevEnd time.Time; HasPrevious bool; MeasuredSince *time.Time; Totals, Previous EmailTotals; Series, PreviousSeries []EmailPoint; Campaigns []CampaignFigures; Automations []AutomationFigures; Audiences []AudienceFigures; Accounts []CampaignFigures }
   func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, requested []string, p statsperiod.Period, now time.Time) (EmailStatistics, error)
-  func (s EmailStatistics) Payload() map[string]any // nil -> JSON null; keys are the lowerCamel field names (uniqueOpens, openRate, previousSeries, campaigns, automations, accounts, id), which Task 17 parses
+  func (s EmailStatistics) Payload() map[string]any // nil -> JSON null; keys are the lowerCamel field names (uniqueOpens, openRate, suppressed, previousSeries, campaigns, automations, audiences, accounts, id, kind, net), which Task 17 parses; previous and previousSeries are null when !HasPrevious
   ```
 - Read rules:
   - `allowedAccounts`: for `EveryAccount`, the requested ids, or everything when none are requested. Otherwise the requested ids that are in `AccountIDs`, or all of `AccountIDs` when none are requested.
   - An empty result answers with every figure `null`.
   - `MeasuredSince` is the global `min(day)` of `email_stat_fact`. Figures for buckets before it are `null`, and with no facts at all every figure is `null`.
-  - A rate is the number of `sent` facts in range whose `source_id` has an `open_unique` (or `click_unique`) fact on any day, divided by the `sent` facts in range. It is `null` when nothing was sent.
+  - A rate is the number of campaign `sent` facts in range (`campaign_id <> ''`) whose `source_id` has an `open_unique` (or `click_unique`) fact on any day, divided by the campaign `sent` facts in range. It is `null` when no campaign mail was sent (spec D18).
   - Series rates use send-day cohorts.
-  - `Campaigns` groups by `campaign_id <> ''` and `Automations` by `rule_id <> ''`, each the top 50 by sent. `Accounts` appears only when more than one organization is in scope.
-  - Periods: `7d | 30d | 90d | 12m`.
+  - `Campaigns` groups by `campaign_id <> ''`, top 50 ordered by unique opens desc, then unique clicks desc.
+  - `Automations` has one row per `rule_id <> ''` (kind `rule`) and per `journey_id <> ''` (kind `journey`), with sent, failed and suppressed.
+  - `Audiences` has one row per `audience_id <> ''` with subscribes, unsubscribes and `Net = Subscribes - Unsubscribes`.
+  - `Accounts` appears only when more than one organization is in scope.
+  - Periods: `7d | 30d | 90d | 12m`. `12m` has no previous period (13 monthly buckets).
 
 - [ ] **Step 1: Write the failing DB tests**, inserting facts directly.
   - `TestTotalsAndCohortRates`: 100 sent, 42 opened, 3 clicked give 0.42 and 0.03.
-  - `TestSeriesByDayAndByMonth`.
+  - `TestRatesCountCampaignMailOnly`: 100 campaign sends with 42 opened, plus 50 rule sends, still give 0.42.
+  - `TestSeriesByDayAndByMonth`: the series carries bounces, complaints, failed and suppressed; `12m` has 13 points and no previous.
+  - `TestAutomationsListRulesAndJourneysWithFailedAndSuppressed`.
+  - `TestAudiencesCarryTheirNetChange`.
+  - `TestCampaignsRankByUniqueOpensThenUniqueClicks`.
   - `TestAMemberGetsOnlyTheirOrganization`, with a fake `GrantResolver` returning `[A]`: requesting `[B]` gives nil totals; requesting `[]` gives A only.
   - `TestStaffGetEveryOrganizationAndTheUnattributed`.
   - `TestAccountsListOnlyWhenMoreThanOneIsInScope`.
@@ -1029,10 +1078,10 @@ make sdk-gen && bash scripts/os/build.sh deps
 - Produces:
   ```ts
   export type Dimension = "page" | "source" | "country" | "device" | "browser" | "os";
-  export interface SiteTotals { visitors: number | null; pageViews: number | null; viewsPerVisitor: number | null; requests: number | null; errors: number | null; notFound: number | null; bytes: number | null; botRequests: number | null; medianMs: number | null; p95Ms: number | null }
-  export interface SitePoint { at: string; visitors: number | null; pageViews: number | null; requests: number | null; errors: number | null; notFound: number | null; p95Ms: number | null }
-  export interface TopEntry { value: string; visitors: number; pageViews: number }
-  export interface SiteStatistics { period: Period; bucket: Bucket; start: string; end: string; measuredSince: string | null; totals: SiteTotals; previous: SiteTotals; series: SitePoint[]; previousSeries: SitePoint[]; top: Record<Dimension, TopEntry[]>; sites: { siteId: string; visitors: number | null; pageViews: number | null }[] }
+  export interface SiteTotals { visitors: number | null; visits: number | null; bounces: number | null; pageViews: number | null; viewsPerVisit: number | null; bounceRate: number | null; requests: number | null; errors: number | null; notFound: number | null; bytes: number | null; botRequests: number | null; medianMs: number | null; p95Ms: number | null }
+  export interface SitePoint { at: string; visitors: number | null; visits: number | null; bounces: number | null; pageViews: number | null; requests: number | null; errors: number | null; notFound: number | null; p95Ms: number | null }
+  export interface TopEntry { value: string; visitors: number; visits: number; pageViews: number }
+  export interface SiteStatistics { period: Period; bucket: Bucket; start: string; end: string; measuredSince: string | null; totals: SiteTotals; previous: SiteTotals | null; series: SitePoint[]; previousSeries: SitePoint[] | null; top: Record<Dimension, TopEntry[]>; sites: { siteId: string; visitors: number | null; visits: number | null; pageViews: number | null }[] } // previous* null for 12m
   export function parseSiteStatistics(row: Row): SiteStatistics // a JSON null stays null; never rowNumber() (it turns null into 0)
   export function fetchSiteStatistics(query: QueryClient, args: { siteIds?: readonly string[]; accountIds?: readonly string[]; period: Period }, signal?: AbortSignal): Promise<SiteStatistics | null>
   export interface StatisticsReading { value: SiteStatistics | null; state: "idle" | "loading" | "ready" | "error"; error: string; reload: () => Promise<void> }
@@ -1041,7 +1090,7 @@ make sdk-gen && bash scripts/os/build.sh deps
   export function StatisticsListPage(props: { site: SiteRow; dimension: Dimension }): JSX.Element
   ```
 - Copy, exact:
-  - Figures: "Visitors", "Page views", "Views per visitor".
+  - Figures: "Visitors", "Visits", "Page views", "Views per visit", "Bounce rate". All five are chartable; a bucket's views per visit and bounce rate are worked out from its page views, visits and bounces. The rate uses `formatRate` from the kit (add it there if Email's `formatRate` is the only copy, and have Email import it).
   - Health figures: "Requests", "Errors", "Not found", "Response time, p95". Health facts: "Data served", "Median response", "Bot requests".
   - List titles: "Pages", "Sources", "Countries", "Devices". Devices has `LocalTabs` options "Device", "Browser", "OS".
   - Value words: `(other)` reads "Other", `(unknown)` "Unknown", `direct` "Direct".
@@ -1053,6 +1102,7 @@ make sdk-gen && bash scripts/os/build.sh deps
 - Layout: the lists stand in a two-column grid when `useWide` reports at least 760px of pane (Pages beside Sources, then Countries beside Devices), and stack in one column below that. Health comes last.
 - `PageHelp title="Statistics"` (the window's one information control, DESIGN.md) says, in five short paragraphs:
   - a visitor is counted once per UTC day, without cookies
+  - a visit is a visitor's page views with no gap over 30 minutes, and a bounce is a one-page visit
   - days are UTC
   - a page view is a page load or an in-app page change
   - bots are left out and counted under Health
@@ -1068,6 +1118,7 @@ make sdk-gen && bash scripts/os/build.sh deps
   - `TestCountriesCreditDbIp`.
   - `TestAReadRefusalShowsTheEnginesSentence`.
   - `TestASystemOwnedDeployableShowsTheNote`.
+  - `TestTwelveMonthsShowsNoComparison`: no change text on any figure and no `data-series="previous"` path.
 - [ ] **Step 2: Fail.**
 
   ```bash
@@ -1097,8 +1148,9 @@ make sdk-gen && bash scripts/os/build.sh deps
   ```
 - Layout:
   - `Subhead` "Websites" with `actions={<><ScopeControl/><PeriodControl/></>}`.
-  - `StatFigures` (Visitors, Page views), then `TimeChart`.
+  - `StatFigures` (Visitors, Visits, Page views), then `TimeChart`.
   - `RankedList` "Websites": rows from `read.sites` named by `site.title || site.hostname`, valued by visitors (else page views). A row opens its Statistics.
+  - Below it, `RankedList` "Sources" and "Countries" from `read.top.source` and `read.top.country`, already summed over the websites in scope, with the same words and the DB-IP footer as Task 15. Reuse Task 15's value-word and footer helpers rather than copying them.
 - The read sends no `siteIds` and `accountIds: scope.accountIds`. The scope is stored in `DeployablesSettings.statisticsScope`.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -1106,6 +1158,7 @@ make sdk-gen && bash scripts/os/build.sh deps
   - `TestAWebsiteRowOpensItsStatistics`: the region "Statistics for <host>" appears.
   - `TestStaffSeeTheClientControlAndAMemberOfOneDoesNot`: uses `withSession({ role: "user", everyAccount: false, accountIds: ["acme"] })`.
   - `TestTheReadNamesTheChosenClient`: the call contains `accountIds: ["acme"]`.
+  - `TestWebsitesShowSourcesAndCountriesForTheScope`.
 - [ ] **Step 2: Fail.**
 
   ```bash
@@ -1133,10 +1186,12 @@ make sdk-gen && bash scripts/os/build.sh deps
 - Consumes: Tasks 10, 11, 12, 13 and 14.
 - Produces:
   ```ts
-  export interface EmailTotals { sent: number | null; delivered: number | null; undelivered: number | null; failed: number | null; skipped: number | null; opens: number | null; clicks: number | null; uniqueOpens: number | null; uniqueClicks: number | null; unsubscribes: number | null; bounces: number | null; complaints: number | null; subscribes: number | null; openRate: number | null; clickRate: number | null }
-  export interface EmailPoint { at: string; sent: number | null; uniqueOpens: number | null; uniqueClicks: number | null; unsubscribes: number | null; subscribes: number | null; openRate: number | null; clickRate: number | null }
-  export interface SourceFigures { id: string; sent: number; uniqueOpens: number; uniqueClicks: number; openRate: number | null; clickRate: number | null }
-  export interface EmailStatistics { period: Period; bucket: Bucket; start: string; end: string; measuredSince: string | null; totals: EmailTotals; previous: EmailTotals; series: EmailPoint[]; previousSeries: EmailPoint[]; campaigns: SourceFigures[]; automations: SourceFigures[]; accounts: SourceFigures[] }
+  export interface EmailTotals { sent: number | null; delivered: number | null; undelivered: number | null; failed: number | null; skipped: number | null; suppressed: number | null; opens: number | null; clicks: number | null; uniqueOpens: number | null; uniqueClicks: number | null; unsubscribes: number | null; bounces: number | null; complaints: number | null; subscribes: number | null; openRate: number | null; clickRate: number | null }
+  export interface EmailPoint { at: string; sent: number | null; uniqueOpens: number | null; uniqueClicks: number | null; unsubscribes: number | null; subscribes: number | null; bounces: number | null; complaints: number | null; failed: number | null; suppressed: number | null; openRate: number | null; clickRate: number | null }
+  export interface CampaignFigures { id: string; sent: number; uniqueOpens: number; uniqueClicks: number; openRate: number | null; clickRate: number | null } // also the accounts rows
+  export interface AutomationFigures { id: string; kind: "rule" | "journey"; sent: number; failed: number; suppressed: number }
+  export interface AudienceFigures { id: string; subscribes: number; unsubscribes: number; net: number }
+  export interface EmailStatistics { period: Period; bucket: Bucket; start: string; end: string; measuredSince: string | null; totals: EmailTotals; previous: EmailTotals | null; series: EmailPoint[]; previousSeries: EmailPoint[] | null; campaigns: CampaignFigures[]; automations: AutomationFigures[]; audiences: AudienceFigures[]; accounts: CampaignFigures[] } // previous* null for 12m
   export function parseEmailStatistics(row: Row): EmailStatistics
   export function useEmailStatistics(args: { accountIds: readonly string[]; period: Period }): Reading<EmailStatistics | null> // the email Reading<T>; AutoRefresh 900_000 ms while visible
   export function OverviewSection(props: { feeds: EmailFeeds; settings: EmailSettings; update: (patch: Partial<EmailSettings>) => void }): JSX.Element
@@ -1144,13 +1199,27 @@ make sdk-gen && bash scripts/os/build.sh deps
 - Copy and layout:
   - Figures: "Sent", "Open rate", "Click rate", "Unsubscribes", "New subscribers"; the rates use `formatRate`.
   - Facts: "Subscriptions" (existing `useSubscriberCounts`, over the in-scope audiences) and "Active automations" (in-scope rules and journeys).
-  - "Sent in this period": a `RecordList` of campaigns, then automations. `name` is the campaign or rule name from the feeds. `secondary` reads "{1,204} sent · {42%} opened · {3.1%} clicked", omitting a part whose rate is `null`. Opening a campaign calls `openRecord("campaigns", { id })`; a rule calls `openRecord("automations", { id })`.
-  - "Delivery": an `OverviewBreakdown` of Delivered (good), Not delivered (warn), Failed (warn), Skipped (quiet) and Unconfirmed (unknown), where unconfirmed is `max(0, sent - delivered - undelivered)`.
+  - "Delivery problems" (spec 9):
+    - its own `StatFigures` (Bounces, Complaints, Failed, Suppressed, all chartable), then a `TimeChart` of the selected one
+    - a `Fact` "Delivered" only when the period has a delivered or undelivered fact (the provider reports outcomes); otherwise no Delivered at all
+  - "Audience growth":
+    - a `RecordList` of `RecordRow`s, one per `audiences` entry, named from the audiences feed
+    - `secondary` reads "{12} new · {3} unsubscribed · {+9} net · {1,204} subscribed"; the last part comes from `useSubscriberCounts` and is left out while unread
+    - a row calls `openRecord("audiences", { id })`
+  - "Top campaigns":
+    - a `RankedList` of `campaigns` in the read's order (unique opens, then unique clicks), valued by unique opens
+    - `secondary` reads "{42%} opened · {3.1%} clicked", leaving out a `null` part
+    - a row calls `openRecord("campaigns", { id })`
+  - "Automations":
+    - a `RecordList` of `RecordRow`s, one per `automations` entry, named from the rules or journeys feed
+    - `secondary` reads "{120} sent · {2} failed · {1} suppressed"
+    - a row calls `openRecord("automations", { id })`
   - "Campaigns": the existing status breakdown.
   - "Clients": a `RankedList` by sent, with the open rate as `secondary`. Shown only when `accounts.length > 1`.
   - The first-use empty state is unchanged.
   - `PageHelp title="Overview"` says:
-    - an open or click rate is of the messages sent in the period
+    - an open or click rate is of the campaign messages sent in the period
+    - automations show no opens or clicks, because automated mail is not tracked for them
     - a recipient counts once per campaign
     - mail privacy proxies make opens an upper bound
     - days are UTC
@@ -1161,7 +1230,12 @@ make sdk-gen && bash scripts/os/build.sh deps
   - `TestOverviewShowsThePeriodsFiguresFromTheRead`.
   - `TestRatesComeFromTheCohort`: 0.42 shows "42%".
   - `TestPressingAFigureChartsIt`.
-  - `TestTheSentListOpensACampaign`.
+  - `TestDeliveryProblemsChartTheirOwnFigures`.
+  - `TestDeliveredIsAFactOnlyWhenTheProviderReports`.
+  - `TestAudienceGrowthRowsOpenTheAudience`.
+  - `TestTopCampaignsRankByUniqueOpensAndOpenTheCampaign`.
+  - `TestAutomationsShowSentFailedSuppressedAndOpenTheirPage`.
+  - `TestTwelveMonthsShowsNoComparison`.
   - `TestStaffSeeAllClientsAndTheClientsList`.
   - `TestAMemberOfOneSeesNoClientControlAndNoOtherClient`.
   - `TestTheChosenClientIsSentToTheRead`.

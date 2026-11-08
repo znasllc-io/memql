@@ -21,7 +21,13 @@ a way to switch clients. A few options on a deployable still open a pop-up; the
 owner wants none.
 
 **Approvals.** The owner approved this design in conversation on 2026-11-08
-("Looks right"), and approved the written spec the same day ("Approve spec"). Each fork in section 3 marked *owner* was the owner's explicit
+("Looks right"), and approved the written spec the same day ("Approve spec").
+The same day the owner approved four additions in a forked conversation and
+confirmed them here ("Yes, fold them in"):
+- visits, views per visit and bounce rate for websites (D17)
+- four more Email Overview sections, with the attribution they need (D18)
+- Sources and Countries on the Deployables Overview's Websites section
+- no previous period for twelve months (D4) Each fork in section 3 marked *owner* was the owner's explicit
 choice. The new HTTP surface in section 6 (`/_memql/view.js` and `/_memql/view`
 on a deployable's own origin) was approved as an HTTP exception under the
 gRPC-first policy in the same conversation. Forks the owner did not settle
@@ -92,8 +98,8 @@ remote with no pull request; the owner merges it into `main`.
 | --- | --- | --- |
 | D1 | *Owner.* **Unique visitors are counted without cookies, per UTC day.** A visitor is `HMAC-SHA256(dailySecret, siteId \| clientIp \| userAgent)`, truncated to 16 bytes. The secret is random, created for one UTC day, shared by every edge replica through one database row, and deleted when the day ends. The IP address and user agent never reach storage. | A first-party cookie counts returning visitors across days but needs a consent banner on every client site for EU and UK visitors. Counting nothing about visitors fails R1. The price of the daily secret is that a person visiting on three days counts three times in a weekly total, which the page says once in its help. |
 | D2 | *Owner.* **A page view is a browser navigation, plus an opt-in page-change ping for single-page apps.** Server-side, a page view is a `GET` with `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, answered 200 or 304, that is not a prefetch (`Sec-Purpose` / `Purpose`). Without `Sec-Fetch-*` headers it is a `GET` accepting `text/html` whose path class is `document` or `fallback`. In-app page changes arrive through the ping (section 6). | Counting every HTML response double counts sites that fetch page fragments (one storefront fetches a view shell for each product page). Counting navigations only misses a single-page app's in-app pages, which the ping covers without the edge rewriting anybody's HTML. |
-| D3 | *Owner.* **Five figure families:** visitors and page views over time; top pages and sources; devices, browsers and operating systems; countries; site health (requests, errors, not found, response time, data served, bot requests). | All four optional families were chosen. |
-| D4 | *Owner.* **History is 13 months of daily totals.** Request detail stays 30 days; hourly totals 30 days; daily totals and daily top lists 400 days. Ranges: last 24 hours (hourly), 7, 30 and 90 days (daily), 12 months (monthly), each compared with the period before it. | 30 days cannot answer "this month against last month". |
+| D3 | *Owner.* **Five figure families:** visitors, visits, page views, views per visit and bounce rate over time; top pages and sources; devices, browsers and operating systems; countries; site health (requests, errors, not found, response time, data served, bot requests). | All four optional families were chosen; visits and bounce rate were added on 2026-11-08 (D17). |
+| D4 | *Owner.* **History is 13 months of daily totals.** Request detail stays 30 days; hourly totals 30 days; daily totals and daily top lists 400 days. Ranges: last 24 hours (hourly), 7, 30 and 90 days (daily), each compared with the period before it, and **12 months with no comparison**: its chart shows the current month and the 12 before it (13 monthly buckets), so this month stands beside the same month last year. | 30 days cannot answer "this month against last month". The 12 months before a 12-month range are past the 400-day retention, so the first version of this decision promised a comparison the storage cannot hold (corrected 2026-11-08). Twenty-five months of daily totals would add it at about twice the rollup storage; the owner kept 13. |
 | D5 | *Default.* **Days are UTC.** The daily secret, the daily totals and the chart's days all turn over at 00:00 UTC. | A per-site time zone would need per-zone secrets and per-zone totals for a difference most readers will not notice; it can follow without a schema change to the hourly tier. |
 | D6 | *Default.* **Rollups are computed by a scheduled job, not by continuous aggregates.** | A continuous aggregate cannot `COUNT(DISTINCT ...)`, and visitors are exactly that. The two existing aggregates stay for the list row's "served 3 minutes ago". |
 | D7 | *Default.* **Response time is a fixed log-scale histogram** (64 buckets from 0.5 ms, each about 19% wider than the last) on every hourly and daily row, so the median and 95th percentile of any range are merged exactly from the buckets and read to within about 10%. | Medians cannot be combined from medians, and percentiles over 30 days of raw rows at read time would be a slow query on every page load. |
@@ -106,6 +112,8 @@ remote with no pull request; the owner merges it into `main`.
 | D14 | *Owner.* **Email's Overview grows into the statistics page** and keeps its name. Deployables' Overview gains a **Websites** section with every website the person may see added together. | One place for each app's figures; Overview is the shell's summary destination. |
 | D15 | *Default.* **The deployable page is called Statistics**, with a chart icon, replacing Traffic. | The owner's word. |
 | D16 | *Default.* **System-owned sites stay unrecorded**, as today. | Measuring the console somebody reads a figure in would be measuring the act of looking. |
+| D17 | *Owner.* **A visit is one visitor's page views with no gap over 30 minutes**, counted in the hour and the day it started, so hourly and daily visits add up without double counting. A bounce is a one-page visit. Views per visit is page views over visits; bounce rate is bounces over visits. A visit that crosses midnight UTC splits in two, because the visitor hash changes. | The standard session definition; computed from page views and the visitor hash, with no cookie. Because a visit is segmented over a whole day's page views, every rollup run recomputes every hour of today. |
+| D18 | *Owner.* **Email facts are attributed to the rule, journey and audience they belong to.** A rule send carries `delivery.emailRuleId`. A journey send carries `delivery.requestId` = `journey-<enrollment>-<step>` (`component/campaigns/journey.go`, `journeyRequestID`); the enrollment's `journeyId` is read through the engine. A subscribe or unsubscribe is a consent event naming a recipient, and the recipient's `audienceId` is read the same way, in batches; an event with no recipient counts in its organization's totals only. **Opens and clicks are counted for campaign mail only**: `engagementEvent.campaignId` is required, so rule and journey sends have no engagement rows, and the open and click rates are of campaign sends. | Each Overview section the owner chose needs one of these attributions. Tracking opens and clicks for automated mail is an owner-agreed follow-up, out of scope here. |
 
 ## 4. What the edge records
 
@@ -160,19 +168,24 @@ retention policies):
 | `edge_stats_daily` | site, UTC day | 400 days |
 | `edge_stats_daily_top` | site, UTC day, dimension, value | 400 days |
 
-The hourly and daily rows carry `visitors`, `page_views`, `requests`, `errors`
-(5xx), `not_found` (4xx), `bytes`, `bot_requests` and `duration_hist` (D7).
-`visitors` and `page_views` are NULL for a period that has request rows but no
-visitor fields, which is every period before this ships. The top table holds,
-per dimension (`page`, `source`, `country`, `device`, `browser`, `os`), the 100
-values with the most visitors that day plus one `(other)` row for the rest,
-each with `visitors` and `page_views`.
+The hourly and daily rows carry `visitors`, `visits`, `bounces`, `page_views`,
+`requests`, `errors` (5xx), `not_found` (4xx), `bytes`, `bot_requests` and
+`duration_hist` (D7). `visitors`, `visits`, `bounces` and `page_views` are
+NULL for a period that has request rows but no visitor fields, which is every
+period before this ships. A visit is counted in the hour and day it started
+(D17). The top table holds, per dimension (`page`, `source`, `country`,
+`device`, `browser`, `os`), the 100 values with the most visitors that day plus
+one `(other)` row for the rest, each with `visitors`, `visits` and
+`page_views`. A visit counts under the page and the source it started on, and
+under its first page view's country, device, browser and OS.
 
 **The job.** A scheduled automation in `dsl/platform/automations.memql` runs
 every five minutes on the cron leader and calls the builtin
 `siteStatisticsRollup` (`component/sitetraffic`). For every site with request
-rows in the window, it recomputes the current and previous hour, today, and
-yesterday until 02:00 UTC, from `edge_request`, as upserts. A recompute is the
+rows in the window, it recomputes every hour of today and today itself, and
+yesterday's hours and yesterday until 02:00 UTC, from `edge_request`, as
+upserts. Every hour of today, because a visit is segmented over the day's page
+views (D17). A recompute is the
 whole computation for that period, so running twice changes nothing. On its
 first run it backfills every day still in `edge_request`. The run is bounded
 (sites per run, statement timeout), logs what it did, and a period it could not
@@ -193,15 +206,17 @@ database records no country. This is the cluster's only new outbound call: one
 HTTPS request a day at most, and a download once a month.
 
 **Email facts.** `email_stat_fact (kind TEXT, source_id TEXT, account_id TEXT,
-campaign_id TEXT, rule_id TEXT, day DATE, PRIMARY KEY (kind, source_id))`,
-indexed on `(account_id, day)` and kept 400 days. Kinds and their source
-records:
+campaign_id TEXT, rule_id TEXT, journey_id TEXT, audience_id TEXT, day DATE,
+PRIMARY KEY (kind, source_id))`, indexed on `(account_id, day)` and kept 400
+days. `rule_id`, `journey_id` and `audience_id` come from D18. Kinds and their
+source records:
 
 | Kind | Source | Day |
 | --- | --- | --- |
 | `sent` | delivery | `sentAt` |
 | `delivered`, `undelivered` | delivery's provider status: `delivered` and `expanded` are delivered; `bounced`, `suppressed`, `quarantined`, `filtered-spam` and `failed` are undelivered | `providerAt`, else the version's time |
 | `failed`, `skipped` | delivery | when it reached that status |
+| `suppressed` | a skipped delivery whose `skipReason` is `hard_bounce`, `complaint`, `manual`, `bounced` or `complained`, the set `campaignStats` calls suppressed | when it reached that status |
 | `open`, `click` | engagement event | `occurredAt` |
 | `open_unique`, `click_unique` | delivery (first open, first click) | `occurredAt` of the first one |
 | `unsubscribe`, `bounce`, `complaint`, `subscribe` | consent event (`withdraw`, `bounce`, `complaint`, `grant`) | `occurredAt` |
@@ -262,20 +277,25 @@ surface, dated 2026-11-08, beside the access-code and shopper routes.
 - Narrows `siteIds` through `readableSites`.
 - Returns one object:
   - the bounds of the period and the period before it, and the bucket size
-  - `totals` and `previous`: visitors, page views, views per visitor, requests,
-    errors, not found, bytes, bot requests, and the median and 95th-percentile
-    response times
-  - `series` and `previousSeries`: one entry per bucket (visitors, page views,
-    requests, errors, not found, 95th-percentile response time), aligned by
-    offset, so the previous period can be drawn under the current one
+  - `totals` and `previous`: visitors, visits, bounces, page views, views per
+    visit, bounce rate, requests, errors, not found, bytes, bot requests, and
+    the median and 95th-percentile response times
+  - `series` and `previousSeries`: one entry per bucket (visitors, visits,
+    bounces, page views, requests, errors, not found, 95th-percentile response
+    time), aligned by offset, so the previous period can be drawn under the
+    current one
   - `top`: the 50 leading values of each dimension, summed over the period's
-    days, with an `other` remainder
-  - `sites`: per-site visitors and page views, for the Websites list
+    days, each with visitors, visits and page views, and an `other` remainder
+  - `sites`: per-site visitors, visits and page views, for the Websites list
   - `measuredSince`: the first day with visitor data, so the page can say where
     the line starts instead of drawing zeroes before it
 - Any figure nothing measured is absent, never zero. A 24-hour period reads the
-  hourly table; the other periods read the daily tables, and 12 months sums
-  days into months. The current partial bucket is included.
+  hourly table for its series, and its visitor total is distinct over the
+  request rows themselves, because hourly visitor counts do not add up. The
+  other periods read the daily tables, and 12 months sums days into months:
+  the current month and the 12 before it. The current partial bucket is
+  included. A 12-month period returns no `previous` and no `previousSeries`
+  (D4).
 
 **`emailStatistics`** (`@sdk`, `integration.campaigns.statistics`):
 
@@ -284,20 +304,26 @@ surface, dated 2026-11-08, beside the access-code and shopper routes.
 - Narrows `accountIds` by `ResolveAccessGrant` (D11).
 - Returns one object:
   - `totals` and `previous`: sent, delivered, undelivered, failed, skipped,
-    opens, clicks, unique opens, unique clicks, unsubscribes, bounces,
-    complaints and new subscribers
-  - the open rate and click rate: of the messages sent in the period, the share
-    opened (clicked) at least once, joined on the delivery id
+    suppressed, opens, clicks, unique opens, unique clicks, unsubscribes,
+    bounces, complaints and new subscribers
+  - the open rate and click rate: of the **campaign** messages sent in the
+    period, the share opened (clicked) at least once, joined on the delivery id
+    (D18)
   - `series` and `previousSeries`: sent, unique opens, unique clicks,
-    unsubscribes and new subscribers per bucket, plus each bucket's open and
-    click rate by send-day cohort
-  - `campaigns` and `automations`: each campaign or rule with sends in the
-    period, with sent, unique opens, unique clicks and both rates, the top 50 by
-    sent
+    unsubscribes, new subscribers, bounces, complaints, failed and suppressed
+    per bucket, plus each bucket's open and click rate by send-day cohort
+  - `campaigns`: each campaign with sends in the period, with sent, unique
+    opens, unique clicks and both rates, the top 50 by unique opens, then
+    unique clicks
+  - `automations`: each rule and journey with sends in the period, with its
+    kind (`rule` or `journey`), sent, failed and suppressed
+  - `audiences`: each audience with subscribes or unsubscribes in the period,
+    with new subscribers, unsubscribes and the net change
   - `accounts`: per-organization sent and rates, only when more than one
     organization is in scope
-- The two rates are absent when nothing was sent, and every figure is absent
-  for a period the facts table does not yet cover.
+- The two rates are absent when no campaign mail was sent, and every figure is
+  absent for a period the facts table does not yet cover. A 12-month period
+  returns no `previous` and no `previousSeries` (D4).
 
 Both reads are cached by the engine's result cache for 60 seconds by default
 and are re-read by the page on `AutoRefresh` (five minutes for 24 hours,
@@ -348,7 +374,7 @@ are those series.
 **Deployable, Statistics** (`detail: "statistics"`, replacing `"traffic"`):
 
 - Head: Statistics, with `PeriodControl` at the right.
-- Figures: Visitors, Page views, Views per visitor.
+- Figures: Visitors, Visits, Page views, Views per visit, Bounce rate.
 - The chart of the selected figure.
 - Pages and Sources side by side on a wide page and stacked on a narrow one,
   then Countries and Devices. Devices uses `LocalTabs` for Device, Browser and
@@ -367,8 +393,9 @@ are those series.
 
 - The existing figures, status breakdown and map stay.
 - A **Websites** `Subhead` carries `ScopeControl` and `PeriodControl`, then
-  Visitors and Page views over every website in scope, the chart, and a
-  `RankedList` of websites; a row opens that deployable's Statistics.
+  Visitors, Visits and Page views over every website in scope, the chart, and
+  a `RankedList` of websites; a row opens that deployable's Statistics. Below
+  it, Sources and Countries as `RankedList`s summed over the websites in scope.
 
 **Email, Overview:**
 
@@ -377,18 +404,27 @@ are those series.
   current Subscriptions and Active automations stay as `Facts` beneath, because
   they are about now, not the period.
 - The chart.
-- **Sent in this period**: campaigns and automations as `RecordRow`s with sent,
-  open rate and click rate as quiet text; a row opens its page.
-- **Delivery**: an `OverviewBreakdown` of delivered, not delivered (the
-  provider's report), failed, skipped and unconfirmed.
+- **Delivery problems** (owner, 2026-11-08): its own `StatFigures`, Bounces,
+  Complaints, Failed and Suppressed, and a `TimeChart`. Delivered is a `Fact`
+  beside them only where the provider reports outcomes (some delivered or
+  undelivered fact in scope). Bounces are consent `bounce` events, the source a
+  campaign's results page counts, so the two pages agree.
+- **Audience growth** (owner): each audience as a `RecordRow` with new
+  subscribers, unsubscribes, net change and current size (the existing
+  subscriber count) as quiet text; a row opens the audience.
+- **Top campaigns** (owner): a `RankedList` by unique opens, then unique
+  clicks, showing the open and click rates; a row opens the campaign.
+- **Automations** (owner): each rule and journey as a `RecordRow` with sent,
+  failed and suppressed; a row opens it.
 - **Campaigns**: the existing status breakdown.
 - Under All clients only, **Clients**: a `RankedList` of organizations by sent,
   with open rate.
 - The first-use empty state stays.
 
 Copy follows DESIGN.md: say it once, no standing explanations. Help text goes in
-`PageHelp`: what a visitor is, UTC days, what counts as a page view, bots, and
-the DB-IP source.
+`PageHelp`: what a visitor, a visit and a bounce are, UTC days, what counts as
+a page view, bots, and the DB-IP source; and on Email, that automations show no
+opens or clicks because automated mail is not tracked for them (D18).
 
 ## 10. No pop-ups
 
@@ -451,8 +487,12 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
   - the `(other)` remainder
   - histogram percentiles against known durations
   - retention
+  - visits: a 30-minute gap starts a new visit, a one-page visit is a bounce, a
+    visit counts in the hour it started, a visit across midnight UTC splits in
+    two, and top rows count a visit under the page and source it started on
 - **`siteStatistics`, db-gated:**
   - each period's buckets, the previous period and absent figures
+  - 12 months: 13 monthly buckets and no previous period
   - a client member reads their organization's sites and gets nothing for
     another organization's site even by id
   - staff read all
@@ -460,7 +500,12 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
   - facts from fixture deliveries, events and consent rows
   - idempotent re-runs
   - the watermark overlap
-  - cohort rates
+  - cohort rates over campaign mail only
+  - attribution: a rule send to its rule, a journey send to its journey through
+    its request id, a subscribe or unsubscribe to its recipient's audience, a
+    consent event with no recipient to its organization's totals only, and a
+    suppressed skip as `suppressed`
+  - 12 months has no previous period
   - narrowing by organization, including a member asking for another
     organization by id
   - All clients for staff, and empty-organization facts only for staff
@@ -518,8 +563,14 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
 - **Countries are approximate.** Country accuracy is DB-IP Lite's.
 - **Offline clusters have no countries.** A cluster that cannot reach
   download.db-ip.com shows countries as not measured.
+- **Visits split at midnight UTC.** The visitor hash changes, so one sitting
+  across midnight reads as two visits.
+- **Automated mail has no opens or clicks.** Rule and journey sends carry no
+  engagement tracking, so their rows show sent, failed and suppressed only.
+- **Twelve months has no comparison** (D4).
 
 ## 15. Out of scope
 
 Scheduled or emailed reports, export, custom date ranges, per-site time zones,
-goals and conversions, and a live "visitors now" figure.
+goals and conversions, a live "visitors now" figure, and open and click
+tracking for automated mail (an owner-agreed follow-up).
