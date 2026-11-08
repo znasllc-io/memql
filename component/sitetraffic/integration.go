@@ -52,8 +52,8 @@ const integrationName = "siteTraffic"
 const resultConcept = "v1:observability:siteTraffic"
 
 // rollupConcept is the concept of the one node the rollup answers with, its
-// report. Not a DSL concept: nothing stores it and no client reads it, the
-// logStore sweep's precedent (integration:logs:sweep).
+// report. Not a DSL concept: nothing stores it and no client reads it, which
+// is how component/logstore's sweep answers too (integration:logs:sweep).
 const rollupConcept = "integration:siteTraffic:rollup"
 
 // rollupPrincipal is the only caller the rollup admits: the maintenance

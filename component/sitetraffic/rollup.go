@@ -114,11 +114,14 @@ const (
 // top rows older than today-400d.
 //
 // Every day is its own transaction, so one day that fails costs only that
-// day: the others are still written and the failure is returned, joined with
-// any other, for the caller to log. A failed day is recomputed on the next run
-// -- today and yesterday because every run recomputes them, a backfill day
-// because the backfill stops at the first failure and the next run resumes
-// below the oldest day written.
+// day: the days before it in the run are still written, and the failure is
+// returned, joined with any other, for the caller to log. A failed day is
+// recomputed by a later run: today, and yesterday until 02:00, because every
+// run recomputes them; a backfill day because the run stops at the first
+// failed day before today, so every older day stays unwritten and the next
+// run's backfill, which starts below the oldest daily row, reaches it again.
+// On a run that is backfilling, that stop covers yesterday past 02:00 too; in
+// steady operation yesterday is final at 02:00 (see the package comment).
 func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error) {
 	var rep RollupReport
 	if db == nil {
@@ -127,12 +130,13 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 	now = now.UTC()
 
 	// A backfill that cannot be planned still leaves today and yesterday to
-	// do: the plan answers them whatever its reads said.
+	// do: planRollup answers them whatever its reads said.
 	var failures []error
 	days, err := planRollup(ctx, db, now)
 	if err != nil {
 		failures = append(failures, fmt.Errorf("site statistics backfill: %w", err))
 	}
+	today := utcMidnight(now)
 	for _, d := range days {
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
@@ -144,11 +148,17 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 		hours, err := recomputeDay(ctx, db, d.day, now)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("site statistics for %s: %w", d.day.Format(time.DateOnly), err))
-			if d.backfill {
-				// Stop here rather than skip ahead. The next run resumes
-				// below the oldest daily row, so every day older than this
-				// one must still be missing for it to be found again; a
-				// written older day would hide this one for good.
+			if d.day.Before(today) {
+				// Stop at the first failed day before today rather than
+				// skip ahead. The next run backfills below the oldest daily
+				// row, so a failed day is found again only while every day
+				// older than it is still missing: on a run that is
+				// backfilling, writing an older day would hide this one for
+				// good -- yesterday included, once 02:00 has passed. In
+				// steady operation nothing older is scheduled, so the stop
+				// costs nothing. Today is the exception: every run
+				// recomputes it, so a today that keeps failing does not also
+				// hold the backfill back.
 				break
 			}
 			continue

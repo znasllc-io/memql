@@ -54,6 +54,7 @@ func rollupTestDB(t *testing.T) *bun.DB {
 func clearRollupBand(t *testing.T, db *bun.DB) {
 	t.Helper()
 	ctx := context.Background()
+	dropDailyRefusal(t, db)
 	from, to := rollupBandStart.Format(time.DateOnly), rollupBandEnd.Format(time.DateOnly)
 	for _, q := range []struct {
 		sql  string
@@ -545,6 +546,124 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	}
 }
 
+// refuseDailyRowsFor makes every insert of a daily row for one day fail, until
+// the returned func or the test's end removes it. A trigger on the real table
+// rather than a seam in the code, so the failure takes the path a statement
+// timeout would: the day's transaction rolls back and Rollup reports the day.
+// It names one date in the tests' band, so nothing else is refused, and
+// clearRollupBand removes it too, so a test binary killed mid-test cannot
+// leave it refusing that date for the next run.
+func refuseDailyRowsFor(t *testing.T, db *bun.DB, day time.Time) func() {
+	t.Helper()
+	ctx := context.Background()
+	date := day.Format(time.DateOnly)
+	remove := func() { dropDailyRefusal(t, db) }
+	remove()
+	for _, stmt := range []string{
+		"CREATE FUNCTION " + dailyRefusal + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN " +
+			"IF NEW.day = TG_ARGV[0]::date THEN RAISE EXCEPTION 'injected failure for %', NEW.day; END IF; " +
+			"RETURN NEW; END $$",
+		"CREATE TRIGGER " + dailyRefusal + " BEFORE INSERT ON edge_stats_daily FOR EACH ROW EXECUTE FUNCTION " +
+			dailyRefusal + "('" + date + "')",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("install the refusal for %s: %v", date, err)
+		}
+	}
+	t.Cleanup(remove)
+	return remove
+}
+
+// dailyRefusal names both the trigger and its function.
+const dailyRefusal = "rollup_test_refuse_day"
+
+func dropDailyRefusal(t *testing.T, db *bun.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		"DROP TRIGGER IF EXISTS " + dailyRefusal + " ON edge_stats_daily",
+		"DROP FUNCTION IF EXISTS " + dailyRefusal + "()",
+	} {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			t.Fatalf("remove the daily-row refusal: %v", err)
+		}
+	}
+}
+
+// A backfill day that fails stops the backfill there, so the days older than
+// it stay unwritten and the next run finds it again below the oldest daily
+// row. The newer days, and today, are written by the run that failed.
+func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	now := time.Date(2036, 6, 20, 12, 0, 0, 0, time.UTC)
+	for _, d := range []int{5, 10, 15, 20} {
+		seedRequests(t, db, site, pageViewRow(time.Date(2036, 6, d, 9, 0, 0, 0, time.UTC), "f"+strconv.Itoa(d), "/"))
+	}
+	restore := refuseDailyRowsFor(t, db, time.Date(2036, 6, 10, 0, 0, 0, 0, time.UTC))
+
+	rep, err := Rollup(context.Background(), db, now)
+	if err == nil || !strings.Contains(err.Error(), "2036-06-10") {
+		t.Fatalf("the run reported %v, want the failure of 2036-06-10", err)
+	}
+	// Today and 2036-06-19 back to 2036-06-11 were written before it.
+	if !rep.Backfilled || rep.Days != 10 {
+		t.Errorf("the failing run reported %+v, want a backfill that wrote today and nine days before stopping", rep)
+	}
+	daily := dailyOf(t, db, site)
+	for d, want := range map[string]bool{"2036-06-20": true, "2036-06-15": true, "2036-06-10": false, "2036-06-05": false} {
+		if _, got := daily[d]; got != want {
+			t.Errorf("after the failing run, a daily row for %s exists = %v, want %v", d, got, want)
+		}
+	}
+
+	restore()
+	rep = runRollup(t, db, now)
+	if !rep.Backfilled {
+		t.Errorf("the next run reported %+v, want it to resume the backfill", rep)
+	}
+	daily = dailyOf(t, db, site)
+	for _, d := range []string{"2036-06-10", "2036-06-05"} {
+		wantFigures(t, "resumed day", daily, d, measuredFigures(1, 1, 1, 1))
+	}
+}
+
+// On a first run, a yesterday that fails stops the backfill too, so it is
+// still below the oldest daily row after 02:00 -- when it is no longer
+// recomputed as yesterday -- and the next run backfills it.
+func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	yesterday := time.Date(2036, 6, 24, 0, 0, 0, 0, time.UTC)
+	today := yesterday.AddDate(0, 0, 1)
+	seedRequests(t, db, site,
+		pageViewRow(time.Date(2036, 6, 20, 9, 0, 0, 0, time.UTC), "y-old", "/"),
+		pageViewRow(dayAt(yesterday, 22, 0), "y-yesterday", "/"),
+		pageViewRow(dayAt(today, 0, 30), "y-today", "/"),
+	)
+	restore := refuseDailyRowsFor(t, db, yesterday)
+
+	if _, err := Rollup(context.Background(), db, dayAt(today, 1, 0)); err == nil || !strings.Contains(err.Error(), "2036-06-24") {
+		t.Fatalf("the first run reported %v, want yesterday's failure", err)
+	}
+	daily := dailyOf(t, db, site)
+	if _, ok := daily["2036-06-25"]; !ok {
+		t.Error("today was not written by the run that failed on yesterday")
+	}
+	if _, ok := daily["2036-06-20"]; ok {
+		t.Error("a day older than the failed yesterday was written, which would leave yesterday above the oldest daily row for good")
+	}
+
+	restore()
+	rep := runRollup(t, db, dayAt(today, 3, 0))
+	if !rep.Backfilled {
+		t.Errorf("the run after 02:00 reported %+v, want it to backfill yesterday", rep)
+	}
+	daily = dailyOf(t, db, site)
+	for _, d := range []string{"2036-06-24", "2036-06-20"} {
+		wantFigures(t, "backfilled day", daily, d, measuredFigures(1, 1, 1, 1))
+	}
+}
+
 // Yesterday is recomputed until 02:00 UTC, so a request served at 23:59 and
 // written a little later still lands in yesterday's figures -- and after that,
 // yesterday is left as it is.
@@ -727,11 +846,10 @@ func TestASecondRollupInTheSameProcessIsSkipped(t *testing.T) {
 // D17: a visitor's page views more than thirty minutes apart are two visits,
 // each counted in the hour it started.
 //
-// The brief's example, 10:00, 10:20, 10:55 and 11:30, says "two visits, both
-// started in hour 10". By D17's own rule it is three: 10:20 to 10:55 is 35
-// minutes and so is 10:55 to 11:30, both over thirty, so a third visit starts
-// at 11:30 in hour 11. The rule is the owner's decision and wins over the
-// example; the arithmetic is asserted here as the rule gives it.
+// Views at 10:00, 10:20, 10:55 and 11:30 are THREE visits, not two: 10:20 to
+// 10:55 is 35 minutes and so is 10:55 to 11:30, both over thirty, so the third
+// starts at 11:30, in hour 11. Two of them start in hour 10. The gap is
+// measured from the previous page view, never from the visit's start.
 func TestAGapOverThirtyMinutesStartsANewVisit(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -747,6 +865,12 @@ func TestAGapOverThirtyMinutesStartsANewVisit(t *testing.T) {
 		// Thirty minutes and a second is: two.
 		pageViewRow(dayAt(day, 15, 0), "g3", "/a"),
 		pageViewRow(dayAt(day, 15, 30).Add(time.Second), "g3", "/b"),
+		// An hour of reading, twenty minutes a page: one visit, because no
+		// gap is over thirty, though the last page is an hour after the first.
+		pageViewRow(dayAt(day, 16, 0), "g4", "/a"),
+		pageViewRow(dayAt(day, 16, 20), "g4", "/b"),
+		pageViewRow(dayAt(day, 16, 40), "g4", "/c"),
+		pageViewRow(dayAt(day, 17, 0), "g4", "/d"),
 	)
 	runRollup(t, db, dayAt(day, 20, 0))
 
@@ -755,7 +879,9 @@ func TestAGapOverThirtyMinutesStartsANewVisit(t *testing.T) {
 	wantFigures(t, "hour", hourly, "2036-05-05T11", measuredFigures(1, 1, 1, 1))
 	wantFigures(t, "hour", hourly, "2036-05-05T14", measuredFigures(1, 1, 0, 2))
 	wantFigures(t, "hour", hourly, "2036-05-05T15", measuredFigures(1, 2, 2, 2))
-	wantFigures(t, "day", dailyOf(t, db, site), "2036-05-05", measuredFigures(3, 6, 4, 8))
+	wantFigures(t, "hour", hourly, "2036-05-05T16", measuredFigures(1, 1, 0, 3))
+	wantFigures(t, "hour", hourly, "2036-05-05T17", measuredFigures(1, 0, 0, 1))
+	wantFigures(t, "day", dailyOf(t, db, site), "2036-05-05", measuredFigures(4, 7, 4, 12))
 }
 
 // D17: a bounce is a visit of one page view.
