@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/releasecatalog"
@@ -70,6 +72,19 @@ func installationReadRows(result *memql.ExecuteResult) ([]client.Row, error) {
 	}
 	var rows []client.Row
 	switch value := result.OutputPayload().(type) {
+	case map[string]memorynodes.MemoryNode:
+		// Top-level release builtins return a typed node set with no Bundle.
+		// Read its payloads, not the synthetic node envelope. Current-user is
+		// a shaped query and follows the ordinary row branches below. The HTTP
+		// handler still requires exactly one row; malformed evidence refuses.
+		for _, node := range value {
+			var row client.Row
+			if err := json.Unmarshal(node.Payload, &row); err != nil || row == nil {
+				return nil, errors.New("invalid installation evidence")
+			}
+			rows = append(rows, row)
+		}
+		return rows, nil
 	case map[string]any:
 		return []client.Row{value}, nil
 	case []map[string]any:

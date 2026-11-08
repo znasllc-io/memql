@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/memql"
@@ -23,6 +24,18 @@ type installationVerifierFunc func(context.Context, string) (*pat.Claims, error)
 
 func (f installationVerifierFunc) VerifyToken(ctx context.Context, token string) (*pat.Claims, error) {
 	return f(ctx, token)
+}
+
+func TestInstallationReadRowsRefusesMalformedBuiltinPayloads(t *testing.T) {
+	for _, payload := range []string{"", "null", "[]", `"not an object"`, "{broken"} {
+		t.Run(payload, func(t *testing.T) {
+			result := memql.NewResultWithOutput(map[string]memorynodes.MemoryNode{
+				"result": {ID: "result", Payload: []byte(payload)},
+			})
+			_, err := installationReadRows(result)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestInstallationPATReplacesAmbientSystemAuthorityAndRechecksRevocation(t *testing.T) {

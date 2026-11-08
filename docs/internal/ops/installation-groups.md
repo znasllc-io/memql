@@ -121,6 +121,13 @@ principal, credential operation, publication or installation write. It mints no
 token and adds no Kubernetes or object-store authority to Identity. The existing
 PAT activity/last-use accounting still runs during authentication.
 
+The in-process result adapter must handle both the shaped `currentUser` query
+and the typed node sets returned by the release builtins. A builtin's result has
+no graph bundle; treating that absence as missing evidence makes authenticated
+catalog and health reads return 503. Decode each builtin payload as an object,
+retain the handler's exactly-one-row check, and refuse malformed payloads. Do
+not replace this boundary test with an executor that already returns flat rows.
+
 Catalog signatures and exact candidate/digest checks are shared with the SDK
 reader. The continuity probe checks the nonce, signed engine commit, completed
 migrations and original user/credential across installation. It now measures the
@@ -133,8 +140,13 @@ evidence. Secret UID/resourceVersion fences remain unchanged.
 Regression coverage includes `TestIdentityReaderVerifiesSignedCatalogAcrossReplicasAndRevocation`,
 `TestIdentityReaderRefusesAuthorityAndProtocolConfusionBeforeQueries`,
 `TestIdentityReaderTransportNeverForwardsBearerOrTrustsMalformedReplies`,
-`TestInstallationPATReplacesAmbientSystemAuthorityAndRechecksRevocation`, and
-`TestInstallationContinuityUsesIdentityTLSAndOriginalPAT`. These local tests do
+`TestInstallationPATReplacesAmbientSystemAuthorityAndRechecksRevocation`,
+`TestInstallationContinuityUsesIdentityTLSAndOriginalPAT`, and
+`TestIdentityInstallationReadsThroughNativeEngines`. The latter mounts the real
+route on two independent engines, reads a signed fixture from the shared ledger,
+and verifies catalog get/list, current-user, and native health. Run it with an
+immutable build-info commit stamp to exercise successful health; an unstamped
+test binary must refuse that claim. These local tests do
 not certify a production installation. Install the supporting engine first,
 retain the approved credential, update the two endpoint values, and require a
 fresh native preparation/apply/completion receipt before claiming readiness.
