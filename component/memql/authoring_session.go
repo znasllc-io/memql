@@ -57,7 +57,7 @@ type SessionDefineResult struct {
 // source) constructs the sandbox + authored runtime operate on. It reuses the
 // per-kind slicers the bootstrap loaders use, covering EVERY authorable kind so
 // a deployment-style bundle (concept + query/mutation/logic + spec/trait/shape +
-// automation + action + capability) is fully classified. Duplicate (kind, name)
+// rule + automation + action + capability) is fully classified. Duplicate (kind, name)
 // slices collapse to the first -- the sandbox separately hard-fails genuine
 // in-bundle duplicates.
 //
@@ -136,6 +136,16 @@ func SplitBundleSource(source string) []SandboxConstruct {
 			}
 			add(kind, s.Name, src)
 		}
+	}
+	// Rules (epic memql#5127): annotations and an empty body, sliced by the
+	// keyword slicer the embedded tree's rule loader uses
+	// (unified_rule_loader.go), so Gate 1 compiles the text that loader would.
+	// Until this was here no rule region was classified, so Gate 1 refused
+	// every runtime-authored routing rule as unrecognized and none was ever
+	// armed (memql#6022 follow-up). A rule names its policy as a string and
+	// imports nothing, so like a shape it takes no import preamble.
+	for _, s := range ExtractKeywordSlices(source, "rule") {
+		add("rule", s.Name, s.Source)
 	}
 	// Automations (event-triggered orchestration) -- sliced by the dedicated
 	// automation extractor. The Gate-1 sandbox compiles them through the

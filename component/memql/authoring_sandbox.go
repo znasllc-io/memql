@@ -566,7 +566,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// authorable construct kind (SplitBundleSource fail-loud backstop, E1
 		// #2372). Hard failure -- NEVER a silent pass. c.Name carries the header
 		// line excerpt.
-		return failAt(d, c, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
+		return failAt(d, c, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / rule / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
 
 	default:
 		// A kind with no compile path in this pass (a stray prompt / policy /

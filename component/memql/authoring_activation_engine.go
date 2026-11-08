@@ -141,9 +141,21 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	// Authority gate: the approver must be the bundle owner. The authored
 	// automation runs under the author's envelope, so only the author can
 	// activate it -- no privilege escalation by activating someone else's bundle.
-	if bundle.OwnerUserId != owner {
+	//
+	// It compares PEOPLE, not spellings, as the owner checks across this package
+	// do (BareShortId on both sides). The row stores ownerUserId canonical,
+	// stamped from actor.userId; a builtin hands over the caller's BARE id
+	// (integrations/router actingOwner). Compared as strings, the owner was
+	// refused their own bundle and no routing rule was ever armed (memql#6022
+	// follow-up). Anybody else is refused in either spelling, and an empty
+	// owner never reaches here.
+	if BareShortId(bundle.OwnerUserId) != BareShortId(owner) {
 		return ActivationResult{}, fmt.Errorf("authoring: actor %q cannot activate bundle owned by %q", owner, bundle.OwnerUserId)
 	}
+	// From here the owner is spelled as the row spells it, so what the
+	// activation records (its audit event, its logs) does not depend on the
+	// spelling its caller used. Retirement does the same.
+	owner = bundle.OwnerUserId
 
 	constructs, err := store.LoadConstructs(ctx, bundleId)
 	if err != nil {
@@ -459,7 +471,8 @@ func (e *MemQLEngine) retireActiveBundleWithStore(ctx context.Context, store Act
 	if bundle.Id == "" {
 		return fmt.Errorf("authoring: bundle %q not found", bundleId)
 	}
-	if bundle.OwnerUserId != strings.TrimSpace(owner) {
+	// People, not spellings: the comparison activation's gate makes.
+	if BareShortId(bundle.OwnerUserId) != BareShortId(owner) {
 		return fmt.Errorf("authoring: actor %q cannot retire bundle owned by %q", owner, bundle.OwnerUserId)
 	}
 	if err := retireBundleRuntime(ctx, store, bundleId, bundle.OwnerUserId, deps, nil); err != nil {
