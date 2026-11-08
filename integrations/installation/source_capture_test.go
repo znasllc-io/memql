@@ -66,7 +66,7 @@ func captureRevisionWithRenderFixture(t *testing.T, message string, template *ar
 	deploy := add("tree", append(entry("40000", "engine", tree), entry("40000", "product", tree)...))
 	root := add("tree", append(entry("40000", "deploy", deploy), entry("40000", "overlay", tree)...))
 	commit := add("commit", []byte("tree "+root+"\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\n\n"+message+"\n"))
-	spec := sourceCaptureSpec{OwnerUserID: "operator-one", RunID: "capture-run", WorkRunID: "capture-work", StepKey: "prepare.source", Attempt: 1,
+	spec := sourceCaptureSpec{OwnerUserID: "operator-one", RunID: "capture-run", WorkRunID: "capture-work", StepKey: "prepare.source", Attempt: 1, Event: pl.EventManual,
 		RunStartedAt: time.Now().UTC().Format(time.RFC3339Nano), Repository: pl.Repository{Owner: "example", Name: "installation", CloneURL: "https://github.com/example/installation.git"},
 		CollectorImage: "registry.example/collector@sha256:" + strings.Repeat("a", 64), Platform: "linux/arm64",
 		Render: argocd.RenderSpec{Source: json.RawMessage(`{"repoURL":"https://github.com/example/installation.git","path":"overlay","targetRevision":"` + commit + `"}`),
@@ -261,10 +261,12 @@ func TestSourceCaptureRefusesChangedScopeAndArtifactBytes(t *testing.T) {
 }
 
 func TestSourceCaptureConfigurationRefusesBeforeDispatch(t *testing.T) {
-	for _, fault := range []string{"mutable-image", "platform", "no-owner", "no-start", "no-attempt", "different-repo", "credential-host", "reserved-secret", "source-duplicate"} {
+	for _, fault := range []string{"mutable-image", "platform", "no-owner", "no-start", "no-attempt", "different-repo", "credential-host", "reserved-secret", "source-duplicate", "release-priority"} {
 		t.Run(fault, func(t *testing.T) {
 			spec, _ := captureFixture(t)
 			switch fault {
+			case "release-priority":
+				spec.Event = pl.EventRelease
 			case "mutable-image":
 				spec.CollectorImage = "registry.example/collector:latest"
 			case "platform":

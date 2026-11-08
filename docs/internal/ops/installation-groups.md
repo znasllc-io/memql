@@ -66,6 +66,31 @@ bounded native closure can be acknowledged and rendered as a root source.
 Source acquisition and every retained dependency remain part of the
 preparation's cleanup journal.
 
+Native source collectors carry the trusted `manual` event, bound into their
+request identity before dispatch. This lets the installed queue apply its
+operator-maintenance priority while retaining its quota, dedicated build pool
+and suspended-job admission. The event and priority are not client inputs.
+An absent event is refused when priority selection is configured; it does not
+fall back to an unqueued job. The real executor/Workbench hop and job-builder
+regression, `TestSourceCaptureUsesWorkbenchHopAndFreshReplicaRecovery`, checks
+the manual class and suspended admission on both initial dispatch and a fresh
+replica's recovery. That test does not claim live installation completion.
+
+An unfinished preparation can be cancelled by its original operator from
+**Cluster > Updates**. `releaseCancelInstallationPreparation` runs one bounded
+pass of the existing installed retirement workflow: stop the scoped producer,
+fence its artifact writes, release its references, and confirm retirement of
+the complete inventory before releasing the installation reservation. Use
+**Resume cancellation** when cleanup remains pending. An uncertain reply must
+be reconciled from the saved preparation; it cannot authorize another capture.
+The cleanup entry does not depend on optional release choices or GitHub reads.
+It refuses promoted plans and other operators, including a different owner.
+Legacy captures retain their absent event and original receipt identity for
+cleanup. Once cleanup starts, its recipe is bound to the executing engine;
+an incompatible engine change refuses resumption rather than changing a
+partially completed cleanup. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
+covers interrupted cleanup, a fresh host, ownership and a successor reservation.
+
 A private product root remains supported. Rendering mints a fresh GitHub App
 token limited to that root repository and `contents: read`, through the same
 native token capability used for its checkout. DSL arguments cannot supply

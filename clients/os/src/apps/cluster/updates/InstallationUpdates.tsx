@@ -13,7 +13,7 @@ export interface InstallationPlan extends InstallationChoice {
   expectedCurrentRevision: string; artifactExpiresAt: string; canManage: boolean; canRollback: boolean; direction: "forward" | "rollback"; applications: InstallationApplication[];
   observation?: InstallationObservation;
 }
-export interface InstallationPreparation extends InstallationChoice { installationId: string; preparationId: string; requestId: string; expectedCurrentRevision: string; state: string; canResume: boolean }
+export interface InstallationPreparation extends InstallationChoice { installationId: string; preparationId: string; requestId: string; expectedCurrentRevision: string; state: string; canResume: boolean; canCancel: boolean }
 export interface InstallationStatus { proposalLandingMode?: string; applications: InstallationApplication[]; preparation: InstallationPreparation | null; installationId: string; currentRevision: string; choices: InstallationChoice[]; active: InstallationPlan | null; latest: InstallationPlan | null; proposalBaseRevision: string; proposals: InstallationProposal[]; choicesWarning: string; proposalWarning: string }
 type InstallationQuery = Pick<QueryClient, "executeNamed">;
 
@@ -58,7 +58,7 @@ export function readInstallationPlan(value: unknown): InstallationPlan {
 function readPreparation(value: unknown): InstallationPreparation {
   const v = record(value);
   if (!["preparing", "retiring"].includes(required(v.state))) throw new Error("Preparation progress was not recognized. Read the saved plan again.");
-  return { ...choice(v), installationId: required(v.installationId), preparationId: required(v.preparationId), requestId: required(v.requestId), expectedCurrentRevision: required(v.expectedCurrentRevision), state: required(v.state), canResume: v.canResume === true };
+  return { ...choice(v), installationId: required(v.installationId), preparationId: required(v.preparationId), requestId: required(v.requestId), expectedCurrentRevision: required(v.expectedCurrentRevision), state: required(v.state), canResume: v.canResume === true, canCancel: v.canCancel === true };
 }
 export function readInstallationStatus(result: Result): InstallationStatus {
   const v = record(result.single());
@@ -74,6 +74,7 @@ type InstallationArguments = {
   releaseApplyInstallation: Parameters<QueryClient["releaseApplyInstallation"]>[0];
   releaseObserveInstallation: Parameters<QueryClient["releaseObserveInstallation"]>[0];
   releaseResumeInstallation: Parameters<QueryClient["releaseResumeInstallation"]>[0];
+  releaseCancelInstallationPreparation: Parameters<QueryClient["releaseCancelInstallationPreparation"]>[0];
   releaseCancelInstallation: Parameters<QueryClient["releaseCancelInstallation"]>[0];
   releaseRollbackInstallation: Parameters<QueryClient["releaseRollbackInstallation"]>[0];
   releaseProposeInstallation: { installationId: string; requestId: string; candidateId: string; catalogDigest: string; expectedBaseRevision: string };
@@ -92,6 +93,9 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelPreparationFor, setCancelPreparationFor] = useState<string | null>(null);
+  const cancelPreparationButton = useRef<HTMLDivElement>(null);
+  const cancelPreparationPrompt = useRef<HTMLDivElement>(null);
   const [rollbackFor, setRollbackFor] = useState<string | null>(null);
   const rollbackButton = useRef<HTMLDivElement>(null);
   const rollbackPrompt = useRef<HTMLDivElement>(null);
@@ -104,7 +108,7 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   const preparation = current?.preparation;
   const plan = recorded && !["complete", "cancelled", "rolled_back"].includes(recorded.state) ? recorded : null;
   const selectedLabel = plan ? current?.choices.find(c => c.candidateId === plan.candidateId && c.overlayRevision === plan.overlayRevision)?.label ?? plan.label : selected?.label;
-  async function perform(name: "prepare" | "apply" | "observe" | "resume" | "cancel" | "rollback" | "resumeRollback") {
+  async function perform(name: "prepare" | "apply" | "observe" | "resume" | "cancel" | "cancelPreparation" | "rollback" | "resumeRollback") {
     if (!query || !current || inFlight.current || !status.fresh) return;
     inFlight.current = true; setBusy(name); setError("");
     try {
@@ -114,6 +118,15 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
         const key = `${current.installationId}:${selected.candidateId}:${selected.catalogDigest}:${selected.overlayRevision}:${current.currentRevision}`;
         if (request.current?.key !== key) request.current = { key, id: crypto.randomUUID() };
         result = await installationCall(query, "releasePrepareInstallation", { installationId: current.installationId, requestId: request.current.id, candidateId: selected.candidateId, catalogDigest: selected.catalogDigest, overlayRevision: selected.overlayRevision, expectedCurrentRevision: current.currentRevision });
+      } else if (name === "cancelPreparation") {
+        if (!preparation?.canCancel || preparation.state === "preparing" && cancelPreparationFor !== preparation.preparationId) return;
+        result = await installationCall(query, "releaseCancelInstallationPreparation", { installationId: current.installationId, preparationId: preparation.preparationId });
+        const outcome = record(result.single());
+        if (outcome.installationId !== current.installationId || outcome.preparationId !== preparation.preparationId || !["retiring", "cancelled"].includes(required(outcome.state))) throw new Error("Preparation cancellation was not confirmed. Read the saved preparation again.");
+        setCancelPreparationFor(null);
+        if (outcome.state === "cancelled") { select(null); request.current = null; }
+        status.retry();
+        return;
       } else if (name === "resume") {
         if (!preparation?.canResume) return;
         result = await installationCall(query, "releaseResumeInstallation", { installationId: current.installationId, preparationId: preparation.preparationId });
@@ -139,6 +152,9 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   function refresh() { setSaved(null); setError(""); status.retry(); }
   const canRestore = !preparation && recorded?.canManage && recorded.canRollback && recorded.direction !== "rollback";
   const confirmRestore = canRestore && rollbackFor === recorded.planId;
+  const confirmPreparationCancel = preparation?.canCancel && preparation.state === "preparing" && cancelPreparationFor === preparation.preparationId;
+  useEffect(() => { if (confirmPreparationCancel) cancelPreparationPrompt.current?.querySelector("button")?.focus(); }, [confirmPreparationCancel]);
+  function keepPreparation() { setCancelPreparationFor(null); requestAnimationFrame(() => cancelPreparationButton.current?.querySelector("button")?.focus()); }
   useEffect(() => { if (confirmRestore) rollbackPrompt.current?.querySelector("button")?.focus(); }, [confirmRestore]);
   function keepRelease() { setRollbackFor(null); requestAnimationFrame(() => rollbackButton.current?.querySelector("button")?.focus()); }
   const needsSetup = /(?:^|:\s*)installation selection is not configured\.?$/i.test(status.error ?? "");
@@ -161,6 +177,7 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
       {preparation ? <section className="os-app-stack" aria-label="Saved installation preparation"><Subhead>Saved preparation</Subhead><Caption>{preparation.state === "retiring" ? "This preparation is being cancelled. Its reserved work must finish cleanup before another release can be selected." : "This release has unfinished preparation. Resume the saved work to verify it and produce an installation plan. Nothing has been applied."}</Caption>
         <details className="nexus-technical"><summary>Preparation details</summary><Facts><Fact label="Selected revision" value={preparation.overlayRevision} /><Fact label="Original request" value={preparation.requestId} /><Fact label="Preparation reference" value={preparation.preparationId} /></Facts></details>
         <div className="os-panel-actions">{preparation.canResume ? <Button tone="primary" disabled={!!busy || !status.fresh} busy={busy === "resume"} onClick={() => void perform("resume")}>Resume preparation</Button> : preparation.state === "preparing" ? <Caption>The original operator must continue this preparation.</Caption> : null}<Button tone="quiet" disabled={!!busy} onClick={refresh}>Read saved preparation</Button></div>
+        {preparation.canCancel ? preparation.state === "retiring" ? <div className="os-panel-actions"><Button disabled={!!busy || !status.fresh} busy={busy === "cancelPreparation"} onClick={() => void perform("cancelPreparation")}>Resume cancellation</Button></div> : confirmPreparationCancel ? <InPlaceAsk key={preparation.preparationId}><Notice sentence="Cancel this preparation?"><Caption>Stop source collection and release this saved preparation. Nothing has been applied.</Caption><div className="os-panel-actions" ref={cancelPreparationPrompt}><Button tone="quiet" disabled={!!busy} onClick={keepPreparation}>Keep preparation</Button><Button tone="danger" disabled={!!busy || !status.fresh} busy={busy === "cancelPreparation"} onClick={() => void perform("cancelPreparation")}>Confirm cancellation</Button></div></Notice></InPlaceAsk> : <div className="os-panel-actions" ref={cancelPreparationButton}><Button tone="quiet" disabled={!!busy || !status.fresh} onClick={() => setCancelPreparationFor(preparation.preparationId)}>Cancel preparation</Button></div> : null}
       </section> : plan ? <section className="os-app-stack"><Subhead>{selectedLabel}</Subhead>
         <Caption>{plan.direction === "rollback" ? "The previous release is being restored. Check progress to verify the restored installation." : plan.state === "prepared" ? "The installation plan is prepared. Applying it will change this installation." : plan.state === "applying" ? "The selected release is being applied. Check progress to read the latest installation evidence." : `Installation plan: ${plan.state}.`}</Caption>
         {plan.observation ? <Facts><Fact label={plan.direction === "rollback" ? "Previous version observed" : "Selected version observed"} value={plan.observation.revisionObserved === undefined ? "Not reported" : plan.observation.revisionObserved ? "Yes" : "Not yet"} /><Fact label="Controller health" value={plan.observation.healthy === undefined ? "Not reported" : plan.observation.healthy ? "Healthy" : "Not healthy yet"} /><Fact label="Configuration synchronized" value={plan.observation.synced === undefined ? "Not reported" : plan.observation.synced ? "Yes" : "Not yet"} /></Facts> : null}

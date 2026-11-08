@@ -242,3 +242,15 @@ func (i *Integration) handleInstallationCancel(ctx context.Context, args map[str
 	}
 	return resultNode("installation", r.PlanID, r)
 }
+
+func (i *Integration) handleInstallationPreparationCancel(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	p, err := i.receivingSelection(ctx, asString(args["installationId"]))
+	if err != nil {
+		return nil, err
+	}
+	r, err := p.CancelPreparation(ctx, asString(args["installationId"]), asString(args["preparationId"]))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("installation", r.PreparationID, r)
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 	"github.com/znasllc-io/memql/integrations/workbench"
 )
@@ -22,6 +23,7 @@ import (
 type captureHopState struct {
 	mu       sync.Mutex
 	requests []pipelinesteps.StepRun
+	jobs     []pipelinesteps.Job
 	result   []byte
 	acked    int
 	err      error
@@ -37,16 +39,25 @@ func (r captureHopRunner) RunStep(_ context.Context, body []byte) []byte {
 		return nil
 	}
 	cfg := pipelinesteps.ConfigFromEnv(func(key string) string {
-		if key == "MEMQL_PIPELINES_CLONE_IMAGE" {
+		switch key {
+		case "MEMQL_PIPELINES_CLONE_IMAGE":
 			return "registry.example/clone@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		case "MEMQL_PIPELINES_QUEUE":
+			return "background"
+		case "MEMQL_PIPELINES_NODE_POOL":
+			return "builds"
+		case "MEMQL_PIPELINES_QUEUE_PRIORITY_CLASSES":
+			return `{"manual":"maintenance","release":"release-builds"}`
 		}
 		return ""
 	})
-	if _, err := pipelinesteps.BuildJob(cfg, run, pipelinesteps.JobName(run.RunID, run.StepKey, run.Attempt)); err != nil {
+	job, err := pipelinesteps.BuildJob(cfg, run, pipelinesteps.JobName(run.RunID, run.StepKey, run.Attempt))
+	if err != nil {
 		r.state.err = err
 		return nil
 	}
 	r.state.requests = append(r.state.requests, run)
+	r.state.jobs = append(r.state.jobs, job)
 	return r.state.result
 }
 func (r captureHopRunner) Status(context.Context, []byte) ([]byte, string) { return nil, "unused" }
@@ -102,6 +113,10 @@ func TestSourceCaptureUsesWorkbenchHopAndFreshReplicaRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(captureOperator(auth.RoleDeveloper, spec.OwnerUserID), 5*time.Second)
 	defer cancel()
 	receipt, err := first.run(ctx, executor("workbench-a"), false, "")
+	state.mu.Lock()
+	jobError := state.err
+	state.mu.Unlock()
+	require.NoError(t, jobError)
 	require.NoError(t, err)
 	peer, err := newSourceCapture(spec)
 	require.NoError(t, err)
@@ -125,6 +140,14 @@ func TestSourceCaptureUsesWorkbenchHopAndFreshReplicaRecovery(t *testing.T) {
 	require.Equal(t, a.SHA, b.SHA)
 	require.Equal(t, a.Artifacts, b.Artifacts)
 	require.Equal(t, a.RunDeadline, b.RunDeadline)
+	// Native source collection is operator maintenance. Both replicas must
+	// preserve its trusted event through the hop and obey queue admission.
+	for n, run := range state.requests {
+		require.Equal(t, pl.EventManual, run.Event)
+		require.Equal(t, "manual", run.Env["MEMQL_EVENT"])
+		require.Equal(t, "maintenance", state.jobs[n].Metadata.Labels["kueue.x-k8s.io/priority-class"])
+		require.True(t, *state.jobs[n].Spec.Suspend)
+	}
 	require.Empty(t, b.Secrets)
 	require.Empty(t, b.Caches)
 	require.Empty(t, b.Services)

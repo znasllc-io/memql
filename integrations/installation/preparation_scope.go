@@ -74,7 +74,7 @@ func (s preparationScope) canonical() ([]byte, string, error) {
 		if err := sameRenderScope(b.Render, a.Render); err != nil {
 			return nil, "", err
 		}
-		if a.Repository != b.Repository || a.RunStartedAt != b.RunStartedAt || a.CollectorImage != b.CollectorImage || a.Platform != b.Platform || a.CloneInstallationID != b.CloneInstallationID || a.ImagePullSecret != b.ImagePullSecret {
+		if a.Repository != b.Repository || a.RunStartedAt != b.RunStartedAt || a.CollectorImage != b.CollectorImage || a.Platform != b.Platform || a.CloneInstallationID != b.CloneInstallationID || a.ImagePullSecret != b.ImagePullSecret || a.Event != b.Event {
 			return nil, "", errors.New("candidate and rollback acquisition configuration differs")
 		}
 		memberScope := preparationScope{Intent: app.Intent, Captures: map[string]sourceCaptureSpec{"candidate": a, "rollback": b}}

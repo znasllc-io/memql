@@ -5220,6 +5220,29 @@ QueryClient.prototype.releaseCancelInstallation = function (this: QueryClient, a
   return this.executeNamed("releaseCancelInstallation", buildReleaseCancelInstallation(args), opts);
 };
 
+/** Cancel or continue cancelling the original operator's unfinished preparation. Native cleanup retains its reservation until producer and artifact fences complete. */
+export interface ReleaseCancelInstallationPreparationArgs {
+  installationId: string;
+  preparationId: string;
+}
+
+export function buildReleaseCancelInstallationPreparation(args: ReleaseCancelInstallationPreparationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("preparationId: " + renderMemQLValue(args.preparationId));
+  return "builtin releaseCancelInstallationPreparation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCancelInstallationPreparation(args: ReleaseCancelInstallationPreparationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCancelInstallationPreparation = function (this: QueryClient, args: ReleaseCancelInstallationPreparationArgs = {} as ReleaseCancelInstallationPreparationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCancelInstallationPreparation", buildReleaseCancelInstallationPreparation(args), opts);
+};
+
 /** Read configured release sources and exact publication target identities. Owner only. */
 export interface ReleaseCandidateConfigurationArgs {
 }

@@ -118,7 +118,7 @@ func TestInstallationStatusKeepsNativeRecoveryAvailableDuringRepositoryOutage(t 
 	_, err = i.receivingSelection(actorContext(auth.RoleReader), "installation")
 	require.Error(t, err)
 	type handler func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
-	for name, call := range map[string]handler{"apply": i.handleInstallationApply, "observe": i.handleInstallationObserve, "cancel": i.handleInstallationCancel, "resume": i.handleInstallationResume, "rollback": i.handleInstallationRollback} {
+	for name, call := range map[string]handler{"apply": i.handleInstallationApply, "observe": i.handleInstallationObserve, "cancel": i.handleInstallationCancel, "cancel preparation": i.handleInstallationPreparationCancel, "resume": i.handleInstallationResume, "rollback": i.handleInstallationRollback} {
 		t.Run(name+" reaches native validation", func(t *testing.T) {
 			_, err := call(ownerCtx(), map[string]any{"installationId": "installation", "planId": strings.Repeat("0", 64), "preparationId": strings.Repeat("0", 64)}, 0)
 			require.Error(t, err, "a missing native plan must still be refused")

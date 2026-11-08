@@ -75,6 +75,10 @@ func TestPreparationWorkflowFreshHostRecoversSameStartedCapture(t *testing.T) {
 	require.True(t, saved.Captures["rollback"].Started)
 	require.False(t, saved.Captures["candidate"].Started)
 	require.Equal(t, first.digest, saved.Scope.WorkflowDigest)
+	for _, capture := range saved.Scope.Captures {
+		require.Equal(t, pipelines.EventManual, capture.Event)
+	}
+	require.Equal(t, pipelines.EventManual, executor.requests[0].Event)
 	fresh := &preparationHost{api: receiver, journal: preparationConnection(peerDB), executor: executor, files: files, tokens: preparationTokenFixture{}, catalog: factory, namespace: "memql", configurationName: "receiver"}
 	require.NoError(t, fresh.bindWorkflow(strings.Repeat("a", 40)))
 	_, err = fresh.prepare(ctx, request)

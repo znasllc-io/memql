@@ -8,6 +8,53 @@ import { readInstallationProposal } from "../../src/apps/cluster/updates/Install
 const candidate = { candidateId: "sha256:release", catalogDigest: "sha256:catalog", overlayRevision: "a".repeat(40), label: "MemQL 1.2" };
 const plan = { ...candidate, installationId: "installation-one", preparationId: "preparation-one", planId: "plan-one", expectedCurrentRevision: "b".repeat(40), artifactExpiresAt: "2026-12-22T10:00:00Z", state: "prepared", canManage: true };
 function answer(value: object): Result { return new Result({ bundle: { nodes: [{ id: "answer", payload: value }] } } as never); }
+
+it("confirms preparation cancellation and recovers an uncertain cleanup without preparing again", async () => {
+  const preparation = { ...candidate, installationId: "installation-one", preparationId: "saved-preparation", requestId: "original-request", expectedCurrentRevision: "b".repeat(40), state: "preparing", canResume: true, canCancel: true };
+  let pending: typeof preparation | null = preparation;
+  let writes = 0;
+  const executeNamed = vi.fn(async (name: string) => {
+    if (name === "releaseInstallationStatus") return answer({ installationId: "installation-one", currentRevision: "b".repeat(40), choices: [candidate], preparation: pending, active: null });
+    if (name === "releaseCancelInstallationPreparation") {
+      writes++;
+      if (writes === 1) { pending = { ...preparation, state: "retiring", canResume: false }; throw new Error("Connection lost after cleanup began"); }
+      pending = null;
+      return answer({ ...preparation, state: "cancelled", canResume: false, canCancel: false });
+    }
+    throw new Error("Unexpected installation write");
+  });
+  const first = render(<InstallationUpdates query={{ executeNamed }} connected />);
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel preparation" }));
+  expect(writes).toBe(0);
+  expect(screen.getByRole("button", { name: "Keep preparation" })).toBe(document.activeElement);
+  await readTheBar();
+  fireEvent.click(screen.getByRole("button", { name: "Keep preparation" }));
+  expect(writes).toBe(0);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Cancel preparation" })).toBe(document.activeElement));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel preparation" }));
+  await readTheBar();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+  await screen.findByText("Connection lost after cleanup began");
+  await screen.findByRole("button", { name: "Resume cancellation" });
+  expect(screen.queryByRole("button", { name: "Prepare installation plan" })).toBeNull();
+  first.unmount();
+  render(<InstallationUpdates query={{ executeNamed }} connected />);
+  fireEvent.click(await screen.findByRole("button", { name: "Resume cancellation" }));
+  await screen.findByRole("button", { name: /MemQL 1.2/ });
+  expect(writes).toBe(2);
+  const sent = (executeNamed.mock.calls as unknown as string[][]).filter(c => c[0] === "releaseCancelInstallationPreparation");
+  expect(sent).toHaveLength(2);
+  expect(sent.every(c => (c[1] ?? "").includes('preparationId: "saved-preparation"'))).toBe(true);
+  expect(sent.every(c => !/requestId|candidateId|overlayRevision/.test(c[1] ?? ""))).toBe(true);
+  expect(executeNamed.mock.calls.some(c => ["releasePrepareInstallation", "releaseApplyInstallation", "releaseResumeInstallation"].includes(c[0]))).toBe(false);
+});
+
+it("does not offer preparation cancellation without native owner authority", async () => {
+  const preparation = { ...candidate, installationId: "installation-one", preparationId: "saved-preparation", requestId: "original-request", expectedCurrentRevision: "b".repeat(40), state: "preparing", canResume: false, canCancel: false };
+  render(<InstallationUpdates query={{ executeNamed: vi.fn(async () => answer({ installationId: "installation-one", currentRevision: "b".repeat(40), choices: [candidate], preparation, active: null })) }} connected />);
+  await screen.findByText("The original operator must continue this preparation.");
+  expect(screen.queryByRole("button", { name: "Cancel preparation" })).toBeNull();
+});
 function fixture(over: { unavailable?: boolean; uncertain?: boolean } = {}) {
   let active: typeof plan | null = null;
   const executeNamed = vi.fn(async (name: string) => {

@@ -104,6 +104,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "installationStatus", Description: "Read this installation and its available immutable release selections.", Handler: i.handleInstallationStatus},
 		{Name: "prepareInstallation", Description: "Prepare the explicitly selected candidate and current revision for separate installation approval.", Handler: i.handleInstallationPrepare},
 		{Name: "resumeInstallation", Description: "Resume the original operator’s saved preparation without changing its selection or request identity.", Handler: i.handleInstallationResume},
+		{Name: "cancelInstallationPreparation", Description: "Retire the original operator's unfinished preparation through its native producer and artifact cleanup fences.", Handler: i.handleInstallationPreparationCancel},
 		{Name: "cancelInstallation", Description: "Cancel only the original operator’s current prepared plan before any application begins.", Handler: i.handleInstallationCancel},
 		{Name: "applyInstallation", Description: "Apply one exact separately selected native installation plan.", Handler: i.handleInstallationApply},
 		{Name: "rollbackInstallation", Description: "Restore the original operator’s exact previous installation through its retained rollback recipe and fresh safety checks.", Handler: i.handleInstallationRollback},

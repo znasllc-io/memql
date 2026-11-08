@@ -6939,6 +6939,32 @@ func ReleaseCancelInstallationBuild(args ReleaseCancelInstallationArgs) string {
 	return b.String()
 }
 
+// ReleaseCancelInstallationPreparation -- Cancel or continue cancelling the original operator's unfinished preparation. Native cleanup retains its reservation until producer and artifact fences complete.
+type ReleaseCancelInstallationPreparationArgs struct {
+	InstallationId string
+	PreparationId  string
+}
+
+// ReleaseCancelInstallationPreparation calls the engine builtin releaseCancelInstallationPreparation.
+func (qc *QueryClient) ReleaseCancelInstallationPreparation(ctx context.Context, args ReleaseCancelInstallationPreparationArgs) (*Result, error) {
+	call := ReleaseCancelInstallationPreparationBuild(args)
+	return qc.executeNamed(ctx, "releaseCancelInstallationPreparation", call)
+}
+
+func ReleaseCancelInstallationPreparationBuild(args ReleaseCancelInstallationPreparationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCancelInstallationPreparation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 45 {
+		b.WriteString(", ")
+	}
+	b.WriteString("preparationId: ")
+	b.WriteString(quoteMemQL(args.PreparationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCandidateConfiguration -- Read configured release sources and exact publication target identities. Owner only.
 type ReleaseCandidateConfigurationArgs struct {
 }
