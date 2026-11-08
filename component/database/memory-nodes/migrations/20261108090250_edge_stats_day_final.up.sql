@@ -11,8 +11,9 @@
 -- leaving the day's figures short for good.
 --
 -- A PLAIN TABLE, like the rollup tables beside it: one small row per day, which
--- the rollup deletes once the day is older than the oldest day still in the
--- request log, where nothing can be recomputed any more.
+-- the rollup deletes with the day's daily row, after 400 days. So a final day
+-- stays final while its figures are kept: a request dated on it that turns up
+-- after the request log has dropped the day cannot reopen it.
 CREATE TABLE IF NOT EXISTS edge_stats_final (
     day          DATE        PRIMARY KEY,
     finalized_at TIMESTAMPTZ NOT NULL

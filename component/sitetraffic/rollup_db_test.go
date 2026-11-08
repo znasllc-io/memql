@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
@@ -582,28 +583,31 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	}
 }
 
-// refuseDailyRowsFor makes every insert of a daily row for one day fail, until
-// the returned func or the test's end removes it. A trigger on the real table
-// rather than a seam in the code, so the failure takes the path a statement
-// timeout would: the day's transaction rolls back and Rollup reports the day.
-// It names one date in the tests' band, so nothing else is refused, and
+// refuseDailyRowsFor makes every insert of a daily row for the given days fail,
+// until the returned func or the test's end removes it. A trigger on the real
+// table rather than a seam in the code, so the failure takes the path a
+// statement timeout would: the day's transaction rolls back and Rollup reports
+// the day. It names dates in the tests' band, so nothing else is refused, and
 // clearRollupBand removes it too, so a test binary killed mid-test cannot
-// leave it refusing that date for the next run.
-func refuseDailyRowsFor(t *testing.T, db *bun.DB, day time.Time) func() {
+// leave it refusing those dates for the next run.
+func refuseDailyRowsFor(t *testing.T, db *bun.DB, days ...time.Time) func() {
 	t.Helper()
 	ctx := context.Background()
-	date := day.Format(time.DateOnly)
+	dates := make([]string, len(days))
+	for i, d := range days {
+		dates[i] = "'" + d.Format(time.DateOnly) + "'"
+	}
 	remove := func() { dropDailyRefusal(t, db) }
 	remove()
 	for _, stmt := range []string{
 		"CREATE FUNCTION " + dailyRefusal + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN " +
-			"IF NEW.day = TG_ARGV[0]::date THEN RAISE EXCEPTION 'injected failure for %', NEW.day; END IF; " +
+			"IF NEW.day::text = ANY (TG_ARGV) THEN RAISE EXCEPTION 'injected failure for %', NEW.day; END IF; " +
 			"RETURN NEW; END $$",
 		"CREATE TRIGGER " + dailyRefusal + " BEFORE INSERT ON edge_stats_daily FOR EACH ROW EXECUTE FUNCTION " +
-			dailyRefusal + "('" + date + "')",
+			dailyRefusal + "(" + strings.Join(dates, ", ") + ")",
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("install the refusal for %s: %v", date, err)
+			t.Fatalf("install the refusal for %s: %v", strings.Join(dates, ", "), err)
 		}
 	}
 	t.Cleanup(remove)
@@ -625,10 +629,10 @@ func dropDailyRefusal(t *testing.T, db *bun.DB) {
 	}
 }
 
-// A day that fails stops the run there: it and the days older than it are
-// neither written nor recorded final, so the next run recomputes them. The
-// newer days, and today, are written by the run that failed.
-func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
+// A day that fails is only that day: it is neither written nor recorded final,
+// so the next run recomputes it, and the run carries on with every other open
+// day -- the newer ones, and the older ones too.
+func TestAFailedDayDoesNotHoldBackOtherDays(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
 	now := time.Date(2036, 6, 20, 12, 0, 0, 0, time.UTC)
@@ -641,18 +645,18 @@ func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2036-06-10") {
 		t.Fatalf("the run reported %v, want the failure of 2036-06-10", err)
 	}
-	// Today and 2036-06-19 back to 2036-06-11 were written before it.
-	if !rep.Backfilled || rep.Days != 10 {
-		t.Errorf("the failing run reported %+v, want a backfill that wrote today and nine days before stopping", rep)
+	// Today and the fifteen open days 2036-06-05..19, less the one that failed.
+	if !rep.Backfilled || rep.Days != 15 {
+		t.Errorf("the failing run reported %+v, want every day written but the one that failed: 15", rep)
 	}
 	daily := dailyOf(t, db, site)
-	for d, want := range map[string]bool{"2036-06-20": true, "2036-06-15": true, "2036-06-10": false, "2036-06-05": false} {
+	for d, want := range map[string]bool{"2036-06-20": true, "2036-06-15": true, "2036-06-10": false, "2036-06-05": true} {
 		if _, got := daily[d]; got != want {
 			t.Errorf("after the failing run, a daily row for %s exists = %v, want %v", d, got, want)
 		}
 	}
 	final := finalDays(t, db, time.Date(2036, 6, 1, 0, 0, 0, 0, time.UTC), now)
-	for d, want := range map[string]bool{"2036-06-19": true, "2036-06-11": true, "2036-06-10": false, "2036-06-05": false} {
+	for d, want := range map[string]bool{"2036-06-19": true, "2036-06-11": true, "2036-06-10": false, "2036-06-09": true, "2036-06-05": true} {
 		if _, got := final[d]; got != want {
 			t.Errorf("after the failing run, %s recorded final = %v, want %v", d, got, want)
 		}
@@ -660,19 +664,92 @@ func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
 
 	restore()
 	rep = runRollup(t, db, now)
-	if !rep.Backfilled {
-		t.Errorf("the next run reported %+v, want it to resume the backfill", rep)
+	if rep.Days != 2 || !rep.Backfilled {
+		t.Errorf("the next run reported %+v, want today and the day that failed", rep)
 	}
-	daily = dailyOf(t, db, site)
-	for _, d := range []string{"2036-06-10", "2036-06-05"} {
-		wantFigures(t, "resumed day", daily, d, measuredFigures(1, 1, 1, 1))
+	wantFigures(t, "retried day", dailyOf(t, db, site), "2036-06-10", measuredFigures(1, 1, 1, 1))
+	if _, ok := finalDays(t, db, now.AddDate(0, 0, -10), now)["2036-06-10"]; !ok {
+		t.Error("the retried day was not recorded final")
 	}
 }
 
-// A yesterday that fails stops the run as any earlier day does: the days older
-// than it are left for the next run, and so is yesterday, which has no
-// finalization record and is recomputed -- and recorded final -- by the first
-// run after 02:00 that succeeds.
+// Every day a run could not write is logged once, by name, at Warn, and the
+// run still writes the rest. The run's error is returned too, so the
+// automation's run reads as failed.
+func TestEachFailedDayIsLoggedOnceByName(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	now := time.Date(2036, 6, 28, 12, 0, 0, 0, time.UTC)
+	for _, d := range []int{22, 24, 26} {
+		seedRequests(t, db, site, pageViewRow(time.Date(2036, 6, d, 9, 0, 0, 0, time.UTC), "w"+strconv.Itoa(d), "/"))
+	}
+	refuseDailyRowsFor(t, db, time.Date(2036, 6, 22, 0, 0, 0, 0, time.UTC), time.Date(2036, 6, 26, 0, 0, 0, 0, time.UTC))
+
+	logs := &recordedLogs{}
+	i := NewIntegration(nil, func() *bun.DB { return db }, slog.New(logs))
+	i.now = func() time.Time { return now }
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
+	if _, err := i.handleRollup(ctx, nil, 0); err == nil {
+		t.Fatal("a run with two failed days answered no error")
+	}
+	var named []string
+	for _, r := range logs.warnings() {
+		day, ok := r["day"]
+		if !ok {
+			t.Errorf("a Warn names no day: %v", r)
+			continue
+		}
+		named = append(named, day)
+	}
+	sort.Strings(named)
+	if strings.Join(named, ",") != "2036-06-22,2036-06-26" {
+		t.Errorf("the Warns name the days %v, want 2036-06-22 and 2036-06-26, once each", named)
+	}
+	if _, ok := dailyOf(t, db, site)["2036-06-24"]; !ok {
+		t.Error("the day between the two failed days was not written")
+	}
+}
+
+// recordedLogs is a slog.Handler that keeps what it is given, so a test can ask
+// what was logged and at which level.
+type recordedLogs struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *recordedLogs) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordedLogs) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *recordedLogs) WithGroup(string) slog.Handler            { return h }
+func (h *recordedLogs) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+// warnings answers the attributes of each Warn record, as strings.
+func (h *recordedLogs) warnings() []map[string]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []map[string]string
+	for _, r := range h.records {
+		if r.Level != slog.LevelWarn {
+			continue
+		}
+		attrs := map[string]string{"msg": r.Message}
+		r.Attrs(func(a slog.Attr) bool {
+			attrs[a.Key] = a.Value.String()
+			return true
+		})
+		out = append(out, attrs)
+	}
+	return out
+}
+
+// A yesterday that fails is only that day: the run writes today and the days
+// older than it, and yesterday, which has no finalization record, is
+// recomputed -- and recorded final -- by the first run after 02:00 that
+// succeeds.
 func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -692,21 +769,54 @@ func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 	if _, ok := daily["2036-06-25"]; !ok {
 		t.Error("today was not written by the run that failed on yesterday")
 	}
-	if _, ok := daily["2036-06-20"]; ok {
-		t.Error("a day older than the failed yesterday was written; the run should stop at the first day it could not write")
-	}
+	wantFigures(t, "a day older than the failed yesterday", daily, "2036-06-20", measuredFigures(1, 1, 1, 1))
 
 	restore()
 	rep := runRollup(t, db, dayAt(today, 3, 0))
-	if !rep.Backfilled {
-		t.Errorf("the run after 02:00 reported %+v, want it to backfill the days before yesterday", rep)
+	if rep.Days != 2 || rep.Backfilled {
+		t.Errorf("the run after 02:00 reported %+v, want yesterday and today alone: the older days were written already", rep)
 	}
-	daily = dailyOf(t, db, site)
-	for _, d := range []string{"2036-06-24", "2036-06-20"} {
-		wantFigures(t, "backfilled day", daily, d, measuredFigures(1, 1, 1, 1))
-	}
+	wantFigures(t, "yesterday", dailyOf(t, db, site), "2036-06-24", measuredFigures(1, 1, 1, 1))
 	if _, ok := finalDays(t, db, yesterday, yesterday)["2036-06-24"]; !ok {
 		t.Error("yesterday, recomputed after 02:00, was not recorded final")
+	}
+}
+
+// A FINAL DAY STAYS FINAL. Once the request log's retention has dropped a
+// day's requests, a stray request for it -- an edge replica whose clock lags,
+// or rows restored to the log -- must not reopen the day and rewrite its
+// figures from what little is there. The day's record lives as long as its
+// daily row, so the run leaves it alone.
+func TestAStrayRawRowCannotReopenAFinalDay(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	day := time.Date(2036, 8, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2036, 8, 10, 12, 0, 0, 0, time.UTC)
+	seedRequests(t, db, site,
+		pageViewRow(dayAt(day, 9, 0), "s1", "/"),
+		pageViewRow(dayAt(day, 10, 0), "s2", "/"),
+		pageViewRow(dayAt(day, 11, 0), "s3", "/"),
+		pageViewRow(time.Date(2036, 8, 5, 9, 0, 0, 0, time.UTC), "n1", "/"),
+	)
+	runRollup(t, db, now)
+	wantFigures(t, "the day", dailyOf(t, db, site), "2036-08-01", measuredFigures(3, 3, 3, 3))
+
+	// The request log's retention drops the day: the oldest day still logged
+	// is now 2036-08-05, and a run's retention passes over the day's record.
+	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_request WHERE served_at >= ? AND served_at < ?", day, day.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	runRollup(t, db, now.Add(5*time.Minute))
+
+	// A replica with a lagging clock writes a request dated on the day.
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 12, 0), "stray", "/stray"))
+	rep := runRollup(t, db, now.Add(10*time.Minute))
+	if rep.Days != 1 {
+		t.Errorf("the run recomputed %d days, want today alone", rep.Days)
+	}
+	wantFigures(t, "the final day after a stray request", dailyOf(t, db, site), "2036-08-01", measuredFigures(3, 3, 3, 3))
+	if got, ok := finalDays(t, db, day, day)["2036-08-01"]; !ok || !got.Equal(now) {
+		t.Errorf("the day's record = %v (%v), want it kept as the first run wrote it", got, ok)
 	}
 }
 
@@ -846,8 +956,8 @@ func TestYesterdayIsRecomputedUntilTwoAfterMidnight(t *testing.T) {
 }
 
 // Retention: hourly rows go after thirty days, daily and top rows after 400,
-// and a day's finalization record once the day is older than the oldest day
-// still in the request log, below which no day can be recomputed.
+// and a day's finalization record with its daily row -- not when the request
+// log loses the day, which is what keeps a final day final.
 func TestRowsPastRetentionAreDeleted(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -873,11 +983,12 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The oldest day still in the request log is 2036-08-10, so the record for
-	// 2036-08-05 can never be used again; the one for 2036-08-12 still can.
+	// The oldest day still in the request log is 2036-08-10. The record for
+	// 2036-08-05 is older than that and stays all the same: its daily row is
+	// kept 400 days, and so is the record that keeps it final.
 	seedRequests(t, db, site, pageViewRow(time.Date(2036, 8, 10, 9, 0, 0, 0, time.UTC), "r-oldest", "/"))
 	recordedAt := time.Date(2036, 8, 13, 3, 0, 0, 0, time.UTC)
-	for _, d := range []string{"2036-08-05", "2036-08-12"} {
+	for _, d := range []string{dayCutoff.AddDate(0, 0, -1).Format(time.DateOnly), dayCutoff.Format(time.DateOnly), "2036-08-05", "2036-08-12"} {
 		if _, err := db.ExecContext(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)`, d, recordedAt); err != nil {
 			t.Fatal(err)
 		}
@@ -921,12 +1032,14 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 	if len(topOf(t, db, site, old)) != 0 {
 		t.Error("a top row older than 400 days was kept")
 	}
-	final := finalDays(t, db, time.Date(2036, 8, 1, 0, 0, 0, 0, time.UTC), now)
-	if _, ok := final["2036-08-05"]; ok {
-		t.Error("the finalization record of a day older than the oldest logged day was kept")
+	final := finalDays(t, db, old, now)
+	if _, ok := final[old.Format(time.DateOnly)]; ok {
+		t.Error("a finalization record older than 400 days was kept")
 	}
-	if got, ok := final["2036-08-12"]; !ok || !got.Equal(recordedAt) {
-		t.Errorf("the record for 2036-08-12 = %v (%v), want it kept as it was", got, ok)
+	for _, d := range []string{dayCutoff.Format(time.DateOnly), "2036-08-05", "2036-08-12"} {
+		if got, ok := final[d]; !ok || !got.Equal(recordedAt) {
+			t.Errorf("the record for %s = %v (%v), want it kept as it was", d, got, ok)
+		}
 	}
 	if _, ok := final["2036-08-10"]; !ok {
 		t.Error("the oldest logged day was not recorded final by the run")

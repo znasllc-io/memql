@@ -3,6 +3,7 @@ package sitetraffic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -132,8 +133,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // with the cluster-owner role that principal carries -- the id alone with any
 // other role is refused, as is any other automation's principal.
 //
-// A failed period is logged here and returned, so the automation's run says
-// it failed; the next run recomputes the period (rollup.go).
+// Every day the run could not write is logged here, one Warn naming the day,
+// and the run's error is returned, so the automation's run says it failed; the
+// next run recomputes those days (rollup.go).
 func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
 	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() {
@@ -153,14 +155,10 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 		now = i.now()
 	}
 	rep, err := Rollup(ctx, db, now)
-	if err != nil {
-		i.logger.Warn("Site statistics rollup left periods for the next run",
-			"component", "sitetraffic", "days", rep.Days, "hours", rep.Hours,
-			"backfilled", rep.Backfilled, "deleted", rep.Deleted, "error", err)
-		return nil, err
-	}
+	i.logRollupFailures(err)
 	// A routine run is the same line every five minutes, so it is Debug; a
-	// backfill or a retention delete is a change worth a line at Info.
+	// backfill or a retention delete is a change worth a line at Info. A
+	// failure has its own Warn above.
 	level := slog.LevelDebug
 	if rep.Backfilled || rep.Deleted > 0 {
 		level = slog.LevelInfo
@@ -168,6 +166,9 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 	i.logger.Log(ctx, level, "Site statistics rolled up",
 		"component", "sitetraffic", "days", rep.Days, "hours", rep.Hours,
 		"backfilled", rep.Backfilled, "deleted", rep.Deleted)
+	if err != nil {
+		return nil, err
+	}
 
 	payload, err := json.Marshal(rep)
 	if err != nil {
@@ -180,6 +181,28 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 		CreatedAt: now.UTC(),
 		Payload:   payload,
 	}}, nil
+}
+
+// logRollupFailures writes one Warn per failure in a run's error: one per day
+// the run could not write, naming the day, so a day that keeps failing is
+// findable by its date, and one for a failed plan or retention pass.
+func (i *Integration) logRollupFailures(err error) {
+	if err == nil {
+		return
+	}
+	failures := []error{err}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		failures = joined.Unwrap()
+	}
+	for _, f := range failures {
+		var day *dayFailure
+		if errors.As(f, &day) {
+			i.logger.Warn("Site statistics for a day were not written; the next run recomputes it",
+				"component", "sitetraffic", "day", day.Day.Format(time.DateOnly), "error", day.Err)
+			continue
+		}
+		i.logger.Warn("Site statistics rollup failed", "component", "sitetraffic", "error", f)
+	}
 }
 
 func (i *Integration) handleInWindow(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

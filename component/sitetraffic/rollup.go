@@ -48,21 +48,23 @@ import (
 // So which days a run recomputes is read off the record, not off the clock:
 // today, and every day from the oldest one still in the request log through
 // yesterday that has no record. That one rule does three jobs. Yesterday is
-// recomputed until the first run at or after 02:00 finalizes it. On the first run
-// nothing is final, so every logged day is recomputed: the backfill. And an
+// recomputed until the first run at or after 02:00 finalizes it. On the first
+// run nothing is final, so every logged day is recomputed: the backfill. And an
 // outage of any length -- the cron leader down, every run failing -- leaves
 // its days open, so the next run that succeeds recomputes them, with every
 // request that arrived meanwhile. The bound is the request log's retention: a
 // day whose requests are gone cannot be recomputed and keeps the figures last
-// written for it, and its record is deleted, since no run can use it again
-// (TestAnOutageAcrossTwoAMHealsOnTheNextRun, TestAFinalDayIsNotRecomputed).
+// written for it (TestAnOutageAcrossTwoAMHealsOnTheNextRun,
+// TestAFinalDayIsNotRecomputed).
 //
-// Deleting those records relies on the request log losing days only from its
-// old end. A request stamped with a date below that line -- an edge replica
-// whose clock runs more than the log's retention behind -- would put the days
-// around it back in the open range, and the next run would rewrite their
-// figures from the requests that remain for them. Nothing in a healthy
-// cluster writes such a row.
+// A record lives as long as its daily row, 400 days, and so a final day stays
+// final while its figures are kept. That matters once the request log has
+// dropped the day: a request dated on it can still turn up -- an edge replica
+// whose clock lags, rows restored to the log -- and a day without a record
+// would be reopened and rewritten from that request alone
+// (TestAStrayRawRowCannotReopenAFinalDay). A day that never became final
+// before its requests aged out has no record to protect it; its figures were
+// short of the day already.
 //
 // # Why every expression names UTC
 //
@@ -130,13 +132,14 @@ const (
 // first, with the hours of each that the hourly table keeps. A day recomputed
 // at or after 02:00 UTC the day after it is recorded final in the same
 // transaction. Then it deletes the rows past retention: hourly rows older than
-// now-30d, daily and top rows older than today-400d, and the finalization
-// records of days older than the oldest day still in the request log.
+// now-30d, and daily rows, top rows and finalization records older than
+// today-400d.
 //
-// Every day is its own transaction, so one day that fails costs only that
-// day: the days before it in the run are still written, and the failure is
-// returned, joined with any other, for the caller to log. A failed day is not
-// recorded final, so the next run recomputes it.
+// Every day is its own transaction, so a day that fails costs only that day:
+// it is not recorded final, so the next run recomputes it, and this run
+// carries on with every other open day. Each failed day is a *dayFailure in the
+// returned error, joined with any other failure, so the caller can log each by
+// name.
 func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error) {
 	var rep RollupReport
 	if db == nil {
@@ -151,8 +154,9 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 	if err != nil {
 		failures = append(failures, fmt.Errorf("site statistics plan: %w", err))
 	}
-	today := utcMidnight(now)
 	for _, d := range days {
+		// A cancelled run stops: every day after this one would fail the
+		// same way, and none of them is lost, since none is recorded final.
 		if err := ctx.Err(); err != nil {
 			failures = append(failures, err)
 			break
@@ -162,20 +166,13 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 		}
 		hours, err := recomputeDay(ctx, db, d.day, now, d.final)
 		if err != nil {
-			failures = append(failures, fmt.Errorf("site statistics for %s: %w", d.day.Format(time.DateOnly), err))
-			if d.day.Before(today) {
-				// Stop at the first failed day before today. The days after
-				// it in this run are older, and none of them is recorded
-				// final, so the next run recomputes them; stopping keeps a
-				// struggling database from spending a statement timeout on
-				// each of them in turn. Newer days come first, so a broken
-				// day never holds back today or a more recent day -- only
-				// older ones, until it succeeds or leaves the request log.
-				// Today is the exception to the stop: every run recomputes it
-				// first, so a today that keeps failing does not also hold
-				// every earlier day back.
-				break
-			}
+			// Carry on with the other days. They are independent of each
+			// other, so one that fails -- a statement timeout, a row the
+			// database refuses -- must not hold back the rest, older ones
+			// included. The run's length stays bounded by the statement
+			// timeout per day, and the per-process single flight in
+			// handleRollup keeps a slow run from overlapping the next.
+			failures = append(failures, &dayFailure{Day: d.day, Err: err})
 			continue
 		}
 		rep.Days++
@@ -189,6 +186,20 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 	rep.Deleted = deleted
 	return rep, errors.Join(failures...)
 }
+
+// dayFailure is one day a run could not write. Rollup returns one per failed
+// day, joined into its error, so a caller can name each day it logs.
+type dayFailure struct {
+	// Day is the UTC day, at midnight.
+	Day time.Time
+	Err error
+}
+
+func (f *dayFailure) Error() string {
+	return fmt.Sprintf("site statistics for %s: %v", f.Day.Format(time.DateOnly), f.Err)
+}
+
+func (f *dayFailure) Unwrap() error { return f.Err }
 
 // rollupDay is one UTC day a run recomputes.
 type rollupDay struct {
@@ -353,15 +364,17 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final boo
 // rows older than today-400d, and answers how many went. It takes the rollup
 // lock like a recompute, so it never deletes under a day being written.
 //
-// It also removes the finalization records of days older than the oldest day
-// still in the request log: no run can recompute such a day, so its record
-// can stop nothing. The line is read inside the daily table's window, the
-// planner's own bound; with no request in the window, only the records older
-// than the window go. These are not counted in the answer.
+// A day's finalization record goes WITH ITS DAILY ROW, after the same 400 days,
+// and not when the request log loses the day. Kept that long, a final day stays
+// final for as long as its figures are kept: a request dated on it that turns
+// up later -- an edge replica whose clock lags past the log's retention, or
+// rows restored to the log -- cannot reopen the day and rewrite its figures
+// from the few rows there (TestAStrayRawRowCannotReopenAFinalDay). The cost is
+// at most one small row per day the daily table keeps. The records are not
+// counted in the answer.
 func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64, error) {
 	var deleted int64
-	today := utcMidnight(now)
-	cutoff := dateArg(dailyCutoff(today))
+	cutoff := dateArg(dailyCutoff(utcMidnight(now)))
 	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
 		deleted = 0
 		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
@@ -385,14 +398,8 @@ func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64,
 			}
 			deleted += n
 		}
-		line := cutoff
-		if oldest, logged, err := oldestLoggedDay(ctx, tx, today); err != nil {
-			return err
-		} else if logged {
-			line = dateArg(oldest)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, line); err != nil {
-			return fmt.Errorf("delete the spent finalization records: %w", err)
+		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, cutoff); err != nil {
+			return fmt.Errorf("delete the finalization records past retention: %w", err)
 		}
 		return nil
 	})
