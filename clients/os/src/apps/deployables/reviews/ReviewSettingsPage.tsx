@@ -153,13 +153,13 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
     : "Nobody who can moderate this store by that name.";
   // NOBODY NAMED, ONLY AN OPERATOR CAN NAME ONE: besides an operator, the
   // store's current approver is the only one who may (writeSettings). So the
-  // approver who is no operator is told beside Clear, and once it is pressed on
-  // the line that says nobody approves, that saving nobody leaves them unable
-  // to name anybody again. Both halves are the settings read's answers
-  // (packs/reviewspack/reads.go, readSettings): `approvesRemovals` is true only
-  // for the viewer the settings name, and only when they are no operator -- an
-  // operator named reads false -- and `nameSender` is true for an operator
-  // alone.
+  // approver who is no operator is told beside Clear -- and, once it is
+  // pressed, on the line that says nobody approves -- that saving nobody
+  // leaves them unable to name anybody again. Both halves are the settings
+  // read's answers (packs/reviewspack/reads.go, readSettings):
+  // `approvesRemovals` is true only for the viewer the settings name, and only
+  // when they are no operator -- an operator named reads false -- and
+  // `nameSender` is true for an operator alone.
   const clearingLocksOut = value.viewer.approvesRemovals && !value.may.nameSender;
   // That approver has cleared themselves in the draft: Clear and the sentence
   // beside it are gone, and what Save does still has to be said.
