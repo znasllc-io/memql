@@ -845,9 +845,10 @@ The edge answers two exact paths on the site's own origin for this
   already counted, so the script reports only a later change of
   `location.pathname`.
 - **A ping counts only from the site itself.** Its `Origin` must name the site's
-  own host or, with no `Origin`, `Sec-Fetch-Site` must say `same-origin`. The
-  body is the path, at most 1 KiB, and one address may send 120 a minute to a
-  site on each replica.
+  own host. When there is no `Origin`, or it is the `null` a browser sends from
+  a page whose referrer policy is `no-referrer`, `Sec-Fetch-Site` must say
+  `same-origin`. The body is the path, at most 1 KiB, and one address may send
+  120 a minute to a site on each replica.
 - **Every ping is answered `204`,** whether it counted or not, so the route says
   nothing about why one was refused. A refused ping is still a request the edge
   answered, and counts under health.

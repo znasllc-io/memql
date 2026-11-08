@@ -269,9 +269,10 @@ func TestAPingWithoutOriginNeedsSameOriginFetchSite(t *testing.T) {
 // A PING FROM ANOTHER ORIGIN IS NOT A PAGE VIEW, or any page on the web could
 // make its own visitors' browsers report pages here. The cluster's other
 // deployables are another origin too, and so is the same host on another port.
-// An Origin that is present but cannot be read ("null", which a sandboxed
-// frame sends, or an empty one) is refused rather than read as absent, and a
-// present Origin outranks a same-origin Fetch Metadata claim.
+// An empty Origin is refused rather than read as absent, and an Origin naming
+// another host outranks a same-origin Fetch Metadata claim (every request here
+// makes one). "null" is the one Origin a same-origin page can send, and its
+// rule is TestAPingWithNullOriginIsAcceptedOnlyWhenSameOrigin's.
 //
 // Every refusal is answered exactly as an accepted ping is, header for header,
 // so the route tells a prober nothing about which check it failed.
@@ -281,7 +282,6 @@ func TestAPingFromAnotherOriginRecordsNothing(t *testing.T) {
 		"another site":                  "https://elsewhere.example",
 		"a sibling deployable":          "https://other.example.com",
 		"the same host on another port": "https://shop.example.com:8443",
-		"an opaque origin":              "null",
 		"an empty origin":               "",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -299,6 +299,64 @@ func TestAPingFromAnotherOriginRecordsNothing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// "null" FROM A SAME-ORIGIN PAGE IS STILL THE SITE. A beacon is a no-cors POST,
+// and the Fetch standard sends its Origin as "null" when the sending page's
+// referrer policy is no-referrer, which a site may set in its own HTML. Fetch
+// Metadata is the browser's own word, a header no page can write, and a sender
+// whose origin is opaque is cross-site to everything, so "null" together with
+// same-origin is a same-origin page and is accepted. "null" with anything else
+// is refused, and so is an Origin spelled otherwise: only the exact
+// serialization stands for an origin the browser chose not to send. An empty
+// or another host's Origin stays refused beside a same-origin claim, and a
+// ping with neither header is TestAPingWithoutOriginNeedsSameOriginFetchSite's.
+func TestAPingWithNullOriginIsAcceptedOnlyWhenSameOrigin(t *testing.T) {
+	for name, tc := range map[string]struct {
+		origin, fetchSite string
+		pageView          bool
+	}{
+		"null, same-origin":                 {"null", "same-origin", true},
+		"null, no Fetch Metadata":           {"null", "", false},
+		"null, same-site":                   {"null", "same-site", false},
+		"null, cross-site":                  {"null", "cross-site", false},
+		"null, none":                        {"null", "none", false},
+		"Null in another case, same-origin": {"Null", "same-origin", false},
+		"an empty Origin, same-origin":      {"", "same-origin", false},
+		"another host's Origin, same-origin": {
+			"https://elsewhere.example", "same-origin", false,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newPingHarness(t, staticResolver{site: pingSite()})
+			req := pingRequest("/products/a")
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Del("Sec-Fetch-Site")
+			if tc.fetchSite != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+			}
+			assertPingAnswer(t, p.serve(req))
+			got := p.last(t)
+			if tc.pageView {
+				if !got.PageView || got.Path != "/products/a" {
+					t.Errorf("pageView=%v path=%q, want a page view of /products/a", got.PageView, got.Path)
+				}
+				return
+			}
+			assertNoPageView(t, got)
+		})
+	}
+
+	// Only as the one Origin. A browser sends one; a request carrying "null"
+	// beside a second value is not the serialization this rule trusts.
+	t.Run("null beside a second Origin, same-origin", func(t *testing.T) {
+		p := newPingHarness(t, staticResolver{site: pingSite()})
+		req := pingRequest("/products/a")
+		req.Header.Set("Origin", "null")
+		req.Header.Add("Origin", "https://shop.example.com")
+		assertPingAnswer(t, p.serve(req))
+		assertNoPageView(t, p.last(t))
+	})
 }
 
 // ONLY A POST IS A PING. Any other method is answered as a refused ping is,

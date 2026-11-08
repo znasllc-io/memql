@@ -201,22 +201,36 @@ func (h *Handler) acceptViewPing(w http.ResponseWriter, r *http.Request, site *S
 }
 
 // viewPingFromSite reports whether a ping was sent by a page on the origin it
-// was sent to: its Origin names the request's host, or it carries no Origin at
-// all and its Fetch Metadata says same-origin.
+// was sent to: its Origin names the request's host, or its Fetch Metadata says
+// same-origin and its Origin is absent or exactly "null".
 //
 // THE ORIGIN RULE IS THE ACCESS SURFACE'S (accessSameOrigin): the request's
 // host rather than the site's, since a custom domain reaches the same site
 // under its own name; host and port compared and never the scheme, since the
 // edge sits behind a TLS terminator; and an Origin that is present but cannot
-// be read ("null", or empty) refused rather than taken for absent.
+// be read (empty, or any other unparseable value) refused rather than taken
+// for absent.
 //
 // ABSENT IS WHERE THE TWO DIFFER. The access surface lets a POST with no Origin
 // through, because a client that is not a browser has no victim there. Here
 // the figure is the victim, so a missing Origin proves nothing: the browser
 // must still say same-origin, and a ping with neither header is refused. Not
 // same-site, which every deployable on the cluster is (the file comment).
+//
+// "null" WITH same-origin IS A SAME-ORIGIN PAGE. A beacon is a no-cors POST,
+// and for one of those the Fetch standard serializes Origin as "null" when the
+// sending page's referrer policy is no-referrer. The edge itself sends strict-origin-when-cross-origin, which
+// keeps the real origin, but a site may set no-referrer in its own HTML, and
+// refusing it would leave that site's in-app pages uncounted with nothing to
+// say why. Sec-Fetch-Site is set by the browser, never by a page, and a sender
+// whose own origin is opaque (a sandboxed frame, say) is cross-site to
+// everything, so "null" beside same-origin can only be a same-origin page.
+// Only the exact serialization, and only as the one Origin: "null" with
+// same-site, cross-site, none or no Fetch Metadata is refused, as is any
+// other spelling.
 func viewPingFromSite(r *http.Request) bool {
-	if len(r.Header.Values("Origin")) == 0 {
+	origins := r.Header.Values("Origin")
+	if len(origins) == 0 || (len(origins) == 1 && origins[0] == "null") {
 		return r.Header.Get("Sec-Fetch-Site") == "same-origin"
 	}
 	return accessSameOrigin(r)
