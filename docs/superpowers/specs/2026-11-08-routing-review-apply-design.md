@@ -58,9 +58,12 @@ change:
   `RoutingConfigurationAuthor`. The routing builtins keep calling it, and the
   work integration calls the same function, so the two cannot disagree.
 - **The read.** A new `@serverOnly` query, `workRoutingReviewsForCluster`,
-  returns routing reviews nobody owns: `actor.isClusterOwner == true &&
-  row.kind == "routingReview" && row.ownerUserId == ""`, the pending ones, or
-  one by id whatever its decision.
+  returns routing reviews: `actor.isClusterOwner == true &&
+  row.kind == "routingReview"`, the pending ones, or one by id whatever its
+  decision. It selects on the kind alone because only the fold raises one:
+  every routing review is the cluster's, including any raised before
+  memql#4817's owner undo, which still carry the `system:maintenance:` id
+  that `row.ownerUserId == ""` would hide forever.
   The work integration runs it under `auth.ContextWithSystemActor(ctx,
   "routingReview")`, and only after the caller passed the author check.
   Not a row-authz change: `unowned="developer"` is legal only beside
