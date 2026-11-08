@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -526,23 +527,45 @@ func shopRoster() *orgRoster {
 	}
 }
 
-func readPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) ([]map[string]any, error) {
+// peopleAnswer is the v1:reviews:people receipt as a client reads it.
+type peopleAnswer struct {
+	StoreID   string           `json:"storeId"`
+	People    []map[string]any `json:"people"`
+	Truncated *bool            `json:"truncated"`
+}
+
+// truncated is the answer's truncated, false when it carries none (askPeople
+// has failed the test for that).
+func (a peopleAnswer) truncated() bool {
+	return a.Truncated != nil && *a.Truncated
+}
+
+// askPeople reads reviewsPeople's whole answer. Every answer says whether its
+// list is cut (truncated), the empty one included: a client cannot tell a whole
+// list from a cut one by looking at it.
+func askPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) (peopleAnswer, error) {
 	t.Helper()
 	nodes, err := (&Provider{reader: withRoster{rowReader: r, roster: roster}, organizations: roster}).people(ctx, args, 0)
 	if err != nil {
-		return nil, err
+		return peopleAnswer{}, err
 	}
-	var out struct {
-		StoreID string           `json:"storeId"`
-		People  []map[string]any `json:"people"`
-	}
+	var out peopleAnswer
 	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.StoreID != "store-live" {
 		t.Fatalf("storeId = %q, want the store asked about", out.StoreID)
 	}
-	return out.People, nil
+	if out.Truncated == nil {
+		t.Errorf("the answer carries no truncated: %s", nodes[0].Payload)
+	}
+	return out, nil
+}
+
+func readPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) ([]map[string]any, error) {
+	t.Helper()
+	answer, err := askPeople(t, ctx, r, roster, args)
+	return answer.People, err
 }
 
 func peopleIDs(people []map[string]any) []string {
@@ -598,6 +621,87 @@ func TestReviewsPeopleListsTheStoresModerators(t *testing.T) {
 		map[string]any{"storeId": "store-live", "siteId": "site-1"})
 	if err != nil || strings.Join(peopleIDs(again), ",") != "owner-1,mod-1" {
 		t.Fatalf("an operator read %v (%v), want the same two people", peopleIDs(again), err)
+	}
+}
+
+// crowd is the store's organization (acct-shop) with one group and nobody in
+// it yet; join puts people there.
+func crowd() *orgRoster {
+	return &orgRoster{
+		groups:  map[string][]map[string]any{"acct-shop": {rosterGroup("group-crowd", "acct-shop")}},
+		members: map[string][]map[string]any{},
+		users:   map[string]map[string]any{},
+		holds:   map[string][]memql.OrganizationDecision{},
+	}
+}
+
+// join makes one more person an active member of crowd's group, called name,
+// able to moderate in acct-shop when moderates says so and holding nothing
+// there otherwise.
+func (r *orgRoster) join(id, name string, moderates bool) {
+	r.members["group-crowd"] = append(r.members["group-crowd"], rosterMember("group-crowd", id, "added", "active"))
+	r.users[id] = rosterUser(id, name, "user", true)
+	if moderates {
+		r.holds[id] = heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	}
+}
+
+var theStore = map[string]any{"storeId": "store-live", "siteId": "site-1"}
+
+// EVERY MEMBER IS JUDGED BEFORE THE LIST IS CUT. A bound on the organization's
+// members, taken before anybody was asked whether they can moderate, kept the
+// first maxPeople ids whoever they were: an organization whose first hundred
+// could not moderate listed nobody, and said nothing. The bound is the list's.
+func TestTheListIsCutOnlyOnceEveryMemberIsJudged(t *testing.T) {
+	roster := crowd()
+	for i := 0; i < maxPeople; i++ {
+		roster.join(fmt.Sprintf("a-%03d", i), fmt.Sprintf("Ash %03d", i), false)
+	}
+	for _, id := range []string{"b-1", "b-2", "b-3"} {
+		roster.join(id, "Bea "+id, true)
+	}
+	answer, err := askPeople(t, moderatorCtx("b-1"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(answer.People), ","); got != "b-1,b-2,b-3" || answer.truncated() {
+		t.Fatalf("people = %q (truncated %v), want b-1,b-2,b-3, the whole list", got, answer.truncated())
+	}
+}
+
+// A LIST LONGER THAN THE BOUND IS CUT BY NAME, AND SAYS SO. The people kept are
+// the first maxPeople as a person reads the list, by what they are called --
+// not the first by id -- and truncated tells a client the list is not everyone
+// who can moderate. A list exactly the bound is whole.
+func TestALongListIsCutByNameAndSaysSo(t *testing.T) {
+	roster := crowd()
+	for i := 0; i <= maxPeople; i++ {
+		// Ids and names run opposite ways: p-000 is called Pat 100, p-100 Pat 000.
+		roster.join(fmt.Sprintf("p-%03d", i), fmt.Sprintf("Pat %03d", maxPeople-i), true)
+	}
+	answer, err := askPeople(t, moderatorCtx("p-000"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.People) != maxPeople || !answer.truncated() {
+		t.Fatalf("listed %d people (truncated %v), want %d and truncated", len(answer.People), answer.truncated(), maxPeople)
+	}
+	for i, p := range answer.People {
+		if want := fmt.Sprintf("Pat %03d", i); p["displayName"] != want {
+			t.Fatalf("person %d = %v, want %s: the first %d by name", i, p["displayName"], want, maxPeople)
+		}
+	}
+
+	exact := crowd()
+	for i := 0; i < maxPeople; i++ {
+		exact.join(fmt.Sprintf("p-%03d", i), fmt.Sprintf("Pat %03d", i), true)
+	}
+	whole, err := askPeople(t, moderatorCtx("p-000"), settingsReader(existingSettings()), exact, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(whole.People) != maxPeople || whole.truncated() {
+		t.Fatalf("listed %d of %d (truncated %v), want all and not truncated", len(whole.People), maxPeople, whole.truncated())
 	}
 }
 

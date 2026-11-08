@@ -124,6 +124,10 @@ func TestLiveE2E_ReviewsPeopleListsTheStoresModerators(t *testing.T) {
 	if first["displayName"] != "Avery Colleague" || first["email"] != w.colleague+"@example.test" || first["mayRemove"] != false || len(first) != 4 {
 		t.Fatalf("a person = %v, want their id, name and address, and that they approve nothing yet", first)
 	}
+	// And the answer says the list is whole: everybody who can moderate is on it.
+	if answer := payloadOf(t, w.eng, w.as(w.moderator), `builtin reviewsPeople(storeId: `+quote(w.store)+`, siteId: `+quote(w.site)+`)`); answer["truncated"] != false {
+		t.Fatalf("truncated = %v, want false: the list is whole", answer["truncated"])
+	}
 
 	// The cluster's operators read the same people: the answer is the store's.
 	if got := idsOf(w.people(t, w.operator())); got != w.colleague+","+w.moderator {

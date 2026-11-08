@@ -306,8 +306,11 @@ const (
 // deployment, once the organization gate has admitted the caller.
 const peopleActor = "reviews-people"
 
-// maxPeople bounds how many of an organization's people are considered, the
-// bound integrations/groups/people.go puts on its roster.
+// maxPeople bounds how many of the people who can moderate a store are listed:
+// the bound integrations/groups/people.go puts on its roster, put here on the
+// LIST, once every member has been judged and the list sorted by name
+// (moderatorsIn) -- never on the members before, where it kept the first ids
+// whoever they were. reviewsPeople says when it cut (truncated).
 const maxPeople = 100
 
 // Moderator is one person who can moderate a store's reviews. Nothing else of
@@ -342,7 +345,11 @@ func (p *Provider) organizationResolver() (organizationDecisions, error) {
 }
 
 // people answers reviewsPeople: the people who can moderate one store's
-// reviews, each saying whether they are its removal approver.
+// reviews, each saying whether they are its removal approver, by name and at
+// most maxPeople of them (moderatorsIn). The v1:reviews:people receipt always
+// carries truncated: true when more people can moderate the store than are
+// listed, so a client never takes a cut list for everyone. A person left off
+// can still be named approver; the write asks about them directly.
 func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	storeID := strings.TrimSpace(asString(args["storeId"]))
 	if storeID == "" {
@@ -356,7 +363,7 @@ func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	people, err := p.moderatorsIn(ctx, storeOrganization(settings, asString(site["accountId"])))
+	people, truncated, err := p.moderatorsIn(ctx, storeOrganization(settings, asString(site["accountId"])))
 	if err != nil {
 		return nil, err
 	}
@@ -364,8 +371,9 @@ func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]me
 		people[i].MayRemove = namesApprover(settings, people[i].UserID)
 	}
 	return receipt("v1:reviews:people", "people-"+slugOf(storeID), map[string]any{
-		"storeId": storeID,
-		"people":  people,
+		"storeId":   storeID,
+		"people":    people,
+		"truncated": truncated,
 	})
 }
 
@@ -388,8 +396,14 @@ func storeOrganization(settings map[string]any, siteAccount string) string {
 
 // moderatorsIn answers the people who can moderate a store's reviews in its
 // organization, by name: every active member of any of the organization's
-// groups on whom canModerate's verdict is yes. A store of no organization has
-// nobody.
+// groups on whom canModerate's verdict is yes, at most maxPeople of them, and
+// whether there were more (truncated). A store of no organization has nobody.
+//
+// THE LIST IS CUT, NOT THE ORGANIZATION. Every member is judged, and only the
+// list of those who can moderate is sorted and cut, so the people kept are the
+// first as a person reads the list. Cut before the judging, the bound kept the
+// first ids whoever they were: operators, stand-ins and people without the
+// part could fill it and leave nobody on the list, with nothing to say so.
 //
 // THE ROSTER IS THE DEPLOYMENT'S READ, not the caller's. Who can moderate a
 // store is a fact about the store, and answering it from what this caller may
@@ -405,32 +419,32 @@ func storeOrganization(settings map[string]any, siteAccount string) string {
 // could read when a read fails, which a gate wants; a list of who can moderate
 // drawn from part of the grants could name somebody a deny it never read has
 // barred. Any failed read under the answer refuses it.
-func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderator, error) {
+func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderator, bool, error) {
 	account = bareAccount(account)
 	if account == "" {
-		return []Moderator{}, nil
+		return []Moderator{}, false, nil
 	}
 	resolver, err := p.organizationResolver()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	sys, resolving, failures := peopleReads(ctx)
 	members, err := p.organizationMembers(sys, account)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := []Moderator{}
 	for _, userID := range members {
 		m, moderates, err := p.canModerate(sys, resolving, resolver, account, userID)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if moderates {
 			out = append(out, m)
 		}
 	}
 	if err := failures.Err(); err != nil {
-		return nil, fmt.Errorf("reviews: a read behind who can moderate this store failed, so it cannot be answered: %w", err)
+		return nil, false, fmt.Errorf("reviews: a read behind who can moderate this store failed, so it cannot be answered: %w", err)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := strings.ToLower(out[i].DisplayName+" "+out[i].Email), strings.ToLower(out[j].DisplayName+" "+out[j].Email)
@@ -439,12 +453,17 @@ func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderato
 		}
 		return out[i].UserID < out[j].UserID
 	})
-	return out, nil
+	if len(out) > maxPeople {
+		return out[:maxPeople], true, nil
+	}
+	return out, false, nil
 }
 
 // organizationMembers is every active member of every active group of the
-// organization, bare and sorted, at most maxPeople of them: the people
-// integrations/groups/people.go collects.
+// organization, bare (bareUser) and sorted: the people
+// integrations/groups/people.go collects. All of them, with no bound: who
+// among them can moderate is canModerate's to say, and the list moderatorsIn
+// draws from them is what maxPeople bounds.
 func (p *Provider) organizationMembers(sys context.Context, account string) ([]string, error) {
 	groups, err := p.organizationGroups(sys, account)
 	if err != nil {
@@ -470,9 +489,6 @@ func (p *Provider) organizationMembers(sys context.Context, account string) ([]s
 		out = append(out, id)
 	}
 	sort.Strings(out)
-	if len(out) > maxPeople {
-		out = out[:maxPeople]
-	}
 	return out, nil
 }
 
