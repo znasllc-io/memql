@@ -572,21 +572,24 @@ export function approvalRejectMeaning(kind: string): string {
   }
 }
 
-/** What is true once it is decided -- the notice under a decided approval. */
-export function approvalDecidedNext(kind: string, decision: string): string {
+/**
+ * What is true once it is decided -- the notice under a decided approval.
+ *
+ * `direction` is a routing review's (`subject.direction`): approving a
+ * demotion added a rule, approving a promotion removed the exclusion.
+ */
+export function approvalDecidedNext(kind: string, decision: string, direction = ""): string {
   switch (kind) {
     case "procedurePromotion":
       return decision === "approved"
         ? "It moves to canary: it runs for real, with the app standing by to take over."
         : "It stays in shadow and has to earn a new proposal.";
     case "routingReview":
-      // NOTHING APPLIES AN APPROVED ROUTING REVIEW YET. The decision is
-      // recorded and routing is untouched, so the notice says where the
-      // change is made rather than claiming it was. A proposal can add an
-      // exclusion or retire one, hence "the change" rather than "the rule".
-      return decision === "approved"
-        ? "Your decision was recorded. Routing has not changed: make the change in Fleet > Routing > Rules to apply it."
-        : "Routing was left as it is.";
+      // Approving SAVED the change into the routing configuration before the
+      // decision was recorded (integrations/work's routing review decision),
+      // so by the time this shows, routing has changed.
+      if (decision !== "approved") return "Routing was left as it is.";
+      return direction === "promotion" ? "The exclusion was removed." : "The rule was added.";
     default:
       return "Your response was recorded.";
   }
@@ -618,10 +621,10 @@ export function approvalKindMeaning(kind: string): string {
       return "No door to a model was open, so the run stopped where it was. It starts again on its own when one opens; approving uses a paid provider now instead.";
     case "routingReview":
       // RAISED BY A SWEEP, NOT BY A RUN (epic memql#5146, D5): the nightly
-      // fold read a model failing at a level and proposes the exact rule text.
-      // Approving does not apply it (see approvalDecidedNext), and the person
-      // has to hear that before deciding, not after.
-      return "The nightly review of routing found a model failing at a level and proposes a rule. Approving records your decision but does not change routing: make the change in Fleet > Routing > Rules to apply it. Nothing is parked on it.";
+      // fold measured a model at a level and proposes the exact rule change.
+      // Said for both directions: a demotion adds a rule, a promotion removes
+      // one, and the question beside it says which.
+      return "The nightly review of routing measured a model at a level and proposes a change to the routing rules. Approving makes exactly this change; nothing is parked on it.";
     case "procedurePromotion":
       return "A learned procedure matched the app often enough to run for real, with the app standing by.";
     default:

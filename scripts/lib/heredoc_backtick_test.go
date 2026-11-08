@@ -53,12 +53,46 @@ func unescapedHeredocBackticks(src string) []string {
 }
 
 func hasUnescapedBacktick(s string) bool {
+	// An odd run of backslashes escapes the next backtick; paired backslashes
+	// leave it active. Reset the state after every other character as well.
+	escaped := false
 	for j := 0; j < len(s); j++ {
-		if s[j] == '`' && (j == 0 || s[j-1] != '\\') {
+		switch {
+		case escaped:
+			escaped = false
+		case s[j] == '\\':
+			escaped = true
+		case s[j] == '`':
 			return true
 		}
 	}
 	return false
+}
+
+func TestHasUnescapedBacktickTracksEscapeParity(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"empty text", "", false},
+		{"no backtick", "plain text\\", false},
+		{"backtick at start", "`date`", true},
+		{"one backslash", strings.Repeat("\\", 1) + "`", false},
+		{"two backslashes", strings.Repeat("\\", 2) + "`", true},
+		{"three backslashes", strings.Repeat("\\", 3) + "`", false},
+		{"four backslashes", strings.Repeat("\\", 4) + "`", true},
+		{"ordinary character ends escape", "\\x`date`", true},
+		{"escaped then unescaped backtick", "\\`literal `date`", true},
+		{"independently escaped backticks", "\\`literal\\`", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasUnescapedBacktick(tc.src); got != tc.want {
+				t.Errorf("hasUnescapedBacktick(%q) = %t, want %t", tc.src, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestUnescapedHeredocBackticksCatchesTheShape(t *testing.T) {
@@ -69,6 +103,8 @@ func TestUnescapedHeredocBackticksCatchesTheShape(t *testing.T) {
 	}{
 		{"an unquoted heredoc runs a backticked command", "cat <<EOF\nhow `make release` forwards\nEOF\n", 1},
 		{"an escaped backtick is literal", "cat <<EOF\nrun \\`make help\\`\nEOF\n", 0},
+		{"paired backslashes leave a backtick active", "cat <<EOF\n" + strings.Repeat("\\", 2) + "`date\\`\nEOF\n", 1},
+		{"an odd backslash run escapes a backtick", "cat <<EOF\n" + strings.Repeat("\\", 3) + "`date\\`\nEOF\n", 0},
 		{"a quoted delimiter makes the body literal", "cat <<'EOF'\nhow `make release` forwards\nEOF\n", 0},
 		{"a <<- heredoc ends at a tab-indented delimiter", "\tcat <<-EOF\n\tfine\n\tEOF\necho `date`\n", 0},
 		{"a comment that mentions << opens nothing", "# cat <<EOF\n`date`\n", 0},

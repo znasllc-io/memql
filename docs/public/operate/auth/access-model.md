@@ -956,15 +956,15 @@ subject, verb, resource and effect in `detail`.
   decisions the action guards make. One row `{verb, resourceType, held,
   source, sourceId, accountId}` per app door, floored section and part; a
   pair the engine decides per organization (opening Email, Deployables or
-  Pipelines, the data verbs, an organization's deployable parts) has one row per organization
-  the person's scope reaches and never a merged one. An operator has no
-  per-organization rows, their scope reaching every organization alike: each
-  app pair comes once with `accountId` empty, and no data verb has a row at
-  all. The same holds for a person whose scope reaches no organization. For a
-  group, the rows are its own active grants. It keeps the grant reads' floor
-  -- a cluster role at admin or above, applied by the handler because a
-  builtin carries no `@requiresRank` -- and nobody reads a person who outranks
-  them (`access_subject_outranks_caller`).
+  Pipelines, the data verbs, an organization's deployable parts) has one row
+  per organization the person's scope reaches and never a merged one. An
+  operator has no per-organization rows, their scope reaching every
+  organization alike: each app pair comes once with `accountId` empty, and no
+  data verb has a row at all. The same holds for a person whose scope reaches
+  no organization. For a group, the rows are its own active grants. It keeps
+  the grant reads' floor -- a cluster role at admin or above, applied by the
+  handler because a builtin carries no `@requiresRank` -- and nobody reads a
+  person who outranks them (`access_subject_outranks_caller`).
 
 The engine itself never reads through the admin-floored queries. Resolution
 reads the rows through the engine's own graph-backed source under its own
@@ -992,13 +992,13 @@ answer from `effectiveAccessForSubject`, never a restatement of it, said in
 words: "Can open" or "Can't open", where it came from (a role, a group, a
 grant to the person, an organization role's limit, or nothing granting it),
 and the organization when the engine answers per organization, one line for
-each. An organization's door (Email, Deployables) reads "Can open" there only
-where the person can also read that organization's data, and a part of one
-only where that door is open there and the organization's data can be
-changed too, as the shell draws them. By group, each row says whether the
-group's own grant allows it, denies it, or grants nothing. By app, the roles
-that hold it and everyone granted it by name. The acts are buttons in each
-row's act column, never where the answer is read, and only an act that
+each. An organization's door (Email, Deployables, Pipelines) reads "Can open"
+there only where the person can also read that organization's data, and a
+part of one only where that door is open there and the organization's data
+can be changed too, as the shell draws them. By group, each row says whether
+the group's own grant allows it, denies it, or grants nothing. By app, the
+roles that hold it and everyone granted it by name. The acts are buttons in
+each row's act column, never where the answer is read, and only an act that
 changes an answer is offered: Allow, Deny, and "Use role" to revoke a
 person's own grant ("Remove" for a group's). A grant to a person counts in
 every organization they are in, so a pair's acts are drawn once, never per

@@ -311,6 +311,9 @@ const peopleActor = "reviews-people"
 // LIST, once every member has been judged and the list sorted by what each is
 // called (moderatorsIn) -- never on the members before, where it kept the
 // first ids whoever they were. reviewsPeople says when it cut (truncated).
+//
+// The number is also prose: reviewsPeople's description in dsl/builtins.memql
+// says "at most 100 of them", and changes with it.
 const maxPeople = 100
 
 // Moderator is one person who can moderate a store's reviews. Nothing else of
@@ -452,7 +455,7 @@ func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderato
 	for _, userID := range members {
 		m, moderates, err := p.canModerate(sys, resolving, resolver, account, userID)
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("reviews: reading the organization's people: %w", err)
 		}
 		if moderates {
 			out = append(out, m)
@@ -559,14 +562,16 @@ func peopleReads(ctx context.Context) (sys, resolving context.Context, failures 
 // act on the store the gate then refuses.
 //
 // The user row is @serverOnly: the internal stamp is on that one read, made as
-// the deployment (sys).
+// the deployment (sys). A read that fails is returned as it failed, and each
+// caller says what it was reading: the organization's people, or the approver
+// named.
 func (p *Provider) canModerate(sys, resolving context.Context, resolver organizationDecisions, account, userID string) (Moderator, bool, error) {
 	if auth.IsRoleTestUser(userID) {
 		return Moderator{}, false, nil
 	}
 	rows, err := p.rowsFor(auth.ContextWithInternalOrigin(sys), "userByIdSystem", map[string]string{"userId": userID})
 	if err != nil {
-		return Moderator{}, false, fmt.Errorf("reviews: reading the organization's people: %w", err)
+		return Moderator{}, false, err
 	}
 	if len(rows) == 0 {
 		return Moderator{}, false, nil
@@ -616,7 +621,7 @@ func (p *Provider) moderatorNamed(ctx context.Context, account, userID string) (
 	m, moderates := Moderator{}, false
 	if member {
 		if m, moderates, err = p.canModerate(sys, resolving, resolver, account, userID); err != nil {
-			return Moderator{}, false, err
+			return Moderator{}, false, fmt.Errorf("reviews: reading the approver named: %w", err)
 		}
 	}
 	if err := failures.Err(); err != nil {
@@ -639,9 +644,9 @@ func (p *Provider) inOrganization(sys context.Context, account, userID string) (
 	}
 	for _, m := range memberships {
 		// The membership must be the named person's own, as this package
-		// spells people: the engine answers mod-1's memberships for the id
-		// `v1:identity:user:mod-1`, which is all bareUser leaves of an id with
-		// the prefix twice, and that id is nobody's here.
+		// spells people (bareUser): a row that names them under another
+		// concept's prefix, or the user's twice, is nobody's here, as it is
+		// on the list (organizationMembers).
 		if strings.TrimSpace(asString(m["status"])) == "active" && bareUser(asString(m["userId"])) == userID &&
 			slices.Contains(groups, memql.BareShortId(asString(m["groupId"]))) {
 			return true, nil
@@ -677,7 +682,8 @@ func displayNameOf(row map[string]any) string {
 // spellings: a signed-in caller's as the token carried it -- canonical,
 // `v1:identity:user:<id>`, on a deployed cluster -- and a chosen or stored one
 // as clients write ids, bare. Both are made bare by bareUser, so an id of
-// another concept matches no person's. Empty names nobody.
+// another concept, or one with the user's prefix twice, matches no person's.
+// Empty names nobody.
 func sameUser(a, b string) bool {
 	a, b = bareUser(a), bareUser(b)
 	return a != "" && a == b
@@ -689,8 +695,15 @@ const userIDPrefix = "v1:identity:user:"
 // bareUser is a user id as clients write it: the user concept's prefix
 // stripped, and no other. memql.BareShortId strips ANY concept's prefix, which
 // read `v1:accounts:account:mod-1` as the person mod-1; here it stays what it
-// is, an id of another concept, and names nobody. Every user id this
-// package's people code makes bare goes through it.
+// is, an id of another concept, and names nobody. An id with the user's prefix
+// twice is "": stripped once it is still canonical, which no person is spelled
+// as here, so it names nobody either -- never somebody the list offers and the
+// write refuses. Every user id this package's people code makes bare goes
+// through it.
 func bareUser(id string) string {
-	return bareID(id, userIDPrefix)
+	bare := bareID(id, userIDPrefix)
+	if strings.HasPrefix(bare, userIDPrefix) {
+		return ""
+	}
+	return bare
 }

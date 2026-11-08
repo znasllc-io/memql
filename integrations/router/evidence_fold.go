@@ -7,7 +7,11 @@ package router
 // ===========================================================================
 // A week of real calls says more about a model than any probe can. The fold
 // counts them per (model, level, week), writes the counts down, and where the
-// evidence carries a demotion it OPENS AN APPROVAL. It never applies one.
+// evidence carries a demotion it OPENS AN APPROVAL. It never applies one: an
+// owner or developer approving it is what saves the rule into the routing
+// configuration (integrations/work's routing review decision). A demotion no
+// call would reach, because a locked shipped rule takes every call at its
+// level first, opens nothing and is counted as withheld (proposeEvidence).
 //
 // It refuses to invent a level. A `v1:router:call` that did not say which level
 // it was serving cannot support a demotion AT a level, and demoting at every
@@ -101,6 +105,22 @@ func isStructuredFailure(row map[string]any, categories []string) bool {
 		}
 	}
 	return false
+}
+
+// ruleBeatenBy asks the engine which rule would beat a proposed rule if it
+// were saved now (component/memql's RoutingRuleBeatenBy). The engine reaches
+// this integration as the narrow IntegrationEngineAccess, so the check is
+// found by assertion; an engine without it REFUSES, the way a node with no
+// renderer does, because a fold that cannot check must not propose a rule that
+// might decide nothing.
+func (i *Integration) ruleBeatenBy(ctx context.Context, source string) (string, error) {
+	checker, ok := i.engine.(interface {
+		RoutingRuleBeatenBy(context.Context, string) (string, error)
+	})
+	if !ok {
+		return "", fmt.Errorf("this node's engine cannot check whether a proposed rule could decide a call, so the fold proposes nothing")
+	}
+	return checker.RoutingRuleBeatenBy(ctx, source)
 }
 
 // renderRule is the one renderer, injected into the pure layer.

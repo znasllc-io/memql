@@ -784,6 +784,16 @@ func TestReviewsPeopleRefusesWhenAReadBehindItFails(t *testing.T) {
 			t.Errorf("an answer was drawn from part of %s", query)
 		}
 	}
+	// The refusal says what was read: the organization's people, one of whose
+	// user rows failed. The approver write says it read the one person named
+	// (TestTheApproverCheckRefusesWhenAReadBehindItFails).
+	broken := shopRoster()
+	broken.errorIn = "userByIdSystem"
+	_, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), broken,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if want := "reviews: reading the organization's people: the rows could not be read"; err == nil || err.Error() != want {
+		t.Errorf("a member's user row failing: err = %v, want %q", err, want)
+	}
 }
 
 func TestReviewsPeopleNeedsTheStoreAndItsSite(t *testing.T) {

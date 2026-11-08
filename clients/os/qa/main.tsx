@@ -859,11 +859,24 @@ const QA_REVIEWS_SEED: FakeSeed = {
     } as unknown as Row,
   },
 };
-/** The settings as the store's approver reads them: they may hand the role on. */
+/**
+ * The settings as the store's approver reads them: this session's person,
+ * u-me, is the one named, so they may hand the role on or clear it. The engine
+ * answers `approvesRemovals` to the person named alone (packs/reviewspack,
+ * readSettings), so the settings and the list name u-me, and nobody else.
+ */
 const QA_REVIEWS_APPROVER_SEED: FakeSeed = {
   reviews: {
     ...QA_REVIEWS_SEED.reviews,
-    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-owner" }, may: { edit: true, nameApprover: true }, viewer: { moderates: true, approvesRemovals: true } } as unknown as Row,
+    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-me" }, may: { edit: true, nameApprover: true, nameSender: false }, viewer: { moderates: true, approvesRemovals: true } } as unknown as Row,
+    people: {
+      storeId: "store-live",
+      people: [
+        { userId: "u-carol", displayName: "Carol Reyes", email: "carol@example.com", mayRemove: false },
+        { userId: "u-owner", displayName: "Store Owner", email: "owner@shop.example.com", mayRemove: false },
+        { userId: "u-me", displayName: "", email: "moderator@shop.example.com", mayRemove: true },
+      ],
+    } as unknown as Row,
   },
 };
 const QA_NAMES: Record<string, string> = { "u-carol": "Carol Reyes", "u-owner": "Store Owner" };

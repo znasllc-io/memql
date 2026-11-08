@@ -99,8 +99,9 @@ func TestServerOnlyMutationRefusesClientOrigin(t *testing.T) {
 		if serverOnly(err) {
 			t.Errorf("updateUser was refused at INTERNAL origin: %v\n"+
 				"This is the half that breaks the product rather than securing it: the "+
-				"identity admin server is the one production caller, and it stamps an "+
-				"internal origin precisely so this call keeps working.", err)
+				"production callers -- the identity admin surface (component/identity/adminops) "+
+				"and role testing's persona rename (component/identity/roletest) -- each "+
+				"stamp an internal origin precisely so this call keeps working.", err)
 		}
 	})
 

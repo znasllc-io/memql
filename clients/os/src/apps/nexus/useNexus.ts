@@ -11,7 +11,7 @@ import {
   RUN_CONCEPT,
   STEP_CONCEPT,
 } from "./concepts";
-import { runFromRow, modelCallFromRow, observationFromRow, sameRow, stepFromRow, type ModelCallRow, type ObservationRow } from "./rows";
+import { approvalFromRow, approvalIsPending, runFromRow, modelCallFromRow, observationFromRow, sameRow, stepFromRow, type ModelCallRow, type ObservationRow } from "./rows";
 
 // Complete summary feeds are reserved for the Overview and the unresolved
 // approval-recovery set. Resource browsing uses useNexusDirectory's manual
@@ -80,6 +80,43 @@ export function useApprovals(enabled = true): LiveCollectionHandle<Row> {
     },
     paged: false,
   }));
+}
+
+/**
+ * The nightly routing reviews the viewer may decide (`workRoutingReviews`).
+ *
+ * NOBODY OWNS ONE. The evidence fold raises a routing review as the cluster,
+ * so the person's own approval reads never list it; the builtin answers an
+ * owner or a developer and nobody else (design record 2026-11-08). Row
+ * admission sends a row nobody owns to cluster owners only, so a DEVELOPER
+ * hears nothing when one is decided: the approvals section re-reads this
+ * collection after deciding one, and every collection re-reads on reconnect
+ * and resume. An owner's events still fold in through `inScope`, and an
+ * id-only one is re-read through the builtin.
+ */
+export function useRoutingReviews(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "work:routing-reviews" : null, (connection) => ({
+    concept: APPROVAL_CONCEPT,
+    seed: async (_cursor, signal) => {
+      const result = await connection.query.workRoutingReviews({}, { signal });
+      return { rows: result.rows(), nextCursor: "" };
+    },
+    reread: async (rowId, signal) => {
+      const result = await connection.query.workRoutingReviews({ approvalId: rowId }, { signal });
+      return result.rows()[0] ?? null;
+    },
+    inScope: (row) => isPendingRoutingReview(row),
+    paged: false,
+  }));
+}
+
+/** The approval kind the nightly routing review raises. */
+export const ROUTING_REVIEW = "routingReview";
+
+/** Whether a row is a routing review still waiting for a decision. */
+export function isPendingRoutingReview(row: Row): boolean {
+  const approval = approvalFromRow(row);
+  return approval.kind === ROUTING_REVIEW && approvalIsPending(approval);
 }
 
 /**

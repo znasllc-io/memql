@@ -266,6 +266,16 @@ builtin decideApproval {
   answer      object   @description("The person's offered choice or feedback. Progress feedback continues saved work within its original limits; it cannot grant permissions or raise those limits. Older budget requests can only be rejected.")
 }
 
+/// The nightly routing reviews the caller may decide: the pending ones, oldest first, or one by id
+/// whatever its decision. No person owns a routing review -- the evidence fold raises it as the
+/// cluster -- so the owner-scoped approval reads never list one. An owner or developer, the people
+/// who may change routing, sees them; anyone else gets no rows.
+@sdk
+@executor("integration.work.routingReviews")
+builtin workRoutingReviews {
+  approvalId  string  @description("One routing review by id, decided or not. Omit for every pending one.")
+}
+
 /// Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader
 /// gated through its scheduled automation, so it runs on one replica cluster-wide.
 @executor("integration.work.sweepWaiting")

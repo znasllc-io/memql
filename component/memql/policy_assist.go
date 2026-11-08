@@ -25,7 +25,7 @@ type PolicyProposal struct {
 var policyProposalSchema = json.RawMessage(`{"type":"object","additionalProperties":false,"required":["action","name","description","primary","fallbacks","explanation"],"properties":{"action":{"type":"string","enum":["save","reset","unsupported"]},"name":{"type":"string"},"description":{"type":"string"},"primary":{"type":"string"},"fallbacks":{"type":"array","items":{"type":"string"}},"explanation":{"type":"string"}}}`)
 
 func (e *MemQLEngine) policyDescribeBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if _, err := configurationAuthor(ctx); err != nil {
+	if _, err := RoutingConfigurationAuthor(ctx); err != nil {
 		return nil, err
 	}
 	sentence := stringArg(args, "sentence")

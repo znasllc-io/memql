@@ -7,7 +7,9 @@ import {
   useLiveCollection,
   usePagedCollection,
 } from "../../live/useLiveCollection";
+import { useMergedPagedCollections } from "../../live/useMergedPagedCollections";
 import { APPROVAL_CONCEPT, GOAL_CONCEPT, RUN_CONCEPT } from "./concepts";
+import { ROUTING_REVIEW, useRoutingReviews } from "./useNexus";
 import {
   approvalFromRow,
   approvalIsPending,
@@ -159,9 +161,41 @@ export function useRunDirectory(
   );
 }
 
+/** Oldest first, the queue's order; the id settles a tie. */
+function oldestRequest(a: Row, b: Row) {
+  return rowString(flatten(a), "requestedAt").localeCompare(rowString(flatten(b), "requestedAt"))
+    || rowString(a, "id").localeCompare(rowString(b, "id"));
+}
+
+/**
+ * The approvals inbox: the person's own pending approvals, paged, merged with
+ * the routing reviews they may decide.
+ *
+ * A ROUTING REVIEW IS NOBODY'S OWN, so the person's browse never holds one;
+ * it comes from its own collection (useRoutingReviews) and is merged in the
+ * queue's order, the way the users roster merges people and invitations. The
+ * routing reviews are returned too, so the section can re-read them after a
+ * decision a developer is sent no update for.
+ */
 export function useApprovalDirectory(search: string, enabled = true) {
   const viewer = useSession().access?.userId ?? "";
   const text = search.trim();
+  const own = useOwnApprovalDirectory(viewer, text, enabled);
+  const routingReviews = useRoutingReviews(enabled && viewer !== "");
+  const merged = useMergedPagedCollections(
+    `work:approvals:inbox:${JSON.stringify([viewer, text])}`,
+    own,
+    routingReviews,
+    (ownRows, reviewRows) => [...ownRows, ...reviewRows.filter(row => approvalMatches(approvalFromRow(row), text))].sort(oldestRequest),
+  );
+  return {
+    ...merged,
+    snapshot: merged.source?.snapshot ?? own.snapshot,
+    routingReviews,
+  };
+}
+
+function useOwnApprovalDirectory(viewer: string, text: string, enabled: boolean) {
   return usePagedCollection<Row>(
     enabled && viewer
       ? `work:approvals:browse:${JSON.stringify([viewer, text])}`
@@ -223,6 +257,12 @@ export function useWorkRecord(kind: "goal" | "run" | "approval", id: string) {
                   { approvalId: rowId },
                   { signal },
                 );
+        // A routing review is nobody's own, so the person's own read never
+        // has it: it is read through the routing reviews instead, which
+        // answer an owner or developer whatever its decision.
+        if (kind === "approval" && result.rows().length === 0) {
+          return (await connection.query.workRoutingReviews({ approvalId: rowId }, { signal })).rows();
+        }
         return result.rows();
       };
       return {
@@ -235,7 +275,8 @@ export function useWorkRecord(kind: "goal" | "run" | "approval", id: string) {
         reread: async (rowId, signal) => (await read(rowId, signal))[0] ?? null,
         rereadEveryEvent: true,
         inScope: (row) =>
-          owned(row, viewer) && sameRow(rowString(row, "id"), id),
+          (owned(row, viewer) || (kind === "approval" && approvalFromRow(row).kind === ROUTING_REVIEW))
+          && sameRow(rowString(row, "id"), id),
         paged: false,
       };
     },

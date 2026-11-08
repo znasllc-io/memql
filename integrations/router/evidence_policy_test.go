@@ -3,9 +3,12 @@ package router
 import (
 	"context"
 	"errors"
-	routerlib "github.com/znasllc-io/memql/component/router"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
+	routerlib "github.com/znasllc-io/memql/component/router"
 )
 
 // fakeRender stands in for component/routingrules.GenerateRule, which this
@@ -171,7 +174,7 @@ func TestTheWhenBlockCarriesOnlyTheKeysThatAreSet(t *testing.T) {
 	// the blanks produces a rule that silently never fires -- which here would
 	// be a demotion a person approved and that did nothing.
 	var form routerlib.Form
-	_, _, err := proposeEvidence(context.Background(), window(100, 90), "demotion", 0, false, func(f routerlib.Form) (string, error) { form = f; return fakeRender(f) })
+	_, _, _, err := proposeEvidence(context.Background(), window(100, 90), "demotion", 0, false, func(f routerlib.Form) (string, error) { form = f; return fakeRender(f) }, noRuleBeatsIt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,6 +253,18 @@ func TestARuleNameIsDerivedSoTwoFoldsAgree(t *testing.T) {
 	if a == routerlib.RuleName(routerlib.DirectionDemotion, "qwen3.5:9b", "fast") {
 		t.Fatal("two levels must produce two rule names")
 	}
+	// A saved rule's name is lowerCamelCase letters and digits: routingRuleSave
+	// refuses anything else, and so do MemQL OS's rule forms. An approved
+	// demotion is saved through the same checks, so a name of any other shape
+	// is a proposal nobody could ever apply.
+	if !regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`).MatchString(a) {
+		t.Fatalf("a rule name must be lowerCamelCase letters and digits, got %q", a)
+	}
+	// Two model ids with the same letters and digits are still two models, and
+	// one name for both would let approving one replace the other's demotion.
+	if a == routerlib.RuleName(routerlib.DirectionDemotion, "qwen35:9b", "strong") {
+		t.Fatal("two model ids must produce two rule names")
+	}
 }
 
 func TestSortWindowsIsStable(t *testing.T) {
@@ -279,9 +294,76 @@ func TestFailureRateOfAnEmptyWindowIsZeroAndTheFloorIsWhatMakesThatSafe(t *testi
 	}
 }
 
+// noRuleBeatsIt is the checker for a fold whose demotions can all decide a
+// call -- the case every test above is about.
+func noRuleBeatsIt(context.Context, string) (string, error) { return "", nil }
+
 func proposeExclusion(w routerlib.Window, render routerlib.Renderer) (routerlib.Proposal, bool, error) {
-	return proposeEvidence(context.Background(), w, "demotion", 0, false, render)
+	p, _, ok, err := proposeEvidence(context.Background(), w, "demotion", 0, false, render, noRuleBeatsIt)
+	return p, ok, err
 }
 func proposePromotion(w routerlib.Window, validity float64, measured bool, render routerlib.Renderer) (routerlib.Proposal, bool, error) {
-	return proposeEvidence(context.Background(), w, "promotion", validity, measured, render)
+	p, _, ok, err := proposeEvidence(context.Background(), w, "promotion", validity, measured, render, noRuleBeatsIt)
+	return p, ok, err
+}
+
+func TestABeatenDemotionIsWithheld(t *testing.T) {
+	// fastLane is locked and matches every fast call, so a demotion saved at
+	// fast would decide nothing. Asking a person to approve it would ask them
+	// to approve a change that changes no routing (design record D3).
+	var asked string
+	p, withheld, ok, err := proposeEvidence(context.Background(), window(100, 90), "demotion", 0, false, fakeRender,
+		func(_ context.Context, source string) (string, error) { asked = source; return "fastLane", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok || withheld != "fastLane" {
+		t.Fatalf("a beaten demotion must be withheld naming the rule that beats it: ok=%v withheld=%q", ok, withheld)
+	}
+	if p.RuleSource != "" || p.Hash != "" {
+		t.Fatalf("a withheld demotion must open nothing, got %+v", p)
+	}
+	if !strings.Contains(asked, "rule "+routerlib.RuleName(routerlib.DirectionDemotion, "qwen3.5:9b", "strong")) {
+		t.Fatalf("the checker must be asked about the rendered rule, got %q", asked)
+	}
+}
+
+func TestADemotionNeedsAChecker(t *testing.T) {
+	// No checker is not "nothing beats it": the fold must not propose a rule
+	// nobody checked, any more than one nobody rendered.
+	_, _, ok, err := proposeEvidence(context.Background(), window(100, 90), "demotion", 0, false, fakeRender, nil)
+	if ok || err == nil {
+		t.Fatalf("a demotion with no checker must be an error: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestACheckerFailureIsAnErrorAndNotASilentSkip(t *testing.T) {
+	_, _, ok, err := proposeEvidence(context.Background(), window(100, 90), "demotion", 0, false, fakeRender,
+		func(context.Context, string) (string, error) { return "", errors.New("configuration unreadable") })
+	if ok || err == nil {
+		t.Fatalf("a failed check must be reported: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestAPromotionIsNotChecked(t *testing.T) {
+	// A promotion retires the demotion it lifts; its own text is never saved,
+	// so whether that text could decide a call is not a question.
+	_, _, ok, err := proposeEvidence(context.Background(), window(0, 0), "promotion", 0.95, true, fakeRender,
+		func(context.Context, string) (string, error) {
+			t.Fatal("a promotion must not be checked")
+			return "", nil
+		})
+	if err != nil || !ok {
+		t.Fatalf("a measured promotion must still propose: ok=%v err=%v", ok, err)
+	}
+}
+
+// engineWithoutTheCheck is an engine that predates RoutingRuleBeatenBy.
+type engineWithoutTheCheck struct{ memql.IntegrationEngineAccess }
+
+func TestTheFoldRefusesAnEngineThatCannotCheck(t *testing.T) {
+	i := &Integration{engine: engineWithoutTheCheck{}}
+	if _, err := i.ruleBeatenBy(context.Background(), "rule x { }"); err == nil {
+		t.Fatal("an engine without the check must refuse, so the fold proposes nothing it could not check")
+	}
 }

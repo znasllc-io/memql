@@ -91,3 +91,26 @@ func TestTheSubjectCarriesTheNumbersTheDecisionRestsOn(t *testing.T) {
 		t.Fatal("the subject must carry the exact rule text that was hashed")
 	}
 }
+
+func TestRoutingReviewOptionsFollowTheDirection(t *testing.T) {
+	// Approving changes routing, and a demotion and a promotion change it in
+	// opposite directions: one adds a rule, the other removes one. A single
+	// label for both would tell somebody retiring an exclusion that they are
+	// adding a rule.
+	labels := func(direction string) map[string]string {
+		a := RoutingReviewApproval(RoutingProposal{
+			ModelId: "m", Level: "strong", Week: "2026-W45", Direction: direction, RuleSource: "rule r { }",
+		}, time.Now(), 0)
+		out := map[string]string{}
+		for _, o := range a.Options {
+			out[o["value"].(string)] = o["label"].(string)
+		}
+		return out
+	}
+	if got := labels("demotion"); got["approved"] != "Add the rule" || got["rejected"] != "Leave routing as it is" {
+		t.Fatalf("a demotion's options: %v", got)
+	}
+	if got := labels("promotion"); got["approved"] != "Remove the exclusion" || got["rejected"] != "Leave routing as it is" {
+		t.Fatalf("a promotion's options: %v", got)
+	}
+}
