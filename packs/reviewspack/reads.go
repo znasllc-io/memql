@@ -452,7 +452,7 @@ func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderato
 	for _, userID := range members {
 		m, moderates, err := p.canModerate(sys, resolving, resolver, account, userID)
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("reviews: reading the organization's people: %w", err)
 		}
 		if moderates {
 			out = append(out, m)
@@ -559,14 +559,16 @@ func peopleReads(ctx context.Context) (sys, resolving context.Context, failures 
 // act on the store the gate then refuses.
 //
 // The user row is @serverOnly: the internal stamp is on that one read, made as
-// the deployment (sys).
+// the deployment (sys). A read that fails is returned as it failed, and each
+// caller says what it was reading: the organization's people, or the approver
+// named.
 func (p *Provider) canModerate(sys, resolving context.Context, resolver organizationDecisions, account, userID string) (Moderator, bool, error) {
 	if auth.IsRoleTestUser(userID) {
 		return Moderator{}, false, nil
 	}
 	rows, err := p.rowsFor(auth.ContextWithInternalOrigin(sys), "userByIdSystem", map[string]string{"userId": userID})
 	if err != nil {
-		return Moderator{}, false, fmt.Errorf("reviews: reading the organization's people: %w", err)
+		return Moderator{}, false, err
 	}
 	if len(rows) == 0 {
 		return Moderator{}, false, nil
@@ -616,7 +618,7 @@ func (p *Provider) moderatorNamed(ctx context.Context, account, userID string) (
 	m, moderates := Moderator{}, false
 	if member {
 		if m, moderates, err = p.canModerate(sys, resolving, resolver, account, userID); err != nil {
-			return Moderator{}, false, err
+			return Moderator{}, false, fmt.Errorf("reviews: reading the approver named: %w", err)
 		}
 	}
 	if err := failures.Err(); err != nil {

@@ -276,6 +276,14 @@ func TestTheApproverCheckRefusesWhenAReadBehindItFails(t *testing.T) {
 			t.Errorf("%s: err = %v, want the write refused for the read that failed", name, err)
 		}
 	}
+	// The refusal says what was read: the person named, alone. Naming an
+	// approver reads none of the organization's people.
+	roster := shopRoster()
+	roster.errorIn = "userByIdSystem"
+	_, err := writeSettingsOn(t, operatorCtxFor("op-1"), roster, existingSettings(), approverArgs("mod-1"), false)
+	if want := "reviews: reading the approver named: the rows could not be read"; err == nil || err.Error() != want {
+		t.Errorf("the named approver's user row failing: err = %v, want %q", err, want)
+	}
 }
 
 // A ROLE TEST'S STAND-IN IS NEVER ONE OF THE STORE'S PEOPLE (ruling R3). While
