@@ -21,8 +21,8 @@
 // # What it never carries
 //
 // The IP address and the user agent are read here, on the serving goroutine,
-// to derive those fields, and are dropped before the record is built. They
-// are not fields of RequestRecord, so nothing downstream of the handler -- the
+// only to derive those fields, and are never placed on the record. They are
+// not fields of RequestRecord, so nothing downstream of the handler -- the
 // recorder, the sink, the table, a log line -- can store them. The visitor id
 // is a keyed hash under a secret that exists for one UTC day (spec D1): it
 // counts a day's visitors without a cookie, and once the day's secret is
