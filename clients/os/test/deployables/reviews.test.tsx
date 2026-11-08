@@ -391,6 +391,19 @@ describe("who can moderate", () => {
     may: { edit: true, nameApprover: true },
     viewer: { moderates: true, approvesRemovals: true },
   } as unknown as Row;
+  /** The first 100 people who can moderate, by what each is called: the list the engine cuts at. */
+  const FIRST_HUNDRED = Array.from({ length: 100 }, (_, n) => {
+    const at = String(n).padStart(3, "0");
+    return { userId: `u-${at}`, displayName: `Moderator ${at}`, email: `m${at}@example.com`, mayRemove: false };
+  });
+
+  /** Type into the approver picker, and what it shows. */
+  async function search(text: string): Promise<HTMLElement> {
+    const field = await screen.findByRole("combobox", { name: "Choose who approves removals" });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: text } });
+    return screen.findByRole("listbox", { name: "People who can moderate" });
+  }
 
   it("review settings pick the approver from the people who can moderate", async () => {
     const connection = await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE }));
@@ -528,17 +541,13 @@ describe("who can moderate", () => {
   it("say when only the first people by name are listed, and never that nobody approves", async () => {
     // The engine lists the first 100 by what each is called. Zoe approves
     // removals and sorts past the cut, so she is on no row.
-    const hundred = Array.from({ length: 100 }, (_, n) => {
-      const at = String(n).padStart(3, "0");
-      return { userId: `u-${at}`, displayName: `Moderator ${at}`, email: `m${at}@example.com`, mayRemove: false };
-    });
     const settings = {
       exists: true,
       settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-zoe" },
       may: { edit: true, nameApprover: true },
       viewer: { moderates: true, approvesRemovals: false },
     } as unknown as Row;
-    await openReviews(reviewsSeed({ settings, people: { storeId: "store-live", people: hundred, truncated: true } as unknown as Row }));
+    await openReviews(reviewsSeed({ settings, people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }));
     await click(tab("Settings"));
     const list = await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(100);
@@ -549,6 +558,26 @@ describe("who can moderate", () => {
     const approver = settingRow("Removal approver");
     expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
     expect(within(approver).getByText(/Someone not among the people listed is the one person who can remove a published review/)).toBeTruthy();
+  });
+
+  it("say nobody among the first listed has the name typed, when the engine cut the list", async () => {
+    // Zoe can moderate and sorts past the cut: nobody listed is called that,
+    // which is not nobody who can moderate.
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }));
+    await click(tab("Settings"));
+    const choices = await search("Zoe");
+    expect(within(choices).queryAllByRole("option")).toEqual([]);
+    expect(screen.getByText("Nobody among the first 100 by that name.")).toBeTruthy();
+    expect(screen.queryByText("Nobody who can moderate this store by that name.")).toBeNull();
+  });
+
+  it("say nobody who can moderate has the name typed, when everybody who can is listed", async () => {
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    const choices = await search("Zoe");
+    expect(within(choices).queryAllByRole("option")).toEqual([]);
+    expect(screen.getByText("Nobody who can moderate this store by that name.")).toBeTruthy();
+    expect(screen.queryByText(/Nobody among the first/)).toBeNull();
   });
 });
 

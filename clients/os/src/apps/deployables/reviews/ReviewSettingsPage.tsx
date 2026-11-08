@@ -133,6 +133,13 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   const approverReading = approverId !== "" && approverName === "" && people.value === null && people.state !== "failed";
   const namesApprover = canEdit && value.may.nameApprover;
   const choosesApprover = namesApprover && moderators.length > 0;
+  // THE PICKER SEARCHES ONLY THE PEOPLE LISTED. When the engine cut the list,
+  // the person typed may be past the cut -- the approver among them -- so
+  // finding nobody by that name is said of those listed, never of everybody
+  // who can moderate.
+  const noMatch = people.value?.truncated
+    ? `Nobody among the first ${moderators.length} by that name.`
+    : "Nobody who can moderate this store by that name.";
 
   async function save() {
     if (problem !== "" || Object.keys(changes).length === 0) return;
@@ -199,7 +206,7 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
                   listLabel="People who can moderate"
                   placeholder="Search the people who can moderate"
                   choices={moderators.map((p) => ({ id: p.userId, name: personCalled(p), detail: p.displayName === "" ? undefined : p.email }))}
-                  emptyText="Nobody who can moderate this store by that name."
+                  emptyText={noMatch}
                   onChoose={(choice) => set("removalApproverUserId")(choice.id)}
                 />
               ) : namesApprover && people.state === "failed" ? (
