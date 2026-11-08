@@ -33,7 +33,9 @@ import (
 //     observe sink's counters are readable by tests and by nothing else.
 //   - A flush failure is counted as dropped rows rather than only as an error,
 //     for the same reason: what a reader of the figure needs to know is how
-//     many requests are missing from it.
+//     many requests are missing from it. And a refused batch is retried one
+//     row at a time first (writeRowByRow), so the rows missing are only the
+//     ones the database refused, not every request that shared their batch.
 type Sink struct {
 	logger        *slog.Logger
 	db            *bun.DB
@@ -55,7 +57,15 @@ type Sink struct {
 	// which is what lets the drop, batch and shutdown behaviour be proven
 	// with no database at all.
 	insert func(ctx context.Context, rows []Row) error
+
+	// writeTimeout bounds one batch insert, and the row-by-row fallback after
+	// a refused batch shares one more of it (writeRowByRow). A field,
+	// defaulted by NewSink, so a test can shorten it.
+	writeTimeout time.Duration
 }
+
+// defaultWriteTimeout is how long one insert may take before it is abandoned.
+const defaultWriteTimeout = 5 * time.Second
 
 // SinkOptions configures the writer. Zero values take the defaults, which are
 // the Logs store's numbers (its design's L5) for the same reason it chose
@@ -138,6 +148,7 @@ func NewSink(db *bun.DB, opts SinkOptions) *Sink {
 		maxBatch:      opts.MaxBatch,
 		stopCh:        make(chan struct{}),
 		doneCh:        make(chan struct{}),
+		writeTimeout:  defaultWriteTimeout,
 	}
 	s.insert = opts.Insert
 	if s.insert == nil {
@@ -208,19 +219,10 @@ func (s *Sink) run() {
 		if len(batch) == 0 {
 			return
 		}
-		if err := s.write(batch); err != nil {
-			// COUNTED AS DROPPED, not only as an error. What somebody reading
-			// the figure needs is how many requests are missing from it, and
-			// a failed batch is missing exactly as thoroughly as an overflowed
-			// one.
-			s.dropped.Add(uint64(len(batch)))
-			metrics.SiteTrafficDropped(metrics.SiteTrafficDropWriteFailed, len(batch))
-			s.logger.Warn("the request log could not be written; the traffic figure will be low for this window",
-				"count", len(batch), "err", err)
-		} else {
-			s.written.Add(uint64(len(batch)))
-			metrics.SiteTrafficWritten(len(batch))
-		}
+		// write accounts for every row itself, as written or dropped: after
+		// a refused batch the two are no longer all of one or all of the
+		// other (writeRowByRow).
+		s.write(batch)
 		batch = batch[:0]
 	}
 
@@ -256,14 +258,16 @@ func (s *Sink) run() {
 	}
 }
 
-// write turns records into rows and hands them to the insert seam.
+// write turns records into rows, inserts them as one batch and accounts for
+// every row as written or dropped. A refused batch falls back to
+// writeRowByRow; a batch that lands is one insert, as it always was.
 //
 // The row id is minted HERE rather than in Record, so the serving path pays
 // for a channel send and nothing else. It only has to be unique within a
 // (served_at, id) primary key, and two requests to one site can land in the
 // same microsecond -- which is exactly the collision a (served_at, site_id)
 // key would have swallowed silently.
-func (s *Sink) write(batch []Record) error {
+func (s *Sink) write(batch []Record) {
 	rows := make([]Row, 0, len(batch))
 	for _, r := range batch {
 		node := r.Node
@@ -291,9 +295,72 @@ func (s *Sink) write(batch []Record) error {
 			Visitor:    r.Visitor,
 		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.writeTimeout)
+	err := s.insert(ctx, rows)
+	cancel()
+	if err == nil {
+		s.countWritten(len(rows))
+		return
+	}
+	s.writeRowByRow(rows, err)
+}
+
+// writeRowByRow retries a refused batch one row at a time, so that one bad
+// row costs one row.
+//
+// A BATCH INSERT IS ALL OR NOTHING. One row the database refuses fails the
+// statement, and before this every request in the batch was dropped with it:
+// up to MaxBatch rows, other sites' among them, lost to a single bad value.
+// Alone, each row lands or fails on its own merits. Only the rows refused
+// again are dropped, each counted as write_failed, and the batch is reported
+// in ONE warning naming how many rows were isolated, rather than a line per
+// row.
+//
+// ONE WRITE TIMEOUT, SHARED BY THE WHOLE PASS. A batch also fails when the
+// database is down or hung, and then every row fails alone too. A timeout per
+// row would hold this drain for a batch's worth of them (256 times five
+// seconds is over twenty minutes) while the queue overflowed behind it and a
+// shutdown waited. Sharing one deadline bounds a failed batch at two write
+// timeouts whatever its size. A row the deadline leaves unattempted is
+// dropped and counted like a refused one: what a reader of the figure needs is
+// how many requests are missing, not why each one is.
+//
+// A batch the database committed but whose reply was lost would retry into
+// duplicate keys and be counted dropped although it is stored, so in that
+// rare case the drop counter errs high, as it did before this fallback.
+func (s *Sink) writeRowByRow(rows []Row, batchErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.writeTimeout)
 	defer cancel()
-	return s.insert(ctx, rows)
+	written, isolated := 0, 0
+	var rowErr error
+	for i := range rows {
+		err := ctx.Err()
+		if err == nil {
+			err = s.insert(ctx, rows[i:i+1])
+		}
+		if err != nil {
+			isolated++
+			if rowErr == nil {
+				rowErr = err
+			}
+			s.dropped.Add(1)
+			metrics.SiteTrafficDropped(metrics.SiteTrafficDropWriteFailed, 1)
+			continue
+		}
+		written++
+	}
+	s.countWritten(written)
+	s.logger.Warn("a request log batch was refused and its rows were retried one at a time; the isolated rows were dropped, and the traffic figure is low by that many",
+		"rows", len(rows), "written", written, "isolated", isolated, "err", batchErr, "rowErr", rowErr)
+}
+
+// countWritten adds rows that landed to the written count and its metric.
+func (s *Sink) countWritten(n int) {
+	if n == 0 {
+		return
+	}
+	s.written.Add(uint64(n))
+	metrics.SiteTrafficWritten(n)
 }
 
 func (s *Sink) insertBatch(ctx context.Context, rows []Row) error {

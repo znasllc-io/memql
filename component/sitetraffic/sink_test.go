@@ -1,6 +1,7 @@
 package sitetraffic
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -8,7 +9,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -269,6 +273,128 @@ func TestAFailedFlushIsCountedAsDropped(t *testing.T) {
 	}
 	if after := metrics.SiteTrafficDroppedValue(metrics.SiteTrafficDropWriteFailed); after <= before {
 		t.Error("the write_failed counter did not move")
+	}
+}
+
+// ONE BAD ROW MUST NOT ERASE ITS BATCH. A batch insert is all or nothing, so a
+// single row the database refuses used to drop every request in its batch --
+// up to 256, other sites' among them. A refused batch is retried one row at a
+// time: the rows that land are written, only the row refused again is dropped
+// and counted, and the failure is reported once for the batch.
+func TestAFailedBatchFallsBackToRowsAndDropsOnlyTheBadRow(t *testing.T) {
+	before := metrics.SiteTrafficDroppedValue(metrics.SiteTrafficDropWriteFailed)
+	var (
+		mu     sync.Mutex
+		calls  []int
+		landed []string
+	)
+	insert := func(_ context.Context, rows []Row) error {
+		mu.Lock()
+		defer mu.Unlock()
+		calls = append(calls, len(rows))
+		for _, row := range rows {
+			if row.SiteId == "site-poisoned" {
+				return errors.New(`ERROR: syntax error at or near ":" (SQLSTATE=42601)`)
+			}
+		}
+		for _, row := range rows {
+			landed = append(landed, row.SiteId)
+		}
+		return nil
+	}
+	snapshot := func() ([]int, []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(calls), slices.Clone(landed)
+	}
+	reset := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		calls, landed = nil, nil
+	}
+
+	var logs bytes.Buffer
+	s := NewSink(nil, SinkOptions{Insert: insert, FlushInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	s.Start()
+	for _, site := range []string{"site-a", "site-poisoned", "site-b", "site-c"} {
+		s.Record(aRecord(site))
+	}
+	// Stop flushes the four as one batch: nothing flushes earlier with an
+	// hour-long interval and a batch limit of 256.
+	if err := s.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	gotCalls, gotLanded := snapshot()
+	if want := []string{"site-a", "site-b", "site-c"}; !slices.Equal(gotLanded, want) {
+		t.Errorf("landed %v, want %v -- every row but the poisoned one", gotLanded, want)
+	}
+	if want := []int{4, 1, 1, 1, 1}; !slices.Equal(gotCalls, want) {
+		t.Errorf("insert calls of %v rows, want the batch once and then each row alone: %v", gotCalls, want)
+	}
+	if written, dropped := s.Stats(); written != 3 || dropped != 1 {
+		t.Errorf("stats = (%d written, %d dropped), want (3, 1)", written, dropped)
+	}
+	if moved := metrics.SiteTrafficDroppedValue(metrics.SiteTrafficDropWriteFailed) - before; moved != 1 {
+		t.Errorf("the write_failed counter moved by %v, want 1 -- the one row that was dropped", moved)
+	}
+	if warnings := strings.Count(logs.String(), "level=WARN"); warnings != 1 || !strings.Contains(logs.String(), "isolated=1") {
+		t.Errorf("logged %d warnings, want one for the batch naming isolated=1:\n%s", warnings, logs.String())
+	}
+
+	// A batch that lands is one insert, exactly as before: the fallback runs
+	// only after a refusal.
+	reset()
+	healthy := NewSink(nil, SinkOptions{Insert: insert, FlushInterval: time.Hour})
+	healthy.Start()
+	for _, site := range []string{"site-a", "site-b", "site-c"} {
+		healthy.Record(aRecord(site))
+	}
+	if err := healthy.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if gotCalls, _ := snapshot(); !slices.Equal(gotCalls, []int{3}) {
+		t.Errorf("a batch that landed took insert calls of %v rows, want [3]", gotCalls)
+	}
+}
+
+// THE FALLBACK SHARES ONE WRITE TIMEOUT. A batch fails for one bad row, but
+// also when the database is down or hung, and then every row fails alone too.
+// A timeout per row would hold the drain for a batch's worth of them -- 256
+// times five seconds is over twenty minutes -- while the queue overflows behind
+// it and a shutdown waits. One deadline shared by the whole pass bounds a
+// failed batch at two write timeouts, whatever its size; the rows the deadline
+// leaves unattempted are dropped and counted like any other.
+func TestTheRowByRowFallbackSharesOneWriteTimeout(t *testing.T) {
+	var calls atomic.Int64
+	hung := func(ctx context.Context, _ []Row) error {
+		calls.Add(1)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	s := NewSink(nil, SinkOptions{Insert: hung, FlushInterval: time.Hour, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s.writeTimeout = 50 * time.Millisecond
+	s.Start()
+	const rows = 40
+	for i := 0; i < rows; i++ {
+		s.Record(aRecord("site-1"))
+	}
+
+	started := time.Now()
+	if err := s.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	elapsed := time.Since(started)
+
+	if calls.Load() < 2 {
+		t.Errorf("the refused batch was never retried row by row (%d insert calls)", calls.Load())
+	}
+	if written, dropped := s.Stats(); written != 0 || dropped != rows {
+		t.Errorf("stats = (%d written, %d dropped), want (0, %d)", written, dropped, rows)
+	}
+	// A timeout per row would take (rows+1) x 50ms: over two seconds.
+	if elapsed > time.Second {
+		t.Errorf("a failed batch of %d rows held the drain for %v -- the fallback must share one write timeout", rows, elapsed)
 	}
 }
 
