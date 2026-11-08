@@ -397,7 +397,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         guard let version = updateState.beginInstall() else { return }
         installStartedAt = Date()
         showAbout()
-        // The updater owns bounded downloads, rollback and worker recovery.
+        // The updater owns bounded downloads and saved worker recovery.
         // Killing it on a UI timeout could interrupt those recovery steps.
         updateRequest(["--install", "--version=\(version)"], timeout: nil) { [weak self] reply, error in
             guard let self else { return }

@@ -81,6 +81,7 @@ type fixture struct {
 	prepareFail                 bool
 	wrongReady                  bool
 	progressChecked             bool
+	running                     bool
 	config                      string
 }
 
@@ -140,20 +141,28 @@ func setupFixture(t *testing.T) *fixture {
 		}
 		return nil, fmt.Errorf("unexpected command %s %v", name, args)
 	}
-	c.status = func(context.Context) (workerStatus, error) { return f.worker, nil }
+	f.running = true
+	c.status = func(context.Context) (workerStatus, error) {
+		if !f.running {
+			return workerStatus{}, errors.New("worker stopped")
+		}
+		return f.worker, nil
+	}
 	c.prepare = func(context.Context, int) error {
 		f.prepares++
 		if f.prepareFail {
 			return errors.New("The worker became busy")
 		}
+		f.worker.UpdatePending = true
 		return nil
 	}
 	c.cancel = func(context.Context, int) error { f.cancels++; return nil }
-	c.restart = func(context.Context) error {
+	c.start = func(context.Context) error {
 		f.restarts++
 		if f.restartFail && f.restarts == 1 {
 			return errors.New("restart refused")
 		}
+		f.running = true
 		body, err := os.ReadFile(executable)
 		if err != nil {
 			return err
@@ -161,11 +170,20 @@ func setupFixture(t *testing.T) *fixture {
 		fields := strings.Fields(string(body))
 		f.worker.Version = fields[1]
 		f.worker.PID++
+		f.worker.UpdatePending = false
 		if f.wrongReady && f.restarts == 1 {
 			f.worker.Homes = append(f.worker.Homes, homeStatus{ID: "unexpected"})
 		} else if f.restarts > 1 && f.wrongReady {
 			f.worker.Homes = f.worker.Homes[:2]
 		}
+		return nil
+	}
+	c.alive = func(pid int) bool { return f.running && pid == f.worker.PID }
+	c.finish = func(_ context.Context, pid int) error {
+		if pid != f.worker.PID || !f.worker.UpdatePending {
+			return errors.New("worker changed or unreserved")
+		}
+		f.running = false
 		return nil
 	}
 	return f
@@ -246,19 +264,22 @@ func TestInstallFailuresLeaveOriginalInPlace(t *testing.T) {
 	}
 }
 
-func TestInstallRollsBackFailedRestartAndWrongHomes(t *testing.T) {
+func TestInstallRetainsTargetAndRecoveryWhenRestartOrHomesCannotBeVerified(t *testing.T) {
 	for _, kind := range []string{"restart", "homes"} {
 		t.Run(kind, func(t *testing.T) {
 			f := setupFixture(t)
 			f.restartFail = kind == "restart"
 			f.wrongReady = kind == "homes"
 			r := f.c.Install(context.Background(), "1.1.0")
-			if r.OK || r.Updated || !strings.Contains(r.Error, "restored and restarted") {
+			if r.OK || !r.Updated || !r.RestartRequired || !strings.Contains(r.Error, "previous copy is retained") {
 				t.Fatalf("%+v", r)
 			}
 			body, _ := os.ReadFile(f.c.Executable)
-			if string(body) != "memql 1.0.0 (computeruse)\n" || f.restarts != 2 {
-				t.Fatalf("rollback failed: %s restarts %d", body, f.restarts)
+			if string(body) != string(f.payload) || f.restarts != 1 {
+				t.Fatalf("replacement was rolled back or restarted again: %s restarts %d", body, f.restarts)
+			}
+			if pending, ok := f.c.pendingRecord(); !ok || pending.Version != "1.1.0" {
+				t.Fatalf("recovery journal lost: %+v %v", pending, ok)
 			}
 		})
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestUpdateInvalidActionAlwaysReturnsJSONWithoutStarting(t *testing.T) {
-	for _, args := range [][]string{{"--install", "--json"}, {"--check", "--install", "--version=1.2.3", "--json"}, {"--unknown", "--json"}, {"--status", "--version=1.2.3", "--json"}, {"--check", "unexpected", "--json"}} {
+	for _, args := range [][]string{{"--install", "--json"}, {"--check", "--install", "--version=1.2.3", "--json"}, {"--unknown", "--json"}, {"--status", "--version=1.2.3", "--json"}, {"--check", "unexpected", "--json"}, {"--bootstrap", "--version=1.2.3", "--json"}, {"--install", "--version=1.2.3", "--installed-executable=/tmp/memql", "--json"}, {"--check", "--confirm=restart-worker", "--json"}, {"--bootstrap", "--check", "--version=1.2.3", "--installed-executable=/tmp/memql", "--installed-version=1.0.0", "--json"}} {
 		read, write, err := os.Pipe()
 		if err != nil {
 			t.Fatal(err)

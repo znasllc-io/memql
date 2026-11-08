@@ -60,6 +60,13 @@ enum CockpitUpdateTests {
         partial.finished(connected, error: connected.processError(exitStatus: 1))
         precondition(partial.failure != nil && partial.action == .check && !partial.hasUpdate,
                      "A replaced worker plus process failure remains a partial outcome, not another install")
+        let handoff = reply(#"{"ok":false,"updated":true,"restart_required":true,"can_install":true,"current_version":"0.23.0","latest_version":"0.23.0","phase":"error","error":"The worker handoff needs recovery."}"#)
+        var handoffState = CockpitUpdateState()
+        handoffState.finished(handoff, error: handoff.processError(exitStatus: 1))
+        precondition(handoffState.hasUpdate && handoffState.action == .install && !handoffState.installing,
+                     "An installed release with unfinished handoff keeps its badge and immediate recovery action")
+        precondition(handoffState.actionTitle == "Restart to Finish Update" && handoffState.failure == handoff.error)
+        precondition(handoffState.beginInstall() == "0.23.0", "Recovery uses the installed target without another newer release")
         state.progress(reply(#"{"ok":true,"phase":"downloading"}"#))
         precondition(!state.installing && state.title == "Cockpit updated and connected", "Late progress cannot undo completion")
 

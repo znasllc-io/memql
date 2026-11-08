@@ -27,6 +27,9 @@ func (c *Client) installable(ctx context.Context) error {
 		target = c.bundle
 		body, err := c.run(ctx, "/bin/launchctl", "print", fmt.Sprintf("gui/%d/com.znasllc.memql-worker", os.Getuid()))
 		matches := err == nil && launchdProgram(string(body), c.Executable)
+		if err != nil {
+			_, matches = c.recoveryPlist(ctx)
+		}
 		if err == nil && !matches {
 			// SMAppService prints a bundle-relative program. Bind that form to
 			// the PID of the local, path-verified worker so another copy with the
@@ -116,26 +119,19 @@ func sameExecutable(a, b string) bool {
 	return err == nil && left == right
 }
 
-func (c *Client) restartService(ctx context.Context) error {
-	var err error
-	switch c.OS {
-	case "darwin":
-		_, err = c.run(ctx, "/bin/launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/com.znasllc.memql-worker", os.Getuid()))
-	case "linux":
-		_, err = c.run(ctx, "systemctl", "--user", "restart", "memql-worker.service")
-	default:
-		return errors.New("Worker service restart is unsupported")
-	}
-	if err != nil {
-		return errors.New("The worker service could not restart")
-	}
-	return nil
-}
-
 func (c *Client) startService(ctx context.Context) error {
 	var err error
 	switch c.OS {
 	case "darwin":
+		if _, err := c.run(ctx, "/bin/launchctl", "print", c.workerService()); err != nil {
+			plist, ok := c.recoveryPlist(ctx)
+			if !ok {
+				return errors.New("The stopped worker has no verified bootstrap recovery definition")
+			}
+			if _, err = c.run(ctx, "/bin/launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), plist); err != nil {
+				return errors.New("The existing worker LaunchAgent could not restart")
+			}
+		}
 		_, err = c.run(ctx, "/bin/launchctl", "kickstart", fmt.Sprintf("gui/%d/com.znasllc.memql-worker", os.Getuid()))
 	case "linux":
 		_, err = c.run(ctx, "systemctl", "--user", "start", "memql-worker.service")
@@ -166,6 +162,9 @@ func (c *Client) serviceRunning(ctx context.Context) (bool, error) {
 	case "darwin":
 		body, err := c.run(ctx, "/bin/launchctl", "print", fmt.Sprintf("gui/%d/com.znasllc.memql-worker", os.Getuid()))
 		if err != nil {
+			if _, ok := c.recoveryPlist(ctx); ok {
+				return false, nil
+			}
 			return false, errors.New("The worker service state could not be confirmed")
 		}
 		stopped := false

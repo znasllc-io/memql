@@ -15,15 +15,18 @@ import (
 // Its sole purpose is to prove which installed executable and saved home
 // choices a later explicit restart must recover after an updater disappears.
 type pendingUpdate struct {
-	Version     string       `json:"version"`
-	Variant     string       `json:"variant"`
-	Executable  string       `json:"executable"`
-	Homes       []homeStatus `json:"homes"`
-	OperationID string       `json:"operation_id"`
+	Version         string       `json:"version"`
+	Variant         string       `json:"variant"`
+	Executable      string       `json:"executable"`
+	Homes           []homeStatus `json:"homes"`
+	OperationID     string       `json:"operation_id"`
+	ServicePlist    string       `json:"service_plist,omitempty"`
+	PreviousVersion string       `json:"previous_version,omitempty"`
+	LegacyPID       int          `json:"legacy_pid,omitempty"`
 }
 
 func (c *Client) savePending(version, operation string, homes []homeStatus) error {
-	pending := pendingUpdate{Version: version, Variant: c.Variant, Executable: c.Executable, Homes: homes, OperationID: operation}
+	pending := pendingUpdate{Version: version, Variant: c.Variant, Executable: c.Executable, Homes: homes, OperationID: operation, ServicePlist: c.servicePlist, PreviousVersion: baseVersion(c.Version), LegacyPID: c.legacyPID}
 	body, err := json.Marshal(pending)
 	if err != nil {
 		return err
@@ -55,6 +58,11 @@ func (c *Client) savePending(version, operation string, homes []homeStatus) erro
 }
 
 func (c *Client) pending() (pendingUpdate, bool) {
+	pending, ok := c.pendingRecord()
+	return pending, ok && pending.Version == baseVersion(c.Version)
+}
+
+func (c *Client) pendingRecord() (pendingUpdate, bool) {
 	var pending pendingUpdate
 	path := filepath.Join(c.state, "pending.json")
 	info, err := os.Lstat(path)
@@ -64,7 +72,9 @@ func (c *Client) pending() (pendingUpdate, bool) {
 	body, err := os.ReadFile(path)
 	if err != nil || json.Unmarshal(body, &pending) != nil || pending.OperationID == "" ||
 		pending.Executable != c.Executable || pending.Variant != c.Variant ||
-		!stableVersion.MatchString(pending.Version) || pending.Version != baseVersion(c.Version) ||
+		!stableVersion.MatchString(pending.Version) ||
+		(pending.PreviousVersion != "" && !stableVersion.MatchString(pending.PreviousVersion)) ||
+		pending.LegacyPID < 0 ||
 		!sameHomes(pending.Homes, pending.Homes) {
 		return pendingUpdate{}, false
 	}
@@ -131,6 +141,9 @@ func (c *Client) resumeUpdate(ctx context.Context, r Result) Result {
 	if err := c.installable(ctx); err != nil {
 		return failed(r, err)
 	}
+	r.Updated = true // This journal is tied to the version already on disk.
+	r.CurrentVersion = pending.Version
+	r.RestartRequired = true
 	before, statusErr := c.status(ctx)
 	alreadyReady := false
 	reserved := false
@@ -165,6 +178,7 @@ func (c *Client) resumeUpdate(ctx context.Context, r Result) Result {
 			_ = c.cancel(cancelCtx, before.PID)
 		}
 	}()
+	ready := before
 	if !alreadyReady {
 		r.OK = true
 		r.Phase = "restarting"
@@ -174,18 +188,17 @@ func (c *Client) resumeUpdate(ctx context.Context, r Result) Result {
 		if stopped {
 			// The manager may auto-start the service after our stopped check.
 			// An idempotent start must not kill that newly running worker.
-			err = c.startService(ctx)
+			err = c.start(ctx)
+			if err == nil {
+				ready, err = c.waitReady(ctx, pending.Version, pending.Homes)
+			}
 		} else {
-			err = c.restart(ctx)
+			ready, err = c.restartReserved(ctx, before, pending.Version)
 		}
 		if err != nil {
 			return failed(r, fmt.Errorf("The update is installed, but its worker could not restart. Retry Restart to Finish Update: %w", err))
 		}
 		reserved = false
-	}
-	ready, err := c.waitReady(ctx, pending.Version, pending.Homes)
-	if err != nil {
-		return failed(r, errors.New("The updated worker has not resumed its saved connections. Check the worker logs, then retry Restart to Finish Update"))
 	}
 	r.Updated = true
 	r.RestartRequired = false

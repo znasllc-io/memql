@@ -84,6 +84,7 @@ func TestRecoveryRefusesBusyChangedHomesAndUnverifiableRunningWorker(t *testing.
 
 func TestStoppedRecoveryUsesNonDestructiveStart(t *testing.T) {
 	f := interruptedFixture(t)
+	f.c.start = f.c.startService
 	running, starts := false, 0
 	f.c.status = func(context.Context) (workerStatus, error) {
 		if !running {

@@ -11,3 +11,5 @@ func updateLocked(string) bool { return false }
 func writableDirectory(string) error {
 	return errors.New("Automatic updates are unsupported on this platform")
 }
+func processAlive(int) bool   { return true }
+func ownedByUser(string) bool { return false }

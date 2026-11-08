@@ -15,8 +15,10 @@ import (
 const updateAdmissionLease = 2 * time.Minute
 
 type updateAdmission struct {
-	mu    sync.Mutex
-	until time.Time
+	mu        sync.Mutex
+	until     time.Time
+	finishing bool
+	shutdown  func()
 }
 
 func (f *Fleet) controlUpdate(action string, pid int) error {
@@ -27,6 +29,9 @@ func (f *Fleet) controlUpdate(action string, pid int) error {
 	defer f.mu.Unlock()
 	f.update.mu.Lock()
 	defer f.update.mu.Unlock()
+	if f.update.finishing {
+		return errors.New("This worker is already shutting down for its reserved update.")
+	}
 	if action == "cancel-update" {
 		f.update.until = time.Time{}
 		return nil
@@ -46,6 +51,37 @@ func (f *Fleet) controlUpdate(action string, pid int) error {
 	}
 	f.update.until = time.Now().Add(updateAdmissionLease)
 	return nil
+}
+
+// finishUpdate shuts down only the process that reserved this update. A
+// service-manager restart names a job, so a replacement process could accept
+// work between a status check and that restart. This PID-bound control runs in
+// the reserved worker instead. Admission stays closed after acceptance even
+// if shutdown takes longer than the original lease or the reply is lost.
+func (f *Fleet) finishUpdate(pid int) (func(), error) {
+	if pid <= 0 || pid != os.Getpid() {
+		return nil, errors.New("The worker changed. No replacement worker was stopped.")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.update.mu.Lock()
+	defer f.update.mu.Unlock()
+	if f.update.finishing {
+		return nil, errors.New("This worker is already shutting down for its reserved update.")
+	}
+	if !time.Now().Before(f.update.until) {
+		return nil, errors.New("The update reservation expired. Prepare the worker again before restarting.")
+	}
+	if f.update.shutdown == nil {
+		return nil, errors.New("This worker cannot finish an update through its local control.")
+	}
+	for _, home := range f.managed {
+		if home.runner != nil && home.runner.busy() {
+			return nil, errors.New("The worker is busy. No work was stopped.")
+		}
+	}
+	f.update.finishing = true
+	return f.update.shutdown, nil
 }
 
 func startsWorkerWork(msg *memqlv1.WorkerServerMessage) bool {

@@ -50,3 +50,8 @@ func updateLocked(directory string) bool {
 	return false
 }
 func writableDirectory(directory string) error { return unix.Access(directory, unix.W_OK) }
+func processAlive(pid int) bool                { return unix.Kill(pid, 0) != unix.ESRCH }
+func ownedByUser(path string) bool {
+	var s unix.Stat_t
+	return unix.Lstat(path, &s) == nil && s.Uid == uint32(os.Getuid())
+}

@@ -21,6 +21,8 @@ func TestInstallerScripts(t *testing.T) {
 	}{
 		{"fixture-process", "python3", "fixture_process_test.py"},
 		{"release-discovery", "python3", "release_discovery_test.py"},
+		{"upgrade-linux", "python3", "upgrade_linux_test.py"},
+		{"upgrade-mac", "python3", "upgrade_mac_test.py"},
 		{"presentation", "python3", "ui_test.py"},
 		{"library", "bash", "lib_test.sh"},
 		{"menubar", "bash", "menubar_test.sh"},

@@ -483,6 +483,11 @@ func handleRun(args []string) {
 	}
 
 	if fleet != nil {
+		// Only this process can accept its PID-bound, reserved shutdown. The
+		// updater never force-restarts a service that may already run new work.
+		fleet.update.mu.Lock()
+		fleet.update.shutdown = cancel
+		fleet.update.mu.Unlock()
 		controlListener, err := listenControl(ctx, defaultControlPath(), fleet)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: worker control: %v\n", err)

@@ -65,7 +65,13 @@ type Client struct {
 	status                                  func(context.Context) (workerStatus, error)
 	prepare                                 func(context.Context, int) error
 	cancel                                  func(context.Context, int) error
-	restart                                 func(context.Context) error
+	finish                                  func(context.Context, int) error
+	start                                   func(context.Context) error
+	alive                                   func(int) bool
+	stop                                    func(context.Context, int) error
+	bootstrap                               *bootstrapOptions
+	servicePlist                            string
+	legacyPID                               int
 	readyTimeout, reconnectTimeout          time.Duration
 }
 
@@ -97,7 +103,9 @@ func New(version, variant, executable string) (*Client, error) {
 		return e
 	}
 	c.cancel = func(ctx context.Context, pid int) error { _, e := c.control(ctx, "cancel-update", pid); return e }
-	c.restart = c.restartService
+	c.finish = func(ctx context.Context, pid int) error { _, e := c.control(ctx, "finish-update", pid); return e }
+	c.start = c.startService
+	c.alive = processAlive
 	return c, nil
 }
 
@@ -257,7 +265,12 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
 	defer cancel()
 	progress("starting", "Checking the selected release")
-	check := c.Check(ctx)
+	var check Result
+	if c.bootstrap != nil {
+		check = c.bootstrapCheck(ctx, requested)
+	} else {
+		check = c.Check(ctx)
+	}
 	r.LatestVersion = check.LatestVersion
 	r.ReleaseURL = check.ReleaseURL
 	r.Available = check.Available
@@ -265,6 +278,9 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 	r.RestartRequired = check.RestartRequired
 	if !check.OK {
 		return failed(r, errors.New(check.Error))
+	}
+	if c.bootstrap != nil && check.Phase == "current" {
+		return check
 	}
 	if !check.Available && !check.RestartRequired {
 		return failed(r, errors.New("Cockpit is already current; no update was installed"))
@@ -285,11 +301,20 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 	if err = validateWorker(before, c.Executable); err != nil {
 		return failed(r, err)
 	}
-	if before.Busy == nil {
+	if c.bootstrap != nil && before.Version != c.bootstrap.installed {
+		return failed(r, errors.New("The running worker differs from the selected installed version. Restart it normally before upgrading"))
+	}
+	if before.Busy == nil && (c.bootstrap == nil || c.bootstrap.confirmation != "restart-worker") {
 		return failed(r, errors.New("This worker cannot reserve a safe update. Install the current Cockpit release once using the installer"))
 	}
-	if *before.Busy {
+	if before.Busy != nil && *before.Busy {
 		return failed(r, errors.New("The worker is busy. Wait for its current work to finish, then retry"))
+	}
+	if before.Busy == nil && c.OS == "darwin" {
+		c.servicePlist = filepath.Join(c.home, "Library", "LaunchAgents", "com.znasllc.memql-worker.plist")
+		if err = c.validateRecoveryPlist(ctx, c.servicePlist); err != nil {
+			return failed(r, err)
+		}
 	}
 	target := c.Executable
 	if c.bundle != "" {
@@ -358,13 +383,26 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 	if latest.PID != before.PID || !sameHomes(before.Homes, latest.Homes) {
 		return failed(r, errors.New("The worker changed while the update downloaded. Retry"))
 	}
+	if c.bootstrap != nil {
+		if err = c.verifyBootstrapInstalled(ctx); err != nil {
+			return failed(r, err)
+		}
+	}
 	if err = c.installable(ctx); err != nil {
 		return failed(r, err)
 	}
-	if err = c.prepare(ctx, before.PID); err != nil {
-		return failed(r, err)
+	reserved, legacyStopped := false, false
+	if latest.Busy != nil {
+		if *latest.Busy {
+			return failed(r, errors.New("The worker became busy. Finish its work before retrying"))
+		}
+		if err = c.prepare(ctx, before.PID); err != nil {
+			return failed(r, err)
+		}
+		reserved = true
+	} else if c.bootstrap == nil || c.bootstrap.confirmation != "restart-worker" {
+		return failed(r, errors.New("The worker cannot reserve this update; explicit legacy restart confirmation is required"))
 	}
-	reserved := true
 	defer func() {
 		if reserved {
 			cancelCtx, stop := context.WithTimeout(context.Background(), 8*time.Second)
@@ -372,8 +410,33 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 			_ = c.cancel(cancelCtx, before.PID)
 		}
 	}()
+	defer func() {
+		if legacyStopped {
+			recoveryCtx, stop := context.WithTimeout(context.Background(), 60*time.Second)
+			defer stop()
+			if err := c.verifyBootstrapInstalled(recoveryCtx); err != nil {
+				return // Retain the journal; a partial exchange needs explicit recovery.
+			}
+			if err := c.start(recoveryCtx); err != nil {
+				r = failed(r, errors.New("The upgrade stopped before replacing files, but the worker could not restart. Start its existing service and retry"))
+				return
+			}
+			if _, err := c.waitReady(recoveryCtx, before.Version, before.Homes); err != nil {
+				r = failed(r, errors.New("The previous worker was started, but its saved connections could not be verified. Check its existing service before retrying"))
+			}
+		}
+	}()
+	if latest.Busy == nil {
+		c.legacyPID = before.PID
+	}
 	if err = c.savePending(requested, r.OperationID, before.Homes); err != nil {
 		return failed(r, errors.New("Could not save update recovery information. Nothing was replaced"))
+	}
+	if latest.Busy == nil {
+		if err = c.stop(ctx, before.PID); err != nil {
+			return failed(r, err)
+		}
+		legacyStopped = true
 	}
 	progress("installing", "Installing the verified release")
 	previous := filepath.Join(stage, "previous")
@@ -383,40 +446,33 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 		cleanup = false
 		return failed(r, err)
 	}
-	rollback := func(cause error) Result {
-		// Keep both copies if restoration fails. Losing a rollback copy is worse
-		// than retaining an identifiable directory for manual repair.
-		if e := restore(target, previous); e != nil {
-			cleanup = false
-			return failed(r, fmt.Errorf("%s. Could not restore the previous installation; recovery files: %s", cause, stage))
-		}
-		if e := c.savePending(baseVersion(before.Version), r.OperationID, before.Homes); e != nil {
-			return failed(r, fmt.Errorf("%s. Previous files restored, but restart recovery could not be recorded. Restart the MemQL worker service", cause))
-		}
-		rollbackCtx, stop := context.WithTimeout(context.Background(), 60*time.Second)
-		defer stop()
-		if e := c.restart(rollbackCtx); e != nil {
-			return failed(r, fmt.Errorf("%s. Previous files restored, but the worker needs to be restarted", cause))
-		}
-		reserved = false
-		if _, e := c.waitReady(rollbackCtx, before.Version, before.Homes); e != nil {
-			return failed(r, fmt.Errorf("%s. Previous files restored, but worker recovery could not be confirmed", cause))
-		}
-		c.clearPending()
-		return failed(r, fmt.Errorf("%s. The previous version was restored and restarted", cause))
-	}
-	progress("restarting", "Restarting the worker with its saved connections")
-	if err = c.restart(ctx); err != nil {
-		return rollback(err)
-	}
-	reserved = false
-	ready, err := c.waitReady(ctx, requested, before.Homes)
-	if err != nil {
-		return rollback(err)
-	}
+	legacyStopped = false // From this point the installed target and journal are retained on failure.
 	r.Updated = true
 	r.CurrentVersion = requested
 	r.Available = false
+	keepForRecovery := func(cause error) Result {
+		// A replacement may already have accepted work. Never replace its files
+		// or force-restart it to roll back an uncertain handoff.
+		cleanup = false
+		r.RestartRequired, r.CanInstall = true, true
+		return failed(r, fmt.Errorf("Cockpit %s is installed, but its worker needs recovery: %s. Check for updates and use Restart to Finish Update. The previous copy is retained at %s", requested, cause, previous))
+	}
+	progress("restarting", "Restarting the worker with its saved connections")
+	var ready workerStatus
+	if reserved {
+		ready, err = c.restartReserved(ctx, before, requested)
+	} else {
+		// The explicitly confirmed legacy worker has already stopped. Start is
+		// idempotent if its manager starts the replacement before this call.
+		err = c.start(ctx)
+		if err == nil {
+			ready, err = c.waitReady(ctx, requested, before.Homes)
+		}
+	}
+	if err != nil {
+		return keepForRecovery(err)
+	}
+	reserved = false
 	r.CanInstall = false
 	progress("reconnecting", "Reconnecting to your enabled servers")
 	ready, connectionErr := c.waitConnected(ctx, ready)

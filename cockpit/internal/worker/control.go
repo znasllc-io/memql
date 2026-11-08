@@ -86,7 +86,7 @@ func (f *Fleet) LocalStatus() LocalStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.update.mu.Lock()
-	status.UpdatePending = time.Now().Before(f.update.until)
+	status.UpdatePending = f.update.finishing || time.Now().Before(f.update.until)
 	f.update.mu.Unlock()
 	for _, h := range f.managed {
 		if h.runner != nil && h.runner.busy() {
@@ -351,7 +351,18 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 		return
 	}
 	response := controlResponse{OK: true}
+	var shutdown func()
 	switch request.Action {
+	case "finish-update":
+		var err error
+		shutdown, err = fleet.finishUpdate(request.PID)
+		if err != nil {
+			response.OK = false
+			response.Error = err.Error()
+		} else {
+			status := fleet.LocalStatus()
+			response.Status = &status
+		}
 	case "prepare-update", "cancel-update":
 		if err := fleet.controlUpdate(request.Action, request.PID); err != nil {
 			response.OK = false
@@ -403,6 +414,11 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 		response.Error = "unknown control action"
 	}
 	json.NewEncoder(conn).Encode(response)
+	if shutdown != nil {
+		// Flush the bounded response before closing the worker's listener. A
+		// lost reply does not reopen admission or cancel an accepted shutdown.
+		shutdown()
+	}
 }
 
 func callControl(path string, request controlRequest) (controlResponse, error) {
@@ -435,7 +451,7 @@ func callControl(path string, request controlRequest) (controlResponse, error) {
 
 func handleControl(args []string) {
 	fs := flag.NewFlagSet("worker control", flag.ContinueOnError)
-	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), request-permission (explicit local macOS prompt), prepare-update, or cancel-update")
+	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), request-permission (explicit local macOS prompt), prepare-update, finish-update, or cancel-update")
 	permission := fs.String("permission", "", "accessibility or screen_recording, for request-permission")
 	pid := fs.Int("pid", 0, "expected worker process ID, required for permission and update actions")
 	home := fs.String("home", "", "configured server ID")

@@ -44,17 +44,32 @@ homes, so a new request cannot slip between the idle check and reservation.
 New requests receive their normal terminal response explaining that Cockpit
 is updating. Pings and cancellation traffic continue.
 
-This reservation is in memory. `cancel-update` releases it on failure; restart
-removes it, and expiry releases it if the updater disappears. It never writes
+This reservation is in memory. Before shutdown is accepted, `cancel-update`
+releases it on failure, and expiry releases it if the updater disappears. It never writes
 paused state to the enrollment registry. The new worker starts with the same
 registry, credentials, machine identity and policy. Its existing registration
 handshake advertises the new stamped version and current capabilities to each
 enabled cluster. A previously paused connection stays paused.
 
-Replacement succeeds only after the new worker reports the selected version
-and the same home identities and connection choices. If service restart or
-worker readiness fails, the updater restores the prior files and attempts to
-restart the previous worker. Reconnection has a separate bounded wait. An
+After atomic replacement, `finish-update --pid=N` asks only the exact reserved
+worker to shut down. It checks the unexpired reservation and idle state under
+the same admission lock. An accepted shutdown keeps admission closed until
+that process exits, even if the original lease expires or its reply is lost.
+The control socket sends its response before cancelling the worker's normal
+run context. A replacement process rejects a request naming the old PID.
+
+The updater waits for the old process to exit, then starts the existing service
+idempotently. If the service manager already started the selected version with
+the same executable and saved homes, the updater accepts it without disturbing
+new work. It never force-restarts the manager's current process. An unknown
+worker, expired reservation or changed home registry stops the handoff and
+retains recovery evidence.
+
+The update completes only after the new worker reports the selected version
+and the same home identities and connection choices. After replacement, a
+startup or readiness failure retains the verified installation, pending
+journal and private previous copy. It does not restore files underneath a
+worker that may already have accepted work. Reconnection has a separate bounded wait. An
 unavailable cluster is reported as retrying rather than making a successful
 local installation look like a connected worker.
 
@@ -71,9 +86,16 @@ installed path and existing home identities/connection choices. If the updater
 is interrupted after replacement, the next check uses that evidence to offer
 **Restart to finish update**. This is an explicit action: it verifies the
 installed version and saved homes, reserves the old worker when it is running,
-and restarts the service without downloading the release again. A background
+finishes that exact process and starts the service without downloading the
+release again. A stopped worker uses an idempotent start. A background
 check never restarts a worker. An unrelated install or changed home registry
 requires repair rather than guessing which settings to restore.
+
+An uncertain handoff intentionally keeps its private `.memql-update-*`
+directory beside the installed app or executable, including the previous
+copy. Even after a later successful restart, that directory remains available
+for manual recovery; the updater does not delete a path taken from a recovery
+record. Normal successful updates remove their temporary directory.
 
 If an update fails, read its message and retry after fixing the named cause.
 Finish active work first; start an unavailable worker before retrying. A
@@ -87,8 +109,11 @@ Accessibility and Screen Recording on the user's behalf.
 ## Verification boundaries
 
 The updater tests use a fixture release service and simulated service control
-to exercise release selection, artifact verification, replacement, rollback
-and reconnection. Worker tests exercise admission and paused-home persistence;
+to exercise release selection, artifact verification, replacement, retained
+recovery and reconnection. Worker tests exercise admission, PID-bound shutdown,
+expired reservations, response delivery and paused-home persistence. Restart
+tests cover already-busy replacements, changed identities, lost replies and
+shutdown/start failures without forcing or stopping replacement work;
 native menu tests exercise available, pending, failure and completion states.
 macOS tests also build and sign scratch bundles, reject tampered executables,
 and exercise whole-bundle exchange and rollback without installing an app.

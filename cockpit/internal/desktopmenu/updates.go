@@ -112,11 +112,13 @@ func (s *updateState) installed(result updateReply, err error) {
 	s.progress = ""
 	if err != nil {
 		if result.Updated {
-			// A receipt write can fail after replacement and reconnection.
-			// Keep that partial outcome instead of offering to install again.
+			// Keep the completed replacement and any explicit restart recovery.
+			// A receipt-only failure must not offer another installation.
 			s.result = result
 			s.result.Available = false
-			s.result.CanInstall = false
+			if !result.RestartRequired {
+				s.result.CanInstall = false
+			}
 		}
 		s.problem = err.Error()
 		s.installFailed = !result.Updated
@@ -152,6 +154,8 @@ func (s updateState) presentation() updatePresentation {
 	case s.checking:
 		p.status = "Checking for updates…"
 		p.checkLabel = "Checking for updates…"
+	case s.result.RestartRequired:
+		p.status = "Restart to finish updating Cockpit"
 	case s.result.Updated:
 		p.status = s.result.Message
 		if p.status == "" {
@@ -161,8 +165,6 @@ func (s updateState) presentation() updatePresentation {
 				p.status = "Cockpit updated; waiting for worker connection"
 			}
 		}
-	case s.result.RestartRequired:
-		p.status = "Restart to finish updating Cockpit"
 	case s.result.Available:
 		p.status = fmt.Sprintf("Cockpit %s is available", s.result.LatestVersion)
 	case s.result.OK:

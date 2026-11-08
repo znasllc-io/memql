@@ -58,6 +58,35 @@ func TestReceiptFailureDoesNotOfferToInstallAnAlreadyUpdatedWorker(t *testing.T)
 	}
 }
 
+func TestInstalledUpdateWithHandoffErrorImmediatelyOffersRestart(t *testing.T) {
+	// The backend keeps the new files installed after an uncertain handoff.
+	// Its failure envelope must expose recovery without another release check.
+	body := `{"ok":false,"current_version":"0.23.0","latest_version":"0.23.0","available":false,"updated":true,"restart_required":true,"can_install":true,"phase":"error","error":"Cockpit 0.23.0 is installed, but its worker needs recovery. Retry Restart to Finish Update."}`
+	reply, err := decodeUpdate([]byte(body), errors.New("exit status 1"))
+	if err == nil {
+		t.Fatal("handoff failure was reported as success")
+	}
+	s := updateState{}
+	s.checked(availableUpdate(), nil)
+	s.beginInstall()
+	s.installed(reply, err)
+	p := s.presentation()
+	if !s.result.Updated || !p.badge || !p.showInstall || !p.canInstall ||
+		p.installLabel != "Restart to finish update" || p.status != "Restart to finish updating Cockpit" || p.problem != reply.Error {
+		t.Fatalf("installed update lost immediate worker recovery: %+v", p)
+	}
+	if target, ok := s.beginInstall(); !ok || target != reply.CurrentVersion {
+		t.Fatalf("restart did not bind the installed version: %q, %t", target, ok)
+	}
+	// Preserve a backend refusal too: replacing files alone does not establish
+	// that it is safe to stop a worker whose status can no longer be verified.
+	reply.CanInstall = false
+	s.installed(reply, err)
+	if p = s.presentation(); p.canInstall || p.showInstall || !p.badge {
+		t.Fatalf("unsafe recovery was enabled: %+v", p)
+	}
+}
+
 func TestInterruptedUpdateOffersRestartWithoutClaimingNewRelease(t *testing.T) {
 	s := updateState{}
 	s.checked(updateReply{OK: true, CurrentVersion: "1.1.0", LatestVersion: "1.1.0", RestartRequired: true, CanInstall: true}, nil)
@@ -140,10 +169,18 @@ func TestUpdateCommandsUseSelectedExecutableWithoutShellExpansion(t *testing.T) 
 	if err := os.WriteFile(executable, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// This checks subprocess argument boundaries, not process startup speed.
+	// Let a busy native test host use the suite's budget, keeping time to print
+	// a useful failure before the test binary's own deadline.
+	deadline, ok := t.Deadline()
+	if !ok {
+		deadline = time.Now().Add(time.Minute)
+	}
+	deadline = deadline.Add(-min(time.Until(deadline)/10, time.Second))
+	ctx, cancel := context.WithDeadline(t.Context(), deadline)
 	defer cancel()
 	if _, err := requestUpdate(ctx, executable, "--check"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("update check fixture: %v (context: %v)", err, ctx.Err())
 	}
 	args, _ := os.ReadFile(receipt)
 	if string(args) != "update\n--json\n--check\n" {

@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,5 +136,109 @@ func TestUpdateReservationCannotOvertakeAnAdmittedCall(t *testing.T) {
 	case <-held.started:
 		t.Fatal("new work started after update reservation")
 	default:
+	}
+}
+
+func TestFinishUpdateRequiresExactIdleLiveReservation(t *testing.T) {
+	for _, kind := range []string{"wrong-pid", "missing-lease", "expired", "busy", "no-shutdown"} {
+		t.Run(kind, func(t *testing.T) {
+			fleet, path := controlFixture(t)
+			before, _ := os.ReadFile(path)
+			called := false
+			fleet.update.shutdown = func() { called = true }
+			runner := &Runner{update: &fleet.update}
+			fleet.managed["a"] = &managedHome{runner: runner}
+			if err := fleet.controlUpdate("prepare-update", os.Getpid()); err != nil {
+				t.Fatal(err)
+			}
+			pid := os.Getpid()
+			switch kind {
+			case "wrong-pid":
+				pid++
+			case "missing-lease":
+				fleet.update.until = time.Time{}
+			case "expired":
+				fleet.update.until = time.Now().Add(-time.Second)
+			case "busy":
+				runner.activeCalls.Add(1)
+			case "no-shutdown":
+				fleet.update.shutdown = nil
+			}
+			finish, err := fleet.finishUpdate(pid)
+			if err == nil || finish != nil || called || fleet.update.finishing {
+				t.Fatalf("unsafe shutdown accepted: %v callback=%v finishing=%v", err, called, fleet.update.finishing)
+			}
+			after, _ := os.ReadFile(path)
+			if string(before) != string(after) {
+				t.Fatal("refused shutdown changed saved homes")
+			}
+		})
+	}
+}
+
+func TestFinishUpdateKeepsAdmissionClosedUntilProcessExits(t *testing.T) {
+	fleet, _ := controlFixture(t)
+	called := false
+	fleet.update.shutdown = func() { called = true }
+	if err := fleet.controlUpdate("prepare-update", os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	finish, err := fleet.finishUpdate(os.Getpid())
+	if err != nil || finish == nil || called {
+		t.Fatalf("shutdown should wait for the response: %v called=%v", err, called)
+	}
+	fleet.update.until = time.Now().Add(-time.Second)
+	if err := fleet.controlUpdate("cancel-update", os.Getpid()); err == nil {
+		t.Fatal("cancellation reopened an accepted shutdown")
+	}
+	runner := &Runner{update: &fleet.update, logger: quietLogger()}
+	recorder := &recordingStream{}
+	if err := runner.handleMessage(t.Context(), &Connection{conn: recorder}, toolDispatch("late", time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	replies := recorder.messages()
+	if len(replies) != 1 || replies[0].GetToolResult().GetFailure().GetErrorCode() != "worker_updating" || runner.busy() || !fleet.LocalStatus().UpdatePending {
+		t.Fatal("accepted shutdown admitted work after its original lease expired")
+	}
+	finish()
+	if !called {
+		t.Fatal("accepted shutdown did not invoke worker cancellation")
+	}
+}
+
+func TestFinishUpdateSocketRepliesBeforeShutdownAndRejectsReplacementPID(t *testing.T) {
+	fleet, _ := controlFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var calls atomic.Int32
+	fleet.update.shutdown = func() { calls.Add(1); cancel() }
+	dir, err := os.MkdirTemp("/tmp", "mq-finish-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "private", "worker.sock")
+	listener, err := listenControl(ctx, path, fleet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if response, err := callControl(path, controlRequest{Action: "prepare-update", PID: os.Getpid()}); err != nil || !response.OK {
+		t.Fatalf("prepare: %+v %v", response, err)
+	}
+	if response, err := callControl(path, controlRequest{Action: "finish-update", PID: os.Getpid() + 1}); err != nil || response.OK || calls.Load() != 0 {
+		t.Fatalf("a request for another process stopped this worker: %+v %v", response, err)
+	}
+	response, err := callControl(path, controlRequest{Action: "finish-update", PID: os.Getpid()})
+	if err != nil || !response.OK || response.Status == nil || response.Status.PID != os.Getpid() || !response.Status.UpdatePending {
+		t.Fatalf("shutdown lost its successful response: %+v %v", response, err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("successful shutdown was not delivered")
+	}
+	if calls.Load() != 1 {
+		t.Fatal("worker shutdown was not invoked exactly once")
 	}
 }

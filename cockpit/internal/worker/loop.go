@@ -892,7 +892,7 @@ func (r *Runner) handleMessage(ctx context.Context, conn *Connection, msg *memql
 	// different home. Cancellation, pings and results remain available.
 	if startsWorkerWork(msg) && r.update != nil {
 		r.update.mu.Lock()
-		if time.Now().Before(r.update.until) {
+		if r.update.finishing || time.Now().Before(r.update.until) {
 			r.update.mu.Unlock()
 			return refuseUpdating(conn, msg)
 		}
