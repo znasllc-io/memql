@@ -955,8 +955,8 @@ subject, verb, resource and effect in `detail`.
   organization role's limits (`scoped-role-limit`), and the per-organization
   decisions the action guards make. One row `{verb, resourceType, held,
   source, sourceId, accountId}` per app door, floored section and part; a
-  pair the engine decides per organization (opening Email or Deployables, the
-  data verbs, an organization's deployable parts) has one row per organization
+  pair the engine decides per organization (opening Email, Deployables or
+  Pipelines, the data verbs, an organization's deployable parts) has one row per organization
   the person's scope reaches and never a merged one. An operator has no
   per-organization rows, their scope reaching every organization alike: each
   app pair comes once with `accountId` empty, and no data verb has a row at
