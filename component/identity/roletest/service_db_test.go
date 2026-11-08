@@ -513,17 +513,29 @@ func sessionRow(t *testing.T, s *Service, id string) (account sql.NullString, re
 	return account, revoked
 }
 
-// warnings keeps the message of everything logged at warning level or above.
+// warnings keeps everything logged at warning level or above: each message,
+// and the attributes it was logged with.
 type warnings struct {
 	mu   sync.Mutex
-	seen []string
+	seen []warning
+}
+
+// warning is one record a warnings handler kept.
+type warning struct {
+	message string
+	attrs   map[string]string
 }
 
 func (w *warnings) Enabled(_ context.Context, level slog.Level) bool { return level >= slog.LevelWarn }
 func (w *warnings) Handle(_ context.Context, r slog.Record) error {
+	attrs := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.seen = append(w.seen, r.Message)
+	w.seen = append(w.seen, warning{message: r.Message, attrs: attrs})
 	return nil
 }
 func (w *warnings) WithAttrs([]slog.Attr) slog.Handler { return w }
@@ -531,7 +543,24 @@ func (w *warnings) WithGroup(string) slog.Handler      { return w }
 func (w *warnings) messages() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return append([]string(nil), w.seen...)
+	out := make([]string, 0, len(w.seen))
+	for _, seen := range w.seen {
+		out = append(out, seen.message)
+	}
+	return out
+}
+
+// about is the attributes of the last warning logged with message: what it
+// was about. Nil when nothing was.
+func (w *warnings) about(message string) map[string]string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := len(w.seen) - 1; i >= 0; i-- {
+		if w.seen[i].message == message {
+			return w.seen[i].attrs
+		}
+	}
+	return nil
 }
 
 // captureWarnings gives the service's Store a logger, which the one in
@@ -725,6 +754,10 @@ func TestAPersonaIsCalledWhatItTests(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "Test Site moderator (Beta)", persona(t, service, first.UserID).DisplayName)
 	require.Contains(t, warned.messages(), "role test: renaming a persona failed")
+	renaming := warned.about("role test: renaming a persona failed")
+	require.Equal(t, first.UserID, renaming["persona"], "the warning says which persona kept its old name")
+	require.Equal(t, siteModerator, renaming["role"], "of which role's test")
+	require.Equal(t, refused.ID, renaming["session"], "and which session the Start that tried it issued")
 	refusing.refuse()
 	_, err = service.Start(developer, siteModerator)
 	require.NoError(t, err)
@@ -962,6 +995,10 @@ func TestAnEndWhoseMembershipStaysHasStillEndedTheTest(t *testing.T) {
 	require.Equal(t, identity.AuditOutcomeSuccess, ended.Outcome)
 	require.Equal(t, acme, ended.Detail["accountId"])
 	require.Contains(t, warned.messages(), "role test: removing an ended test's membership failed")
+	releasing := warned.about("role test: removing an ended test's membership failed")
+	require.Equal(t, session.UserID, releasing["persona"], "the warning says whose membership stays")
+	require.Equal(t, siteModerator, releasing["role"], "of which role's test")
+	require.Equal(t, session.ID, releasing["session"], "and which session was ended")
 	require.Equal(t, []string{acmeGroup}, activeGroups(t, session.UserID), "the membership stays")
 
 	_, err = service.Start(owner, "reader")

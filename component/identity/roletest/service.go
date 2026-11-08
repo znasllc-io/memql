@@ -372,6 +372,9 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 	if err != nil {
 		return out, err
 	}
+	// The session this Start issues is named before anything is written for
+	// it, so a warning on the way can say which one.
+	sessionID := uuid.NewString()
 	name := personaName(role, group)
 	if u == nil {
 		// The preceding actor/mayTest gates authorize exactly this bounded
@@ -388,13 +391,13 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 	} else if u.DisplayName != name {
 		// The role or its organization's group was renamed, or the role moved
 		// to another organization, since the persona was last named.
-		s.rename(ctx, userID, name)
+		s.rename(ctx, userID, role, sessionID, name)
 	}
 	var entropy [32]byte
 	if _, err = rand.Read(entropy[:]); err != nil {
 		return out, err
 	}
-	out = Session{ID: uuid.NewString(), UserID: userID, Role: role, ExpiresAt: s.now().Add(Lifetime), Token: TokenPrefix + hex.EncodeToString(entropy[:])}
+	out = Session{ID: sessionID, UserID: userID, Role: role, ExpiresAt: s.now().Add(Lifetime), Token: TokenPrefix + hex.EncodeToString(entropy[:])}
 	// One active run per operator/role. Restarting a test also ends any old
 	// editor tabs for that persona instead of accumulating live credentials.
 	if _, err = tx.ExecContext(ctx, `UPDATE identity_role_test_sessions SET revoked_at=$2 WHERE user_id=$1 AND revoked_at IS NULL`, userID, s.now()); err != nil {
@@ -454,13 +457,14 @@ func personaName(role string, group *organizationGroup) string {
 // gates as the persona's creation precede it, on the same server-reserved ID
 // under the unchanged actor, and this inline stamp opens only that @serverOnly
 // write; the stamped context is never returned. Best effort: the name is what
-// the persona is called, not what it may do, so a failure is logged and the
-// test starts all the same.
-func (s *Service) rename(ctx context.Context, userID, name string) {
+// the persona is called, not what it may do, so a failure is logged -- with the
+// persona, its role and the session the Start is issuing -- and the test starts
+// all the same.
+func (s *Service) rename(ctx context.Context, userID, role, sessionID, name string) {
 	_, err := s.Store.Engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation updateUser(userId: %s, payload: {displayName: %s})`,
 		langparser.QuoteString(userID), langparser.QuoteString(name)))
 	if err != nil {
-		s.warn("role test: renaming a persona failed", err)
+		s.warn("role test: renaming a persona failed", err, "persona", userID, "role", role, "session", sessionID)
 	}
 }
 
@@ -659,9 +663,11 @@ func (s *Service) sweep(ctx context.Context, db *sql.DB, operatorID, exceptRole 
 	}
 }
 
-func (s *Service) warn(msg string, err error) {
+// warn logs a failure the call it rode on survives, with what it was about:
+// attrs are slog's alternating keys and values.
+func (s *Service) warn(msg string, err error, attrs ...any) {
 	if s.Store != nil && s.Store.Logger != nil {
-		s.Store.Logger.Warn(msg, "error", err)
+		s.Store.Logger.Warn(msg, append([]any{"error", err}, attrs...)...)
 	}
 }
 
@@ -754,9 +760,10 @@ func (s *Service) End(ctx context.Context, sessionID string) (err error) {
 	// test has ended whatever happens here, so a membership that fails to go
 	// is logged rather than returned: it admits nobody without a live session,
 	// and this operator's next Start or End removes it -- the sweep, or this
-	// role's own next End.
-	if err := s.release(ctx, db, actorID, role, userID, true); err != nil {
-		s.warn("role test: removing an ended test's membership failed", err)
+	// role's own next End. Its own name, so End's err, which the deferred audit
+	// reads, is never shadowed here.
+	if releaseErr := s.release(ctx, db, actorID, role, userID, true); releaseErr != nil {
+		s.warn("role test: removing an ended test's membership failed", releaseErr, "persona", userID, "role", role, "session", sessionID)
 	}
 	s.sweep(ctx, db, actorID, role)
 	return nil
