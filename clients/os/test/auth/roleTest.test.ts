@@ -47,6 +47,20 @@ it("receives from only its opener, then clears the opener without storing creden
   expect(child.opener).toBeNull(); expect(storage.setItem).not.toHaveBeenCalled();
 });
 
+it("receives a custom or organization role's credential, and never an owner's or a blank one", async () => {
+  for (const [role, accepted] of [["site-moderator", true], ["owner", false], ["", false]] as const) {
+    const listeners = new Set<(e: MessageEvent) => void>();
+    const parent = { postMessage: vi.fn() };
+    vi.stubGlobal("window", { opener: parent, addEventListener: (_: string, fn: (e: MessageEvent) => void) => listeners.add(fn), removeEventListener: (_: string, fn: (e: MessageEvent) => void) => listeners.delete(fn) });
+    vi.stubGlobal("location", { href: "https://os.example.test/?roleTest=nonce" });
+    const result = receiveRoleTest("https://os.example.test");
+    const offered = { ...credential, role };
+    [...listeners].forEach(fn => fn({ source: parent, origin: "https://os.example.test", data: { type: "memql.role-test.credential", nonce: "nonce", credential: offered } } as unknown as MessageEvent));
+    if (accepted) expect(await result).toEqual(offered);
+    else await expect(result).rejects.toThrow("invalid or expired");
+  }
+});
+
 
 it("refuses cookie-backed account actions before they can use the original account", async () => {
   vi.stubGlobal("location", { href: "https://os.example.test/?roleTest=nonce" });

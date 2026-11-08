@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -305,6 +307,391 @@ func TestDeveloperRestrictionAndPersonaGrantInvalidateTests(t *testing.T) {
 	write(persona.UserID, "allow")
 	_, err = service.VerifyRoleTest(context.Background(), persona.Token)
 	require.ErrorIs(t, err, ErrInvalid, "a test persona must never inherit extra grants")
+}
+
+// ---------------------------------------------------------------------
+// Custom and organization roles
+// ---------------------------------------------------------------------
+//
+// Only the role CATALOG is a fixture: the engine here never runs the seed
+// materializer, so the role rows are not there to lean on (the choice
+// integrations/rbac's access cases make). Every group, membership and grant is
+// a row written through the real mutations, and every read the service makes
+// goes through its real sources.
+
+const (
+	supportLead    = "support-lead"    // custom, rank 150: below a developer, holds what one holds
+	releaseCaptain = "release-captain" // custom, rank 350: above a developer, below an owner
+	peopleSteward  = "people-steward"  // custom, rank 150: holds update on principal, which a developer lacks
+	retiredHelper  = "retired-helper"  // custom, retired
+	siteModerator  = "site-moderator"  // organization role, rank 20, scoped to the case's organization
+)
+
+type fixtureCatalog struct {
+	ranks     map[string]int
+	canonical map[string]string
+	names     map[string]string
+	scopes    map[string]string
+	retired   map[string]bool
+	grants    map[string]map[auth.VerbResource]bool
+}
+
+func (c *fixtureCatalog) resolve(slug string) string {
+	return c.canonical[strings.ToLower(strings.TrimSpace(slug))]
+}
+func (c *fixtureCatalog) Rank(slug string) (int, bool) {
+	r, ok := c.ranks[strings.ToLower(strings.TrimSpace(slug))]
+	return r, ok
+}
+func (c *fixtureCatalog) Name(slug string) string { return c.names[c.resolve(slug)] }
+func (c *fixtureCatalog) Holds(slug, verb, resource string) bool {
+	return c.Active(slug) && c.grants[c.resolve(slug)][auth.VerbResource{Verb: verb, Resource: resource}]
+}
+func (c *fixtureCatalog) Grants(slug string) []auth.VerbResource {
+	if !c.Active(slug) {
+		return nil
+	}
+	out := []auth.VerbResource{}
+	for vr := range c.grants[c.resolve(slug)] {
+		out = append(out, vr)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Resource+out[i].Verb < out[j].Resource+out[j].Verb })
+	return out
+}
+func (c *fixtureCatalog) Scope(slug string) string { return c.scopes[c.resolve(slug)] }
+func (c *fixtureCatalog) Active(slug string) bool {
+	s := c.resolve(slug)
+	return s != "" && !c.retired[s]
+}
+func (c *fixtureCatalog) CanonicalSlug(slug string) string { return c.resolve(slug) }
+func (c *fixtureCatalog) Slugs() []string {
+	out := []string{}
+	for slug := range c.names {
+		out = append(out, slug)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// installCatalog installs the ladder with the organization role scoped to
+// `organization`, for one case.
+func installCatalog(t *testing.T, organization string) {
+	t.Helper()
+	vr := func(v, r string) auth.VerbResource { return auth.VerbResource{Verb: v, Resource: r} }
+	set := func(pairs ...auth.VerbResource) map[auth.VerbResource]bool {
+		m := map[auth.VerbResource]bool{}
+		for _, p := range pairs {
+			m[p] = true
+		}
+		return m
+	}
+	engineers := []auth.VerbResource{vr("read", "data"), vr("create", "data"), vr("update", "data"),
+		vr("read", "app:deployables"), vr("execute", "app:deployables/reviews"), vr("read", "principal")}
+	c := &fixtureCatalog{
+		ranks: map[string]int{"owner": 400, releaseCaptain: 350, "developer": 300, "admin": 200,
+			supportLead: 150, peopleSteward: 150, "user": 100, "viewer": 50, retiredHelper: 30, siteModerator: 20},
+		names: map[string]string{"owner": "Owner", releaseCaptain: "Release captain", "developer": "Developer", "admin": "Admin",
+			supportLead: "Support lead", peopleSteward: "People steward", "user": "Member", "viewer": "Viewer",
+			retiredHelper: "Retired helper", siteModerator: "Site moderator"},
+		canonical: map[string]string{},
+		scopes:    map[string]string{siteModerator: organization},
+		retired:   map[string]bool{retiredHelper: true},
+		grants: map[string]map[auth.VerbResource]bool{
+			"owner":     set(append(engineers, vr("update", "principal"), vr("update", "group"))...),
+			"developer": set(engineers...),
+			"admin":     set(vr("read", "data"), vr("update", "principal"), vr("update", "group")),
+			"user":      set(vr("read", "data"), vr("create", "data"), vr("read", "group")),
+			"viewer":    set(vr("read", "data"), vr("read", "group")),
+			supportLead: set(vr("read", "data"), vr("update", "data")), releaseCaptain: set(vr("read", "data")),
+			peopleSteward: set(vr("read", "data"), vr("update", "principal")), retiredHelper: set(vr("read", "data")),
+			siteModerator: set(vr("read", "data"), vr("update", "data")),
+		},
+	}
+	for slug := range c.names {
+		c.canonical[slug] = slug
+	}
+	for alias, slug := range map[string]string{"writer": "user", "reader": "viewer"} {
+		c.canonical[alias], c.ranks[alias] = slug, c.ranks[slug]
+	}
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(c)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+}
+
+// deploymentExec runs one fixture statement as the cluster acting: the system
+// actor under internal origin, which the @serverOnly group, membership and
+// grant writers require, and which reads every membership row.
+func deploymentExec(t *testing.T, e *memql.MemQLEngine, q string) *memql.ExecuteResult {
+	t.Helper()
+	res, err := e.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "role-test-fixture")), q)
+	require.NoError(t, err, q)
+	return res
+}
+
+// organization writes an active organization group at the id ensureAccountGroup
+// derives for every account, acct-<account>, and returns the group id.
+func organization(t *testing.T, e *memql.MemQLEngine, account, name string) string {
+	t.Helper()
+	group := "acct-" + account
+	deploymentExec(t, e, fmt.Sprintf(`mutation writeGroup(groupId: %s, name: %s, kind: "account", accountId: %s, status: "active")`,
+		langparser.QuoteString(group), langparser.QuoteString(name), langparser.QuoteString(account)))
+	return group
+}
+
+func groupGrant(t *testing.T, e *memql.MemQLEngine, group, verb, resource string) {
+	t.Helper()
+	id := auth.GrantRowID(auth.SubjectKindGroup, group, verb, resource)
+	deploymentExec(t, e, fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "group", subjectId: %s, verb: %s, resourceType: %s, effect: "allow", grantedBy: "role-test-fixture")`,
+		langparser.QuoteString(id), langparser.QuoteString(group), langparser.QuoteString(verb), langparser.QuoteString(resource)))
+}
+
+// join writes one membership the way somebody other than a role test would.
+func join(t *testing.T, e *memql.MemQLEngine, group, account, user, origin, status string) {
+	t.Helper()
+	deploymentExec(t, e, fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, accountId: %s, userId: %s, origin: %s, status: %s)`,
+		langparser.QuoteString(group+"-"+memql.BareShortId(user)), langparser.QuoteString(group), langparser.QuoteString(account),
+		langparser.QuoteString(memql.BareShortId(user)), langparser.QuoteString(origin), langparser.QuoteString(status)))
+}
+
+// activeGroups is what the engine's authorization reads place a person in.
+func activeGroups(t *testing.T, user string) []string {
+	t.Helper()
+	groups, err := auth.InstalledMembershipSource().(auth.CheckedMembershipSource).ActiveGroupIdsForUserChecked(context.Background(), user)
+	require.NoError(t, err)
+	out := []string{}
+	for _, g := range groups {
+		out = append(out, memql.BareShortId(g))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// membershipRows is every membership row of a person, newest version per row,
+// removed ones included, keyed by bare group id.
+func membershipRows(t *testing.T, e *memql.MemQLEngine, user string) map[string]map[string]any {
+	t.Helper()
+	res := deploymentExec(t, e, fmt.Sprintf(`query groupsForUser(userId: %s, includeRemoved: true)`, langparser.QuoteString(memql.BareShortId(user))))
+	out := map[string]map[string]any{}
+	for _, row := range memql.MaterializeRows(res) {
+		group, _ := row["groupId"].(string)
+		out[memql.BareShortId(group)] = row
+	}
+	return out
+}
+
+func lastAudit(t *testing.T, s *Service, action string) identity.AuditEvent {
+	t.Helper()
+	sink := s.Audit.(*auditSink)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for i := len(sink.events) - 1; i >= 0; i-- {
+		if sink.events[i].Action == action {
+			return sink.events[i]
+		}
+	}
+	t.Fatalf("no %s audit event", action)
+	return identity.AuditEvent{}
+}
+
+// TestAnOperatorMayNotTestARoleAboveOrHoldingWhatTheyDoNot: a custom role is
+// tested on the predefined roles' terms. Rank decides first -- strictly below
+// the operator -- and the per-capability rule decides after it: a developer
+// cannot start a role holding something the developer does not hold.
+func TestAnOperatorMayNotTestARoleAboveOrHoldingWhatTheyDoNot(t *testing.T) {
+	service, _ := realService(t)
+	installCatalog(t, "org-"+uuid.NewString())
+	developer := seedOperator(t, service, "developer")
+	owner := seedOperator(t, service, "owner")
+
+	session, err := service.Start(developer, supportLead)
+	require.NoError(t, err, "a custom role below the developer that holds nothing the developer lacks")
+	require.Equal(t, supportLead, session.Role)
+	persona, err := service.Store.LookupUserById(fresh(context.Background()), session.UserID)
+	require.NoError(t, err)
+	require.Equal(t, "Test Support lead", persona.DisplayName)
+	require.Equal(t, supportLead, lastAudit(t, service, "role_test_started").Detail["role"])
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.NoError(t, err)
+
+	for role, why := range map[string]string{
+		releaseCaptain: "ranks above a developer",
+		peopleSteward:  "holds update on principal, which a developer does not",
+		retiredHelper:  "is retired",
+	} {
+		_, err := service.Start(developer, role)
+		require.ErrorIs(t, err, ErrDenied, "a developer may not test a role that %s", why)
+	}
+	_, err = service.Start(owner, releaseCaptain)
+	require.NoError(t, err, "an owner ranks above every custom role")
+	_, err = service.Start(owner, peopleSteward)
+	require.NoError(t, err, "an owner holds everything")
+	_, err = service.Start(owner, retiredHelper)
+	require.ErrorIs(t, err, ErrDenied, "a retired role is tested by nobody")
+}
+
+// TestAnOrganizationRoleTestIsAMemberOfThatOrganizationOnly: the persona of an
+// organization role joins exactly that organization's group, marked as a role
+// test, and so sees what that organization's people see and nothing of any
+// other. Verification accepts that one membership and nothing else, and every
+// other persona still holds none at all.
+func TestAnOrganizationRoleTestIsAMemberOfThatOrganizationOnly(t *testing.T) {
+	service, engine := realService(t)
+	acme, beta := "org-"+uuid.NewString(), "org-"+uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup, betaGroup := organization(t, engine, acme, "Acme"), organization(t, engine, beta, "Beta")
+	groupGrant(t, engine, acmeGroup, "read", "app:deployables")
+	groupGrant(t, engine, acmeGroup, "execute", "app:deployables/reviews")
+	developer := seedOperator(t, service, "developer")
+
+	session, err := service.Start(developer, siteModerator)
+	require.NoError(t, err, "a developer holds everything the role and its organization's group give")
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, session.UserID))
+	placed := membershipRows(t, engine, session.UserID)[acmeGroup]
+	require.Equal(t, "role-test", placed["origin"])
+	require.Equal(t, "active", placed["status"])
+	require.Equal(t, acme, memql.BareShortId(fmt.Sprint(placed["accountId"])))
+	persona, err := service.Store.LookupUserById(fresh(context.Background()), session.UserID)
+	require.NoError(t, err)
+	require.Equal(t, "Test Site moderator (Acme)", persona.DisplayName)
+	started := lastAudit(t, service, "role_test_started")
+	require.Equal(t, siteModerator, started.Detail["role"])
+	require.Equal(t, acme, started.Detail["accountId"])
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.NoError(t, err)
+	// The engine's own resolution agrees: this persona reaches Acme and no
+	// other organization.
+	decisions := engine.ResolveOrganizationDecisionsFor(context.Background(), session.UserID, siteModerator, nil)
+	require.NotEmpty(t, decisions)
+	for _, d := range decisions {
+		require.Equal(t, acme, memql.BareShortId(d.AccountID))
+	}
+
+	join(t, engine, betaGroup, beta, session.UserID, "added", "active")
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.ErrorIs(t, err, ErrInvalid, "a second organization's group is access its operator never tested")
+	join(t, engine, betaGroup, beta, session.UserID, "added", "removed")
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.NoError(t, err)
+	join(t, engine, acmeGroup, acme, session.UserID, "added", "active")
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.ErrorIs(t, err, ErrInvalid, "the right group joined some other way is not the test's membership")
+
+	reader, err := service.Start(developer, "reader")
+	require.NoError(t, err)
+	require.Empty(t, activeGroups(t, reader.UserID))
+	join(t, engine, acmeGroup, acme, reader.UserID, "role-test", "active")
+	_, err = service.VerifyRoleTest(context.Background(), reader.Token)
+	require.ErrorIs(t, err, ErrInvalid, "a global role's persona still holds no membership at all")
+
+	deploymentExec(t, engine, fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Acme", kind: "account", accountId: %s, status: "archived")`,
+		langparser.QuoteString(acmeGroup), langparser.QuoteString(acme)))
+	_, err = service.Start(developer, siteModerator)
+	require.ErrorIs(t, err, ErrDenied, "an organization with no active group has nothing to test in")
+}
+
+// TestEndingAnOrganizationRoleTestRemovesItsMembership (review focus 3): a
+// role test of an organization role ends with no membership left behind --
+// ended by its operator or from its own tab -- and replacing the test keeps
+// exactly the live run's one membership, moving it when the role's
+// organization moved.
+func TestEndingAnOrganizationRoleTestRemovesItsMembership(t *testing.T) {
+	service, engine := realService(t)
+	acme, beta := "org-"+uuid.NewString(), "org-"+uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup, betaGroup := organization(t, engine, acme, "Acme"), organization(t, engine, beta, "Beta")
+	owner := seedOperator(t, service, "owner")
+
+	first, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	second, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, first.UserID, second.UserID, "one persona per operator and role")
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, second.UserID))
+	require.NoError(t, service.End(owner, first.ID), "ending the run that was replaced")
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, second.UserID), "the live run keeps its membership")
+	_, err = service.VerifyRoleTest(context.Background(), second.Token)
+	require.NoError(t, err)
+
+	require.NoError(t, service.End(owner, second.ID))
+	require.Empty(t, activeGroups(t, second.UserID))
+	require.Equal(t, "removed", membershipRows(t, engine, second.UserID)[acmeGroup]["status"])
+	ended := lastAudit(t, service, "role_test_ended")
+	require.Equal(t, siteModerator, ended.Detail["role"])
+	require.Equal(t, acme, ended.Detail["accountId"])
+
+	third, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, third.UserID))
+	auth.SetRoleTestValidator(service)
+	require.NoError(t, service.End(personaContext(t, service, engine, third.Token), third.ID), "ended from the test's own tab")
+	require.Empty(t, activeGroups(t, third.UserID))
+
+	installCatalog(t, beta)
+	moved, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, []string{betaGroup}, activeGroups(t, moved.UserID), "the role's organization moved, and the test moved with it")
+	require.NoError(t, service.End(owner, moved.ID))
+	require.Empty(t, activeGroups(t, moved.UserID))
+}
+
+// TestADeveloperCannotTestAnOrganizationRoleWhoseGroupGivesWhatTheyLack (R16):
+// an organization role's persona holds its role's capabilities AND what its
+// organization's group grants, so the developer must hold both. A group
+// letting its people manage the organization's groups is beyond a developer,
+// who holds no group capability: the test is refused at Start, and a running
+// one stops verifying once the group gains it.
+func TestADeveloperCannotTestAnOrganizationRoleWhoseGroupGivesWhatTheyLack(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup := organization(t, engine, acme, "Acme")
+	groupGrant(t, engine, acmeGroup, "read", "app:deployables")
+	developer := seedOperator(t, service, "developer")
+	running, err := service.Start(developer, siteModerator)
+	require.NoError(t, err)
+
+	groupGrant(t, engine, acmeGroup, "update", "group")
+	_, err = service.Start(developer, siteModerator)
+	require.ErrorIs(t, err, ErrDenied, "the group gives the persona update on group, which the developer does not hold")
+	_, err = service.VerifyRoleTest(context.Background(), running.Token)
+	require.ErrorIs(t, err, ErrInvalid, "a running test stops once its group gives what its operator lacks")
+	_, err = service.Start(seedOperator(t, service, "owner"), siteModerator)
+	require.NoError(t, err, "an owner holds everything the group gives")
+}
+
+// TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrEnd
+// (R14): a test that expires without End leaves its membership in place --
+// reads write nothing -- until that operator's next Start or End, of any role,
+// removes it.
+func TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrEnd(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup := organization(t, engine, acme, "Acme")
+	owner := seedOperator(t, service, "owner")
+
+	expired, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	service.Now = func() time.Time { return expired.ExpiresAt.Add(time.Minute) }
+	_, err = service.VerifyRoleTest(context.Background(), expired.Token)
+	require.ErrorIs(t, err, ErrInvalid)
+	rows, err := service.List(owner)
+	require.NoError(t, err)
+	require.Empty(t, rows)
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, expired.UserID), "nothing removes it inside a read")
+	_, err = service.Start(owner, "reader")
+	require.NoError(t, err)
+	require.Empty(t, activeGroups(t, expired.UserID), "the operator's next Start removes it")
+
+	service.Now = nil
+	lapsed, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	other, err := service.Start(owner, "writer")
+	require.NoError(t, err)
+	service.Now = func() time.Time { return lapsed.ExpiresAt.Add(time.Minute) }
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, lapsed.UserID))
+	require.NoError(t, service.End(owner, other.ID))
+	require.Empty(t, activeGroups(t, lapsed.UserID), "the operator's next End removes it")
 }
 
 type durableAudit struct {

@@ -15649,7 +15649,7 @@ func (*IdentityAdminMsg_RoleTest) isIdentityAdminMsg_Request() {}
 type RoleTestRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Operation     string                 `protobuf:"bytes,1,opt,name=operation,proto3" json:"operation,omitempty"` // start | end | list
-	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`           // reader | writer | developer | admin (never owner)
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`           // reader | writer | developer | admin, or an active custom role's slug (never owner)
 	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

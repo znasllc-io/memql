@@ -72,17 +72,41 @@ func DetachUserWork(parent context.Context, userID string) (context.Context, con
 	return detached, cancel, nil
 }
 
-// Exact roles, not ranks: developer and admin have different authority even
-// though their ordering rung is the same. No caller can create an owner test.
+// The predefined roles by exact role, not rank: developer and admin have
+// different authority even though their ordering rung is the same. A custom
+// role, organization-scoped or not, is tested by the same two operators when it
+// is active and ranks strictly below the operator -- rank only; the role-test
+// service then requires the operator to hold everything the persona would. No
+// caller can create an owner test.
 func MayTestRole(operator, target Role) bool {
-	switch target {
-	case RoleReader, RoleWriter, RoleDeveloper:
-		return operator == RoleOwner || operator == RoleDeveloper
-	case RoleAdmin:
-		return operator == RoleOwner
-	default:
+	if operator != RoleOwner && operator != RoleDeveloper {
 		return false
 	}
+	switch target {
+	case RoleReader, RoleWriter, RoleDeveloper:
+		return true
+	case RoleAdmin:
+		return operator == RoleOwner
+	case RoleOwner, seedSlugUser, seedSlugViewer:
+		// The catalog's own slugs for the owner, member and viewer rungs. The
+		// member and viewer rungs are tested as writer and reader, so one rung
+		// never has two personas.
+		return false
+	}
+	cat := InstalledCapabilityCatalog()
+	if cat == nil {
+		return false
+	}
+	// Under its own slug, never an alias or another spelling: the slug is the
+	// persona's key, one persona per operator and role.
+	canonical, ok := cat.(interface{ CanonicalSlug(string) string })
+	if !ok || string(target) == "" || canonical.CanonicalSlug(string(target)) != string(target) {
+		return false
+	}
+	if _, known := cat.Rank(string(target)); !known || !cat.Active(string(target)) {
+		return false
+	}
+	return roleRank(target) < roleRank(operator)
 }
 
 // Every mesh node checks the shared session before executing a forwarded or

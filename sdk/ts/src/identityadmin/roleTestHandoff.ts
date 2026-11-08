@@ -46,8 +46,11 @@ export function receiveRoleTest(parentOrigin: string): Promise<RoleTestCredentia
       if (event.source !== parent || event.origin !== parentOrigin || event.data?.type !== CREDENTIAL || event.data?.nonce !== nonce) return;
       const value = event.data.credential as RoleTestCredential;
       stop();
+      // The role is the session's label: a predefined, custom or organization
+      // role's slug. The server alone decides what the token may do, and no
+      // owner test exists.
       if (!value || !/^mql_test_[0-9a-f]{64}$/.test(value.token) || !value.sessionId ||
-        !["reader", "writer", "developer", "admin"].includes(value.role) ||
+        typeof value.role !== "string" || value.role.trim() === "" || value.role === "owner" ||
         !Number.isFinite(value.expiresAt) || value.expiresAt * 1000 <= Date.now() ||
         `https://os.${value.domain}` !== parentOrigin) {
         reject(new Error("The role-test handoff is invalid or expired.")); return;

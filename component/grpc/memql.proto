@@ -3323,7 +3323,7 @@ message IdentityAdminMsg {
 // On-demand personas. Credentials are returned once, never in a URL or graph row.
 message RoleTestRequest {
   string operation = 1; // start | end | list
-  string role = 2; // reader | writer | developer | admin (never owner)
+  string role = 2; // reader | writer | developer | admin, or an active custom role's slug (never owner)
   string session_id = 3;
 }
 message RoleTestSession {
