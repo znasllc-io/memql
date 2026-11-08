@@ -115,6 +115,20 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		// A ROUTING REVIEW IS NOBODY'S OWN, so the caller's pending list never
+		// holds one: it is looked for where an owner or developer may decide
+		// it (routing_review.go), before the recovery chain treats the id as
+		// already decided or somebody else's.
+		if approval, err = i.pendingRoutingReview(ctx, approvalId); err != nil {
+			return nil, err
+		}
+	}
+	if approval == nil {
+		if recovered, err := i.recoverRoutingReviewDecision(ctx, approvalId, decision); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverOutcomeDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -150,6 +164,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	kind := rowString(approval, "kind")
+	if kind == work.ApprovalKindRoutingReview {
+		// Its own path end to end (routing_review.go): it parks no run, takes
+		// no answer, and an approval CHANGES ROUTING before it is recorded.
+		return i.decideRoutingReview(ctx, approvalId, approval, decision, argMap(args, "answer"), strings.TrimSpace(ac.UserId), i.clock().UTC())
+	}
 	answer := argMap(args, "answer")
 	guidance, err := i.approvalGuidance(ctx, approval, decision, answer)
 	if err != nil {
