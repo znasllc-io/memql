@@ -72,7 +72,8 @@ type Fleet struct {
 	limiter     *modelcall.Limiter
 	// setup is the installer's report (setupprogress.go): one per machine,
 	// carried on every home's heartbeat.
-	setup *setupTracker
+	setup  *setupTracker
+	update updateAdmission
 
 	mu      sync.Mutex
 	runners []*Runner
@@ -379,6 +380,7 @@ func (f *Fleet) buildHome(home Home, machineID string) (homeRun, error) {
 	if err != nil {
 		return homeRun{}, err
 	}
+	runner.update = &f.update
 	backups := backup.New(backup.Options{
 		Logger:            homeLogger,
 		StateDir:          cfg.StateDir,

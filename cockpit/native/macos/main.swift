@@ -67,6 +67,18 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     private var fastTimer: Timer?
     private var permissionWindow: PermissionSetupWindow?
     private var restartBusy = false
+    private var updateState = CockpitUpdateState()
+    private var updateTimer: Timer?
+    private var updateStatusBusy = false
+    private var installStartedAt: Date?
+    private var aboutWindow: CockpitAboutWindow?
+    private var menuUpdateAction: NSMenuItem?
+    private var menuUpdateStatus: NSMenuItem?
+    private var menuCheckAction: NSMenuItem?
+    private var applicationUpdateAction: NSMenuItem?
+    private var menuQuitAction: NSMenuItem?
+    private var applicationQuitAction: NSMenuItem?
+    private var homeToggleActions: [NSMenuItem] = []
     private var openPermissionsAfterLaunch = false
     /// Setup was already waiting on the Permissions window at the last
     /// refresh: the window opens itself once when a wait begins, and a person
@@ -100,9 +112,13 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refresh()
+            self?.refreshUpdateProgress()
             if self?.following == true, self?.logWindow?.isVisible == true { self?.refreshLogs() }
         }
         if openPermissionsAfterLaunch { showPermissions() }
+        restoreUpdateOutcome()
+        checkForUpdates()
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in self?.checkForUpdates() }
     }
 
     // Opening the installed app again should reveal a useful window even
@@ -119,11 +135,17 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "MemQL")
+        appMenu.autoenablesItems = false
+        appMenu.addItem(entry("About MemQL Cockpit…", action: #selector(showAbout)))
+        let update = entry("Check for Updates…", action: #selector(checkForUpdates))
+        applicationUpdateAction = update; appMenu.addItem(update)
+        appMenu.addItem(.separator())
         appMenu.addItem(entry("Show Cockpit Menu", action: #selector(showCockpitMenu)))
         appMenu.addItem(entry("Show Logs…", action: #selector(showLogs)))
         appMenu.addItem(entry("Set Up Permissions…", action: #selector(showPermissions)))
         appMenu.addItem(.separator())
-        appMenu.addItem(entry("Quit menu bar — worker keeps running", action: #selector(quitMenu)))
+        let quit = entry("Quit menu bar — worker keeps running", action: #selector(quitMenu))
+        applicationQuitAction = quit; appMenu.addItem(quit)
         appItem.submenu = appMenu
         main.addItem(appItem)
         let editItem = NSMenuItem()
@@ -188,7 +210,12 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
             self.busy = false
             self.snapshot = reply?.ok == true ? reply?.status : nil
             self.workerError = error ?? "Background worker unavailable"
-            self.item.button?.toolTip = self.snapshot.map { "MemQL · \($0.homes.filter { $0.state == "Connected" }.count) connected" } ?? "MemQL · worker unavailable"
+            if let snapshot = self.snapshot, snapshot.permissionReport.fresh() {
+                let enabled = snapshot.homes.filter { $0.enabled }
+                self.updateState.observeConnections(workerVersion: snapshot.version, enabled: enabled.count,
+                                                    connected: enabled.filter { $0.state == "Connected" }.count)
+            }
+            self.updatePresentation()
             if !self.trackingMenu { self.rebuildMenu() }
             self.permissionWindow?.update(self.snapshot?.permissionReport)
             // Setup waits on the person here (memql-cockpit#548): the window
@@ -217,6 +244,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     }
     private func rebuildMenu() {
         let menu = NSMenu(); menu.delegate = self; menu.autoenablesItems = false
+        homeToggleActions = []
         menu.addItem(heading("MemQL"))
         if let snapshot {
             menu.addItem(heading("Worker running · \(snapshot.homes.filter { $0.state == "Connected" }.count) of \(snapshot.homes.count) servers connected"))
@@ -226,7 +254,8 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
                 let submenu = NSMenu(); submenu.autoenablesItems = false
                 submenu.addItem(heading(home.state == "Paused" ? "Connections paused on this Mac" : "\(home.state) · this Mac"))
                 let toggle = entry(home.enabled ? "Pause connection" : "Allow connecting", action: #selector(toggleHome(_:)), payload: home.id)
-                toggle.isEnabled = !pendingHomes.contains(home.id)
+                toggle.isEnabled = !updateState.installing && !pendingHomes.contains(home.id)
+                homeToggleActions.append(toggle)
                 submenu.addItem(toggle)
                 if let osURL = home.os_url, !osURL.isEmpty {
                     submenu.addItem(entry("Open MemQL OS", action: #selector(openOS(_:)), payload: osURL))
@@ -252,12 +281,28 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
             menu.addItem(entry("Show Logs…", action: #selector(showLogs)))
         }
         menu.addItem(.separator())
-        menu.addItem(entry("Quit menu bar — worker keeps running", action: #selector(quitMenu)))
+        menu.addItem(entry("About MemQL Cockpit…", action: #selector(showAbout)))
+        let status = heading(updateState.title)
+        let update = entry(updateState.actionTitle, action: #selector(updateClicked))
+        menuUpdateStatus = status; menuUpdateAction = update
+        menu.addItem(status); menu.addItem(update)
+        update.isEnabled = updateState.action != nil && !restartBusy
+        menuCheckAction = nil
+        if updateState.hasUpdate {
+            let check = entry("Check for Updates…", action: #selector(checkForUpdates))
+            check.isEnabled = !updateState.checking && !updateState.installing
+            menuCheckAction = check
+            menu.addItem(check)
+        }
+        menu.addItem(.separator())
+        let quit = entry("Quit menu bar — worker keeps running", action: #selector(quitMenu))
+        quit.isEnabled = !updateState.installing
+        menuQuitAction = quit; menu.addItem(quit)
         item.menu = menu
     }
     @objc private func retry() { refresh(); refreshLogs() }
     @objc private func toggleHome(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String,
+        guard !updateState.installing, let id = sender.representedObject as? String,
               let home = snapshot?.homes.first(where: { $0.id == id }) else { return }
         pendingHomes.insert(id)
         request(["--action=home", "--home=\(id)", "--enabled=\(!home.enabled)"]) { [weak self] reply, error in
@@ -281,7 +326,144 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         } else { url = workerExecutableURL().resolvingSymlinksInPath() }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
-    @objc private func quitMenu() { NSApp.terminate(nil) }
+    @objc private func quitMenu() {
+        if updateState.installing {
+            showAbout()
+            return
+        }
+        NSApp.terminate(nil)
+    }
+
+    private var menuVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+    private var connectionSummary: String {
+        guard let snapshot else { return "Background worker unavailable" }
+        if snapshot.homes.isEmpty { return "No servers configured" }
+        return "\(snapshot.homes.filter { $0.state == "Connected" }.count) of \(snapshot.homes.count) servers connected"
+    }
+    @objc private func showAbout() {
+        if aboutWindow == nil {
+            let about = CockpitAboutWindow()
+            about.window?.delegate = self
+            about.action = { [weak self] in self?.updateClicked() }
+            aboutWindow = about
+        }
+        updatePresentation()
+        showInDock()
+        bringForward(aboutWindow?.window)
+    }
+    private func updatePresentation() {
+        guard item != nil else { return }
+        item.button?.image = CockpitMenuIcon.image(updateAvailable: updateState.hasUpdate)
+        let updateDescription = updateState.hasUpdate ? ", update available" : ""
+        item.button?.setAccessibilityLabel("MemQL, \(connectionSummary)\(updateDescription)")
+        item.button?.toolTip = "MemQL — \(connectionSummary)\(updateDescription)"
+        // Updating titles in place keeps an open native menu stable under
+        // the pointer; never rebuild its hierarchy while AppKit tracks it.
+        menuUpdateStatus?.title = updateState.title
+        menuUpdateAction?.title = updateState.actionTitle
+        menuUpdateAction?.isEnabled = updateState.action != nil && !restartBusy
+        applicationUpdateAction?.title = updateState.checking ? "Checking for Updates…" : "Check for Updates…"
+        applicationUpdateAction?.isEnabled = !updateState.checking && !updateState.installing
+        menuCheckAction?.isEnabled = !updateState.checking && !updateState.installing
+        menuQuitAction?.isEnabled = !updateState.installing
+        applicationQuitAction?.isEnabled = !updateState.installing
+        for toggle in homeToggleActions {
+            let pending = (toggle.representedObject as? String).map { pendingHomes.contains($0) } ?? true
+            toggle.isEnabled = !updateState.installing && !pending
+        }
+        aboutWindow?.update(menuVersion: menuVersion, workerVersion: snapshot?.version,
+                            connectionSummary: connectionSummary, state: updateState)
+    }
+    @objc private func updateClicked() {
+        guard !restartBusy else { return }
+        switch updateState.action {
+        case .check: checkForUpdates()
+        case .install: installUpdate()
+        case nil: break
+        }
+    }
+    @objc private func checkForUpdates() {
+        guard updateState.beginCheck() else { return }
+        updatePresentation()
+        updateRequest(["--check"], timeout: 130) { [weak self] reply, error in
+            guard let self else { return }
+            self.updateState.checked(reply, error: error)
+            self.updatePresentation()
+        }
+    }
+    private func installUpdate() {
+        guard let version = updateState.beginInstall() else { return }
+        installStartedAt = Date()
+        showAbout()
+        // The updater owns bounded downloads, rollback and worker recovery.
+        // Killing it on a UI timeout could interrupt those recovery steps.
+        updateRequest(["--install", "--version=\(version)"], timeout: nil) { [weak self] reply, error in
+            guard let self else { return }
+            self.installStartedAt = nil
+            self.updateState.finished(reply, error: error)
+            self.updatePresentation()
+            self.refresh()
+            if reply?.updated == true { self.relaunchUpdatedMenu() }
+        }
+    }
+    private func refreshUpdateProgress() {
+        guard updateState.installing, !updateStatusBusy, let started = installStartedAt else { return }
+        updateStatusBusy = true
+        updateRequest(["--status"], timeout: 8) { [weak self] reply, error in
+            guard let self else { return }
+            self.updateStatusBusy = false
+            guard error == nil, self.updateState.installing, let reply, reply.ok, let timestamp = reply.timestamp,
+                  timestamp >= started.addingTimeInterval(-1) else { return }
+            self.updateState.progress(reply)
+            self.updatePresentation()
+        }
+    }
+    private func restoreUpdateOutcome() {
+        updateRequest(["--status"], timeout: 8) { [weak self] reply, error in
+            guard let self, let reply, error == nil || !reply.ok, let id = reply.operation_id, !id.isEmpty,
+                  ["complete", "error"].contains(reply.phase ?? ""),
+                  UserDefaults.standard.string(forKey: "shownUpdateOperation") != id,
+                  let timestamp = reply.timestamp, (-5..<3600).contains(Date().timeIntervalSince(timestamp)) else { return }
+            UserDefaults.standard.set(id, forKey: "shownUpdateOperation")
+            self.updateState.finished(reply, error: reply.error)
+            self.showAbout()
+        }
+    }
+    private func updateRequest(_ arguments: [String], timeout: TimeInterval?, done: @escaping (CockpitUpdateReply?, String?) -> Void) {
+        let executable = workerExecutableURL()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process(); let pipe = Pipe()
+            process.executableURL = executable
+            process.arguments = ["update"] + arguments + ["--json"]
+            process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+                let timeoutWork = DispatchWorkItem { if process.isRunning { process.terminate() } }
+                if let timeout { DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork) }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit(); timeoutWork.cancel()
+                let reply = try JSONDecoder().decode(CockpitUpdateReply.self, from: data)
+                let failure = reply.processError(exitStatus: process.terminationStatus)
+                DispatchQueue.main.async { done(reply, failure) }
+            } catch {
+                DispatchQueue.main.async { done(nil, "Cockpit could not finish the update request. Check your connection and try again.") }
+            }
+        }
+    }
+    private func relaunchUpdatedMenu() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [weak self] app, error in
+            DispatchQueue.main.async {
+                if app != nil && error == nil { NSApp.terminate(nil) }
+                else {
+                    self?.alert("Cockpit was updated", "The menu could not reopen. Open MemQL from Applications to finish restarting the menu. The worker keeps running.")
+                }
+            }
+        }
+    }
 
     @objc private func showPermissions() {
         if permissionWindow == nil {
@@ -333,7 +515,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         window?.orderFrontRegardless()
     }
     private func windowsChanged() {
-        let open = [permissionWindow?.window, logWindow].contains { $0?.isVisible == true }
+        let open = [permissionWindow?.window, logWindow, aboutWindow?.window].contains { $0?.isVisible == true }
         if !open && NSApp.activationPolicy() != .accessory { NSApp.setActivationPolicy(.accessory) }
     }
     func windowWillClose(_ notification: Notification) {
@@ -352,7 +534,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     // Only the confirmed button reaches this method. Resolve the installed
     // service and verify its loaded PID/program before targeting its label.
     private func restartWorker(expectedPID: Int) {
-        guard !restartBusy, let report = snapshot?.permissionReport, report.fresh(),
+        guard !restartBusy, !updateState.installing, let report = snapshot?.permissionReport, report.fresh(),
               report.pid == expectedPID, let actualPath = report.executable else {
             permissionWindow?.restartFinished("The worker changed. Wait for its current status and try again.")
             return

@@ -1,5 +1,11 @@
 # macOS menu bar companion
 
+The menu includes **About MemQL Cockpit**, installed version/build information,
+and release checks. A newer stable release adds an upward arrow to the menu
+bar mark and a versioned **Update and restart** action. See
+[desktop updates](desktop-updates.md) for installation, worker reconnection,
+signing and recovery behavior.
+
 ## Native MemQL app (development; planned for 0.15)
 
 Computer-use installations use a real `MemQL.app`. Its **main executable is

@@ -50,6 +50,14 @@ type liveSignIn struct {
 	session harness.SignIn
 }
 
+// LiveSignIns includes an interactive sign-in in the worker's idle check:
+// replacing the worker must not silently abandon a login in progress.
+func (m *Manager) LiveSignIns() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.signIns)
+}
+
 // StartSignIn begins a sign-in and returns at once: this runs on the one goroutine
 // reading the stream. A newer sign-in to the same app replaces an older one, because a
 // person pressing the button again has given up on the first.
