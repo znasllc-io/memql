@@ -3,6 +3,7 @@ package sitetraffic
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 // The response-time histogram a statistics rollup stores per hour and per day.
@@ -43,6 +44,26 @@ func histogramBucket(durationNs int64) int {
 // interpolated, so it must be a trusted identifier, never user input.
 func histogramBucketSQL(column string) string {
 	return fmt.Sprintf("LEAST(63, GREATEST(0, floor(4 * ln(GREATEST(%s,1)::float8 / 500000) / ln(2))))::int", column)
+}
+
+// histogramSumSQL is mergeHistograms as one SQL aggregate over a group of
+// stored histograms: element i of the answer is the sum of element i of every
+// row, a missing element counting as zero. One aggregate per element, in one
+// pass over the rows, is what lets a statistics read merge a period's
+// histograms in the database rather than pulling one 64-element array per
+// site and day out of it. TestHistogramSumInSQLMatchesTheMergeInGo pins it to
+// mergeHistograms. The column is interpolated: a trusted identifier only.
+func histogramSumSQL(column string) string {
+	var b strings.Builder
+	b.WriteString("ARRAY[")
+	for i := 1; i <= histogramBuckets; i++ { // SQL arrays are 1-based
+		if i > 1 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "coalesce(sum(%s[%d]), 0)", column, i)
+	}
+	b.WriteString("]::bigint[]")
+	return b.String()
 }
 
 // mergeHistograms adds histograms element by element. Missing or short inputs

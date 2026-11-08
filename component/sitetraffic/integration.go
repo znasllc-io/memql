@@ -16,13 +16,17 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/statsperiod"
 )
 
-// The DSL-callable half: `builtin siteTrafficInWindow` and `builtin
-// siteStatisticsRollup`, declared in dsl/platform/builtins.memql and executed
-// here. The first is a read any caller makes about the deployables they may
-// see; the second is the five-minute rollup (rollup.go), which only its
-// scheduled automation's maintenance principal may run.
+// The DSL-callable half, declared in dsl/platform/builtins.memql and executed
+// here. Two reads any caller makes about the deployables they may see:
+// `builtin siteTrafficInWindow`, the request counts the list row shows, and
+// `builtin siteStatistics`, a period of website statistics (statistics.go).
+// Two pieces of scheduled work, each of which only its own automation's
+// maintenance principal may run: `builtin siteStatisticsRollup`, the
+// five-minute rollup the statistics are read from (rollup.go), and `builtin
+// geoCountryRefresh`, the monthly country database (countryrefresh.go).
 //
 // # Why a builtin rather than a query
 //
@@ -71,14 +75,15 @@ const countryRefreshConcept = "integration:siteTraffic:countryRefresh"
 // maintenance principal of its daily automation.
 const countryRefreshPrincipal = "system:maintenance:geoCountryRefreshSweep"
 
-// Integration exposes the read, the rollup and the country refresh.
+// Integration exposes the two reads, the rollup and the country refresh.
 type Integration struct {
 	engine Engine
 	bunDB  func() *bun.DB
 	logger *slog.Logger
 
-	// now is the rollup's clock; nil is time.Now. A field so a test runs the
-	// builtin at an instant of its own choosing.
+	// now is the clock of the rollup, the country refresh and the statistics
+	// read's period; nil is time.Now. A field so a test runs a builtin at an
+	// instant of its own choosing.
 	now func() time.Time
 
 	// rollupRunning keeps one rollup per process. A run slower than the
@@ -131,6 +136,16 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"windowStart": "string (required) -- RFC3339, inclusive",
 				"windowEnd":   "string (required) -- RFC3339, exclusive",
 				"summary":     "boolean -- one row per deployable for the whole window instead of one per bucket",
+			},
+		},
+		{
+			Name:        "statistics",
+			Description: "Read a period of website statistics for the deployables the caller may read: totals against the previous period, a series of one point per hour, day or month, the leading pages, sources, countries, devices, browsers and systems, and each deployable's own figures. A figure nothing measured is null, never zero.",
+			Handler:     i.handleStatistics,
+			ArgsSchema: map[string]string{
+				"siteIds":    "[]string -- the deployables to read, bare ids, at most 200; empty reads every deployable the caller may read",
+				"accountIds": "[]string -- with no siteIds, keeps the read to these organizations, bare ids; it never widens what the caller reaches",
+				"period":     "string (required) -- 24h, 7d, 30d, 90d or 12m",
 			},
 		},
 		{
@@ -297,6 +312,46 @@ func (i *Integration) handleInWindow(ctx context.Context, args map[string]any, _
 		return nil, err
 	}
 	return nodesFor(readings), nil
+}
+
+// handleStatistics answers builtin siteStatistics: one node whose payload is
+// the read's answer (Statistics.Payload), which a client reads as its row.
+//
+// ANY CALLER, NARROWED. There is no principal check here, as there is none on
+// handleInWindow: what the caller reaches is decided in the read, under their
+// own actor, and a caller who reaches nothing gets the answer of a deployable
+// with no traffic. Only a malformed call is refused -- more than 200 named
+// deployables, or a period the read does not offer, said in a sentence that
+// names the periods.
+func (i *Integration) handleStatistics(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	var db *bun.DB
+	if i.bunDB != nil {
+		db = i.bunDB()
+	}
+	now := time.Now()
+	if i.now != nil {
+		now = i.now()
+	}
+	stats, err := NewReader(db, i.engine).Statistics(ctx, StatisticsQuery{
+		SiteIds:    stringsArg(args, "siteIds"),
+		AccountIds: stringsArg(args, "accountIds"),
+		Period:     statsperiod.Period(stringArg(args, "period")),
+		Now:        now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(stats.Payload())
+	if err != nil {
+		return nil, fmt.Errorf("site statistics: encode the answer: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        "statistics",
+		Concept:   statisticsConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: now.UTC(),
+		Payload:   payload,
+	}}, nil
 }
 
 // nodesFor projects readings onto synthetic nodes of v1:observability:siteTraffic.

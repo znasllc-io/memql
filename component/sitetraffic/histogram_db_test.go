@@ -3,8 +3,33 @@ package sitetraffic
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
+
+	"github.com/uptrace/bun/dialect/pgdialect"
 )
+
+// TestHistogramSumInSQLMatchesTheMergeInGo pins the statistics read's SQL
+// merge to mergeHistograms, short arrays included: a disagreement would move
+// every percentile a period reports.
+func TestHistogramSumInSQLMatchesTheMergeInGo(t *testing.T) {
+	db := edgeTestDB(t)
+	if db == nil {
+		return
+	}
+	a := make([]int64, histogramBuckets)
+	b := make([]int64, histogramBuckets)
+	a[0], a[5], a[63], b[5], b[40] = 1, 2, 7, 3, 11
+	short := []int64{4, 0, 0, 0, 0, 1} // a short array: its missing elements are zeros
+	q := fmt.Sprintf("SELECT %s FROM (VALUES (?::bigint[]), (?::bigint[]), (?::bigint[])) v(h)", histogramSumSQL("h"))
+	var got []int64
+	if err := db.NewRaw(q, pgdialect.Array(a), pgdialect.Array(b), pgdialect.Array(short)).Scan(context.Background(), pgdialect.Array(&got)); err != nil {
+		t.Fatalf("sum in SQL: %v", err)
+	}
+	if want := mergeHistograms(a, b, short); !reflect.DeepEqual(got, want) {
+		t.Errorf("SQL sum = %v\nGo merge = %v", got, want)
+	}
+}
 
 // TestSQLBucketMatchesGo pins the rollup job's SQL bucketing to the Go
 // function the readers use: a disagreement would shift every percentile.

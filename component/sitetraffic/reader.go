@@ -281,6 +281,31 @@ func (r *Reader) readSummary(ctx context.Context, q Query, allowed []string) ([]
 	return out, nil
 }
 
+// readableSite is what the narrowing reads off a site row: its bare id, and the
+// two facts the statistics read filters on.
+type readableSite struct {
+	id string
+	// accountId is the organization the site belongs to, bare; empty when the
+	// row names none (a system-owned site, or one older than organizations).
+	accountId   string
+	systemOwned bool
+}
+
+// readableSiteOf reads a sitesAll / siteById row. The engine answers an
+// in-process caller with CANONICAL ids (`v1:platform:site:<id>`,
+// `v1:accounts:account:<id>`), while the edge stamps and a client sends bare
+// ones, so both are bared before anything compares them.
+func readableSiteOf(row map[string]any) readableSite {
+	id, _ := row["id"].(string)
+	account, _ := row["accountId"].(string)
+	owned, _ := row["systemOwned"].(bool)
+	return readableSite{
+		id:          memql.BareShortId(strings.TrimSpace(id)),
+		accountId:   memql.BareShortId(strings.TrimSpace(account)),
+		systemOwned: owned,
+	}
+}
+
 // readableSites narrows the caller's ids to the ones the engine hands back
 // under their own actor.
 //
@@ -292,6 +317,21 @@ func (r *Reader) readSummary(ctx context.Context, q Query, allowed []string) ([]
 // and an archived deployable's traffic is exactly what somebody deciding
 // whether to restore it wants to see.
 func (r *Reader) readableSites(ctx context.Context, ids []string) ([]string, error) {
+	sites, err := r.readableSiteRows(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(sites))
+	for _, s := range sites {
+		out = append(out, s.id)
+	}
+	return out, nil
+}
+
+// readableSiteRows is readableSites answering the rows rather than only their
+// ids, ordered by id, so the statistics read can drop a system-owned site it
+// was named without a second read.
+func (r *Reader) readableSiteRows(ctx context.Context, ids []string) ([]readableSite, error) {
 	want := make(map[string]struct{}, len(ids))
 	ordered := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -309,16 +349,15 @@ func (r *Reader) readableSites(ctx context.Context, ids []string) ([]string, err
 		return nil, nil
 	}
 
-	allowed := make(map[string]struct{}, len(ordered))
+	allowed := make(map[string]readableSite, len(ordered))
 	res, err := r.engine.Execute(ctx, "query sitesAll()")
 	if err != nil {
 		return nil, fmt.Errorf("read the deployables you may see: %w", err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
-		id, _ := row["id"].(string)
-		id = memql.BareShortId(strings.TrimSpace(id))
-		if _, wanted := want[id]; wanted {
-			allowed[id] = struct{}{}
+		site := readableSiteOf(row)
+		if _, wanted := want[site.id]; wanted {
+			allowed[site.id] = site
 		}
 	}
 
@@ -342,14 +381,107 @@ func (r *Reader) readableSites(ctx context.Context, ids []string) ([]string, err
 		if err != nil {
 			return nil, fmt.Errorf("read deployable %q: %w", id, err)
 		}
-		if len(memql.MaterializeRows(one)) > 0 {
-			allowed[id] = struct{}{}
+		if rows := memql.MaterializeRows(one); len(rows) > 0 {
+			site := readableSiteOf(rows[0])
+			// Keyed by the id that was ASKED for, which siteById matched;
+			// the row's own id is the same one, spelled canonically.
+			site.id = id
+			allowed[id] = site
 		}
 	}
 
-	out := make([]string, 0, len(allowed))
-	for id := range allowed {
-		out = append(out, id)
+	out := make([]readableSite, 0, len(allowed))
+	for _, site := range allowed {
+		out = append(out, site)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].id < out[j].id })
+	return out, nil
+}
+
+// sitesPageSize is how many deployables one page of the every-deployable walk
+// reads: the engine's own per-query row cap (MEMQL_MEMORY_ENGINE_MAX_RESULTS,
+// 500 by default), so a cluster with fewer deployables than that answers in
+// one read. A variable so a test can walk a small list across pages.
+var sitesPageSize = 500
+
+// maxSitePages bounds the walk: forty pages of 500 is 20,000 deployables. Past
+// it the read is REFUSED rather than answered short, maxSitesPerRead's rule --
+// a total that silently left deployables out would read as theirs having no
+// traffic. The bound is far past any cluster this serves; it exists so a list
+// that never ends cannot hold a read open.
+const maxSitePages = 40
+
+// readableSitesForAccounts answers the deployables a read that names none of
+// them covers: every one the caller may read, the cluster's own system-owned
+// surfaces left out, kept to the named organizations when there are any.
+//
+// `sitesAll` UNDER THE CALLER'S OWN ACTOR, and nothing else, for the reason
+// readableSites gives: the site's own tier decides who reaches what, so a
+// client's member reaches their organization's deployables and staff reach
+// every organization's, and this function has no rule of its own that could
+// disagree with the list the Deployables app shows. Archived deployables are
+// out, as they are from that list. EVERY PAGE OF IT, because staff on a large
+// cluster may read more deployables than one page holds, and a total over the
+// first page alone would be short without saying so.
+//
+// THE ORGANIZATIONS ONLY EVER NARROW. They filter the rows the caller was
+// already given; an organization the caller does not belong to matches none
+// of them, which is the empty answer an organization with no deployables
+// gives, so naming one confirms nothing. System-owned sites are dropped
+// whatever is named (D16): they are never recorded, and the console somebody
+// reads a figure in is not one of their websites.
+func (r *Reader) readableSitesForAccounts(ctx context.Context, accountIds []string) ([]string, error) {
+	keep := make(map[string]struct{}, len(accountIds))
+	for _, id := range accountIds {
+		if bare := memql.BareShortId(strings.TrimSpace(id)); bare != "" {
+			keep[bare] = struct{}{}
+		}
+	}
+	query := fmt.Sprintf("paginate(query sitesAll(), %d)", sitesPageSize)
+	seen := map[string]struct{}{}
+	out := []string{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page >= maxSitePages {
+			return nil, fmt.Errorf("you may read more than %d deployables, more than one statistics read covers; name the deployables to read them in pages", maxSitePages*sitesPageSize)
+		}
+		res, err := r.engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
+		if err != nil {
+			return nil, fmt.Errorf("read the deployables you may see: %w", err)
+		}
+		for _, row := range memql.MaterializeRows(res) {
+			site := readableSiteOf(row)
+			if site.id == "" || site.systemOwned {
+				continue
+			}
+			if len(keep) > 0 {
+				if _, named := keep[site.accountId]; !named {
+					continue
+				}
+			}
+			if _, dup := seen[site.id]; dup {
+				continue
+			}
+			seen[site.id] = struct{}{}
+			out = append(out, site.id)
+		}
+		next, more := "", false
+		if res != nil && res.Meta != nil {
+			next, more = strings.TrimSpace(res.Meta.Cursor), res.Meta.HasMore
+		}
+		if next == "" {
+			if more {
+				// A full page the engine could not continue. Refused rather
+				// than read as the end of the list (pageActiveBundles' rule in
+				// component/memql).
+				return nil, fmt.Errorf("the list of deployables you may read has more rows and no cursor to reach them")
+			}
+			break
+		}
+		if next == cursor {
+			return nil, fmt.Errorf("the list of deployables you may read did not advance past one page")
+		}
+		cursor = next
 	}
 	sort.Strings(out)
 	return out, nil

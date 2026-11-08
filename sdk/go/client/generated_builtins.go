@@ -9839,6 +9839,45 @@ func SiteRestoreBuild(args SiteRestoreArgs) string {
 	return b.String()
 }
 
+// SiteStatistics -- The website statistics a deployable's Statistics page and the Deployables Overview's Websites section read (the 2026-11-08 statistics design, section 7). Gated by the SITE, as siteTrafficInWindow is: a named deployable the caller may not read is dropped, an empty list means every deployable they may read, and naming an organization only narrows that -- so a client's member who names another client's deployable or organization gets the answer a deployable with no traffic gets, and learns nothing.
+type SiteStatisticsArgs struct {
+	// The deployables to read, as bare ids, at most 200. Empty reads every deployable you may read.
+	SiteIds []string
+	// With no siteIds, keeps the read to these organizations, as bare ids. It narrows what you may read and never widens it; ignored when siteIds names the deployables.
+	AccountIds []string
+	// 24h (hourly), 7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison.
+	Period string
+}
+
+// SiteStatistics calls the engine builtin siteStatistics.
+func (qc *QueryClient) SiteStatistics(ctx context.Context, args SiteStatisticsArgs) (*Result, error) {
+	call := SiteStatisticsBuild(args)
+	return qc.executeNamed(ctx, "siteStatistics", call)
+}
+
+func SiteStatisticsBuild(args SiteStatisticsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteStatistics(")
+	if args.SiteIds != nil {
+		b.WriteString("siteIds: ")
+		b.WriteString(renderMemQLValue(args.SiteIds))
+	}
+	if args.AccountIds != nil {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("period: ")
+	b.WriteString(quoteMemQL(args.Period))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SiteTrafficInWindow -- The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id.
 type SiteTrafficInWindowArgs struct {
 	// The deployables to read, as bare ids.

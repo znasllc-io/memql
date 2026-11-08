@@ -244,6 +244,22 @@ builtin siteTrafficInWindow {
   summary      boolean    @description("Fold the whole window into one row per deployable instead of one row per bucket. Summed in the database, which is the point of the mode.")
 }
 
+/// The website statistics a deployable's Statistics page and the Deployables Overview's Websites
+/// section read (the 2026-11-08 statistics design, section 7). Gated by the SITE, as
+/// siteTrafficInWindow is: a named deployable the caller may not read is dropped, an empty list
+/// means every deployable they may read, and naming an organization only narrows that -- so a
+/// client's member who names another client's deployable or organization gets the answer a
+/// deployable with no traffic gets, and learns nothing.
+@sdk
+@executor("integration.siteTraffic.statistics")
+@args(profile="object")
+@description("Read a period of website statistics for the deployables the caller may read, from the hourly and daily rollups of the edge's request log: visitors, visits, bounces, page views, views per visit, bounce rate, requests, errors, not found, bytes, bot requests and the median and 95th-percentile response times, against the period before; a series of one point per hour, day or month, aligned with the previous period's; the fifty leading pages, sources, countries, devices, browsers and systems with an (other) remainder; each deployable's own visitors, visits and page views; and measuredSince, the first day with visitor figures. Answers one integration:siteTraffic:statistics row. A FIGURE NOTHING MEASURED IS NULL, NEVER ZERO: a period before visitor counting began has null visitors, and a period with no rows is null throughout. Twelve months are the current month and the twelve before it with no previous period, so previous and previousSeries are null. A deployable the caller may not read is dropped, not refused, and the cluster's own system-owned surfaces are never in the answer. Bounded at 200 named deployables, refused past it rather than truncated.")
+builtin siteStatistics {
+  siteIds     []string  @description("The deployables to read, as bare ids, at most 200. Empty reads every deployable you may read.")
+  accountIds  []string  @description("With no siteIds, keeps the read to these organizations, as bare ids. It narrows what you may read and never widens it; ignored when siteIds names the deployables.")
+  period      string!   @description("24h (hourly), 7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison.")
+}
+
 /// The website statistics rollup (the 2026-11-08 statistics design, section 5). NO @sdk: it is the
 /// siteStatisticsRollupSweep automation's work, and its handler admits that automation's maintenance
 /// principal and no other caller, a cluster owner included.

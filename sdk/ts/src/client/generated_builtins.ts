@@ -7623,6 +7623,34 @@ QueryClient.prototype.siteRestore = function (this: QueryClient, args: SiteResto
   return this.executeNamed("siteRestore", buildSiteRestore(args), opts);
 };
 
+/** The website statistics a deployable's Statistics page and the Deployables Overview's Websites section read (the 2026-11-08 statistics design, section 7). Gated by the SITE, as siteTrafficInWindow is: a named deployable the caller may not read is dropped, an empty list means every deployable they may read, and naming an organization only narrows that -- so a client's member who names another client's deployable or organization gets the answer a deployable with no traffic gets, and learns nothing. */
+export interface SiteStatisticsArgs {
+  /** The deployables to read, as bare ids, at most 200. Empty reads every deployable you may read. */
+  siteIds?: string[];
+  /** With no siteIds, keeps the read to these organizations, as bare ids. It narrows what you may read and never widens it; ignored when siteIds names the deployables. */
+  accountIds?: string[];
+  /** 24h (hourly), 7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison. */
+  period: string;
+}
+
+export function buildSiteStatistics(args: SiteStatisticsArgs): string {
+  const parts: string[] = [];
+  if (args.siteIds !== undefined) parts.push("siteIds: " + renderMemQLValue(args.siteIds));
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  parts.push("period: " + renderMemQLValue(args.period));
+  return "builtin siteStatistics(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteStatistics(args: SiteStatisticsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteStatistics = function (this: QueryClient, args: SiteStatisticsArgs = {} as SiteStatisticsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteStatistics", buildSiteStatistics(args), opts);
+};
+
 /** The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id. */
 export interface SiteTrafficInWindowArgs {
   /** The deployables to read, as bare ids. */
