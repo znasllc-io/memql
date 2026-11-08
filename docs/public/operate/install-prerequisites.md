@@ -78,6 +78,12 @@ Everything else, without asking beyond one password prompt:
 | The MemQL checkout | `~/.memql/src/` | Yes, always |
 | The k3d cluster | Docker | Only if MemQL created it, or if you turn on **Delete the cluster's data** |
 
+Tool downloads must match the version and checksum shipped with MemQL. If a
+GitHub release download keeps failing, the installer can retrieve that same
+asset through GitHub's official API. This requires `curl` and Python 3; it does
+not change the pin or accept unverified bytes. If both routes fail, installation
+stops and preserves any existing tool. Restore network access and retry.
+
 ### An uninstall is not a data reset
 
 **If the cluster was already on this machine, the wizard installed nothing over

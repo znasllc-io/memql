@@ -135,11 +135,11 @@ function _sha256_of() {
 # FETCH
 #=============================================================================
 
-# fetch <url> <out-path> -- retrieve an artifact to a staging path. file:// is
+# fetch <url> <out-path> <pinned-digest> -- retrieve an artifact to staging. file:// is
 # handled directly (local artifacts, fixtures, air-gapped mirrors) so the fetch
 # path does not depend on a downloader's protocol support.
 function fetch() {
-    local url="$1" out="$2"
+    local url="$1" out="$2" digest="$3"
     case "$url" in
         file://*)
             local src="${url#file://}"
@@ -147,7 +147,7 @@ function fetch() {
             cp "$src" "$out" ;;
         http://*|https://*)
             if command -v curl &>/dev/null; then
-                fetch_with_curl "$url" "$out"
+                fetch_with_curl "$url" "$out" || fetch_github_asset "$url" "$out" "$digest"
             elif command -v wget &>/dev/null; then
                 wget -q --tries=5 --timeout=30 -O "$out" "$url"
             else
@@ -202,6 +202,79 @@ function curl_once() {
     local url="$1" out="$2"
     shift 2
     curl -fsSL "$@" --connect-timeout 30 --speed-limit 1024 --speed-time 30 --max-time 600 -o "$out" "$url"
+}
+
+# GitHub's browser route can fail repeatedly while its official asset API is
+# available. Only try that route after normal retries, for an exact GitHub
+# release URL from the pins manifest. Metadata chooses the asset ID, never a
+# different repository, tag, platform or download host. Older releases have no
+# API digest: the committed pin remains mandatory in main before placement or
+# chmod. A metadata digest, when supplied, must agree with that pin too.
+function fetch_github_asset() {
+    local url="$1" out="$2" digest="$3" coordinates repository tag asset metadata asset_id asset_size
+    [[ "$url" == https://github.com/*/releases/download/* ]] || return 1
+    command -v python3 &>/dev/null || return 1
+    coordinates="$(python3 - "$url" <<'PY'
+import re
+import sys
+match = re.fullmatch(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/releases/download/([A-Za-z0-9._+-]+)/([A-Za-z0-9._+-]+)", sys.argv[1])
+if match is None or any(part in (".", "..") for part in match.groups()):
+    sys.exit("GitHub asset fallback requires an exact published release URL")
+owner, repo, tag, asset = match.groups()
+print(owner + "/" + repo, tag, asset)
+PY
+    )" || return 1
+    read -r repository tag asset <<< "$coordinates"
+    cap_info "browser download failed; trying the same pinned tool through the official GitHub asset API."
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' --max-redirs 3 \
+        --connect-timeout 20 --max-time 60 --max-filesize 1048576 \
+        -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -o "${out}.release.json" "https://api.github.com/repos/${repository}/releases/tags/${tag}"; then
+        return 1
+    fi
+    metadata="$(python3 - "${out}.release.json" "$tag" "$asset" "$digest" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1], "rb") as source:
+        body = source.read(1048577)
+    if len(body) > 1048576:
+        raise ValueError("release metadata exceeds 1 MiB")
+    release = json.loads(body)
+    if not isinstance(release, dict) or release.get("tag_name") != sys.argv[2] or release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("metadata does not name the exact published release")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("metadata has no asset list")
+    matches = [a for a in assets if isinstance(a, dict) and a.get("name") == sys.argv[3]]
+    if len(matches) != 1:
+        raise ValueError("metadata must contain exactly one matching platform asset")
+    asset = matches[0]
+    asset_id, size = asset.get("id"), asset.get("size")
+    if type(asset_id) is not int or not 0 < asset_id <= 9223372036854775807 or asset.get("state") != "uploaded":
+        raise ValueError("asset has no valid uploaded identity")
+    if type(size) is not int or not 0 < size < 256 * 1024 * 1024:
+        raise ValueError("asset size is outside the permitted bound")
+    if asset.get("digest") is not None and asset["digest"] != "sha256:" + sys.argv[4]:
+        raise ValueError("asset digest differs from the committed pin")
+    print(asset_id, size)
+except (OSError, ValueError) as error:
+    sys.exit("GitHub asset fallback refused: " + str(error))
+PY
+    )" || return 1
+    read -r asset_id asset_size <<< "$metadata"
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' --max-redirs 3 \
+        --connect-timeout 20 --speed-limit 1024 --speed-time 30 --max-time 300 --max-filesize "$asset_size" \
+        -H 'Accept: application/octet-stream' -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -o "$out" "https://api.github.com/repos/${repository}/releases/assets/${asset_id}"; then
+        return 1
+    fi
+    python3 - "$out" "$asset_size" <<'PY'
+import os
+import sys
+if os.path.getsize(sys.argv[1]) != int(sys.argv[2]):
+    sys.exit("GitHub asset fallback refused: asset size differs from metadata")
+PY
 }
 
 #=============================================================================
@@ -376,7 +449,7 @@ function main() {
     staged="${_INSTALL_SCRATCH}/${tool}"
 
     cap_step "Downloading ${url}"
-    if ! fetch "$url" "$staged"; then
+    if ! fetch "$url" "$staged" "$digest"; then
         cap_fail 5 "download failed: ${url}"
     fi
 

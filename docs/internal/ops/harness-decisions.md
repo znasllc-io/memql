@@ -5045,3 +5045,30 @@ or execution on refusal. The existing compiler signature and version tests remai
 in place. An isolated Mac validation downloaded through the real API helper,
 verified and signed the pinned asset, and compiled the stylesheet successfully.
 Native pipeline success is still required before releasing this source.
+
+## Pinned installer tool download recovery (2026-11-08)
+
+The native no-cluster installer fixture exhausted all six browser-route
+attempts with HTTP 504 for the committed k3d v5.9.0 and mkcert v1.4.4 assets.
+`scripts/install/install-binary.sh` now tries GitHub's official asset API only
+after those retries fail, when curl and Python 3 are available. Successful
+downloads, local files, non-GitHub URLs and wget keep their existing paths.
+
+The fallback derives the repository, release tag and filename from the exact
+pinned URL. It requires a published, non-prerelease tag, one uploaded asset with
+that name, a numeric asset ID and a positive size below 256 MiB. Metadata reads
+are bounded to 1 MiB. API URLs are constructed locally; URLs in the response
+cannot redirect the lookup to a different repository or host. Transfers have
+bounded time and size, with HTTPS-only redirects. Bytes must match the declared
+size and the committed SHA256 before chmod or placement. An API digest must
+also match that pin when present; older assets without one still require the
+committed digest. No metadata response can update the pin. Failure removes
+staged files through the existing cleanup trap and preserves the prior tool.
+
+`TestInstallBinaryGitHubAssetFallback` reproduces the failed primary route and
+covers exact recovery, older metadata, refused metadata, partial downloads,
+size/checksum mismatch and preservation of the existing target. The full
+installer script suite passes. Isolated network fixtures forced the primary
+route to fail and fetched both real Linux assets through the API, verifying
+their committed digests without executing them or modifying installed tools.
+The native installer fixture must still pass before release publication.
