@@ -412,6 +412,16 @@ describe("an organization's apps on its group page", () => {
     expect(within(panel).queryByText(/access_unknown_subject/)).toBeNull();
     expect(within(panel).queryByText("What this group grants could not be read.")).toBeNull();
     expect(connection.query.effectiveAccessForSubject).not.toHaveBeenCalled();
+    // Nor a way to manage what it grants: Settings > Access would open on a
+    // group the engine refuses to answer for.
+    expect(within(panel).queryByRole("button", { name: "Manage app access" })).toBeNull();
+    view.unmount();
+  });
+
+  it("offers Manage app access on an active organization group", async () => {
+    const view = await openAcmeInShell(acmeSeed());
+    const panel = screen.getByRole("region", { name: "Organization access" });
+    expect(within(panel).getByRole("button", { name: "Manage app access" })).toBeTruthy();
     view.unmount();
   });
 
