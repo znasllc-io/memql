@@ -731,6 +731,33 @@ func TestAPersonaIsCalledWhatItTests(t *testing.T) {
 	require.Equal(t, "Test Site moderator (Beta Labs)", persona(t, service, first.UserID).DisplayName, "the next Start renames it")
 }
 
+// TestAPersonaWhoseNameIsCurrentIsNotRenamed: Start renames a persona only when
+// the name its test calls for has changed. A Start whose persona is already
+// called that writes nothing to its row -- not even the same name again -- so
+// with updateUser refused it tries none and warns of nothing, and the row is as
+// the first Start left it.
+func TestAPersonaWhoseNameIsCurrentIsNotRenamed(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	organization(t, engine, acme, "Acme")
+	developer := seedOperator(t, service, "developer")
+	refusing := refuseWrites(service)
+	warned := captureWarnings(service)
+
+	first, err := service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	named := persona(t, service, first.UserID)
+	require.Equal(t, "Test Site moderator (Acme)", named.DisplayName)
+
+	refusing.refuse("updateUser")
+	again, err := service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, first.UserID, again.UserID, "one persona per operator and role")
+	require.Empty(t, warned.messages(), "no rename was tried, so none was refused")
+	require.Equal(t, named, persona(t, service, first.UserID), "the persona's row was not written")
+}
+
 // TestEndingAnOrganizationRoleTestRemovesItsMembership (review focus 3): a
 // role test of an organization role ends with no membership left behind --
 // ended by its operator or from its own tab -- and replacing the test keeps
