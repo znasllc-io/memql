@@ -44,6 +44,22 @@ versions in the chunk still taking inserts, where PostgreSQL reuses their space.
 Pins: `component/memql/status_row_retention_test.go`; behaviour under the real
 admission: `component/retention/status_rows_db_test.go`.
 
+**A pipeline run's versions keep their `policySnapshot` (decided 2026-11-08).**
+Each version copies the snapshot because the row is read-merged whole, and it is
+most of each version's bytes. Since the day's retention, what that costs is write
+volume (about 70 MB a day at the 2026-11-06 rate) and the last day of versions in
+each chunk that closes, not lasting growth: the rest are deleted inside the chunk
+still taking inserts. Taking it off the versions needs a second store for it,
+content-addressed by the snapshot's own `version` digest, and a lookup on every
+fresh run read the driver makes (each guarded journal write makes one), plus
+retention and archive coverage for that store. The larger lever on this row is
+the 30-second lease renewal, about three quarters of its versions, and moving
+`driverHeartbeatAt` into `memory_liveness` needs a third reader handshake that
+would activate only where liveness storage is enabled (production), on the lease
+every pipeline run depends on. Both are left for a change scheduled on purpose.
+The pipeline's `v1:work:run` is no longer beaten at all (the lease is its
+liveness, `docs/internal/ops/harness-decisions.md`).
+
 The hourly platform automation invokes `integration.retention.sweep` under
 cluster-owner authority. Each page scans at most 100 versions, has a 20-second
 deadline and a 32 MiB archive budget, and compares downloaded bytes before an
