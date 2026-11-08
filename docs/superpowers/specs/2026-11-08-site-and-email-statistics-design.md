@@ -1,7 +1,7 @@
 ---
 title: Website and email statistics, scoped to the client a person belongs to
 audience: internal
-status: draft
+status: approved
 area: operate
 sinceVersion: 0.31.25
 owner: znas
@@ -21,7 +21,7 @@ a way to switch clients. A few options on a deployable still open a pop-up; the
 owner wants none.
 
 **Approvals.** The owner approved this design in conversation on 2026-11-08
-("Looks right"). Each fork in section 3 marked *owner* was the owner's explicit
+("Looks right"), and approved the written spec the same day ("Approve spec"). Each fork in section 3 marked *owner* was the owner's explicit
 choice. The new HTTP surface in section 6 (`/_memql/view.js` and `/_memql/view`
 on a deployable's own origin) was approved as an HTTP exception under the
 gRPC-first policy in the same conversation. Forks the owner did not settle
@@ -97,7 +97,7 @@ remote with no pull request; the owner merges it into `main`.
 | D5 | *Default.* **Days are UTC.** The daily secret, the daily totals and the chart's days all turn over at 00:00 UTC. | A per-site time zone would need per-zone secrets and per-zone totals for a difference most readers will not notice; it can follow without a schema change to the hourly tier. |
 | D6 | *Default.* **Rollups are computed by a scheduled job, not by continuous aggregates.** | A continuous aggregate cannot `COUNT(DISTINCT ...)`, and visitors are exactly that. The two existing aggregates stay for the list row's "served 3 minutes ago". |
 | D7 | *Default.* **Response time is a fixed log-scale histogram** (64 buckets from 0.5 ms, each about 19% wider than the last) on every hourly and daily row, so the median and 95th percentile of any range are merged exactly from the buckets and read to within about 10%. | Medians cannot be combined from medians, and percentiles over 30 days of raw rows at read time would be a slow query on every page load. |
-| D8 | *Owner (countries).* **Country comes from DB-IP's IP-to-Country Lite database**, licensed CC BY 4.0, pinned to one monthly release and checked against its SHA-256 when the edge image is built. Only the ISO country code is stored. Its attribution ("IP geolocation by DB-IP", linked) stands under the Countries list. | MaxMind's free database needs an account key at build time and a stricter licence. City-level location is never stored. |
+| D8 | *Owner.* **Country comes from DB-IP's IP-to-Country Lite database** (CC BY 4.0), **downloaded once a month by the cluster** and kept in its database (`edge_geo_country`); every edge replica loads it from there. Only the ISO country code is stored on a request. Its attribution ("IP Geolocation by DB-IP", linked to db-ip.com) stands under the Countries list. | The spec first pinned one monthly file into the edge image. DB-IP serves only its current and previous month (an older month answers 404, checked 2026-11-08), so a pinned build would break within about two months; the owner chose the monthly download over mirroring a copy as a repository release asset or downloading whatever month exists at build time. MaxMind's free database needs an account key and a stricter licence, and the embedded-data Go modules carry share-alike data. City-level location is never stored. |
 | D9 | *Default.* **Bots are kept out of visitors and page views and counted under Health.** A request is a bot when its user agent is empty or names a known crawler, preview fetcher, monitor or headless browser (a closed list in one file). | A figure a client reads as "people" must not be search crawlers. Bots that imitate browsers are still counted, and the help says so. |
 | D10 | *Default.* **Email facts are a narrow side table filled through the engine.** A scheduled job reads new or changed deliveries, engagement events and consent events through the engine, using `@serverOnly` queries ordered by row creation time from a stored watermark, and records one fact per source record in `email_stat_fact`, keyed so a re-run never counts twice. | Grouped counts over graph rows cannot be pushed down, and hand-written SQL over the graph is the measured hazard in section 2. Counters incremented by each writer would drift across the three node paths that write these rows. |
 | D11 | *Default.* **Reads narrow through the caller, never through the picker.** `siteStatistics` keeps the site narrowing `readableSites` already does. `emailStatistics` intersects the requested organizations with `ResolveAccessGrant` for the caller, and a failed resolution answers nothing. | The client picker is presentation. A person who edits a request to name another client's site or organization gets an empty answer, indistinguishable from a client with no activity. |
@@ -119,8 +119,8 @@ database, and the secret is read from an atomic held by a keeper goroutine.
 | --- | --- |
 | `PageView` | D2. False for bots. |
 | `Path` | For a page view only: the request path with no query string or fragment, a trailing slash removed except at the root, at most 256 bytes. Empty otherwise. |
-| `Source` | For a page view only: the landing URL's `utm_source` (lowercased, at most 64 bytes); otherwise the `Referer` host with `www.` removed, when it is not the site's own host or one of its client domains; otherwise empty, which reads "Direct". A short closed map folds common hosts (`l.facebook.com` to `facebook.com`, `t.co` to `x.com`, any `google.<tld>` to `google`). |
-| `Country` | ISO 3166-1 alpha-2 from D8, or empty. |
+| `Source` | For a navigation page view only: the landing URL's `utm_source` (lowercased, at most 64 bytes); otherwise the `Referer` host with `www.` removed, when it is not the site's own host or one of its client domains; otherwise `direct`. Empty for a navigation from the site's own pages and for every ping, and empty values stay out of the Sources list, so it counts arrivals rather than clicks inside the site. A short closed map folds common hosts (`l.facebook.com` to `facebook.com`, `t.co` to `x.com`, any `google.<tld>` to `google`). |
+| `Country` | ISO 3166-1 alpha-2 from the loaded D8 database, or empty when no database is loaded or the address is not in it. |
 | `Device` | `desktop`, `mobile`, `tablet` or empty. |
 | `Browser` | `Chrome`, `Safari`, `Firefox`, `Edge`, `Opera`, `Samsung Internet`, `Other`, or empty. |
 | `OS` | `Windows`, `macOS`, `iOS`, `iPadOS`, `Android`, `Linux`, `ChromeOS`, `Other`, or empty. |
@@ -148,8 +148,11 @@ for health.
 
 ## 5. Storage and rollups
 
-Three new tables, all TimescaleDB hypertables with retention policies (plain
-tables without TimescaleDB, as `edge_request` is):
+Three new plain tables, small by construction (one row per site per hour or
+day, plus at most 101 rows per site, day and dimension). The rollup run deletes
+the rows past each table's retention, so the same code serves TimescaleDB and
+plain Postgres (changed during planning, 2026-11-08, from hypertables with
+retention policies):
 
 | Table | Grain | Kept |
 | --- | --- | --- |
@@ -175,6 +178,20 @@ first run it backfills every day still in `edge_request`. The run is bounded
 (sites per run, statement timeout), logs what it did, and a period it could not
 finish is recomputed on the next run.
 
+**The country database.** `edge_geo_country (id SMALLINT PRIMARY KEY, release
+TEXT NOT NULL, fetched_at TIMESTAMPTZ NOT NULL, data BYTEA NOT NULL)` holds one
+row. A scheduled automation runs daily on the cron leader and calls the builtin
+`geoCountryRefresh` (`component/sitetraffic`). It does nothing when the stored
+release is the current month. Otherwise it downloads
+`https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.mmdb.gz` for the
+current month, falling back to the previous month on a 404, decompresses it
+(refusing anything over 64 MiB), checks that it opens as an MMDB country
+database, and replaces the row in one statement. A failed download keeps the
+stored release. Each edge replica loads the row at start and checks the stored
+`release` every hour, swapping a newer database in atomically. A replica with no
+database records no country. This is the cluster's only new outbound call: one
+HTTPS request a day at most, and a download once a month.
+
 **Email facts.** `email_stat_fact (kind TEXT, source_id TEXT, account_id TEXT,
 campaign_id TEXT, rule_id TEXT, day DATE, PRIMARY KEY (kind, source_id))`,
 indexed on `(account_id, day)` and kept 400 days. Kinds and their source
@@ -183,7 +200,7 @@ records:
 | Kind | Source | Day |
 | --- | --- | --- |
 | `sent` | delivery | `sentAt` |
-| `delivered`, `bounced_provider` | delivery's provider status | when the status arrived |
+| `delivered`, `undelivered` | delivery's provider status: `delivered` and `expanded` are delivered; `bounced`, `suppressed`, `quarantined`, `filtered-spam` and `failed` are undelivered | `providerAt`, else the version's time |
 | `failed`, `skipped` | delivery | when it reached that status |
 | `open`, `click` | engagement event | `occurredAt` |
 | `open_unique`, `click_unique` | delivery (first open, first click) | `occurredAt` of the first one |
@@ -201,7 +218,11 @@ ever counted for staff under All clients.
 ## 6. The page-change ping (HTTP exception)
 
 Two routes on every non-system deployable's own origin, answered by the edge
-itself and never proxied:
+itself and never proxied. **Changed during planning (2026-11-08):** the edge
+already inserts its own `/_memql/site-refresh.js` into every HTML document it
+serves (`component/edge/site_refresh.go`), so the page-change script rides the
+same insertion instead of being a tag each site adds. Clients change nothing,
+and the Statistics page needs no "copy this tag" notice.
 
 - `GET /_memql/view.js`: a static script of about 1 KB, served from the edge
   binary as `text/javascript` with a long cache lifetime. It wraps
@@ -220,20 +241,24 @@ itself and never proxied:
   no cookie and forwards nothing to the bff.
 
 Both routes fit the existing site content policy (`script-src 'self'`,
-`connect-src 'self'`, `component/edge/csp.go`). A site opts in by adding
-`<script src="/_memql/view.js" defer></script>` to its HTML. For a deployable
-of kind `spa` that has recorded no ping in the period, the Statistics page shows
-that tag to copy, because the problem is current and the remedy is one line
-(DESIGN.md rule 7). CLAUDE.md's Allowed HTTP Exceptions table gains a row for
-this surface, dated 2026-11-08, beside the access-code and shopper routes.
+`connect-src 'self'`, `component/edge/csp.go`). The edge inserts
+`<script src="/_memql/view.js" defer></script>` after `<head>` in every HTML
+document of a live, non-system deployable, next to the site-refresh tag, and
+extends the document's ETag with a `view-v1` marker so caches do not keep a copy
+without it. On a multi-page site the script never fires, because every page is a
+navigation. CLAUDE.md's Allowed HTTP Exceptions table gains a row for this
+surface, dated 2026-11-08, beside the access-code and shopper routes.
 
 ## 7. Reads
 
 **`siteStatistics`** (`@sdk`, `integration.siteTraffic.statistics`, declared in
 `dsl/platform/builtins.memql`):
 
-- Takes `siteIds` (at most 200, the existing cap) and `period` (`24h`, `7d`,
-  `30d`, `90d`, `12m`).
+- Takes `siteIds` (at most 200, the existing cap), `accountIds` and `period`
+  (`24h`, `7d`, `30d`, `90d`, `12m`). Empty `siteIds` means every non-system
+  deployable the caller may read, kept to the named organizations when
+  `accountIds` is given; the Overview's Websites section asks this way, so it
+  never pages through ids (changed during planning, 2026-11-08).
 - Narrows `siteIds` through `readableSites`.
 - Returns one object:
   - the bounds of the period and the period before it, and the bucket size
@@ -258,9 +283,9 @@ this surface, dated 2026-11-08, beside the access-code and shopper routes.
   `period` (`7d`, `30d`, `90d`, `12m`).
 - Narrows `accountIds` by `ResolveAccessGrant` (D11).
 - Returns one object:
-  - `totals` and `previous`: sent, delivered, failed, skipped, opens, clicks,
-    unique opens, unique clicks, unsubscribes, bounces, complaints and new
-    subscribers
+  - `totals` and `previous`: sent, delivered, undelivered, failed, skipped,
+    opens, clicks, unique opens, unique clicks, unsubscribes, bounces,
+    complaints and new subscribers
   - the open rate and click rate: of the messages sent in the period, the share
     opened (clicked) at least once, joined on the delivery id
   - `series` and `previousSeries`: sent, unique opens, unique clicks,
@@ -337,7 +362,6 @@ are those series.
     counting starts
   - a draft: nothing, as today
   - a refused read: the engine's sentence and automatic retry
-- The single-page-app tag from section 6.
 
 **Deployables, Overview:**
 
@@ -355,8 +379,8 @@ are those series.
 - The chart.
 - **Sent in this period**: campaigns and automations as `RecordRow`s with sent,
   open rate and click rate as quiet text; a row opens its page.
-- **Delivery**: an `OverviewBreakdown` of delivered, bounced, failed, skipped
-  and unconfirmed.
+- **Delivery**: an `OverviewBreakdown` of delivered, not delivered (the
+  provider's report), failed, skipped and unconfirmed.
 - **Campaigns**: the existing status breakdown.
 - Under All clients only, **Clients**: a `RankedList` of organizations by sent,
   with open rate.
@@ -386,6 +410,7 @@ the DB-IP source.
 | State | Where | How it crosses |
 | --- | --- | --- |
 | The day's visitor secret | Postgres (one row), plus memory on every edge replica | Each keeper reads the same row; no event bus. |
+| The country database | Postgres (one row), downloaded by the cron leader, plus memory on every edge replica | Each replica re-reads the stored release hourly and swaps in a newer one. |
 | Request rows | The edge replica that served them, then Postgres through the sink | Unchanged. |
 | Rollups and email facts | Written by the cron leader's scheduled automation | One writer per run; idempotent upserts survive a leader change mid-run. |
 | Reads | Any bff replica | Pure reads of shared tables, narrowed under the caller's actor. |
@@ -409,6 +434,15 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
   - the ping: origin and same-origin rules, size cap, rate limit, 204 in every
     case, a page view recorded only when accepted, and `view.js` content type
     and caching
+  - the insertion: the `view.js` tag in a live site's HTML documents and not in
+    a system-owned site's, and the ETag marker
+- **Country database:** against a local HTTP server, the refresh
+  - downloads the current month and falls back to the previous one on a 404
+  - refuses a body that is not a country MMDB or is over the size cap
+  - keeps the stored release when a download fails
+  - does nothing when the current month is stored
+  - and the edge loader swaps in a newer release and keeps serving when none
+    exists
 - **Rollups, db-gated (TimescaleDB image):**
   - hourly, daily and top rows from fixture requests
   - re-running changes nothing
@@ -459,7 +493,8 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
 - `docs/public/operate/deployables.md`, "Traffic and health", becomes
   "Statistics and health": what is recorded, retention per tier, the ping and
   its tag, the `siteStatistics` read, and a paragraph an operator can adapt for
-  a client's privacy policy. The request-log section of
+  a client's privacy policy, and the monthly country download (the cluster's
+  one new outbound call). The request-log section of
   `docs/public/operate/site-hosting.md` changes with it.
 - `docs/public/operate/campaign-sending.md`: the Overview's figures, their
   definitions and `emailStatistics`.
@@ -472,14 +507,17 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
   count as one; one person on two networks counts as two.
 - **Days are UTC** (D5).
 - **Imitating bots count.** Bots that imitate browsers are counted as visitors.
-- **Single-page apps need the tag.** Without it, an app counts only the pages
-  visits land on.
+- **In-app pages need JavaScript.** A single-page app's in-app pages are
+  counted by the inserted script, so a visitor with scripts disabled counts only
+  the page they landed on.
 - **Older days lack visitors.** Days recorded before this ships have health
   figures and no visitors or pages.
 - **Opens are approximate.** Mail privacy proxies fetch tracking pixels, so
   email opens are an upper bound, as they are everywhere. Clicks are not
   affected.
 - **Countries are approximate.** Country accuracy is DB-IP Lite's.
+- **Offline clusters have no countries.** A cluster that cannot reach
+  download.db-ip.com shows countries as not measured.
 
 ## 15. Out of scope
 
