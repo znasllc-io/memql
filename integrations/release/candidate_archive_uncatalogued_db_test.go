@@ -1,16 +1,21 @@
 package release
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"maps"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
@@ -517,5 +522,280 @@ func TestArchiveWithoutCatalogResolvesOnlyDestinationsItReads(t *testing.T) {
 	}
 	if _, err := withMovedTarget(p, "registry").verifyUncataloguedInputs(ownerCtx(), snapshot); err == nil || !strings.Contains(err.Error(), "changed since candidate review") {
 		t.Fatal("a published destination verified against a moved target", err)
+	}
+}
+
+func TestArchiveWithoutCatalogOwnerWallPrecedesPorts(t *testing.T) {
+	p := &candidatePreparer{ledger: &candidateLedger{db: func() *sql.DB { t.Fatal("non-owner reached archive storage"); return nil }}}
+	i := &Integration{}
+	for _, ctx := range []context.Context{context.Background(), actorContext(auth.RoleAdmin), actorContext(auth.RoleDeveloper)} {
+		if _, err := p.archiveWithoutCatalog(ctx, "candidate", "fixture", nil); err == nil {
+			t.Fatal("non-owner archived a candidate without a catalog")
+		}
+		if _, err := p.ledger.uncataloguedSnapshot(ctx, "candidate", "fixture", nil); err == nil {
+			t.Fatal("non-owner read an uncatalogued snapshot")
+		}
+		if _, err := p.ledger.archiveWithoutCatalog(ctx, candidateUncataloguedSnapshot{}, candidateSupersessionProof{}, "fixture", nil); err == nil {
+			t.Fatal("non-owner wrote a supersession fence")
+		}
+		if rows, err := i.handleCandidateArchiveWithoutCatalog(ctx, map[string]any{"candidateId": "candidate"}, 0); err == nil || len(rows) != 0 {
+			t.Fatal("non-owner reached the archive-without-catalog entry")
+		}
+	}
+}
+
+func archiveRows(t *testing.T, db *sql.DB, key string) (count int, basis string, digestNull bool) {
+	t.Helper()
+	if err := db.QueryRow(`SELECT count(*),COALESCE(max(basis),''),COALESCE(bool_and(catalog_digest IS NULL),false) FROM release_candidate_archives WHERE candidate_id=$1`, key).Scan(&count, &basis, &digestNull); err != nil {
+		t.Fatal(err)
+	}
+	return count, basis, digestNull
+}
+
+func TestArchiveWithoutCatalogFencesOnceAcrossReplicasAndReleasesOnlyItsReferences(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, library := twoRegistryFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ledger.beginPublication(ownerCtx(), request.CandidateID, request.ApprovalID, "registry-2", "engine", "image"); err != nil {
+		t.Fatal(err)
+	}
+	ageIntents(t, db, request.CandidateID, "2 hours 1 minute")
+	library.pins["another-candidate"] = true
+	beforeWrites := provider.writes.Load()
+	var wg sync.WaitGroup
+	failures := make(chan error, 3)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			record, err := freshDraftHost(p, candidateTestDB(t)).archiveWithoutCatalog(ownerCtx(), request.CandidateID, "fixture", trust)
+			if err == nil && (record.State != "archived" || record.ApprovalID != request.ApprovalID) {
+				err = errors.New("archive changed candidate identity")
+			}
+			failures <- err
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, basis, digestNull := archiveRows(t, db, request.CandidateID); count != 1 || basis != "supersession" || !digestNull {
+		t.Fatal("replicas did not share one supersession fence", count, basis, digestNull)
+	}
+	if library.pins[request.CandidateID] || !library.released[request.CandidateID] || !library.pins["another-candidate"] || provider.writes.Load() != beforeWrites {
+		t.Fatal("archive kept its own reference, released another's, or wrote to a registry")
+	}
+	var released bool
+	if err := db.QueryRow(`SELECT inputs_released_at IS NOT NULL FROM release_candidate_archives WHERE candidate_id=$1`, request.CandidateID).Scan(&released); err != nil || !released {
+		t.Fatal("reference release was not recorded", err)
+	}
+	for name, operation := range map[string]func() error{
+		"prepare": func() error { _, err := p.prepare(ownerCtx(), c); return err },
+		"approve": func() error { _, err := p.approve(ownerCtx(), request.CandidateID); return err },
+		"publish": func() error { _, err := p.publish(ownerCtx(), request); return err },
+		"ready":   func() error { _, err := p.ledger.ready(ownerCtx(), request.CandidateID); return err },
+		"begin publication": func() error {
+			_, err := p.ledger.beginPublication(ownerCtx(), request.CandidateID, request.ApprovalID, "registry-2", "engine", "image")
+			return err
+		},
+		"seal": func() error {
+			_, private, _ := ed25519.GenerateKey(rand.Reader)
+			_, err := p.ledger.sealCatalog(ownerCtx(), request.CandidateID, request.ApprovalID, "fixture", "archive-test", private, trust)
+			return err
+		},
+	} {
+		if operation() == nil {
+			t.Fatal("candidate archived without a catalog resumed", name)
+		}
+	}
+	for _, ref := range candidateArtifactReferences(c, request.CandidateID) {
+		if _, err := library.PinRunFileReceipts(auth.ContextWithInternalOrigin(ownerCtx()), ref); err == nil {
+			t.Fatal("a delayed preparer repinned released inputs")
+		}
+	}
+	effects, err := p.ledger.effects(ownerCtx(), request.CandidateID)
+	if err != nil || len(effects) != 2 {
+		t.Fatal("publication history was lost", effects, err)
+	}
+	states := map[string]string{}
+	for _, e := range effects {
+		states[e.Target.TargetID] = e.State
+	}
+	if states["registry"] != "complete" || states["registry-2"] != "pending" {
+		t.Fatal("publication history changed", states)
+	}
+	var body []byte
+	if err := db.QueryRow(`SELECT receipt FROM release_candidate_archives WHERE candidate_id=$1`, request.CandidateID).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var proof candidateSupersessionProof
+	if err := json.Unmarshal(body, &proof); err != nil || len(proof.Targets) != 1 || proof.SupersededBy["engine"] == "" || len(proof.Destinations) != 2 {
+		t.Fatal("the supersession receipt does not record what was verified", proof, err)
+	}
+	if _, err := PublishedCatalog(ownerCtx(), db, proof.SupersededBy["engine"], "fixture", trust); err != nil {
+		t.Fatal("the superseding catalog no longer verifies", err)
+	}
+}
+
+func TestArchiveWithoutCatalogResumesReferenceReleaseOnAnotherHost(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	first := *p
+	first.library = interruptedArchiveLibrary{library}
+	if record, err := first.archiveWithoutCatalog(ownerCtx(), request.CandidateID, "fixture", trust); err == nil || record.State != "archived" || !library.pins[request.CandidateID] {
+		t.Fatal("an interrupted archive lost its fence or its pending reference release", record.State, err)
+	}
+	provider.unusable.Store(true)
+	before := provider.reads.Load()
+	if _, err := freshDraftHost(p, candidateTestDB(t)).archiveWithoutCatalog(ownerCtx(), request.CandidateID, "fixture", trust); err != nil || library.pins[request.CandidateID] || provider.reads.Load() != before {
+		t.Fatal("another host did not resume the committed reference release without reading a provider", err)
+	}
+	var released bool
+	if err := db.QueryRow(`SELECT inputs_released_at IS NOT NULL FROM release_candidate_archives WHERE candidate_id=$1`, request.CandidateID).Scan(&released); err != nil || !released {
+		t.Fatal("the resumed release was not recorded", err)
+	}
+}
+
+func TestArchiveWithoutCatalogProofCannotCrossItsSnapshot(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, library := twoRegistryFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Components[0].Artifacts[0]
+	for _, mode := range []string{"owner", "candidate", "approval", "stale", "future", "missing target", "extra target", "wrong digest", "changed outcome", "superseded by nobody"} {
+		t.Run(mode, func(t *testing.T) {
+			input := proof
+			input.Targets = slices.Clone(proof.Targets)
+			input.Destinations = slices.Clone(proof.Destinations)
+			input.SupersededBy = maps.Clone(proof.SupersededBy)
+			ctx := ownerCtx()
+			snap := snapshot
+			switch mode {
+			case "owner":
+				ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "another-owner", Role: auth.RoleOwner})
+			case "candidate":
+				input.CandidateID = "sha256:" + strings.Repeat("f", 64)
+			case "approval":
+				input.ApprovalID = "another-approval"
+			case "stale":
+				input.ObservedAt = input.ObservedAt.Add(-6 * time.Minute)
+				snap.observedAt = input.ObservedAt
+			case "future":
+				input.ObservedAt = input.ObservedAt.Add(time.Minute)
+				snap.observedAt = input.ObservedAt
+			case "missing target":
+				input.Targets = nil
+			case "extra target":
+				input.Targets = append(input.Targets, candidateArchiveTarget{TargetID: "registry-2", Digest: a.Digest, ImageDigest: a.ImageDigest, Platform: a.Platform, Size: a.Size})
+			case "wrong digest":
+				input.Targets[0].Digest = "sha256:" + strings.Repeat("f", 64)
+			case "changed outcome":
+				for j := range input.Destinations {
+					if input.Destinations[j].TargetID == "registry-2" {
+						input.Destinations[j].Outcome = "verified"
+					}
+				}
+			case "superseded by nobody":
+				input.SupersededBy["engine"] = "sha256:" + strings.Repeat("e", 64)
+			}
+			if _, err := p.ledger.archiveWithoutCatalog(ctx, snap, input, "fixture", trust); err == nil || !library.pins[request.CandidateID] {
+				t.Fatal("an altered proof was accepted", mode, err)
+			}
+			if count, _, _ := archiveRows(t, db, request.CandidateID); count != 0 {
+				t.Fatal("an altered proof wrote a fence", mode)
+			}
+		})
+	}
+}
+
+func TestArchiveWithoutCatalogRefusesAJournalChangedSinceItsSnapshot(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	t.Run("a destination began publication", func(t *testing.T) {
+		p, c, library := twoRegistryFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		if _, err := p.publish(ownerCtx(), request); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.ledger.beginPublication(ownerCtx(), request.CandidateID, request.ApprovalID, "registry-2", "engine", "image"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.ledger.archiveWithoutCatalog(ownerCtx(), snapshot, proof, "fixture", trust); err == nil || !library.pins[request.CandidateID] {
+			t.Fatal("a publication begun during verification was fenced", err)
+		}
+	})
+	t.Run("the candidate was sealed", func(t *testing.T) {
+		p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		if _, err := p.publish(ownerCtx(), request); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealArchiveFixture(t, p, request)
+		if _, err := p.ledger.archiveWithoutCatalog(ownerCtx(), snapshot, proof, "fixture", trust); err == nil || !strings.Contains(err.Error(), "releaseArchiveCandidate") || !library.pins[request.CandidateID] {
+			t.Fatal("a candidate sealed during verification was archived without its catalog", err)
+		}
+	})
+}
+
+func TestArchiveWithoutCatalogRefusesACatalogArchivedCandidate(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	p, c, _, _ := candidatePublicationFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	trust := sealArchiveFixture(t, p, request)
+	if _, err := p.archive(ownerCtx(), request.CandidateID, "fixture", trust); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.archiveWithoutCatalog(ownerCtx(), request.CandidateID, "fixture", trust); err == nil {
+		t.Fatal("a candidate archived with its catalog was archived again without one")
+	}
+	if count, basis, _ := archiveRows(t, db, request.CandidateID); count != 1 || basis != "catalog" {
+		t.Fatal("the catalog archive's evidence changed", count, basis)
 	}
 }

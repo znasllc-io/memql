@@ -5149,6 +5149,27 @@ QueryClient.prototype.releaseArchiveCandidate = function (this: QueryClient, arg
   return this.executeNamed("releaseArchiveCandidate", buildReleaseArchiveCandidate(args), opts);
 };
 
+/** Release the build inputs of an approved candidate that has no signed catalog. Every component it contains must have a later or equal release with one; every copy it published is read back first; and nothing it began may have changed for two hours. Nothing remote changes, and the candidate can never prepare, publish or be catalogued again. Owner only. */
+export interface ReleaseArchiveWithoutCatalogArgs {
+  candidateId: string;
+}
+
+export function buildReleaseArchiveWithoutCatalog(args: ReleaseArchiveWithoutCatalogArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseArchiveWithoutCatalog(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseArchiveWithoutCatalog(args: ReleaseArchiveWithoutCatalogArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseArchiveWithoutCatalog = function (this: QueryClient, args: ReleaseArchiveWithoutCatalogArgs = {} as ReleaseArchiveWithoutCatalogArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseArchiveWithoutCatalog", buildReleaseArchiveWithoutCatalog(args), opts);
+};
+
 /** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
 export interface ReleaseAssembleCandidateArgs {
   planName: string;

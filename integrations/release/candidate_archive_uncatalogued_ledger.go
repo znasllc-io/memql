@@ -85,8 +85,15 @@ func (l *candidateLedger) uncataloguedSnapshot(ctx context.Context, key, publish
 		return candidateUncataloguedSnapshot{}, err
 	}
 	defer tx.Rollback()
-	snapshot, err := readUncatalogued(ctx, tx, owner, key, publisher, trust)
+	rec, err := readCandidate(ctx, tx, owner, key)
 	if err != nil {
+		return candidateUncataloguedSnapshot{}, err
+	}
+	snapshot, err := readUncatalogued(ctx, tx, owner, rec)
+	if err != nil {
+		return candidateUncataloguedSnapshot{}, err
+	}
+	if snapshot.supersededBy, err = supersedingCatalogs(ctx, tx, owner, snapshot.record, publisher, trust); err != nil {
 		return candidateUncataloguedSnapshot{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&snapshot.observedAt); err != nil {
@@ -96,12 +103,12 @@ func (l *candidateLedger) uncataloguedSnapshot(ctx context.Context, key, publish
 }
 
 // readUncatalogued reads everything the snapshot and the fence must agree on,
-// under the candidate row lock the transaction takes first.
-func readUncatalogued(ctx context.Context, tx *sql.Tx, owner, key, publisher string, trust map[string]ed25519.PublicKey) (candidateUncataloguedSnapshot, error) {
-	rec, err := readCandidate(ctx, tx, owner, key)
-	if err != nil {
-		return candidateUncataloguedSnapshot{}, err
-	}
+// under the candidate row lock readCandidate took first. Supersession is
+// established by the snapshot and checked by the fence separately: catalogs are
+// immutable, so one that superseded at the snapshot still does at the fence,
+// while a newer catalog sealed in between must not turn into a refusal.
+func readUncatalogued(ctx context.Context, tx *sql.Tx, owner string, rec candidateRecord) (candidateUncataloguedSnapshot, error) {
+	var err error
 	if rec.State != "approved" {
 		return candidateUncataloguedSnapshot{}, errors.New("only an approved candidate can archive without a catalog")
 	}
@@ -116,10 +123,6 @@ func readUncatalogued(ctx context.Context, tx *sql.Tx, owner, key, publisher str
 	if catalogued {
 		return candidateUncataloguedSnapshot{}, errors.New("candidate has a signed catalog; archive it with releaseArchiveCandidate")
 	}
-	supersededBy, err := supersedingCatalogs(ctx, tx, owner, rec, publisher, trust)
-	if err != nil {
-		return candidateUncataloguedSnapshot{}, err
-	}
 	if err := requireQuietPublication(ctx, tx, owner, rec.ID); err != nil {
 		return candidateUncataloguedSnapshot{}, err
 	}
@@ -127,7 +130,165 @@ func readUncatalogued(ctx context.Context, tx *sql.Tx, owner, key, publisher str
 	if err != nil {
 		return candidateUncataloguedSnapshot{}, err
 	}
-	return candidateUncataloguedSnapshot{record: rec, destinations: destinations, bound: bound, supersededBy: supersededBy}, nil
+	return candidateUncataloguedSnapshot{record: rec, destinations: destinations, bound: bound}, nil
+}
+
+// archiveWithoutCatalog permanently fences publication under the same
+// candidate row lock every effect takes. It re-derives the snapshot, refuses a
+// changed journal, a newly sealed catalog, a superseding catalog that no longer
+// verifies, and a proof that is stale or does not match, and only then writes
+// the supersession evidence and the archived state. A candidate another host
+// already archived this way returns as it is, so the caller resumes releasing
+// its references.
+func (l *candidateLedger) archiveWithoutCatalog(ctx context.Context, snapshot candidateUncataloguedSnapshot, proof candidateSupersessionProof, publisher string, trust map[string]ed25519.PublicKey) (candidateRecord, error) {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	db, err := l.database()
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	defer tx.Rollback()
+	rec, err := readCandidate(ctx, tx, owner, snapshot.record.ID)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if rec.State == "archived" {
+		if rec, err = readCandidateApproval(ctx, tx, owner, rec); err != nil {
+			return candidateRecord{}, err
+		}
+		if err := readSupersessionArchive(ctx, tx, owner, rec); err != nil {
+			return candidateRecord{}, err
+		}
+		return rec, tx.Commit()
+	}
+	current, err := readUncatalogued(ctx, tx, owner, rec)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if current.record.ApprovalID != snapshot.record.ApprovalID || !slices.Equal(current.destinations, snapshot.destinations) || !sameBoundReleases(current.bound, snapshot.bound) {
+		return candidateRecord{}, errors.New("candidate publication changed during verification")
+	}
+	for _, component := range current.record.Manifest.Components {
+		if err := requireSupersedingCatalog(ctx, tx, owner, current.record, component, proof.SupersededBy[component.Name], publisher, trust); err != nil {
+			return candidateRecord{}, err
+		}
+	}
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return candidateRecord{}, err
+	}
+	if !supersessionProofMatches(current, proof) || !proof.ObservedAt.Equal(snapshot.observedAt) || proof.ObservedAt.After(now) || now.Sub(proof.ObservedAt) > 5*time.Minute {
+		return candidateRecord{}, errors.New("archiving without a catalog requires fresh verification of every published copy")
+	}
+	body, err := json.Marshal(proof)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO release_candidate_archives(candidate_id,owner_user_id,approval_id,catalog_digest,verified_at,receipt,basis)
+VALUES($1,$2,$3,NULL,$4,$5::jsonb,'supersession')`, rec.ID, owner, current.record.ApprovalID, proof.ObservedAt, string(body))
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE release_candidates SET state='archived',updated_at=clock_timestamp() WHERE candidate_id=$1`, rec.ID); err != nil {
+		return candidateRecord{}, err
+	}
+	archived := current.record
+	archived.State = "archived"
+	return archived, tx.Commit()
+}
+
+// supersessionProofMatches requires the proof to describe exactly the
+// re-derived journal: this candidate and approval, the same outcome for every
+// declared destination, a superseding candidate for every component, and one
+// verified target, with the approved artifact's digests, for exactly the
+// destinations recorded as verified.
+func supersessionProofMatches(current candidateUncataloguedSnapshot, proof candidateSupersessionProof) bool {
+	rec := current.record
+	if proof.CandidateID != rec.ID || proof.ApprovalID != rec.ApprovalID || proof.ObservedAt.IsZero() || !slices.Equal(proof.Destinations, current.destinations) {
+		return false
+	}
+	for _, component := range rec.Manifest.Components {
+		if proof.SupersededBy[component.Name] == "" {
+			return false
+		}
+	}
+	verified := 0
+	for _, outcome := range current.destinations {
+		if outcome.Outcome == uncataloguedVerified {
+			verified++
+		}
+	}
+	if len(proof.Targets) != verified {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, target := range proof.Targets {
+		if seen[target.TargetID] {
+			return false
+		}
+		seen[target.TargetID] = true
+		index := slices.IndexFunc(current.destinations, func(d candidateUncataloguedDestination) bool {
+			return d.TargetID == target.TargetID && d.Outcome == uncataloguedVerified
+		})
+		if index < 0 {
+			return false
+		}
+		d := current.destinations[index]
+		publication, err := candidatePublicationFor(rec, d.TargetID, d.Component, d.Artifact)
+		if err != nil {
+			return false
+		}
+		a := publication.Artifact
+		if target != (candidateArchiveTarget{TargetID: d.TargetID, Digest: a.Digest, ImageDigest: a.ImageDigest, Platform: a.Platform, Size: a.Size}) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameBoundReleases compares the release records verification read. A
+// published release's receipt is immutable, so any difference is a changed
+// journal rather than ordinary progress.
+func sameBoundReleases(a, b map[string]candidateDraftRecord) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for target, x := range a {
+		y, ok := b[target]
+		if !ok || x.IntentID != y.IntentID || x.CandidateID != y.CandidateID || x.ApprovalID != y.ApprovalID || x.State != y.State || x.ReleaseID != y.ReleaseID || (x.Receipt == nil) != (y.Receipt == nil) {
+			return false
+		}
+		if x.Receipt != nil && (x.Receipt.ReleaseID != y.Receipt.ReleaseID || !slices.Equal(x.Receipt.Assets, y.Receipt.Assets)) {
+			return false
+		}
+	}
+	return true
+}
+
+// readSupersessionArchive accepts an archived candidate only when its journal
+// row is supersession evidence for the same approval. A candidate archived
+// with its catalog belongs to releaseArchiveCandidate.
+func readSupersessionArchive(ctx context.Context, q candidateQuerier, owner string, rec candidateRecord) error {
+	var basis, approval string
+	var body []byte
+	err := q.QueryRowContext(ctx, `SELECT basis,approval_id,receipt FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2`, rec.ID, owner).Scan(&basis, &approval, &body)
+	if err != nil {
+		return err
+	}
+	if basis != "supersession" {
+		return errors.New("candidate was archived with its signed catalog; releaseArchiveCandidate manages it")
+	}
+	var proof candidateSupersessionProof
+	if decodeCandidateObject(body, &proof) != nil || approval != rec.ApprovalID || proof.CandidateID != rec.ID || proof.ApprovalID != rec.ApprovalID {
+		return errors.New("candidate archive journal differs from its verified supersession")
+	}
+	return nil
 }
 
 func requireQuietPublication(ctx context.Context, tx *sql.Tx, owner, key string) error {

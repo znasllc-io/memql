@@ -2,11 +2,14 @@ package release
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"maps"
 	"slices"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
@@ -57,4 +60,83 @@ func (p *candidatePreparer) verifyUncataloguedInputs(ctx context.Context, snapsh
 		proof.Targets = append(proof.Targets, target)
 	}
 	return proof, nil
+}
+
+// archiveWithoutCatalog is the owner's terminal path for an approved candidate
+// that has no signed catalog. Like archive, it commits the permanent fence
+// before releasing anything: if the reply or this process is lost, any replica
+// rerunning it finds the candidate archived on the supersession basis and
+// resumes releasing the same references without reading a provider again, and
+// storage tombstones each reference so a delayed preparer cannot pin it again.
+// It releases duplicate or abandoned build inputs only, never a published
+// download, image, tag, approval, catalog or publication receipt.
+func (p *candidatePreparer) archiveWithoutCatalog(ctx context.Context, key, publisher string, trust map[string]ed25519.PublicKey) (candidateRecord, error) {
+	if _, err := candidateOwner(ctx); err != nil {
+		return candidateRecord{}, err
+	}
+	if p == nil || p.ledger == nil || p.library == nil {
+		return candidateRecord{}, errors.New("archiving without a catalog is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	record, err := p.ledger.get(ctx, key)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if record.State == "archived" {
+		if err := p.ledger.requireSupersessionArchive(ctx, record); err != nil {
+			return candidateRecord{}, err
+		}
+	} else {
+		snapshot, err := p.ledger.uncataloguedSnapshot(ctx, key, publisher, trust)
+		if err != nil {
+			return candidateRecord{}, err
+		}
+		proof, err := p.verifyUncataloguedInputs(ctx, snapshot)
+		if err != nil {
+			return candidateRecord{}, err
+		}
+		if record, err = p.ledger.archiveWithoutCatalog(ctx, snapshot, proof, publisher, trust); err != nil {
+			return candidateRecord{}, err
+		}
+	}
+	var releaseErr error
+	for _, ref := range candidateArtifactReferences(record.Manifest, record.ID) {
+		releaseErr = errors.Join(releaseErr, p.library.ReleaseRunFileReference(auth.ContextWithInternalOrigin(ctx), ref))
+	}
+	if releaseErr == nil {
+		releaseErr = p.ledger.recordArchiveInputsReleased(ctx, record.ID)
+	}
+	return record, releaseErr
+}
+
+func (l *candidateLedger) requireSupersessionArchive(ctx context.Context, rec candidateRecord) error {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return err
+	}
+	db, err := l.database()
+	if err != nil {
+		return err
+	}
+	return readSupersessionArchive(ctx, db, owner, rec)
+}
+
+// The destinations it reads are resolved as archival resolves them, through the
+// candidate's release profile or the current configuration, so the preparer is
+// archival's.
+func (i *Integration) handleCandidateArchiveWithoutCatalog(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	p, err := i.archivalCandidateFor(ctx, asString(args["candidateId"]))
+	if err != nil {
+		return nil, err
+	}
+	_, config, trust, err := i.catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	record, err := p.archiveWithoutCatalog(ctx, asString(args["candidateId"]), config.Publisher, trust)
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("candidate", record.ID, record)
 }

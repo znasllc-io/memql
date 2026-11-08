@@ -39,6 +39,17 @@ func (l *candidateLedger) effects(ctx context.Context, key string) ([]candidateP
 	if err != nil {
 		return nil, err
 	}
+	// A candidate archived with its catalog completed every publication. One
+	// archived on the supersession basis may keep an intent that never completed;
+	// it stays in the history as pending, fenced from ever completing.
+	unfinishedAllowed := false
+	if record.State == "archived" {
+		var basis string
+		if err := tx.QueryRowContext(ctx, `SELECT basis FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2`, record.ID, owner).Scan(&basis); err != nil {
+			return nil, err
+		}
+		unfinishedAllowed = basis == "supersession"
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT effect_id,target_id,component_name,artifact_name,approval_id,state,receipt
 FROM release_publication_intents WHERE candidate_id=$1 ORDER BY target_id,component_name,artifact_name LIMIT 1025`, record.ID)
 	if err != nil {
@@ -52,7 +63,7 @@ FROM release_publication_intents WHERE candidate_id=$1 ORDER BY target_id,compon
 		if err := rows.Scan(&effect, &target, &component, &artifact, &approval, &state, &body); err != nil {
 			return nil, err
 		}
-		if len(out) == 1024 || effect == "" || (record.State != "approved" && record.State != "archived") || approval == "" || approval != record.ApprovalID || (state != "pending" && state != "complete") || (record.State == "archived" && state != "complete") {
+		if len(out) == 1024 || effect == "" || (record.State != "approved" && record.State != "archived") || approval == "" || approval != record.ApprovalID || (state != "pending" && state != "complete") || (record.State == "archived" && state != "complete" && !unfinishedAllowed) {
 			return nil, errors.New("candidate publication journal is inconsistent")
 		}
 		entry, err := candidatePublicationFor(record, target, component, artifact)

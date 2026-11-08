@@ -6845,6 +6845,26 @@ func ReleaseArchiveCandidateBuild(args ReleaseArchiveCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseArchiveWithoutCatalog -- Release the build inputs of an approved candidate that has no signed catalog. Every component it contains must have a later or equal release with one; every copy it published is read back first; and nothing it began may have changed for two hours. Nothing remote changes, and the candidate can never prepare, publish or be catalogued again. Owner only.
+type ReleaseArchiveWithoutCatalogArgs struct {
+	CandidateId string
+}
+
+// ReleaseArchiveWithoutCatalog calls the engine builtin releaseArchiveWithoutCatalog.
+func (qc *QueryClient) ReleaseArchiveWithoutCatalog(ctx context.Context, args ReleaseArchiveWithoutCatalogArgs) (*Result, error) {
+	call := ReleaseArchiveWithoutCatalogBuild(args)
+	return qc.executeNamed(ctx, "releaseArchiveWithoutCatalog", call)
+}
+
+func ReleaseArchiveWithoutCatalogBuild(args ReleaseArchiveWithoutCatalogArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseArchiveWithoutCatalog(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseAssembleCandidate -- Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively.
 type ReleaseAssembleCandidateArgs struct {
 	PlanName string

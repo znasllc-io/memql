@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
@@ -89,15 +90,7 @@ ORDER BY p.created_at DESC,p.candidate_id DESC LIMIT $5`, owner, publisher, rec.
 			return nil, err
 		}
 		for _, row := range found {
-			verified, err := pl.VerifyPublishedRelease(row.envelope, publisher, trust)
-			if err != nil || verified.Digest() != row.digest {
-				continue
-			}
-			projection, err := verified.Release()
-			if err != nil || projection.CandidateID != row.candidateID {
-				continue
-			}
-			if catalogSupersedes(projection, component) {
+			if row.supersedes(component, publisher, trust) {
 				out[component.Name] = row.candidateID
 				break
 			}
@@ -107,4 +100,33 @@ ORDER BY p.created_at DESC,p.candidate_id DESC LIMIT $5`, owner, publisher, rec.
 		}
 	}
 	return out, nil
+}
+
+// supersedes verifies one catalog row under the configured publisher trust and
+// decides from its signed payload alone.
+func (row supersedingCatalogRow) supersedes(component pl.ReleaseComponent, publisher string, trust map[string]ed25519.PublicKey) bool {
+	verified, err := pl.VerifyPublishedRelease(row.envelope, publisher, trust)
+	if err != nil || verified.Digest() != row.digest {
+		return false
+	}
+	projection, err := verified.Release()
+	return err == nil && projection.CandidateID == row.candidateID && catalogSupersedes(projection, component)
+}
+
+// requireSupersedingCatalog is the fence's check of the catalog the snapshot
+// named for one component: still this owner's, still verifying, still
+// superseding. Catalogs are immutable, so this re-reads the proof rather than
+// repeating the search, which a catalog sealed since could answer differently.
+func requireSupersedingCatalog(ctx context.Context, tx *sql.Tx, owner string, rec candidateRecord, component pl.ReleaseComponent, candidateID, publisher string, trust map[string]ed25519.PublicKey) error {
+	row := supersedingCatalogRow{candidateID: candidateID}
+	err := tx.QueryRowContext(ctx, `SELECT p.catalog_digest,p.envelope FROM release_catalog p
+JOIN release_candidates c ON c.candidate_id=p.candidate_id
+WHERE c.owner_user_id=$1 AND p.publisher=$2 AND p.candidate_id=$3 AND p.candidate_id<>$4`, owner, publisher, candidateID, rec.ID).Scan(&row.digest, &row.envelope)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err != nil || !row.supersedes(component, publisher, trust) {
+		return fmt.Errorf("the catalogued release recorded as superseding %s %s no longer does", component.Name, component.Version)
+	}
+	return nil
 }
