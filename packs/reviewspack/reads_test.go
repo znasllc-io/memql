@@ -332,33 +332,91 @@ func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // orgRoster is an organization's people as the pack reads them -- each
-// organization's groups, their members and every person's user row -- and what
-// the engine answers for each person in each of their organizations. It
-// answers the roster's reads and stands in for the engine's resolver
-// (organizationDecisions), so the rule over them is tested as a function.
+// organization's groups, their members, each person's own memberships and
+// every person's user row -- and what the engine answers for each person in
+// each of their organizations. It answers the people reads and stands in for
+// the engine's resolver (organizationDecisions), so the rule over them is
+// tested as a function, and it keeps a log of every read and every person the
+// engine was asked about, so a test can say what an answer cost.
 type orgRoster struct {
 	groups  map[string][]map[string]any             // groupsForAccount, by account
-	members map[string][]map[string]any             // membersOfGroup, by group
+	members map[string][]map[string]any             // membersOfGroup, by group; groupsForUser, by member
 	users   map[string]map[string]any               // userByIdSystem, by user
 	holds   map[string][]memql.OrganizationDecision // the engine's decisions, by user
 	// failRead: the engine notes a failed grant read while it resolves.
 	failRead bool
-	asked    []string
+	// noteFailureIn: this read answers in full and notes a read it could not
+	// make on its context, as the engine's tolerant readers do.
+	noteFailureIn string
+	// errorIn: this read fails outright.
+	errorIn string
+	asked   []string
+	reads   []rosterRead
 }
 
-func (r *orgRoster) rows(query string, args map[string]string) ([]map[string]any, bool) {
+// rosterRead is one read the roster answered: the query, the id it was asked
+// about, and who asked -- the actor on the context, and whether it carried
+// internal origin.
+type rosterRead struct {
+	query, about, actor string
+	internal            bool
+}
+
+func (r *orgRoster) rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, bool, error) {
+	var out []map[string]any
+	about := args["userId"]
 	switch query {
 	case "groupsForAccount":
-		return r.groups[args["accountId"]], true
+		about = args["accountId"]
+		out = r.groups[about]
 	case "membersOfGroup":
-		return r.members[args["groupId"]], true
-	case "userByIdSystem":
-		if row, ok := r.users[args["userId"]]; ok {
-			return []map[string]any{row}, true
+		about = args["groupId"]
+		out = r.members[about]
+	case "groupsForUser":
+		// Every group's rows for the person, whatever their status, as the
+		// membersOfGroup double answers them: the status is the pack's to read.
+		groups := make([]string, 0, len(r.members))
+		for group := range r.members {
+			groups = append(groups, group)
 		}
-		return nil, true
+		sort.Strings(groups)
+		for _, group := range groups {
+			for _, m := range r.members[group] {
+				if asString(m["userId"]) == about {
+					out = append(out, m)
+				}
+			}
+		}
+	case "userByIdSystem":
+		if row, ok := r.users[about]; ok {
+			out = []map[string]any{row}
+		}
+	default:
+		return nil, false, nil
 	}
-	return nil, false
+	actor := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		actor = ac.UserId
+	}
+	r.reads = append(r.reads, rosterRead{query: query, about: about, actor: actor, internal: auth.OriginFromContext(ctx).IsInternal()})
+	if query == r.errorIn {
+		return nil, true, errors.New("the rows could not be read")
+	}
+	if query == r.noteFailureIn {
+		auth.NoteReadFailure(ctx, errors.New("part of the rows could not be read"))
+	}
+	return out, true, nil
+}
+
+// read is who each read of query was about, in the order they were made.
+func (r *orgRoster) read(query string) []string {
+	out := []string{}
+	for _, read := range r.reads {
+		if read.query == query {
+			out = append(out, read.about)
+		}
+	}
+	return out
 }
 
 func (r *orgRoster) ResolveOrganizationDecisionsFor(ctx context.Context, userId string, _ auth.Role, _ []auth.Decision) []memql.OrganizationDecision {
@@ -376,8 +434,8 @@ type withRoster struct {
 }
 
 func (w withRoster) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
-	if rows, ok := w.roster.rows(query, args); ok {
-		return rows, nil
+	if rows, ok, err := w.roster.rows(ctx, query, args); ok {
+		return rows, err
 	}
 	return w.rowReader.Rows(ctx, query, args)
 }
@@ -560,13 +618,23 @@ func TestReviewsPeopleOfAStoreInNoOrganizationIsNobody(t *testing.T) {
 
 // WHO CAN MODERATE IS ANSWERED IN FULL OR NOT AT ALL: a grant read that failed
 // under the answer could hide a deny, and a list drawn without it names a
-// moderator the store's organization has barred.
+// moderator the store's organization has barred. So could one of the
+// deployment's own reads -- the groups, their members, a person's row -- that
+// answered from part of what it reads, and the answer refuses that too.
 func TestReviewsPeopleRefusesWhenAReadBehindItFails(t *testing.T) {
 	roster := shopRoster()
 	roster.failRead = true
 	if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
 		map[string]any{"storeId": "store-live", "siteId": "site-1"}); err == nil {
 		t.Fatal("an answer was drawn from part of the grants")
+	}
+	for _, query := range []string{"groupsForAccount", "membersOfGroup", "userByIdSystem"} {
+		roster := shopRoster()
+		roster.noteFailureIn = query
+		if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+			map[string]any{"storeId": "store-live", "siteId": "site-1"}); err == nil {
+			t.Errorf("an answer was drawn from part of %s", query)
+		}
 	}
 }
 

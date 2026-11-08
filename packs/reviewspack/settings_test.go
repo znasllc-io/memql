@@ -23,8 +23,14 @@ func settingsReader(row map[string]any) *decideReader {
 
 func writeSettings(t *testing.T, ctx context.Context, row map[string]any, args map[string]any, display bool) (map[string]any, error) {
 	t.Helper()
+	return writeSettingsOn(t, ctx, shopRoster(), row, args, display)
+}
+
+// writeSettingsOn is writeSettings over the roster given, so a test can read
+// back what the write read.
+func writeSettingsOn(t *testing.T, ctx context.Context, roster *orgRoster, row map[string]any, args map[string]any, display bool) (map[string]any, error) {
+	t.Helper()
 	w := &fakeWriter{}
-	roster := shopRoster()
 	p := &Provider{reader: withRoster{rowReader: settingsReader(row), roster: roster}, organizations: roster, writer: w}
 	var err error
 	if display {
@@ -129,14 +135,15 @@ func approverArgs(who string) map[string]any {
 // they hold in their own; not one of the cluster's operators, who host the
 // reviews and decide none; nobody who could not moderate there. Whoever names
 // them -- an operator, or the current approver handing the role on -- and in
-// addition to the rule on who may name one, which is unchanged.
+// addition to the rule on who may name one, which is unchanged. Each refusal
+// is reached by asking about the person named and nobody else: the write
+// never reads the organization's roster.
 func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
-	name := func(who string) map[string]any {
-		return map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": who}
-	}
+	name := approverArgs
 	for _, c := range []struct{ who, why string }{
 		{"outsider-1", "a person of another organization, who moderates there"},
 		{"staff-1", "a cluster operator in the store's own group"},
+		{auth.RoleTestUserPrefix + "stand-in", "a role test's stand-in in the store's own group"},
 		{"viewer-1", "a person of the organization without the reviews part"},
 		{"doorless-1", "a person with the part who cannot open the organization's Deployables"},
 		{"away-1", "a deactivated person"},
@@ -147,9 +154,18 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 			ctx  context.Context
 			name string
 		}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
-			_, err := writeSettings(t, namer.ctx, existingSettings(), name(c.who), false)
+			roster := shopRoster()
+			_, err := writeSettingsOn(t, namer.ctx, roster, existingSettings(), name(c.who), false)
 			if err == nil || err.Error() != approverRefusal {
 				t.Errorf("%s naming %s (%s): err = %v, want %q", namer.name, c.who, c.why, err, approverRefusal)
+			}
+			if members := roster.read("membersOfGroup"); len(members) != 0 {
+				t.Errorf("%s naming %s: the write read the organization's roster (%v)", namer.name, c.who, members)
+			}
+			for _, about := range append(roster.read("userByIdSystem"), roster.asked...) {
+				if about != c.who {
+					t.Errorf("%s naming %s: the write read about %s", namer.name, c.who, about)
+				}
 			}
 		}
 	}
@@ -202,6 +218,63 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	}
 	if got, set := handed["accountId"]; set {
 		t.Fatalf("the current approver's write tied the store to organization %v; only an operator records it", got)
+	}
+}
+
+// NAMING THE APPROVER ASKS ABOUT THAT PERSON ALONE. Whether the one person named
+// can moderate is answered from the organization's groups, the person's own
+// memberships, their own user row and the engine's answer for them -- never
+// the organization's roster -- so naming an approver costs one person's reads
+// however many people the organization has. Every read is the deployment's,
+// and only the user row's carries internal origin.
+func TestNamingTheApproverResolvesThatPersonAlone(t *testing.T) {
+	deployment := auth.SystemActor(peopleActor).UserId
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		roster := shopRoster()
+		if _, err := writeSettingsOn(t, namer.ctx, roster, existingSettings(), approverArgs("mod-1"), false); err != nil {
+			t.Fatalf("%s naming mod-1: %v", namer.name, err)
+		}
+		if got := strings.Join(roster.asked, ","); got != "mod-1" {
+			t.Errorf("%s naming mod-1: the engine was asked about %q, want mod-1 alone", namer.name, got)
+		}
+		for query, want := range map[string]string{
+			"groupsForAccount": "acct-shop", "groupsForUser": "mod-1", "userByIdSystem": "mod-1", "membersOfGroup": "",
+		} {
+			if got := strings.Join(roster.read(query), ","); got != want {
+				t.Errorf("%s naming mod-1: %s read about %q, want %q", namer.name, query, got, want)
+			}
+		}
+		for _, read := range roster.reads {
+			if read.actor != deployment || read.internal != (read.query == "userByIdSystem") {
+				t.Errorf("%s naming mod-1: %+v, want it read as %s, with internal origin on the user row alone", namer.name, read, deployment)
+			}
+		}
+	}
+}
+
+// THE APPROVER CHECK IS ANSWERED IN FULL OR NOT AT ALL, as the list is. A read
+// behind it that failed -- the engine's while it resolved the person, or one of
+// the deployment's own, failing outright or answering from part of what it
+// reads -- refuses the write for the read, not for the person, and nothing is
+// written (writeSettingsOn asserts it).
+func TestTheApproverCheckRefusesWhenAReadBehindItFails(t *testing.T) {
+	breaks := map[string]func(*orgRoster){
+		"the engine's grant read": func(r *orgRoster) { r.failRead = true },
+	}
+	for _, query := range []string{"groupsForAccount", "groupsForUser", "userByIdSystem"} {
+		breaks[query+" failing"] = func(r *orgRoster) { r.errorIn = query }
+		breaks[query+" answering from part of what it reads"] = func(r *orgRoster) { r.noteFailureIn = query }
+	}
+	for name, broken := range breaks {
+		roster := shopRoster()
+		broken(roster)
+		_, err := writeSettingsOn(t, operatorCtxFor("op-1"), roster, existingSettings(), approverArgs("mod-1"), false)
+		if err == nil || err.Error() == approverRefusal {
+			t.Errorf("%s: err = %v, want the write refused for the read that failed", name, err)
+		}
 	}
 }
 

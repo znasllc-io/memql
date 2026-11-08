@@ -7,9 +7,10 @@ package reviewspack_test
 // resolver. This proves them through the real engine: the builtin reaches its
 // handler through the DSL, the organization gate admits a caller who holds the
 // reviews part in the store's organization and refuses one who holds it only
-// in another, the organization's roster is read as the deployment reads it,
-// and the engine's own resolver answers who can moderate there -- with the ids
-// the wire carries, a signed-in caller's canonical and a chosen person's bare.
+// in another, the organization's roster -- and a named approver's own
+// memberships -- are read as the deployment reads them, and the engine's own
+// resolver answers who can moderate there -- with the ids the wire carries, a
+// signed-in caller's canonical and a chosen person's bare.
 //
 // Postgres-gated: skips when no database is reachable; MEMQL_REQUIRE_DB=1
 // turns that skip into a failure.

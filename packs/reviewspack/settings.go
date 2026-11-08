@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 
@@ -205,9 +204,11 @@ var errApproverCannotModerate = errors.New("reviews: Choose someone in this stor
 //
 // And one rule decides whom: the approver named is one of the people who can
 // moderate the store, in its organization as reviewsPeople reads it
-// (storeOrganization, moderatorsIn) -- never somebody outside it, never one of
-// the cluster's operators, never a role test's stand-in. Whoever names them,
-// operator or current owner.
+// (storeOrganization) -- never somebody outside it, never one of the
+// cluster's operators, never a role test's stand-in. Whoever names them,
+// operator or current owner. It is asked of the person named alone
+// (moderatorNamed), with the verdict the list is drawn by (canModerate): the
+// write never reads the organization's roster.
 func (p *Provider) writeSettings(ctx context.Context, storeID string, changes map[string]any) ([]memorynodes.MemoryNode, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || strings.TrimSpace(ac.UserId) == "" {
@@ -245,11 +246,11 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 			// picker reads by. siteForStore has already matched the site to any
 			// organization the settings carry, so the site's is safe to check
 			// against; whether the write records it is the rule above.
-			people, err := p.moderatorsIn(ctx, storeOrganization(current, siteAccount))
+			_, moderates, err := p.moderatorNamed(ctx, storeOrganization(current, siteAccount), named)
 			if err != nil {
 				return nil, err
 			}
-			if !slices.ContainsFunc(people, func(m Moderator) bool { return sameUser(m.UserID, named) }) {
+			if !moderates {
 				return nil, errApproverCannotModerate
 			}
 		}
