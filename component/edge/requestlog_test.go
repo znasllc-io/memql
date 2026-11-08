@@ -2,20 +2,26 @@ package edge
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
 
 // requestlog_test.go -- the edge's per-request record (epic memql#4906).
 //
-// Three properties, and only the first is about counting:
+// Four properties, and only the first two are about counting:
 //
 //   - what the edge DID is what the record says (the path classes), including
 //     the fallback-versus-document distinction that says whether a build
 //     emitted its routes;
+//   - a page view carries its visit fields, derived from the address the
+//     front door wrote and never from one the client claimed, and nothing
+//     else does; the address and the user agent never reach the record;
 //   - the cluster's own surfaces write nothing, gated on the ROW FIELD;
 //   - the wrapper does not break the proxy, which is the failure that would
 //     compile, serve a plain GET correctly and silently kill every WebSocket.
@@ -88,6 +94,12 @@ func TestRequestLogClassifiesWhatWasServed(t *testing.T) {
 		if got.ServedAt.IsZero() || got.DurationNs <= 0 {
 			t.Errorf("GET %s recorded servedAt=%v duration=%d, want both filled", tc.path, got.ServedAt, got.DurationNs)
 		}
+		// Every row this edge writes is MEASURED, whatever its class: the
+		// flag says the visit fields were computed, which is what tells a
+		// day of these rows from a day recorded before they existed.
+		if !got.Measured {
+			t.Errorf("GET %s recorded measured=false, want every recorded row measured", tc.path)
+		}
 	}
 }
 
@@ -114,6 +126,9 @@ func TestRequestLogClassifiesWhatWasNotServed(t *testing.T) {
 		}
 		if records[0].Status != tc.status {
 			t.Errorf("%s: status = %d, want %d", name, records[0].Status, tc.status)
+		}
+		if !records[0].Measured || records[0].PageView {
+			t.Errorf("%s: measured=%v pageView=%v, want a measured request that is no page view -- nothing was served", name, records[0].Measured, records[0].PageView)
 		}
 	}
 }
@@ -331,5 +346,331 @@ func TestHealthProbesDoNotInflateVisitorTraffic(t *testing.T) {
 	}
 	if len(log.records) != 1 {
 		t.Fatalf("want only the visitor, got %d traffic records", len(log.records))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The visit fields
+// ---------------------------------------------------------------------------
+
+// chromeOnWindows is a real desktop browser's user agent: not a bot, and
+// every family visit.Classify reports is filled.
+const chromeOnWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+// The two entries of a forwarded request. The client wrote the left-most one
+// and the front door appended the right-most, so only the right-most may ever
+// reach a visitor or a country.
+const (
+	forgedAddress    = "203.0.113.9"
+	frontDoorAddress = "198.51.100.7"
+)
+
+// fakeVisitors stands in for the day's visitor secret. It answers a different
+// id per address key, so the id on a record says which address it was derived
+// from without the address itself appearing anywhere on the record.
+type fakeVisitors struct {
+	byAddressKey map[string]string
+	calls        []visitorCall
+}
+
+type visitorCall struct {
+	siteID, addressKey, userAgent string
+	at                            time.Time
+}
+
+func (f *fakeVisitors) Visitor(siteID, addressKey, userAgent string, at time.Time) string {
+	f.calls = append(f.calls, visitorCall{siteID: siteID, addressKey: addressKey, userAgent: userAgent, at: at})
+	return f.byAddressKey[addressKey]
+}
+
+// fakeCountries stands in for the country database, for the same reason.
+type fakeCountries struct {
+	byAddress map[netip.Addr]string
+	asked     []netip.Addr
+}
+
+func (f *fakeCountries) Country(addr netip.Addr) string {
+	f.asked = append(f.asked, addr)
+	return f.byAddress[addr]
+}
+
+var (
+	_ VisitorHasher = (*fakeVisitors)(nil)
+	_ CountryLookup = (*fakeCountries)(nil)
+)
+
+// visitFakes answers a distinct visitor id and country for each of the two
+// addresses, so a field derived from the forged entry is told apart from one
+// derived from the front door's.
+func visitFakes() (*fakeVisitors, *fakeCountries) {
+	visitors := &fakeVisitors{byAddressKey: map[string]string{
+		frontDoorAddress: "visitor-from-the-front-door",
+		forgedAddress:    "visitor-from-the-forged-entry",
+	}}
+	countries := &fakeCountries{byAddress: map[netip.Addr]string{
+		netip.MustParseAddr(frontDoorAddress): "NL",
+		netip.MustParseAddr(forgedAddress):    "US",
+	}}
+	return visitors, countries
+}
+
+// visitSite is the live deployable every visit-field test is served by.
+func visitSite() *Site {
+	return &Site{ID: "site-1", Hostname: "shop.example.com", Status: "live", Kind: "spa"}
+}
+
+// serveVisit serves one request through a handler that records visit fields.
+func serveVisit(t *testing.T, req *http.Request, files map[string]string, visitors VisitorHasher, countries CountryLookup) (*httptest.ResponseRecorder, []RequestRecord) {
+	t.Helper()
+	log := &captureRecorder{}
+	h := NewHandler(Options{
+		Resolver:   staticResolver{site: visitSite()},
+		Opener:     mapOpener(files),
+		RequestLog: log,
+		Visitors:   visitors,
+		Countries:  countries,
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec, log.records
+}
+
+// visitRequest is a request to the test site as it arrives through the front
+// door: the forwarding header carries an entry the client wrote, followed by
+// the address the front door appended.
+func visitRequest(method, target, userAgent string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.Host = "shop.example.com"
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("X-Forwarded-For", forgedAddress+", "+frontDoorAddress)
+	return req
+}
+
+// navigate marks a request as a top-level navigation to a document, which is
+// how a browser says a person is opening a page.
+func navigate(req *http.Request) *http.Request {
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	return req
+}
+
+// assertNoVisitDimensions fails when any field a statistic groups on is set:
+// they belong to page views alone.
+func assertNoVisitDimensions(t *testing.T, got RequestRecord) {
+	t.Helper()
+	for field, value := range map[string]string{
+		"path":    got.Path,
+		"source":  got.Source,
+		"country": got.Country,
+		"device":  got.Device,
+		"browser": got.Browser,
+		"os":      got.OS,
+		"visitor": got.Visitor,
+	} {
+		if value != "" {
+			t.Errorf("%s = %q on a request that is not a page view, want empty", field, value)
+		}
+	}
+}
+
+// THE HEADLINE CASE, and the plan's first review focus: a person opening a
+// page from a search result is a page view with every field filled, and the
+// visitor and the country come from the address the FRONT DOOR wrote. The
+// left-most forwarding entry is whatever the client chose to send; were it
+// read, anybody could mint visitors or choose their country with a header.
+func TestANavigationIsRecordedAsAPageViewWithItsFields(t *testing.T) {
+	visitors, countries := visitFakes()
+	// A trailing slash and a query string, so the path on the record is
+	// visibly the normalized one rather than whatever the URL said.
+	req := navigate(visitRequest(http.MethodGet, "/products/a/?ref=spring", chromeOnWindows))
+	req.Header.Set("Referer", "https://www.google.com/search?q=shoes")
+
+	rec, records := serveVisit(t, req, map[string]string{"index.html": "ROOT", "products/a.html": "A"}, visitors, countries)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /products/a/ answered %d, want 200", rec.Code)
+	}
+	if len(records) != 1 {
+		t.Fatalf("recorded %d requests, want 1", len(records))
+	}
+	got := records[0]
+
+	if !got.Measured || !got.PageView || got.Bot {
+		t.Errorf("measured=%v pageView=%v bot=%v, want a measured page view by a person", got.Measured, got.PageView, got.Bot)
+	}
+	for field, pair := range map[string][2]string{
+		"path":    {got.Path, "/products/a"},
+		"source":  {got.Source, "google"},
+		"country": {got.Country, "NL"},
+		"device":  {got.Device, "desktop"},
+		"browser": {got.Browser, "Chrome"},
+		"os":      {got.OS, "Windows"},
+		"visitor": {got.Visitor, "visitor-from-the-front-door"},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("%s = %q, want %q", field, pair[0], pair[1])
+		}
+	}
+
+	// The visitor was derived from this site, the front door's address, the
+	// browser's own user agent and the instant the record carries. The
+	// instant matters: it decides which UTC day's secret hashes the visitor,
+	// so it must be the same instant the row is filed under.
+	if len(visitors.calls) != 1 {
+		t.Fatalf("the visitor hasher was asked %d times, want once", len(visitors.calls))
+	}
+	call := visitors.calls[0]
+	if call.siteID != "site-1" || call.addressKey != frontDoorAddress || call.userAgent != chromeOnWindows {
+		t.Errorf("visitor derived from (%q, %q, %q), want (site-1, the front door's address, the user agent)", call.siteID, call.addressKey, call.userAgent)
+	}
+	if !call.at.Equal(got.ServedAt) {
+		t.Errorf("visitor derived at %v, want the record's own servedAt %v", call.at, got.ServedAt)
+	}
+	if len(countries.asked) != 1 || countries.asked[0] != netip.MustParseAddr(frontDoorAddress) {
+		t.Errorf("the country was looked up for %v, want only the front door's address", countries.asked)
+	}
+
+	// Derived, and nothing more: neither address nor the user agent is
+	// anywhere on the record, so nothing downstream of it can store them.
+	dump := fmt.Sprintf("%+v", got)
+	for _, raw := range []string{frontDoorAddress, forgedAddress, chromeOnWindows, "Mozilla"} {
+		if strings.Contains(dump, raw) {
+			t.Errorf("the record carries %q: %s", raw, dump)
+		}
+	}
+}
+
+// AN ASSET IS NOT A PAGE. A browser fetching a page's script says so in its
+// Fetch Metadata, and the request counts under health and nowhere else: no
+// visit field is filled, and neither the visitor secret nor the country
+// database is consulted -- which also keeps assets, most of what the edge
+// serves, at the cost they had before.
+func TestAnAssetIsMeasuredButNotAPageView(t *testing.T) {
+	visitors, countries := visitFakes()
+	req := visitRequest(http.MethodGet, "/assets/app.js", chromeOnWindows)
+	req.Header.Set("Sec-Fetch-Mode", "no-cors")
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Referer", "https://shop.example.com/products/a")
+
+	_, records := serveVisit(t, req, map[string]string{"index.html": "ROOT", "assets/app.js": "JS"}, visitors, countries)
+	if len(records) != 1 {
+		t.Fatalf("recorded %d requests, want 1", len(records))
+	}
+	got := records[0]
+	if got.PathClass != pathClassAsset || got.Status != http.StatusOK {
+		t.Fatalf("recorded %s %d, want a served asset", got.PathClass, got.Status)
+	}
+	if !got.Measured || got.PageView || got.Bot {
+		t.Errorf("measured=%v pageView=%v bot=%v, want a measured request by a person that is not a page view", got.Measured, got.PageView, got.Bot)
+	}
+	assertNoVisitDimensions(t, got)
+	if len(visitors.calls) != 0 || len(countries.asked) != 0 {
+		t.Errorf("an asset consulted the visitor secret %d times and the country database %d times, want neither", len(visitors.calls), len(countries.asked))
+	}
+}
+
+// A BOT IS NEVER A PAGE VIEW (spec D9), even one that navigates exactly as a
+// browser does. It is still recorded and flagged, because bot requests count
+// under health, but it carries no visitor and none of the fields a visitor
+// figure is cut by. An empty user agent is a bot too: no browser sends none.
+func TestABotNavigationIsNotAPageView(t *testing.T) {
+	for name, userAgent := range map[string]string{
+		"a crawler":            "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+		"no user agent at all": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			visitors, countries := visitFakes()
+			req := navigate(visitRequest(http.MethodGet, "/", userAgent))
+
+			_, records := serveVisit(t, req, map[string]string{"index.html": "ROOT"}, visitors, countries)
+			if len(records) != 1 {
+				t.Fatalf("recorded %d requests, want 1 -- a bot's request still counts under health", len(records))
+			}
+			got := records[0]
+			if !got.Measured || !got.Bot || got.PageView {
+				t.Errorf("measured=%v bot=%v pageView=%v, want a measured bot request that is not a page view", got.Measured, got.Bot, got.PageView)
+			}
+			if got.Visitor != "" {
+				t.Errorf("visitor = %q, want none for a bot", got.Visitor)
+			}
+			assertNoVisitDimensions(t, got)
+			if len(visitors.calls) != 0 || len(countries.asked) != 0 {
+				t.Errorf("a bot consulted the visitor secret %d times and the country database %d times, want neither", len(visitors.calls), len(countries.asked))
+			}
+		})
+	}
+}
+
+// AN ACCEPTED PING IS A PAGE VIEW (spec D2): a single-page app's in-app page
+// change, which the page-change ping reports and, once it passes its checks,
+// leaves on the writer as viewPath. It is a POST answered 204, so the
+// navigation rule alone would refuse it.
+//
+// Its path is the one the ping named, and its source is EMPTY whatever its
+// Referer says: a ping's headers are its sender's to choose, and a page change
+// inside a site is not an arrival at it. A bot's ping is still not a page
+// view.
+func TestAnAcceptedPingIsAPageViewWithNoSource(t *testing.T) {
+	visitors, countries := visitFakes()
+	h := NewHandler(Options{Visitors: visitors, Countries: countries})
+	ping := func(userAgent string) (*http.Request, RequestRecord) {
+		req := visitRequest(http.MethodPost, "/_memql/view", userAgent)
+		req.Header.Set("Origin", "https://shop.example.com")
+		req.Header.Set("Referer", "https://www.google.com/")
+		return req, RequestRecord{
+			SiteId:    "site-1",
+			ServedAt:  time.Date(2026, 11, 8, 14, 30, 0, 0, time.UTC),
+			Status:    http.StatusNoContent,
+			PathClass: pathClassView,
+		}
+	}
+
+	req, got := ping(chromeOnWindows)
+	h.addVisitFields(&got, req, visitSite(), "/products/b")
+	if !got.Measured || !got.PageView || got.Bot {
+		t.Errorf("measured=%v pageView=%v bot=%v, want an accepted ping to be a page view", got.Measured, got.PageView, got.Bot)
+	}
+	if got.Path != "/products/b" || got.Source != "" {
+		t.Errorf("path=%q source=%q, want the ping's own path and no source", got.Path, got.Source)
+	}
+	if got.Visitor != "visitor-from-the-front-door" || got.Country != "NL" {
+		t.Errorf("visitor=%q country=%q, want both from the front door's address", got.Visitor, got.Country)
+	}
+	if got.Device != "desktop" || got.Browser != "Chrome" || got.OS != "Windows" {
+		t.Errorf("device=%q browser=%q os=%q, want the user agent's families", got.Device, got.Browser, got.OS)
+	}
+
+	req, bot := ping("")
+	h.addVisitFields(&bot, req, visitSite(), "/products/b")
+	if !bot.Measured || !bot.Bot || bot.PageView {
+		t.Errorf("measured=%v bot=%v pageView=%v, want a bot's ping to be no page view", bot.Measured, bot.Bot, bot.PageView)
+	}
+	assertNoVisitDimensions(t, bot)
+}
+
+// WITH NO SECRET AND NO COUNTRY DATABASE A PAGE VIEW STILL COUNTS. Both are
+// optional to the handler (nil in a test; in production the secret is absent
+// until a keeper has read the day's row, and the country database until one
+// has been downloaded): the page, source and agent fields are filled, and the
+// visitor and the country are left empty rather than guessed. A keeper's own
+// "no secret for this day" answer reaches the record the same way.
+func TestAPageViewWithNoSecretOrCountryDatabaseLeavesThoseEmpty(t *testing.T) {
+	req := navigate(visitRequest(http.MethodGet, "/", chromeOnWindows))
+	_, records := serveVisit(t, req, map[string]string{"index.html": "ROOT"}, nil, nil)
+	if len(records) != 1 {
+		t.Fatalf("recorded %d requests, want 1", len(records))
+	}
+	got := records[0]
+	if !got.PageView || got.Path != "/" || got.Source != "direct" || got.Browser != "Chrome" {
+		t.Errorf("pageView=%v path=%q source=%q browser=%q, want a page view of / arriving direct in Chrome", got.PageView, got.Path, got.Source, got.Browser)
+	}
+	if got.Visitor != "" || got.Country != "" {
+		t.Errorf("visitor=%q country=%q, want both empty with nothing to derive them from", got.Visitor, got.Country)
+	}
+
+	unheld := &fakeVisitors{byAddressKey: map[string]string{}}
+	_, records = serveVisit(t, navigate(visitRequest(http.MethodGet, "/", chromeOnWindows)), map[string]string{"index.html": "ROOT"}, unheld, nil)
+	if len(records) != 1 || !records[0].PageView || records[0].Visitor != "" {
+		t.Errorf("a keeper holding no secret for the day gave %+v, want a page view with no visitor", records)
 	}
 }

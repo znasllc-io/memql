@@ -95,9 +95,10 @@ func (o SinkOptions) defaults() SinkOptions {
 }
 
 // Row mirrors the edge_request schema in
-// migrations/20260903020000_edge_request_hypertable.up.sql. Exported so a test
-// can supply its own Insert and assert on what would have been written; the
-// bun tags stay inside this package.
+// migrations/20260903020000_edge_request_hypertable.up.sql, plus the visit
+// columns of migrations/20261108090100_edge_request_visit_fields.up.sql.
+// Exported so a test can supply its own Insert and assert on what would have
+// been written; the bun tags stay inside this package.
 type Row struct {
 	bun.BaseModel `bun:"table:edge_request,alias:er"`
 
@@ -109,6 +110,20 @@ type Row struct {
 	PathClass  string    `bun:"path_class,notnull"`
 	Bytes      int64     `bun:"bytes"`
 	DurationNs int64     `bun:"duration_ns"`
+
+	// The visit columns. Each has a constant default in the table, so an
+	// insert that names none of them -- a previous release's edge during a
+	// rolling upgrade -- still lands, and reads back unmeasured.
+	Measured bool   `bun:"measured,notnull"`
+	PageView bool   `bun:"page_view,notnull"`
+	Bot      bool   `bun:"bot,notnull"`
+	Path     string `bun:"path,notnull"`
+	Source   string `bun:"source,notnull"`
+	Country  string `bun:"country,notnull"`
+	Device   string `bun:"device,notnull"`
+	Browser  string `bun:"browser,notnull"`
+	OS       string `bun:"os,notnull"`
+	Visitor  string `bun:"visitor,notnull"`
 }
 
 // NewSink constructs the writer. It does not start the drain; call Start.
@@ -264,6 +279,16 @@ func (s *Sink) write(batch []Record) error {
 			PathClass:  r.PathClass,
 			Bytes:      r.Bytes,
 			DurationNs: r.DurationNs,
+			Measured:   r.Measured,
+			PageView:   r.PageView,
+			Bot:        r.Bot,
+			Path:       r.Path,
+			Source:     r.Source,
+			Country:    r.Country,
+			Device:     r.Device,
+			Browser:    r.Browser,
+			OS:         r.OS,
+			Visitor:    r.Visitor,
 		})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

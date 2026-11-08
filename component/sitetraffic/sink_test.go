@@ -120,6 +120,58 @@ func TestSinkWritesWhatItWasGiven(t *testing.T) {
 	}
 }
 
+// THE VISIT FIELDS ARE WRITTEN AS THEY ARRIVED. A page view carries every
+// dimension and a bot's request only its flags; the sink maps both and decides
+// nothing, because what a request was is the edge's call, made where the
+// request still exists.
+func TestSinkWritesTheVisitFields(t *testing.T) {
+	c := newCollector(2)
+	s := NewSink(nil, SinkOptions{Insert: c.insert, FlushInterval: 10 * time.Millisecond})
+	s.Start()
+	defer func() { _ = s.Stop(context.Background()) }()
+
+	view := aRecord("site-1")
+	view.PathClass = PathClassDocument
+	view.Measured, view.PageView = true, true
+	view.Path, view.Source, view.Country = "/products/a", "google", "NL"
+	view.Device, view.Browser, view.OS = "desktop", "Chrome", "Windows"
+	view.Visitor = "0123456789abcdef0123456789abcdef"
+	bot := aRecord("site-1")
+	bot.Measured, bot.Bot = true, true
+
+	s.Record(view)
+	s.Record(bot)
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sink did not flush")
+	}
+
+	rows := c.snapshot()
+	if len(rows) != 2 {
+		t.Fatalf("wrote %d rows, want 2", len(rows))
+	}
+	for i, want := range []Record{view, bot} {
+		if got := visitColumnsOf(rows[i]); got != visitFieldsOf(want) {
+			t.Errorf("row %d wrote the visit columns %+v, want %+v", i, got, visitFieldsOf(want))
+		}
+	}
+}
+
+// visitColumns is the visit half of a row, comparable in one step.
+type visitColumns struct {
+	Measured, PageView, Bot                             bool
+	Path, Source, Country, Device, Browser, OS, Visitor string
+}
+
+func visitColumnsOf(r Row) visitColumns {
+	return visitColumns{r.Measured, r.PageView, r.Bot, r.Path, r.Source, r.Country, r.Device, r.Browser, r.OS, r.Visitor}
+}
+
+func visitFieldsOf(r Record) visitColumns {
+	return visitColumns{r.Measured, r.PageView, r.Bot, r.Path, r.Source, r.Country, r.Device, r.Browser, r.OS, r.Visitor}
+}
+
 // A record's own Node wins over the sink's, so a caller that knows which
 // replica served a request can say so.
 func TestSinkKeepsARecordsOwnNode(t *testing.T) {
@@ -267,12 +319,21 @@ func TestRecordAfterStopIsSafe(t *testing.T) {
 // This is the one place the two are compared. It imports component/edge in a
 // TEST only, which is what keeps the production dependency running one way.
 func TestPathClassesMatchTheEdgesOwnSpelling(t *testing.T) {
-	if got, want := edge.PathClassesForTest(), PathClasses; len(got) != len(want) {
+	edgeClasses := edge.PathClassesForTest()
+	if got, want := edgeClasses, PathClasses; len(got) != len(want) {
 		t.Fatalf("the edge names %d path classes and this package names %d: %v vs %v", len(got), len(want), got, want)
 	}
 	for i, class := range PathClasses {
-		if edge.PathClassesForTest()[i] != class {
-			t.Errorf("path class %d: the edge says %q, this package says %q", i, edge.PathClassesForTest()[i], class)
+		if edgeClasses[i] != class {
+			t.Errorf("path class %d: the edge says %q, this package says %q", i, edgeClasses[i], class)
+		}
+	}
+	// The page-change ping's class is APPENDED to both lists, never inserted:
+	// they are ordered, and appending leaves every existing class where a
+	// reader of either list already found it.
+	for name, classes := range map[string][]string{"the edge's": edgeClasses, "this package's": PathClasses} {
+		if last := classes[len(classes)-1]; last != "view" {
+			t.Errorf("%s last path class is %q, want \"view\"", name, last)
 		}
 	}
 }

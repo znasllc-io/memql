@@ -2,11 +2,11 @@ package sitetraffic
 
 import (
 	"context"
-	"errors"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -61,8 +61,8 @@ type VisitorSecrets struct {
 	// deleteEarlier removes secrets of days before day. A field so a test can
 	// make it fail once; production uses purgeSQL.
 	deleteEarlier func(ctx context.Context, db *bun.DB, day time.Time) error
-	running atomic.Bool
-	readyCh chan struct{}
+	running       atomic.Bool
+	readyCh       chan struct{}
 
 	mu     sync.Mutex // guards closed
 	stop   chan struct{}

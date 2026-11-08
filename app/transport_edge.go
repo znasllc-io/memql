@@ -91,13 +91,30 @@ func (a *App) mountEdgeEndpoints() {
 	// until then and a request served in that window records nothing rather
 	// than blocking on a handle that does not exist yet. Appended as a
 	// Dependency the same way the observe sink is.
-	requestLog := sitetraffic.NewSinkComponent(a.Logger, func() *bun.DB {
+	bunDB := func() *bun.DB {
 		if a.db == nil {
 			return nil
 		}
 		return a.db.BunDB()
-	}, 0)
+	}
+	requestLog := sitetraffic.NewSinkComponent(a.Logger, bunDB, 0)
 	a.Dependencies = append(a.Dependencies, requestLog)
+
+	// What a page view's visitor id and country are derived from (website
+	// statistics). Both are held IN MEMORY on this replica and refreshed by
+	// their own background loops, because the handler consults them on the
+	// serving goroutine: the request path only ever does an atomic load, and
+	// all database work is the keepers'. Built here for the request log's
+	// reason -- only an edge serves a site -- and appended as Dependencies so
+	// the bootstrap starts and stops them like the sink.
+	//
+	// Until each has read its row the handler gets "" from it, and the page
+	// views of that window carry no visitor or no country: the visitor
+	// secret keeper fails closed rather than reuse another day's secret, and
+	// a cluster that has never downloaded the country database records none.
+	visitors := sitetraffic.NewVisitorSecrets(a.Logger, bunDB, nil)
+	countries := sitetraffic.NewCountryLoader(a.Logger, bunDB)
+	a.Dependencies = append(a.Dependencies, visitors, countries)
 
 	handler := edge.NewHandler(edge.Options{
 		Resolver:       resolver,
@@ -106,6 +123,8 @@ func (a *App) mountEdgeEndpoints() {
 		APITarget:      edgeAPITargetFromEnv(a.Logger),
 		IdentityTarget: edgeIdentityTargetFromEnv(a.Logger),
 		RequestLog:     edgeRequestRecorder{sink: requestLog},
+		Visitors:       visitors,
+		Countries:      countries,
 		// The engine's own global-secret read, handed over as a one-method
 		// function rather than as the engine itself: a shopify_storefront
 		// site's runtime-config document resolves the v1:platform:globalSecret
@@ -250,8 +269,11 @@ func edgeBundleOpener(logger *slog.Logger) edge.BundleOpener {
 // IT LIVES HERE BECAUSE THIS IS THE WIRING LAYER. component/edge declares its
 // own one-method interface rather than importing the writer, so the edge
 // depends on nothing new; component/sitetraffic knows nothing about HTTP. The
-// translation between them is exactly what app/ is for, and it is six fields
-// long precisely because neither side had to bend toward the other.
+// translation between them is exactly what app/ is for, and it is a
+// field-for-field copy precisely because neither side had to bend toward the
+// other. A field added to both records and forgotten here would be written as
+// its zero value with nothing failing, so TestTheEdgeRecorderCopiesEveryField
+// fills every field of the edge's record and requires each to arrive.
 type edgeRequestRecorder struct{ sink sitetraffic.Recorder }
 
 func (e edgeRequestRecorder) Record(r edge.RequestRecord) {
@@ -262,6 +284,16 @@ func (e edgeRequestRecorder) Record(r edge.RequestRecord) {
 		PathClass:  r.PathClass,
 		Bytes:      r.Bytes,
 		DurationNs: r.DurationNs,
+		Measured:   r.Measured,
+		PageView:   r.PageView,
+		Bot:        r.Bot,
+		Path:       r.Path,
+		Source:     r.Source,
+		Country:    r.Country,
+		Device:     r.Device,
+		Browser:    r.Browser,
+		OS:         r.OS,
+		Visitor:    r.Visitor,
 	})
 }
 

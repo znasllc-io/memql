@@ -5,11 +5,14 @@ package app
 import (
 	"bytes"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/sitetraffic"
 )
 
 // The edge node runs with no identity verifier at all (verifierRequired=false,
@@ -203,5 +206,53 @@ func TestEdgeIdentityTargetFromEnvUsesAConfiguredValueQuietly(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("a configured value must not warn: %q", buf.String())
+	}
+}
+
+// sitetrafficRecorderFunc captures what the adapter hands the writer.
+type sitetrafficRecorderFunc func(sitetraffic.Record)
+
+func (f sitetrafficRecorderFunc) Record(r sitetraffic.Record) { f(r) }
+
+// THE ADAPTER COPIES EVERY FIELD. The edge's record and the writer's are
+// declared apart on purpose, so a field added to both and forgotten in
+// edgeRequestRecorder would be written as its zero value with nothing failing
+// -- a visit field that silently never reached the table. Every field of the
+// edge's record is filled with a value of its own, and each must arrive under
+// the same name.
+func TestTheEdgeRecorderCopiesEveryField(t *testing.T) {
+	var in edge.RequestRecord
+	fields := reflect.ValueOf(&in).Elem()
+	for i := 0; i < fields.NumField(); i++ {
+		field, name := fields.Field(i), fields.Type().Field(i).Name
+		switch field.Kind() {
+		case reflect.String:
+			field.SetString("value of " + name)
+		case reflect.Bool:
+			field.SetBool(true)
+		case reflect.Int, reflect.Int64:
+			field.SetInt(int64(i + 1))
+		default:
+			if field.Type() != reflect.TypeOf(time.Time{}) {
+				t.Fatalf("RequestRecord.%s is a %s, which this test does not know how to fill -- teach it", name, field.Type())
+			}
+			field.Set(reflect.ValueOf(time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)))
+		}
+	}
+
+	var got sitetraffic.Record
+	edgeRequestRecorder{sink: sitetrafficRecorderFunc(func(r sitetraffic.Record) { got = r })}.Record(in)
+
+	arrived := reflect.ValueOf(got)
+	for i := 0; i < fields.NumField(); i++ {
+		name := fields.Type().Field(i).Name
+		out := arrived.FieldByName(name)
+		if !out.IsValid() {
+			t.Errorf("sitetraffic.Record has no field %s, so the edge's %s has nowhere to go", name, name)
+			continue
+		}
+		if want := fields.Field(i).Interface(); !reflect.DeepEqual(out.Interface(), want) {
+			t.Errorf("%s arrived as %v, want %v -- edgeRequestRecorder does not copy it", name, out.Interface(), want)
+		}
 	}
 }

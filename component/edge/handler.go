@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"path"
 	"strings"
 	"time"
@@ -45,6 +46,36 @@ type Options struct {
 	// public sees are untouched by this feature's existence. See preview.go for
 	// why it is separate from Resolver rather than folded into it.
 	PreviewExec PreviewExecutor
+	// Visitors and Countries derive a page view's visitor id and country for
+	// the request log (website statistics; requestlog.go says what is and is
+	// not recorded). NIL LEAVES THOSE TWO FIELDS EMPTY, which is the ordinary
+	// state for a handler built by a test: the page view is still recorded
+	// with its page, source and agent, because a count of pages does not
+	// depend on knowing who viewed them.
+	Visitors  VisitorHasher
+	Countries CountryLookup
+}
+
+// VisitorHasher names a page view's visitor for one UTC day without storing
+// who they are; component/sitetraffic.VisitorSecrets is the production one.
+// Declared here, like RequestRecorder, so the edge depends on nothing new.
+//
+// IT MUST NOT BLOCK: it is called on the serving goroutine for every page
+// view, so it may read memory and compute, never wait on a lock, the network
+// or the database. It answers "" when it holds no secret for at's UTC day; the
+// record then carries no visitor, which reads low rather than linking one
+// person across two days.
+type VisitorHasher interface {
+	Visitor(siteID, addressKey, userAgent string, at time.Time) string
+}
+
+// CountryLookup answers the ISO 3166-1 alpha-2 country of a client address,
+// or "" when it has no database or the address is not in it;
+// component/sitetraffic.CountryLoader is the production one. IT MUST NOT
+// BLOCK, for VisitorHasher's reason: the production lookup reads an in-memory
+// database a background loader swaps in, and never the stored copy.
+type CountryLookup interface {
+	Country(addr netip.Addr) string
 }
 
 // Handler serves whichever site the request's Host names.
@@ -56,6 +87,8 @@ type Handler struct {
 	identityTarget string
 	secretResolver SecretResolver
 	requestLog     RequestRecorder
+	visitors       VisitorHasher
+	countries      CountryLookup
 	previewExec    PreviewExecutor
 	// previews caches resolved grants for previewCacheTTL and throttles the
 	// lastSeenAt write. Per replica, like hashCache beside it.
@@ -94,6 +127,8 @@ func NewHandler(opts Options) *Handler {
 		identityTarget: opts.IdentityTarget,
 		secretResolver: opts.SecretResolver,
 		requestLog:     opts.RequestLog,
+		visitors:       opts.Visitors,
+		countries:      opts.Countries,
 		previewExec:    opts.PreviewExec,
 		previews:       newPreviewCache(),
 		hashCache:      newBundleCache(cspHashCacheBytes),
@@ -141,15 +176,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &recordingWriter{ResponseWriter: w}
 	pathClass := h.serve(rec, r, site)
 	// AFTER the response, so nothing a visitor waits for happens here beyond
-	// a channel send the recorder promises not to block on.
-	h.requestLog.Record(RequestRecord{
+	// bounded in-memory work and a channel send the recorder promises not to
+	// block on. The duration is taken before the visit fields are derived:
+	// it measures serving, not recording.
+	record := RequestRecord{
 		SiteId:     site.ID,
 		ServedAt:   time.Now().UTC(),
 		Status:     rec.statusOr(http.StatusOK),
 		PathClass:  pathClass,
 		Bytes:      rec.bytes,
 		DurationNs: time.Since(started).Nanoseconds(),
-	})
+	}
+	h.addVisitFields(&record, r, site, rec.viewPath)
+	h.requestLog.Record(record)
 }
 
 // serve is the whole of what the edge does with a resolved site, and it
