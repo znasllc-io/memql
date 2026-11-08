@@ -27,6 +27,12 @@ type preparationCaptureRetirement struct {
 type preparationArtifactRetirement struct {
 	IntentID      string `json:"intentId"`
 	ReceiptDigest string `json:"receiptDigest"`
+	// Purged records the confirmed removal of the retired file's Library
+	// entries, which only follows ReceiptDigest. It is omitted while false so
+	// a page an earlier engine wrote keeps its canonical encoding and stays
+	// readable; that engine's cleanup cannot resume under this recipe anyway,
+	// because the cleanup digest binds the engine revision.
+	Purged bool `json:"purged,omitempty"`
 }
 
 func decodePreparationRetirement(body []byte, state string) (*preparationRetirement, error) {
@@ -63,7 +69,8 @@ func decodePreparationRetirement(body []byte, state string) (*preparationRetirem
 		previous := c.Cursor
 		for _, artifact := range c.Page {
 			if !pl.ValidArtifactIntentIDs([]string{artifact.IntentID}) || artifact.IntentID <= previous ||
-				(artifact.ReceiptDigest != "" && !internalDigest.MatchString(artifact.ReceiptDigest)) {
+				(artifact.ReceiptDigest != "" && !internalDigest.MatchString(artifact.ReceiptDigest)) ||
+				(artifact.Purged && artifact.ReceiptDigest == "") {
 				return nil, errors.New("preparation retirement page is inconsistent")
 			}
 			previous = artifact.IntentID

@@ -21,6 +21,10 @@ builtin installationRetirementPage { role string! }
 @executor("integration.installation.installationRetirementArtifact")
 @args(profile="object")
 builtin installationRetirementArtifact { role string! intentId string! }
+/// Remove one retired artifact's Library entries after its recorded retirement receipt.
+@executor("integration.installation.installationRetirementPurge")
+@args(profile="object")
+builtin installationRetirementPurge { role string! intentId string! }
 /// Read completion prerequisites from the durable native journal.
 @executor("integration.installation.installationRetirementObserve")
 builtin installationRetirementObserve { }

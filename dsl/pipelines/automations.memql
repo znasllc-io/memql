@@ -30,6 +30,21 @@ automation enrollLegacyPipelineLogs {
   result := builtin pipelinesEnrollLegacyLogs()
 }
 
+/// An installation preparation's source captures share the upload journal
+/// under the preparation's own run, which no window above applies to: only the
+/// preparation's cleanup fences and retires them. Files that cleanup already
+/// retired still lose their Library entries here, one bounded page a pass,
+/// which covers preparations cancelled before their cleanup removed them. An
+/// unconfirmed removal stops the page; the next pass starts from the journal.
+@template
+automation purgeRetiredPipelineArtifacts {
+  items := builtin pipelineRetentionItems()
+  for item in items {
+    builtin pipelineRetentionPurge(intentId: item.intentId)
+  }
+  return builtin pipelineRetentionReport()
+}
+
 /// Cleanup one authorized page. Byte retirement precedes Library removal;
 /// retained files are skipped, while an unconfirmed provider effect stops the
 /// page. A later invocation resumes through the same permanent native journal.

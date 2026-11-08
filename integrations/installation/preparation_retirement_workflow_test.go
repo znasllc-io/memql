@@ -59,10 +59,73 @@ func TestRetirementWorkflowInstalledPassRecoversPendingPagesOnFreshHost(t *testi
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", r.State)
 	require.Len(t, files.retired, 4)
+	require.Len(t, files.purged, 4, "a cancelled preparation leaves no Library entry pointing at a tombstone")
 	require.Equal(t, 1, executor.calls, "durable producer stop must survive replacement")
 	again, err := w.run(ctx, j, scope.InstallationID, r.ID, executor, files)
 	require.NoError(t, err)
 	require.Equal(t, r, again)
+}
+
+// The installed recipe removes each retired capture's Library entries before
+// the page may advance. A removal whose reply was lost is repeated by a fresh
+// host from the journal; completion is impossible while one is unconfirmed.
+func TestRetirementWorkflowInstalledPassPurgesRetiredCapturesOnFreshHost(t *testing.T) {
+	db, otherDB := journalDB(t)
+	j, other := preparationConnection(db), preparationConnection(otherDB)
+	scope, _ := preparationFixture(t)
+	ctx := captureOperator(auth.RoleOwner, scope.RequestedBy)
+	r, err := j.reserve(ctx, scope)
+	require.NoError(t, err)
+	w, err := loadRetirementWorkflow(strings.Repeat("d", 40))
+	require.NoError(t, err)
+	files, executor := retirementFiles(scope), &retirementStopFixture{}
+	files.fail = "purge"
+	_, err = w.run(ctx, j, scope.InstallationID, r.ID, executor, files)
+	require.Error(t, err)
+	r, err = other.get(ctx, scope.InstallationID, r.ID)
+	require.NoError(t, err)
+	first := r.Retirement.Captures["candidate"].Page[0]
+	require.NotEmpty(t, first.ReceiptDigest)
+	require.False(t, first.Purged, "a lost removal reply is not a removal")
+	_, err = other.finishRetirement(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, w.digest)
+	require.Error(t, err, "completion requires every Library removal")
+	for range 3 {
+		r, err = w.run(ctx, other, scope.InstallationID, r.ID, executor, files)
+		require.NoError(t, err)
+		if r.State == "cancelled" {
+			break
+		}
+	}
+	require.Equal(t, "cancelled", r.State)
+	require.Len(t, files.purged, 4)
+	require.Equal(t, 2, files.purged[first.IntentID], "the fresh host repeated the unconfirmed removal")
+}
+
+// A page written before removals were recorded keeps its exact encoding, and
+// a removal can never be recorded for an artifact without its retirement.
+func TestPreparationRetirementRemovalNeedsItsRetirementReceipt(t *testing.T) {
+	intent := strings.Repeat("a", 64)
+	receipt := "memql-id:" + strings.Repeat("b", 64)
+	page := func(entry string) []byte {
+		return []byte(`{"workflowDigest":"memql-id:` + strings.Repeat("c", 64) + `","producerStopped":true,"captures":{` +
+			`"candidate":{"fenced":true,"pinsReleased":true,"cursor":"","page":[` + entry + `],"complete":false},` +
+			`"rollback":{"fenced":true,"pinsReleased":true,"cursor":"","page":[],"complete":false}}}`)
+	}
+	for name, entry := range map[string]string{
+		"pending":      `{"intentId":"` + intent + `","receiptDigest":""}`,
+		"retired":      `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `"}`,
+		"retired+gone": `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `","purged":true}`,
+	} {
+		_, err := decodePreparationRetirement(page(entry), "retiring")
+		require.NoError(t, err, name)
+	}
+	for name, entry := range map[string]string{
+		"gone before retirement": `{"intentId":"` + intent + `","receiptDigest":"","purged":true}`,
+		"noncanonical false":     `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `","purged":false}`,
+	} {
+		_, err := decodePreparationRetirement(page(entry), "retiring")
+		require.Error(t, err, name)
+	}
 }
 
 func TestRetirementWorkflowSecondRecipeComposesNativeOperations(t *testing.T) {
@@ -80,6 +143,7 @@ for role in ["rollback", "candidate"] parallel(2) {
   pending := builtin installationRetirementPage(role: role)
   for artifact in pending.items parallel(2) {
     builtin installationRetirementArtifact(role: role, intentId: artifact.intentId)
+    builtin installationRetirementPurge(role: role, intentId: artifact.intentId)
   }
   builtin installationRetirementPage(role: role)
 }
@@ -91,6 +155,7 @@ if observed.ready { builtin installationRetirementComplete() }`)
 		require.NoError(t, err)
 	}
 	require.Equal(t, "cancelled", r.State)
+	require.Len(t, files.purged, 4)
 	installed, err := loadRetirementWorkflow(strings.Repeat("d", 40))
 	require.NoError(t, err)
 	require.NotEqual(t, installed.digest, w.digest)

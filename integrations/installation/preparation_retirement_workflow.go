@@ -142,6 +142,7 @@ func (s *retirementWorkflowScope) operations() map[string]workflowhost.Operation
 		"installationRetirementRelease":      roleEffect(s.journal.releaseRetiringCapturePins),
 		"installationRetirementPage":         s.page,
 		"installationRetirementArtifact":     s.artifact,
+		"installationRetirementPurge":        s.purge,
 		"installationRetirementObserve":      s.observe,
 		"installationRetirementComplete": noArgs(func(ctx context.Context) (preparationRecord, error) {
 			r, err := s.journal.finishRetirement(ctx, s.installation, s.key, s.workflow, s.cleanup)
@@ -175,20 +176,39 @@ func (s *retirementWorkflowScope) page(ctx context.Context, args map[string]any)
 	c := r.Retirement.Captures[role]
 	items := make([]any, 0, len(c.Page))
 	for _, artifact := range c.Page {
-		if artifact.ReceiptDigest == "" {
+		// Pending until both its retirement and its Library removal are
+		// recorded; the recipe repeats either, and each is idempotent.
+		if artifact.ReceiptDigest == "" || !artifact.Purged {
 			items = append(items, map[string]any{"intentId": artifact.IntentID})
 		}
 	}
 	return map[string]any{"items": items, "complete": c.Complete}, nil
 }
 
-func (s *retirementWorkflowScope) artifact(ctx context.Context, args map[string]any) (any, error) {
+func retirementArtifactArgs(args map[string]any) (string, string, error) {
 	role, ok := args["role"].(string)
 	intent, okID := args["intentId"].(string)
 	if !ok || !okID || len(args) != 2 {
-		return nil, errors.New("artifact cleanup requires its role and scoped intent identity")
+		return "", "", errors.New("artifact cleanup requires its role and scoped intent identity")
 	}
-	_, err := s.journal.retireCaptureArtifact(ctx, s.installation, s.key, s.workflow, s.cleanup, role, intent, s.files)
+	return role, intent, nil
+}
+
+func (s *retirementWorkflowScope) artifact(ctx context.Context, args map[string]any) (any, error) {
+	role, intent, err := retirementArtifactArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.journal.retireCaptureArtifact(ctx, s.installation, s.key, s.workflow, s.cleanup, role, intent, s.files)
+	return nil, err
+}
+
+func (s *retirementWorkflowScope) purge(ctx context.Context, args map[string]any) (any, error) {
+	role, intent, err := retirementArtifactArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.journal.purgeRetiredCaptureArtifact(ctx, s.installation, s.key, s.workflow, s.cleanup, role, intent, s.files)
 	return nil, err
 }
 

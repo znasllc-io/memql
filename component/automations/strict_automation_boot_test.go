@@ -270,7 +270,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // written before logs had upload receipts (2026-11-08). One added, none removed.
 // 198 -> 199: pipelineSecurityRemediation, the private retained-report-to-goal
 // workflow (2026-11-08). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 199
+// 199 -> 200: purgeRetiredPipelineArtifacts, the sweep's page for an
+// installation preparation's captures, which only removes the Library entries
+// of files its cleanup already retired (2026-11-08). One added, none removed;
+// measured by the strict loader.
+const shippedAutomationCount = 200
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

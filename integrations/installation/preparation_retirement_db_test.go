@@ -22,6 +22,7 @@ type retirementFilesFixture struct {
 	fenced   map[pipelinesteps.RunFileReceiptScope]bool
 	released map[string]bool
 	retired  map[string]pipelinesteps.RetiredFileReceipt
+	purged   map[string]int
 	fail     string
 	calls    int
 }
@@ -30,7 +31,7 @@ func retirementFiles(scope preparationScope) *retirementFilesFixture {
 	return &retirementFilesFixture{ids: map[pipelinesteps.RunFileReceiptScope][]string{
 		retirementArtifactScope(scope.Captures["candidate"]): {fmt.Sprintf("%064x", 1), fmt.Sprintf("%064x", 2), fmt.Sprintf("%064x", 3)},
 		retirementArtifactScope(scope.Captures["rollback"]):  {fmt.Sprintf("%064x", 4)},
-	}, fenced: map[pipelinesteps.RunFileReceiptScope]bool{}, released: map[string]bool{}, retired: map[string]pipelinesteps.RetiredFileReceipt{}}
+	}, fenced: map[pipelinesteps.RunFileReceiptScope]bool{}, released: map[string]bool{}, retired: map[string]pipelinesteps.RetiredFileReceipt{}, purged: map[string]int{}}
 }
 
 func (f *retirementFilesFixture) effect(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, operation string) error {
@@ -95,6 +96,18 @@ func (f *retirementFilesFixture) RetireRunFile(ctx context.Context, scope pipeli
 	receipt := pipelinesteps.RetiredFileReceipt{IntentID: id, FileID: "file-" + id, TombstoneETag: "permanent-etag"}
 	f.retired[id] = receipt
 	return receipt, f.effect(ctx, scope, "retire")
+}
+
+// Like the Library store, removal is idempotent and refuses an artifact whose
+// bytes were not retired first. A lost reply still committed the removal.
+func (f *retirementFilesFixture) PurgeRetiredRunFile(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, retired := f.retired[id]; !retired || !f.fenced[scope] || !slices.Contains(f.ids[scope], id) {
+		return errors.New("Library cleanup requires a retired artifact in its fenced scope")
+	}
+	f.purged[id]++
+	return f.effect(ctx, scope, "purge")
 }
 
 type retirementStopFixture struct {
@@ -199,14 +212,36 @@ func TestPreparationRetirementReconcilesLostRepliesAndReleasesOnlyItsHead(t *tes
 			current, err := peer.get(ctx, scope.InstallationID, r.ID)
 			require.NoError(t, err)
 			require.Empty(t, current.Retirement.Captures[role].Page[0].ReceiptDigest, "uncertain provider result cannot advance the cursor")
+			// Fence, retire, then purge: Library removal needs this journal's own
+			// retirement receipt, not only the store's tombstone.
+			_, err = j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, page[0].IntentID, files)
+			require.ErrorContains(t, err, "retirement receipt")
 			for _, artifact := range page {
 				_, err = peer.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, artifact.IntentID, files)
 				require.NoError(t, err)
 			}
+			held, err := j.nextRetiringArtifacts(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, files)
+			require.NoError(t, err)
+			require.Equal(t, page[0].IntentID, held.Retirement.Captures[role].Page[0].IntentID, "retired artifacts keep their page until their Library entries are gone")
+			files.fail = "purge"
+			_, err = j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, page[0].IntentID, files)
+			require.Error(t, err)
+			current, err = peer.get(ctx, scope.InstallationID, r.ID)
+			require.NoError(t, err)
+			require.False(t, current.Retirement.Captures[role].Page[0].Purged, "an unconfirmed Library removal cannot advance the cursor")
+			for _, artifact := range page {
+				_, err = peer.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, artifact.IntentID, files)
+				require.NoError(t, err)
+			}
+			again, err := j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, page[0].IntentID, files)
+			require.NoError(t, err)
+			require.True(t, again.Retirement.Captures[role].Page[0].Purged)
 		}
 	}
 	require.Len(t, files.released, 1, "only the capture with a committed receipt could have pinned")
 	require.Len(t, files.retired, 4, "lost rollback capture receipt did not lose its upload")
+	require.Len(t, files.purged, 4, "every retired artifact left the Library")
+	require.Equal(t, 2, files.purged[fmt.Sprintf("%064x", 1)], "a lost removal reply is repeated, never skipped")
 	r, err = j.finishRetirement(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup)
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", r.State)
@@ -276,10 +311,24 @@ func TestPreparationRetirementAuthorityHistoryAndParallelPageReceipts(t *testing
 	for range 2 {
 		require.NoError(t, <-results)
 	}
+	for n, a := range r.Retirement.Captures["candidate"].Page {
+		writer := j
+		if n%2 == 1 {
+			writer = peer
+		}
+		go func() {
+			_, err := writer.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", a.IntentID, files)
+			results <- err
+		}()
+	}
+	for range 2 {
+		require.NoError(t, <-results)
+	}
 	r, err = peer.get(ctx, scope.InstallationID, r.ID)
 	require.NoError(t, err)
 	for _, a := range r.Retirement.Captures["candidate"].Page {
 		require.NotEmpty(t, a.ReceiptDigest)
+		require.True(t, a.Purged, "parallel removals on two connections keep each other's receipts")
 	}
 	body, err := os.ReadFile(retirementMigrationPath + ".down.sql")
 	require.NoError(t, err)
