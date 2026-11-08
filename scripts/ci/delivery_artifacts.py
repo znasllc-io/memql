@@ -169,6 +169,37 @@ def verify_events(raw, required):
     return sorted(passed)
 
 
+def transient_go_toolchain_download(raw):
+    """Recognize only the selected official toolchain's transient transport error.
+
+    `go version` can provision a missing toolchain before this fixture starts.
+    Keep the two-line provisioning diagnostic exact: a missing version, proxy
+    configuration, checksum failure or any additional compiler/test output is
+    not evidence of a transient download and must fail without another try.
+    """
+    lines = raw.strip().splitlines()
+    if len(lines) != 2:
+        return False
+    selected = re.fullmatch(r"go: downloading (go[0-9]+\.[0-9]+\.[0-9]+) \(([a-z0-9]+)/([a-z0-9]+)\)", lines[0])
+    if not selected:
+        return False
+    version, system, architecture = selected.groups()
+    module = f"golang.org/toolchain@v0.0.1-{version}.{system}-{architecture}"
+    url = "https://proxy.golang.org/" + module.replace("@", "/@v/") + ".zip"
+    prefix = f'go: download {version}: {module}: Get "{url}": '
+    if not lines[1].startswith(prefix):
+        return False
+    cause = lines[1][len(prefix):]
+    return any(re.fullmatch(pattern, cause) for pattern in (
+        r"dial tcp: lookup proxy\.golang\.org(?: on \S+)?: (?:server misbehaving|i/o timeout|temporary failure in name resolution)",
+        r"dial tcp \S+: (?:i/o timeout|connect: connection timed out|connect: connection reset by peer)",
+        r"read tcp \S+: (?:i/o timeout|read: connection reset by peer)",
+        r"net/http: TLS handshake timeout",
+        r"context deadline exceeded(?: \(Client\.Timeout exceeded while awaiting headers\))?",
+        r"EOF|unexpected EOF",
+    ))
+
+
 class Fixture:
     def __init__(self, root, output):
         self.root = root
@@ -213,6 +244,30 @@ class Fixture:
 
     def docker(self, *args, **kwargs):
         return self.run(["docker", *args], **kwargs)
+
+    def go_prerequisite(self):
+        # Retry only a recognized provisioning transport failure, before any
+        # provider/test runs. All attempts and backoff share the original 600s
+        # setup allowance and overall deadline. Separate logs retain the first
+        # failure even if a later download succeeds; timeouts are never retried.
+        deadline = min(self.deadline, time.monotonic() + 600)
+        for attempt in range(1, 4):
+            log = "go-version.log" if attempt == 1 else f"go-version-attempt-{attempt}.log"
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                message = "fixture overall deadline exhausted before Go prerequisite startup" if deadline == self.deadline else "Go prerequisite deadline exhausted before retry"
+                (self.output / log).write_text(message + "\n")
+                raise RuntimeError(message)
+            code, raw = self.run(["go", "version"], timeout=remaining, log=log, check=False)
+            if code == 0:
+                return raw
+            if code != 1 or attempt == 3 or not transient_go_toolchain_download(raw):
+                raise RuntimeError(f"go failed ({code}); {log}")
+            delay = 2 ** attempt
+            if deadline - time.monotonic() <= delay:
+                raise RuntimeError(f"Go prerequisite deadline exhausted before retry; {log}")
+            print(f"Temporary Go toolchain download failure; retrying in {delay}s ({log})", file=sys.stderr)
+            time.sleep(delay)
 
     def image(self, ref, platform=None):
         # inspect is a cache/idempotency branch, never a trust substitution.
@@ -284,11 +339,7 @@ class Fixture:
         if not re.fullmatch("[a-f0-9]{40}", commit):
             raise ValueError("qualification requires an immutable source commit")
         _, changes = self.run(["git", "status", "--porcelain"])
-        # An empty native attempt cache can make this provision the module's
-        # selected Go toolchain. Allow the existing setup budget, clipped by
-        # run() to the overall deadline, and retain diagnostics before any
-        # provider or test starts. This does not retry a failed prerequisite.
-        _, go_version = self.run(["go", "version"], timeout=600, log="go-version.log")
+        go_version = self.go_prerequisite()
         _, docker_version = self.docker("version", "--format", "{{.Client.Version}} / {{.Server.Version}}")
         self.report.update(commit=commit, dirty=bool(changes.strip()), images={
             k: getattr(args, k) for k in ("database_image", "blob_image", "registry_image", "artifact_image")})

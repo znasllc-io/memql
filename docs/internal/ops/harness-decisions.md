@@ -5072,3 +5072,31 @@ installer script suite passes. Isolated network fixtures forced the primary
 route to fail and fetched both real Linux assets through the API, verifying
 their committed digests without executing them or modifying installed tools.
 The native installer fixture must still pass before release publication.
+
+## Toolchain startup and lazy Settings checks (2026-11-08)
+
+The native provider qualification failed before starting any provider or test
+because the worker's DNS resolver temporarily failed to resolve
+`proxy.golang.org` while `go version` provisioned the selected Go toolchain.
+`scripts/ci/delivery_artifacts.py` now permits at most three attempts for that
+prerequisite, with two- and four-second backoffs. Every attempt and backoff
+shares the original 600-second setup allowance, clipped to the fixture's
+overall deadline. Only exit status 1 with the exact selected official toolchain
+ZIP diagnostic and an allowlisted temporary DNS or transport error qualifies.
+Configuration, checksum, certificate and compiler errors, test failures,
+command deadline expiry and interrupted commands remain failures without retry.
+
+The first diagnostic stays in `go-version.log`; later attempts use
+`go-version-attempt-2.log` and `go-version-attempt-3.log`. A later success does
+not erase the failure evidence. Offline subprocess fixtures reproduce the
+observed DNS error, successful recovery, exhaustion, clipped deadlines and
+permanent failures. They also prove ordinary Go test commands are not retried.
+
+The OS shell's Settings gear check separately raced the real Settings module's
+cold dynamic import against a one-second heading lookup. The test now checks
+the immediate selected destination, awaits that same module inside React
+`act`, and requires the real Appearance heading. Production loading and test
+timeouts are unchanged. A temporary fixture delaying the real import by 1.5
+seconds reproduced the original failure and passed after the correction; the
+fixture is retained with validation evidence, not in the test suite. Native
+checks remain required before releasing these changes.

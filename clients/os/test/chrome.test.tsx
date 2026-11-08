@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
@@ -232,7 +232,11 @@ describe("roles (spec K bullet 7)", () => {
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(nav).getByRole("button", { name: "Cluster" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Settings settings" }));
-    expect(await screen.findByRole("heading", { name: "Appearance" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Settings settings" }).getAttribute("aria-current")).toBe("page");
+    // The real Settings module loads on demand. Await that work and its React
+    // update explicitly; a cold transform need not finish within findBy's 1s.
+    await act(async () => { await import("../src/apps/settings/SettingsApp"); });
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeTruthy();
   });
 });
 

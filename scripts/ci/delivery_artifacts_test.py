@@ -13,8 +13,121 @@ spec = importlib.util.spec_from_file_location("delivery_artifacts", Path(__file_
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 
+GO_DOWNLOAD = (
+    "go: downloading go1.27.3 (linux/amd64)\n"
+    "go: download go1.27.3: golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64: "
+    'Get "https://proxy.golang.org/golang.org/toolchain/@v/v0.0.1-go1.27.3.linux-amd64.zip": '
+)
+GO_DNS_FAILURE = GO_DOWNLOAD + "dial tcp: lookup proxy.golang.org on 127.0.0.53:53: server misbehaving\n"
+
 
 class ArtifactFixtureTest(unittest.TestCase):
+    def test_only_exact_transient_toolchain_downloads_are_retried(self):
+        for cause in (
+                "dial tcp: lookup proxy.golang.org on 127.0.0.53:53: server misbehaving",
+                "dial tcp: lookup proxy.golang.org: i/o timeout",
+                "dial tcp 142.250.190.17:443: i/o timeout",
+                "read tcp 127.0.0.1:1234->142.250.190.17:443: read: connection reset by peer",
+                "net/http: TLS handshake timeout", "EOF"):
+            with self.subTest(cause=cause):
+                self.assertTrue(fixture.transient_go_toolchain_download(GO_DOWNLOAD + cause + "\n"))
+        for raw in (
+                GO_DOWNLOAD + "dial tcp: lookup proxy.golang.org: no such host\n",
+                GO_DOWNLOAD + "x509: certificate signed by unknown authority\n",
+                GO_DOWNLOAD + "403 Forbidden\n",
+                GO_DNS_FAILURE.replace("https://proxy.golang.org/", "https://other-proxy.example/"),
+                GO_DNS_FAILURE.replace("linux-amd64.zip", "darwin-arm64.zip"),
+                GO_DNS_FAILURE.replace("go: downloading go1.27.3", "go: downloading go1.27.2"),
+                GO_DNS_FAILURE + "FAIL\t./app\n",
+                GO_DNS_FAILURE + "checksum mismatch\n",
+                "go: invalid GOTOOLCHAIN value\n", "go: toolchain not available\n",
+                "verifying golang.org/toolchain: checksum mismatch\n",
+                "# example/package\nfile.go:10: undefined: missing\nFAIL\texample/package [build failed]\n",
+                "--- FAIL: TestDNS\n    dial tcp: lookup proxy.golang.org: server misbehaving\n",
+                GO_DNS_FAILURE.splitlines()[1] + "\n"):
+            with self.subTest(raw=raw):
+                self.assertFalse(fixture.transient_go_toolchain_download(raw))
+
+    def test_go_download_attempts_share_budgets_and_retain_all_evidence(self):
+        success = "go version go1.27.3 linux/amd64\n"
+        # Model elapsed command time and backoff without network or real waits.
+        # Each response is (duration, exit status, diagnostic).
+        for name, remaining, responses, error, waits, sleeps in (
+                ("transient then success", 1800, [(14.5, 1, GO_DNS_FAILURE), (1, 0, success)], None, [600, 583.5], [2]),
+                ("three transient failures", 1800, [(1, 1, GO_DNS_FAILURE)] * 3, RuntimeError, [600, 597, 592], [2, 4]),
+                ("prerequisite timeout clipped", 1800, [(590, 1, GO_DNS_FAILURE), (9, 1, GO_DNS_FAILURE)], fixture.subprocess.TimeoutExpired, [600, 8], [2]),
+                ("overall timeout clipped", 20, [(14.5, 1, GO_DNS_FAILURE), (4, 1, GO_DNS_FAILURE)], fixture.subprocess.TimeoutExpired, [20, 3.5], [2]),
+                ("no budget for backoff", 1800, [(599, 1, GO_DNS_FAILURE)], RuntimeError, [600], []),
+                ("interrupted process", 1800, [(1, -15, GO_DNS_FAILURE)], RuntimeError, [600], []),
+                ("permanent failure", 1800, [(1, 1, "verifying golang.org/toolchain: checksum mismatch\n")], RuntimeError, [600], []),
+                ("configuration failure", 1800, [(1, 1, "go: invalid GOTOOLCHAIN value\n")], RuntimeError, [600], []),
+                ("permanent after transient", 1800, [(1, 1, GO_DNS_FAILURE), (1, 1, "go: toolchain not available\n")], RuntimeError, [600, 597], [2])):
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+                run = fixture.Fixture(Path(directory), directory)
+                now = [100.0]
+                run.deadline = now[0] + remaining
+                commands, actual_waits, actual_sleeps = [], [], []
+
+                def popen(argv, **kwargs):
+                    self.assertEqual(argv, ["go", "version"])
+                    self.assertEqual(kwargs["stderr"], fixture.subprocess.STDOUT)
+                    duration, code, raw = responses[len(commands)]
+                    commands.append(argv)
+                    process = Mock(pid=123, returncode=code)
+                    communicated = False
+
+                    def communicate(timeout=None):
+                        nonlocal communicated
+                        if not communicated:
+                            communicated = True
+                            actual_waits.append(timeout)
+                            now[0] += min(duration, timeout)
+                            if duration > timeout:
+                                raise fixture.subprocess.TimeoutExpired(argv, timeout)
+                        return raw.encode(), None
+
+                    process.communicate.side_effect = communicate
+                    return process
+
+                def sleep(seconds):
+                    actual_sleeps.append(seconds)
+                    now[0] += seconds
+
+                with patch.object(fixture.time, "monotonic", side_effect=lambda: now[0]), \
+                        patch.object(fixture.time, "sleep", side_effect=sleep), \
+                        patch.object(fixture.subprocess, "Popen", side_effect=popen), \
+                        patch.object(fixture.os, "killpg") as kill:
+                    if error:
+                        with self.assertRaises(error):
+                            run.go_prerequisite()
+                    else:
+                        self.assertEqual(run.go_prerequisite(), success)
+                self.assertEqual(actual_waits, waits)
+                self.assertEqual(actual_sleeps, sleeps)
+                self.assertEqual(len(commands), len(responses))
+                self.assertLessEqual(now[0] - 100, min(600, remaining))
+                self.assertEqual(run.deadline, 100 + remaining)
+                expected_logs = ["go-version.log"] + [f"go-version-attempt-{n}.log" for n in range(2, len(responses) + 1)]
+                self.assertEqual(sorted(p.name for p in run.output.iterdir()), sorted(expected_logs))
+                for log, (_, _, diagnostic) in zip(expected_logs, responses):
+                    self.assertEqual((run.output / log).read_text(), diagnostic)
+                self.assertEqual(kill.call_count, int(error is fixture.subprocess.TimeoutExpired))
+                self.assertEqual(run.report["tests"], [])
+                self.assertEqual(run.containers, [])
+
+    def test_ordinary_test_commands_are_never_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = fixture.Fixture(Path(directory), directory)
+            process = Mock(returncode=1)
+            process.communicate.return_value = GO_DNS_FAILURE.encode(), None
+            with patch.object(fixture.subprocess, "Popen", return_value=process) as popen, \
+                    patch.object(fixture.time, "sleep") as sleep:
+                with self.assertRaises(RuntimeError):
+                    run.run(["go", "test", "./app"], log="app.log")
+            popen.assert_called_once()
+            sleep.assert_not_called()
+            self.assertEqual((run.output / "app.log").read_text(), GO_DNS_FAILURE)
+
     def test_go_prerequisite_budget_and_failure_evidence(self):
         # The mock models elapsed setup time without sleeping for minutes or
         # downloading a toolchain. Only success reaches the next prerequisite.
@@ -84,7 +197,7 @@ class ArtifactFixtureTest(unittest.TestCase):
                     process = Mock(returncode=0)
                     process.communicate.return_value = raw, None
                     processes.append(process)
-                with patch.object(fixture.time, "monotonic", side_effect=[100, 199, now]), \
+                with patch.object(fixture.time, "monotonic", side_effect=[100, 199, now, now]), \
                         patch.object(fixture.subprocess, "Popen", side_effect=processes) as popen, \
                         patch.object(run, "docker") as docker:
                     with self.assertRaisesRegex(RuntimeError, "overall deadline exhausted"):
