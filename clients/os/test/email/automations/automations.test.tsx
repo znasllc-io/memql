@@ -42,7 +42,7 @@ describe("Automation pages", () => {
   });
   it("turns on after asking, pauses, retires and reads counts", async () => {
     const conn = setup({ journeys: [journey] }); let row = { ...journey };
-    conn.query.campaignSetJourneyState.mockImplementation(async args => { row = { ...row, status: args.action === "activate" ? "active" : args.action === "pause" ? "paused" : "archived", createdAt: new Date(Date.parse(row.createdAt) + 1000).toISOString() }; conn.query.journeys.mockResolvedValue(rowsResult([row])); return rowsResult([{ revision: row.createdAt, issues: [] }]); });
+    conn.query.campaignSetJourneyState.mockImplementation(async args => { row = { ...row, status: args.action === "activate" ? "active" : args.action === "pause" ? "paused" : "archived", createdAt: new Date(Date.parse(row.createdAt) + 1000).toISOString() }; conn.subscriptions.emit("v1:campaigns:journey", row); return rowsResult([{ revision: row.createdAt, issues: [] }]); });
     mount(conn); fireEvent.click(await screen.findByText("Welcome series")); await screen.findByRole("button", { name: "Turn on" }); await press("Turn on");
     expect(conn.query.campaignSetJourneyState).not.toHaveBeenCalled(); await press("Turn on"); await screen.findByRole("button", { name: "Pause" }); await press("Pause"); await screen.findByRole("button", { name: "Turn on" }); await press("Retire"); await press("Retire");
     await waitFor(() => expect(conn.query.campaignSetJourneyState.mock.calls.map(c => c[0].action)).toEqual(["activate", "pause", "archive"]));
@@ -216,7 +216,10 @@ describe("Automation pages", () => {
       enrollments: [{ id: "e1", journeyId: "j", recipientId: "r1", stepId: "send1", stepIndex: 0, status: "failed", lastError: "x", createdAt: "2026-10-11T02:00:00Z" }] });
     mount(conn); fireEvent.click(await screen.findByText("Welcome series")); await screen.findByText("one@acme.test");
     const lists = conn.query.journeyEnrollmentsByStatus.mock.calls.length;
+    const later = Date.now() + 2000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(later);
     await act(async () => window.dispatchEvent(new Event("focus")));
+    clock.mockRestore();
     await waitFor(() => expect(conn.query.journeyEnrollmentsByStatus.mock.calls.length).toBeGreaterThan(lists));
     expect(conn.query.recipientById).toHaveBeenCalledTimes(1);
   });

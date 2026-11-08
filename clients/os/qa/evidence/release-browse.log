@@ -1,0 +1,86 @@
+{"time":"2026-11-07T16:13:47.640855-07:00","level":"INFO","component":"memoryNodesDB","msg":"instance created"}
+{"time":"2026-11-07T16:13:47.640999-07:00","level":"INFO","component":"memoryNodesDB","msg":"starting"}
+{"time":"2026-11-07T16:13:47.651264-07:00","level":"INFO","component":"memoryNodesDB","msg":"write-gate pool opened","size":4}
+{"time":"2026-11-07T16:13:47.679265-07:00","level":"INFO","component":"memoryNodesDB","msg":"MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend cannot be enabled; nothing was changed (memql#5421)","table":"MemoryNodes","triggers":"work_run_head_delete"}
+{"time":"2026-11-07T16:13:47.685987-07:00","level":"INFO","component":"memoryNodesDB","msg":"timescaledb extension enabled","version":"2.29.0","schema":"public","hasCreateHypertable":true,"hypertables":{"MemoryNodes":true,"SecretMemoryNodes":true},"compression":{"MemoryNodes":"blocked: DELETE trigger with a transition table: work_run_head_delete"}}
+{"time":"2026-11-07T16:13:47.687735-07:00","level":"INFO","component":"memoryNodesDB","msg":"startup ping succeeded","dsn":"postgres://memql:********@localhost:55432/memql?sslmode=disable"}
+{"time":"2026-11-07T16:13:47.687871-07:00","level":"INFO","component":"memoryNodesDB","msg":"started"}
+{"time":"2026-11-07T16:13:47.687986-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopping"}
+{"time":"2026-11-07T16:13:47.688009-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopped"}
+=== RUN   TestCandidateBrowseSearchBeforePagingDB
+--- PASS: TestCandidateBrowseSearchBeforePagingDB (0.16s)
+=== RUN   TestReleaseBuildBrowseSearchBeforePagingDB
+{"time":"2026-11-07T16:13:47.952226-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T16:13:50.359979-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+--- PASS: TestReleaseBuildBrowseSearchBeforePagingDB (3.07s)
+=== RUN   TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin
+{"time":"2026-11-07T16:13:50.956488-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+=== RUN   TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin/omitted_default
+=== RUN   TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin/explicit_50
+--- PASS: TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin (0.53s)
+    --- PASS: TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin/omitted_default (0.00s)
+    --- PASS: TestReleaseBuildListExecutesEmptyHistoryThroughBuiltin/explicit_50 (0.00s)
+=== RUN   TestReleaseBuildListAcceptsWireIntegers
+=== RUN   TestReleaseBuildListAcceptsWireIntegers/runtime_float64
+=== RUN   TestReleaseBuildListAcceptsWireIntegers/native_integer
+=== RUN   TestReleaseBuildListAcceptsWireIntegers/json_number
+=== RUN   TestReleaseBuildListAcceptsWireIntegers/lower_bound
+=== RUN   TestReleaseBuildListAcceptsWireIntegers/upper_bound
+--- PASS: TestReleaseBuildListAcceptsWireIntegers (0.01s)
+    --- PASS: TestReleaseBuildListAcceptsWireIntegers/runtime_float64 (0.00s)
+    --- PASS: TestReleaseBuildListAcceptsWireIntegers/native_integer (0.00s)
+    --- PASS: TestReleaseBuildListAcceptsWireIntegers/json_number (0.00s)
+    --- PASS: TestReleaseBuildListAcceptsWireIntegers/lower_bound (0.00s)
+    --- PASS: TestReleaseBuildListAcceptsWireIntegers/upper_bound (0.00s)
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/fractional
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/string
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/boolean
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/null
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/object
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/array
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/zero
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/negative
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/over_limit
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/overflow
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/nonfinite
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/anonymous
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/developer
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/admin
+=== RUN   TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/object_decoder_remains_strict
+--- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/fractional (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/string (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/boolean (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/null (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/object (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/array (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/zero (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/negative (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/over_limit (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/overflow (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/nonfinite (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/anonymous (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/developer (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/admin (0.00s)
+    --- PASS: TestReleaseBuildListRefusesInvalidLimitsAndNonOwnersBeforeDatabase/object_decoder_remains_strict (0.00s)
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner/resolver_unavailable
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner/missing_configuration
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner/malformed_configuration
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner/invalid_trust
+=== RUN   TestCandidateHistoryPagesByImmutablePositionAndOwner/verified_lookup_absent
+--- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner (0.04s)
+    --- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner/resolver_unavailable (0.00s)
+    --- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner/missing_configuration (0.00s)
+    --- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner/malformed_configuration (0.00s)
+    --- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner/invalid_trust (0.00s)
+    --- PASS: TestCandidateHistoryPagesByImmutablePositionAndOwner/verified_lookup_absent (0.00s)
+=== RUN   TestCandidateHistoryBoundsBeforeDatabase
+--- PASS: TestCandidateHistoryBoundsBeforeDatabase (0.00s)
+PASS
+ok  	github.com/znasllc-io/memql/integrations/release	5.293s
+=== RUN   TestReleaseSearchPagesBeforeReturningTenAndBindsContinuation
+--- PASS: TestReleaseSearchPagesBeforeReturningTenAndBindsContinuation (0.00s)
+PASS
+ok  	github.com/znasllc-io/memql/component/releasecatalog	0.634s

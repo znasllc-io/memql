@@ -10,6 +10,7 @@
 
 import type { QueryClient, QueryCallOptions } from "./query.js";
 import type { Row } from "./types.js";
+import { buildConceptRowsSearch } from "./generated_builtins.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
 // A concept registry can hold far more than the engine's implicit
@@ -41,6 +42,8 @@ export interface ConceptBrowseOptions extends QueryCallOptions {
    */
   order?: "asc" | "desc";
   pageSize?: number;
+  /** Search public declared text fields on the server; results use ten-row pages. */
+  search?: string;
 }
 
 export async function browseConceptPage(
@@ -55,7 +58,16 @@ export async function browseConceptPage(
   // Hand-copying `cursor` + `signal` was correct for today's
   // QueryCallOptions and silently wrong the moment a field is added to it --
   // the new option would compile fine here and never reach the query.
-  const { pageSize: requestedPageSize, order, ...callOpts } = opts;
+  const { pageSize: requestedPageSize, order, search, ...callOpts } = opts;
+  if (search?.trim()) {
+    const { cursor, ...requestOpts } = callOpts;
+    const result = await query.executeNamed("conceptRowsSearch", buildConceptRowsSearch({ conceptId, search: search.trim(), cursor }), requestOpts);
+    const page = result.rows()[0];
+    if (!page || !Array.isArray(page["rows"]) || typeof page["nextCursor"] !== "string") {
+      throw new Error("Concept search returned an invalid page");
+    }
+    return { rows: page["rows"] as Row[], nextCursor: page["nextCursor"] };
+  }
   const pageSize =
     requestedPageSize !== undefined && requestedPageSize > 0
       ? requestedPageSize

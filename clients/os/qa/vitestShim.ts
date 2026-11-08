@@ -32,5 +32,8 @@ function fn(impl?: AnyFn): MockFn {
   return f;
 }
 
+// Browser scenes are disposed by page navigation, not a test runner.
+export const afterEach = (_cleanup: () => void) => {};
+
 export const vi = { fn, mock: () => {}, hoisted: <T,>(f: () => T) => f() };
 export default { vi };

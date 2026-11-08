@@ -412,10 +412,14 @@ const (
 	// string, so the literal reading would let an empty search widen a selection
 	// to every row.
 	OpIncludes ComparisonOperator = "includes"
+	// OpIncludesFold preserves literal substring semantics while folding case
+	// in SQL, before pagination. It never turns % or _ into wildcards.
+	OpIncludesFold ComparisonOperator = "includesFold"
 )
 
 // ComparisonExpression compares a field to a literal value or collection.
 type ComparisonExpression struct {
+	TextConcat       *textConcatOperand
 	Field            FieldReference
 	Operator         ComparisonOperator
 	Value            any

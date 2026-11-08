@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../../chrome/access";
 import { useConnectionStatus } from "../../../chrome/connection";
 import { useOsConnection } from "../../../live/connection";
-import { Button, Caption, ContentSkeleton, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead, useAppReach } from "../../../kit";
+import { AutoRefresh, Button, Caption, ContentSkeleton, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Refine, Subhead, useAppReach } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { formatMoment } from "../../../kit/format";
 import { allPublicationsComplete, candidateTitle, destinationKey, historiesMatch, matchingTarget, readCandidate, readDrafts, readPage, readPublications, readTargets, readyForCatalog, stateLabel, type Candidate, type Destination, type Draft, type Publication, type Target } from "./model";
 import { useReleaseRead } from "./useReleaseRead";
+import { useReleasePages } from "./useReleasePages";
+import { LoadMore } from "../../../kit/LoadMore";
+import { LiveReadVisibility } from "../../../live/useGraphRevision";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../../logs/useDebouncedValue";
 import { PrepareRelease } from "./PrepareRelease";
 import { StartRelease } from "./StartRelease";
 import { ReleaseJourney, type ReleaseNavigation } from "./ReleaseJourney";
@@ -31,7 +35,12 @@ export function ReleasesSection({ visible = true, ...navigation }: ReleaseViewPr
   return <ReleaseBrowser key={access.userId} query={connection?.query ?? null} connected={status === "connected"} visible={visible} {...navigation} onUpdates={cluster.sections.includes("updates") ? release => cluster.open("updates", { release }) : undefined} />;
 }
 
-export function ReleaseBrowser({ query, connected, visible = true, openRequest, ...navigation }: { query: ReleaseQueries | null; connected: boolean } & ReleaseViewProps) {
+export function ReleaseBrowser(props: { query: ReleaseQueries | null; connected: boolean } & ReleaseViewProps) {
+  const parentVisible = useContext(LiveReadVisibility);
+  return <LiveReadVisibility.Provider value={parentVisible && props.visible !== false && props.connected}><ReleaseBrowserContent {...props} /></LiveReadVisibility.Provider>;
+}
+
+function ReleaseBrowserContent({ query, connected, visible = true, openRequest, ...navigation }: { query: ReleaseQueries | null; connected: boolean } & ReleaseViewProps) {
   const [selected, select] = useState("");
   const [preparing, setPreparing] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -47,35 +56,42 @@ export function ReleaseBrowser({ query, connected, visible = true, openRequest, 
     const item = Array.from(list.current?.querySelectorAll<HTMLElement>("[data-candidate-key]") ?? []).find((row) => row.dataset.candidateKey === previousSelection.current);
     item?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [selected, preparing, starting, intentId]);
-  const [cursors, setCursors] = useState<string[]>([""]);
-  const cursor = cursors[cursors.length - 1]!;
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
   const available = connected && query !== null;
   const showingList = visible && !selected && !preparing && !starting && !intentId;
-  const page = useReleaseRead(`page:${cursor}`, available ? async (signal) => readPage(await query.releaseCandidates({ cursor, limit: 20 }, { signal })) : null, showingList, query);
-  const builds = useReleaseRead("builds", available ? async signal => readReleaseBuilds(await buildCall(query, "releaseBuilds", { limit: 50 }, signal)) : null, showingList, query);
+  const page = useReleasePages(`release-candidates:${needle}`, query, query && !selected && !preparing && !starting && !intentId ? async (cursor, signal) => {
+    const result = readPage(await query.releaseCandidates({ cursor, limit: 10, search: needle }, { signal }));
+    return { rows: result.candidates.map(c => ({ ...c, id: c.candidateId })), nextCursor: result.nextCursor ?? "" };
+  } : null, showingList, connected);
+  const builds = useReleasePages(`release-builds:${needle}`, query, query && !selected && !preparing && !starting && !intentId ? async (cursor, signal) => {
+    const result = await buildCall(query, "releaseBuilds", { limit: 10, cursor, search: needle }, signal);
+    return { rows: readReleaseBuilds(result).map(build => ({ ...build, id: build.intentId })), nextCursor: String(result.single()?.nextCursor ?? "") };
+  } : null, showingList, connected);
+  const listRefresh = useRef<{ query: typeof query; refresh: () => void } | null>(null);
+  if (page.source && builds.source) listRefresh.current = { query, refresh: () => { page.retry(); builds.retry(); } };
+  const refreshLists = () => { if (listRefresh.current?.query === query) listRefresh.current.refresh(); };
   const profiles = useReleaseRead("build-profiles", available ? async signal => readProfiles(await query.releaseCandidateProfiles({}, { signal })) : null, showingList, query);
   const canStart = profiles.value?.some(p => p.build);
-  if (starting) return <StartRelease query={query} connected={connected} visible={visible} back={() => setStarting(false)} prepared={id => { setStarting(false); selectIntent(id); }} />;
-  if (preparing) return <PrepareRelease query={query} connected={connected} visible={visible} back={() => setPreparing(false)} prepared={(id) => { setPreparing(false); select(id); }} />;
+  if (starting) return <StartRelease query={query} connected={connected} visible={visible} back={() => { setStarting(false); refreshLists(); }} prepared={id => { setStarting(false); selectIntent(id); }} />;
+  if (preparing) return <PrepareRelease query={query} connected={connected} visible={visible} back={() => { setPreparing(false); refreshLists(); }} prepared={(id) => { setPreparing(false); select(id); }} />;
   if (selected) return <CandidatePage key={selected} candidateId={selected} query={query} connected={connected} visible={visible} back={() => select("")} backLabel={intentId ? "Cut release" : undefined} />;
   if (intentId) return <ReleaseJourney key={intentId} intentId={intentId} query={query} connected={connected} visible={visible} back={() => selectIntent("")} onCandidate={select} {...navigation} />;
   return <div className="os-cluster os-release-list" ref={list}>
-    <Head title="Releases">{available && (profiles.value !== null || profiles.error) ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
+    <AutoRefresh resume={false} onRefresh={() => { page.retry(); builds.retry(); }} enabled={showingList && available} busy={page.snapshot.state === "seeding" || builds.snapshot.state === "seeding" || page.loadingMore || builds.loadingMore} intervalMs={20_000} />
+    <Head title="Releases"><Refine label="Search releases" search={search} onSearch={setSearch} placeholder="Search releases" />{available && (profiles.value !== null || profiles.error) ? canStart ? <AddButton data-prepare-release label="Cut release" onClick={() => { previousSelection.current = "prepare"; setStarting(true); }} /> : <AddButton data-prepare-release label="Prepare release" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }} /> : null}</Head>
     {!available ? <Notice sentence="Disconnected. Releases will update when the cluster reconnects." /> : null}
     <ReadFailure error={page.error} retry={page.retry} />
     <ReadFailure error={builds.error} retry={builds.retry} />
     <ReadFailure error={profiles.error} retry={profiles.retry} />
-    {builds.value?.length ? <><Subhead>Release requests</Subhead><RecordList as="ul" label="Release requests">{builds.value.map(build => <li key={build.intentId} data-candidate-key={build.intentId}><RecordRow name={buildTitle(build)} secondary={formatMoment(build.createdAt)} state={buildWord(build)} onOpen={() => { previousSelection.current = build.intentId; selectIntent(build.intentId); }} label={`Open release ${buildTitle(build)}`} /></li>)}</RecordList><Subhead>Prepared candidates</Subhead></> : null}
+    {builds.value?.length ? <><Subhead>Release requests</Subhead><RecordList as="ul" label="Release requests">{builds.value.map(build => <li key={build.intentId} data-candidate-key={build.intentId}><RecordRow name={buildTitle(build)} secondary={formatMoment(build.createdAt)} state={buildWord(build)} onOpen={() => { previousSelection.current = build.intentId; selectIntent(build.intentId); }} label={`Open release ${buildTitle(build)}`} /></li>)}</RecordList><LoadMore feed={builds} /><Subhead>Prepared candidates</Subhead></> : null}
     {page.value === null && available && !page.error ? <RecordListSkeleton label="Loading releases" /> : null}
-    {page.value?.candidates.length === 0 ? <Caption>No release candidates have been prepared for your review.</Caption> : null}
+    {!page.error && page.value?.length === 0 ? <Caption>No release candidates have been prepared for your review.</Caption> : null}
     <RecordList as="ul" label="Release candidates">
-      {page.value?.candidates.map((c) => <li key={c.candidateId} data-candidate-key={c.candidateId}><RecordRow name={candidateTitle(c)} secondary={formatMoment(c.createdAt)} state={stateLabel[c.state]} tone={c.state === "preparing" ? "warn" : "muted"} onOpen={() => { previousSelection.current = c.candidateId; select(c.candidateId); }} label={`Review ${candidateTitle(c)}`} /></li>)}
+      {page.value?.map((c) => <li key={c.candidateId} data-candidate-key={c.candidateId}><RecordRow name={candidateTitle(c)} secondary={formatMoment(c.createdAt)} state={stateLabel[c.state]} tone={c.state === "preparing" ? "warn" : "muted"} onOpen={() => { previousSelection.current = c.candidateId; select(c.candidateId); }} label={`Review ${candidateTitle(c)}`} /></li>)}
     </RecordList>
     {canStart ? <div className="os-panel-actions"><Button tone="quiet" onClick={() => { previousSelection.current = "prepare"; setPreparing(true); }}>Use a completed build</Button></div> : null}
-    {cursors.length > 1 || page.value?.nextCursor ? <div className="os-panel-actions">
-      {cursors.length > 1 ? <Button onClick={() => setCursors((old) => old.slice(0, -1))}>Newer</Button> : null}
-      {page.fresh && page.value?.nextCursor ? <Button onClick={() => setCursors((old) => [...old, page.value!.nextCursor!])}>Older</Button> : null}
-    </div> : null}
+    <LoadMore feed={page} />
   </div>;
 }
 

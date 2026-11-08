@@ -7,11 +7,13 @@ export const AUTO_REFRESH_MS = 15_000;
  * performs the initial read, reports failures, and cancels requests on teardown.
  * Mount beside the reading so parked panes pause along with hidden browser tabs.
  * Never use this for mutations, probes, or other actions with side effects. */
-export function AutoRefresh({ onRefresh, busy = false, enabled = true, intervalMs = AUTO_REFRESH_MS }: {
+export function AutoRefresh({ onRefresh, busy = false, enabled = true, intervalMs = AUTO_REFRESH_MS, resume = true }: {
   onRefresh: () => void | Promise<unknown>;
   busy?: boolean;
   enabled?: boolean;
   intervalMs?: number;
+  /** Session-cached collections already own browser resume recovery. */
+  resume?: boolean;
 }) {
   const marker = useRef<HTMLSpanElement>(null);
   const latest = useRef({ onRefresh, busy, enabled });
@@ -47,12 +49,12 @@ export function AutoRefresh({ onRefresh, busy = false, enabled = true, intervalM
     };
     const wake = () => { void run(); };
     schedule();
-    const stopResume = onAppResume(wake);
+    const stopResume = resume ? onAppResume(wake) : () => {};
     return () => {
       disposed = true;
       clearTimeout(timer);
       stopResume();
     };
-  }, [intervalMs]);
+  }, [intervalMs, resume]);
   return <span ref={marker} hidden aria-hidden="true" />;
 }

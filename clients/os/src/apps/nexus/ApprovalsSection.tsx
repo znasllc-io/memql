@@ -1,3 +1,10 @@
+import { approvalLabel, approvalMatches, isFailureQuestion, isRepositoryReview } from "./approvalSearch";
+export { isFailureQuestion } from "./approvalSearch";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { useApprovalDirectory, useWorkRecord, useRunRecords } from "./useNexusDirectory";
+import { useConstructRecord } from "./useAutomations";
+import { procedureFromRow } from "./ladder";
 import { isReportingFailure } from "./outcomeRecovery";
 import { useEffect, useId, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
@@ -58,7 +65,6 @@ import {
 import {
   approvalDecidedNext,
   approvalKindMeaning,
-  approvalKindWord,
   approvalParksARun,
   approvalRejectMeaning,
   decisionWord,
@@ -94,7 +100,7 @@ import {
 // that tells somebody where to change the policy.
 
 export interface ApprovalsSectionProps {
-  approvals: LiveListSource<Row> | null;
+  approvals?: LiveListSource<Row> | null;
   runs: readonly RunRow[];
   decide: DecideApprovalState;
   selectedApprovalId: string;
@@ -113,31 +119,25 @@ export interface ApprovalsSectionProps {
 
 const EMPTY_APPROVALS: LiveSnapshot<Row> = { rows: [], state: "disconnected", error: "", version: 0 };
 
-// Mirrors work.IsFailureQuestion: these offered values identify a recovery
-// decision even when an older approval carries the planReview kind.
-export function isFailureQuestion(approval: ApprovalRow): boolean {
-  return approval.subject?.progressLimit !== true && approval.kind !== "budget" && approval.options.some(option => option.value === "retry")
-    && approval.options.some(option => option.value === "abandon");
-}
-
-function approvalLabel(approval: ApprovalRow): string {
-  if (isRepositoryReview(approval)) return "Repository change";
-  return isFailureQuestion(approval) ? "Work stopped" : approvalKindWord(approval.kind);
-}
-
 export function ApprovalsSection({
-  approvals,
-  runs,
+  approvals: suppliedApprovals,
+  runs: suppliedRuns,
   decide,
   selectedApprovalId,
   onSelectApproval,
   onOpenRun,
   onAnswerInAsk,
   onDiscussInAsk,
-  procedures = [],
+  procedures: suppliedProcedures = [],
   onOpenProcedure,
 }: ApprovalsSectionProps) {
   const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search, 200);
+  const directory = useApprovalDirectory(query, suppliedApprovals === undefined);
+  const approvals = suppliedApprovals === undefined ? directory.source : suppliedApprovals;
+  const selectedFeed = useWorkRecord("approval", suppliedApprovals === undefined ? selectedApprovalId : "");
+  const visibleRuns = useRunRecords(suppliedApprovals === undefined ? directory.snapshot.rows.map(row => approvalFromRow(row).runId) : []);
+  const runs = useMemo(() => [...new Map([...suppliedRuns, ...visibleRuns.snapshot.rows.map(runFromRow)].map(run => [idTail(run.id), run])).values()], [suppliedRuns, visibleRuns.snapshot]);
   const [choice, setChoice] = useState("");
   const [choices, setChoices] = useState<string[]>([]);
   const [freeText, setFreeText] = useState("");
@@ -148,26 +148,21 @@ export function ApprovalsSection({
   const [olderRun, setOlderRun] = useState<RunRow | null>(null);
   const [olderRunError, setOlderRunError] = useState("");
   const [runReadAttempt, setRunReadAttempt] = useState(0);
-  const snapshot = useSyncExternalStore(
+  const listSnapshot = useSyncExternalStore(
     useMemo(() => approvals ? approvals.subscribe.bind(approvals) : () => () => {}, [approvals]),
     () => approvals?.snapshot ?? EMPTY_APPROVALS,
   );
 
-  const viewKey = `approvals:${search.trim().toLowerCase()}`;
+  const selectedPending = listSnapshot.rows.find(row => idTail(String(row.id ?? "")) === idTail(selectedApprovalId));
+  const snapshot = selectedApprovalId && suppliedApprovals === undefined && !(selectedFeed.snapshot.state === "seeding" && selectedPending) ? selectedFeed.snapshot : listSnapshot;
+  const viewKey = `approvals:${query.trim().toLowerCase()}`;
   const view = useLiveView<Row, ApprovalRow>(approvals, viewKey, (rows) => {
-    const needle = search.trim().toLowerCase();
+    const needle = query.trim().toLowerCase();
     const projected = rows
       .map(approvalFromRow)
       .filter((approval) => approval.id !== "")
       .filter(approvalIsPending)
-      .filter((approval) =>
-        needle === ""
-          ? true
-          : [approval.kind, approvalLabel(approval), approvalSubjectLine(approval), approval.evidenceReason, approval.stepKey]
-              .join(" ")
-              .toLowerCase()
-              .includes(needle),
-      );
+      .filter((approval) => approvalMatches(approval, needle));
     // OLDEST FIRST, WHICH IS THE OPPOSITE OF EVERY OTHER LIST IN THIS APP.
     // A queue is answered from the front: the approval that has waited longest
     // is the run that has been stopped longest, and burying it under this
@@ -181,6 +176,8 @@ export function ApprovalsSection({
   // A deep link still opens when the list's retained search excludes it.
   // Subscribe here too: the list unmounts while its detail is open.
   const selected = snapshot.rows.map(approvalFromRow).find((a) => idTail(a.id) === idTail(selectedApprovalId)) ?? null;
+  const procedureFeed = useConstructRecord(selected ? promotionSubject(selected)?.constructId ?? "" : "");
+  const procedures = procedureFeed.snapshot.rows.length ? procedureFeed.snapshot.rows.map(procedureFromRow) : suppliedProcedures;
   const lapsed = selected !== null && selected.expiresAt !== "" && Date.parse(selected.expiresAt) <= now.getTime();
   const runsById = useMemo(() => {
     const byId = new Map<string, RunRow>();
@@ -364,7 +361,7 @@ export function ApprovalsSection({
         title={selected ? approvalLabel(selected) : "Approval"}
         back={{ label: "Approvals", onSelect: back }}
         breadcrumbs={[{ label: "Approvals", onSelect: back }, { label: selected ? approvalLabel(selected) : "Approval" }]}
-      /> : <Head title="Approvals" meta={listCount(view?.snapshot, (view?.snapshot.rows.length ?? 0) + resumable.length)}>
+      /> : <Head title="Approvals" meta={listCount(view?.snapshot) === undefined ? undefined : `${(view?.snapshot.rows.length ?? 0) + resumable.length} shown`}>
         <Button tone="quiet" onClick={() => setShowPermissions(true)}>Saved permissions</Button>
         <Refine search={search} onSearch={setSearch} placeholder="Kind, question or reason" label="Search your approvals" />
       </Head>}
@@ -389,7 +386,7 @@ export function ApprovalsSection({
             now={now}
             onOpen={() => onSelectApproval(approval.id)}
           />}
-        /></> : <>
+        />{suppliedApprovals === undefined ? <LoadMore feed={directory} /> : null}</> : <>
           {snapshot.error ? <Notice tone="error" sentence="Could not refresh this approval." detail={snapshot.error} />
             : snapshot.state === "disconnected" || snapshot.state === "degraded" ? <Notice tone="warn" sentence="Not connected to live approvals." next="This is the last known state." /> : null}
           {selected === null ? <Notice tone="info" sentence={approvalResume ? "This request was approved. Resume this work when you are ready." : snapshot.state === "seeding" ? "Loading this approval." : snapshot.state === "live" && !snapshot.error ? "This approval is no longer waiting." : "This approval is unavailable."} next="Back returns to your approvals." />
@@ -857,10 +854,6 @@ function decisionLabels(approval: ApprovalRow): { approve: string; reject: strin
   const approve = offered("approved");
   const reject = offered("rejected");
   return { approve: approve || "Approve", reject: reject || "Reject" };
-}
-
-function isRepositoryReview(approval: ApprovalRow): boolean {
-  return approval.kind === "planReview" && approval.subject?.reviewType === "repository-change" && !isFailureQuestion(approval);
 }
 
 function approvalDecisionWord(approval: ApprovalRow): string {

@@ -1,0 +1,130 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 8,
+  "numPassedTests": 7,
+  "numFailedTests": 1,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1794098810836,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "uses two ten-row queries to show the newest ten combined records and retains the loaded window on reopen",
+          "status": "passed",
+          "title": "uses two ten-row queries to show the newest ten combined records and retains the loaded window on reopen",
+          "duration": 70.46591599999994,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "searches and filters the server population before paging, including records beyond the initial page",
+          "status": "passed",
+          "title": "searches and filters the server population before paging, including records beyond the initial page",
+          "duration": 56.32650000000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "holds the merged window until both page frontiers succeed and retries only the failed side",
+          "status": "passed",
+          "title": "holds the merged window until both page frontiers succeed and retries only the failed side",
+          "duration": 56.71341600000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "waits for group membership before asking the directory and suppresses unrelated catalogs",
+          "status": "passed",
+          "title": "waits for group membership before asking the directory and suppresses unrelated catalogs",
+          "duration": 2.228417000000036,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the merged window behind an interrupted frontier and retries only that side",
+          "status": "passed",
+          "title": "keeps the merged window behind an interrupted frontier and retries only that side",
+          "duration": 109.52075000000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not reveal a merged page when a second Load more overlaps its pending frontier",
+          "status": "passed",
+          "title": "does not reveal a merged page when a second Load more overlaps its pending frontier",
+          "duration": 55.820875,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "shares a completed merged window across consumers while a new authenticated connection starts at ten",
+          "status": "passed",
+          "title": "shares a completed merged window across consumers while a new authenticated connection starts at ten",
+          "duration": 116.98749999999995,
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "fills holes left by accepted invitations before exposing older people from the other frontier",
+          "status": "failed",
+          "title": "fills holes left by accepted invitations before exposing older people from the other frontier",
+          "duration": 65.33083299999998,
+          "failureMessages": [
+            "AssertionError: expected [ 'invite-19', 'invite-18', \u2026(18) ] to deeply equal [ 'invite-19', 'invite-18', \u2026(18) ]\n    at /Users/znas/memql-os-lists/clients/os/test/users/directory.test.tsx:136:54\n    at file:///Users/znas/memql-os-lists/clients/os/node_modules/vitest/dist/chunks/run.BPv-BBRv.js:2801:20"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1794098811307,
+      "endTime": 1794098811841.3308,
+      "status": "failed",
+      "message": "",
+      "name": "/Users/znas/memql-os-lists/clients/os/test/users/directory.test.tsx"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+Command: npm test -- --run (sdk/ts)
+
+  ...
+1..489
+# tests 489
+# suites 0
+# pass 489
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5015.209583

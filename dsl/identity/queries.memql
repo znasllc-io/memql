@@ -350,9 +350,19 @@ query user usersForSeedSweep {
 @requiresRank("developer")
 query user searchUsers {
   args {
-    active  boolean
+    active boolean
+    search string
+    role string
+    state string
+    showDeactivated boolean
+    memberIds []string
   }
-  filter  row => args.active == nil || row.active == args.active
+  filter row => (args.active == nil || row.active == args.active)
+    && (args.memberIds == nil || row.id in args.memberIds)
+    && (args.role == nil || args.role == "" || row.role == args.role)
+    && (args.showDeactivated == nil || args.showDeactivated == true || ((row.active == nil || isActiveRecord(row)) && (row.suspendedAt == nil || row.suspendedAt == "")))
+    && (args.state == nil || args.state == "" || (args.state == "active" && (row.active == nil || isActiveRecord(row)) && (row.suspendedAt == nil || row.suspendedAt == "")) || (args.state == "deactivated" && (row.active == false || (row.suspendedAt != nil && row.suspendedAt != ""))))
+    && (args.search == nil || trim(args.search) == "" || row.displayName.includes(trim(args.search), true) || row.firstName.includes(trim(args.search), true) || row.lastName.includes(trim(args.search), true) || row.primaryEmail.includes(trim(args.search), true) || (row.firstName + " " + row.lastName).includes(trim(args.search), true))
   sort    "row.createdAt", "desc"
   shape   userFull
 }
@@ -1492,12 +1502,15 @@ query identity patIdentityByKeyHash {
 /// Access requests with status=pending; backs the admin review queue.
 @requiresRank("admin")
 query accessRequest pendingAccessRequests {
-  filter  row => statusIsPending(row)
+  args {
+    search string
+  }
+  filter row => statusIsPending(row) && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.email.includes(trim(args.search), true) || row.additionalContext.includes(trim(args.search), true))
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
   sort     "row.createdAt", "desc"
-  paginate 50
+  paginate 10
   shape   accessRequestFull
 }
 
@@ -2731,7 +2744,19 @@ query identity activeRecoveryKeys {
 /// their own product-side surface.
 @requiresRank("developer")
 query invitation pendingUserInvitations {
-  filter  row => row.kind == "user" && statusIsPending(row) && isActiveRecord(row)
+  args {
+    search string
+    role string
+    groupId string
+    state string
+    unexpired boolean
+  }
+  filter row => row.kind == "user" && statusIsPending(row) && isActiveRecord(row)
+    && (args.unexpired != true || row.expiresAt == nil || row.expiresAt == "" || row.expiresAt > now)
+    && (args.role == nil || args.role == "" || row.inviteeRole == args.role)
+    && (args.groupId == nil || args.groupId == "" || args.groupId in row.groupIds)
+    && (args.state == nil || args.state == "" || args.state == "invited")
+    && (args.search == nil || trim(args.search) == "" || row.inviteeName.includes(trim(args.search), true) || row.inviteeEmail.includes(trim(args.search), true))
   sort    "row.createdAt", "desc"
   // AN EXPLICIT SHAPE, ADDED LATE (memql#4735). This query declared none, and a query with no
   // shape projects the bound concept's EVERY field -- so it handed `tokenHash`,
@@ -2835,6 +2860,22 @@ query group groupsAll {
   sort    "name", "asc"
 }
 
+/// Ten recent authorized groups, with name and description search before paging.
+@cache(0)
+query group groupsBrowse {
+  args {
+    search string
+    includeArchived boolean
+  }
+  filter row => (statusIsActive(row) || args.includeArchived == true)
+             && (args.search == nil || trim(args.search) == ""
+                 || row.name.includes(trim(args.search), true)
+                 || row.description.includes(trim(args.search), true))
+  shape groupFull
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+}
+
 /// One group by id, for its page.
 query group groupById {
   args {
@@ -2876,4 +2917,18 @@ query groupMembership groupsForUser {
   filter  row => row.userId == args.userId && (statusIsActive(row) || args.includeRemoved == true)
   shape   groupMembershipFull
   sort    "row.createdAt", "desc"
+}
+
+/// Search the authorized audit trail before its ten-row page boundary.
+@actor
+query auditEvent auditEventsBrowse {
+ args {
+  category string
+  search string
+ }
+ filter row => actor.isClusterOwner == true && (args.category == nil || row.category == args.category)
+   && (args.search == nil || trim(args.search) == "" || row.action.includes(trim(args.search), true) || row.category.includes(trim(args.search), true) || row.actorEmail.includes(trim(args.search), true) || row.targetType.includes(trim(args.search), true) || row.targetId.includes(trim(args.search), true) || row.outcome.includes(trim(args.search), true))
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape auditEventFull
 }

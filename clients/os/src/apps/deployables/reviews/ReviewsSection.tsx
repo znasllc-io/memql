@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { MessageSquareText } from "lucide-react";
 
 import { Button, Caption, EmptyState, Head, Notice, RecordListSkeleton, useNow } from "../../../kit";
+import { LoadMore } from "../../../kit/LoadMore";
+import { Input } from "../../../kit/controls";
 import { ActionBar } from "../../../kit/ActionBar";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { formatMoment } from "../../../kit/format";
@@ -114,8 +116,8 @@ function ReviewList({ state, scope, heading, writes, moderates, onOpen }: {
   moderates: boolean;
   onOpen: (reviewId: string) => void;
 }) {
-  const [pages, setPages] = useState(1);
-  const list = useReviewList(scope, state, pages, writes.revision);
+  const [search, setSearch] = useState("");
+  const list = useReviewList(scope, state, search, writes.revision);
   const now = useNow(60_000);
   const page = list.value;
   const rows = page?.reviews ?? [];
@@ -129,6 +131,7 @@ function ReviewList({ state, scope, heading, writes, moderates, onOpen }: {
 
   return (
     <ReviewsPane heading={heading} bar={bar} context={{ page: "Reviews", view: tabName(state), siteId: scope.siteId, storeId: scope.storeId }}>
+      <Input id="review-directory-search" value={search} onChange={setSearch} label="Search reviews" placeholder="Search reviews" />
       {!moderates ? <Caption>You can read this store&rsquo;s reviews. Its own people publish and decline them.</Caption> : null}
       {writes.refusal ? <Notice tone="error" sentence={writes.refusal} /> : null}
       {list.state === "failed" && page === null ? (
@@ -136,15 +139,13 @@ function ReviewList({ state, scope, heading, writes, moderates, onOpen }: {
       ) : page === null ? (
         <RecordListSkeleton label="Reading reviews" rows={3} />
       ) : rows.length === 0 ? (
-        <EmptyState title={waiting ? "Nothing waiting" : "Nothing published"} icon={MessageSquareText}>{emptyFilterSentence(state)}</EmptyState>
+        <EmptyState title={search ? "No matching reviews" : waiting ? "Nothing waiting" : "Nothing published"} icon={MessageSquareText}>{emptyFilterSentence(state)}</EmptyState>
       ) : (
         <RecordList as="ul" label={waiting ? "Waiting reviews" : "Published reviews"}>
           {rows.map((review) => <ReviewListRow key={review.id} review={review} now={now} onOpen={() => onOpen(review.id)} />)}
         </RecordList>
       )}
-      {page !== null && page.next !== "" && pages < 4 ? (
-        <div><Button tone="quiet" onClick={() => setPages((n) => n + 1)}>Show more</Button></div>
-      ) : null}
+      <LoadMore feed={list} />
     </ReviewsPane>
   );
 }

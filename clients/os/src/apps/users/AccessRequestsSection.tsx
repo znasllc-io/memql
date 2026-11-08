@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { IdentityAdminClient } from "@znasllc-io/memql-sdk-core/identityadmin";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection } from "../../live/useLiveCollection";
+import { usePagedCollection } from "../../live/useLiveCollection";
 import { LiveList } from "../../live/LiveList";
 import { ActionBar } from "../../kit/ActionBar";
 import { Button, Caption, CopyValue, Field, Head, Input, Notice, RecordRow, Select, roleRungOf } from "../../kit";
@@ -10,20 +10,26 @@ import { Button, Caption, CopyValue, Field, Head, Input, Notice, RecordRow, Sele
 import type { RoleCatalog } from "./useRoles";
 import { rungRefusal, rungSentence, type AssignContext } from "./assign";
 
+import { LoadMore } from "../../kit/LoadMore";
+import { Refine } from "../../kit";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+
 const CONCEPT = "v1:identity:accessRequest";
 const text = (row: Row, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 
 export function AccessRequestsSection({ catalog, viewerRole, canReview }: { catalog: RoleCatalog; viewerRole: string; canReview: boolean }) {
   const connection = useOsConnection();
   const client = useMemo(() => connection?.dispatcher ? new IdentityAdminClient(connection.dispatcher) : null, [connection]);
-  const requests = useLiveCollection<Row>("users:access-requests", connection => ({
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), 250);
+  const requests = usePagedCollection<Row>(`users:access-requests:${needle}`, connection => ({
     concept: CONCEPT, actions: ["created", "updated"],
     seed: async (cursor, signal) => {
-      const result = await connection.query.pendingAccessRequests({}, { signal, ...(cursor ? { cursor } : {}) });
+      const result = await connection.query.pendingAccessRequests({ search: needle || undefined }, { signal, cursor });
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: (id, signal) => getRowByConceptAndId(connection.query, CONCEPT, id, { signal }),
-    inScope: row => text(row, "status") === "pending",
+    inScope: row => text(row, "status") === "pending" && (!needle || ["name", "email", "additionalContext"].some(key => text(row, key).toLocaleLowerCase().includes(needle.toLocaleLowerCase()))),
   }));
   const caller = roleRungOf(viewerRole);
   const assignContext: AssignContext = { kind: "invitation", callerRole: viewerRole, callerRank: caller?.rank ?? 0,
@@ -71,12 +77,14 @@ export function AccessRequestsSection({ catalog, viewerRole, canReview }: { cata
   </div>;
   return <div className="os-settings">
     <Head title="Access requests" />
+    <Refine search={search} onSearch={setSearch} label="Search access requests" placeholder="Search access requests" />
     <Caption>Review who may join. Approval creates an invitation; an account is created when they accept it.</Caption>
     {requests.snapshot.error ? <Notice tone="error" sentence="Access requests could not be read."><Button onClick={requests.reseed}>Try again</Button></Notice> : null}
     <LiveList<Row> source={requests.source} rowId={row => text(row, "id")} fingerprint={row => `${text(row, "status")}|${text(row, "email")}`}
-      label="Pending access requests" emptyText="No access requests waiting for review."
+      label="Pending access requests" emptyText={needle ? "No access requests match." : "No access requests waiting for review."}
       renderRow={(row, tick) => <RecordRow name={text(row, "name") || text(row, "email")} secondary={text(row, "name") ? text(row, "email") : undefined}
         state="Pending" stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         onOpen={() => { select(row); setRole(""); setNote(""); setError(""); setResult(null); }} />} />
+    <LoadMore feed={requests} />
   </div>;
 }

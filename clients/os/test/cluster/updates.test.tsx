@@ -35,10 +35,9 @@ describe("signed update discovery", () => {
     expect(screen.queryByRole("button", { name: /install|deploy|approve/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back to MemQL" }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Inspect engine 0.25.0" })));
-    fireEvent.click(screen.getByRole("button", { name: "Older" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     await waitFor(() => expect(f.state.calls).toContain("page:older"));
-    fireEvent.click(screen.getByRole("button", { name: "Newer" }));
-    await waitFor(() => expect(f.state.calls.filter(c => c === "page:").length).toBeGreaterThan(1));
+    expect(f.state.calls.filter(c => c === "page:")).toHaveLength(1);
   });
   it("refuses a changed selection and distinguishes a failed read from an empty list", async () => {
     const f = fixture(); f.state.fail = true;

@@ -1,7 +1,7 @@
 import { getRowByConceptAndId, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
-import { membershipFromRow } from "./rows";
+import { useLiveCollection, usePagedCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import { groupFromRow, membershipFromRow } from "./rows";
 
 // The groups feed, and the two membership reads.
 //
@@ -39,19 +39,46 @@ export const MEMBERSHIP_CONCEPT = "v1:identity:groupMembership";
  * read and re-baseline every arrival cue -- so flipping it would announce the
  * whole list as new.
  */
-export function useGroups(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("users:groups", (connection) => ({
+export function useGroups(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "users:groups" : null, (connection) => ({
     concept: GROUP_CONCEPT,
     actions: ["created", "updated"],
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.groupsAll({ includeArchived: true }, { signal });
-      return { rows: result.rows(), nextCursor: "" };
+    seed: async (cursor, signal) => {
+      const result = await connection.query.groupsAll({ includeArchived: true }, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, GROUP_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;
     },
-    paged: false,
+  }));
+}
+
+export function useGroupDirectory(search: string, includeArchived: boolean) {
+  const needle = search.trim();
+  return usePagedCollection<Row>(`users:groups:directory:${JSON.stringify([needle, includeArchived])}`, connection => ({
+    concept: GROUP_CONCEPT,
+    actions: ["created", "updated"],
+    seed: async (cursor, signal) => {
+      const result = await connection.query.groupsBrowse({ search: needle || undefined, includeArchived }, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (groupId, signal) => (await connection.query.groupById({ groupId }, { signal })).rows()[0] ?? null,
+    comparePageRows: (a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(a["id"]).localeCompare(String(b["id"])),
+    inScope: raw => {
+      const group = groupFromRow(raw);
+      return (includeArchived || group.status === "active") && (!needle || [group.name, group.description].some(text => text.toLowerCase().includes(needle.toLowerCase())));
+    },
+  }));
+}
+
+export function useGroupRecord(groupId: string) {
+  return useLiveCollection<Row>(groupId ? `users:group:${groupId}` : null, connection => ({
+    concept: GROUP_CONCEPT,
+    eventInScope: id => id === groupId,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.groupById({ groupId }, { signal })).rows(), nextCursor: "" }),
+    reread: async (id, signal) => (await connection.query.groupById({ groupId: id }, { signal })).rows()[0] ?? null,
+    inScope: raw => groupFromRow(raw).id === groupId,
   }));
 }
 
@@ -65,13 +92,13 @@ export function useMembersOfGroup(groupId: string): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>(`users:members:${groupId}`, (connection) => ({
     concept: MEMBERSHIP_CONCEPT,
     actions: ["created", "updated"],
-    seed: async (_cursor, signal) => {
+    seed: async (cursor, signal) => {
       if (groupId === "") return { rows: [], nextCursor: "" };
       const result = await connection.query.membersOfGroup(
         { groupId, includeRemoved: false },
-        { signal },
+        { signal, ...(cursor ? { cursor } : {}) },
       );
-      return { rows: result.rows(), nextCursor: "" };
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, MEMBERSHIP_CONCEPT, rowId, { signal });
@@ -84,7 +111,6 @@ export function useMembersOfGroup(groupId: string): LiveCollectionHandle<Row> {
       const membership = membershipFromRow(row);
       return membership.groupId === groupId && membership.status === "active";
     },
-    paged: false,
   }));
 }
 
@@ -93,13 +119,13 @@ export function useGroupsForUser(userId: string): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>(`users:memberships:${userId}`, (connection) => ({
     concept: MEMBERSHIP_CONCEPT,
     actions: ["created", "updated"],
-    seed: async (_cursor, signal) => {
+    seed: async (cursor, signal) => {
       if (userId === "") return { rows: [], nextCursor: "" };
       const result = await connection.query.groupsForUser(
         { userId, includeRemoved: false },
-        { signal },
+        { signal, ...(cursor ? { cursor } : {}) },
       );
-      return { rows: result.rows(), nextCursor: "" };
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, MEMBERSHIP_CONCEPT, rowId, { signal });
@@ -109,7 +135,6 @@ export function useGroupsForUser(userId: string): LiveCollectionHandle<Row> {
       const membership = membershipFromRow(row);
       return membership.userId === userId && membership.status === "active";
     },
-    paged: false,
   }));
 }
 

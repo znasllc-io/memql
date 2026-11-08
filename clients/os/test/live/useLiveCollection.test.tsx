@@ -1,19 +1,29 @@
 import { StrictMode, type ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type { Connection, ConnectionStatus } from "@znasllc-io/memql-sdk-core/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Connection, ConnectionStatus, Event as GraphEvent } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 const { useLiveCollection } = await import("../../src/live/useLiveCollection");
+const { disposeSessionCollections } = await import("../../src/live/sessionCollections");
+const { LiveReadVisibility } = await import("../../src/live/useGraphRevision");
+afterEach(() => { if (h.connection) disposeSessionCollections(h.connection as Connection); });
 
 function connection() {
   const cycles = new Set<(cycle: number) => void>();
   const statuses = new Set<(event: { status: ConnectionStatus }) => void>();
+  const deliveries = new Set<(event: GraphEvent) => void>();
   let status: ConnectionStatus = "connected";
   const conn = {
     get status() { return status; },
-    subscriptions: { subscribeGraph: vi.fn(() => () => {}) },
+    subscriptions: {
+      subscribeGraph: vi.fn(() => () => {}),
+      onDelivery: vi.fn((handler: (event: GraphEvent) => void) => {
+        deliveries.add(handler);
+        return () => deliveries.delete(handler);
+      }),
+    },
     onConnectionCycle: (handler: (cycle: number) => void) => {
       cycles.add(handler);
       return () => cycles.delete(handler);
@@ -31,13 +41,54 @@ function connection() {
       conn.setStatus("connected");
       for (const handler of cycles) handler(1);
     },
-    cycles, statuses,
+    deliver(seq: number, gapBefore = false) {
+      const event: GraphEvent = { subscriptionId: "unrelated", kind: "NODE_UPDATED", payload: null,
+        payloadOmitted: true, timestamp: null, seq, gapBefore };
+      for (const handler of deliveries) handler(event);
+    },
+    cycles, statuses, deliveries,
   };
   h.connection = conn as unknown as Connection;
   return conn;
 }
 
 describe("live collection reconnects", () => {
+  it("repairs noncached readers on stream gaps without duplicating reconnect or resume recovery", async () => {
+    const conn = connection();
+    const seed = vi.fn().mockResolvedValue({ rows: [{ id: "initial" }], nextCursor: "" });
+    const wrapper = ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>;
+    const { result, unmount } = renderHook(() => useLiveCollection("composed", () => ({ concept: "c", seed }), { cacheReleased: false }), { wrapper });
+    await waitFor(() => expect(seed).toHaveBeenCalledTimes(1));
+    seed.mockResolvedValue({ rows: [{ id: "repaired" }], nextCursor: "" });
+    act(() => { conn.deliver(1); conn.deliver(3); });
+    await waitFor(() => expect(result.current.snapshot.rows).toEqual([{ id: "repaired" }]));
+    expect(seed).toHaveBeenCalledTimes(2);
+    act(() => conn.deliver(4, true));
+    await waitFor(() => expect(seed).toHaveBeenCalledTimes(3));
+    expect(conn.subscriptions.onDelivery).toHaveBeenCalledTimes(1);
+    expect(conn.cycles.size).toBe(1);
+
+    const markDisconnected = vi.spyOn(result.current.source as unknown as { markDisconnected(): void }, "markDisconnected");
+    act(() => conn.setStatus("reconnecting"));
+    expect(markDisconnected).toHaveBeenCalledTimes(1);
+    expect(result.current.snapshot.state).toBe("disconnected");
+    act(() => conn.reconnected());
+    await waitFor(() => expect(seed).toHaveBeenCalledTimes(4));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    expect(seed).toHaveBeenCalledTimes(4);
+    unmount();
+    act(() => { conn.deliver(6, true); conn.reconnected(); });
+    expect(seed).toHaveBeenCalledTimes(4);
+    disposeSessionCollections(conn as unknown as Connection);
+    expect(conn.cycles.size).toBe(0);
+    expect(conn.statuses.size).toBe(0);
+    expect(conn.deliveries.size).toBe(0);
+  });
+
   it("classifies a transport-interrupted seed as disconnected rather than a failed read", async () => {
     const conn = connection();
     const seed = vi.fn().mockRejectedValueOnce(Object.assign(new Error("stream closed"), {reason:"transport"})).mockResolvedValueOnce({rows:[{id:"recovered"}],nextCursor:""});
@@ -66,6 +117,7 @@ describe("live collection reconnects", () => {
     expect(result.current.snapshot.error).toBe("");
     expect(seed).toHaveBeenCalledTimes(2);
     unmount();
+    disposeSessionCollections(conn as unknown as Connection);
     expect(conn.cycles.size).toBe(0);
     expect(conn.statuses.size).toBe(0);
     act(() => conn.reconnected());
@@ -98,8 +150,38 @@ describe("live collection reconnects", () => {
     act(() => conn.reconnected());
     await waitFor(() => expect(seed).toHaveBeenCalledTimes(2));
     unmount();
+    disposeSessionCollections(conn as unknown as Connection);
     expect(conn.cycles.size).toBe(0);
     expect(conn.statuses.size).toBe(0);
+  });
+
+  it("shares a resource read and subscription across windows and reopening", async () => {
+    const conn = connection();
+    const seed = vi.fn().mockResolvedValue({ rows: [{ id: "retained" }], nextCursor: "" });
+    const first = renderHook(() => useLiveCollection("shared", () => ({ concept: "c", seed })));
+    const second = renderHook(() => useLiveCollection("shared", () => ({ concept: "c", seed })));
+    await waitFor(() => expect(first.result.current.snapshot.rows).toHaveLength(1));
+    expect(first.result.current.source).toBe(second.result.current.source);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(conn.subscriptions.subscribeGraph).toHaveBeenCalledTimes(1);
+    first.unmount(); second.unmount();
+    const reopened = renderHook(() => useLiveCollection("shared", () => ({ concept: "c", seed })));
+    expect(reopened.result.current.snapshot.rows).toEqual([{ id: "retained" }]);
+    expect(seed).toHaveBeenCalledTimes(1);
+    reopened.unmount();
+  });
+
+  it("does no reads for parked content until it becomes visible", async () => {
+    connection();
+    const seed = vi.fn().mockResolvedValue({ rows: [{ id: "visible" }], nextCursor: "" });
+    const hidden = renderHook(() => useLiveCollection("parked", () => ({ concept: "c", seed })), {
+      wrapper: ({ children }: { children: ReactNode }) => <LiveReadVisibility.Provider value={false}>{children}</LiveReadVisibility.Provider>,
+    });
+    expect(seed).not.toHaveBeenCalled();
+    hidden.unmount();
+    const shown = renderHook(() => useLiveCollection("parked", () => ({ concept: "c", seed })));
+    await waitFor(() => expect(shown.result.current.snapshot.rows).toHaveLength(1));
+    expect(seed).toHaveBeenCalledTimes(1);
   });
 
   it("discards a late disconnected read and finishes the queued fresh read", async () => {

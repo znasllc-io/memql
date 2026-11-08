@@ -5,7 +5,7 @@ import { RecordList, RecordRow, RecordListSkeleton } from "../../kit";
 import type { FolderRow } from "./rows";
 
 export function FileFolders({ folders, counts, loading, renamingId, onOpen, onRename, onCancelRename, onMenu }: {
-  folders: readonly FolderRow[]; counts: ReadonlyMap<string, number>; loading: boolean;
+  folders: readonly FolderRow[]; counts: ReadonlyMap<string, number> | null; loading: boolean;
   renamingId: string; onOpen: (id: string) => void; onRename: (id: string, name: string) => void;
   onCancelRename: () => void; onMenu: (x: number, y: number, folder: FolderRow) => void;
 }) {
@@ -15,7 +15,7 @@ export function FileFolders({ folders, counts, loading, renamingId, onOpen, onRe
     {folders.map(folder => <div key={folder.id} onContextMenu={event => { event.preventDefault(); onMenu(event.clientX, event.clientY, folder); }}>
       {renamingId === folder.id ? <FolderRename key={folder.id} folder={folder} onRename={onRename} onCancel={onCancelRename} /> :
         <RecordRow icon={<Folder size={17} aria-hidden />} name={folder.name} label={`Open folder ${folder.name}`}
-          secondary={`${counts.get(folder.id) ?? 0} ${(counts.get(folder.id) ?? 0) === 1 ? "file" : "files"}`} onOpen={() => onOpen(folder.id)}
+          secondary={counts ? `${counts.get(folder.id) ?? 0} ${(counts.get(folder.id) ?? 0) === 1 ? "file" : "files"}` : "Loading count…"} onOpen={() => onOpen(folder.id)}
           actionLayout="compact" actions={<IconButton label={`Actions for folder ${folder.name}`} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); onMenu(rect.right, rect.bottom, folder); }}><MoreHorizontal size={16} aria-hidden /></IconButton>} />}
     </div>)}
   </RecordList>;

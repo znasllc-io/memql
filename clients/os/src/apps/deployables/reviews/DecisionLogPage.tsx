@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react";
 import { ScrollText } from "lucide-react";
 
 import { Button, EmptyState, Notice, RecordListSkeleton } from "../../../kit";
+import { LoadMore } from "../../../kit/LoadMore";
+import { Input } from "../../../kit/controls";
 import { ActionBar } from "../../../kit/ActionBar";
 import { formatMoment } from "../../../kit/format";
 import { PageHelp } from "../../../kit/pageHelp";
@@ -27,8 +29,8 @@ export function DecisionLog({ scope, heading, revision, nameOf, viewerUserId, on
   viewerUserId: string;
   onOpenReview: (reviewId: string) => void;
 }) {
-  const [pages, setPages] = useState(1);
-  const log = useDecisionLog(scope, pages, revision);
+  const [search, setSearch] = useState("");
+  const log = useDecisionLog(scope, search, revision);
   const page = log.value;
   const who = (userId: string) => deployedByLabel(userId, viewerUserId, nameOf) || "someone";
 
@@ -39,6 +41,7 @@ export function DecisionLog({ scope, heading, revision, nameOf, viewerUserId, on
 
   return (
     <ReviewsPane heading={heading} bar={bar} context={{ page: "Decision log", siteId: scope.siteId, storeId: scope.storeId }}>
+      <Input id="review-directory-search" value={search} onChange={setSearch} label="Search decisions" placeholder="Search decisions" />
       <PageHelp title="Decision log">
         <p>Every decision on this store&rsquo;s reviews, newest first: what was decided and why, on which review, by whom and when. Select a decision to open its review.</p>
       </PageHelp>
@@ -47,15 +50,13 @@ export function DecisionLog({ scope, heading, revision, nameOf, viewerUserId, on
       ) : page === null ? (
         <RecordListSkeleton label="Reading the decision log" rows={3} />
       ) : page.entries.length === 0 ? (
-        <EmptyState title="No decisions yet" icon={ScrollText}>Each publish, decline and removal is recorded here as it is made.</EmptyState>
+        <EmptyState title={search ? "No matching decisions" : "No decisions yet"} icon={ScrollText}>Each publish, decline and removal is recorded here as it is made.</EmptyState>
       ) : (
         <RecordList as="ul" label="Decision log">
           {page.entries.map((entry) => <LogRow key={entry.id} entry={entry} who={who} onOpen={() => onOpenReview(entry.reviewId)} />)}
         </RecordList>
       )}
-      {page !== null && page.next !== "" && pages < 4 ? (
-        <div><Button tone="quiet" onClick={() => setPages((n) => n + 1)}>Show more</Button></div>
-      ) : null}
+      <LoadMore feed={log} />
     </ReviewsPane>
   );
 }

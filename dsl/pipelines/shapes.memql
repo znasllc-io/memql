@@ -7,6 +7,71 @@
 // namespace holds a token or a secret value, and secretNames, credentialId and
 // secretRef are projected deliberately because they are NAMES.
 
+/// The pipeline's human-facing facts, without polling heads or timing tables.
+@row
+shape pipeline pipelineSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  packageId
+  name
+  repository
+  defaultBranch
+  installationId
+  delivery
+  compute
+  status
+  secretNames
+  channelIds
+  connectedAt
+}
+
+/// All OS run facts and actions, without immutable execution-policy payloads
+/// or replica lease bookkeeping. Steps and artifacts remain detail reads.
+@row
+shape run pipelineRunSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  pipelineId
+  repository
+  sha
+  mode
+  event
+  runKey
+  attempt
+  trigger
+  rerunOf
+  rerunFailedOnly
+  pullRequest
+  headBranch
+  title
+  version
+  status
+  conclusion
+  refusalCode
+  refusalMessage
+  refusalScope
+  failureCode
+  failureMessage
+  checkRunId
+  checkRunState
+  notes
+  workRunId
+  workGoalId
+  maintenanceState
+  maintenanceGoalId
+  maintenanceMessage
+  cancelRequested
+  stages
+  queuedAt
+  startedAt
+  finishedAt
+  durationMs
+}
+
 /// Every pipeline field the OS and the SDK read.
 @row
 shape pipeline pipelineFull {

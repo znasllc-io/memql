@@ -1,5 +1,5 @@
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
@@ -17,6 +17,10 @@ import {
   useNow,
   type LiveListSource,
 } from "../../kit";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { useGoalDirectory, useGoalRunStatuses } from "./useNexusDirectory";
+import { runFromRow } from "./rows";
 import { NewGoal } from "./NewGoal";
 import { RunMarks } from "./RunsSection";
 import type { CancelGoalState, CreateGoalState } from "./actions";
@@ -64,8 +68,8 @@ import { goalStatusWord, originWord } from "./words";
 // one.
 
 export interface GoalsSectionProps {
-  goals: LiveListSource<Row> | null;
-  runs: readonly RunRow[];
+  goals?: LiveListSource<Row> | null;
+  runs?: readonly RunRow[];
   create: CreateGoalState;
   cancel: CancelGoalState;
   /** Opens the goal view over this goal, which replaces this list. */
@@ -75,8 +79,8 @@ export interface GoalsSectionProps {
 }
 
 export function GoalsSection({
-  goals,
-  runs,
+  goals: suppliedGoals,
+  runs: suppliedRuns,
   create,
   cancel,
   onOpenGoal,
@@ -88,57 +92,20 @@ export function GoalsSection({
   const [composing, setComposing] = useState(false);
   const now = useNow(30_000);
 
-  // ==========================================================================
-  // LIVE WORK ON TOP, THEN THE SORT
-  // ==========================================================================
-  // A plain newest-first sort put the goal that was PARKED ON A PERSON at the
-  // bottom of the list, under two that wanted nothing -- which was visible the
-  // first time this was rendered with three goals in it. The question a person
-  // opens this list with is "what is happening", and a goal whose run is in
-  // flight or waiting on them is the answer; how recently it was set is the
-  // tie-break, not the ordering.
-  //
-  // TWO BANDS, NOT A SCORE. Live work, then everything else, each band ordered
-  // by the sort control -- so the control still does what it says inside each
-  // band and a goal never jumps the queue for being new.
-  // The view caches its projection on the GOALS snapshot, so a sort that also
-  // reads the RUNS feed would go stale the moment a run parked -- the list
-  // would keep its old order until a goal row happened to change. The key
-  // carries the live SET, which moves only when a goal gains or loses work in
-  // flight; `running` -> `waiting` is inside the same set and re-baselines
-  // nothing, which is what keeps the arrival cue off a heartbeat.
-  const liveToken = useMemo(
-    () =>
-      runs
-        .filter(
-          (run) =>
-            run.status === "running" || run.status === "waiting" || run.status === "compiling",
-        )
-        .map((run) => idTail(run.goalId))
-        .sort()
-        .join(","),
-    [runs],
-  );
-  const viewKey = `goals:${includePipelines}:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}:${liveToken}`;
-  const view = useLiveView<Row, GoalRow>(goals, viewKey, (rows) => {
-    const projected = rows
-      .map(goalFromRow)
-      .filter((goal) => goal.id !== "" && (includePipelines || !["pipeline", "pipelines"].includes(goal.requestedVia)))
-      .filter((goal) => goalMatches(goal, search));
-    projected.sort((a, b) => {
-      const band = Number(isLive(b, runs)) - Number(isLive(a, runs));
-      if (band !== 0) return band;
-      return ascending
-        ? a.createdAt.localeCompare(b.createdAt)
-        : b.createdAt.localeCompare(a.createdAt);
-    });
-    return projected;
-  });
+  const query = useDebouncedValue(search, 200);
+  const feed = useGoalDirectory(query, includePipelines, ascending, suppliedGoals === undefined);
+  const goals = suppliedGoals === undefined ? feed.source : suppliedGoals;
+  const statuses = useGoalRunStatuses(suppliedRuns === undefined ? (goals?.snapshot.rows ?? []).map(row => goalFromRow(row).id) : []);
+  const runs = suppliedRuns ?? statuses.snapshot.rows.map(runFromRow);
+  const viewKey = `goals:${includePipelines}:${ascending}:${query}`;
+  const view = useLiveView<Row, GoalRow>(goals, viewKey, rows => rows.map(goalFromRow)
+    .filter(goal => goal.id && (includePipelines || !["pipeline", "pipelines"].includes(goal.requestedVia)) && goalMatches(goal, query))
+    .sort((a,b) => (ascending ? 1 : -1) * (a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))));
 
 
   return (
     <div className="os-nexus-goals">
-      <Head title="Goals" meta={listCount(view?.snapshot)}>
+      <Head title="Goals" meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)} shown`}>
         <Refine
           search={search}
           onSearch={setSearch}
@@ -185,6 +152,7 @@ export function GoalsSection({
               />
             )}
           />
+          {suppliedGoals === undefined ? <LoadMore feed={feed} /> : null}
         </div>
 
         {/* THE ASIDE IS ABSENT WHEN THERE IS NOTHING IN IT (rule 9: nothing
@@ -209,22 +177,6 @@ export function GoalsSection({
       </div>
 
     </div>
-  );
-}
-
-/**
- * Whether this goal is work in flight.
- *
- * Read off the RUNS rather than off the goal's own status, deliberately.
- * `goal.status` is coarse -- `active` means "a run is in flight" and is not
- * re-written when that run parks -- so a goal waiting on a person can be
- * `active`, `open` or neither. The runs are what actually say.
- */
-function isLive(goal: GoalRow, runs: readonly RunRow[]): boolean {
-  if (goal.status === "closed") return false;
-  const mine = runsOfGoal(runs, goal.id);
-  return mine.some(
-    (run) => run.status === "running" || run.status === "waiting" || run.status === "compiling",
   );
 }
 

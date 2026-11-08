@@ -131,6 +131,7 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 	matches := []map[string]any{}
 	scores := map[string]int{}
 	concepts := map[string][]string{}
+	preferredReads := map[string]bool{}
 	for _, fn := range e.functions.List() {
 		if !e.workCapabilityAllowed(ctx, fn) {
 			continue
@@ -139,6 +140,10 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		concept := fn.BoundConcept
 		if fn.Name == "workSearchConversations" {
 			concept = "v1:os:askConversation"
+			// The native read searches messages across conversations; UI title
+			// browsers cannot replace it. Keep this admitted recall path in the
+			// bounded catalog as more conversation browse queries are added.
+			preferredReads[name] = true
 		}
 		if search == "" {
 			if concept != "" && (fn.FunctionKind == "query" || fn.Name == "workSearchConversations") {
@@ -204,7 +209,12 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 	}
 	catalog := []map[string]any{}
 	for concept, reads := range concepts {
-		sort.Strings(reads)
+		sort.Slice(reads, func(i, j int) bool {
+			if preferredReads[reads[i]] != preferredReads[reads[j]] {
+				return preferredReads[reads[i]]
+			}
+			return reads[i] < reads[j]
+		})
 		count := len(reads)
 		if len(reads) > 3 {
 			reads = reads[:3]

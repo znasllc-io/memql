@@ -12,7 +12,7 @@
 // here -- without them the marks would be right on load and frozen after,
 // which looks exactly like working.
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { ModuleId } from "../system/modules";
@@ -104,8 +104,7 @@ export function useReadinessFeed(): Readiness {
     paged: false,
   }));
 
-  const rowsVersion = rows.snapshot.version;
-  const nodesVersion = nodes.snapshot.version;
+  const previous = useRef<{ signature: string; reseedRows: typeof rows.reseed; reseedNodes: typeof nodes.reseed; value: Readiness } | null>(null);
   const loaded =
     rows.snapshot.state !== "seeding" &&
     nodes.snapshot.state !== "seeding" &&
@@ -113,11 +112,6 @@ export function useReadinessFeed(): Readiness {
     nodes.source !== null;
 
   return useMemo(() => {
-    // The snapshot object is replaced on every change, but the HANDLE is not,
-    // so the version counters are what actually move -- naming them is what
-    // makes this memo recompute.
-    void rowsVersion;
-    void nodesVersion;
     const reports = rows.snapshot.rows
       .map(reportFromRow)
       .filter((r): r is NodeReport => r !== null);
@@ -126,15 +120,21 @@ export function useReadinessFeed(): Readiness {
     // changing is re-judged on the next event, the same staleness the Fleet's
     // online dot accepts.
     const verdicts = loaded ? foldReadiness(reports, liveness, new Date()) : [];
+    const state = worse(rows.snapshot.state, nodes.snapshot.state);
+    const signature = JSON.stringify([loaded, state, verdicts]);
+    const held = previous.current;
+    if (held?.signature === signature && held.reseedRows === rows.reseed && held.reseedNodes === nodes.reseed) return held.value;
     const byModule = new Map(verdicts.map((v) => [v.module, v]));
-    return {
+    const value: Readiness = {
       loaded,
-      state: worse(rows.snapshot.state, nodes.snapshot.state),
+      state,
       of: (id: ModuleId) => byModule.get(id) ?? null,
       reseed: () => {
         rows.reseed();
         nodes.reseed();
       },
     };
-  }, [loaded, rowsVersion, nodesVersion, rows, nodes]);
+    previous.current = { signature, reseedRows: rows.reseed, reseedNodes: nodes.reseed, value };
+    return value;
+  }, [loaded, rows.snapshot, nodes.snapshot, rows.reseed, nodes.reseed]);
 }

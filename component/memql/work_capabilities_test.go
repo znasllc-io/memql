@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,6 +63,49 @@ func TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext(t *te
 	require.Empty(t, discover("records.hiddenRecords"))
 	_, err := e.workCapabilitiesBuiltin(context.Background(), map[string]any{"search": "records"}, 0)
 	require.Error(t, err)
+}
+
+func TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist(t *testing.T) {
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	for _, recallAvailable := range []bool{true, false} {
+		t.Run(fmt.Sprintf("recallAvailable=%t", recallAvailable), func(t *testing.T) {
+			e := &MemQLEngine{functions: newFunctionRegistry()}
+			for _, name := range []string{"myAskConversationsBrowse", "myAskConversations", "askConversationById", "recentAskConversationTiming"} {
+				require.NoError(t, e.functions.add(&Function{Name: name, FunctionKind: "query", Enabled: true, Origin: "os/ask.memql", BoundConcept: "v1:os:askConversation"}))
+			}
+			require.NoError(t, e.functions.add(&Function{Name: "workSearchConversations", FunctionKind: "builtin", Enabled: recallAvailable, Origin: "work/capabilities.memql"}))
+			var previousReads []string
+			for range 2 {
+				nodes, err := e.workCapabilitiesBuiltin(askTestActor(), map[string]any{"search": ""}, 0)
+				require.NoError(t, err)
+				var result struct {
+					Concepts []struct {
+						Concept   string   `json:"concept"`
+						Reads     []string `json:"reads"`
+						ReadCount int      `json:"readCount"`
+					} `json:"concepts"`
+				}
+				require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+				require.Len(t, result.Concepts, 1)
+				catalog := result.Concepts[0]
+				require.Equal(t, "v1:os:askConversation", catalog.Concept)
+				require.Len(t, catalog.Reads, 3, "discovery stays bounded as UI reads are added")
+				if recallAvailable {
+					require.Equal(t, 5, catalog.ReadCount)
+					require.Contains(t, catalog.Reads, "work.workSearchConversations", "title-only browse must not crowd out message recall")
+				} else {
+					require.Equal(t, 4, catalog.ReadCount)
+					require.NotContains(t, catalog.Reads, "work.workSearchConversations", "priority never bypasses availability")
+				}
+				if previousReads != nil {
+					require.Equal(t, previousReads, catalog.Reads)
+				}
+				previousReads = catalog.Reads
+			}
+		})
+	}
 }
 
 // work.workRetitleRun renames a goal because a person's message changed what it

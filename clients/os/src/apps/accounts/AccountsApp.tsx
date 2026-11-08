@@ -10,7 +10,7 @@ import { CredentialsSection } from "./CredentialsSection";
 import { FirstRunCard } from "./FirstRunCard";
 import { useArchiveAccount, useCreateAccount, useUpdateAccount } from "./actions";
 import { accountFromRow, needsFirstRun, SELF_ACCOUNT_ID, type AccountRow } from "./rows";
-import { useAccounts } from "./useAccounts";
+import { useAccountRecord } from "./useAccounts";
 import {
   ACCOUNTS_SECTIONS,
   DEFAULT_ACCOUNTS_SETTINGS,
@@ -48,17 +48,6 @@ export function AccountsApp({
   const create = useCreateAccount();
   const update = useUpdateAccount();
   const archive = useArchiveAccount();
-  // ONE FEED, TWO SURFACES -- retained here at the app root and passed down.
-  //
-  // `useLiveCollection` constructs a collection per COMPONENT (it memoises on
-  // `[connection, key]` inside the hook; the SDK's shared LiveRegistry is not
-  // what it calls). So a second `useAccounts()` -- in the first-run gate, say,
-  // beside the list's -- would open a second subscription and run a second
-  // seed over the same concept, and the two would then be free to disagree
-  // about what the registry currently holds. That is the failure the
-  // Deployables app records for its map-and-list pair, and it is worse here:
-  // the two readings decide whether a FORM or a LIST renders.
-  const feed = useAccounts();
 
   function updateSettings(patch: Partial<AccountsSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
@@ -112,44 +101,33 @@ export function AccountsApp({
 
   return (
     <AccountsSurface
-      feed={feed}
       settings={settings}
       update={update}
       create={create}
       archive={archive}
+      openId={typeof intent?.payload.accountId === "string" ? intent.payload.accountId : ""}
+      onOpened={() => { if (intent) consumeIntent?.(intent.id); }}
     />
   );
 }
 
-/**
- * The Accounts section, or the first-run card standing in for it (D7).
- *
- * THE GATE READS THE SELF ROW OFF THE ONE FEED, which the app root retains
- * and hands to both surfaces. A separate read for the gate -- a second
- * collection, or a `clientAccountById` -- would be a second source of truth
- * for the row that decides whether a form or a list renders, which is the
- * worst place in the app for two readings to disagree. It also means the card
- * yields the moment the save's broadcast lands, with nothing to invalidate.
- *
- * WHILE THE FEED IS STILL SEEDING, NEITHER RENDERS. An unconfigured self row
- * and a feed that has not arrived look identical from here -- both are "no
- * matching row" -- and guessing wrong shows a setup form to somebody whose
- * company was named months ago.
- */
+/** Setup reads the self record directly; it can be older than every list page. */
 function AccountsSurface({
-  feed,
   settings,
   update,
   create,
   archive,
+  openId,
+  onOpened,
 }: {
-  feed: ReturnType<typeof useAccounts>;
+  openId: string;
+  onOpened: () => void;
   settings: AccountsSettings;
   update: ReturnType<typeof useUpdateAccount>;
   create: ReturnType<typeof useCreateAccount>;
   archive: ReturnType<typeof useArchiveAccount>;
 }) {
-  const { snapshot } = feed;
+  const { snapshot } = useAccountRecord(SELF_ACCOUNT_ID);
   // `useOsIfPresent`, not `useOs`: a section rendered in a test with no shell
   // around it is not a bug, and "there is nowhere to hand off to" is exactly
   // what null means. The People band renders its count either way and offers
@@ -180,8 +158,9 @@ function AccountsSurface({
 
   return (
     <AccountsSection
-      feed={feed}
       showArchived={settings.showArchived}
+      initialOpenId={openId}
+      onOpened={onOpened}
       create={create}
       update={update}
       archive={archive}

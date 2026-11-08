@@ -5,7 +5,7 @@ import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpd
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
 import { LocalUsersSettingsStore } from "../src/apps/users/settings";
-import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup } from "../test/users/harness";
+import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup, userRow as usersPerson, invitationRow as usersInvitation } from "../test/users/harness";
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
@@ -14,6 +14,9 @@ import { setupWizardScenes } from "./setupWizardScenes";
 import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
+import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
+import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
+import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
@@ -95,6 +98,7 @@ import {
   previewReadinessRow,
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
+import { FleetApp } from "../src/apps/fleet/FleetApp";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
 import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
@@ -1000,6 +1004,9 @@ const VIEWS: Record<
 > = {
   "feedback": { render: () => <WindowBody fallback="Notices"><FeedbackPreview /></WindowBody> },
   ...MATERIALIZER_VIEWS,
+  ...RESOURCE_PAGE_VIEWS,
+  ...NEXUS_PAGED_VIEWS,
+  ...CONCEPT_PAGED_VIEWS,
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
@@ -1103,6 +1110,25 @@ const VIEWS: Record<
     connect: () => nexusConnection(nexusLibrary()),
     wrap: (el, role) => nexusSession(el, { role }),
     render: () => <NexusPane section="overview" />,
+  },
+  "accounts-paged": {
+    connect: () => accountConnection({ clientAccountsAll: Array.from({ length: 25 }, (_, n) => accountRow({ id: `client-${n}`, name: `Client ${String(n).padStart(2, "0")}`, domain: `client-${n}.example.com`, primaryContactName: `Contact ${n}`, createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T00:00:00Z` })) }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
+  "users-paged": {
+    ...usersWizardView("people"),
+    connect: () => usersConnection({
+      activeRoles: [usersRole({ slug: "owner", name: "Owner", rank: 400 }), usersRole({ slug: "user", name: "Member", rank: 100 })],
+      activeCapabilities: [usersGrant("owner", "read", "principal"), usersGrant("owner", "create", "admission")],
+      searchUsers: Array.from({ length: 25 }, (_, n) => usersPerson({ id: `person-${n}`, displayName: `Colleague ${String(n).padStart(2, "0")}`, primaryEmail: `colleague-${n}@example.com`, createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T10:00:00Z` })),
+      pendingUserInvitations: Array.from({ length: 25 }, (_, n) => usersInvitation({ id: `invite-${n}`, inviteeName: `Invitee ${String(n).padStart(2, "0")}`, inviteeEmail: `invitee-${n}@example.com`, expiresAt: "2099-01-01T00:00:00Z", createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T11:00:00Z` })),
+    }),
+  },
+  "fleet-paged": {
+    connect: () => fleetConnection({ myWorkersWithStatus: Array.from({ length: 25 }, (_, n) => fleetMachineRow({ id: `machine-${n}`, displayName: `Studio ${String(n).padStart(2, "0")}`, registeredAt: `2026-10-${String(n + 1).padStart(2, "0")}T00:00:00Z` })) }),
+    wrap: (el, role) => fleetSession(el, { role }),
+    render: () => <WindowBody fallback="Fleet"><MachinesProvider><FleetApp sectionId="machines" navigate={() => {}} askContext={() => {}} store={{ load: () => ({ version: 1, defaultSection: "machines", showRevoked: false }), save: () => {} }} /></MachinesProvider></WindowBody>,
   },
   accounts: {
     connect: () => accountConnection({ clientAccountsAll: [

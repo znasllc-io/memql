@@ -1,0 +1,56 @@
+TAP version 13
+# Subtest: session repair refuses known older row versions and deletion tombstones without retaining absent members
+not ok 1 - session repair refuses known older row versions and deletion tombstones without retaining absent members
+  ---
+  duration_ms: 20.529208
+  type: 'test'
+  location: '/Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1452:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    a stale repair must neither roll back known versions nor resurrect a known deletion; absent IDs still leave
+    + actual - expected
+
+      [
+        {
+    +     createdAt: '2026-10-12T14:47:19.325157Z',
+    -     createdAt: '2026-10-12T14:47:19.325159Z',
+          id: 'updated',
+    +     value: 'snapshot'
+    -     value: 'current'
+        },
+    +   {
+    +     createdAt: '2026-10-12T14:47:19.325157Z',
+    +     id: 'deleted'
+    +   }
+      ]
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0:
+      id: 'updated'
+      createdAt: '2026-10-12T14:47:19.325159Z'
+      value: 'current'
+  actual:
+    0:
+      id: 'updated'
+      createdAt: '2026-10-12T14:47:19.325157Z'
+      value: 'snapshot'
+    1:
+      id: 'deleted'
+      createdAt: '2026-10-12T14:47:19.325157Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1474:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55.034417

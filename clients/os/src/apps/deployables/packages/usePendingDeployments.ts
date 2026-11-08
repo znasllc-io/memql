@@ -7,8 +7,8 @@ import { DEPLOYMENT_CONCEPT, PENDING_DEPLOYMENT_STATUSES } from "./rows";
 // One bounded population of current work and review gates, never full timelines.
 // Keep seed and event scope identical so leaving/reopening survives broadcasts,
 // reconnects, and a different browser or BFF replica.
-export function usePendingDeployments(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("deployables:pendingDeployments", (connection) => ({
+export function usePendingDeployments(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "deployables:pendingDeployments" : null, (connection) => ({
     concept: DEPLOYMENT_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.packageDeploymentsPending({}, { signal });

@@ -41,6 +41,20 @@ query pipeline pipelinesForOwner {
   shape     pipelineFull
 }
 
+/// Browse the caller's pipelines ten at a time, newest first. Search is applied
+/// by the database before the cursor window, including records not loaded yet.
+@actor
+query pipeline pipelinesBrowse {
+  args {
+    search string
+  }
+  filter    row => row.ownerUserId == actor.userId
+                && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.repository.includes(trim(args.search), true) || row.defaultBranch.includes(trim(args.search), true))
+  sort      "connectedAt", "desc", "row.id", "desc"
+  paginate  10
+  shape     pipelineSummary
+}
+
 /// One of the caller's pipelines by id.
 @actor
 query pipeline pipelineForOwner {
@@ -77,6 +91,29 @@ query run pipelineRunsForOwner {
   sort      "queuedAt", "desc"
   paginate  50
   shape     pipelineRunFull
+}
+
+/// Browse runs without downloading execution policy and driver bookkeeping.
+/// Every search and facet narrows the authorized set before the ten-row page.
+/// Internal recovery and release readers retain their existing queries.
+@actor
+query run pipelineRunsBrowse {
+  args {
+    changesOnly bool
+    search string
+    pipelineId string
+    branch string
+    outcome string
+  }
+  filter    row => row.ownerUserId == actor.userId
+                && (args.changesOnly != true || row.event == "pull_request" || row.event == "merge_group")
+                && (args.pipelineId == nil || args.pipelineId == "" || row.pipelineId == args.pipelineId)
+                && (args.branch == nil || args.branch == "" || row.headBranch == args.branch)
+                && (args.outcome == nil || args.outcome == "" || (args.outcome == "queued" && row.status == "queued") || (args.outcome == "running" && row.status == "in_progress") || (args.outcome == "passed" && isCompleted(row) && row.conclusion == "success") || (args.outcome == "failed" && isCompleted(row) && row.conclusion != "success" && row.conclusion != "cancelled" && row.conclusion != "refused") || (args.outcome == "cancelled" && isCompleted(row) && row.conclusion == "cancelled") || (args.outcome == "refused" && isCompleted(row) && row.conclusion == "refused"))
+                && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true) || row.repository.includes(trim(args.search), true) || row.headBranch.includes(trim(args.search), true) || row.sha.includes(trim(args.search), true) || row.failureMessage.includes(trim(args.search), true) || row.refusalMessage.includes(trim(args.search), true))
+  sort      "queuedAt", "desc", "row.id", "desc"
+  paginate  10
+  shape     pipelineRunSummary
 }
 
 /// One of the caller's runs by id -- the run page.
@@ -402,4 +439,14 @@ query run pipelineRunsForPipelineEvent {
   sort      "queuedAt", "desc"
   paginate  20
   shape     pipelineRunFull
+}
+
+/// Complete compact pipeline choices and source links for OS navigation. Detailed
+/// polling heads and timing histories remain behind pipelineForOwner.
+@actor
+query pipeline pipelineDirectory {
+  filter row => row.ownerUserId == actor.userId
+  sort "connectedAt", "desc", "row.id", "desc"
+  paginate 500
+  shape pipelineSummary
 }

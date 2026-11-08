@@ -18,6 +18,7 @@ vi.mock("../../src/auth/context", () => ({
 const { EmailApp } = await import("../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
 const { knowledgeOf, listKnowledge, useCampaignStatsFor, useEmailFeeds, useSeriesFeed, useSignupFormFeed, useSubscriberCounts, useTestSettingsFeed, weakest } = await import("../../src/apps/email/useEmail");
+const { useEmailReferences } = await import("../../src/apps/email/useBrowse");
 const { absent, figureOf } = await import("../../src/kit/measure");
 const { ACCOUNT_CONCEPT } = await import("../../src/apps/accounts/rows");
 const { SITE_CONCEPT } = await import("../../src/apps/deployables/concepts");
@@ -71,9 +72,7 @@ function pane(id: string): HTMLElement {
   return node;
 }
 
-function headMeta(title: string): string | null {
-  return screen.getByRole("heading", { level: 3, name: title }).parentElement?.querySelector(".os-head-meta")?.textContent ?? null;
-}
+
 
 /** A pane's action bar: the state in a word, and the acts it offers. */
 function bar(id: string): HTMLElement {
@@ -89,44 +88,59 @@ function opened(connection: Conn, concept: string): number {
 // Every page
 // ---------------------------------------------------------------------------
 
-describe("the root feeds read every page", () => {
-  const named = (from: number, to: number) =>
-    Array.from({ length: to - from + 1 }, (_, i) =>
-      campaignRow({ id: `v1:campaigns:campaign:c${from + i}`, name: `Campaign ${String(from + i).padStart(2, "0")}` }),
-    );
-
-  it("lists every page of campaigns, not the first fifty", async () => {
-    const conn = fakeConnection();
-    conn.query.campaigns
-      .mockResolvedValueOnce(pagedResult(named(1, 50), "p2"))
-      .mockResolvedValueOnce(rowsResult(named(51, 53)));
-    mount(conn);
-
-    expect(await screen.findByText("Campaign 53")).toBeTruthy();
-    for (let n = 1; n <= 53; n++) expect(screen.getByText(`Campaign ${String(n).padStart(2, "0")}`)).toBeTruthy();
-    await waitFor(() => expect(headMeta("Campaigns")).toBe("53"));
-
-    // The second page is asked for by the first page's cursor, inside the one
-    // seed -- the subscription is not torn down and reopened to page.
-    expect(conn.query.campaigns).toHaveBeenCalledTimes(2);
-    expect(conn.query.campaigns.mock.calls[0]![1]).not.toHaveProperty("cursor");
-    expect(conn.query.campaigns.mock.calls[1]![1]).toMatchObject({ cursor: "p2" });
-    expect(opened(conn, "v1:campaigns:campaign")).toBe(1);
+describe("bounded directories and complete demanded catalogs", () => {
+  it("keeps referenced labels when bare references receive canonical identity updates", async () => {
+    const id = "v1:campaigns:audience:a1";
+    const conn = fakeConnection({ audiences: [audienceRow({ id, name: "Original name" })] });
+    h.connection = conn;
+    const { result } = renderHook(() => useEmailReferences("audiences", ["a1"]));
+    await waitFor(() => expect(result.current.snapshot.rows).toMatchObject([{ id, payload: { name: "Original name" } }]));
+    act(() => conn.subscriptions.emit("v1:campaigns:audience", audienceRow({ id, name: "Updated name", createdAt: "2026-11-07T12:00:00Z" })));
+    await waitFor(() => expect(result.current.snapshot.rows).toMatchObject([{ id, name: "Updated name" }]));
+    const reads = conn.query.executeNamed.mock.calls.length;
+    act(() => conn.subscriptions.emit("v1:campaigns:audience", audienceRow({ id: "v1:campaigns:audience:other", name: "Unrelated" })));
+    expect(conn.query.executeNamed).toHaveBeenCalledTimes(reads);
+    expect(result.current.snapshot.rows).toHaveLength(1);
   });
 
-  it("walks the cursor of the other four feeds too", async () => {
+  it("loads ten at a time and restores loaded pages after closing the window", async () => {
+    const campaigns = Array.from({ length: 25 }, (_, i) => campaignRow({ id: `c${String(i).padStart(2, "0")}`, name: `Campaign ${String(i).padStart(2, "0")}` }));
+    const conn = fakeConnection({ campaigns });
+    const first = mount(conn);
+    await screen.findByText("Campaign 00");
+    expect(screen.queryByText("Campaign 10")).toBeNull();
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(1);
+    for (const name of ["campaigns", "audiences", "templates", "senderIdentities", "emailRules", "journeys"] as const) expect(conn.query[name]).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText("Campaign 19");
+    expect(screen.queryByText("Campaign 20")).toBeNull();
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Refine campaigns" }));
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "Campaign 24" } });
+    await screen.findByText("Campaign 24");
+    expect(screen.queryByText("Campaign 00")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
+    await screen.findByText("Campaign 19");
+    expect(screen.queryByText("Campaign 24")).toBeNull();
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(3);
+    first.view.unmount();
+    mount(conn);
+    await screen.findByText("Campaign 19");
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText("Campaign 24");
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("complete catalogs still walk every cursor when a picker requests them", async () => {
     const conn = fakeConnection();
     const feeds = ["audiences", "templates", "senderIdentities", "emailRules"] as const;
     const row = (id: string) => ({ id, ownerUserId: "v1:identity:user:me", name: id, accountId: "self", status: "active", address: `${id}@acme.test`, createdAt: "2026-08-01T00:00:00Z" });
-    for (const feed of feeds) {
-      conn.query[feed]
-        .mockResolvedValueOnce(pagedResult([row(`${feed}-first`)], `${feed}-next`))
-        .mockResolvedValueOnce(rowsResult([row(`${feed}-second`)]));
-    }
-    mount(conn);
+    for (const feed of feeds) conn.query[feed].mockResolvedValueOnce(pagedResult([row(`${feed}-first`)], `${feed}-next`)).mockResolvedValueOnce(rowsResult([row(`${feed}-second`)]));
+    h.connection = conn;
+    renderHook(() => useEmailFeeds());
     for (const feed of feeds) {
       await waitFor(() => expect(conn.query[feed]).toHaveBeenCalledTimes(2));
-      expect(conn.query[feed].mock.calls[0]![1]).not.toHaveProperty("cursor");
       expect(conn.query[feed].mock.calls[1]![1]).toMatchObject({ cursor: `${feed}-next` });
     }
   });
@@ -214,7 +228,7 @@ describe("one subscription per concept", () => {
     expect(pane("audiences").hidden).toBe(true);
     // The campaign page is exactly where it was left, not a fresh list.
     expect(within(pane("campaigns")).getByRole("region", { name: "Campaign details" })).toBeTruthy();
-    expect(conn.query.campaigns).toHaveBeenCalledTimes(1);
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1001,5 +1015,23 @@ describe("campaign breakdowns", () => {
     await act(async () => { await empty.result.current.reload(); });
     expect(none.query.campaignStats).not.toHaveBeenCalled();
     expect(empty.result.current.stats.size).toBe(0);
+  });
+});
+
+
+describe("component-owned composed reads", () => {
+  it("reopening with different dependencies updates the new component's state", async () => {
+    const conn = fakeConnection({ testSettings: [
+      { id: "first", accountId: "acme", audienceId: "a", createdAt: "2026-10-01T00:00:00Z" },
+      { id: "second", accountId: "other", audienceId: "b", createdAt: "2026-10-01T00:00:00Z" },
+    ] });
+    h.connection = conn;
+    const first = renderHook(() => useTestSettingsFeed(["acme"]));
+    await waitFor(() => expect(first.result.current.settled("acme")).toBe(true));
+    first.unmount();
+    const second = renderHook(() => useTestSettingsFeed(["other"]));
+    await waitFor(() => expect(second.result.current.settled("other")).toBe(true));
+    expect(second.result.current.settled("acme")).toBe(false);
+    expect(second.result.current.snapshot.rows.map(row => row.id)).toEqual(["second"]);
   });
 });

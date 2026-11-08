@@ -2,7 +2,7 @@ import { Head } from "../../kit";
 import { AddRepository } from "../pipelines/AddRepository";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Notice, roleAdmits, useAppReach } from "../../kit";
@@ -151,7 +151,12 @@ function DeployablesAppContent({
   // is the `domains` part now.
   const isClusterOwner = roleAdmits(actorRole, { min: "owner" });
 
-  const { source: collection, reseed } = useSites();
+  const browsing = sectionId !== "logs" && sectionId !== "settings";
+  const [catalogDemand, setCatalogDemand] = useState<Record<string, boolean>>({});
+  const requestCatalog = useCallback((root: "deployables" | "sources", needed: boolean) => setCatalogDemand(held => held[root] === needed ? held : { ...held, [root]: needed }), []);
+  const catalogNeeded = browsing && (sectionId === "map" || sectionId === "overview" || addingRepository || catalogDemand[sectionId] === true);
+  const { source: activeCollection, reseed } = useSites(catalogNeeded);
+  const collection = useRetainedCatalog(activeCollection, viewerUserId);
   // A SECOND FEED, over a second concept, and deliberately not folded into the
   // one above. `useSites` and `usePackages` read different concepts with
   // different shapes -- one feed cannot carry both -- and each is retained
@@ -159,26 +164,30 @@ function DeployablesAppContent({
   // The rule the app root exists for is one feed PER CONCEPT, not one feed
   // total: what must never happen is two subscriptions over the SAME concept
   // free to disagree about what the cluster holds.
-  const { source: packageCollection, reseed: reseedPackages } = usePackages();
+  const { source: activePackageCollection, reseed: reseedPackages } = usePackages(catalogNeeded);
+  const packageCollection = useRetainedCatalog(activePackageCollection, viewerUserId);
   // A THIRD FEED, over a third concept (epic memql#4885): the caller's own
   // source credentials, read once here as CARDS and passed down so the
   // wizard and the Sources list are two
   // readings of one feed rather than two subscriptions free to disagree.
-  const { source: credentialCollection, snapshot: credentialSnapshot, reseed: reseedCredentials } = useSourceCredentials();
+  const { source: activeCredentialCollection, reseed: reseedCredentials } = useSourceCredentials(catalogNeeded || !isPipelines && sectionId === "settings");
+  const credentialCollection = useRetainedCatalog(activeCredentialCollection, viewerUserId);
+  const credentialSnapshot = credentialCollection?.snapshot ?? EMPTY_SNAPSHOT<Row>();
   // A FOURTH FEED, and the ONE recorded exception to clients/os/README.md's
   // rule that a package's deployment timeline is retained by the page and
   // never by the root. This exception keeps only pending work and review
   // gates, so leaving analysis does not hide it. Terminal runs leave this
   // feed; their full history remains on the package's own page.
-  const { source: awaitingCollection, reseed: reseedAwaiting } = usePendingDeployments();
+  const { source: activeAwaitingCollection, reseed: reseedAwaiting } = usePendingDeployments(catalogNeeded);
+  const awaitingCollection = useRetainedCatalog(activeAwaitingCollection, viewerUserId);
   // THE PIPELINES FEEDS, a fifth and sixth concept (epic memql#5479): the
   // caller's pipelines -- one per source they connected -- and their runs.
   // Retained here for the rule this file exists for: the Runs tab, a source
   // page's Checks and Pipeline fact, and the Overview map's Checks node are
   // readings of ONE collection per concept. Both are read owner-scoped, so
   // they answer the viewer's own pipelines and nobody else's.
-  const runsFeed = usePipelineRuns();
-  const { source: pipelineCollection, reseed: reseedPipelines } = usePipelines();
+  const runsFeed = usePipelineRuns(browsing && sectionId !== "runs" && sectionId !== "changes" && (catalogNeeded || sectionId === "overview"));
+  const { source: pipelineCollection, reseed: reseedPipelines } = usePipelines(browsing || sectionId === "settings");
   // The connect rail's answers live above the sections (issue memql#5502), so
   // leaving the rail -- for another tab, for the source page -- keeps them.
   const connectFlow = useConnectFlow();
@@ -195,7 +204,12 @@ function DeployablesAppContent({
     rows.map(siteFromRow).filter((s) => s.id !== "" && !s.deleted),
   );
   const baseSnapshot = sites?.snapshot ?? EMPTY_SNAPSHOT<SiteRow>();
-  const measuredSites = useSiteHealth(baseSnapshot.rows, windowVisible);
+  const [directorySites, setDirectorySites] = useState<Record<string, readonly SiteRow[]>>({});
+  const noteDirectorySites = useCallback((root: "deployables" | "sources", rows: readonly SiteRow[]) => setDirectorySites(held => {
+    const signature = (items: readonly SiteRow[]) => JSON.stringify(items.map(site => [site.id, site.createdAt, site.hostname, site.bundleRef, site.status]));
+    return signature(held[root] ?? []) === signature(rows) ? held : { ...held, [root]: rows };
+  }), []);
+  const measuredSites = useSiteHealth(catalogNeeded && baseSnapshot.state === "live" ? baseSnapshot.rows : directorySites[sectionId] ?? [], windowVisible);
   const healthById = new Map(measuredSites.map(site => [site.id, site.health]));
   // The live list and its nested pages consume a source, while the map consumes
   // rows. Project observations into that source too. The key also expires an
@@ -218,7 +232,7 @@ function DeployablesAppContent({
     rows.map(credentialFromRow).filter((c) => c.id !== ""),
   );
   const credentialRows = credentials?.snapshot.rows ?? [];
-  const connections = useSourceConnections();
+  const connections = useSourceConnections(catalogNeeded || sectionId === "settings");
   const githubAccounts = githubAccountsFor(credentialRows, viewerUserId, connections.revokedCredentialIds);
   const setupState = accountSetupState(githubAccounts, credentialSnapshot);
   useEffect(() => { reportSetupState?.(setupState); }, [reportSetupState, setupState]);
@@ -411,6 +425,9 @@ function DeployablesAppContent({
       // map has neither.
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
+          onCatalogDemand={requestCatalog}
+          onDirectorySites={noteDirectorySites}
+          directoryHealth={healthById}
           active={sectionId === "deployables"}
           navigation={navigation}
           openRequest={openRequest}
@@ -450,6 +467,9 @@ function DeployablesAppContent({
   const sourcesContent = (
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
+          onCatalogDemand={requestCatalog}
+          onDirectorySites={noteDirectorySites}
+          directoryHealth={healthById}
           root="sources"
           sourceLabel={isPipelines ? "Repositories" : "Sources"}
           onAddRepository={isPipelines && can.sources ? () => setAddingRepository(true) : undefined}
@@ -551,4 +571,13 @@ function RetainedSection({ active, children }: { active: boolean; children: Reac
   const [visited, setVisited] = useState(active);
   useEffect(() => { if (active) setVisited(true); }, [active]);
   return active || visited ? <ActivePane active={active}><div hidden={!active} inert={!active} style={{ display: active ? "contents" : "none" }}>{children}</div></ActivePane> : null;
+}
+
+
+/** A parked pane keeps its last complete model while its reads are released. */
+function useRetainedCatalog<T>(current: T | null, viewer: string): T | null {
+  const retained = useRef<{ viewer: string; value: T | null }>({ viewer, value: current });
+  if (retained.current.viewer !== viewer) retained.current = { viewer, value: current };
+  else if (current !== null) retained.current.value = current;
+  return retained.current.value;
 }

@@ -21,9 +21,9 @@ function memStorage(): Pick<Storage, "getItem" | "setItem"> {
 describe("the manifest", () => {
   const deployables = OS_REGISTRY.apps.find((a) => a.id === "deployables");
 
-  it("is a real app rather than a stub", () => {
+  it("registers the app loader", () => {
     expect(deployables).toBeTruthy();
-    expect(deployables?.component.name).toBe("DeployablesApp");
+    expect(deployables?.component.displayName).toBe("LoadDeployables");
   });
 
   it("declares exactly Overview, Deployables, Sources, Runs, Logs and Settings, in that order", () => {

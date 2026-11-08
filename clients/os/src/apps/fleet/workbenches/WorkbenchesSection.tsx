@@ -19,6 +19,9 @@ import {
 } from "../rows";
 import { Button, EmptyState, Switch, Fact, Facts, Head, Notice, Panel, Subhead, RecordRow, listCount } from "../../../kit";
 import { useNow } from "../../../kit/useNow";
+import { LoadMore } from "../../../kit/LoadMore";
+import { Refine } from "../../../kit";
+import { useDebouncedValue } from "../../../logs/useDebouncedValue";
 import { useWorkbenches } from "./useWorkbenches";
 
 // Workbenches: the replicas that host per-plan working directories, and the
@@ -32,10 +35,12 @@ import { useWorkbenches } from "./useWorkbenches";
 // it out.
 
 export function WorkbenchesSection() {
-  const state = useWorkbenches();
   const [tab, setTab] = useState<"workspaces" | "replicas">("workspaces");
   const root = usePageScroll(tab);
   const [showReleased, setShowReleased] = useState(false);
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), 250);
+  const state = useWorkbenches(needle, showReleased, tab);
   const now = useNow(30_000);
 
   // Ordered by replica, then newest first inside each -- so the flat list the
@@ -95,7 +100,7 @@ export function WorkbenchesSection() {
             that arrive on their own. When the caption says the feed IS
             behind, the same control is exactly the right one, and its
             appearance is itself the signal. */}
-        {feedIsBehind(state.workspaceState, state.workspaceError) ? (
+        {tab === "workspaces" && feedIsBehind(state.workspaceState, state.workspaceError) ? (
           <AutoRefresh onRefresh={state.reseedWorkspaces} />
         ) : null}
       </Head>
@@ -128,6 +133,7 @@ export function WorkbenchesSection() {
           context and sit in a panel, workspaces are the subject and run full
           width. Both carry a heading, or the per-replica group bars below
           read as belonging to nothing. */}
+      <Refine search={search} onSearch={setSearch} label="Search workspaces" placeholder="Search workspaces" />
       <div className="fleet-list-options"><Switch checked={showReleased} onChange={setShowReleased}>Show released</Switch><span className="os-caption">Include folders removed after a run.</span></div>
 
       {/* Keyed on the toggle so revealing released rows re-baselines the
@@ -143,8 +149,8 @@ export function WorkbenchesSection() {
         // otherwise flash the row it ran in. Being RELEASED is the news.
         fingerprint={(w) => `${w.status}|${w.releasedAt}|${w.releasedReason}`}
         label="Your workspaces"
-        emptyText="No workspaces yet."
-        emptyContent={<EmptyState title={showReleased ? "No workspaces yet" : "No active workspaces"} action={!showReleased ? <Button onClick={() => setShowReleased(true)}>View released workspaces</Button> : <Button onClick={() => setTab("replicas")}>Check replicas</Button>}>MemQL creates a temporary working folder when one of your plans needs the workbench. {showReleased ? "Your workspace history will appear here." : "Finished runs release their folders; you can include that history."}</EmptyState>}
+        emptyText={needle ? "No workspaces match." : "No workspaces yet."}
+        emptyContent={needle ? undefined : <EmptyState title={showReleased ? "No workspaces yet" : "No active workspaces"} action={!showReleased ? <Button onClick={() => setShowReleased(true)}>View released workspaces</Button> : <Button onClick={() => setTab("replicas")}>Check replicas</Button>}>MemQL creates a temporary working folder when one of your plans needs the workbench. {showReleased ? "Your workspace history will appear here." : "Finished runs release their folders; you can include that history."}</EmptyState>}
         renderRow={(w, tick) => (
           <WorkspaceLine
             workspace={w}
@@ -154,6 +160,7 @@ export function WorkbenchesSection() {
           />
         )}
       />
+      <LoadMore feed={state.page} />
       </div>
     </div>
   );
@@ -226,7 +233,7 @@ function ReplicaLine({ node, tick, now, empty }: { node: WorkbenchNodeRow; tick:
       open={open} onOpen={() => setOpen(value => !value)} stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
       <span>Seen {formatFreshness(node.lastSeen, now)}</span>
     </RecordRow>
-    {open ? <Facts><Fact label="Address" value={node.address || "Not reported"} mono copyValue={node.address || undefined} /><Fact label="First seen" value={formatMoment(node.createdAt)} copyValue={node.createdAt || undefined} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} copyValue={node.lastSeen || undefined} /><Fact label="Your workspaces" value={empty ? "None in this view" : "Listed in Workspaces"} /></Facts> : null}
+    {open ? <Facts><Fact label="Address" value={node.address || "Not reported"} mono copyValue={node.address || undefined} /><Fact label="First seen" value={formatMoment(node.createdAt)} copyValue={node.createdAt || undefined} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} copyValue={node.lastSeen || undefined} /><Fact label="Your workspaces" value={empty ? "Check Workspaces for this replica" : "Listed in Workspaces"} /></Facts> : null}
   </div>;
 }
 

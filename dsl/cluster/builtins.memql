@@ -63,7 +63,11 @@ builtin releasePrepareBuild { profileName string! pipelineId string! expectedCon
 /// Read this owner's saved release journeys, including interrupted attempts.
 @sdk
 @executor("integration.release.builds")
-builtin releaseBuilds { limit integer }
+builtin releaseBuilds {
+ limit integer
+ cursor string
+ search string
+}
 
 /// Read a saved release's current candidate approval and available actions without remote effects.
 @sdk
@@ -119,6 +123,7 @@ builtin releaseCandidateTargets { candidateId string! }
 builtin releaseCandidates {
   cursor string
   limit integer
+  search string
 }
 
 /// Verify an immutable candidate using complete work evidence and operator configuration.
@@ -390,6 +395,7 @@ builtin releaseDiscoverPublishedCandidates {
   sourceId string!
   cursor string
   limit integer
+  search string
 }
 
 /// Reverify an exact discovery selection without approving or starting installation.

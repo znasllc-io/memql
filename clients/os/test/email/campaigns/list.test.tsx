@@ -98,7 +98,7 @@ describe("the campaigns list", () => {
       expect(screen.getByText(name)).toBeTruthy();
     }
     // Seeded unfiltered: narrowing is asked of the rows already here.
-    expect(conn.query.campaigns).toHaveBeenCalledWith({}, expect.anything());
+    expect(conn.query.campaignsBrowse).toHaveBeenCalledWith(expect.objectContaining({ search: undefined }), expect.anything());
 
     const state = (name: string) => within(rowOf(name)).queryByText(/^(Draft|Scheduled|Sending|Paused|Sent|Cancelled|Failed|Repeating)$/)?.textContent ?? "";
     const tone = (name: string) => rowOf(name).querySelector(".os-record-status")?.getAttribute("data-tone");
@@ -152,38 +152,38 @@ describe("the campaigns list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refine campaigns" }));
     // By name.
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "update" } });
-    expect(screen.getByText("August update")).toBeTruthy();
-    expect(screen.getByText("July update")).toBeTruthy();
-    expect(screen.queryByText("Welcome")).toBeNull();
-    expect(headCount(view)).toBe("2");
+    expect(await screen.findByText("August update")).toBeTruthy();
+    expect(await screen.findByText("July update")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Welcome")).toBeNull());
+    await waitFor(() => expect(headCount(view)).toBe("2"));
     // By audience.
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "signups" } });
-    expect(screen.getByText("Welcome")).toBeTruthy();
-    expect(screen.queryByText("August update")).toBeNull();
+    expect(await screen.findByText("Welcome")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("August update")).toBeNull());
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
 
     // By status: In progress is everything not yet finished.
     chooseOption(screen.getByLabelText("Status"), "In progress");
-    expect(screen.getByText("August update")).toBeTruthy();
-    expect(screen.getByText("Welcome")).toBeTruthy();
-    expect(screen.queryByText("July update")).toBeNull();
+    expect(await screen.findByText("August update")).toBeTruthy();
+    expect(await screen.findByText("Welcome")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("July update")).toBeNull());
     chooseOption(screen.getByLabelText("Status"), "Sent");
-    expect(screen.getByText("July update")).toBeTruthy();
-    expect(screen.queryByText("August update")).toBeNull();
-    expect(headCount(view)).toBe("1");
+    expect(await screen.findByText("July update")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("August update")).toBeNull());
+    await waitFor(() => expect(headCount(view)).toBe("1"));
 
     // The constraint stands beside the control, and removing it is one press.
     fireEvent.click(screen.getByRole("button", { name: "Remove Sent" }));
-    expect(screen.getByText("August update")).toBeTruthy();
-    expect(headCount(view)).toBe("3");
+    expect(await screen.findByText("August update")).toBeTruthy();
+    await waitFor(() => expect(headCount(view)).toBe("3"));
   });
 
   it("counts only after its read settles, and a denied read is not zero", async () => {
     const pending = fakeConnection({ campaigns: [campaignRow({ id: "c1", name: "Counted campaign" })] });
     let release!: () => void;
     const gate = new Promise<void>((done) => { release = done; });
-    const answer = pending.query.campaigns.getMockImplementation()!;
-    pending.query.campaigns.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    const answer = pending.query.campaignsBrowse.getMockImplementation()!;
+    pending.query.campaignsBrowse.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
     const first = mount(pending);
     // Reading: the shape of a list, and no count.
     expect(first.view.container.querySelector(".os-record-skeleton")).not.toBeNull();
@@ -193,7 +193,7 @@ describe("the campaigns list", () => {
     first.view.unmount();
 
     const denied = fakeConnection();
-    denied.query.campaigns.mockRejectedValue(new Error("permission denied"));
+    denied.query.campaignsBrowse.mockRejectedValue(new Error("permission denied"));
     const second = mount(denied);
     expect(await screen.findByText("This cluster did not return your campaigns.")).toBeTruthy();
     expect(screen.getByText("Nothing below is current.")).toBeTruthy();
@@ -203,7 +203,7 @@ describe("the campaigns list", () => {
     expect(screen.queryByText("No campaigns yet")).toBeNull();
 
     // Try again reads again.
-    denied.query.campaigns.mockResolvedValue(rowsResult([campaignRow({ id: "c1", name: "Back again" })]));
+    denied.query.campaignsBrowse.mockResolvedValue(rowsResult([campaignRow({ id: "c1", name: "Back again" })]));
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Back again")).toBeTruthy();
   });

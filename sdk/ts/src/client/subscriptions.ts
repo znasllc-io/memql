@@ -74,6 +74,7 @@ interface SubscriptionRecord {
 export class SubscriptionManager {
   private readonly dispatcher: Dispatcher;
   private readonly subs = new Map<string, SubscriptionRecord>();
+  private readonly graphSubscriptions = new Map<string, { handlers: Map<symbol, EventHandler>; unregister: Unregister }>();
   private readonly deliveryObservers = new Set<EventHandler>();
   private readonly eventUnregister: Unregister;
   private stopped = false;
@@ -165,13 +166,34 @@ export class SubscriptionManager {
   // `graph.node.<action>.<concept>` string. This is the graph counterpart
   // of subscribe(); it is what every reactive UI on MemQL uses.
   subscribeGraph(handler: EventHandler, opts: GraphSubscribeOptions = {}): Unregister {
-    const actions = (opts.actions ?? []).map(graphActionWire);
-    return this.register(handler, {
+    if (this.stopped) throw new Error("subscription manager stopped");
+    const actions = [...new Set((opts.actions ?? []).map(graphActionWire))].sort();
+    const fields: SubscribeFields = {
       kind: subscriptionKindWire("graph_events"),
       concept: opts.concept,
       actions: actions.length > 0 ? actions : undefined,
       ...(opts.idOnly ? { config: { idOnly: true } } : {}),
-    });
+    };
+    const key = JSON.stringify({ ...fields, actions: actions.length === 3 ? undefined : fields.actions });
+    const token = Symbol();
+    let shared = this.graphSubscriptions.get(key);
+    if (!shared) {
+      const handlers = new Map<symbol, EventHandler>([[token, handler]]);
+      const unregister = this.register(event => {
+        for (const consume of [...handlers.values()]) {
+          try { consume(event); } catch { /* A failed consumer cannot silence its siblings. */ }
+        }
+      }, fields);
+      shared = { handlers, unregister };
+      this.graphSubscriptions.set(key, shared);
+    } else shared.handlers.set(token, handler);
+    return () => {
+      if (!shared.handlers.delete(token)) return;
+      if (shared.handlers.size === 0) {
+        shared.unregister();
+        this.graphSubscriptions.delete(key);
+      }
+    };
   }
 
   // subscribe registers a handler for events matching a free-text bus
@@ -198,9 +220,14 @@ export class SubscriptionManager {
     if (this.stopped) throw new Error("subscription manager stopped");
     const subscriptionId = newShortId();
     this.subs.set(subscriptionId, { handler, fields });
-    this.dispatcher.send({
-      subscribe: { subscriptionId, ...fields },
-    });
+    try {
+      this.dispatcher.send({ subscribe: { subscriptionId, ...fields } });
+    } catch {
+      // Registration is durable intent within this connection. A closed
+      // socket must not orphan the listener or prevent its owner receiving
+      // an unregister handle. Reconnect replays this exact entry before
+      // collections reseed; a stopped manager still refuses above.
+    }
     let unsubscribed = false;
     return () => {
       if (unsubscribed) return;
@@ -219,6 +246,7 @@ export class SubscriptionManager {
     this.stopped = true;
     this.eventUnregister();
     this.subs.clear();
+    this.graphSubscriptions.clear();
     this.deliveryObservers.clear();
   }
 }

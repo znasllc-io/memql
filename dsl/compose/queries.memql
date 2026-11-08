@@ -10,13 +10,9 @@
 // exemption list -- so the filter says out loud what the concept's tier
 // already implies, and the gate can see it.
 //
-// THE ARCHIVE CONJUNCT IS ABSENT FROM THE LIST READS, deliberately, and
-// it is the Files app's lesson (clients/os/README.md, "the seed is picked
-// for the filter that cannot be server-side"): a read carrying
-// `row.archived != true` can only ever back a show-archived toggle that
-// reveals rows which flipped while the window was open. The list reads
-// carry no archive term, so ONE paged seed holds the complete truth and
-// the archived / not-archived split stays a client-side fold over it.
+// Complete catalogs remain available to explicit editor pickers. OS directories
+// use the Browse queries below: archive/search filters precede ten-row paging,
+// and each filter keeps an independent session cursor in the client.
 
 /// Everything materialized, newest first: the Materialized view's one read and the Files app's
 /// Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything
@@ -156,4 +152,73 @@ query composition compositionsForRun {
  sort "row.createdAt", "desc"
  paginate 2
  shape compositionFull
+}
+
+/// Output-to-composition directory. Ordinary Files browsing supplies visible ids;
+/// the Materializer place requests compact output membership explicitly.
+@actor
+query composition compositionOutputIndex {
+  args {
+    fileIds []string
+  }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+    && row.outputFileId != nil && row.outputFileId != ""
+    && (args.fileIds == nil || row.outputFileId in args.fileIds)
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 50
+  shape compositionOutput
+}
+
+/// Recent directory page. Search and archive selection precede the cursor;
+/// by-id reads remain available for links outside these ten records.
+@actor
+query composition compositionsBrowse {
+  args {
+    search string
+    includeArchived bool
+    format string
+  }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+    && (args.includeArchived == true || row.archived != true)
+    && (args.format == nil || args.format == "" || row.format == args.format)
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.statement.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape compositionFull
+}
+
+/// Recent directory page. Search and archive selection precede the cursor;
+/// by-id reads remain available for links outside these ten records.
+@actor
+query composeTemplate composeTemplatesBrowse {
+  args {
+    search string
+    includeArchived bool
+    format string
+  }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+    && (args.includeArchived == true || row.archived != true)
+    && (args.format == nil || args.format == "" || row.format == args.format)
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.description.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape composeTemplateFull
+}
+
+/// Recent directory page. Search and archive selection precede the cursor;
+/// by-id reads remain available for links outside these ten records.
+@actor
+query recipe composeRecipesBrowse {
+  args {
+    search string
+    includeArchived bool
+    format string
+  }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+    && (args.includeArchived == true || row.archived != true)
+    && (args.format == nil || args.format == "" || row.format == args.format)
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.description.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape composeRecipeFull
 }

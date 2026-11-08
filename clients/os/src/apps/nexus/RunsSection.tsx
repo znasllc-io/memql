@@ -1,3 +1,6 @@
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { useRunDirectory } from "./useNexusDirectory";
 import { flatten } from "../../kit/rows";
 import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -43,33 +46,36 @@ import { runModeDetail, runModeWord, runStatusWord } from "./words";
 // only thing that separates those.
 
 export interface RunsSectionProps {
-  runs: LiveListSource<Row> | null;
+  runs?: LiveListSource<Row> | null;
   showFinished: boolean;
   onOpenRun: (runId: string) => void;
   conversationId?: string;
   onClearConversation?: () => void;
 }
 
-export function RunsSection({ runs, showFinished, onOpenRun, conversationId, onClearConversation }: RunsSectionProps) {
+export function RunsSection({ runs: suppliedRuns, showFinished, onOpenRun, conversationId, onClearConversation }: RunsSectionProps) {
   const [search, setSearch] = useState("");
   const [ascending, setAscending] = useState(false);
   const now = useNow(15_000);
+  const query = useDebouncedValue(search, 200);
+  const feed = useRunDirectory(query, showFinished, ascending, conversationId, suppliedRuns === undefined);
+  const runs = suppliedRuns === undefined ? feed.source : suppliedRuns;
 
   // THE VIEW KEY RE-BASELINES THE CUE WHEN THE QUESTION CHANGES. Revealing
   // rows the browser already had is not the cluster sending them, so flipping
   // "show finished" must not announce every finished run as new.
-  const viewKey = `runs:${conversationId ?? ""}:${showFinished ? "all" : "live"}:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}`;
+  const viewKey = `runs:${conversationId ?? ""}:${showFinished ? "all" : "live"}:${ascending ? "asc" : "desc"}:${query.trim().toLowerCase()}`;
   const view = useLiveView<Row, RunRow>(runs, viewKey, (rows) => {
     const projected = rows
       .filter(row => !conversationId || conversationOf(row) === conversationId)
       .map(runFromRow)
       .filter((run) => run.id !== "")
       .filter((run) => showFinished || !runIsTerminal(run))
-      .filter((run) => runMatches(run, search));
+      .filter((run) => (runMatches(run, query) || runTitle(run).toLowerCase().includes(query.toLowerCase())));
     projected.sort((a, b) => {
       const left = a.createdAt;
       const right = b.createdAt;
-      return ascending ? left.localeCompare(right) : right.localeCompare(left);
+      return ascending ? left.localeCompare(right) || a.id.localeCompare(b.id) : right.localeCompare(left) || b.id.localeCompare(a.id);
     });
     return projected;
   });
@@ -81,7 +87,7 @@ export function RunsSection({ runs, showFinished, onOpenRun, conversationId, onC
     <div className="os-nexus-list">
       <Head
         title="Runs"
-        meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)}${parked > 0 ? ` · ${parked} waiting for you` : ""}`}
+        meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)} shown${parked > 0 ? ` · ${parked} waiting for you` : ""}`}
       >
         <SortControl ascending={ascending} onToggle={() => setAscending((v) => !v)} />
         <Refine
@@ -113,6 +119,7 @@ export function RunsSection({ runs, showFinished, onOpenRun, conversationId, onC
           />
         )}
       />
+      {suppliedRuns === undefined ? <LoadMore feed={feed} /> : null}
     </div>
   );
 }

@@ -16,6 +16,8 @@ import {
   useLiveView,
   type RefineChip,
 } from "../../kit";
+import { useAccountRecord } from "../accounts/useAccounts";
+import { accountFromRow } from "../accounts/rows";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountName, type AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
@@ -24,7 +26,9 @@ import { NewGroupForm } from "./NewGroupForm";
 import { groupFromRow, type GroupRow, type InvitationRow, type PersonRow } from "./rows";
 import type { RoleCatalog } from "./useRoles";
 import type { GroupsView } from "./views";
-import type { LiveCollectionHandle } from "../../live/useLiveCollection";
+import { useGroupDirectory, useGroupRecord } from "./useGroups";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 
 // The groups of this cluster: what a client's people are placed in, and what
 // an operator makes to organize.
@@ -43,7 +47,7 @@ import type { LiveCollectionHandle } from "../../live/useLiveCollection";
 // bounded by the groups of ONE client.
 
 export function GroupsSection({
-  groups,
+  onCatalogDemand,
   people,
   peopleAvailable = false,
   invitations,
@@ -58,7 +62,7 @@ export function GroupsSection({
   onOpenAccount,
   onOpenPerson,
 }: {
-  groups: LiveCollectionHandle<Row>;
+  onCatalogDemand?: (needed: boolean) => void;
   people: readonly PersonRow[];
   peopleAvailable?: boolean;
   invitations: readonly InvitationRow[];
@@ -78,6 +82,10 @@ export function GroupsSection({
     openId ? { kind: "group", groupId: openId } : { kind: "list" },
   );
   const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
+  const groups = useGroupDirectory(needle, showArchived);
+  const detail = useGroupRecord(view.kind === "group" ? view.groupId : "");
+  useEffect(() => { onCatalogDemand?.(view.kind !== "list"); return () => onCatalogDemand?.(false); }, [view.kind, onCatalogDemand]);
 
   // IN AN EFFECT, not during render. Consuming the intent is a call INTO THE
   // PARENT, and a parent's setState during a child's render is the one thing
@@ -100,21 +108,13 @@ export function GroupsSection({
     // Keyed on the question so flipping the archived setting RE-BASELINES the
     // arrival cues rather than announcing every newly-visible row as new.
     `groups:${showArchived}:${search}`,
-    (rows) => {
-      const needle = search.trim().toLowerCase();
-      return rows
-        .map(groupFromRow)
-        .filter((g) => g.id !== "")
-        .filter((g) => showArchived || g.status === "active")
-        .filter((g) => needle === "" || g.name.toLowerCase().includes(needle))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    },
+    rows => rows.map(groupFromRow).filter(group => group.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)),
   );
 
   if (view.kind === "group") {
-    const group = all.find((g) => g.id === view.groupId) ?? null;
+    const group = detail.snapshot.rows[0] ? groupFromRow(detail.snapshot.rows[0]) : all.find((g) => g.id === view.groupId) ?? null;
     if (group === null) {
-      if (groups.snapshot.state === "seeding") return <ContentSkeleton label="Opening group" />;
+      if (detail.snapshot.state === "seeding") return <ContentSkeleton label="Opening group" />;
       return (
         <div className="os-app-stack">
           <Head title="Group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />
@@ -160,7 +160,8 @@ export function GroupsSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Groups" meta={count}>
+      <Head title="Groups" meta={count === undefined || needle !== search.trim() ? undefined : `${count} shown`}>
+        {!search ? <span className="os-caption">Recent</span> : null}
         {holds("create", "group") ? <AddButton onClick={() => setView({ kind: "new" })} label="New group" /> : null}
       </Head>
 
@@ -180,7 +181,7 @@ export function GroupsSection({
       )}
 
       <LiveList<GroupRow>
-        key={`groups:${showArchived}`}
+        key={`groups:${showArchived}:${needle}`}
         source={source}
         rowId={(group) => group.id}
         fingerprint={(group) => `${group.name}|${group.description}|${group.status}|${group.accountId}`}
@@ -199,6 +200,7 @@ export function GroupsSection({
           />
         )}
       />
+      <LoadMore feed={groups} />
     </div>
   );
 }
@@ -214,7 +216,9 @@ function GroupLine({
   tick: "added" | "updated" | null;
   onOpen: () => void;
 }) {
-  const account = accounts.find((a) => a.id === group.accountId) ?? null;
+  const held = accounts.find((a) => a.id === group.accountId);
+  const accountRead = useAccountRecord(held ? "" : group.accountId);
+  const account = held ?? (accountRead.snapshot.rows[0] ? accountFromRow(accountRead.snapshot.rows[0]) : null);
   const archived = group.status === "archived";
   // The client's name only when it SAYS something the group's name does not:
   // an account-kind group is named after its client, so a chip beside it reads

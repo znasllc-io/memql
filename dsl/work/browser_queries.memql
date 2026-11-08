@@ -1,0 +1,173 @@
+/// Goal navigation excludes inputs, acceptance artifacts and execution limits.
+@row
+shape goal workGoalSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  statement
+  origin
+  status
+  requestedVia
+  closedAt
+  closeReason
+}
+@actor
+query goal workGoalSummaryForOwner {
+  args {
+    goalId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.id == args.goalId
+  paginate 1
+  shape workGoalSummary
+}
+
+/// Ten owner-scoped goals. Routine pipeline goals remain an explicit facet.
+@actor
+query goal workGoalsBrowse {
+  args {
+    search string
+    includePipelines boolean
+  }
+  filter row => row.ownerUserId == actor.userId
+    && (args.includePipelines == true || row.requestedVia != "pipeline")
+    && (args.search == nil || trim(args.search) == "" || row.statement.includes(trim(args.search), true) || row.status.includes(trim(args.search), true) || row.origin.includes(trim(args.search), true) || row.id == trim(args.search))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape workGoalSummary
+}
+@actor
+query goal workGoalsBrowseOldest {
+  args {
+    search string
+    includePipelines boolean
+  }
+  filter row => row.ownerUserId == actor.userId
+    && (args.includePipelines == true || row.requestedVia != "pipeline")
+    && (args.search == nil || trim(args.search) == "" || row.statement.includes(trim(args.search), true) || row.status.includes(trim(args.search), true) || row.origin.includes(trim(args.search), true) || row.id == trim(args.search))
+  sort "row.createdAt", "asc", "row.id", "asc"
+  paginate 10
+  shape workGoalSummary
+}
+
+/// Minimal run facts for the ten visible goals. No execution payloads.
+@row
+shape run workGoalRunStatus {
+  row.id
+  goalId
+  ownerUserId
+  status
+  waitingOn
+  automationName
+  title
+  classification.workTitle
+  row.createdAt
+}
+@actor
+query run workGoalRunStatuses {
+  args {
+    goalIds []string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.goalId in args.goalIds
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 200
+  shape workGoalRunStatus
+}
+
+/// Run navigation applies all list questions before its ten-row boundary.
+@actor
+query run workRunsBrowse {
+  args {
+    search string
+    showFinished boolean
+    conversationId string
+  }
+  filter row => row.ownerUserId == actor.userId
+    && (args.showFinished == true || (row.status != "succeeded" && row.status != "failed" && row.status != "cancelled" && row.status != "abandoned"))
+    && (args.conversationId == nil || args.conversationId == "" || row.?input.conversation.id == args.conversationId)
+    && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true) || row.automationName.includes(trim(args.search), true) || row.status.includes(trim(args.search), true) || row.mode.includes(trim(args.search), true) || row.errorCode.includes(trim(args.search), true) || row.id == trim(args.search) || row.?classification.workTitle.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape workRunSummary
+}
+@actor
+query run workRunsBrowseOldest {
+  args {
+    search string
+    showFinished boolean
+    conversationId string
+  }
+  filter row => row.ownerUserId == actor.userId
+    && (args.showFinished == true || (row.status != "succeeded" && row.status != "failed" && row.status != "cancelled" && row.status != "abandoned"))
+    && (args.conversationId == nil || args.conversationId == "" || row.?input.conversation.id == args.conversationId)
+    && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true) || row.automationName.includes(trim(args.search), true) || row.status.includes(trim(args.search), true) || row.mode.includes(trim(args.search), true) || row.errorCode.includes(trim(args.search), true) || row.id == trim(args.search) || row.?classification.workTitle.includes(trim(args.search), true))
+  sort "row.createdAt", "asc", "row.id", "asc"
+  paginate 10
+  shape workRunSummary
+}
+
+/// Full run navigation for one opened goal, without the run execution payload.
+@actor
+query run workRunSummariesForGoal {
+  args {
+    goalId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.goalId == args.goalId
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 50
+  shape workRunSummary
+}
+
+/// The actionable queue keeps its oldest-first meaning while paging.
+@actor
+query approval workApprovalsBrowse {
+  args {
+    search string
+    kindLabels []string
+    repositoryLabel boolean
+    failureLabel boolean
+  }
+  filter row => row.ownerUserId == actor.userId && row.decision == ""
+    && (args.search == nil || trim(args.search) == "" || row.kind.includes(trim(args.search), true) || row.stepKey.includes(trim(args.search), true) || row.?evidence.reason.includes(trim(args.search), true) || row.?subject.statement.includes(trim(args.search), true) || row.question.includes(trim(args.search), true) || row.?subject.summary.includes(trim(args.search), true) || row.?subject.description.includes(trim(args.search), true) || row.?subject.command.includes(trim(args.search), true) || row.?subject.message.includes(trim(args.search), true) || row.?subject.name.includes(trim(args.search), true) || row.?subject.title.includes(trim(args.search), true)
+      || (args.kindLabels != nil && row.kind in args.kindLabels && !(row.?subject.progressLimit != true && row.kind != "budget" && row.options.any(option => option.value == "retry") && row.options.any(option => option.value == "abandon")) && !(row.kind == "planReview" && row.?subject.reviewType == "repository-change"))
+      || (args.repositoryLabel == true && (row.kind == "planReview" && row.?subject.reviewType == "repository-change") && !(row.?subject.progressLimit != true && row.kind != "budget" && row.options.any(option => option.value == "retry") && row.options.any(option => option.value == "abandon")))
+      || (args.failureLabel == true && (row.?subject.progressLimit != true && row.kind != "budget" && row.options.any(option => option.value == "retry") && row.options.any(option => option.value == "abandon"))))
+  sort "requestedAt", "asc", "row.id", "asc"
+  paginate 10
+  shape workApprovalFull
+}
+
+/// Pending requests for the runs shown by one opened goal or run page.
+@actor
+query approval workApprovalsForRuns {
+  args {
+    runIds []string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.decision == "" && row.runId in args.runIds
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 50
+  shape workApprovalFull
+}
+
+/// Names and statuses for requests on the visible approval page.
+@actor
+query run workRunSummariesByIds {
+  args {
+    runIds []string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.id in args.runIds
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 200
+  shape workRunSummary
+}
+
+/// Recovery must discover released decisions even after they leave the queue.
+/// This reads only unresolved recovery candidates, never completed run history.
+@actor
+query run workApprovalRecoveryRuns {
+  filter row => row.ownerUserId == actor.userId && row.cancelRequested != true
+    && ((row.status == "waiting" && row.?waitingOn.kind == "approval")
+      || (row.status == "abandoned" && row.errorCode == "run_abandoned" && row.humanResumeId != nil && row.humanResumeId != ""))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 200
+  shape workRunSummary
+}

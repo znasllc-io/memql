@@ -1,0 +1,19 @@
+{"class": "packages", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=300s", "./component/packages"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/component/packages	102.031s
+{"class": "work", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=480s", "./integrations/work"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/integrations/work	141.921s
+{"class": "library", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=300s", "./integrations/library"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/integrations/library	107.206s
+{"class": "release", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=600s", "./integrations/release"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/integrations/release	239.359s
+{"class": "default", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=180s", "./component/filebackups", "./component/releasecatalog", "./integrations/email", "./integrations/knowledge", "./packs/reviewspack"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/component/filebackups	2.369s
+ok  	github.com/znasllc-io/memql/component/releasecatalog	0.714s
+ok  	github.com/znasllc-io/memql/integrations/email	26.199s
+ok  	github.com/znasllc-io/memql/integrations/knowledge	44.400s
+ok  	github.com/znasllc-io/memql/packs/reviewspack	10.906s

@@ -60,7 +60,15 @@ func (i *integration) discover(ctx context.Context, args map[string]any, _ int) 
 			return nil, errors.New("release page limit must be an integer")
 		}
 	}
-	page, err := i.reader.List(ctx, sourceID, cursor, limit)
+	search := ""
+	if value, ok := args["search"]; ok && value != nil {
+		var valid bool
+		search, valid = value.(string)
+		if !valid {
+			return nil, errors.New("release search must be a string")
+		}
+	}
+	page, err := i.reader.Search(ctx, sourceID, cursor, search, limit)
 	if err != nil {
 		return nil, err
 	}

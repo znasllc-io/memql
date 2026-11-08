@@ -3,8 +3,10 @@ package release
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/core/id"
@@ -66,38 +68,71 @@ func (l *candidateLedger) build(ctx context.Context, key string) (releaseBuildRe
 }
 
 func (l *candidateLedger) builds(ctx context.Context, limit int) ([]releaseBuildRecord, error) {
+	rows, _, err := l.buildsPage(ctx, "", "", limit)
+	return rows, err
+}
+
+func (l *candidateLedger) buildsPage(ctx context.Context, cursor, search string, limit int) ([]releaseBuildRecord, string, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if limit < 1 || limit > 100 {
-		return nil, errors.New("release history limit must be between 1 and 100")
+	search = strings.ToLower(strings.TrimSpace(search))
+	if limit < 1 || limit > 100 || len(cursor) > 2048 || len(search) > 512 {
+		return nil, "", errors.New("release history requires a limit between 1 and 100 and bounded search/cursor")
+	}
+	position := candidateCursor{Search: search}
+	var before any
+	if cursor != "" {
+		data, err := base64.RawURLEncoding.DecodeString(cursor)
+		if err != nil || decodeCandidateObject(data, &position) != nil || position.CreatedAt.IsZero() || position.ID == "" || position.Search != search {
+			return nil, "", errors.New("invalid release history cursor")
+		}
+		before = position.CreatedAt
 	}
 	db, err := l.database()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT intent_id,body,lease_until>clock_timestamp() FROM release_build_intents WHERE owner_user_id=$1 ORDER BY created_at DESC,intent_id LIMIT $2`, owner, limit)
+	rows, err := db.QueryContext(ctx, `SELECT intent_id,body,lease_until>clock_timestamp(),created_at FROM release_build_intents WHERE owner_user_id=$1
+ AND ($2::timestamptz IS NULL OR created_at<$2 OR (created_at=$2 AND intent_id>$3))
+ AND ($4='' OR strpos(lower(concat_ws(' ',intent_id,body->>'phase',body->>'reason',body->'selection'->>'profileName',body->'selection'->>'component',body->'selection'->>'version',body->'selection'->'request'->>'repository')), $4)>0)
+ ORDER BY created_at DESC,intent_id ASC LIMIT $5`, owner, before, position.ID, search, limit+1)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 	out := []releaseBuildRecord{}
+	positions := []candidateCursor{}
 	for rows.Next() {
 		var key string
 		var body []byte
 		var leased bool
-		if err := rows.Scan(&key, &body, &leased); err != nil {
-			return nil, err
+		var at time.Time
+		if err := rows.Scan(&key, &body, &leased, &at); err != nil {
+			return nil, "", err
 		}
 		record, err := decodeBuild(body, owner, key)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		record.leased = leased
 		out = append(out, record)
+		positions = append(positions, candidateCursor{CreatedAt: at, ID: key, Search: search})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > limit {
+		out = out[:limit]
+		data, err := json.Marshal(positions[limit-1])
+		if err != nil {
+			return nil, "", err
+		}
+		next = base64.RawURLEncoding.EncodeToString(data)
+	}
+	return out, next, nil
 }
 
 type releaseBuildLease struct {

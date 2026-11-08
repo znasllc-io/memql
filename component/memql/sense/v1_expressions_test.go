@@ -664,7 +664,7 @@ func TestHoverShowsSignatureTierAndLegality(t *testing.T) {
 
 	card = hoverOn(t, s, v1Query+"  filter row => row.title.includes(args.tag)", "includes")
 	hoverStyle(t, card)
-	for _, want := range []string{"string.includes(sub string) bool", "Pushed down to SQL.", "Replaces `contains(s, sub)`."} {
+	for _, want := range []string{"string.includes(sub string, ignoreCase? bool) bool", "Pushed down to SQL.", "Replaces `contains(s, sub)`."} {
 		if !strings.Contains(card, want) {
 			t.Errorf("hover on includes should contain %q, got:\n%s", want, card)
 		}

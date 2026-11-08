@@ -62,9 +62,12 @@ export function observeSnapshot(
     }
   }
 
-  // A removed row's tick goes with it.
-  for (const id of ticks.keys()) {
-    if (!seen.has(id)) ticks.delete(id);
+  // Only a settled read establishes removal. Switching a server-side search
+  // briefly has no rows while it seeds; that does not revoke an earned cue.
+  if (snapshotState === "live") {
+    for (const id of ticks.keys()) {
+      if (!seen.has(id)) ticks.delete(id);
+    }
   }
 
   return { seen, wasLive: snapshotState === "live", ticks };

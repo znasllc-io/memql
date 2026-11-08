@@ -67,17 +67,17 @@ describe("the registry list", () => {
     mount(conn);
     await screen.findByText("Visible client");
     const heading = screen.getByRole("heading", { name: "Accounts" });
-    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("1");
+    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("1 shown");
     expect(screen.getByRole("button", { name: /Visible client/ }).classList.contains("os-record-row")).toBe(true);
     await act(async () => conn.subscriptions.emit(ACCOUNT_CONCEPT, accountRow({ id: "client-c", name: "New client" }), "NODE_CREATED"));
     await screen.findByText("New client");
-    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("2");
+    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("2 shown");
   });
 
   it("does not invent a zero while the account read is pending or refused", async () => {
     const conn = fakeConnection({});
     let refuse!: (reason: Error) => void;
-    conn.query.clientAccountsAll.mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; }));
+    conn.query.clientAccountsBrowse.mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; }));
     const { view } = mount(conn);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
     await act(async () => refuse(new Error("permission denied")));
@@ -85,17 +85,15 @@ describe("the registry list", () => {
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
   });
 
-  it("SEEDS UNFILTERED and folds the archive filter client-side", async () => {
-    // Seeding filtered would make the toggle re-run the read and re-baseline
-    // every arrival cue, so revealing rows the browser already had would
-    // announce them as new. The seed therefore asks for everything.
+  it("filters archives before paging", async () => {
+    // The server narrows before the ten-row limit; each filter keeps its own cached pages.
     const conn = fakeConnection({
       clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1", name: "Acme" })],
     });
     mount(conn);
     await screen.findByText("Acme");
-    expect(conn.query.clientAccountsAll).toHaveBeenCalledWith(
-      { includeArchived: true },
+    expect(conn.query.clientAccountsBrowse).toHaveBeenCalledWith(
+      { includeArchived: false, search: undefined },
       expect.anything(),
     );
   });

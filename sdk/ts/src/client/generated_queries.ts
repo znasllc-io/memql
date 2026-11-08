@@ -803,16 +803,20 @@ QueryClient.prototype.agentsForRun = function (this: QueryClient, args: AgentsFo
 /** Returns all AI agent templates regardless of active status. */
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["allAgents"] in generated_concepts.ts).
 export interface AllAgentsArgs {
+  includeInactive?: boolean;
+  search?: string;
 }
 
 export function buildAllAgents(args: AllAgentsArgs): string {
-  void args;
-  return "query allAgents()";
+  const parts: string[] = [];
+  if (args.includeInactive !== undefined) parts.push("includeInactive: " + renderMemQLValue(args.includeInactive));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query allAgents(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    allAgents(args?: AllAgentsArgs, opts?: QueryCallOptions): Promise<Result>;
+    allAgents(args: AllAgentsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -820,19 +824,25 @@ QueryClient.prototype.allAgents = function (this: QueryClient, args: AllAgentsAr
   return this.executeNamed("allAgents", buildAllAgents(args), opts);
 };
 
-/** Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel. */
+/** Cursor-paged shared chunk metadata for complete counts and bounded review joins. Optional filters only narrow this existing index; full text stays domain-scoped. */
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["allDocumentChunkDomains"] in generated_concepts.ts).
 export interface AllDocumentChunkDomainsArgs {
+  asOf?: string;
+  pending?: boolean;
+  search?: string;
 }
 
 export function buildAllDocumentChunkDomains(args: AllDocumentChunkDomainsArgs): string {
-  void args;
-  return "query allDocumentChunkDomains()";
+  const parts: string[] = [];
+  if (args.asOf !== undefined) parts.push("asOf: " + renderMemQLValue(args.asOf));
+  if (args.pending !== undefined) parts.push("pending: " + renderMemQLValue(args.pending));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query allDocumentChunkDomains(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    allDocumentChunkDomains(args?: AllDocumentChunkDomainsArgs, opts?: QueryCallOptions): Promise<Result>;
+    allDocumentChunkDomains(args: AllDocumentChunkDomainsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -1293,6 +1303,28 @@ QueryClient.prototype.audienceById = function (this: QueryClient, args: Audience
   return this.executeNamed("audienceById", buildAudienceById(args), opts);
 };
 
+/** Authorized audience identities matching a campaign-search phrase. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audienceNamesMatching"] in generated_concepts.ts).
+export interface AudienceNamesMatchingArgs {
+  search: string;
+}
+
+export function buildAudienceNamesMatching(args: AudienceNamesMatchingArgs): string {
+  const parts: string[] = [];
+  parts.push("search: " + renderMemQLValue(args.search));
+  return "query audienceNamesMatching(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    audienceNamesMatching(args: AudienceNamesMatchingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.audienceNamesMatching = function (this: QueryClient, args: AudienceNamesMatchingArgs = {} as AudienceNamesMatchingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("audienceNamesMatching", buildAudienceNamesMatching(args), opts);
+};
+
 /** ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first -- including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
 THE 500 IS A PAGE, NOT A CEILING (memql#3460). It used to be 5000 and it used to be the largest audience this engine could send to: the worker read the roster WHOLE on every batch and diffed it against the ledger, so anything past the bound would have been silently truncated and campaignStartSend refused the send rather than mail a prefix. The worker now walks this query with the engine's keyset cursor, so the roster is unbounded and the number here only decides how much of it is in memory at once.
 The ascending `row.createdAt` ordering is load-bearing under concurrent roster edits, which is the question a cursor over versioned rows has to answer. Reads collapse to the latest version per id (DISTINCT ON), so editing a recipient mid-send moves it FORWARD in this enumeration -- never backward past the cursor. A row can therefore be seen twice in one pass and can never be MISSED, and the worker de-duplicates within a batch. That asymmetry is the whole safety argument: a duplicate costs a wasted comparison, a skip costs somebody their mail. */
@@ -1381,6 +1413,56 @@ declare module "./query.js" {
 
 QueryClient.prototype.audiences = function (this: QueryClient, args: AudiencesArgs = {} as AudiencesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("audiences", buildAudiences(args), opts);
+};
+
+/** Recent audiences with name, description, archive and confirmation search. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiencesBrowse"] in generated_concepts.ts).
+export interface AudiencesBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  confirmation?: string;
+}
+
+export function buildAudiencesBrowse(args: AudiencesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.confirmation !== undefined) parts.push("confirmation: " + renderMemQLValue(args.confirmation));
+  return "query audiencesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    audiencesBrowse(args: AudiencesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.audiencesBrowse = function (this: QueryClient, args: AudiencesBrowseArgs = {} as AudiencesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("audiencesBrowse", buildAudiencesBrowse(args), opts);
+};
+
+/** Search the authorized audit trail before its ten-row page boundary. */
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsBrowse"] in generated_concepts.ts).
+export interface AuditEventsBrowseArgs {
+  category?: string;
+  search?: string;
+}
+
+export function buildAuditEventsBrowse(args: AuditEventsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.category !== undefined) parts.push("category: " + renderMemQLValue(args.category));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query auditEventsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    auditEventsBrowse(args: AuditEventsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.auditEventsBrowse = function (this: QueryClient, args: AuditEventsBrowseArgs = {} as AuditEventsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("auditEventsBrowse", buildAuditEventsBrowse(args), opts);
 };
 
 /** Audit events where actorUserId equals the supplied userId. CLUSTER OWNER ONLY. Pair with auditEventsByTarget for full per-user history (no OR operator in the filter grammar yet).
@@ -2180,6 +2262,32 @@ QueryClient.prototype.campaigns = function (this: QueryClient, args: CampaignsAr
   return this.executeNamed("campaigns", buildCampaigns(args), opts);
 };
 
+/** Recent campaigns, narrowed before pagination. audienceIds comes from the authorized audience-name search so campaign search retains that relation. */
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignsBrowse"] in generated_concepts.ts).
+export interface CampaignsBrowseArgs {
+  search?: string;
+  status?: string;
+  audienceIds?: string[];
+}
+
+export function buildCampaignsBrowse(args: CampaignsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.audienceIds !== undefined) parts.push("audienceIds: " + renderMemQLValue(args.audienceIds));
+  return "query campaignsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignsBrowse(args: CampaignsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignsBrowse = function (this: QueryClient, args: CampaignsBrowseArgs = {} as CampaignsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignsBrowse", buildCampaignsBrowse(args), opts);
+};
+
 /** The email campaigns run for one account.
 The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field. `sitesForAccount` above dropped its copy under memql#5303 (D4) because v1:platform:site declares the account argument; campaigns keep theirs, because a rollup that dropped the tier predicate would be the shortest path in the product to reading every operator's campaigns.
 It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows, which is a number about one busy week rather than about the client -- and the delivery ledger is deliberately not readable in bulk from here at all (memql#4823). Cancelled and failed campaigns are included: a rollup is what is filed for this client, and a send that failed is still work that happened. */
@@ -2358,6 +2466,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.clientAccountsAll = function (this: QueryClient, args: ClientAccountsAllArgs = {} as ClientAccountsAllArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("clientAccountsAll", buildClientAccountsAll(args), opts);
+};
+
+/** Ten recent authorized clients; searching is applied before cursor paging. */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountsBrowse"] in generated_concepts.ts).
+export interface ClientAccountsBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+}
+
+export function buildClientAccountsBrowse(args: ClientAccountsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "query clientAccountsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clientAccountsBrowse(args: ClientAccountsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clientAccountsBrowse = function (this: QueryClient, args: ClientAccountsBrowseArgs = {} as ClientAccountsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clientAccountsBrowse", buildClientAccountsBrowse(args), opts);
 };
 
 /** The database backing this cluster: where it is, what engine and version, and which extensions are installed. CLUSTER OWNER ONLY. */
@@ -2626,6 +2758,32 @@ QueryClient.prototype.composeRecipes = function (this: QueryClient, args: Compos
   return this.executeNamed("composeRecipes", buildComposeRecipes(args), opts);
 };
 
+/** Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records. */
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipesBrowse"] in generated_concepts.ts).
+export interface ComposeRecipesBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  format?: string;
+}
+
+export function buildComposeRecipesBrowse(args: ComposeRecipesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  return "query composeRecipesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeRecipesBrowse(args: ComposeRecipesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeRecipesBrowse = function (this: QueryClient, args: ComposeRecipesBrowseArgs = {} as ComposeRecipesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeRecipesBrowse", buildComposeRecipesBrowse(args), opts);
+};
+
 /** One template by id, gated to its owner. Backs the template editor and the render step's own resolution -- which runs under the caller's actor, so a composition naming somebody else's template resolves zero rows and is refused rather than rendering through it. */
 // Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.ts).
 export interface ComposeTemplateByIdArgs {
@@ -2668,6 +2826,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.composeTemplates = function (this: QueryClient, args: ComposeTemplatesArgs = {} as ComposeTemplatesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("composeTemplates", buildComposeTemplates(args), opts);
+};
+
+/** Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records. */
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplatesBrowse"] in generated_concepts.ts).
+export interface ComposeTemplatesBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  format?: string;
+}
+
+export function buildComposeTemplatesBrowse(args: ComposeTemplatesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  return "query composeTemplatesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeTemplatesBrowse(args: ComposeTemplatesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeTemplatesBrowse = function (this: QueryClient, args: ComposeTemplatesBrowseArgs = {} as ComposeTemplatesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeTemplatesBrowse", buildComposeTemplatesBrowse(args), opts);
 };
 
 /** One composition in full, for the open Composer and the record panel. Gated to its owner, so a caller cannot read somebody else's composition even holding its id. */
@@ -2758,6 +2942,28 @@ QueryClient.prototype.compositionInputById = function (this: QueryClient, args: 
   return this.executeNamed("compositionInputById", buildCompositionInputById(args), opts);
 };
 
+/** Output-to-composition directory. Ordinary Files browsing supplies visible ids; the Materializer place requests compact output membership explicitly. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionOutputIndex"] in generated_concepts.ts).
+export interface CompositionOutputIndexArgs {
+  fileIds?: string[];
+}
+
+export function buildCompositionOutputIndex(args: CompositionOutputIndexArgs): string {
+  const parts: string[] = [];
+  if (args.fileIds !== undefined) parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  return "query compositionOutputIndex(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionOutputIndex(args: CompositionOutputIndexArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionOutputIndex = function (this: QueryClient, args: CompositionOutputIndexArgs = {} as CompositionOutputIndexArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionOutputIndex", buildCompositionOutputIndex(args), opts);
+};
+
 /** Everything materialized, newest first: the Materialized view's one read and the Files app's Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything materialized in THIS INSTANCE" (the epic's words) a claim this read can honestly make. A plain owner tier has no bypass on the read path, so an operator would silently see one person's subset. */
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositions"] in generated_concepts.ts).
 export interface CompositionsArgs {
@@ -2780,6 +2986,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.compositions = function (this: QueryClient, args: CompositionsArgs = {} as CompositionsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("compositions", buildCompositions(args), opts);
+};
+
+/** Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsBrowse"] in generated_concepts.ts).
+export interface CompositionsBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  format?: string;
+}
+
+export function buildCompositionsBrowse(args: CompositionsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  return "query compositionsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionsBrowse(args: CompositionsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionsBrowse = function (this: QueryClient, args: CompositionsBrowseArgs = {} as CompositionsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionsBrowse", buildCompositionsBrowse(args), opts);
 };
 
 /** The compositions produced by one recipe, newest first. Backs the recipe row's "what it has made" and the evidence that a re-run matched the catalog: two runs of one recipe, one with models and one without. */
@@ -3251,6 +3483,134 @@ QueryClient.prototype.dependentsOfConstruct = function (this: QueryClient, args:
   return this.executeNamed("dependentsOfConstruct", buildDependentsOfConstruct(args), opts);
 };
 
+/** Saved personal installation names, paged rather than an unbounded ceiling. */
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["deployableDirectoryConnections"] in generated_concepts.ts).
+export interface DeployableDirectoryConnectionsArgs {
+}
+
+export function buildDeployableDirectoryConnections(args: DeployableDirectoryConnectionsArgs): string {
+  void args;
+  return "query deployableDirectoryConnections()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectoryConnections(args?: DeployableDirectoryConnectionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectoryConnections = function (this: QueryClient, args: DeployableDirectoryConnectionsArgs = {} as DeployableDirectoryConnectionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectoryConnections", buildDeployableDirectoryConnections(args), opts);
+};
+
+/** Authorized credential naming cards for complete repository provenance search. */
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["deployableDirectoryCredentials"] in generated_concepts.ts).
+export interface DeployableDirectoryCredentialsArgs {
+}
+
+export function buildDeployableDirectoryCredentials(args: DeployableDirectoryCredentialsArgs): string {
+  void args;
+  return "query deployableDirectoryCredentials()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectoryCredentials(args?: DeployableDirectoryCredentialsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectoryCredentials = function (this: QueryClient, args: DeployableDirectoryCredentialsArgs = {} as DeployableDirectoryCredentialsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectoryCredentials", buildDeployableDirectoryCredentials(args), opts);
+};
+
+/** Compact authorized source definitions, including undeployed apps. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["deployableDirectoryPackages"] in generated_concepts.ts).
+export interface DeployableDirectoryPackagesArgs {
+  asOf: string;
+}
+
+export function buildDeployableDirectoryPackages(args: DeployableDirectoryPackagesArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query deployableDirectoryPackages(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectoryPackages(args: DeployableDirectoryPackagesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectoryPackages = function (this: QueryClient, args: DeployableDirectoryPackagesArgs = {} as DeployableDirectoryPackagesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectoryPackages", buildDeployableDirectoryPackages(args), opts);
+};
+
+/** Active deployment identities and declared apps, without logs/history payloads. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["deployableDirectoryPending"] in generated_concepts.ts).
+export interface DeployableDirectoryPendingArgs {
+  asOf: string;
+}
+
+export function buildDeployableDirectoryPending(args: DeployableDirectoryPendingArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query deployableDirectoryPending(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectoryPending(args: DeployableDirectoryPendingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectoryPending = function (this: QueryClient, args: DeployableDirectoryPendingArgs = {} as DeployableDirectoryPendingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectoryPending", buildDeployableDirectoryPending(args), opts);
+};
+
+/** Compact authorized site identities used by the deployables directory reducer. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deployableDirectorySites"] in generated_concepts.ts).
+export interface DeployableDirectorySitesArgs {
+  asOf: string;
+}
+
+export function buildDeployableDirectorySites(args: DeployableDirectorySitesArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query deployableDirectorySites(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectorySites(args: DeployableDirectorySitesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectorySites = function (this: QueryClient, args: DeployableDirectorySitesArgs = {} as DeployableDirectorySitesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectorySites", buildDeployableDirectorySites(args), opts);
+};
+
+/** Hydrate only the sites named by one directory page, under the caller's gate. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deployableDirectorySitesByIds"] in generated_concepts.ts).
+export interface DeployableDirectorySitesByIdsArgs {
+  ids: string[];
+}
+
+export function buildDeployableDirectorySitesByIds(args: DeployableDirectorySitesByIdsArgs): string {
+  const parts: string[] = [];
+  parts.push("ids: " + renderMemQLValue(args.ids));
+  return "query deployableDirectorySitesByIds(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectorySitesByIds(args: DeployableDirectorySitesByIdsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectorySitesByIds = function (this: QueryClient, args: DeployableDirectorySitesByIdsArgs = {} as DeployableDirectorySitesByIdsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectorySitesByIds", buildDeployableDirectorySitesByIds(args), opts);
+};
+
 /** The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id and a result collapses to one row per id, so this is not a timeline read; for the state at an earlier instant, wrap it in `asOf(deploymentById(...), "<rfc3339>")`. A one-query all-versions mode does not exist (#2880). */
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.ts).
 export interface DeploymentByIdArgs {
@@ -3394,11 +3754,19 @@ QueryClient.prototype.deviceCodeByUserCodeHash = function (this: QueryClient, ar
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["documentChunksForDomain"] in generated_concepts.ts).
 export interface DocumentChunksForDomainArgs {
   domainId: string;
+  ids?: string[];
+  asOf?: string;
+  pending?: boolean;
+  search?: string;
 }
 
 export function buildDocumentChunksForDomain(args: DocumentChunksForDomainArgs): string {
   const parts: string[] = [];
   parts.push("domainId: " + renderMemQLValue(args.domainId));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.asOf !== undefined) parts.push("asOf: " + renderMemQLValue(args.asOf));
+  if (args.pending !== undefined) parts.push("pending: " + renderMemQLValue(args.pending));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
   return "query documentChunksForDomain(" + parts.join(", ") + ")";
 }
 
@@ -3636,6 +4004,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailRules = function (this: QueryClient, args: EmailRulesArgs = {} as EmailRulesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailRules", buildEmailRules(args), opts);
+};
+
+/** Recent event rules, the other ordered automation-directory input. */
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRulesBrowse"] in generated_concepts.ts).
+export interface EmailRulesBrowseArgs {
+  search?: string;
+  trigger?: string;
+}
+
+export function buildEmailRulesBrowse(args: EmailRulesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.trigger !== undefined) parts.push("trigger: " + renderMemQLValue(args.trigger));
+  return "query emailRulesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRulesBrowse(args: EmailRulesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRulesBrowse = function (this: QueryClient, args: EmailRulesBrowseArgs = {} as EmailRulesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRulesBrowse", buildEmailRulesBrowse(args), opts);
 };
 
 /** Enrolment-token lookup by tokenHash for the /enroll redeem path. */
@@ -4122,6 +4514,30 @@ QueryClient.prototype.groupsAll = function (this: QueryClient, args: GroupsAllAr
   return this.executeNamed("groupsAll", buildGroupsAll(args), opts);
 };
 
+/** Ten recent authorized groups, with name and description search before paging. */
+// Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupsBrowse"] in generated_concepts.ts).
+export interface GroupsBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+}
+
+export function buildGroupsBrowse(args: GroupsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "query groupsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    groupsBrowse(args: GroupsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.groupsBrowse = function (this: QueryClient, args: GroupsBrowseArgs = {} as GroupsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("groupsBrowse", buildGroupsBrowse(args), opts);
+};
+
 /** The groups tied to one account -- the Accounts ledger's People band. */
 // Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupsForAccount"] in generated_concepts.ts).
 export interface GroupsForAccountArgs {
@@ -4485,6 +4901,32 @@ QueryClient.prototype.journeys = function (this: QueryClient, args: JourneysArgs
   return this.executeNamed("journeys", buildJourneys(args), opts);
 };
 
+/** Recent journeys, one ordered input to the Email automation directory. */
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeysBrowse"] in generated_concepts.ts).
+export interface JourneysBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  trigger?: string;
+}
+
+export function buildJourneysBrowse(args: JourneysBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.trigger !== undefined) parts.push("trigger: " + renderMemQLValue(args.trigger));
+  return "query journeysBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeysBrowse(args: JourneysBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeysBrowse = function (this: QueryClient, args: JourneysBrowseArgs = {} as JourneysBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeysBrowse", buildJourneysBrowse(args), opts);
+};
+
 /** Every knowledge domain this cluster holds.
 The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
 NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.
@@ -4613,6 +5055,28 @@ QueryClient.prototype.libraryArchivedFolders = function (this: QueryClient, args
   return this.executeNamed("libraryArchivedFolders", buildLibraryArchivedFolders(args), opts);
 };
 
+/** Ten archived folders matching the Bin's server-side search. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryArchivedFoldersBrowse"] in generated_concepts.ts).
+export interface LibraryArchivedFoldersBrowseArgs {
+  search?: string;
+}
+
+export function buildLibraryArchivedFoldersBrowse(args: LibraryArchivedFoldersBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query libraryArchivedFoldersBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArchivedFoldersBrowse(args: LibraryArchivedFoldersBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArchivedFoldersBrowse = function (this: QueryClient, args: LibraryArchivedFoldersBrowseArgs = {} as LibraryArchivedFoldersBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArchivedFoldersBrowse", buildLibraryArchivedFoldersBrowse(args), opts);
+};
+
 /** Fetch a single Library artifact index row by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.ts).
 export interface LibraryArtifactByIdArgs {
@@ -4657,6 +5121,46 @@ QueryClient.prototype.libraryArtifactBySourceConceptRef = function (this: QueryC
   return this.executeNamed("libraryArtifactBySourceConceptRef", buildLibraryArtifactBySourceConceptRef(args), opts);
 };
 
+/** Internal metadata, aggregated before transport by libraryBrowseFacets. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactFacetRows"] in generated_concepts.ts).
+export interface LibraryArtifactFacetRowsArgs {
+  asOf: string;
+  archived?: boolean;
+  folderId?: string;
+  kind?: string;
+  source?: string;
+  accountId?: string;
+  search?: string;
+  ids?: string[];
+  folderIds?: string[];
+  sourceRefs?: string[];
+}
+
+export function buildLibraryArtifactFacetRows(args: LibraryArtifactFacetRowsArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.folderIds !== undefined) parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  if (args.sourceRefs !== undefined) parts.push("sourceRefs: " + renderMemQLValue(args.sourceRefs));
+  return "query libraryArtifactFacetRows(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactFacetRows(args: LibraryArtifactFacetRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactFacetRows = function (this: QueryClient, args: LibraryArtifactFacetRowsArgs = {} as LibraryArtifactFacetRowsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactFacetRows", buildLibraryArtifactFacetRows(args), opts);
+};
+
 /** Resolve a newly uploaded file's artifact using the bare file ID from its receipt. The polymorphic sourceConceptRef query is for canonical internal references; clients cannot infer a concept from a bare ID. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactForFile"] in generated_concepts.ts).
 export interface LibraryArtifactForFileArgs {
@@ -4697,6 +5201,86 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryArtifacts = function (this: QueryClient, args: LibraryArtifactsArgs = {} as LibraryArtifactsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryArtifacts", buildLibraryArtifacts(args), opts);
+};
+
+/** Ten owner-scoped Library entries matching the requested place and facets. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowse"] in generated_concepts.ts).
+export interface LibraryArtifactsBrowseArgs {
+  archived?: boolean;
+  folderId?: string;
+  kind?: string;
+  source?: string;
+  accountId?: string;
+  label?: string;
+  search?: string;
+  ids?: string[];
+  folderIds?: string[];
+  sourceRefs?: string[];
+}
+
+export function buildLibraryArtifactsBrowse(args: LibraryArtifactsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.folderIds !== undefined) parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  if (args.sourceRefs !== undefined) parts.push("sourceRefs: " + renderMemQLValue(args.sourceRefs));
+  return "query libraryArtifactsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactsBrowse(args: LibraryArtifactsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactsBrowse = function (this: QueryClient, args: LibraryArtifactsBrowseArgs = {} as LibraryArtifactsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactsBrowse", buildLibraryArtifactsBrowse(args), opts);
+};
+
+/** Ten owner-scoped Library entries matching the requested place and facets. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowseOldest"] in generated_concepts.ts).
+export interface LibraryArtifactsBrowseOldestArgs {
+  archived?: boolean;
+  folderId?: string;
+  kind?: string;
+  source?: string;
+  accountId?: string;
+  label?: string;
+  search?: string;
+  ids?: string[];
+  folderIds?: string[];
+  sourceRefs?: string[];
+}
+
+export function buildLibraryArtifactsBrowseOldest(args: LibraryArtifactsBrowseOldestArgs): string {
+  const parts: string[] = [];
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.folderIds !== undefined) parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  if (args.sourceRefs !== undefined) parts.push("sourceRefs: " + renderMemQLValue(args.sourceRefs));
+  return "query libraryArtifactsBrowseOldest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactsBrowseOldest(args: LibraryArtifactsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactsBrowseOldest = function (this: QueryClient, args: LibraryArtifactsBrowseOldestArgs = {} as LibraryArtifactsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactsBrowseOldest", buildLibraryArtifactsBrowseOldest(args), opts);
 };
 
 /** List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: `row.ownerUserId == actor.userId` gates the row set; `row.kind` narrows to the selected kind. */
@@ -4765,6 +5349,28 @@ QueryClient.prototype.libraryArtifactsByLens = function (this: QueryClient, args
   return this.executeNamed("libraryArtifactsByLens", buildLibraryArtifactsByLens(args), opts);
 };
 
+/** Complete membership of one deliberate archive operation, including archived files. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsInFolders"] in generated_concepts.ts).
+export interface LibraryArtifactsInFoldersArgs {
+  folderIds: string[];
+}
+
+export function buildLibraryArtifactsInFolders(args: LibraryArtifactsInFoldersArgs): string {
+  const parts: string[] = [];
+  parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  return "query libraryArtifactsInFolders(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactsInFolders(args: LibraryArtifactsInFoldersArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactsInFolders = function (this: QueryClient, args: LibraryArtifactsInFoldersArgs = {} as LibraryArtifactsInFoldersArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactsInFolders", buildLibraryArtifactsInFolders(args), opts);
+};
+
 /** Branch roots retain their exact parent link even after their document changes. */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentBranches"] in generated_concepts.ts).
 export interface LibraryDocumentBranchesArgs {
@@ -4790,16 +5396,22 @@ QueryClient.prototype.libraryDocumentBranches = function (this: QueryClient, arg
 /** Cursor-based retained document history. Bodies are fetched only on selection. */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentHistoryPage"] in generated_concepts.ts).
 export interface LibraryDocumentHistoryPageArgs {
+  documentId: string;
+  documentIdAlias?: string;
+  beforeVersion: number;
 }
 
 export function buildLibraryDocumentHistoryPage(args: LibraryDocumentHistoryPageArgs): string {
-  void args;
-  return "query libraryDocumentHistoryPage()";
+  const parts: string[] = [];
+  parts.push("documentId: " + renderMemQLValue(args.documentId));
+  if (args.documentIdAlias !== undefined) parts.push("documentIdAlias: " + renderMemQLValue(args.documentIdAlias));
+  parts.push("beforeVersion: " + renderMemQLValue(args.beforeVersion));
+  return "query libraryDocumentHistoryPage(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    libraryDocumentHistoryPage(args?: LibraryDocumentHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
+    libraryDocumentHistoryPage(args: LibraryDocumentHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -4810,16 +5422,22 @@ QueryClient.prototype.libraryDocumentHistoryPage = function (this: QueryClient, 
 /** One owned immutable snapshot, including the initial version zero. */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentVersionByNumber"] in generated_concepts.ts).
 export interface LibraryDocumentVersionByNumberArgs {
+  documentId: string;
+  documentIdAlias?: string;
+  versionNumber: number;
 }
 
 export function buildLibraryDocumentVersionByNumber(args: LibraryDocumentVersionByNumberArgs): string {
-  void args;
-  return "query libraryDocumentVersionByNumber()";
+  const parts: string[] = [];
+  parts.push("documentId: " + renderMemQLValue(args.documentId));
+  if (args.documentIdAlias !== undefined) parts.push("documentIdAlias: " + renderMemQLValue(args.documentIdAlias));
+  parts.push("versionNumber: " + renderMemQLValue(args.versionNumber));
+  return "query libraryDocumentVersionByNumber(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    libraryDocumentVersionByNumber(args?: LibraryDocumentVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result>;
+    libraryDocumentVersionByNumber(args: LibraryDocumentVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -4927,16 +5545,20 @@ QueryClient.prototype.libraryFileChunksForFile = function (this: QueryClient, ar
 /** Cursor-based retained file history, with content resolved through owned storage. */
 // Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileHistoryPage"] in generated_concepts.ts).
 export interface LibraryFileHistoryPageArgs {
+  fileId: string;
+  beforeVersion: number;
 }
 
 export function buildLibraryFileHistoryPage(args: LibraryFileHistoryPageArgs): string {
-  void args;
-  return "query libraryFileHistoryPage()";
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  parts.push("beforeVersion: " + renderMemQLValue(args.beforeVersion));
+  return "query libraryFileHistoryPage(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    libraryFileHistoryPage(args?: LibraryFileHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
+    libraryFileHistoryPage(args: LibraryFileHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -5079,6 +5701,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFolderById = function (this: QueryClient, args: LibraryFolderByIdArgs = {} as LibraryFolderByIdArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFolderById", buildLibraryFolderById(args), opts);
+};
+
+/** Complete folder navigation metadata, including archived folders, in bounded pages. */
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderDirectory"] in generated_concepts.ts).
+export interface LibraryFolderDirectoryArgs {
+}
+
+export function buildLibraryFolderDirectory(args: LibraryFolderDirectoryArgs): string {
+  void args;
+  return "query libraryFolderDirectory()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFolderDirectory(args?: LibraryFolderDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFolderDirectory = function (this: QueryClient, args: LibraryFolderDirectoryArgs = {} as LibraryFolderDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFolderDirectory", buildLibraryFolderDirectory(args), opts);
 };
 
 /** The caller's whole folder tree, live (memql#4781, design B1). Owned: `row.ownerUserId == actor.userId` gates the row set; `row.archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held no file at all and is meant to be gone from every surface at once. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume. */
@@ -5698,6 +6340,28 @@ QueryClient.prototype.myAskConversations = function (this: QueryClient, args: My
   return this.executeNamed("myAskConversations", buildMyAskConversations(args), opts);
 };
 
+/** Search private conversation titles before taking the next ten summaries. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["myAskConversationsBrowse"] in generated_concepts.ts).
+export interface MyAskConversationsBrowseArgs {
+  search?: string;
+}
+
+export function buildMyAskConversationsBrowse(args: MyAskConversationsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query myAskConversationsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myAskConversationsBrowse(args: MyAskConversationsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myAskConversationsBrowse = function (this: QueryClient, args: MyAskConversationsBrowseArgs = {} as MyAskConversationsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myAskConversationsBrowse", buildMyAskConversationsBrowse(args), opts);
+};
+
 /** The caller's seen UI revisions, shared across their OS windows and machines. */
 // Bound concept: v1:os:attentionReceipt (machine-readable: BoundConcepts["myAttentionReceipts"] in generated_concepts.ts).
 export interface MyAttentionReceiptsArgs {
@@ -5738,6 +6402,72 @@ declare module "./query.js" {
 
 QueryClient.prototype.myDesktop = function (this: QueryClient, args: MyDesktopArgs = {} as MyDesktopArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("myDesktop", buildMyDesktop(args), opts);
+};
+
+/** Open one owned machine independently of the directory's loaded page or search. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachineById"] in generated_concepts.ts).
+export interface MyMachineByIdArgs {
+  registrationId: string;
+}
+
+export function buildMyMachineById(args: MyMachineByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "query myMachineById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myMachineById(args: MyMachineByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myMachineById = function (this: QueryClient, args: MyMachineByIdArgs = {} as MyMachineByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myMachineById", buildMyMachineById(args), opts);
+};
+
+/** Lightweight machine identities and heartbeat presence for desktop file provenance. Equipment, apps and routing settings are loaded only by the Fleet surfaces that use them. Consumers must follow the cursor if present. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachinePresence"] in generated_concepts.ts).
+export interface MyMachinePresenceArgs {
+}
+
+export function buildMyMachinePresence(args: MyMachinePresenceArgs): string {
+  void args;
+  return "query myMachinePresence()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myMachinePresence(args?: MyMachinePresenceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myMachinePresence = function (this: QueryClient, args: MyMachinePresenceArgs = {} as MyMachinePresenceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myMachinePresence", buildMyMachinePresence(args), opts);
+};
+
+/** The caller's machine directory, ten recent registrations at a time. This is separate from myWorkersWithStatus because routing needs the full fleet in stable first-registration order, while a directory needs recent/search. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachinesBrowse"] in generated_concepts.ts).
+export interface MyMachinesBrowseArgs {
+  search?: string;
+  includeRevoked?: boolean;
+}
+
+export function buildMyMachinesBrowse(args: MyMachinesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeRevoked !== undefined) parts.push("includeRevoked: " + renderMemQLValue(args.includeRevoked));
+  return "query myMachinesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myMachinesBrowse(args: MyMachinesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myMachinesBrowse = function (this: QueryClient, args: MyMachinesBrowseArgs = {} as MyMachinesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myMachinesBrowse", buildMyMachinesBrowse(args), opts);
 };
 
 /** The caller's own earlier model calls on a selected machine. This does not expose other people's prompts or identities on a shared machine. */
@@ -5826,16 +6556,20 @@ QueryClient.prototype.myWorkersWithStatus = function (this: QueryClient, args: M
 /** The caller's own workbench workspaces, live and released, newest first. Backs the workspaces list on /fleet/workbenches for a person who is not a cluster owner. */
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["myWorkspaces"] in generated_concepts.ts).
 export interface MyWorkspacesArgs {
+  includeReleased?: boolean;
+  search?: string;
 }
 
 export function buildMyWorkspaces(args: MyWorkspacesArgs): string {
-  void args;
-  return "query myWorkspaces()";
+  const parts: string[] = [];
+  if (args.includeReleased !== undefined) parts.push("includeReleased: " + renderMemQLValue(args.includeReleased));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query myWorkspaces(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    myWorkspaces(args?: MyWorkspacesArgs, opts?: QueryCallOptions): Promise<Result>;
+    myWorkspaces(args: MyWorkspacesArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -5973,6 +6707,60 @@ declare module "./query.js" {
 
 QueryClient.prototype.newslettersForAudience = function (this: QueryClient, args: NewslettersForAudienceArgs = {} as NewslettersForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("newslettersForAudience", buildNewslettersForAudience(args), opts);
+};
+
+/** nexusAutomationSummaryById wraps the query named "nexusAutomationSummaryById". */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["nexusAutomationSummaryById"] in generated_concepts.ts).
+export interface NexusAutomationSummaryByIdArgs {
+  constructId: string;
+}
+
+export function buildNexusAutomationSummaryById(args: NexusAutomationSummaryByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("constructId: " + renderMemQLValue(args.constructId));
+  return "query nexusAutomationSummaryById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    nexusAutomationSummaryById(args: NexusAutomationSummaryByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.nexusAutomationSummaryById = function (this: QueryClient, args: NexusAutomationSummaryByIdArgs = {} as NexusAutomationSummaryByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("nexusAutomationSummaryById", buildNexusAutomationSummaryById(args), opts);
+};
+
+/** nexusAutomationsBrowse wraps the query named "nexusAutomationsBrowse". */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["nexusAutomationsBrowse"] in generated_concepts.ts).
+export interface NexusAutomationsBrowseArgs {
+  search?: string;
+  origin?: string;
+  reuse?: string;
+  statusWords?: string[];
+  includeLearned?: boolean;
+  offLadder?: boolean;
+}
+
+export function buildNexusAutomationsBrowse(args: NexusAutomationsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
+  if (args.reuse !== undefined) parts.push("reuse: " + renderMemQLValue(args.reuse));
+  if (args.statusWords !== undefined) parts.push("statusWords: " + renderMemQLValue(args.statusWords));
+  if (args.includeLearned !== undefined) parts.push("includeLearned: " + renderMemQLValue(args.includeLearned));
+  if (args.offLadder !== undefined) parts.push("offLadder: " + renderMemQLValue(args.offLadder));
+  return "query nexusAutomationsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    nexusAutomationsBrowse(args: NexusAutomationsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.nexusAutomationsBrowse = function (this: QueryClient, args: NexusAutomationsBrowseArgs = {} as NexusAutomationsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("nexusAutomationsBrowse", buildNexusAutomationsBrowse(args), opts);
 };
 
 /** Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094. */
@@ -6398,6 +7186,30 @@ QueryClient.prototype.outboxDeadLetters = function (this: QueryClient, args: Out
   return this.executeNamed("outboxDeadLetters", buildOutboxDeadLetters(args), opts);
 };
 
+/** A connector's dead letters, searched before paging and never drained implicitly. */
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxDeadLettersBrowse"] in generated_concepts.ts).
+export interface OutboxDeadLettersBrowseArgs {
+  target: string;
+  search?: string;
+}
+
+export function buildOutboxDeadLettersBrowse(args: OutboxDeadLettersBrowseArgs): string {
+  const parts: string[] = [];
+  parts.push("target: " + renderMemQLValue(args.target));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query outboxDeadLettersBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    outboxDeadLettersBrowse(args: OutboxDeadLettersBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.outboxDeadLettersBrowse = function (this: QueryClient, args: OutboxDeadLettersBrowseArgs = {} as OutboxDeadLettersBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("outboxDeadLettersBrowse", buildOutboxDeadLettersBrowse(args), opts);
+};
+
 /** One entry by its own row id -- the seam the retry and discard mutations resolve through. */
 // Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxEntryById"] in generated_concepts.ts).
 export interface OutboxEntryByIdArgs {
@@ -6616,6 +7428,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, args: PackageDeploymentsPendingArgs = {} as PackageDeploymentsPendingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
+};
+
+/** Names for linked visible resources; declarations, manifests and deployment configuration are deliberately absent. Ordinary package authorization applies. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packageNamesByIds"] in generated_concepts.ts).
+export interface PackageNamesByIdsArgs {
+  ids: string[];
+}
+
+export function buildPackageNamesByIds(args: PackageNamesByIdsArgs): string {
+  const parts: string[] = [];
+  parts.push("ids: " + renderMemQLValue(args.ids));
+  return "query packageNamesByIds(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageNamesByIds(args: PackageNamesByIdsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageNamesByIds = function (this: QueryClient, args: PackageNamesByIdsArgs = {} as PackageNamesByIdsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageNamesByIds", buildPackageNamesByIds(args), opts);
 };
 
 /** Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read. */
@@ -6874,16 +7708,18 @@ QueryClient.prototype.paymentTermsOutstanding = function (this: QueryClient, arg
 /** Access requests with status=pending; backs the admin review queue. */
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["pendingAccessRequests"] in generated_concepts.ts).
 export interface PendingAccessRequestsArgs {
+  search?: string;
 }
 
 export function buildPendingAccessRequests(args: PendingAccessRequestsArgs): string {
-  void args;
-  return "query pendingAccessRequests()";
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query pendingAccessRequests(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    pendingAccessRequests(args?: PendingAccessRequestsArgs, opts?: QueryCallOptions): Promise<Result>;
+    pendingAccessRequests(args: PendingAccessRequestsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -6896,16 +7732,26 @@ The console's "who is still outstanding" read, and the list a revoke acts on. De
 `row.kind == "user"` is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface. */
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.ts).
 export interface PendingUserInvitationsArgs {
+  search?: string;
+  role?: string;
+  groupId?: string;
+  state?: string;
+  unexpired?: boolean;
 }
 
 export function buildPendingUserInvitations(args: PendingUserInvitationsArgs): string {
-  void args;
-  return "query pendingUserInvitations()";
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.role !== undefined) parts.push("role: " + renderMemQLValue(args.role));
+  if (args.groupId !== undefined) parts.push("groupId: " + renderMemQLValue(args.groupId));
+  if (args.state !== undefined) parts.push("state: " + renderMemQLValue(args.state));
+  if (args.unexpired !== undefined) parts.push("unexpired: " + renderMemQLValue(args.unexpired));
+  return "query pendingUserInvitations(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    pendingUserInvitations(args?: PendingUserInvitationsArgs, opts?: QueryCallOptions): Promise<Result>;
+    pendingUserInvitations(args: PendingUserInvitationsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -6953,6 +7799,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelineChannelsForOwner = function (this: QueryClient, args: PipelineChannelsForOwnerArgs = {} as PipelineChannelsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelineChannelsForOwner", buildPipelineChannelsForOwner(args), opts);
+};
+
+/** Complete compact pipeline choices and source links for OS navigation. Detailed polling heads and timing histories remain behind pipelineForOwner. */
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineDirectory"] in generated_concepts.ts).
+export interface PipelineDirectoryArgs {
+}
+
+export function buildPipelineDirectory(args: PipelineDirectoryArgs): string {
+  void args;
+  return "query pipelineDirectory()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineDirectory(args?: PipelineDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineDirectory = function (this: QueryClient, args: PipelineDirectoryArgs = {} as PipelineDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineDirectory", buildPipelineDirectory(args), opts);
 };
 
 /** One of the caller's pipelines by id. */
@@ -7021,6 +7887,36 @@ QueryClient.prototype.pipelineRunForOwner = function (this: QueryClient, args: P
   return this.executeNamed("pipelineRunForOwner", buildPipelineRunForOwner(args), opts);
 };
 
+/** Browse runs without downloading execution policy and driver bookkeeping. Every search and facet narrows the authorized set before the ten-row page. Internal recovery and release readers retain their existing queries. */
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowse"] in generated_concepts.ts).
+export interface PipelineRunsBrowseArgs {
+  changesOnly?: boolean;
+  search?: string;
+  pipelineId?: string;
+  branch?: string;
+  outcome?: string;
+}
+
+export function buildPipelineRunsBrowse(args: PipelineRunsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.changesOnly !== undefined) parts.push("changesOnly: " + renderMemQLValue(args.changesOnly));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  if (args.branch !== undefined) parts.push("branch: " + renderMemQLValue(args.branch));
+  if (args.outcome !== undefined) parts.push("outcome: " + renderMemQLValue(args.outcome));
+  return "query pipelineRunsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineRunsBrowse(args: PipelineRunsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineRunsBrowse = function (this: QueryClient, args: PipelineRunsBrowseArgs = {} as PipelineRunsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineRunsBrowse", buildPipelineRunsBrowse(args), opts);
+};
+
 /** The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs list across every source, or one source's runs. */
 // Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsForOwner"] in generated_concepts.ts).
 export interface PipelineRunsForOwnerArgs {
@@ -7042,6 +7938,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: PipelineRunsForOwnerArgs = {} as PipelineRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
+};
+
+/** Browse the caller's pipelines ten at a time, newest first. Search is applied by the database before the cursor window, including records not loaded yet. */
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesBrowse"] in generated_concepts.ts).
+export interface PipelinesBrowseArgs {
+  search?: string;
+}
+
+export function buildPipelinesBrowse(args: PipelinesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query pipelinesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesBrowse(args: PipelinesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesBrowse = function (this: QueryClient, args: PipelinesBrowseArgs = {} as PipelinesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesBrowse", buildPipelinesBrowse(args), opts);
 };
 
 /** Read the caller's repository pipelines and source package identities, most recently connected first. Use these repository and package links to locate native CI for connected application sources; a repository need not have a pipeline to be editable. */
@@ -8014,6 +8932,12 @@ export interface RouterDecisionsRecentArgs {
   outcome?: string;
   /** Only decisions made under this route a person chose: local, apps or one of their own. */
   route?: string;
+  /** Search visible call metadata before selecting the next page. */
+  search?: string;
+  /** Compact words match camel-cased custom prompt names. */
+  compactSearch?: string;
+  /** Shipped display names resolved by the client, such as Route composing. */
+  promptNames?: string[];
 }
 
 export function buildRouterDecisionsRecent(args: RouterDecisionsRecentArgs): string {
@@ -8024,6 +8948,9 @@ export function buildRouterDecisionsRecent(args: RouterDecisionsRecentArgs): str
   if (args.rule !== undefined) parts.push("rule: " + renderMemQLValue(args.rule));
   if (args.outcome !== undefined) parts.push("outcome: " + renderMemQLValue(args.outcome));
   if (args.route !== undefined) parts.push("route: " + renderMemQLValue(args.route));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.compactSearch !== undefined) parts.push("compactSearch: " + renderMemQLValue(args.compactSearch));
+  if (args.promptNames !== undefined) parts.push("promptNames: " + renderMemQLValue(args.promptNames));
   return "query routerDecisionsRecent(" + parts.join(", ") + ")";
 }
 
@@ -8132,11 +9059,21 @@ The MANAGEMENT verbs are untouched: a developer reading this list still cannot e
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.ts).
 export interface SearchUsersArgs {
   active?: boolean;
+  search?: string;
+  role?: string;
+  state?: string;
+  showDeactivated?: boolean;
+  memberIds?: string[];
 }
 
 export function buildSearchUsers(args: SearchUsersArgs): string {
   const parts: string[] = [];
   if (args.active !== undefined) parts.push("active: " + renderMemQLValue(args.active));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.role !== undefined) parts.push("role: " + renderMemQLValue(args.role));
+  if (args.state !== undefined) parts.push("state: " + renderMemQLValue(args.state));
+  if (args.showDeactivated !== undefined) parts.push("showDeactivated: " + renderMemQLValue(args.showDeactivated));
+  if (args.memberIds !== undefined) parts.push("memberIds: " + renderMemQLValue(args.memberIds));
   return "query searchUsers(" + parts.join(", ") + ")";
 }
 
@@ -11850,6 +12787,28 @@ QueryClient.prototype.skillsForTraining = function (this: QueryClient, args: Ski
   return this.executeNamed("skillsForTraining", buildSkillsForTraining(args), opts);
 };
 
+/** One recent page for Training. Full rows remain inside the baseline verifier; the browser receives compact catalog summaries, then reads detail on open. */
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTrainingPage"] in generated_concepts.ts).
+export interface SkillsForTrainingPageArgs {
+  search?: string;
+}
+
+export function buildSkillsForTrainingPage(args: SkillsForTrainingPageArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query skillsForTrainingPage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    skillsForTrainingPage(args: SkillsForTrainingPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.skillsForTrainingPage = function (this: QueryClient, args: SkillsForTrainingPageArgs = {} as SkillsForTrainingPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("skillsForTrainingPage", buildSkillsForTrainingPage(args), opts);
+};
+
 /** Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here. */
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.ts).
 export interface SoldByProductArgs {
@@ -12341,6 +13300,34 @@ QueryClient.prototype.templates = function (this: QueryClient, args: TemplatesAr
   return this.executeNamed("templates", buildTemplates(args), opts);
 };
 
+/** Recent template summaries; bodies and documents are still read by id. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templatesBrowse"] in generated_concepts.ts).
+export interface TemplatesBrowseArgs {
+  search?: string;
+  includeArchived?: boolean;
+  accountId?: string;
+  status?: string;
+}
+
+export function buildTemplatesBrowse(args: TemplatesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query templatesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templatesBrowse(args: TemplatesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templatesBrowse = function (this: QueryClient, args: TemplatesBrowseArgs = {} as TemplatesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templatesBrowse", buildTemplatesBrowse(args), opts);
+};
+
 /** Territories for a store. */
 // Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["territoriesForStore"] in generated_concepts.ts).
 export interface TerritoriesForStoreArgs {
@@ -12405,6 +13392,50 @@ declare module "./query.js" {
 
 QueryClient.prototype.todos = function (this: QueryClient, args: TodosArgs = {} as TodosArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("todos", buildTodos(args), opts);
+};
+
+/** Analyses only for the file rows currently displayed in Training. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["trainingAnalysisRunsForFiles"] in generated_concepts.ts).
+export interface TrainingAnalysisRunsForFilesArgs {
+  fileIds: string[];
+}
+
+export function buildTrainingAnalysisRunsForFiles(args: TrainingAnalysisRunsForFilesArgs): string {
+  const parts: string[] = [];
+  parts.push("fileIds: " + renderMemQLValue(args.fileIds));
+  return "query trainingAnalysisRunsForFiles(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    trainingAnalysisRunsForFiles(args: TrainingAnalysisRunsForFilesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.trainingAnalysisRunsForFiles = function (this: QueryClient, args: TrainingAnalysisRunsForFilesArgs = {} as TrainingAnalysisRunsForFilesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("trainingAnalysisRunsForFiles", buildTrainingAnalysisRunsForFiles(args), opts);
+};
+
+/** Training's recent file worklist, searched before the ten-row page boundary. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["trainingFilesBrowse"] in generated_concepts.ts).
+export interface TrainingFilesBrowseArgs {
+  search?: string;
+}
+
+export function buildTrainingFilesBrowse(args: TrainingFilesBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query trainingFilesBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    trainingFilesBrowse(args: TrainingFilesBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.trainingFilesBrowse = function (this: QueryClient, args: TrainingFilesBrowseArgs = {} as TrainingFilesBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("trainingFilesBrowse", buildTrainingFilesBrowse(args), opts);
 };
 
 /** List the authenticated caller's events whose start falls within a [windowStart, windowEnd] instant range, in start order. The reactive harness's reminder responsibilities read this for the 'remind me the day before X' condition (pass windowStart=now, windowEnd=now+lookahead). Self-scoped via actor.userId -- another user's events are never returned. */
@@ -12721,6 +13752,54 @@ QueryClient.prototype.workApprovalGuidanceForOwnerRun = function (this: QueryCli
   return this.executeNamed("workApprovalGuidanceForOwnerRun", buildWorkApprovalGuidanceForOwnerRun(args), opts);
 };
 
+/** Recovery must discover released decisions even after they leave the queue. This reads only unresolved recovery candidates, never completed run history. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workApprovalRecoveryRuns"] in generated_concepts.ts).
+export interface WorkApprovalRecoveryRunsArgs {
+}
+
+export function buildWorkApprovalRecoveryRuns(args: WorkApprovalRecoveryRunsArgs): string {
+  void args;
+  return "query workApprovalRecoveryRuns()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalRecoveryRuns(args?: WorkApprovalRecoveryRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalRecoveryRuns = function (this: QueryClient, args: WorkApprovalRecoveryRunsArgs = {} as WorkApprovalRecoveryRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalRecoveryRuns", buildWorkApprovalRecoveryRuns(args), opts);
+};
+
+/** The actionable queue keeps its oldest-first meaning while paging. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsBrowse"] in generated_concepts.ts).
+export interface WorkApprovalsBrowseArgs {
+  search?: string;
+  kindLabels?: string[];
+  repositoryLabel?: boolean;
+  failureLabel?: boolean;
+}
+
+export function buildWorkApprovalsBrowse(args: WorkApprovalsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.kindLabels !== undefined) parts.push("kindLabels: " + renderMemQLValue(args.kindLabels));
+  if (args.repositoryLabel !== undefined) parts.push("repositoryLabel: " + renderMemQLValue(args.repositoryLabel));
+  if (args.failureLabel !== undefined) parts.push("failureLabel: " + renderMemQLValue(args.failureLabel));
+  return "query workApprovalsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalsBrowse(args: WorkApprovalsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalsBrowse = function (this: QueryClient, args: WorkApprovalsBrowseArgs = {} as WorkApprovalsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalsBrowse", buildWorkApprovalsBrowse(args), opts);
+};
+
 /** Durable decisions for one of the caller's runs, including decided reviews. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.ts).
 export interface WorkApprovalsForOwnedRunArgs {
@@ -12761,6 +13840,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workApprovalsForOwner = function (this: QueryClient, args: WorkApprovalsForOwnerArgs = {} as WorkApprovalsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workApprovalsForOwner", buildWorkApprovalsForOwner(args), opts);
+};
+
+/** Pending requests for the runs shown by one opened goal or run page. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForRuns"] in generated_concepts.ts).
+export interface WorkApprovalsForRunsArgs {
+  runIds: string[];
+}
+
+export function buildWorkApprovalsForRuns(args: WorkApprovalsForRunsArgs): string {
+  const parts: string[] = [];
+  parts.push("runIds: " + renderMemQLValue(args.runIds));
+  return "query workApprovalsForRuns(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalsForRuns(args: WorkApprovalsForRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalsForRuns = function (this: QueryClient, args: WorkApprovalsForRunsArgs = {} as WorkApprovalsForRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalsForRuns", buildWorkApprovalsForRuns(args), opts);
 };
 
 /** The caller's steps that invoked an AUTOMATION, newest first -- the other half of the reuse evidence (epic memql#5414, D24): a section a decomposed goal served from the catalog is an automation step of the goal's run, so a construct used that way counts for the goal it served. Owned, for the reason workSignedRunsForOwner gives. Bounded at 2000, the most recent. */
@@ -12808,16 +13909,20 @@ QueryClient.prototype.workCheckpointForOwner = function (this: QueryClient, args
 /** Latest completed receipt from a bounded set of caller-owned attempts. */
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workCompletedStepsForOwnerRuns"] in generated_concepts.ts).
 export interface WorkCompletedStepsForOwnerRunsArgs {
+  runIds: string[];
+  stepKey: string;
 }
 
 export function buildWorkCompletedStepsForOwnerRuns(args: WorkCompletedStepsForOwnerRunsArgs): string {
-  void args;
-  return "query workCompletedStepsForOwnerRuns()";
+  const parts: string[] = [];
+  parts.push("runIds: " + renderMemQLValue(args.runIds));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  return "query workCompletedStepsForOwnerRuns(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workCompletedStepsForOwnerRuns(args?: WorkCompletedStepsForOwnerRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+    workCompletedStepsForOwnerRuns(args: WorkCompletedStepsForOwnerRunsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -12940,16 +14045,20 @@ QueryClient.prototype.workContinuationConflictsForOwnerGoal = function (this: Qu
 /** Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.ts).
 export interface WorkContinuationForOwnerRunArgs {
+  runId: string;
+  stepKey: string;
 }
 
 export function buildWorkContinuationForOwnerRun(args: WorkContinuationForOwnerRunArgs): string {
-  void args;
-  return "query workContinuationForOwnerRun()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  return "query workContinuationForOwnerRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workContinuationForOwnerRun(args?: WorkContinuationForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+    workContinuationForOwnerRun(args: WorkContinuationForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13089,6 +14198,30 @@ QueryClient.prototype.workDraftsForOwnerRun = function (this: QueryClient, args:
   return this.executeNamed("workDraftsForOwnerRun", buildWorkDraftsForOwnerRun(args), opts);
 };
 
+/** Ten recent evaluation receipts; selected scenario and search filter before paging. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsBrowse"] in generated_concepts.ts).
+export interface WorkGoalEvaluationsBrowseArgs {
+  scenarioId?: string;
+  search?: string;
+}
+
+export function buildWorkGoalEvaluationsBrowse(args: WorkGoalEvaluationsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.scenarioId !== undefined) parts.push("scenarioId: " + renderMemQLValue(args.scenarioId));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  return "query workGoalEvaluationsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalEvaluationsBrowse(args: WorkGoalEvaluationsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalEvaluationsBrowse = function (this: QueryClient, args: WorkGoalEvaluationsBrowseArgs = {} as WorkGoalEvaluationsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalEvaluationsBrowse", buildWorkGoalEvaluationsBrowse(args), opts);
+};
+
 /** Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.ts).
 export interface WorkGoalEvaluationsForOwnerArgs {
@@ -13129,6 +14262,98 @@ declare module "./query.js" {
 
 QueryClient.prototype.workGoalForOwner = function (this: QueryClient, args: WorkGoalForOwnerArgs = {} as WorkGoalForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workGoalForOwner", buildWorkGoalForOwner(args), opts);
+};
+
+/** workGoalRunStatuses wraps the query named "workGoalRunStatuses". */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workGoalRunStatuses"] in generated_concepts.ts).
+export interface WorkGoalRunStatusesArgs {
+  goalIds: string[];
+}
+
+export function buildWorkGoalRunStatuses(args: WorkGoalRunStatusesArgs): string {
+  const parts: string[] = [];
+  parts.push("goalIds: " + renderMemQLValue(args.goalIds));
+  return "query workGoalRunStatuses(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalRunStatuses(args: WorkGoalRunStatusesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalRunStatuses = function (this: QueryClient, args: WorkGoalRunStatusesArgs = {} as WorkGoalRunStatusesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalRunStatuses", buildWorkGoalRunStatuses(args), opts);
+};
+
+/** workGoalSummaryForOwner wraps the query named "workGoalSummaryForOwner". */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalSummaryForOwner"] in generated_concepts.ts).
+export interface WorkGoalSummaryForOwnerArgs {
+  goalId: string;
+}
+
+export function buildWorkGoalSummaryForOwner(args: WorkGoalSummaryForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  return "query workGoalSummaryForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalSummaryForOwner(args: WorkGoalSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalSummaryForOwner = function (this: QueryClient, args: WorkGoalSummaryForOwnerArgs = {} as WorkGoalSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalSummaryForOwner", buildWorkGoalSummaryForOwner(args), opts);
+};
+
+/** Ten owner-scoped goals. Routine pipeline goals remain an explicit facet. */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsBrowse"] in generated_concepts.ts).
+export interface WorkGoalsBrowseArgs {
+  search?: string;
+  includePipelines?: boolean;
+}
+
+export function buildWorkGoalsBrowse(args: WorkGoalsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includePipelines !== undefined) parts.push("includePipelines: " + renderMemQLValue(args.includePipelines));
+  return "query workGoalsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalsBrowse(args: WorkGoalsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalsBrowse = function (this: QueryClient, args: WorkGoalsBrowseArgs = {} as WorkGoalsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalsBrowse", buildWorkGoalsBrowse(args), opts);
+};
+
+/** workGoalsBrowseOldest wraps the query named "workGoalsBrowseOldest". */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsBrowseOldest"] in generated_concepts.ts).
+export interface WorkGoalsBrowseOldestArgs {
+  search?: string;
+  includePipelines?: boolean;
+}
+
+export function buildWorkGoalsBrowseOldest(args: WorkGoalsBrowseOldestArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.includePipelines !== undefined) parts.push("includePipelines: " + renderMemQLValue(args.includePipelines));
+  return "query workGoalsBrowseOldest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workGoalsBrowseOldest(args: WorkGoalsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workGoalsBrowseOldest = function (this: QueryClient, args: WorkGoalsBrowseOldestArgs = {} as WorkGoalsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workGoalsBrowseOldest", buildWorkGoalsBrowseOldest(args), opts);
 };
 
 /** The caller's goals, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side. */
@@ -13199,16 +14424,20 @@ QueryClient.prototype.workHistorySearchSourcesForOwnerRun = function (this: Quer
 /** Reconcile a late completion against its exact durable receipt. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.ts).
 export interface WorkModelCallReceiptForOwnerRunArgs {
+  runId: string;
+  receiptId: string;
 }
 
 export function buildWorkModelCallReceiptForOwnerRun(args: WorkModelCallReceiptForOwnerRunArgs): string {
-  void args;
-  return "query workModelCallReceiptForOwnerRun()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("receiptId: " + renderMemQLValue(args.receiptId));
+  return "query workModelCallReceiptForOwnerRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workModelCallReceiptForOwnerRun(args?: WorkModelCallReceiptForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+    workModelCallReceiptForOwnerRun(args: WorkModelCallReceiptForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13241,16 +14470,20 @@ QueryClient.prototype.workModelCallsForOwnerRun = function (this: QueryClient, a
 /** Contribution receipts for one completed section, without response/checkpoint bodies. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.ts).
 export interface WorkModelCallsForOwnerStepArgs {
+  runId: string;
+  stepKey: string;
 }
 
 export function buildWorkModelCallsForOwnerStep(args: WorkModelCallsForOwnerStepArgs): string {
-  void args;
-  return "query workModelCallsForOwnerStep()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  return "query workModelCallsForOwnerStep(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workModelCallsForOwnerStep(args?: WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+    workModelCallsForOwnerStep(args: WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13349,16 +14582,22 @@ QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient,
 /** Reconcile one consumed formatting attempt, never authorize another inference. Two rows expose ambiguity instead of silently selecting a later answer. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workOutcomeFormatReceiptsForOwnerStep"] in generated_concepts.ts).
 export interface WorkOutcomeFormatReceiptsForOwnerStepArgs {
+  runId: string;
+  stepKey: string;
+  attemptedAt: string;
 }
 
 export function buildWorkOutcomeFormatReceiptsForOwnerStep(args: WorkOutcomeFormatReceiptsForOwnerStepArgs): string {
-  void args;
-  return "query workOutcomeFormatReceiptsForOwnerStep()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  parts.push("attemptedAt: " + renderMemQLValue(args.attemptedAt));
+  return "query workOutcomeFormatReceiptsForOwnerStep(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workOutcomeFormatReceiptsForOwnerStep(args?: WorkOutcomeFormatReceiptsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+    workOutcomeFormatReceiptsForOwnerStep(args: WorkOutcomeFormatReceiptsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13369,16 +14608,20 @@ QueryClient.prototype.workOutcomeFormatReceiptsForOwnerStep = function (this: Qu
 /** Bounded candidate lookup against durable consumed-evidence identities. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.ts).
 export interface WorkProgressCreditsForOwnerRunArgs {
+  runId: string;
+  receiptIds: string[];
 }
 
 export function buildWorkProgressCreditsForOwnerRun(args: WorkProgressCreditsForOwnerRunArgs): string {
-  void args;
-  return "query workProgressCreditsForOwnerRun()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("receiptIds: " + renderMemQLValue(args.receiptIds));
+  return "query workProgressCreditsForOwnerRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workProgressCreditsForOwnerRun(args?: WorkProgressCreditsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+    workProgressCreditsForOwnerRun(args: WorkProgressCreditsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13455,16 +14698,20 @@ QueryClient.prototype.workQuestionsForOwnerRun = function (this: QueryClient, ar
 /** The latest private reply-review checkpoint of this owner's step. A completed operational result survives a failed helper without rerunning its effects. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workReplyReviewForOwnerStep"] in generated_concepts.ts).
 export interface WorkReplyReviewForOwnerStepArgs {
+  runId: string;
+  stepKey: string;
 }
 
 export function buildWorkReplyReviewForOwnerStep(args: WorkReplyReviewForOwnerStepArgs): string {
-  void args;
-  return "query workReplyReviewForOwnerStep()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  return "query workReplyReviewForOwnerStep(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workReplyReviewForOwnerStep(args?: WorkReplyReviewForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+    workReplyReviewForOwnerStep(args: WorkReplyReviewForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13475,16 +14722,20 @@ QueryClient.prototype.workReplyReviewForOwnerStep = function (this: QueryClient,
 /** One stable owner-feedback receipt, including a not-yet-committed intent. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRequest"] in generated_concepts.ts).
 export interface WorkResultFeedbackForOwnerRequestArgs {
+  runId: string;
+  observationId: string;
 }
 
 export function buildWorkResultFeedbackForOwnerRequest(args: WorkResultFeedbackForOwnerRequestArgs): string {
-  void args;
-  return "query workResultFeedbackForOwnerRequest()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("observationId: " + renderMemQLValue(args.observationId));
+  return "query workResultFeedbackForOwnerRequest(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workResultFeedbackForOwnerRequest(args?: WorkResultFeedbackForOwnerRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+    workResultFeedbackForOwnerRequest(args: WorkResultFeedbackForOwnerRequestArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13536,6 +14787,50 @@ QueryClient.prototype.workRunForOwner = function (this: QueryClient, args: WorkR
   return this.executeNamed("workRunForOwner", buildWorkRunForOwner(args), opts);
 };
 
+/** Names and statuses for requests on the visible approval page. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesByIds"] in generated_concepts.ts).
+export interface WorkRunSummariesByIdsArgs {
+  runIds: string[];
+}
+
+export function buildWorkRunSummariesByIds(args: WorkRunSummariesByIdsArgs): string {
+  const parts: string[] = [];
+  parts.push("runIds: " + renderMemQLValue(args.runIds));
+  return "query workRunSummariesByIds(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummariesByIds(args: WorkRunSummariesByIdsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummariesByIds = function (this: QueryClient, args: WorkRunSummariesByIdsArgs = {} as WorkRunSummariesByIdsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummariesByIds", buildWorkRunSummariesByIds(args), opts);
+};
+
+/** Full run navigation for one opened goal, without the run execution payload. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForGoal"] in generated_concepts.ts).
+export interface WorkRunSummariesForGoalArgs {
+  goalId: string;
+}
+
+export function buildWorkRunSummariesForGoal(args: WorkRunSummariesForGoalArgs): string {
+  const parts: string[] = [];
+  parts.push("goalId: " + renderMemQLValue(args.goalId));
+  return "query workRunSummariesForGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummariesForGoal(args: WorkRunSummariesForGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummariesForGoal = function (this: QueryClient, args: WorkRunSummariesForGoalArgs = {} as WorkRunSummariesForGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummariesForGoal", buildWorkRunSummariesForGoal(args), opts);
+};
+
 /** The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs. */
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.ts).
 export interface WorkRunSummariesForOwnerArgs {
@@ -13576,6 +14871,58 @@ declare module "./query.js" {
 
 QueryClient.prototype.workRunSummaryForOwner = function (this: QueryClient, args: WorkRunSummaryForOwnerArgs = {} as WorkRunSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workRunSummaryForOwner", buildWorkRunSummaryForOwner(args), opts);
+};
+
+/** Run navigation applies all list questions before its ten-row boundary. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsBrowse"] in generated_concepts.ts).
+export interface WorkRunsBrowseArgs {
+  search?: string;
+  showFinished?: boolean;
+  conversationId?: string;
+}
+
+export function buildWorkRunsBrowse(args: WorkRunsBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.showFinished !== undefined) parts.push("showFinished: " + renderMemQLValue(args.showFinished));
+  if (args.conversationId !== undefined) parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  return "query workRunsBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunsBrowse(args: WorkRunsBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunsBrowse = function (this: QueryClient, args: WorkRunsBrowseArgs = {} as WorkRunsBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunsBrowse", buildWorkRunsBrowse(args), opts);
+};
+
+/** workRunsBrowseOldest wraps the query named "workRunsBrowseOldest". */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsBrowseOldest"] in generated_concepts.ts).
+export interface WorkRunsBrowseOldestArgs {
+  search?: string;
+  showFinished?: boolean;
+  conversationId?: string;
+}
+
+export function buildWorkRunsBrowseOldest(args: WorkRunsBrowseOldestArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.showFinished !== undefined) parts.push("showFinished: " + renderMemQLValue(args.showFinished));
+  if (args.conversationId !== undefined) parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  return "query workRunsBrowseOldest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunsBrowseOldest(args: WorkRunsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunsBrowseOldest = function (this: QueryClient, args: WorkRunsBrowseOldestArgs = {} as WorkRunsBrowseOldestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunsBrowseOldest", buildWorkRunsBrowseOldest(args), opts);
 };
 
 /** The runs of one of the caller's goals, newest first. */
@@ -13666,16 +15013,20 @@ QueryClient.prototype.workSignedRunsForOwner = function (this: QueryClient, args
 /** The immutable selection for one exact step version in owned work. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.ts).
 export interface WorkSkillSelectionForOwnerRunArgs {
+  runId: string;
+  observationId: string;
 }
 
 export function buildWorkSkillSelectionForOwnerRun(args: WorkSkillSelectionForOwnerRunArgs): string {
-  void args;
-  return "query workSkillSelectionForOwnerRun()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("observationId: " + renderMemQLValue(args.observationId));
+  return "query workSkillSelectionForOwnerRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workSkillSelectionForOwnerRun(args?: WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+    workSkillSelectionForOwnerRun(args: WorkSkillSelectionForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -13701,6 +15052,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workSkillSelectionsForOwner = function (this: QueryClient, args: WorkSkillSelectionsForOwnerArgs = {} as WorkSkillSelectionsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workSkillSelectionsForOwner", buildWorkSkillSelectionsForOwner(args), opts);
+};
+
+/** Ten selection receipts for one skill in this caller's work. Filtering the nested receipt before the page boundary avoids walking unrelated history. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForSkill"] in generated_concepts.ts).
+export interface WorkSkillSelectionsForSkillArgs {
+  skillId: string;
+}
+
+export function buildWorkSkillSelectionsForSkill(args: WorkSkillSelectionsForSkillArgs): string {
+  const parts: string[] = [];
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  return "query workSkillSelectionsForSkill(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillSelectionsForSkill(args: WorkSkillSelectionsForSkillArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillSelectionsForSkill = function (this: QueryClient, args: WorkSkillSelectionsForSkillArgs = {} as WorkSkillSelectionsForSkillArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillSelectionsForSkill", buildWorkSkillSelectionsForSkill(args), opts);
 };
 
 /** Bounded checkpoints for source projection; callers expose only paired tool results, never system prompts or model reasoning from the saved exchange. */
@@ -13796,21 +15169,47 @@ QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: 
 /** Page recorded tool exchanges for safe projection, including exact receipts that exceed the short source-context preview. Never expose these raw rows. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workToolSourcesForOwnerRun"] in generated_concepts.ts).
 export interface WorkToolSourcesForOwnerRunArgs {
+  runId: string;
+  checkpointId: string;
 }
 
 export function buildWorkToolSourcesForOwnerRun(args: WorkToolSourcesForOwnerRunArgs): string {
-  void args;
-  return "query workToolSourcesForOwnerRun()";
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("checkpointId: " + renderMemQLValue(args.checkpointId));
+  return "query workToolSourcesForOwnerRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workToolSourcesForOwnerRun(args?: WorkToolSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+    workToolSourcesForOwnerRun(args: WorkToolSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
 QueryClient.prototype.workToolSourcesForOwnerRun = function (this: QueryClient, args: WorkToolSourcesForOwnerRunArgs = {} as WorkToolSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workToolSourcesForOwnerRun", buildWorkToolSourcesForOwnerRun(args), opts);
+};
+
+/** Delivery receipts for the ten selections already visible in the inspector. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingDeliveryForSelections"] in generated_concepts.ts).
+export interface WorkTrainingDeliveryForSelectionsArgs {
+  observationIds: string[];
+}
+
+export function buildWorkTrainingDeliveryForSelections(args: WorkTrainingDeliveryForSelectionsArgs): string {
+  const parts: string[] = [];
+  parts.push("observationIds: " + renderMemQLValue(args.observationIds));
+  return "query workTrainingDeliveryForSelections(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingDeliveryForSelections(args: WorkTrainingDeliveryForSelectionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingDeliveryForSelections = function (this: QueryClient, args: WorkTrainingDeliveryForSelectionsArgs = {} as WorkTrainingDeliveryForSelectionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingDeliveryForSelections", buildWorkTrainingDeliveryForSelections(args), opts);
 };
 
 /** workTrainingEvidenceById wraps the query named "workTrainingEvidenceById". */
@@ -13857,6 +15256,50 @@ QueryClient.prototype.workTrainingLessonEvents = function (this: QueryClient, ar
   return this.executeNamed("workTrainingLessonEvents", buildWorkTrainingLessonEvents(args), opts);
 };
 
+/** The immutable revision trail is only read after opening a lesson. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonHistory"] in generated_concepts.ts).
+export interface WorkTrainingLessonHistoryArgs {
+  lessonId: string;
+}
+
+export function buildWorkTrainingLessonHistory(args: WorkTrainingLessonHistoryArgs): string {
+  const parts: string[] = [];
+  parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  return "query workTrainingLessonHistory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingLessonHistory(args: WorkTrainingLessonHistoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingLessonHistory = function (this: QueryClient, args: WorkTrainingLessonHistoryArgs = {} as WorkTrainingLessonHistoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingLessonHistory", buildWorkTrainingLessonHistory(args), opts);
+};
+
+/** Owned lesson revisions used to compute current heads without browser history scans. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonIndexRows"] in generated_concepts.ts).
+export interface WorkTrainingLessonIndexRowsArgs {
+  asOf: string;
+}
+
+export function buildWorkTrainingLessonIndexRows(args: WorkTrainingLessonIndexRowsArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query workTrainingLessonIndexRows(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingLessonIndexRows(args: WorkTrainingLessonIndexRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingLessonIndexRows = function (this: QueryClient, args: WorkTrainingLessonIndexRowsArgs = {} as WorkTrainingLessonIndexRowsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingLessonIndexRows", buildWorkTrainingLessonIndexRows(args), opts);
+};
+
 /** workTrainingLessonsForOwner wraps the query named "workTrainingLessonsForOwner". */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonsForOwner"] in generated_concepts.ts).
 export interface WorkTrainingLessonsForOwnerArgs {
@@ -13875,6 +15318,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workTrainingLessonsForOwner = function (this: QueryClient, args: WorkTrainingLessonsForOwnerArgs = {} as WorkTrainingLessonsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workTrainingLessonsForOwner", buildWorkTrainingLessonsForOwner(args), opts);
+};
+
+/** Only selections of the inspected lesson, never all work/model-call history. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingSelectionsForLesson"] in generated_concepts.ts).
+export interface WorkTrainingSelectionsForLessonArgs {
+  lessonId: string;
+}
+
+export function buildWorkTrainingSelectionsForLesson(args: WorkTrainingSelectionsForLessonArgs): string {
+  const parts: string[] = [];
+  parts.push("lessonId: " + renderMemQLValue(args.lessonId));
+  return "query workTrainingSelectionsForLesson(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workTrainingSelectionsForLesson(args: WorkTrainingSelectionsForLessonArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workTrainingSelectionsForLesson = function (this: QueryClient, args: WorkTrainingSelectionsForLessonArgs = {} as WorkTrainingSelectionsForLessonArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workTrainingSelectionsForLesson", buildWorkTrainingSelectionsForLesson(args), opts);
 };
 
 /** Selection and provider-delivery receipts for owned Training inspection. */

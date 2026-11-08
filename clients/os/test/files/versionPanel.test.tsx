@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 async function openInspector(title: string) {
-  await click(screen.getByRole("button", { name: new RegExp(title) }));
+  await click(await screen.findByRole("button", { name: new RegExp(title) }));
   return screen.getByRole("region", { name: "File details" });
 }
 

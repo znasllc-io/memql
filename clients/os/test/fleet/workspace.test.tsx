@@ -14,7 +14,7 @@ afterEach(cleanup);
 beforeEach(()=>{installSeededAccess('owner');h.connection=fakeConnection();});
 // A machine is opened from the LIST: the section no longer selects the first one
 // on sight, and there is no dropdown to pick another from.
-const openMachine=async(name:string)=>fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^Open ${name}`)}));
+const openMachine=async(name:string)=>{ fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^Open ${name}`)})); await screen.findByLabelText("Active call breakdown"); };
 const CSS=readFileSync(join(__dirname,'..','..','src','styles','index.css'),'utf8');
 function fleet(section='machines'){return render(withSession(<MachinesProvider><FleetApp sectionId={section} navigate={vi.fn()} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></MachinesProvider>));}
 
@@ -36,7 +36,7 @@ it('updates the owner and shared call breakdown in Equipment from the existing m
  expect(screen.queryByText('99 active calls')).toBeNull();
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,{...row,connectedNodeId:'agent-next',sharingActivity:report},'NODE_UPDATED'));
  expect(within(breakdown).getAllByText('—')).toHaveLength(2);
- expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
+ expect(h.connection.query.myMachinesBrowse).toHaveBeenCalledTimes(1);
  fireEvent.click(within(screen.getByLabelText('Machine hardware')).getByRole('button',{name:'Activity'}));
  expect(within(screen.getByRole('navigation',{name:'Machine views'})).getByRole('button',{name:'Activity'}).getAttribute('aria-current')).toBeTruthy();
 });
@@ -77,12 +77,12 @@ it('keeps trying to read a machine feed that is behind',async()=>{
   const drop=droppable({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
   fleet();
   await act(async()=>{await vi.advanceTimersByTimeAsync(0);});
-  const reads=h.connection.query.myWorkersWithStatus.mock.calls.length;
+  const reads=h.connection.query.myMachinesBrowse.mock.calls.length;
   await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});
-  expect(h.connection.query.myWorkersWithStatus.mock.calls.length).toBe(reads);
+  expect(h.connection.query.myMachinesBrowse.mock.calls.length).toBe(reads);
   await drop();
   await act(async()=>{await vi.advanceTimersByTimeAsync(15_000);});
-  expect(h.connection.query.myWorkersWithStatus.mock.calls.length).toBeGreaterThan(reads);
+  expect(h.connection.query.myMachinesBrowse.mock.calls.length).toBeGreaterThan(reads);
  }finally{vi.useRealTimers();}
 });
 it('says the machine feed is behind on the heading line of the overview',async()=>{
@@ -128,9 +128,9 @@ it('retains Settings drafts across machine tabs and updates sharing counts from 
  expect((screen.getByRole('combobox',{name:'Search users and groups'}) as HTMLInputElement).value).toBe('Bo');
  fireEvent.change(screen.getByRole('combobox',{name:'Search users and groups'}),{target:{value:''}});
  expect(screen.getByText('3 active calls')).toBeTruthy();
- expect(h.connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
- // Directory facts invalidate when their machine source changes.
- await waitFor(() => expect(h.connection.query.fleetShareDirectory).toHaveBeenCalledTimes(2));
+ expect(h.connection.query.myMachinesBrowse).toHaveBeenCalledTimes(1);
+ // Activity updates carry counts; they do not reload the sharing directory.
+ expect(h.connection.query.fleetShareDirectory).toHaveBeenCalledTimes(1);
 });
 
 it('keeps sharing and general write failures beside their own controls and supports sharing retry',async()=>{
@@ -319,23 +319,24 @@ it('keeps keyboard focus on the arrows on resize and clamps pages when inventory
 it('counts only the authorized filtered machine rows after the feed settles', async () => {
  let finish!: (value: ReturnType<typeof rowsResult>) => void;
  h.connection = fakeConnection();
- h.connection.query.myWorkersWithStatus.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+ h.connection.query.myMachinesBrowse.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+ h.connection.query.myMachinesBrowse.mockResolvedValue(rowsResult([machineRow({id:'a',displayName:'Alpha'})]));
  fleet();
  const count = () => screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')?.textContent;
  expect(count()).toBeUndefined();
  await act(async () => finish(rowsResult([machineRow({id:'a',displayName:'Alpha'}), machineRow({id:'b',displayName:'Beta'})])));
- expect(count()).toBe('2');
+ expect(count()).toBe('2 shown');
  fireEvent.click(screen.getByRole('button', { name: 'Find machines' }));
  fireEvent.change(screen.getByPlaceholderText('Search machines'), { target: { value: 'Alpha' } });
- expect(count()).toBe('1');
+ await waitFor(() => expect(count()).toBe('1 shown'));
  expect(screen.queryByRole('button', { name: /^Open Beta/ })).toBeNull();
  await act(async () => h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT, {id:'a'}, 'NODE_DELETED'));
- expect(count()).toBe('0');
+ expect(count()).toBe('0 shown');
 });
 
 it('never presents a refused machine inventory as a zero count', async () => {
  h.connection = fakeConnection();
- h.connection.query.myWorkersWithStatus.mockRejectedValue(new Error('Inventory denied'));
+ h.connection.query.myMachinesBrowse.mockRejectedValue(new Error('Inventory denied'));
  fleet();
  await screen.findByRole('region', { name: 'Machines unavailable' });
  expect(screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')).toBeNull();

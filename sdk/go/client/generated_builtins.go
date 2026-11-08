@@ -2017,6 +2017,40 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 	return b.String()
 }
 
+// ConceptRowsSearch -- Ten recent readable rows matching public declared text fields. The generic Concepts inspector retains raw node structure; secret fields are never searched.
+type ConceptRowsSearchArgs struct {
+	ConceptId string
+	Search    string
+	Cursor    string
+}
+
+// ConceptRowsSearch calls the engine builtin conceptRowsSearch.
+func (qc *QueryClient) ConceptRowsSearch(ctx context.Context, args ConceptRowsSearchArgs) (*Result, error) {
+	call := ConceptRowsSearchBuild(args)
+	return qc.executeNamed(ctx, "conceptRowsSearch", call)
+}
+
+func ConceptRowsSearchBuild(args ConceptRowsSearchArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin conceptRowsSearch(")
+	b.WriteString("conceptId: ")
+	b.WriteString(quoteMemQL(args.ConceptId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("search: ")
+	b.WriteString(quoteMemQL(args.Search))
+	if args.Cursor != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ContinueRun -- Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation.
 type ContinueRunArgs struct {
 	RunId      string
@@ -2388,6 +2422,85 @@ func DecideApprovalBuild(args DecideApprovalArgs) string {
 	return b.String()
 }
 
+// DeployableDirectoryPage -- Ten recent authorized deployables or repository sources. Combines deployed, pending and declared apps before search and pagination; returns exact archived counts and complete source summaries without full catalogs in the browser.
+type DeployableDirectoryPageArgs struct {
+	Resource    string
+	Search      string
+	Kind        string
+	Status      string
+	AccountId   string
+	Source      string
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	Cursor      string
+}
+
+// DeployableDirectoryPage calls the engine builtin deployableDirectoryPage.
+func (qc *QueryClient) DeployableDirectoryPage(ctx context.Context, args DeployableDirectoryPageArgs) (*Result, error) {
+	call := DeployableDirectoryPageBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectoryPage", call)
+}
+
+func DeployableDirectoryPageBuild(args DeployableDirectoryPageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin deployableDirectoryPage(")
+	if args.Resource != "" {
+		b.WriteString("resource: ")
+		b.WriteString(quoteMemQL(args.Resource))
+	}
+	if args.Search != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Kind != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Status != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Source != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.ArchivedSet {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
@@ -2551,6 +2664,64 @@ func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Re
 func EmailInboxBuild(args EmailInboxArgs) string {
 	_ = args
 	return "builtin emailInbox()"
+}
+
+// EmailInboxMessage -- Read one captured test message with its body from the past seven days. Owner or developer only.
+type EmailInboxMessageArgs struct {
+	MessageId string
+}
+
+// EmailInboxMessage calls the engine builtin emailInboxMessage.
+func (qc *QueryClient) EmailInboxMessage(ctx context.Context, args EmailInboxMessageArgs) (*Result, error) {
+	call := EmailInboxMessageBuild(args)
+	return qc.executeNamed(ctx, "emailInboxMessage", call)
+}
+
+func EmailInboxMessageBuild(args EmailInboxMessageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailInboxMessage(")
+	b.WriteString("messageId: ")
+	b.WriteString(quoteMemQL(args.MessageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailInboxPage -- Read ten captured test message summaries from the past seven days. Search decrypts at most 100 stored messages per request; nextCursor continues a sparse search. Owner or developer only.
+type EmailInboxPageArgs struct {
+	Search    string
+	AccountId string
+	Cursor    string
+}
+
+// EmailInboxPage calls the engine builtin emailInboxPage.
+func (qc *QueryClient) EmailInboxPage(ctx context.Context, args EmailInboxPageArgs) (*Result, error) {
+	call := EmailInboxPageBuild(args)
+	return qc.executeNamed(ctx, "emailInboxPage", call)
+}
+
+func EmailInboxPageBuild(args EmailInboxPageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailInboxPage(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // EmailLayouts -- The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId.
@@ -3701,6 +3872,21 @@ func KnowledgeInstallCapabilityCorporaBuild(args KnowledgeInstallCapabilityCorpo
 	return b.String()
 }
 
+// KnowledgeTrainingDomainRollups -- Stream authorized chunk pages into complete domain counters before transport.
+type KnowledgeTrainingDomainRollupsArgs struct {
+}
+
+// KnowledgeTrainingDomainRollups calls the engine builtin knowledgeTrainingDomainRollups.
+func (qc *QueryClient) KnowledgeTrainingDomainRollups(ctx context.Context, args KnowledgeTrainingDomainRollupsArgs) (*Result, error) {
+	call := KnowledgeTrainingDomainRollupsBuild(args)
+	return qc.executeNamed(ctx, "knowledgeTrainingDomainRollups", call)
+}
+
+func KnowledgeTrainingDomainRollupsBuild(args KnowledgeTrainingDomainRollupsArgs) string {
+	_ = args
+	return "builtin knowledgeTrainingDomainRollups()"
+}
+
 // LanguageStatus -- The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster.
 type LanguageStatusArgs struct {
 }
@@ -4016,6 +4202,8 @@ func LibraryBackupDownloadBlockBuild(args LibraryBackupDownloadBlockArgs) string
 
 // LibraryBackupList wraps the builtin named "libraryBackupList".
 type LibraryBackupListArgs struct {
+	Search string
+	Limit  int
 	// Enum: active | archives | all
 	Scope    string
 	WorkerId string
@@ -4031,7 +4219,21 @@ func (qc *QueryClient) LibraryBackupList(ctx context.Context, args LibraryBackup
 func LibraryBackupListBuild(args LibraryBackupListArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin libraryBackupList(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
 	if args.Scope != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
 		b.WriteString("scope: ")
 		b.WriteString(quoteMemQL(args.Scope))
 	}
@@ -4239,6 +4441,101 @@ func LibraryBackupUsageBuild(args LibraryBackupUsageArgs) string {
 	if args.UserId != "" {
 		b.WriteString("userId: ")
 		b.WriteString(quoteMemQL(args.UserId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryBrowseFacets -- Exact folder counts and distinct label options, reduced from authorized metadata pages.
+type LibraryBrowseFacetsArgs struct {
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId    string
+	Kind        string
+	Source      string
+	AccountId   string
+	Label       string
+	Search      string
+	Ids         []string
+	FolderIds   []string
+	SourceRefs  []string
+}
+
+// LibraryBrowseFacets calls the engine builtin libraryBrowseFacets.
+func (qc *QueryClient) LibraryBrowseFacets(ctx context.Context, args LibraryBrowseFacetsArgs) (*Result, error) {
+	call := LibraryBrowseFacetsBuild(args)
+	return qc.executeNamed(ctx, "libraryBrowseFacets", call)
+}
+
+func LibraryBrowseFacetsBuild(args LibraryBrowseFacetsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryBrowseFacets(")
+	if args.ArchivedSet {
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.Kind != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Source != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Label != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	if args.Search != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Ids != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if args.FolderIds != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderIds: ")
+		b.WriteString(renderMemQLValue(args.FolderIds))
+	}
+	if args.SourceRefs != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceRefs: ")
+		b.WriteString(renderMemQLValue(args.SourceRefs))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4745,6 +5042,36 @@ func LibraryTrainFileBuild(args LibraryTrainFileArgs) string {
 	}
 	b.WriteString("domainId: ")
 	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryTrainingLessonsPage -- Ten current lesson heads, with exact revision folding before search and paging.
+type LibraryTrainingLessonsPageArgs struct {
+	Search string
+	Cursor string
+}
+
+// LibraryTrainingLessonsPage calls the engine builtin libraryTrainingLessonsPage.
+func (qc *QueryClient) LibraryTrainingLessonsPage(ctx context.Context, args LibraryTrainingLessonsPageArgs) (*Result, error) {
+	call := LibraryTrainingLessonsPageBuild(args)
+	return qc.executeNamed(ctx, "libraryTrainingLessonsPage", call)
+}
+
+func LibraryTrainingLessonsPageBuild(args LibraryTrainingLessonsPageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryTrainingLessonsPage(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6550,7 +6877,9 @@ func ReleaseAssembleProfileCandidateBuild(args ReleaseAssembleProfileCandidateAr
 
 // ReleaseBuilds -- Read this owner's saved release journeys, including interrupted attempts.
 type ReleaseBuildsArgs struct {
-	Limit int
+	Limit  int
+	Cursor string
+	Search string
 }
 
 // ReleaseBuilds calls the engine builtin releaseBuilds.
@@ -6565,6 +6894,20 @@ func ReleaseBuildsBuild(args ReleaseBuildsArgs) string {
 	if args.Limit != 0 {
 		b.WriteString("limit: ")
 		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	if args.Search != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6690,6 +7033,7 @@ func ReleaseCandidateTargetsBuild(args ReleaseCandidateTargetsArgs) string {
 type ReleaseCandidatesArgs struct {
 	Cursor string
 	Limit  int
+	Search string
 }
 
 // ReleaseCandidates calls the engine builtin releaseCandidates.
@@ -6711,6 +7055,13 @@ func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
 		}
 		b.WriteString("limit: ")
 		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if args.Search != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -6852,6 +7203,7 @@ type ReleaseDiscoverPublishedCandidatesArgs struct {
 	SourceId string
 	Cursor   string
 	Limit    int
+	Search   string
 }
 
 // ReleaseDiscoverPublishedCandidates calls the engine builtin releaseDiscoverPublishedCandidates.
@@ -6878,6 +7230,13 @@ func ReleaseDiscoverPublishedCandidatesBuild(args ReleaseDiscoverPublishedCandid
 		}
 		b.WriteString("limit: ")
 		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	if args.Search != "" {
+		if b.Len() > 43 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9706,6 +10065,45 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 	return b.String()
 }
 
+// TrainingChunksBrowse -- Ten pending chunks from the existing shared-domain index, admitted at writer rank.
+type TrainingChunksBrowseArgs struct {
+	Pending    bool
+	PendingSet bool // set true to send pending; required because zero-value bool is ambiguous
+	Search     string
+	Cursor     string
+}
+
+// TrainingChunksBrowse calls the engine builtin trainingChunksBrowse.
+func (qc *QueryClient) TrainingChunksBrowse(ctx context.Context, args TrainingChunksBrowseArgs) (*Result, error) {
+	call := TrainingChunksBrowseBuild(args)
+	return qc.executeNamed(ctx, "trainingChunksBrowse", call)
+}
+
+func TrainingChunksBrowseBuild(args TrainingChunksBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin trainingChunksBrowse(")
+	if args.PendingSet {
+		b.WriteString("pending: ")
+		b.WriteString(fmt.Sprintf("%v", args.Pending))
+	}
+	if args.Search != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkAcceptGoalResults -- Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance.
 type WorkAcceptGoalResultsArgs struct {
 	GoalId string
@@ -9787,6 +10185,56 @@ func (qc *QueryClient) WorkSkillCatalog(ctx context.Context, args WorkSkillCatal
 func WorkSkillCatalogBuild(args WorkSkillCatalogArgs) string {
 	_ = args
 	return "builtin workSkillCatalog()"
+}
+
+// WorkSkillCatalogEntry -- Inspect one skill and verify its complete current content against installed seeds.
+type WorkSkillCatalogEntryArgs struct {
+	SkillId string
+}
+
+// WorkSkillCatalogEntry calls the engine builtin workSkillCatalogEntry.
+func (qc *QueryClient) WorkSkillCatalogEntry(ctx context.Context, args WorkSkillCatalogEntryArgs) (*Result, error) {
+	call := WorkSkillCatalogEntryBuild(args)
+	return qc.executeNamed(ctx, "workSkillCatalogEntry", call)
+}
+
+func WorkSkillCatalogEntryBuild(args WorkSkillCatalogEntryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workSkillCatalogEntry(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkSkillCatalogPage -- Ten recent skills with verified baseline provenance. Search precedes paging.
+type WorkSkillCatalogPageArgs struct {
+	Search string
+	Cursor string
+}
+
+// WorkSkillCatalogPage calls the engine builtin workSkillCatalogPage.
+func (qc *QueryClient) WorkSkillCatalogPage(ctx context.Context, args WorkSkillCatalogPageArgs) (*Result, error) {
+	call := WorkSkillCatalogPageBuild(args)
+	return qc.executeNamed(ctx, "workSkillCatalogPage", call)
+}
+
+func WorkSkillCatalogPageBuild(args WorkSkillCatalogPageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workSkillCatalogPage(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Cursor != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkStepVersions -- Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>.

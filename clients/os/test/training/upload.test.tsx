@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -119,13 +119,13 @@ beforeEach(() => {
 });
 
 describe("the file list", () => {
-  it("reads libraryFilesForOwner and workRunsForOwner, and renders the caller's files", async () => {
+  it("reads ten recent files and only their analysis runs", async () => {
     const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
     mount(connection);
     await settle();
 
-    expect(connection.calls).toContain("query libraryFilesForOwner()");
-    expect(connection.calls).toContain("query workRunsForOwner()");
+    expect(connection.callsNamed("trainingFilesBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("trainingAnalysisRunsForFiles")).toHaveLength(1);
     expect(screen.getByText("handbook.docx")).toBeTruthy();
   });
 
@@ -421,9 +421,9 @@ describe("teaching a domain", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /Knowledge domain/ }), { target: { value: "software-development" } });
     seed.domainRows = [domainLiteRow("software-development", "unvalidated")];
     seed.chunkPages = { "software-development": [[chunkRow({ id: "lesson", domainId: "software-development", source: "fileUpload", sourceRef: "artifact:lesson", text: "Prove persisted workflow metadata through the real schema.", validationStatus: "unvalidated" })]] };
-    const reads = connection.callsNamed("allDocumentChunkDomains").length;
+    const reads = connection.callsNamed("knowledgeTrainingDomainRollups").length;
     await click(screen.getByRole("button", { name: "Teach" }));
-    expect(connection.callsNamed("allDocumentChunkDomains").length).toBeGreaterThan(reads);
+    expect(connection.callsNamed("knowledgeTrainingDomainRollups").length).toBeGreaterThan(reads);
     await click(screen.getByRole("button", { name: "Review" }));
     expect(navigate).toHaveBeenCalledWith("review");
     view.rerender(withSession(<TrainingApp sectionId="review" navigate={navigate} askContext={vi.fn()} store={memStore()} />));
@@ -594,4 +594,27 @@ describe("the training record list", () => {
     expect(screen.getByText(/files denied/)).toBeTruthy();
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
   });
+});
+
+it("keeps loaded file pages on reopen and searches beyond the recent page", async () => {
+  const connection = fakeConnection({ files: Array.from({ length: 23 }, (_, n) => fileRow({ id: `file-page-${n}`, name: `File page ${n}`, status: "ready" })) });
+  const view = mount(connection);
+  await settle();
+  expect(screen.getByText("File page 9")).toBeTruthy();
+  expect(screen.queryByText("File page 10")).toBeNull();
+  await click(screen.getByRole("button", { name: "Load more" }));
+  await settle();
+  expect(screen.getByText("File page 19")).toBeTruthy();
+  const reads = () => connection.calls.filter(call => call.includes("trainingFilesBrowse")).length;
+  expect(reads()).toBe(2);
+  view.unmount();
+  mount(connection);
+  await settle();
+  expect(screen.getByText("File page 19")).toBeTruthy();
+  expect(reads()).toBe(2);
+  fireEvent.click(screen.getByRole("button", { name: "Search files" }));
+  fireEvent.change(screen.getByPlaceholderText("Search files"), { target: { value: "File page 22" } });
+  await waitFor(() => expect(reads()).toBe(3));
+  await settle();
+  expect(screen.queryByText("File page 0")).toBeNull();
 });

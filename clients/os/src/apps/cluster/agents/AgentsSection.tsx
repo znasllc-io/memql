@@ -14,14 +14,17 @@ import {
   Panel,
   RecordList,
   RecordRow,
+  Refine,
   listCount,
   Subhead,
   formatMoment,
   useLiveView,
 } from "../../../kit";
 import { useOsConnection } from "../../../live/connection";
-import { useLiveCollection } from "../../../live/useLiveCollection";
+import { usePagedCollection } from "../../../live/useLiveCollection";
 import { useReading } from "../../../cluster/reading";
+import { LoadMore } from "../../../kit/LoadMore";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../../logs/useDebouncedValue";
 import {
   agentFingerprint,
   agentFromRow,
@@ -67,32 +70,35 @@ import {
 const AUTHORIZATION_CAP = 50;
 
 export function AgentsSection({ showInactive }: { showInactive: boolean }) {
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
   const spec = useCallback(
     (conn: Connection): LiveCollectionSpec<Row> => ({
       concept: Concepts.AGENTS_AGENT,
-      seed: async (_cursor, signal) => {
-        const result = showInactive
-          ? await conn.query.allAgents({}, { signal })
-          : await conn.query.activeAgents({}, { signal });
+      seed: async (cursor, signal) => {
+        const result = await conn.query.allAgents({ includeInactive: showInactive, search: needle }, { cursor, signal });
         return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
       },
       reread: async (rowId, signal) => {
         const row = await getRowByConceptAndId(conn.query, Concepts.AGENTS_AGENT, rowId, { signal });
         return (row as Row) ?? null;
       },
-      paged: false,
+      inScope: raw => {
+        const row = agentFromRow(raw);
+        return (showInactive || row.active) && (!needle || [row.name, row.description, row.role, row.roleSlug].join("\n").toLowerCase().includes(needle.toLowerCase()));
+      },
     }),
-    [showInactive],
+    [showInactive, needle],
   );
 
   // The key encodes WHICH READ this is. Flipping the preference changes the
   // seed, so it has to restart the collection rather than filter what the
   // previous seed happened to bring back.
-  const feed = useLiveCollection<Row>(`cluster:agents:${showInactive}`, spec);
+  const feed = usePagedCollection<Row>(`cluster:agents:${showInactive}:${needle}`, spec);
 
   const [openId, setOpenId] = useState("");
 
-  const view = useLiveView<Row, AgentRow>(feed.source, `agents:${showInactive}`, (rows) =>
+  const view = useLiveView<Row, AgentRow>(feed.source, `agents:${showInactive}:${needle}`, (rows) =>
     rows.map(agentFromRow).filter((a) => a.id !== ""),
   );
 
@@ -103,7 +109,7 @@ export function AgentsSection({ showInactive }: { showInactive: boolean }) {
 
   return (
     <div className="os-cluster">
-      <Head title="Agents" meta={listCount(view?.snapshot)} />
+      <Head title="Agents" meta={listCount(view?.snapshot)}><Refine label="Search agents" search={search} onSearch={setSearch} placeholder="Search agents" /></Head>
 
       <div className="os-cluster-body">
         <div className="os-cluster-list">
@@ -111,7 +117,7 @@ export function AgentsSection({ showInactive }: { showInactive: boolean }) {
             // Keyed on the filter so flipping the preference RE-BASELINES the
             // arrival cues: revealing rows this browser already had is not
             // the cluster sending them.
-            key={`agents:${showInactive}`}
+            key={`agents:${showInactive}:${needle}`}
             source={view}
             rowId={(a) => a.id}
             fingerprint={agentFingerprint}
@@ -137,6 +143,7 @@ export function AgentsSection({ showInactive }: { showInactive: boolean }) {
               </RecordRow>
             )}
           />
+          <LoadMore feed={feed} />
         </div>
 
         {open === null ? null : (

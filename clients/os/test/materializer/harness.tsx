@@ -46,6 +46,16 @@ function pagesOf(rows: readonly Row[], opts?: unknown): Result {
   return pagedResult(rows.slice(from, from + PAGE_SIZE), from + PAGE_SIZE < rows.length ? `p${page + 1}` : "");
 }
 
+function browsePage(rows: readonly Row[], args: Record<string, unknown> = {}, opts?: unknown): Result {
+  const search = String(args.search ?? "").trim().toLowerCase();
+  const filtered = rows.filter(row => (args.includeArchived || row.archived !== true)
+    && (!args.format || row.format === args.format)
+    && (!search || [row.name, row.statement, row.description].some(value => String(value ?? "").toLowerCase().includes(search))))
+    .sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")) || String(a.id).localeCompare(String(b.id)));
+  const offset = Number((opts as { cursor?: string })?.cursor || 0);
+  return pagedResult(filtered.slice(offset, offset + 10), offset + 10 < filtered.length ? String(offset + 10) : "");
+}
+
 /**
  * A refusal AS THE APP REALLY RECEIVES IT. The server wraps an internal engine
  * error in "MemQL engine failed to execute query. Details: "
@@ -167,6 +177,13 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // has an empty parameter list, so `.mock.calls[0][0]` is a tuple of
       // length zero and `tsc -b` -- which covers test/ -- refuses the
       // index. A test that asserts a read was issued UNFILTERED needs it.
+      compositionsBrowse: vi.fn(async (args?: Record<string, unknown>, opts?: unknown) => browsePage(seed.compositions ?? [], args, opts)),
+      composeTemplatesBrowse: vi.fn(async (args?: Record<string, unknown>, opts?: unknown) => browsePage(seed.templates ?? [], args, opts)),
+      composeRecipesBrowse: vi.fn(async (args?: Record<string, unknown>, opts?: unknown) => browsePage(seed.recipes ?? [], args, opts)),
+      compositionById: vi.fn(async (args: Record<string, unknown>) => rowsResult((seed.compositions ?? []).filter(row => row.id === args.compositionId))),
+      composeTemplateById: vi.fn(async (args: Record<string, unknown>) => rowsResult((seed.templates ?? []).filter(row => row.id === args.templateId))),
+      composeRecipeById: vi.fn(async (args: Record<string, unknown>) => rowsResult((seed.recipes ?? []).filter(row => row.id === args.recipeId))),
+      workRunSummariesByIds: vi.fn(async (args: Record<string, unknown>, opts?: unknown) => pagesOf((seed.runs ?? []).filter(row => (args.runIds as string[]).includes(String(row.id))), opts)),
       compositions: vi.fn(async (_args?: Record<string, unknown>, opts?: unknown) => pagesOf(seed.compositions ?? [], opts)),
       workRunForOwner: vi.fn(async (args: Record<string, unknown>, _opts?: unknown) =>
         rowsResult((seed.runs ?? []).filter((row) => row.id === args.runId)),

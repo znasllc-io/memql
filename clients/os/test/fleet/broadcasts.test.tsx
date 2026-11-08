@@ -99,7 +99,7 @@ describe("Fleet broadcast connections", () => {
     expect(document.querySelector(".os-fleet-session > .os-notice")).toBeNull();
   });
 
-  it("recovers missed machine events after reconnect and stops connection listeners on unmount", async () => {
+  it("recovers missed machine events after reconnect and retains continuity until the authenticated session ends", async () => {
     const connection = fakeConnection({ myWorkersWithStatus: [machineRow({ id: "one", ownerUserId: "me" })] });
     let cycle = () => {}; let status = (_: { status: string }) => {};
     const stopCycle = vi.fn(), stopStatus = vi.fn();
@@ -120,7 +120,11 @@ describe("Fleet broadcast connections", () => {
     expect(view.result.current.presence("two")).not.toBeNull();
     expect(view.result.current.presence("one")).toBeNull();
     expect(connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(2);
-    view.unmount(); expect(stopCycle).toHaveBeenCalledOnce(); expect(stopStatus).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(stopCycle).not.toHaveBeenCalled(); expect(stopStatus).not.toHaveBeenCalled();
+    const { disposeSessionCollections } = await import("../../src/live/sessionCollections");
+    disposeSessionCollections(connection as never);
+    expect(stopCycle).toHaveBeenCalledOnce(); expect(stopStatus).toHaveBeenCalledOnce();
   });
 
   it("uses one routing feed across views and filters other owners' updates", async () => {

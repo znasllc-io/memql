@@ -69,6 +69,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   clientAccountsAll?: Row[];
+  clientAccountsBrowse?: Row[];
   senderIdentities?: Row[];
   /** v1:platform:accountFrontDoor rows, for the MemQL address stop. */
   accountFrontDoorsOpen?: Row[];
@@ -112,6 +113,13 @@ export function fakeConnection(seed: FakeSeed = {}) {
       configureAccountDomains: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       senderIdentities: rollup(seed.senderIdentities),
       clientAccountsAll: vi.fn(async () => rowsResult(seed.clientAccountsAll ?? [])),
+      clientAccountsBrowse: vi.fn(async (args: { search?: string; includeArchived?: boolean }, options?: { cursor?: string }) => {
+        const search = args.search?.toLowerCase() ?? "";
+        const rows = (seed.clientAccountsBrowse ?? seed.clientAccountsAll ?? []).filter(row => (args.includeArchived || row["status"] !== "archived") && (!search || ["name", "domain", "primaryContactName", "primaryContactEmail", "notes"].some(field => String(row[field] ?? "").toLowerCase().includes(search)))).sort((a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(a["id"]).localeCompare(String(b["id"])));
+        const offset = Number(options?.cursor ?? 0);
+        return new Result({ data: rows.slice(offset, offset + 10), meta: { cursor: offset + 10 < rows.length ? String(offset + 10) : "" } } as never);
+      }),
+      clientAccountById: vi.fn(async ({ accountId }: { accountId: string }) => rowsResult([seed.byId?.[accountId] ?? (seed.clientAccountsAll ?? seed.clientAccountsBrowse ?? []).find(row => row["id"] === accountId)].filter((row): row is Row => !!row))),
       // The account front-door feed (epic memql#5168). Seeded like every other
       // rollup so a harness that says nothing about doors gets an empty feed
       // rather than an unstubbed call.

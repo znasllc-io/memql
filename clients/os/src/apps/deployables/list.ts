@@ -157,6 +157,10 @@ export const SECTION_LABELS: Readonly<Record<ListSection, string>> = {
 };
 
 export interface DeployableListGroup {
+  /** Exact server summaries for a bounded source directory. */
+  summary?: SourceSummary;
+  state?: { word: string; tone: "accent" | "warn" | "muted" };
+  provenance?: string;
   /** `pkg:<id>` for a source and its rows; `site:<id>` for a hand-made site on its own. */
   id: string;
   pkg: PackageRow | null;
@@ -471,6 +475,7 @@ function at(run: DeploymentRow): string {
  */
 export function groupFingerprint(group: DeployableListGroup): string {
   return [
+    JSON.stringify([group.summary, group.state, group.provenance]),
     group.pkg === null ? "" : packageFingerprint(group.pkg),
     ...group.rows.map((row) =>
       [row.key, row.site === null ? "will-serve" : siteFingerprint(row.site), row.parked === null ? "" : `pending:${row.parked.id}:${row.parked.status}`].join(":"),
@@ -610,6 +615,7 @@ export interface SourceSummary {
 }
 
 export function sourceSummary(group: DeployableListGroup): SourceSummary {
+  if (group.summary) return group.summary;
   return {
     apps: group.rows.filter(row => row.app !== "" || row.site !== null).length,
     deployed: group.rows.filter((row) => row.site !== null && row.site.status !== "archived").length,
@@ -624,6 +630,7 @@ export function sourceSummary(group: DeployableListGroup): SourceSummary {
  * then a newer version they could deploy, then the quiet states.
  */
 export function sourceStateWord(group: DeployableListGroup): { word: string; tone: "accent" | "warn" | "muted" } {
+  if (group.state) return group.state;
   const pkg = group.pkg;
   if (pkg === null) return { word: "", tone: "muted" };
   if (pkg.status === "archived") return { word: "Archived", tone: "muted" };

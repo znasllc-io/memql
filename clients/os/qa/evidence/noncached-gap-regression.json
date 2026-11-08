@@ -1,0 +1,30 @@
+{
+  "before": {
+    "passed": 0,
+    "failed": 1,
+    "pending": 7,
+    "files": 1,
+    "success": false,
+    "sourceFile": "noncached-gap-before.json",
+    "bytes": 4200,
+    "sha256": "f0ecddeaf72e51b66d2a0d1691318c6243a9dc7d0f581792348de338b2c74141",
+    "failedTests": [
+      "live collection reconnects repairs noncached readers on stream gaps without duplicating reconnect or resume recovery"
+    ]
+  },
+  "after": {
+    "passed": 85,
+    "failed": 0,
+    "pending": 0,
+    "files": 5,
+    "success": true,
+    "sourceFile": "noncached-gap-after.json",
+    "bytes": 29788,
+    "sha256": "bc827c83040c903b6c32f87b64f299091fa76c93f97ed8f5cc579ca4a43d2d20",
+    "failedTests": []
+  },
+  "regression": "live collection reconnects repairs noncached readers on stream gaps without duplicating reconnect or resume recovery",
+  "testFile": "clients/os/test/live/useLiveCollection.test.tsx",
+  "resolution": "Component-owned collections subscribe in the committed effect to the session continuity observer. Sequence gaps, gap_before and reconnect reach cacheReleased:false readers without a duplicate cycle listener. Regression also exercises StrictMode, disconnected state, resume deduplication and cleanup.",
+  "scope": "OS-only lifecycle change; no SDK or backend changes."
+}

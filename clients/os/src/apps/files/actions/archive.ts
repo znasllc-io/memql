@@ -1,3 +1,5 @@
+import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import { artifactFromRow, isContentKind } from "../rows";
 import type { FolderTree } from "../fold";
 import { subtreeFolderIds } from "../fold";
 import type { ArtifactRow } from "../rows";
@@ -174,4 +176,22 @@ export async function runArchiveWalk(plan: ArchivePlan, ports: ArchiveWalkPorts)
     done += 1;
     ports.onProgress(done, total);
   }
+}
+
+/** Read complete membership for a deliberate operation. An unloaded or
+ * archived file still keeps its containing folder from being deleted. */
+export async function readArchiveMembers(query: QueryClient, tree: FolderTree, folderId: string, signal?: AbortSignal): Promise<ArtifactRow[]> {
+  const folderIds = subtreeFolderIds(tree, folderId);
+  const rows: ArtifactRow[] = [];
+  const seen = new Set<string>();
+  let cursor = "";
+  do {
+    if (signal?.aborted) throw new Error("The folder check was cancelled.");
+    const result = await query.libraryArtifactsInFolders({ folderIds }, { signal, ...(cursor ? { cursor } : {}) });
+    rows.push(...result.rows().map(artifactFromRow).filter(row => row.id && isContentKind(row.kind)));
+    cursor = result.meta()?.cursor ?? "";
+    if (cursor && seen.has(cursor)) throw new Error("The folder check returned a repeated page. Nothing was changed.");
+    seen.add(cursor);
+  } while (cursor);
+  return rows;
 }

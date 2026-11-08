@@ -508,7 +508,7 @@ describe("the list", () => {
     expect(await screen.findByRole("region", { name: "No deployables yet" })).toBeTruthy();
   });
 
-  it("distinguishes a failed read from an empty list and recovers with Reload", async () => {
+  it("distinguishes a failed read from an empty list and repairs once per resume burst", async () => {
     const seed: FakeSeed = { sites: [SHOP], sitesError: "Connection unavailable" };
     const connection = fakeConnection(seed);
     mount(connection);
@@ -516,13 +516,20 @@ describe("the list", () => {
     expect(screen.queryByRole("region", { name: "No deployables yet" })).toBeNull();
     expect(document.querySelector(".os-head-meta")).toBeNull();
     seed.sitesError = undefined;
-    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("pageshow"));
+    });
     expect(await screen.findByText("Storefront")).toBeTruthy();
     expect(screen.queryByText("Deployables could not be loaded.")).toBeNull();
-    expect(connection.callsNamed("sitesAll")).toHaveLength(2);
+    // Computed-input invalidation is delayed 100ms. Wait beyond that window
+    // to catch a second repair hidden by the first successful response.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
+    expect(connection.callsNamed("deployableDirectoryPage")).toHaveLength(2);
   });
 
-  it("reads each feed ONCE on mount, and no timeline until a row is opened", async () => {
+  it("reads one directory page on mount, and defers complete detail catalogs until a row is opened", async () => {
     // The timeline is retained by the PAGE, never by the root
     // (clients/os/README.md); the parked-runs feed is the one exception, and
     // it is a different read.
@@ -530,10 +537,11 @@ describe("the list", () => {
     mount(connection);
     await screen.findByText("storefront");
 
-    expect(connection.calls.filter((c) => c === "query sitesAll()")).toHaveLength(1);
-    expect(connection.calls.filter((c) => c === "query packagesAll()")).toHaveLength(1);
-    expect(connection.calls.filter((c) => c === "query packageDeploymentsPending()")).toHaveLength(1);
-    expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(1);
+    expect(connection.callsNamed("deployableDirectoryPage")).toHaveLength(1);
+    expect(connection.calls.filter((c) => c === "query sitesAll()")).toHaveLength(0);
+    expect(connection.calls.filter((c) => c === "query packagesAll()")).toHaveLength(0);
+    expect(connection.calls.filter((c) => c === "query packageDeploymentsPending()")).toHaveLength(0);
+    expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(0);
     expect(connection.callsNamed("packageDeployments")).toHaveLength(0);
 
     // OPENING A ROW REPLACES THE LIST (rule 11), so the page is what is on
@@ -893,4 +901,52 @@ it("cancels the exact resumed analysis, keeps Leave available, and waits for the
   await waitFor(() => expect(document.querySelector('.os-actbar-word')?.textContent).not.toBe("Cancelling"));
   expect(await screen.findByText("You stopped this analysis.")).toBeTruthy();
   expect(screen.getByText("Configuration",{selector:".os-rail-label"}).closest("li")?.getAttribute("data-state")).toBe("stopped");
+});
+
+
+describe("server directory pages", () => {
+  it("keeps ten-row pages and search results across closing the window", async () => {
+    const sites = Array.from({ length: 25 }, (_, n) => siteRow({ id: `page-${n}`, title: `Page ${String(n).padStart(2, "0")}`, hostname: `page-${n}.example.test`, createdAt: new Date(Date.UTC(2026, 9, n + 1)).toISOString() }));
+    const connection = fakeConnection({ sites, packages: [] });
+    const view = mount(connection);
+    await waitFor(() => expect(rowNames()).toHaveLength(10));
+    expect(rowNames()[0]).toBe("Page 24");
+    expect(connection.callsNamed("sitesAll")).toHaveLength(0);
+    expect(connection.callsNamed("packagesAll")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploymentsPending")).toHaveLength(0);
+    await click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(rowNames()).toHaveLength(20));
+    await click(screen.getByRole("button", { name: "Refine deployables" }));
+    const { type } = await import("./harness");
+    await type(screen.getByLabelText("Search") as HTMLInputElement, "PAGE 00");
+    await waitFor(() => expect(rowNames()).toEqual(["Page 00"]));
+    await type(screen.getByLabelText("Search") as HTMLInputElement, "");
+    await waitFor(() => expect(rowNames()).toHaveLength(20));
+    const reads = connection.callsNamed("deployableDirectoryPage").length;
+    view.unmount();
+    mount(connection);
+    await waitFor(() => expect(rowNames()).toHaveLength(20));
+    expect(connection.callsNamed("deployableDirectoryPage")).toHaveLength(reads);
+    await click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(rowNames()).toHaveLength(25));
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("pages repositories as complete summaries while preserving undeployed apps", async () => {
+    const packages = Array.from({ length: 12 }, (_, n) => ({ ...ACME, id: `repository-${n}`, name: `Repository ${String(n).padStart(2, "0")}`, createdAt: new Date(Date.UTC(2026, 9, n+1)).toISOString(), declares: [{ name: "web", kind: "spa" }, { name: "admin", kind: "spa" }], disabledDeployables: ["admin"] } as Row));
+    const connection = fakeConnection({ sites: [], packages });
+    mount(connection, { section: "sources" });
+    await waitFor(() => expect(rowNames()).toHaveLength(10));
+    expect(screen.getAllByText("2 apps, 0 deployed")).toHaveLength(10);
+    expect(connection.callsNamed("packagesAll")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialsMine")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionsMine")).toHaveLength(0);
+    await click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(rowNames()).toHaveLength(12));
+    await click(screen.getByRole("button", { name: /^Open Repository 00,/ }));
+    await screen.findByRole("region", { name: "Source Repository 00" });
+    expect(connection.callsNamed("packagesAll")).toHaveLength(1);
+    expect(await screen.findByText("web")).toBeTruthy();
+    expect(await screen.findByText("inactive")).toBeTruthy();
+  });
 });

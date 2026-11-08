@@ -1,3 +1,7 @@
+import type { SiteHealth } from "./health";
+import { useLiveView } from "../../live/liveView";
+import { useDeployableDirectory } from "./useDirectory";
+import { LoadMore } from "../../kit/LoadMore";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useSourceConnections } from "../../modules/connections/connections";
 import { sourceRecord } from "./sources/sourceRecord";
@@ -5,7 +9,7 @@ import { AccountChip } from "../accounts/AccountPicker";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActivePane } from "./paneActivity";
 import { Archive, FileArchive, GitBranch, Globe, ShoppingBag } from "lucide-react";
 import { RecordRow } from "../../kit/RecordRow";
@@ -23,7 +27,6 @@ import {
   Refine,
   Select,
   useNow,
-  useThreeFeedView,
   type RefineChip,
 } from "../../kit";
 import { formatFreshness } from "../../kit/format";
@@ -40,7 +43,6 @@ import {
   ACCOUNT_NONE,
   DEFAULT_LIST_FILTER,
   SOURCE_FACETS,
-  flatDeployables,
   originLabel,
   rowFingerprint,
   foldSources,
@@ -48,9 +50,7 @@ import {
   sourceStateWord,
   sourceSummary,
   filterIsNarrowing,
-  foldDeployables,
   groupFingerprint,
-  listViewKey,
   newestParkedRun,
   type DeployableListGroup,
   type DeployableListRow,
@@ -140,7 +140,7 @@ export type SectionRoot = "deployables" | "sources";
 const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Sources" };
 
 export function DeployablesSection({
-  root = "deployables", sourceLabel = "Sources", onOpenRepository, onAddRepository,
+  onDirectorySites, directoryHealth, onCatalogDemand, root = "deployables", sourceLabel = "Sources", onOpenRepository, onAddRepository,
   active = true, navigation, openRequest, composeOpenRequest, connectResult, sourceOpenRequest, onOpenDeployable, onComposeDeployable,
   pipelines, runs, pipelinesSettled = false, pipelinesError = "", connectFlow, onOpenRuns,
   sites,
@@ -159,6 +159,9 @@ export function DeployablesSection({
   onReseed,
   onSettings,
 }: {
+  onDirectorySites?: (root: "deployables" | "sources", sites: readonly SiteRow[]) => void;
+  directoryHealth?: ReadonlyMap<string, SiteHealth | undefined>;
+  onCatalogDemand?: (root: "deployables" | "sources", needed: boolean) => void;
   root?: SectionRoot;
   sourceLabel?: string;
   onAddRepository?: () => void;
@@ -258,61 +261,26 @@ export function DeployablesSection({
   // their ownership chip.
   const nameOf = usePeopleNames();
 
+  const directory = useDeployableDirectory(root, filter, showArchived, active && (landing || view.kind === "list"));
+  useEffect(() => { onCatalogDemand?.(root, active && !landing && view.kind !== "list"); return () => onCatalogDemand?.(root, false); }, [onCatalogDemand, root, active, landing, view.kind]);
   const siteRows = sites?.snapshot.rows ?? [];
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
   const pipelineRows = pipelines?.snapshot.rows ?? [];
   const runRows = runs?.snapshot.rows ?? [];
-
-  const connections = useSourceConnections();
-  const provenanceKey = JSON.stringify(packageRows.map(pkg => sourceRecord(pkg, credentials, connections.rows).provenance));
-  const sourceMetadataReady = connections.state === "live" && !connections.error && (!credentialFeed || credentialFeed.state === "live" && !credentialFeed.error);
+  const connections = useSourceConnections(active && !landing && view.kind !== "list");
+  const sourceMetadataReady = directory.snapshot.state === "live" && !directory.snapshot.error && !directory.provenanceError;
   const sourceSearch = (pkg: PackageRow) => sourceRecord(pkg, credentials, connections.rows).provenance;
-  const refreshSources = () => { onReseed(); credentialFeed?.retry(); connections.retry(); };
-  const viewKey = listViewKey(filter, showArchived);
-  const list = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
-    sites,
-    packages,
-    parked,
-    viewKey,
-    (s, p, r) => foldDeployables(s, p, r, filter, showArchived),
-  );
-  const groups = list?.snapshot.rows ?? [];
-  // THE TWO LISTS, read off the same fold so they can never disagree about
-  // what the cluster holds. Each instance draws the one its root asks for.
-  const flat = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListRow>(
-    sites, packages, parked, `flat:${viewKey}`,
-    (s, p, r) => flatDeployables(foldDeployables(s, p, r, filter, showArchived)),
-  );
-  // ITS OWN FOLD, not a filter over the one above: a source is summarised by
-  // every app it made, so the deployables list's questions (its search narrows
-  // ROWS, its archived flip is the row's) must not reach it. See `foldSources`.
-  const sourcesList = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
-    sites, packages, parked, `sources:${viewKey}:${provenanceKey}`,
-    (s, p, r) => foldSources(s, p.filter(pkg => pkg.sourceKind === "repo" && pkg.repoUrl), r, filter.search, showArchived, sourceSearch),
-  );
+  const refreshSources = () => { directory.reseed(); };
+  const healthKey = JSON.stringify([...(directoryHealth?.entries() ?? [])]);
+  const flat = useLiveView<DeployableListRow, DeployableListRow>(directory.flat, healthKey, rows => rows.map(row => ({ ...row, site: row.site ? { ...row.site, health: directoryHealth?.get(row.site.id) } : null })));
+  const directorySiteKey = JSON.stringify(directory.flat?.snapshot.rows.filter(row => row.site).map(row => [row.site?.id, row.site?.createdAt, row.site?.hostname, row.site?.bundleRef, row.site?.status]));
+  useEffect(() => { if (!(active && (landing || view.kind === "list"))) return; onDirectorySites?.(root, (directory.flat?.snapshot.rows ?? []).map(row => row.site).filter((site): site is SiteRow => site !== null)); }, [root, directorySiteKey, onDirectorySites, active, landing, view.kind]);
+  const sourcesList = directory.sources;
+  const list = root === "sources" ? sourcesList : flat;
   const listedCount = root === "sources" ? (sourcesList?.snapshot.rows.length ?? 0) : (flat?.snapshot.rows.length ?? 0);
-
-  const { figures } = useSiteTraffic(
-    groups.flatMap((g) =>
-      g.rows.map((r) => r.site).filter((s): s is SiteRow => s !== null && !s.systemOwned).map((s) => s.id),
-    ),
-    LIST_TRAFFIC_WINDOW,
-  );
-
-  // HOW MANY OF THIS TAB'S NOUN ARE ARCHIVED -- sources on Sources, deployables
-  // on Deployables. One count for both offered "Show archived (2)" over a list
-  // of sources none of which was archived.
-  const archivedCount = useMemo(
-    () =>
-      root === "sources"
-        ? packageRows.filter((p) => p.status === "archived" && p.sourceKind === "repo" && !p.sourceRemoved).length
-        : foldDeployables(siteRows, packageRows, parkedRows, DEFAULT_LIST_FILTER, true).reduce(
-            (n, g) => n + g.rows.length,
-            0,
-          ),
-    [root, siteRows, packageRows, parkedRows],
-  );
+  const { figures } = useSiteTraffic((flat?.snapshot.rows ?? []).map(row => row.site).filter((site): site is SiteRow => site !== null && !site.systemOwned).map(site => site.id), LIST_TRAFFIC_WINDOW);
+  const archivedCount = directory.archivedCount;
 
   function patch(next: Partial<ListFilter>) {
     setFilter((held) => ({ ...held, ...next }));
@@ -356,6 +324,7 @@ export function DeployablesSection({
   </>;
 
   function renderCurrentView() {
+    if (view.kind !== "list" && (view.kind !== "compose" || view.parkedPackageId !== undefined) && (sites === null || packages === null || parked === null || sites.snapshot.state === "seeding" || packages.snapshot.state === "seeding" || parked.snapshot.state === "seeding")) return <RecordListSkeleton label="Loading selected deployable" />;
     if (view.kind === "compose") {
       const parkedFor =
         view.parkedPackageId === undefined ? null : newestParked(packageRows, parkedRows, view.parkedPackageId);
@@ -599,7 +568,7 @@ export function DeployablesSection({
     const filtered = filterIsNarrowing(filter);
     return (
       <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density="comfortable">
-        <Head title={(root === "sources" ? sourceLabel : ROOT_LABEL[root])} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
+        <Head title={(root === "sources" ? sourceLabel : ROOT_LABEL[root])} meta={!directory.snapshot.error && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}
             onSearch={(search) => patch({ search })}
@@ -670,10 +639,10 @@ export function DeployablesSection({
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
           {root === "sources" && onAddRepository ? <AddButton label="Add repository" onClick={onAddRepository} /> : null}
-          {root === "sources" ? <AutoRefresh busy={sourcesList?.snapshot.state === "seeding"} onRefresh={refreshSources} /> : null}
+          {root === "sources" ? <AutoRefresh resume={false} busy={sourcesList?.snapshot.state === "seeding"} onRefresh={refreshSources} /> : null}
         </Head>
         {root === "sources" && !onAddRepository ? <Caption>Repositories available to this account.</Caption> : null}
-        {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Retrying automatically. Configured repositories remain available." /> : null}
+        {root === "sources" && (directory.provenanceError || connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Retrying automatically. Configured repositories remain available." /> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
             the instant the row is stamped; the certificate and route come down
@@ -700,22 +669,18 @@ export function DeployablesSection({
           </Notice>
         )}
 
-        {feedError ? (
+        {directory.snapshot.error ? (
           <Notice
             tone="error"
             sentence={root === "sources" ? "Sources could not be loaded." : "Deployables could not be loaded."}
-            detail={feedError}
+            detail={directory.snapshot.error}
             next="Check your connection and try again."
           >
-            {root === "sources" ? null : <AutoRefresh onRefresh={onReseed} />}
+            {root === "sources" ? null : <AutoRefresh resume={false} onRefresh={directory.reseed} />}
           </Notice>
         ) : null}
 
-        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? connections.error || credentialFeed?.error ? <Caption>Source provenance is unavailable. Retrying automatically.</Caption> : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? <Caption>Sources are unavailable while disconnected. They update when the connection returns.</Caption> : <RecordListSkeleton label="Loading sources and GitHub access" /> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
-          <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
-            {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
-          </EmptyState>
-        </div>) : root === "sources" ? (
+        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? directory.provenanceError || connections.error || credentialFeed?.error ? <Caption>Source provenance is unavailable. Retrying automatically.</Caption> : directory.snapshot.state === "disconnected" ? <Caption>Sources are unavailable while disconnected. They update when the connection returns.</Caption> : <RecordListSkeleton label="Loading sources and GitHub access" /> : root === "sources" ? (
           /* THE SOURCES, as their own list: a row each, in the list language
              every other list here speaks. A source used to be a header row
              with its apps indented beneath it, inside the deployables list. */
@@ -730,7 +695,7 @@ export function DeployablesSection({
               {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Use Add repository to connect another source."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} hasPipeline={pipelineForPackage(pipelineRows, group.pkg!.id)?.status === "active"} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} provenance={group.provenance ?? sourceSearch(group.pkg!)} hasPipeline={pipelineForPackage(pipelineRows, group.pkg!.id)?.status === "active"} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -767,6 +732,7 @@ export function DeployablesSection({
           />
         )}
 
+        <LoadMore feed={directory} />
         {archivedCount > 0 || showArchived ? (
           <div className="os-archive-toggle">
             <button type="button" className="os-sort" aria-expanded={showArchived} onClick={flipArchived}>

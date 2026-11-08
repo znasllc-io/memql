@@ -41,8 +41,10 @@ export interface FakeQuery {
   datasyncSetSyncPaused: ReturnType<typeof vi.fn>;
   datasyncRetryOutboxEntry: ReturnType<typeof vi.fn>;
   datasyncDiscardOutboxEntry: ReturnType<typeof vi.fn>;
-  activeAgents: ReturnType<typeof vi.fn>;
   allAgents: ReturnType<typeof vi.fn>;
+  auditEventsBrowse: ReturnType<typeof vi.fn>;
+  outboxDeadLettersBrowse: ReturnType<typeof vi.fn>;
+  activeAgents: ReturnType<typeof vi.fn>;
   agentAuthorizationsForSelf: ReturnType<typeof vi.fn>;
   recentAuditEvents: ReturnType<typeof vi.fn>;
   clusterNodes: ReturnType<typeof vi.fn>;
@@ -199,6 +201,13 @@ export function fakeConnection(seed: QuerySeed = {}, modules: ModulesSeed = {}):
   const read = (key: keyof FakeQuery) => vi.fn(async () => rowsResult(seed[key] ?? []));
   return {
     query: {
+      allAgents: vi.fn(async (args: { includeInactive?: boolean; search?: string }, opts?: { cursor?: string }) => {
+        const source = seed.allAgents ?? (args.includeInactive ? seed.allAgents : seed.activeAgents) ?? [];
+        const rows = source.filter(row => !args.search || [row.name, row.description, row.role, row.roleSlug].join(" ").toLowerCase().includes(args.search.toLowerCase()));
+        const offset = Number(opts?.cursor || 0); return rowsResult(rows.slice(offset, offset + 10), offset + 10 < rows.length ? String(offset + 10) : "");
+      }),
+      auditEventsBrowse: read("auditEventsBrowse"),
+      outboxDeadLettersBrowse: read("outboxDeadLettersBrowse"),
       inferenceStatus: read("inferenceStatus"),
       passkeysForSelf: read("passkeysForSelf"),
       dataOrigins: read("dataOrigins"),
@@ -209,7 +218,6 @@ export function fakeConnection(seed: QuerySeed = {}, modules: ModulesSeed = {}):
       datasyncRetryOutboxEntry: vi.fn(async () => rowsResult([])),
       datasyncDiscardOutboxEntry: vi.fn(async () => rowsResult([])),
       activeAgents: read("activeAgents"),
-      allAgents: read("allAgents"),
       agentAuthorizationsForSelf: read("agentAuthorizationsForSelf"),
       recentAuditEvents: read("recentAuditEvents"),
       clusterNodes: read("clusterNodes"),

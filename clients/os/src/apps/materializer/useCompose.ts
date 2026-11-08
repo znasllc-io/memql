@@ -4,14 +4,19 @@ import {
   getRowByConceptAndId,
   refusalSentence,
   rowString,
+  rowBool,
   sameEntityId,
   type Result,
   type Row,
 } from "@znasllc-io/memql-sdk-core/client";
 
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import type { LiveListSource } from "../../live/LiveList";
 import { useOsConnection } from "../../live/connection";
 import {
   useLiveCollection,
+  usePagedCollection,
+  type PagedCollectionHandle,
   type LiveCollectionHandle,
 } from "../../live/useLiveCollection";
 import { compositionRunSource, unfinishedCompositionRunIds } from "./runState";
@@ -21,63 +26,8 @@ import {
   TEMPLATE_CONCEPT,
 } from "./concepts";
 
-// The Materializer's feeds, and the one read that is deliberately not a
-// feed.
-//
-// ===========================================================================
-// FEEDS AT THE APP ROOT, ONE PER CONCEPT
-// ===========================================================================
-// Compositions, templates and recipes are retained ONCE, at the app root,
-// and passed down. `useLiveCollection` constructs a collection per
-// COMPONENT -- it memoises on `[connection, key]` inside the hook and does
-// not call the SDK's shared registry -- so a second `useCompositions()`
-// inside the Materialized list would open a second subscription and run a
-// second seed over the same concept, and the two would then be free to
-// disagree about what the cluster holds. That is the Deployables
-// map-and-list failure.
-//
-// The rule is per CONCEPT, not per app, so three feeds is not three copies
-// of one thing.
-//
-// ===========================================================================
-// EVERY FEED WALKS EVERY PAGE
-// ===========================================================================
-// The reads page (`paginate 50` in dsl/compose and dsl/library), and a feed
-// that read one page of them said "50" to a person with 53 files. Each seed
-// is handed the cursor the previous page named and returns the next one's;
-// the collection keeps asking until a page names none (`pageOf`).
-//
-// ===========================================================================
-// THE LIBRARY'S FILES AND FOLDERS ARE FEEDS TOO, BUT ONLY WHILE ASKED FOR
-// ===========================================================================
-// The Make a file wizard and a made file's page need the person's Library
-// file rows (the tray, the routing) and folders (the Folder step, "Filed in");
-// the list of what was made needs neither, and opening it must not read the
-// person's whole Library. `useLibraryFiles(enabled)` and `useFolders(enabled)`
-// pass a NULL key while `enabled` is false, which makes no read and opens no
-// subscription, and are retained at the app root while a wizard or page that
-// needs them is open, for the reason the per-concept rule above gives.
-//
-// ===========================================================================
-// THE SEED CARRIES NO ARCHIVE FILTER, AND THAT IS THE POINT
-// ===========================================================================
-// `compositions` deliberately declares no `archived != true` conjunct
-// (dsl/compose/queries.memql says so). A read that carried one could only
-// ever back a show-archived preference that revealed the rows which
-// flipped WHILE THE WINDOW WAS OPEN -- the Files app's own lesson. So one
-// paged seed holds the complete truth and the archived / not split stays a
-// client-side fold over it.
-//
-// ===========================================================================
-// THE COMPOSABLE CONCEPTS ARE A READ, NOT A FEED
-// ===========================================================================
-// They come from the concept REGISTRY rather than from rows, so there is
-// no `graph.node.*` event for a subscription to receive -- a
-// `useLiveCollection` over them would render "Loading from the cluster"
-// and then a list that silently never moved. It is read once when the
-// Sources column opens and re-read on demand, which is honest: the set
-// changes when a DSL bundle is redeployed, not while somebody is
-// composing.
+// Directory pages and selected records have independent keys. Complete picker
+// catalogs are requested only by the editor that needs their choices.
 
 /** What one read is asked for to get one page: its abort signal, and the cursor once the page before named one. */
 function pageOptions(
@@ -92,32 +42,50 @@ function pageOf(result: Result): { rows: Row[]; nextCursor: string } {
   return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
 }
 
-/**
- * Every composition this caller can read, newest first, every page. `runOf` answers the run behind an
- * UNFINISHED composition (a finished one has none read), for the making stage's measure of the wait.
- */
-export function useCompositions(): LiveCollectionHandle<Row> & {
-  runOf(runId: string): Row | undefined;
-} {
-  const compositions = useLiveCollection<Row>(
-    "compose:compositions",
-    (connection) => ({
-      concept: COMPOSITION_CONCEPT,
-      seed: async (cursor, signal) =>
-        pageOf(
-          await connection.query.compositions({}, pageOptions(cursor, signal)),
-        ),
-      reread: async (rowId, signal) => {
-        const row = await getRowByConceptAndId(
-          connection.query,
-          COMPOSITION_CONCEPT,
-          rowId,
-          { signal },
-        );
-        return (row as Row) ?? null;
-      },
-    }),
-  );
+export interface ComposeBrowseFilter { search?: string; format?: string; includeArchived?: boolean }
+
+function useComposeDirectory(kind: "composition" | "template" | "recipe", enabled: boolean, filter: ComposeBrowseFilter): PagedCollectionHandle<Row> {
+  const search = useDebouncedValue(filter.search ?? "", 250).trim();
+  const args = { search, format: filter.format ?? "", includeArchived: filter.includeArchived ?? false };
+  const concept = kind === "composition" ? COMPOSITION_CONCEPT : kind === "template" ? TEMPLATE_CONCEPT : RECIPE_CONCEPT;
+  return usePagedCollection<Row>(enabled ? `compose:directory:${kind}:${JSON.stringify(args)}` : null, connection => ({
+    concept,
+    seed: async (cursor, signal) => pageOf(await connection.query[kind === "composition" ? "compositionsBrowse" : kind === "template" ? "composeTemplatesBrowse" : "composeRecipesBrowse"](args, pageOptions(cursor, signal))),
+    inScope: row => (args.includeArchived || !rowBool(row, "archived"))
+      && (!args.format || rowString(row, "format") === args.format)
+      && (!search || [rowString(row, "name"), rowString(row, kind === "composition" ? "statement" : "description")].some(value => value.toLowerCase().includes(search.toLowerCase()))),
+    reread: async (id, signal) => (await getRowByConceptAndId(connection.query, concept, id, { signal }) as Row) ?? null,
+  }));
+}
+
+export const useTemplateDirectory = (filter: ComposeBrowseFilter) => useComposeDirectory("template", true, filter);
+export const useRecipeDirectory = (filter: ComposeBrowseFilter) => useComposeDirectory("recipe", true, filter);
+
+export function useComposeRecord(kind: "composition" | "template" | "recipe", id: string): LiveCollectionHandle<Row> {
+  const concept = kind === "composition" ? COMPOSITION_CONCEPT : kind === "template" ? TEMPLATE_CONCEPT : RECIPE_CONCEPT;
+  return useLiveCollection<Row>(id ? `compose:record:${kind}:${id}` : null, connection => ({
+    concept, paged: false, eventInScope: candidate => sameEntityId(candidate, id),
+    inScope: row => sameEntityId(rowString(row, "id"), id),
+    seed: async (_cursor, signal) => {
+      const result = kind === "composition" ? await connection.query.compositionById({ compositionId: id }, { signal })
+        : kind === "template" ? await connection.query.composeTemplateById({ templateId: id }, { signal })
+        : await connection.query.composeRecipeById({ recipeId: id }, { signal });
+      return { rows: result.rows(), nextCursor: "" };
+    },
+    reread: async (rowId, signal) => (await getRowByConceptAndId(connection.query, concept, rowId, { signal }) as Row) ?? null,
+  }));
+}
+
+/** The selected record is independent of recent pages. No old link forces a
+ * catalog walk, and recovery keeps all pages the person explicitly loaded. */
+export function useCompositions(enabled = true, filter: ComposeBrowseFilter = {}, selectedId = ""): PagedCollectionHandle<Row> & { runOf(runId: string): Row | undefined } {
+  const directory = useComposeDirectory("composition", enabled, filter);
+  const detail = useComposeRecord("composition", selectedId);
+  const combined = useMemo(() => {
+    if (!directory.source || !detail.source) return directory.source ?? detail.source;
+    return withSelectedRecord(directory.source, detail.source, selectedId);
+  }, [directory.source, detail.source, selectedId]);
+  const compositions = { ...directory, source: combined, snapshot: combined?.snapshot ?? directory.snapshot };
   // Read the exact bound runs, including old ones outside the newest run page.
   // They remain retained while these compositions are unfinished; neither the
   // worker process nor Nexus needs to remain open for an abandonment to arrive.
@@ -127,27 +95,21 @@ export function useCompositions(): LiveCollectionHandle<Row> & {
     runIds.length ? `compose:runs:${runKey}` : null,
     (connection) => ({
       concept: Concepts.WORK_RUN,
-      seed: async (_cursor, signal) => {
-        const results = await Promise.all(
-          runIds.map((runId) =>
-            connection.query.workRunForOwner({ runId }, { signal }),
-          ),
-        );
-        return {
-          rows: results.flatMap((result) => result.rows()),
-          nextCursor: "",
-        };
+      eventInScope: id => runIds.some(runId => sameEntityId(runId, id)),
+      seed: async (cursor, signal) => {
+        const result = await connection.query.workRunSummariesByIds({ runIds }, pageOptions(cursor, signal));
+        return pageOf(result);
       },
-      inScope: (row) => runIds.includes(rowString(row, "id")),
+      inScope: (row) => runIds.some(id => sameEntityId(id, rowString(row, "id"))),
       reread: async (runId, signal) => {
-        if (!runIds.includes(runId)) return null;
+        if (!runIds.some(id => sameEntityId(id, runId))) return null;
         const result = await connection.query.workRunForOwner(
           { runId },
           { signal },
         );
         return result.rows()[0] ?? null;
       },
-      paged: false,
+      paged: true,
     }),
   );
   const source = useMemo(
@@ -165,10 +127,12 @@ export function useCompositions(): LiveCollectionHandle<Row> & {
     [runRows],
   );
   return {
+    ...directory,
     source,
     snapshot: source?.snapshot ?? compositions.snapshot,
     reseed: () => {
       compositions.reseed();
+      detail.reseed();
       runs.reseed();
     },
     runOf,
@@ -176,8 +140,8 @@ export function useCompositions(): LiveCollectionHandle<Row> & {
 }
 
 /** Every template binding this caller owns, every page. */
-export function useTemplates(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("compose:templates", (connection) => ({
+export function useTemplates(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "compose:templates" : null, (connection) => ({
     concept: TEMPLATE_CONCEPT,
     seed: async (cursor, signal) =>
       pageOf(
@@ -199,8 +163,8 @@ export function useTemplates(): LiveCollectionHandle<Row> {
 }
 
 /** Every recipe this caller owns, every page. */
-export function useRecipes(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("compose:recipes", (connection) => ({
+export function useRecipes(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "compose:recipes" : null, (connection) => ({
     concept: RECIPE_CONCEPT,
     seed: async (cursor, signal) =>
       pageOf(
@@ -488,4 +452,23 @@ function resolvedFromReply(reply: Row | null): ResolvedSource[] {
       count: typeof s["count"] === "number" ? s["count"] : 0,
       problem: typeof s["problem"] === "string" ? s["problem"] : "",
     }));
+}
+
+/** Preserve page metadata and reconcile a selected row through its own read. */
+function withSelectedRecord(directory: LiveListSource<Row>, detail: LiveListSource<Row>, selectedId: string): LiveListSource<Row> {
+  let previousDirectory: typeof directory.snapshot | null = null;
+  let previousDetail: typeof detail.snapshot | null = null;
+  let snapshot: typeof directory.snapshot;
+  return {
+    subscribe: notify => { const a = directory.subscribe(notify), b = detail.subscribe(notify); return () => { a(); b(); }; },
+    get snapshot() {
+      const a = directory.snapshot, b = detail.snapshot;
+      if (a === previousDirectory && b === previousDetail) return snapshot;
+      previousDirectory = a; previousDetail = b;
+      const rows = b.state === "seeding" ? a.rows : [...a.rows.filter(row => !sameEntityId(rowString(row, "id"), selectedId)), ...b.rows];
+      snapshot = { ...a, rows, version: a.version + b.version, error: a.error || b.error,
+        state: b.state === "disconnected" || b.state === "degraded" || b.state === "seeding" && !a.rows.some(row => sameEntityId(rowString(row, "id"), selectedId)) ? b.state : a.state };
+      return snapshot;
+    },
+  };
 }

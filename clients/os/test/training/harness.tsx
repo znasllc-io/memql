@@ -141,6 +141,33 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     executeNamed: vi.fn(async (_name: string, call: string, opts?: { cursor?: string }) => {
       calls.push(call);
 
+      const offset = opts?.cursor ? Number(opts.cursor.split(":")[1] ?? 0) : 0;
+      const search = /search: "([^"]*)"/.exec(call)?.[1]?.toLowerCase() ?? "";
+      if (call.startsWith("query trainingFilesBrowse(")) {
+        if (seed.filesError !== undefined) throw new Error(seed.filesError);
+        const matching = (seed.files ?? []).filter(row => row.archived !== true && (!search || `${row.name ?? ""} ${row.summary ?? ""}`.toLowerCase().includes(search)));
+        return rowsResult(matching.slice(offset, offset + 10), offset + 10 < matching.length ? `page:${offset + 10}` : "");
+      }
+      if (call.startsWith("query trainingAnalysisRunsForFiles(")) {
+        const ids = JSON.parse(/fileIds: (\[[^\]]*\])/.exec(call)?.[1] ?? "[]") as string[];
+        const matching = (seed.runs ?? []).filter(row => ids.includes(String((row.input as Record<string, unknown>)?.fileId)) && row.automationName === "libraryAnalyzeFile");
+        return rowsResult(matching.slice(offset, offset + 50), offset + 50 < matching.length ? `page:${offset + 50}` : "");
+      }
+      if (call.startsWith("builtin trainingChunksBrowse(") || call.startsWith("query documentChunksForDomain(")) {
+        if (seed.domainsError !== undefined) throw new Error(seed.domainsError);
+        const token = /cursor: "page:(\d+)"/.exec(call)?.[1];
+        const pageOffset = token ? Number(token) : offset;
+        const domainId = /domainId: "([^"]*)"/.exec(call)?.[1];
+        const pending = call.includes("pending: true");
+        const matching = (domainId ? seed.chunkPages?.[domainId]?.flat() ?? [] : Object.values(seed.chunkPages ?? {}).flat(2)).filter(row => {
+          const status = row.validationStatus || "unvalidated";
+          return (!pending || row.superseded !== true && status === "unvalidated") && (!search || `${row.text ?? ""} ${row.sourceRef ?? ""} ${row.domainId ?? ""}`.toLowerCase().includes(search));
+        });
+        const values = matching.slice(pageOffset, pageOffset + 10);
+        const cursor = pageOffset + 10 < matching.length ? `page:${pageOffset + 10}` : "";
+        return call.startsWith("builtin") ? rowsResult([{ rows: values, nextCursor: cursor } as unknown as Row]) : rowsResult(values, cursor);
+      }
+
       if (call === "query libraryFilesForOwner()") {
         if (seed.filesError !== undefined) throw new Error(seed.filesError);
         return rowsResult(seed.files ?? []);
@@ -151,6 +178,26 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin libraryTrainFile(")) {
         if (seed.trainError !== undefined) throw new Error(seed.trainError);
         return rowsResult([]);
+      }
+
+      if (call === "builtin knowledgeTrainingDomainRollups()") {
+        if (seed.domainsError !== undefined) throw new Error(seed.domainsError);
+        const rollups = new Map<string, { domainId: string; total: number; validated: number; rejected: number; unvalidated: number }>();
+        for (const row of seed.domainRows ?? []) {
+          const domainId = String(row.domainId ?? "");
+          const rollup = rollups.get(domainId) ?? { domainId, total: 0, validated: 0, rejected: 0, unvalidated: 0 };
+          rollup.total++;
+          if (row.validationStatus === "validated") rollup.validated++;
+          else if (row.validationStatus === "rejected") rollup.rejected++;
+          else rollup.unvalidated++;
+          rollups.set(domainId, rollup);
+        }
+        return rowsResult([{
+          rollups: [...rollups.values()].sort((a,b) => a.domainId.localeCompare(b.domainId)),
+          validated: [...rollups.values()].map(row => ({ domainId: row.domainId, total: row.validated })),
+          rejected: [...rollups.values()].map(row => ({ domainId: row.domainId, total: row.rejected })),
+          domains: seed.domainCatalog ?? [],
+        }]);
       }
 
       if (call === "query knowledgeDomainsAll()") return rowsResult(seed.domainCatalog ?? []);

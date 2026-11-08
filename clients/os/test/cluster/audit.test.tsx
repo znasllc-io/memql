@@ -33,7 +33,7 @@ describe("the audit trail", () => {
   it("uses silent skeletons during a delayed read and exposes a failed read", async () => {
     const connection = fakeConnection();
     let reject!: (reason: Error) => void;
-    connection.query.recentAuditEvents.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    connection.query.auditEventsBrowse.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
     const view = mount(connection);
     const label = screen.getByText("Loading the trail");
     expect(label.className).toBe("os-sr-only");
@@ -53,14 +53,14 @@ describe("the audit trail", () => {
     // page would tell the one person who cannot check that nothing happened.
     // The floor in settings.ts is the whole mechanism; this asserts the
     // sentence the floor makes honest.
-    mount(fakeConnection({ recentAuditEvents: [] }));
+    mount(fakeConnection({ auditEventsBrowse: [] }));
     expect(await screen.findByText("No events recorded.")).toBeTruthy();
   });
 
   it("lists events newest-first with the actor and the outcome", async () => {
     mount(
       fakeConnection({
-        recentAuditEvents: [
+        auditEventsBrowse: [
           auditEventRow({ id: "e1", action: "sign_in", outcome: "success" }),
           auditEventRow({
             id: "e2",
@@ -81,7 +81,7 @@ describe("the audit trail", () => {
   it("opens the full record, including the fields the row line has no room for", async () => {
     mount(
       fakeConnection({
-        recentAuditEvents: [
+        auditEventsBrowse: [
           auditEventRow({
             id: "e1",
             detail: "granted developer on the cluster",
@@ -106,7 +106,7 @@ describe("the audit trail", () => {
   it("shows a detail recorded as an object", async () => {
     mount(
       fakeConnection({
-        recentAuditEvents: [
+        auditEventsBrowse: [
           auditEventRow({
             id: "e1",
             detail: { deploymentId: "dep-older", pointerMoved: true, rolled: false },
@@ -122,7 +122,7 @@ describe("the audit trail", () => {
     // A keyset cursor is bound to the query it came from. Carrying one across
     // a category change would continue a walk of a DIFFERENT set, which reads
     // as a page of unrelated events rather than as an error.
-    const connection = fakeConnection({ recentAuditEvents: [auditEventRow({ id: "e1" })] });
+    const connection = fakeConnection({ auditEventsBrowse: [auditEventRow({ id: "e1" })] });
     mount(connection);
     await screen.findByText("sign_in");
 
@@ -131,9 +131,9 @@ describe("the audit trail", () => {
     await click(select);
     await click(screen.getByRole("option", { name: "security" }));
 
-    const calls = connection.query.recentAuditEvents.mock.calls;
-    expect(calls[calls.length - 1]?.[0]).toEqual({ category: "security" });
+    const calls = connection.query.auditEventsBrowse.mock.calls;
+    expect(calls[calls.length - 1]?.[0]).toEqual({ category: "security", search: "" });
     // No cursor: this is a first page.
-    expect(calls[calls.length - 1]?.[1]).toEqual({});
+    expect(calls[calls.length - 1]?.[1]).toMatchObject({ cursor: "", signal: expect.any(AbortSignal) });
   });
 });

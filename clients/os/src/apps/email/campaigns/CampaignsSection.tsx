@@ -1,3 +1,6 @@
+import { useEmailCatalogs } from "../catalogs";
+import { useCampaignAudienceSearch, useEmailBrowse, useEmailRecord, useEmailReferences } from "../useBrowse";
+import { LoadMore } from "../../../kit/LoadMore";
 import { useEffect, useMemo, useState } from "react";
 import { Send } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -35,10 +38,9 @@ import { CampaignPage } from "./CampaignPage";
 // name, who it goes to, the one time or figure that matters in its state, and its
 // state in one word.
 //
-// The feed is LIVE (`v1:campaigns:campaign` broadcasts both verbs) and seeded
-// unfiltered: every question here is a view over rows already in the browser,
-// so asking one never re-reads, and the arrival cue starts again from whatever
-// the question shows.
+// The list reads ten recent authorized rows and searches before pagination.
+// Audience-name search reads matching identities only. Full catalogs are
+// requested by the editor/wizard; directory labels hydrate loaded references.
 //
 // A PAGE REPLACES THE LIST (DESIGN.md rule 11), and so does the wizard.
 
@@ -52,19 +54,13 @@ const FACETS: readonly { value: StatusFacet; label: string }[] = [
   { value: "failed", label: "Failed" },
 ];
 
-/** In progress is everything not yet finished: drafts, schedules, sends and pauses. */
-function inFacet(campaign: CampaignRow, facet: StatusFacet): boolean {
-  if (facet === "") return true;
-  if (facet === "progress") return !campaignIsFinished(campaign);
-  return campaign.status === facet;
-}
-
 export function CampaignsSection({
   feeds,
   recordFeeds,
   trackByDefault,
   openRequest,
   onCampaign,
+  onOrganization,
 }: {
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
@@ -78,6 +74,7 @@ export function CampaignsSection({
    * when it was, and its page is the only place to pause it.
    */
   onCampaign?: (campaignId: string) => void;
+  onOrganization?: (accountId: string) => void;
 }) {
   const [openId, setOpenId] = useState("");
   // The campaign somebody ELSE named -- search, Ask or another page -- as opposed
@@ -104,27 +101,24 @@ export function CampaignsSection({
     }
   });
 
-  const audiences = useProjected(feeds.audiences.snapshot.rows, audienceProjection);
+  useEmailCatalogs(adding ? ["campaigns", "audiences", "templates", "senders"] : ["audiences", "templates", "senders"], adding || openId !== "");
+  const audienceMatches = useCampaignAudienceSearch(search);
+  const browse = useEmailBrowse("campaigns", { search: audienceMatches.search, status: facet || undefined, audienceIds: audienceMatches.ids }, audienceMatches.ready);
+  const audienceRefs = useEmailReferences("audiences", browse.snapshot.rows.map(row => campaignFromRow(row).audienceId));
+  const audiences = useProjected(audienceRefs.snapshot.rows, audienceProjection);
   const needle = search.trim().toLowerCase();
-
-  // PROJECT, then narrow, in one pass: the collection holds raw wire rows. A
-  // search reads the audience's name as well as the campaign's, so it is asked
-  // again when an audience is renamed.
-  const source = useLiveView<Row, CampaignRow>(
-    feeds.campaigns.source,
-    `${facet}|${needle}|${needle === "" ? "" : feeds.audiences.snapshot.version}`,
-    (rows) =>
-      rows
-        .map(campaignFromRow)
-        .filter(
-          (c) =>
-            c.id !== "" &&
-            inFacet(c, facet) &&
-            (needle === "" ||
-              campaignName(c).toLowerCase().includes(needle) ||
-              nameOfAudience(audiences, c.audienceId).toLowerCase().includes(needle)),
-        ),
-  );
+  const source = useLiveView<Row, CampaignRow>(browse.source, `${facet}|${needle}`, rows => rows.map(campaignFromRow));
+  const detail = useEmailRecord("campaigns", openId);
+  const arrival = useEmailRecord("campaigns", arriving);
+  const shownIds = browse.snapshot.rows.map(row => campaignFromRow(row).id).join("\n");
+  useEffect(() => {
+    for (const row of browse.snapshot.rows) {
+      const campaign = campaignFromRow(row);
+      if (campaign.status === "draft") onCampaign?.(campaign.id);
+      onOrganization?.(campaign.accountId);
+    }
+    // The loaded identity set is the demand, not unrelated progress updates.
+  }, [shownIds, onCampaign, onOrganization]);
 
   // The series a draft repeats from, by the draft's id: the app root reads them
   // for every draft in view, so a row reads "Repeating" without a read of its own.
@@ -142,13 +136,11 @@ export function CampaignsSection({
   // list is asking. One that has not arrived yet leaves the list on screen, and
   // the page opens when it does.
   const open = useMemo(
-    () => recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, openId),
-    [feeds.campaigns.snapshot.rows, openId],
+    () => recordNamed(detail.snapshot.rows, campaignFromRow, openId) ?? recordNamed(browse.snapshot.rows, campaignFromRow, openId),
+    [detail.snapshot.rows, browse.snapshot.rows, openId],
   );
-  const arrived = useMemo(
-    () => arriving !== "" && recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, arriving) !== null,
-    [feeds.campaigns.snapshot.rows, arriving],
-  );
+  const arrived = arriving !== "" && recordNamed(arrival.snapshot.rows, campaignFromRow, arriving) !== null;
+
   useEffect(() => {
     if (!arrived) return;
     setOpenId(arriving);
@@ -174,7 +166,7 @@ export function CampaignsSection({
       <CampaignPage
         key={open.id}
         campaign={open}
-        feeds={feeds}
+        feeds={{ ...feeds, campaigns: detail }}
         recordFeeds={recordFeeds}
         onBack={() => {
           setOpenId("");
@@ -185,17 +177,17 @@ export function CampaignsSection({
     );
   }
 
-  const failed = feeds.campaigns.snapshot.error !== "";
+  const failed = browse.snapshot.error !== "" || audienceMatches.snapshot.error !== "";
   // A CAMPAIGN SOMEBODY ASKED FOR THAT THE CLUSTER DOES NOT HOLD, said in place.
   // Only once the cluster has answered: while the feed is still reading, or when
   // it could not be asked, the record is not "missing", and the page opens if it
   // arrives. The sentence goes with the request -- another campaign opened, the
   // way back from the page, or the wizard started.
-  const missing = requested !== "" && requested === openId && feeds.campaigns.snapshot.state === "live" && !failed;
+  const missing = requested !== "" && requested === openId && detail.snapshot.state === "live" && !detail.snapshot.error && !open;
   const narrowed = facet !== "" || needle !== "";
   // A list the cluster says is empty has nothing to ask a question of (rule 2).
   // A question that emptied it stays, so it can be taken back.
-  const settledEmpty = feeds.campaigns.snapshot.state === "live" && !failed && feeds.campaigns.snapshot.rows.length === 0;
+  const settledEmpty = browse.snapshot.state === "live" && !failed && browse.snapshot.rows.length === 0;
   const chips: RefineChip[] =
     facet === "" ? [] : [{ id: "status", label: FACETS.find((f) => f.value === facet)?.label ?? facet, onRemove: () => setFacet("") }];
 
@@ -222,6 +214,7 @@ export function CampaignsSection({
         />
       </Head>
 
+      {audienceMatches.snapshot.error ? <Notice tone="error" sentence={audienceMatches.snapshot.error}><Button onClick={audienceMatches.reseed}>Try again</Button></Notice> : null}
       {missing ? <Notice tone="info" sentence={WORDS.unavailable.campaign} /> : null}
 
       {/* Keyed on the question, so asking another one RE-BASELINES the arrival
@@ -236,8 +229,8 @@ export function CampaignsSection({
         fingerprint={campaignFingerprint}
         label="Campaigns"
         errorContent={
-          <Notice tone="error" sentence="This cluster did not return your campaigns." next="Nothing below is current." detail={feeds.campaigns.snapshot.error}>
-            <Button onClick={feeds.campaigns.reseed}>Try again</Button>
+          <Notice tone="error" sentence="This cluster did not return your campaigns." next="Nothing below is current." detail={browse.snapshot.error || audienceMatches.snapshot.error}>
+            <Button onClick={() => { browse.reseed(); audienceMatches.reseed(); }}>Try again</Button>
           </Notice>
         }
         emptyContent={
@@ -261,6 +254,7 @@ export function CampaignsSection({
           />
         )}
       />
+      <LoadMore feed={browse} />
     </div>
   );
 }

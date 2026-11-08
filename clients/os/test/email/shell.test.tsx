@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
@@ -50,7 +50,7 @@ function connection() {
   const conn = fakeConnection({});
   const emailInbox = vi.fn(async () => ({ rows: () => [{ mode: "capture", messages: [MESSAGE] }] }));
   const logsTail = vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => rowsResult([]));
-  Object.assign(conn.query, { emailInbox, logsTail });
+  Object.assign(conn.query, { emailInboxPage: emailInbox, emailInboxMessage: vi.fn(async () => ({ rows: () => [{ message: MESSAGE }] })), logsTail });
   return { conn, emailInbox, logsTail };
 }
 
@@ -89,7 +89,8 @@ describe("the Inbox section", () => {
     mount(conn, "inbox", role);
 
     // Let the root's feeds settle, so an absent read is not just an early look.
-    await waitFor(() => expect(conn.query.campaigns).toHaveBeenCalled());
+    await act(async () => {});
+    expect(conn.query.campaigns).not.toHaveBeenCalled();
     expect(pane("inbox")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Inbox" })).toBeNull();
     expect(emailInbox).not.toHaveBeenCalled();
@@ -133,7 +134,8 @@ describe("the Logs section", () => {
     const { conn, logsTail } = connection();
     mount(conn, "logs", "writer");
 
-    await waitFor(() => expect(conn.query.campaigns).toHaveBeenCalled());
+    await act(async () => {});
+    expect(conn.query.campaigns).not.toHaveBeenCalled();
     expect(pane("logs")).toBeNull();
     expect(logsTail).not.toHaveBeenCalled();
   });

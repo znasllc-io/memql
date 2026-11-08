@@ -4,8 +4,7 @@ import { LocalTabs } from "../../kit/LocalTabs";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { AddButton } from "../../kit/AddButton";
 import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, ChevronRight, Cpu, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
@@ -13,8 +12,10 @@ import { Button, EmptyState, Refine, Head, HeadNote, ProvenanceDot, formatFreshn
 import { IconButton } from "../../kit/IconButton";
 import { PageHelp } from "../../kit/pageHelp";
 import type { PageTrail } from "../../kit/pageNavigation";
-import { useLiveView } from "../../live/liveView";
-import { useMachines } from "../../live/machines";
+import { LiveReadVisibility } from "../../live/useGraphRevision";
+import { useMachineDirectory, useMachineRecord } from "./machines/useMachineDirectory";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 import { AutoRefresh } from "./FleetControls";
 import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
@@ -28,7 +29,7 @@ import { ownsMachine } from "./machines/sharing";
 import { RecentActivity } from "./machines/RecentActivity";
 import { useMachineWrites } from "./machines/useMachineWrites";
 import { isWorkerOnline } from "./online";
-import { isRevoked, machineFromRow, machineName, RUNNABLE_APPS, type MachineRow } from "./rows";
+import { isRevoked, machineName, RUNNABLE_APPS, type MachineRow } from "./rows";
 
 export type MachineView = "equipment" | "details" | "models" | "apps" | "activity" | "settings";
 export interface FleetSelection { machineId: string; view: MachineView }
@@ -40,15 +41,19 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   intent?: OsAppProps["intent"]; consumeIntent?: OsAppProps["consumeIntent"];
 }) {
   const { access } = useSession();
-  const { collection, settled, feedState, reload } = useMachines();
   const consumed = useRef("");
   const now = useNow(15_000);
   const [machineSearch, setMachineSearch] = useState("");
-  const source = useLiveView<Row, MachineRow>(collection, `revoked:${showRevoked}`, rows => rows.map(machineFromRow).filter(m => m.id && (showRevoked || !isRevoked(m))));
-  const subscribe = useCallback((listener: () => void) => source?.subscribe(listener) ?? (() => {}), [source]);
-  const snapshot = useSyncExternalStore(subscribe, () => source?.snapshot ?? null, () => null);
+  const search = useDebouncedValue(machineSearch.trim(), TEXT_DEBOUNCE_MS);
+  const directory = useMachineDirectory(search, showRevoked);
+  const detail = useMachineRecord(selection.machineId);
+  const activeFeed = selection.machineId ? detail : directory;
+  const snapshot = activeFeed.snapshot;
+  const settled = snapshot.state === "live" || snapshot.state === "degraded";
+  const feedState = snapshot.state;
+  const reload = useCallback(() => { directory.reseed(); if (selection.machineId) detail.reseed(); }, [directory.reseed, detail.reseed, selection.machineId]);
   const [removed, setRemoved] = useState<string[]>([]);
-  const machines = (snapshot?.rows ?? []).filter(m => showRevoked || !removed.includes(m.id));
+  const machines = directory.machines.filter(m => showRevoked || !removed.includes(m.id));
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const onRemoved = useCallback((id: string) => {
@@ -64,14 +69,15 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   //
   // A disappearing selection still returns to the list, never to another
   // machine's editor.
-  const machine = selection.machineId ? machines.find(m => m.id === selection.machineId) : undefined;
+  const selectedMachine = detail.snapshot.state === "live" && !detail.snapshot.error ? detail.machine : detail.machine ?? machines.find(m => m.id === selection.machineId);
+  const machine = selectedMachine && (showRevoked || (!isRevoked(selectedMachine) && !removed.includes(selectedMachine.id))) ? selectedMachine : undefined;
   useEffect(() => {
-    if (selection.machineId && !machine && settled && feedState === "live" && !snapshot?.error) {
+    if (selection.machineId && !machine && detail.snapshot.state === "live" && !detail.snapshot.error) {
       select({ machineId: "", view: "equipment" });
     }
-  }, [selection.machineId, machine?.id, settled, feedState, snapshot?.error, select]);
+  }, [selection.machineId, machine?.id, detail.snapshot, select]);
   const toList = useCallback(() => select({ machineId: "", view: "equipment" }), [select]);
-  const shown = machines.filter(m => machineName(m).toLowerCase().includes(machineSearch.toLowerCase()));
+  const shown = machines;
   const request = intent?.payload.addMachine;
   const wants = typeof request === "object" && request !== null && !Array.isArray(request);
   useEffect(() => {
@@ -92,7 +98,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
   }, [machine?.id, selection.view]);
   const retained = machine && !visited.some(item => item.machineId === machine.id && item.view === selection.view) ? [...visited, { machineId: machine.id, view: selection.view }] : visited;
   const scrollRoot = usePageScroll(`${selection.machineId}:${selection.view}`);
-  const behind = feedState === "degraded" || feedState === "disconnected";
+  const behind = feedState === "degraded" || feedState === "disconnected" || directory.snapshot.state === "degraded" || directory.snapshot.state === "disconnected";
   return (<>
     {flow.active ? <AddMachinePage flow={flow} onLeave={machineId => { if (machineId) select({ machineId, view: "equipment" }); }} /> : null}
     <div ref={scrollRoot} className="fleet-home" data-machine-view={selection.view} hidden={flow.active}>
@@ -111,16 +117,18 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
         breadcrumbs={machine ? [{ label: "Machines", onSelect: toList }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined}
         back={machine ? { label: "Machines", onSelect: toList } : undefined}
         navigation={selection.view === "equipment" || !machine}
-        meta={machine ? undefined : listCount(snapshot, shown.length)}
+        meta={machine ? undefined : listCount(directory.snapshot) === undefined || search !== machineSearch.trim() ? undefined : `${shown.length} shown`}
         note={behind ? <HeadNote sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined} /> : null}>
         {/* ON THE LIST the search narrows the rows beneath it (DESIGN.md rule 2:
             a filter is a question asked of the content). Inside a machine it
             keeps its results, which are the quick way across to another.
             ALWAYS RENDERED, machines or none: it is the target the window's own
             Search Fleet control focuses, and that control is there either way. */}
+        {!machine && !machineSearch ? <span className="os-caption">Recent</span> : null}
         {machine ? <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch}>
           <div className="fleet-machine-results">{shown.map(m => <button type="button" className="fleet-reading-link" key={m.id} onClick={() => select({ machineId: m.id, view: "equipment" })}>{machineName(m)}<ChevronRight size={14} aria-hidden /></button>)}
-          {!shown.length ? <EmptyState icon={Monitor} title="No matching machines">{machines.length ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState> : null}</div>
+          {!shown.length && directory.snapshot.state === "live" && !directory.snapshot.error ? <EmptyState icon={Monitor} title="No matching machines">Try another name, hostname or platform.</EmptyState> : null}
+          <LoadMore feed={directory} /></div>
         </Refine> : <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch} />}
         <AddButton label="Add a machine" onClick={() => flow.start({})} />
       </Head>
@@ -129,14 +137,12 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
       <AutoRefresh enabled={behind} onRefresh={reload} />
       <div className="fleet-workspace-body" data-has-machines={machines.length > 0 || undefined}>
         <main className="fleet-equipment-area" aria-label="Machine workspace">
-          {!settled && machines.length === 0 && !snapshot?.error ? <RecordListSkeleton label="Loading machines" rows={3} />
+          {!settled && (selection.machineId !== "" || machines.length === 0) && !snapshot?.error ? <RecordListSkeleton label="Loading machines" rows={3} />
             : snapshot?.error && machines.length === 0 ? <EmptyState title="Machines unavailable">Reconnect to read your machine inventory. No changes have been made.</EmptyState>
             : machine ? retained.map(item => {
-              const retainedMachine = machines.find(value => value.id === item.machineId);
-              if (!retainedMachine) return null;
               const shown = item.machineId === machine.id && item.view === selection.view;
               return <div key={`${item.machineId}:${item.view}`} data-machine-view={item.view} hidden={!shown}>
-                {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} viewerId={access?.userId ?? ""} onInspect={view => view === "activity" ? showActivity(item.machineId) : select({ machineId: item.machineId, view })} />
+                <LiveReadVisibility.Provider value={shown}><RetainedMachine id={item.machineId}>{retainedMachine => item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} viewerId={access?.userId ?? ""} onInspect={view => view === "activity" ? showActivity(item.machineId) : select({ machineId: item.machineId, view })} />
                 <RecentActivity machineId={item.machineId} onActivity={() => showActivity(item.machineId)} onOpenActivity={id => showActivity(item.machineId, id)} /></> : <div className="fleet-inspector">
                   {!["models", "activity"].includes(item.view) ? <Head navigationKey={`machine:${item.machineId}:${item.view}`} title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, RUNNABLE_APPS.length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
@@ -145,17 +151,22 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
                   <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved}
                     openActivity={item.view === "activity" && activityOpen?.machineId === item.machineId ? activityOpen.id : undefined} onActivityOpened={() => setActivityOpen(null)}
                     modelNavigation={{ breadcrumbs: [{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }], back: { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) } }} />
-                </div>}
+                </div>}</RetainedMachine></LiveReadVisibility.Provider>
               </div>;
             })
-            : machines.length === 0 ? <EmptyEquipment onConnect={() => flow.start({})} showRevoked={showRevoked} />
-            : <MachineList machines={shown} now={now} searching={machineSearch !== ""} onOpen={id => select({ machineId: id, view: "equipment" })} />}
+            : machines.length === 0 && search === "" ? <EmptyEquipment onConnect={() => flow.start({})} showRevoked={showRevoked} />
+            : <><MachineList machines={shown} now={now} searching={search !== ""} onOpen={id => select({ machineId: id, view: "equipment" })} /><LoadMore feed={directory} /></>}
         </main>
 
 
       </div>
     </div></div>
   </>);
+}
+
+function RetainedMachine({ id, children }: { id: string; children: (machine: MachineRow) => ReactNode }) {
+  const { machine } = useMachineRecord(id);
+  return machine ? children(machine) : null;
 }
 
 // THE MACHINES, AS A LIST -- on the kit's `RecordRow`, the same row the
@@ -165,7 +176,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
 function MachineList({ machines, now, searching, onOpen }: {
   machines: readonly MachineRow[]; now: Date; searching: boolean; onOpen: (id: string) => void;
 }) {
-  if (machines.length === 0) return <EmptyState icon={Monitor} title="No matching machines">{searching ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState>;
+  if (machines.length === 0) return <EmptyState icon={Monitor} title="No matching machines">{searching ? "Try another name, hostname or platform." : "Connect a machine to find it here."}</EmptyState>;
   return <RecordList as="ul" label="Machines">
     {machines.map(m => {
       const revoked = isRevoked(m);

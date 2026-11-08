@@ -126,10 +126,6 @@ export function MaterializerApp({
   const defaultFormat =
     COMPOSE_FORMATS.find((format) => format === settings.defaultFormat) ??
     "markdown";
-  const compositions = useCompositions(),
-    templates = useTemplates(),
-    recipes = useRecipes();
-  const accounts = useAccountOptions();
   const materialize = useMaterialize(),
     compositionActs = useCompositionActs(),
     templateActs = useTemplateActs(),
@@ -147,6 +143,15 @@ export function MaterializerApp({
   const [making, setMaking] = useState<{ id: string; since: number } | null>(
     null,
   );
+  const [compositionSearch, setCompositionSearch] = useState("");
+  const [compositionFormat, setCompositionFormat] = useState("");
+  const compositionVisible = sectionId === "materialized" || sectionId === "composer";
+  const compositions = useCompositions(compositionVisible, {
+    search: compositionSearch, format: compositionFormat, includeArchived: settings.showArchived,
+  }, compositionVisible ? openId || making?.id || "" : "");
+  const templates = useTemplates(sectionId === "composer" || sectionId === "recipes" || sectionId === "materialized" && !!openId);
+  const recipes = useRecipes(false);
+  const accounts = useAccountOptions(sectionId === "composer" || sectionId === "templates" || sectionId === "recipes" || sectionId === "materialized" && !!openId);
   const [returnTo, setReturnTo] = useState<ComposeSetup["returnTo"]>();
   const [returnFor, setReturnFor] = useState<{
     id: string;
@@ -184,7 +189,7 @@ export function MaterializerApp({
     sectionId === "composer" || templateFilesNeeded,
   );
   const folders = useFolders(
-    sectionId === "composer" || !!openId || sectionId === "recipes",
+    sectionId === "composer" || sectionId === "materialized" && !!openId || sectionId === "recipes",
   );
   const folderRows = useMemo(
     () => folders.snapshot.rows.map(folderFromRow),
@@ -588,6 +593,11 @@ export function MaterializerApp({
         <MaterializedSection
           onRetry={compositions.reseed}
           source={compositions.source}
+          feed={compositions}
+          search={compositionSearch}
+          onSearch={setCompositionSearch}
+          format={compositionFormat}
+          onFormat={setCompositionFormat}
           showArchived={settings.showArchived}
           selectedId={openId}
           onSelect={showComposition}

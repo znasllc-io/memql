@@ -162,7 +162,7 @@ describe("a template MemQL is writing", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(screen.getByText("Autumn letter")).toBeTruthy();
 
-    const reads = () => conn.query.templates.mock.calls.length;
+    const reads = () => conn.query.templatesBrowse.mock.calls.length;
     const before = reads();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
     expect(reads()).toBeGreaterThan(before);
@@ -183,9 +183,9 @@ describe("a template MemQL is writing", () => {
     const view = mount(conn);
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     view.unmount();
-    const settled = conn.query.templates.mock.calls.length;
+    const settled = conn.query.templatesBrowse.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(conn.query.templates.mock.calls.length).toBe(settled);
+    expect(conn.query.templatesBrowse.mock.calls.length).toBe(settled);
   });
 });
 

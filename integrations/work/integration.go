@@ -325,6 +325,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "openModelCatalogResearch", Description: "Open a bounded local-only catalog research run.", Handler: i.handleOpenModelCatalogResearch},
 		{Name: "requestWorkbenchUse", Description: "Request permission to use the Workbench for a Computer-selected goal.", Handler: i.handleRequestWorkbenchUse},
 		{Name: "skillCatalog", Description: "Inspect skill content and its verified installed-baseline provenance.", Handler: i.handleSkillCatalog},
+		{Name: "skillCatalogPage", Description: "Read one recent page of compact skill summaries with verified baseline provenance.", Handler: i.handleSkillCatalogPage},
+		{Name: "skillCatalogEntry", Description: "Inspect one skill and its verified installed-baseline provenance.", Handler: i.handleSkillCatalogEntry},
 		{Name: "selectSkills", Description: "Bind exact reviewed skill versions to the current owned work step.", Handler: i.handleSelectSkills},
 		{Name: "consultKnowledge", Description: "Consult bounded reviewed knowledge for a newly discovered need in owned live work.", Handler: i.handleConsultKnowledge},
 		{Name: "recordGoalEvaluation", Description: "Publish owned external-harness evidence after verifying goal and model receipts.", Handler: i.handleRecordGoalEvaluation},

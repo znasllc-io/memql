@@ -1,6 +1,6 @@
 import { LessonUsage } from "./LessonUsage";
 import { ActionBar, type Act } from "../../kit/ActionBar";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AutoRefresh,
   Caption,
@@ -13,17 +13,20 @@ import {
   Panel,
   RecordList,
   RecordRow,
+  Refine,
   Subhead,
   TextArea,
 } from "../../kit";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useOsConnection } from "../../live/connection";
-import { readHistory } from "./evaluations";
+import { usePagedCollection } from "../../live/useLiveCollection";
+import { LoadMore } from "../../kit/LoadMore";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../logs/useDebouncedValue";
 import { LessonDraftForm } from "./LessonDraftForm";
 import {
   lesson,
-  lessonEvents,
   lessonHeads,
+  lessonEvents,
   guidanceReceiptLabel,
   type Lesson,
   type LessonDraft,
@@ -31,46 +34,43 @@ import {
 
 export function LessonsReview() {
   const connection = useOsConnection();
-  const [events, setEvents] = useState<Lesson[]>([]),
-    [selected, select] = useState(""),
-    [ready, setReady] = useState(false),
-    [error, setError] = useState(""),
+  const [accepted, setAccepted] = useState({ connection, events: [] as Lesson[] });
+  const [selected, select] = useState(""),
+    [operationError, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [draft, setDraft] = useState<LessonDraft | null>(null),
     [reason, setReason] = useState(""),
     [application, setApplication] = useState(""),
     [counterexample, setCounterexample] = useState("");
-  const reading = useRef(false),
-    active = useRef(true);
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
+  const feed = usePagedCollection<Lesson>(`training:lessons:${query}`, conn => ({
+    concept: "v1:work:observation", actions: [],
+    comparePageRows: (a, b) => Date.parse(b.at) - Date.parse(a.at) || a.id.localeCompare(b.id),
+    seed: async (cursor, signal) => {
+      const page = (await conn.query.libraryTrainingLessonsPage({ search: query, cursor }, { signal })).single();
+      if (!Array.isArray(page?.lessons)) throw new Error("The lesson page is incomplete.");
+      return { rows: page.lessons.map(lesson), nextCursor: String(page.nextCursor ?? "") };
+    },
+  }));
+  const history = usePagedCollection<{ id: string; lesson: Lesson }>(selected ? `training:lesson-history:${selected}` : null, conn => ({
+    concept: "v1:work:observation", actions: [],
+    comparePageRows: (a, b) => b.lesson.sequence - a.lesson.sequence,
+    seed: async (cursor, signal) => {
+      const page = await conn.query.workTrainingLessonHistory({ lessonId: selected }, { cursor, signal });
+      return { rows: lessonEvents(page.rows()).map(value => ({ id: value.receipt, lesson: value })), nextCursor: page.meta()?.cursor ?? "" };
+    },
+  }));
+  const events = [...new Map([...history.snapshot.rows.map(row => row.lesson), ...(accepted.connection === connection ? accepted.events : [])].map(value => [value.receipt, value])).values()];
+  const ready = feed.snapshot.state !== "seeding" && feed.snapshot.state !== "disconnected";
+  const error = operationError || feed.snapshot.error;
+  const reload = feed.reseed;
   const [editReceipt, setEditReceipt] = useState("");
   const request = useRef({ signature: "", id: "" });
-  const reload = useCallback(async () => {
-    if (!connection || reading.current) return;
-    reading.current = true;
-    try {
-      const rows = await readHistory((cursor) =>
-        connection.query.workTrainingLessonsForOwner({}, { cursor }),
-      );
-      if (active.current) {
-        setEvents(lessonEvents(rows));
-        setReady(true);
-        setError("");
-      }
-    } catch (e) {
-      if (active.current) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      reading.current = false;
-    }
-  }, [connection]);
-  useEffect(() => {
-    active.current = true;
-    void reload();
-    return () => {
-      active.current = false;
-    };
-  }, [reload]);
-  const heads = lessonHeads(events),
-    current = heads.find((l) => l.id === selected);
+  useEffect(() => { select(""); setDraft(null); setError(""); }, [connection]);
+  const heads = lessonHeads([...(accepted.connection === connection ? accepted.events : []), ...feed.snapshot.rows]);
+  const current = heads.find(l => l.id === selected);
+  const visibleHeads = heads.filter(l => !query || [l.draft.title, l.draft.text, l.draft.applies, l.draft.exceptions].join("\n").toLowerCase().includes(query.toLowerCase()));
   async function act(
     action: "edit" | "review" | "reject" | "enable" | "retire",
   ) {
@@ -98,10 +98,9 @@ export function LessonsReview() {
           })
         ).single(),
       );
-      setEvents((held) => [
-        next,
-        ...held.filter((l) => l.receipt !== next.receipt),
-      ]);
+      setAccepted(held => ({ connection, events: [next, ...(held.connection === connection ? held.events : []).filter(l => l.id !== next.id)] }));
+      feed.reseed();
+      history.reseed();
       setDraft(null);
       setReason("");
       if (action === "enable")
@@ -172,6 +171,7 @@ export function LessonsReview() {
       className="os-app-stack training-lesson-review"
     >
       <AutoRefresh
+        resume={false}
         onRefresh={reload}
         busy={busy}
         enabled={connection !== null && !draft}
@@ -200,10 +200,11 @@ export function LessonsReview() {
       {!ready && !error ? (
         <RecordListSkeleton label="Reading lesson candidates" />
       ) : null}
+      {!current ? <Refine label="Search lessons" search={search} onSearch={setSearch} placeholder="Search lessons" /> : null}
       {ready && !current ? (
-        heads.length ? (
-          <RecordList as="ul" label="Manual lessons">
-            {heads.map((l) => (
+        visibleHeads.length ? (
+          <><RecordList as="ul" label="Manual lessons">
+            {visibleHeads.map((l) => (
               <RecordRow
                 key={l.id}
                 name={l.draft.title}
@@ -212,11 +213,10 @@ export function LessonsReview() {
                 onOpen={() => select(l.id)}
               />
             ))}
-          </RecordList>
+          </RecordList><LoadMore feed={feed} /></>
         ) : (
           <Caption>
-            No lesson candidates. Propose one from a saved guidance message in
-            Ask.
+            {query ? "No lessons match this search." : "No lesson candidates. Propose one from a saved guidance message in Ask."}
           </Caption>
         )
       ) : null}
@@ -306,6 +306,8 @@ export function LessonsReview() {
               <LessonUsage lessonId={current.id} />
               <Panel>
                 <Subhead>History</Subhead>
+                {history.snapshot.error ? <Notice tone="error" sentence="Lesson history could not be read." detail={history.snapshot.error} /> : null}
+                {history.snapshot.state === "seeding" ? <RecordListSkeleton label="Reading lesson history" /> : null}
                 <RecordList as="ul" label="Lesson history">
                   {events
                     .filter((l) => l.id === current.id)
@@ -319,6 +321,7 @@ export function LessonsReview() {
                       />
                     ))}
                 </RecordList>
+                <LoadMore feed={history} />
               </Panel>
               <Field label="Decision reason">
                 <TextArea

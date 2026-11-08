@@ -167,6 +167,12 @@ const PROMPT_TITLES: Record<string, string> = {
   agentReply: "Agent reply",
 };
 
+/** Display names remain searchable before server-side pagination. */
+export function promptSearchNames(search: string): string[] {
+  const needle = search.trim().toLowerCase();
+  return needle ? Object.keys(PROMPT_TITLES).filter(name => PROMPT_TITLES[name]!.toLowerCase().includes(needle)) : [];
+}
+
 /**
  * An ENGINE id as words, with the retired routing words swapped for the
  * product's. For ids the engine chose (prompt names, tags, rule names); a

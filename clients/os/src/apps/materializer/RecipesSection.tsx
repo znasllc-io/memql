@@ -1,3 +1,5 @@
+import { useRecipeDirectory, useComposeRecord } from "./useCompose";
+import { LoadMore } from "../../kit/LoadMore";
 import { useState } from "react";
 import {
   rowString,
@@ -26,7 +28,7 @@ import { recipeFingerprint, recipeFromRow, type RecipeRow } from "./rows";
 import { formatWord } from "./words";
 
 export function RecipesSection({
-  source,
+  source: suppliedSource,
   showArchived,
   busy,
   error,
@@ -34,7 +36,7 @@ export function RecipesSection({
   onRun,
   onArchive,
   onRestore,
-  onRetry,
+  onRetry: suppliedRetry,
   onReset,
 }: {
   source: LiveListSource<Row> | null;
@@ -54,6 +56,10 @@ export function RecipesSection({
 }) {
   const [search, setSearch] = useState(""),
     [page, setPage] = useState("");
+  const feed = useRecipeDirectory({ search, includeArchived: showArchived });
+  const detail = useComposeRecord("recipe", page);
+  const source = feed.source ?? suppliedSource;
+  const onRetry = feed.source ? feed.reseed : suppliedRetry;
   const view = useLiveView(source, `${showArchived}|${search}`, (rows) =>
     rows.filter((row) => {
       const r = recipeFromRow(row);
@@ -65,7 +71,7 @@ export function RecipesSection({
       );
     }),
   );
-  const raw = source?.snapshot.rows.find((row) =>
+  const raw = detail.source && detail.snapshot.state !== "seeding" ? detail.snapshot.rows[0] : source?.snapshot.rows.find((row) =>
       sameEntityId(rowString(row, "id"), page),
     ),
     recipe = raw ? recipeFromRow(raw) : null;
@@ -134,6 +140,7 @@ export function RecipesSection({
               );
             }}
           />
+          <LoadMore feed={feed} />
         </div>
       </div>
       {page ? (

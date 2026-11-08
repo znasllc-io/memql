@@ -136,3 +136,15 @@ shape compositionInput compositionInputFull {
   compositionId
   request
 }
+
+/// Files needs output membership and handoff identity, never sources or models.
+@row
+shape composition compositionOutput {
+  row.id
+  ownerUserId
+  name
+  outputFileId
+  format
+  status
+  archived
+}

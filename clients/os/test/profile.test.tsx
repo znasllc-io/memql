@@ -104,7 +104,7 @@ describe("the access facts surface in chrome", () => {
     return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
   }
 
-  it("Settings -> About names the signed-in identity and role", () => {
+  it("Settings -> About names the signed-in identity and role", async () => {
     resetIdsForTest();
     render(
       <Shell
@@ -119,7 +119,7 @@ describe("the access facts surface in chrome", () => {
     fireEvent.click(
       within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName("Settings") }),
     );
-    expect(screen.getByText("ada@example.test")).toBeTruthy();
+    expect(await screen.findByText("ada@example.test")).toBeTruthy();
     expect(screen.getByText("owner")).toBeTruthy();
     expect(screen.getByText("example.test")).toBeTruthy();
   });
@@ -143,7 +143,7 @@ describe("the access facts surface in chrome", () => {
     expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("the avatar menu opens your Profile (memql#6220)", () => {
+  it("the avatar menu opens your Profile (memql#6220)", async () => {
     resetIdsForTest();
     render(
       <Shell
@@ -159,6 +159,6 @@ describe("the access facts surface in chrome", () => {
     expect(screen.queryByRole("menu", { name: "Account" })).toBeNull();
     // No connection in this harness, so the page holds its reading state --
     // which is the Profile section, not the identity service's page.
-    expect(screen.getByText("Reading your profile")).toBeTruthy();
+    expect(await screen.findByText("Reading your profile")).toBeTruthy();
   });
 });

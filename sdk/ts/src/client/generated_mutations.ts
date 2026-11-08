@@ -124,7 +124,7 @@ export interface ApplyResponsibilityIntakeArgs {
   notifyHow?: string;
   // Enum: draft | active | paused | archived
   status?: string;
-  // Enum: pending | awaitingAnswers | clear | applied
+  // Enum:  | pending | awaitingAnswers | clear | applied
   intakeStatus?: string;
   intakeRequest?: Record<string, unknown>;
 }
@@ -2387,16 +2387,30 @@ QueryClient.prototype.createLibraryWatchedFolder = function (this: QueryClient, 
 /** createMachineActivity wraps the mutation named "createMachineActivity". */
 // Bound concept: v1:worker:activity (machine-readable: BoundConcepts["createMachineActivity"] in generated_concepts.ts).
 export interface CreateMachineActivityArgs {
+  activityId: string;
+  workerId: string;
+  kind: string;
+  label: string;
+  correlationId?: string;
+  startedAt: string;
+  expiresAt: string;
 }
 
 export function buildCreateMachineActivity(args: CreateMachineActivityArgs): string {
-  void args;
-  return "mutation createMachineActivity()";
+  const parts: string[] = [];
+  parts.push("activityId: " + renderMemQLValue(args.activityId));
+  parts.push("workerId: " + renderMemQLValue(args.workerId));
+  parts.push("kind: " + renderMemQLValue(args.kind));
+  parts.push("label: " + renderMemQLValue(args.label));
+  if (args.correlationId !== undefined) parts.push("correlationId: " + renderMemQLValue(args.correlationId));
+  parts.push("startedAt: " + renderMemQLValue(args.startedAt));
+  parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
+  return "mutation createMachineActivity(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    createMachineActivity(args?: CreateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+    createMachineActivity(args: CreateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -7885,16 +7899,24 @@ QueryClient.prototype.updateLibraryWatchedFolder = function (this: QueryClient, 
 /** updateMachineActivity wraps the mutation named "updateMachineActivity". */
 // Bound concept: v1:worker:activity (machine-readable: BoundConcepts["updateMachineActivity"] in generated_concepts.ts).
 export interface UpdateMachineActivityArgs {
+  activityId: string;
+  status: string;
+  endedAt?: string;
+  detail?: string;
 }
 
 export function buildUpdateMachineActivity(args: UpdateMachineActivityArgs): string {
-  void args;
-  return "mutation updateMachineActivity()";
+  const parts: string[] = [];
+  parts.push("activityId: " + renderMemQLValue(args.activityId));
+  parts.push("status: " + renderMemQLValue(args.status));
+  if (args.endedAt !== undefined) parts.push("endedAt: " + renderMemQLValue(args.endedAt));
+  if (args.detail !== undefined) parts.push("detail: " + renderMemQLValue(args.detail));
+  return "mutation updateMachineActivity(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    updateMachineActivity(args?: UpdateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
+    updateMachineActivity(args: UpdateMachineActivityArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 

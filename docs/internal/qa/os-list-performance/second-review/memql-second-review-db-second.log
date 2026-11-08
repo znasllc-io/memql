@@ -1,0 +1,24 @@
+Second broad required-database run: FAILED one cache-hit fixture assertion.
+
+--- FAIL: TestNamedQueryPaginationBoundsSQLCursorCacheAndRankDB (0.15s)
+    pagination_composition_test.go:167:
+            Error Trace:    /Users/znas/memql-os-lists/component/memql/pagination_composition_test.go:167
+            Error:          "SELECT \"mn\".\"id\", \"mn\".\"createdAt\", \"mn\".\"createdBy\", \"mn\".\"concept\", \"mn\".\"type\", \"mn\".\"schema\", \"mn\".\"payload\", \"mn\".\"metadata\", \"mn\".\"provenance\" FROM (SELECT \"mn\".\"id\", \"mn\".\"createdAt\", \"mn\".\"createdBy\", \"mn\".\"concept\", \"mn\".\"type\", \"mn\".\"schema\", \"mn\".\"payload\", \"mn\".\"metadata\", \"mn\".\"provenance\" FROM (SELECT DISTINCT ON (id) \"mn\".\"id\", \"mn\".\"createdAt\" FROM \"MemoryNodes\" AS \"mn\" WHERE (concept = 'v1:platform:missingCapability') ORDER BY id ASC, \"createdAt\" DESC) AS latest_keys JOIN LATERAL (SELECT * FROM (SELECT * FROM \"MemoryNodes\" UNION ALL SELECT * FROM memory_liveness) AS observed WHERE id=latest_keys.id AND \"createdAt\"=latest_keys.\"createdAt\" LIMIT 1) AS mn ON true) AS mn WHERE (((concept = 'v1:platform:missingCapability') AND (\"createdBy\" = 'composed-page-39971'))) ORDER BY \"createdAt\" DESC, \"createdAt\" DESC, id ASC LIMIT 10" should not contain "(\"createdBy\" = '"
+            Test:           TestNamedQueryPaginationBoundsSQLCursorCacheAndRankDB
+            Messages:       the repeated first page should come from its cache entry
+{"time":"2026-11-07T18:09:58.600698-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T18:10:00.90635-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+
+{"time":"2026-11-07T18:12:50.000835-07:00","level":"INFO","component":"MemQLEngine","msg":"DSL load report: healthy","registered":3104,"skipped":0,"duplicates":0,"quarantined":0,"warnings":0}
+FAIL
+FAIL    github.com/znasllc-io/memql/component/memql 289.640s
+?       github.com/znasllc-io/memql/component/memql/baseloader  [no test files]
+ok      github.com/znasllc-io/memql/component/memql/callgraph   0.385s
+ok      github.com/znasllc-io/memql/component/memql/dslgate 0.381s
+ok      github.com/znasllc-io/memql/component/memql/dslimports  1.060s
+ok      github.com/znasllc-io/memql/component/memql/offline 16.368s
+ok      github.com/znasllc-io/memql/component/memql/readiness   0.370s
+ok      github.com/znasllc-io/memql/component/memql/readscale   16.197s
+ok      github.com/znasllc-io/memql/component/memql/sense   2.556s
+ok      github.com/znasllc-io/memql/component/memql/sync    0.281s
+FAIL

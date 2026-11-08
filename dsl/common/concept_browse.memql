@@ -1,0 +1,10 @@
+/// Ten recent readable rows matching public declared text fields. The generic
+/// Concepts inspector retains raw node structure; secret fields are never searched.
+@executor("conceptRowsSearch")
+@sdk
+@description("Search a registered concept's public text fields under the caller's ordinary row authorization, newest first, ten rows per cursor page.")
+builtin conceptRowsSearch {
+  conceptId string!
+  search string!
+  cursor string
+}

@@ -80,7 +80,7 @@ describe("the Users settings document", () => {
         defaultSection: "people",
         showDeactivated: true,
         showArchivedGroups: false,
-        sort: "name",
+        sort: "recent",
       },
     );
   });
@@ -99,7 +99,7 @@ describe("the Users settings document", () => {
       defaultSection: "groups",
       showDeactivated: true,
       showArchivedGroups: true,
-      sort: "name",
+      sort: "recent",
     });
   });
 

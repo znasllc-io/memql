@@ -1,3 +1,4 @@
+import { useEmailCatalogs } from "../catalogs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useSession } from "../../../chrome/access";
@@ -72,6 +73,7 @@ export function SettingsSection({ feeds, recordFeeds, writes, uploads, settings,
   onOrganization: (accountId: string) => void;
 }) {
   const { access, readiness } = useSession();
+  useEmailCatalogs(["senders", "audiences"]);
   const { accounts, state: accountsState } = useAccountOptionsFeed();
   const choices = useMemo(() => selectableOrganizations(accounts), [accounts]);
   const fallback = useDefaultOrganization(accounts);

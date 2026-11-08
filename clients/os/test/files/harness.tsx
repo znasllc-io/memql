@@ -1,7 +1,8 @@
+import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
 import { act, fireEvent, render } from "@testing-library/react";
 import { vi } from "vitest";
-import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { QueryClient, Result, SubscriptionManager, type Dispatcher, type QueryCallOptions, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { SessionProvider } from "../../src/chrome/access";
 import { OsProvider } from "../../src/chrome/state";
@@ -53,35 +54,31 @@ export interface FakeSubscriptions {
   emit: (concept: string, payload: Row, kind?: string) => void;
   /** Live handler count per concept -- what the desk's subscription-free
    *  contract asserts. */
-  activeCount: (concept: string) => number;
+  activeCount: (concept: string, idOnly?: boolean) => number;
 }
 
 function fakeSubscriptions(): FakeSubscriptions {
-  const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
-  return {
-    subscribeGraph(handler, opts) {
-      const concept = opts.concept ?? "*";
-      const set = handlers.get(concept) ?? new Set();
-      set.add(handler);
-      handlers.set(concept, set);
-      return () => set.delete(handler);
+  // Exercise the actual wire sharing contract, including reconnect observers.
+  const active = new Map<string, { concept?: string; config?: { idOnly?: boolean } }>();
+  let deliver: (message: unknown) => void = () => {};
+  const dispatcher = {
+    send(message: { subscribe?: { subscriptionId: string; concept?: string }; unsubscribe?: { subscriptionId: string } }) {
+      if (message.subscribe) active.set(message.subscribe.subscriptionId, message.subscribe);
+      if (message.unsubscribe) active.delete(message.unsubscribe.subscriptionId);
+      return "message";
     },
+    addEventListener(handler: (message: unknown) => void) { deliver = handler; return () => {}; },
+  } as unknown as Dispatcher;
+  const manager = new SubscriptionManager(dispatcher);
+  return {
+    subscribeGraph: (handler, opts) => manager.subscribeGraph(handler, opts),
     emit(concept, payload, kind = "NODE_UPDATED") {
-      for (const handler of handlers.get(concept) ?? []) {
-        handler({
-          subscriptionId: "sub-1",
-          kind,
-          timestamp: new Date(),
-          payload,
-          payloadOmitted: false,
-          seq: 0,
-          gapBefore: false,
-        });
+      for (const [subscriptionId, options] of [...active]) {
+        if (options.concept && options.concept !== concept) continue;
+        deliver({ event: { subscriptionId, kind: `EVENT_KIND_${kind}`, payload, seq: 0, gapBefore: false } });
       }
     },
-    activeCount(concept) {
-      return handlers.get(concept)?.size ?? 0;
-    },
+    activeCount: (concept, idOnly) => [...active.values()].filter(options => options.concept === concept && (idOnly === undefined || !!options.config?.idOnly === idOnly)).length,
   };
 }
 
@@ -117,10 +114,48 @@ export interface FakeConnection {
 export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const calls: string[] = [];
   const stub = {
-    executeNamed: vi.fn(async (name: string, call: string) => {
+    executeNamed: vi.fn(async (name: string, call: string, options?: QueryCallOptions) => {
       calls.push(call);
       const refusal = seed.refuse?.[name];
       if (refusal !== undefined) throw new Error(refusal);
+
+      const args = /^(query|builtin|mutation) \w+\(/.test(call) ? parseCall(call).args : {};
+      const page = (rows: Row[], size = 10) => {
+        const offset = Number(options?.cursor ?? 0);
+        return new Result({ data: rows.slice(offset, offset + size), meta: { cursor: offset + size < rows.length ? String(offset + size) : "" } } as never);
+      };
+      const artifactMatches = (row: Row, omitLabel = false) => {
+        const search = String(args.search ?? "").trim().toLowerCase();
+        const list = (field: string) => Array.isArray(row[field]) ? row[field] as string[] : [];
+        return (args.archived === true ? row.archived === true : row.archived !== true)
+          && (args.folderId == null || String(row.folderId ?? "") === args.folderId)
+          && (args.kind == null || row.kind === args.kind) && (args.source == null || row.source === args.source)
+          && (args.accountId == null || (args.accountId === "" ? list("accountIds").length === 0 : list("accountIds").includes(String(args.accountId))))
+          && (omitLabel || args.label == null || list("labels").includes(String(args.label)))
+          && (args.ids == null || (args.ids as string[]).includes(String(row.id)) || ((args.folderIds as string[] | undefined) ?? []).includes(String(row.folderId)))
+          && (args.sourceRefs == null || (args.sourceRefs as string[]).includes(String(row.sourceConceptRef)))
+          && (!search || [row.title, row.summary, row.producedByWorkerName, row.id, ...list("labels")].some(value => String(value ?? "").toLowerCase().includes(search)));
+      };
+      if (name === "libraryArtifactsBrowse" || name === "libraryArtifactsBrowseOldest") {
+        const direction = name.endsWith("Oldest") ? 1 : -1;
+        const rows = (args.archived === true ? [...new Map([...(seed.artifacts ?? []), ...(seed.archived ?? [])].map(row => [row.id, row])).values()] : seed.artifacts ?? []).filter(row => artifactMatches(row)).sort((a, b) => direction * (String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")) || String(a.id).localeCompare(String(b.id))));
+        return page(rows);
+      }
+      if (name === "libraryArchivedFoldersBrowse") {
+        const search = String(args.search ?? "").toLowerCase();
+        return page((seed.archivedFolders ?? []).filter(row => row.archived === true && row.deleted !== true && (!search || String(row.name ?? "").toLowerCase().includes(search))).sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")) || String(b.id).localeCompare(String(a.id))));
+      }
+      if (name === "libraryFolderDirectory") return page([...new Map([...(seed.folders ?? []), ...(seed.archivedFolders ?? [])].map(row => [row.id, row])).values()].filter(row => row.deleted !== true), 500);
+      if (name === "libraryBrowseFacets") {
+        const rows = (args.archived === true ? [...new Map([...(seed.artifacts ?? []), ...(seed.archived ?? [])].map(row => [row.id, row])).values()] : seed.artifacts ?? []).filter(row => artifactMatches(row, true));
+        const folders = new Map<string, number>();
+        for (const row of rows) { const id = String(row.folderId ?? ""); folders.set(id, (folders.get(id) ?? 0) + 1); }
+        return rowsResult([{ folders: [...folders].map(([folderId, count]) => ({ folderId, count })), labelGroups: rows.map(row => row.labels ?? []) }]);
+      }
+      if (name === "libraryFilesByIds") return rowsResult((seed.files ?? []).filter(row => (args.fileIds as string[] ?? []).includes(String(row.id))));
+      if (name === "compositionOutputIndex") return rowsResult((seed.compositions ?? []).filter(row => args.fileIds == null || (args.fileIds as string[]).includes(String(row.outputFileId))).map(row => ({ id: row.id, ownerUserId: row.ownerUserId, name: row.name, status: row.status, outputFileId: row.outputFileId, format: row.format, archived: row.archived })));
+      if (name === "libraryArtifactsInFolders") return page([...(seed.artifacts ?? []), ...(seed.archived ?? [])].filter(row => (args.folderIds as string[] ?? []).includes(String(row.folderId))), 50);
+      if (name === "myMachinePresence") return rowsResult((seed.machines ?? []).map(row => Object.fromEntries(["id", "createdAt", "ownerUserId", "name", "displayName", "connectedNodeId", "lastSeenAt", "revokedAt", "registeredAt"].map(key => [key, row[key]]))));
 
       if (name === "libraryArtifactById" || name === "libraryArtifactForFile") {
         const value = /(?:artifactId|fileId): "([^"]+)"/.exec(call)?.[1];
@@ -138,7 +173,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("query libraryWatchedFolders(")) return rowsResult(seed.backups ?? []);
       if (call.startsWith("query compositions(")) return rowsResult(seed.compositions ?? []);
       if (name === "libraryBackupUsage") return rowsResult([{ used: 0, reserved: 0, available: 10_000_000_000, limit: 10_000_000_000, clusterUsed: 0, clusterReserved: 0, clusterLimit: 5_000_000_000_000, exempt: false } as never]);
-      if (name === "libraryBackupList") return rowsResult([{ transfers: seed.transfers ?? [], nextCursor: "" } as never]);
+      if (name === "libraryBackupList") {
+        const search = /search: "([^"]*)"/.exec(call)?.[1]?.toLowerCase() ?? "";
+        const after = Number(/after: "([^"]*)"/.exec(call)?.[1] ?? 0);
+        const values = (seed.transfers ?? []).filter(row => !search || [row.name,row.path,row.workerId,row.kind].some(value => String(value ?? "").toLowerCase().includes(search)));
+        return rowsResult([{ transfers: values.slice(after,after+10), nextCursor: after+10<values.length ? String(after+10):"" } as never]);
+      }
       if (call.startsWith("mutation ") || call.startsWith("builtin ")) return rowsResult([]);
 
       // Decode the SDK's quoted ID so a reread does not retain stale seed data.
@@ -298,6 +338,7 @@ export function registryWith(app: OsAppManifest | null, without = ""): OsRegistr
 
 export function artifactRow(over: Partial<Row> & { id: string }): Row {
   return {
+    ownerUserId: "u-me",
     lens: "artifact",
     kind: "file",
     source: "uploaded",
@@ -379,6 +420,7 @@ export function watchedFolderRow(over: Partial<Row> & { id: string }): Row {
 
 export function folderRow(over: Partial<Row> & { id: string }): Row {
   return {
+    ownerUserId: "u-me",
     name: over.id,
     parentFolderId: "",
     archived: false,

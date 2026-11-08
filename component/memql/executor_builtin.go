@@ -18,6 +18,7 @@ import (
 
 func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 	handlers := map[string]builtinExecutorHandler{
+		"conceptRowsSearch":             e.conceptRowsSearchBuiltin,
 		"recallWorkHistory":             e.recallWorkHistoryBuiltin,
 		"workSearchConversations":       e.workSearchConversationsBuiltin,
 		"workAcknowledgementCache":      e.workAcknowledgementCacheBuiltin,

@@ -5,45 +5,73 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 
-const { useCompositions, useFolders, useLibraryFiles, useRecipes, useTemplates } = await import("../../src/apps/materializer/useCompose");
+const { useCompositions, useFolders, useLibraryFiles, useRecipes, useTemplates, useTemplateDirectory, useRecipeDirectory } = await import("../../src/apps/materializer/useCompose");
 const { compositionRow, fakeConnection, folderRow, libraryFileRow, PAGE_SIZE, recipeRow, templateRow } = await import("./harness");
 
-// The Materializer's feeds.
-//
-// THE HEAD'S COUNT STOPPED AT 50. The three lists seeded one page of the engine's `paginate 50`
-// (`paged: false`, a cursor that was never read), so a person with 53 files saw 50 and was told
-// that was all of them. Each feed now walks the cursor the engine hands back until it hands none.
-//
-// THE LIBRARY'S FILES AND FOLDERS ARE NOT SEEDED UNTIL SOMEONE ASKS. The Make a file wizard and a
-// made file's page need them; the list alone must not read the person's whole Library to draw its
-// rows. A feed that is not enabled passes `useLiveCollection` a null key, which makes no read and
-// opens no subscription.
-
+// Directory requests are bounded; complete catalogs remain explicit editor choices.
 const many = (count: number, make: (index: number) => Row): Row[] => Array.from({ length: count }, (_, index) => make(index));
 
-describe("a feed that walks every page", () => {
-  it("lists every page of compositions", async () => {
-    // Fifty rows with a cursor, then three with none.
-    const connection = fakeConnection({ compositions: many(53, (i) => compositionRow({ id: `c${i}`, status: "ready" })) });
+describe("directory pages and picker catalogs", () => {
+  it("reads ten compositions and appends only the next ten on demand", async () => {
+    const connection = fakeConnection({ compositions: many(25, i => compositionRow({ id: `c${String(i).padStart(2, "0")}` })) });
     h.connection = connection;
-    const { result } = renderHook(() => useCompositions());
-
-    await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(53));
-    expect(connection.query.compositions).toHaveBeenCalledTimes(2);
-    const [first, second] = connection.query.compositions.mock.calls;
-    expect(first?.[1]).not.toHaveProperty("cursor");
-    expect(second?.[1]).toMatchObject({ cursor: "p2" });
-    // Nothing is dropped between pages, and nothing is read twice.
-    expect(new Set(result.current.snapshot.rows.map((row) => row["id"])).size).toBe(53);
+    const { result, unmount } = renderHook(() => useCompositions());
+    await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(10));
+    expect(result.current.snapshot.hasMore).toBe(true);
+    expect(connection.query.compositionsBrowse).toHaveBeenCalledTimes(1);
+    expect(connection.query.compositions).not.toHaveBeenCalled();
+    await act(async () => { await result.current.loadMore(); });
+    await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(20));
+    expect(connection.query.compositionsBrowse.mock.calls[1]?.[1]).toMatchObject({ cursor: "10" });
+    unmount();
+    const reopened = renderHook(() => useCompositions());
+    expect(reopened.result.current.snapshot.rows).toHaveLength(20);
+    expect(connection.query.compositionsBrowse).toHaveBeenCalledTimes(2);
+    await act(async () => { await reopened.result.current.loadMore(); });
+    await waitFor(() => expect(reopened.result.current.snapshot.rows).toHaveLength(25));
+    expect(reopened.result.current.snapshot.hasMore).toBe(false);
+    expect(new Set(reopened.result.current.snapshot.rows.map(row => row.id)).size).toBe(25);
   });
 
-  it("follows the cursor for as long as the engine names a next page", async () => {
-    const connection = fakeConnection({ compositions: many(PAGE_SIZE * 2 + 7, (i) => compositionRow({ id: `c${i}`, status: "ready" })) });
+  it("searches unloaded records and restores the cached recent pages", async () => {
+    const connection = fakeConnection({ compositions: many(25, i => compositionRow({ id: `c${String(i).padStart(2, "0")}`, name: i === 24 ? "Ancient invoice" : `Report ${i}` })) });
     h.connection = connection;
-    const { result } = renderHook(() => useCompositions());
+    const hook = renderHook(({ search }) => useCompositions(true, { search }), { initialProps: { search: "" } });
+    await waitFor(() => expect(hook.result.current.snapshot.rows).toHaveLength(10));
+    await act(async () => { await hook.result.current.loadMore(); });
+    await waitFor(() => expect(hook.result.current.snapshot.rows).toHaveLength(20));
+    hook.rerender({ search: "ANCIENT" });
+    await waitFor(() => expect(hook.result.current.snapshot.rows.map(row => row.id)).toEqual(["c24"]));
+    hook.rerender({ search: "" });
+    await waitFor(() => expect(hook.result.current.snapshot.rows).toHaveLength(20));
+    expect(connection.query.compositionsBrowse).toHaveBeenCalledTimes(3);
+  });
 
-    await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(PAGE_SIZE * 2 + 7));
-    expect(connection.query.compositions.mock.calls.map((call) => (call[1] as { cursor?: string } | undefined)?.cursor)).toEqual([undefined, "p2", "p3"]);
+  it("opens an older composition independently and batches unfinished run status", async () => {
+    const connection = fakeConnection({ compositions: many(25, i => compositionRow({ id: `c${String(i).padStart(2, "0")}`, status: "composing", runId: `r${i}` })), runs: many(25, i => ({ id: `r${i}`, status: "running" })) });
+    h.connection = connection;
+    const hook = renderHook(() => useCompositions(true, {}, "c24"));
+    await waitFor(() => expect(hook.result.current.runOf("r24")).toBeDefined());
+    expect(hook.result.current.snapshot.rows).toHaveLength(11);
+    expect(connection.query.compositionsBrowse).toHaveBeenCalledTimes(1);
+    expect(connection.query.compositionById).toHaveBeenCalledWith({ compositionId: "c24" }, expect.anything());
+    expect(connection.query.workRunForOwner).not.toHaveBeenCalled();
+    expect(connection.query.workRunSummariesByIds.mock.calls.at(-1)?.[0].runIds).toHaveLength(11);
+  });
+
+  it.each(["templates", "recipes"] as const)("pages and searches the %s directory without pulling its picker catalog", async kind => {
+    const make = kind === "templates" ? templateRow : recipeRow;
+    const hookFor = kind === "templates" ? useTemplateDirectory : useRecipeDirectory;
+    const connection = fakeConnection({ [kind]: many(25, i => make({ id: `item${String(i).padStart(2, "0")}`, name: i === 24 ? "Earlier needle" : `Item ${i}` })) });
+    h.connection = connection;
+    const hook = renderHook(({ search }) => hookFor({ search }), { initialProps: { search: "" } });
+    await waitFor(() => expect(hook.result.current.snapshot.rows).toHaveLength(10));
+    await act(async () => { await hook.result.current.loadMore(); });
+    expect(hook.result.current.snapshot.rows).toHaveLength(20);
+    hook.rerender({ search: "NEEDLE" });
+    await waitFor(() => expect(hook.result.current.snapshot.rows.map(row => row.id)).toEqual(["item24"]));
+    expect(connection.query.composeTemplates).not.toHaveBeenCalled();
+    expect(connection.query.composeRecipes).not.toHaveBeenCalled();
   });
 
   it("lists every page of templates", async () => {
@@ -74,7 +102,7 @@ describe("a feed that walks every page", () => {
     const { result } = renderHook(() => useCompositions());
 
     await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(3));
-    expect(connection.query.compositions).toHaveBeenCalledTimes(1);
+    expect(connection.query.compositionsBrowse).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -178,7 +206,8 @@ describe("the runs behind unfinished compositions", () => {
     expect(result.current.runOf("r2")).toBeUndefined();
     expect(result.current.runOf("nobody")).toBeUndefined();
     expect(result.current.runOf("")).toBeUndefined();
-    expect(connection.query.workRunForOwner).toHaveBeenCalledTimes(1);
+    expect(connection.query.workRunSummariesByIds).toHaveBeenCalledTimes(1);
+    expect(connection.query.workRunForOwner).not.toHaveBeenCalled();
   });
 
   it("finds the run whether the id is given bare or canonical", async () => {

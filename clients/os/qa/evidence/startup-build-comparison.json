@@ -1,0 +1,48 @@
+{
+  "baselineCommit": "8b7b3a4830650adbe7a0ed3547e727e861979fbf",
+  "commands": [
+    "npm --prefix sdk/ts run build",
+    "npm --prefix clients/os run build (baseline checkout)",
+    "npm --prefix clients/os run build (working checkout)"
+  ],
+  "comparison": "same installed OS dependencies and generated SDK; initial HTML assets only; bytes not network latency",
+  "builds": {
+    "baseline": {
+      "assets": [
+        {
+          "path": "/assets/index-DIWhzwnO.js",
+          "bytes": 3348838,
+          "gzipBytes": 952580
+        },
+        {
+          "path": "/assets/index-B6TiTsYG.css",
+          "bytes": 344810,
+          "gzipBytes": 56448
+        }
+      ],
+      "initialJsBytes": 3348838,
+      "initialJsGzipBytes": 952580,
+      "htmlHasModulePreloads": false
+    },
+    "after": {
+      "assets": [
+        {
+          "path": "/assets/index-Bf4kSZ9O.js",
+          "bytes": 1363296,
+          "gzipBytes": 350709
+        },
+        {
+          "path": "/assets/index-SbKrFc3Q.css",
+          "bytes": 279427,
+          "gzipBytes": 45705
+        }
+      ],
+      "initialJsBytes": 1363296,
+      "initialJsGzipBytes": 350709,
+      "htmlHasModulePreloads": false
+    }
+  },
+  "initialJsReductionPercent": 59.29,
+  "initialJsGzipReductionPercent": 63.18,
+  "gzipLevel": 6
+}

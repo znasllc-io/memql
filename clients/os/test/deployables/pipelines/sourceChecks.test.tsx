@@ -221,7 +221,7 @@ describe("before the pipelines feeds answer", () => {
     // The pipelines read never answers.
     const query = connection.query as unknown as { executeNamed: (name: string, call: string, opts?: unknown) => Promise<unknown> };
     const answer = query.executeNamed;
-    query.executeNamed = vi.fn((name: string, call: string, opts?: unknown) => (call === "query pipelinesForOwner()" ? new Promise(() => {}) : answer(name, call, opts)));
+    query.executeNamed = vi.fn((name: string, call: string, opts?: unknown) => (name === "pipelineDirectory" ? new Promise(() => {}) : answer(name, call, opts)));
     mount(connection);
     const page = await openSource();
     // Loading is said to assistive tech, as a status, and never painted.

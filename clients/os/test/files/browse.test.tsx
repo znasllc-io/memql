@@ -146,7 +146,7 @@ describe("the folder rail", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    await click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
     // The rail's place is named Bin now, but the ROW menu's own verb is
     // still Archive, so the
@@ -185,7 +185,7 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    await click(await screen.findByRole("menuitem", { name: "Archive" }));
     const confirm = screen.getByText(/Archive "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     return { connection, confirm };
   }
@@ -228,12 +228,12 @@ describe("a folder's archive, one double-click later", () => {
     h.connection = connection;
     await renderFiles();
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
-    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    await click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
     await readTheBar();
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Old reels/ }));
-    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    await click(await screen.findByRole("menuitem", { name: "Archive" }));
     const confirm = screen.getByText(/Archive "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
     betweenTheClicks();
     await click(within(confirm).getByRole("button", { name: "Archive" }));

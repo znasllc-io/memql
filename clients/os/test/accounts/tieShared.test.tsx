@@ -63,13 +63,13 @@ describe("the account list under a provider", () => {
 });
 
 describe("the account list outside a provider", () => {
-  it("keeps one subscription per picker, as every other app has", async () => {
+  it("shares one subscription across pickers in the same session", async () => {
     const connection = fakeConnection({ clientAccountsAll: [accountRow({ id: "acme", name: "Acme" })] });
     h.connection = connection;
     const subscriptions = opened(connection);
     const { result } = renderHook(threePickers, { wrapper: ({ children }) => withSession(children) });
 
     await waitFor(() => expect(result.current[2]!.map((a) => a.id)).toEqual(["acme"]));
-    expect(subscriptions()).toBe(3);
+    expect(subscriptions()).toBe(1);
   });
 });

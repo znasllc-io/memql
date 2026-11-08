@@ -50,9 +50,9 @@ export function useInvites(enabled = true): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>(enabled ? "users:invites" : null, (connection) => ({
     concept: INVITATION_CONCEPT,
     actions: ["created", "updated"],
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.pendingUserInvitations({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
+    seed: async (cursor, signal) => {
+      const result = await connection.query.pendingUserInvitations({}, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, INVITATION_CONCEPT, rowId, {
@@ -61,6 +61,5 @@ export function useInvites(enabled = true): LiveCollectionHandle<Row> {
       return (row as Row) ?? null;
     },
     inScope: (row) => invitationIsPending(invitationFromRow(row)),
-    paged: false,
   }));
 }

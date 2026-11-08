@@ -1,3 +1,5 @@
+import { useTemplateDirectory, useComposeRecord } from "./useCompose";
+import { LoadMore } from "../../kit/LoadMore";
 import { useEffect, useState } from "react";
 import {
   rowBool,
@@ -48,7 +50,7 @@ export interface TemplatesSectionProps {
   onFilesNeeded: (needed: boolean) => void;
 }
 export function TemplatesSection({
-  source,
+  source: suppliedSource,
   accounts,
   files,
   filesLoading,
@@ -56,7 +58,7 @@ export function TemplatesSection({
   busy,
   error,
   showArchived,
-  onRetry,
+  onRetry: suppliedRetry,
   onRetryFiles,
   onReset,
   onCreateTemplate,
@@ -67,6 +69,10 @@ export function TemplatesSection({
   const [search, setSearch] = useState(""),
     [page, setPage] = useState(""),
     [adding, setAdding] = useState(false);
+  const feed = useTemplateDirectory({ search, includeArchived: showArchived });
+  const detail = useComposeRecord("template", page);
+  const source = feed.source ?? suppliedSource;
+  const onRetry = feed.source ? feed.reseed : suppliedRetry;
   const view = useLiveView(source, `${showArchived}|${search}`, (rows) =>
     rows.filter((row) => {
       const t = templateFromRow(row);
@@ -78,7 +84,7 @@ export function TemplatesSection({
       );
     }),
   );
-  const selected = source?.snapshot.rows.find((row) =>
+  const selected = detail.source && detail.snapshot.state !== "seeding" ? detail.snapshot.rows[0] : source?.snapshot.rows.find((row) =>
     sameEntityId(rowString(row, "id"), page),
   );
   const template = selected ? templateFromRow(selected) : null;
@@ -177,6 +183,7 @@ export function TemplatesSection({
               );
             }}
           />
+          <LoadMore feed={feed} />
         </div>
       </div>
       {adding ? (

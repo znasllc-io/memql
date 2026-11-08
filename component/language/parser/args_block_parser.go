@@ -7,6 +7,27 @@ import (
 	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
+// ParseArgsSchema parses one standalone args block through the same grammar
+// used by authored constructs. SDK generation uses this to avoid interpreting
+// line breaks as field boundaries. Trailing input is refused.
+func ParseArgsSchema(source string) (*ArgsSchema, error) {
+	lexer := NewLexer(source)
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		return nil, err
+	}
+	p := NewParser(tokens)
+	p.SetDocComments(lexer.DocComments())
+	schema, err := p.parseFileTopArgsBlock()
+	if err != nil {
+		return nil, err
+	}
+	if !p.check(TokenEOF) {
+		return nil, newParseErrorf(&p.current, "unexpected token after args block")
+	}
+	return schema, nil
+}
+
 // parseFileTopArgsBlock parses a file-level `args { ... }` declaration.
 // Each non-blank line declares one field:
 //

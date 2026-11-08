@@ -1,8 +1,10 @@
 import { renderPage as render } from "../pageHarness";
 import { act, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReactNode } from "react";
+import type { Connection } from "@znasllc-io/memql-sdk-core/client";
+import { disposeSessionCollections } from "../../src/live/sessionCollections";
 
 // Settings -> Procedures (epic memql#5408, #5412): the certification ladder's
 // values, read-only.
@@ -98,6 +100,8 @@ const POLICY = {
   insufficientToDemote: 1,
   retireAfterDays: 30,
 };
+
+afterEach(() => disposeSessionCollections(h.connection as unknown as Connection));
 
 beforeEach(() => {
   h.state.rows = [POLICY];

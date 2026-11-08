@@ -90,7 +90,7 @@ describe("goals, the landing surface", () => {
   // goal whose run is in flight or waiting on them is the answer. A plain
   // newest-first sort put the parked goal UNDER two that wanted nothing, which
   // is what the first rendered pass showed.
-  it("puts work in flight above goals that want nothing, newest first inside each", async () => {
+  it("orders goals by recent request while retaining waiting marks", async () => {
     const conn = fakeConnection({
       goals: [
         goalRow({ id: "g1", statement: "Parked on you", createdAt: "2026-09-01T09:00:00Z" }),
@@ -112,7 +112,7 @@ describe("goals, the landing surface", () => {
     const statements = [...document.querySelectorAll(".os-nexus-goal-statement")].map(
       (el) => el.textContent,
     );
-    expect(statements).toEqual(["Parked on you", "Nothing running", "Also nothing"]);
+    expect(statements).toEqual(["Nothing running", "Also nothing", "Parked on you"]);
   });
 
   // A goal now opens as a MAP, a rail and a receipt, which is taller than the
@@ -344,12 +344,13 @@ describe("the runs list", () => {
     await waitFor(() => expect(titles()).toEqual(["Fix repository bug", "Review release notes"]));
   });
 
-  it("seeds UNFILTERED, so the show-finished toggle cannot re-baseline the cue", async () => {
+  it("filters on the server before the first ten rows", async () => {
     const conn = fakeConnection({ runs: [runRow({ id: "r1" })] });
     mount(conn, "runs");
     await screen.findByText("nightlyReconcile");
-    expect(conn.query.workRunSummariesForOwner).toHaveBeenCalledTimes(1);
-    expect(conn.query.workRunSummariesForOwner.mock.calls[0]?.[0]).toEqual({});
+    expect(conn.query.workRunSummariesForOwner).not.toHaveBeenCalled();
+    expect(conn.query.workRunsBrowse).toHaveBeenCalledTimes(1);
+    expect(conn.query.workRunsBrowse.mock.calls[0]?.[0]).toMatchObject({ showFinished: true });
   });
 
   it("hides finished runs under the settings preference, and says where the setting is", async () => {
@@ -371,7 +372,7 @@ describe("the runs list", () => {
       ],
     });
     mount(conn, "runs");
-    expect(await screen.findByText("2 · 1 waiting for you")).toBeTruthy();
+    expect(await screen.findByText("2 shown · 1 waiting for you")).toBeTruthy();
   });
 });
 

@@ -119,15 +119,23 @@ func (s *Service) Capabilities() []memql.IntegrationCapability {
 			}
 			return t, err
 		}},
-		{"list", "Page the caller's backup transfers", map[string]string{"workerId": "string", "after": "string", "scope": "string"}, func(ctx context.Context, a map[string]any) (any, error) {
-			rows, e := s.List(ctx, str(a, "workerId"), str(a, "after"), str(a, "scope"))
+		{"list", "Page the caller's backup transfers", map[string]string{"workerId": "string", "after": "string", "scope": "string", "search": "string", "limit": "int"}, func(ctx context.Context, a map[string]any) (any, error) {
+			limit := int64(100)
+			if value, exists := a["limit"]; exists && value != nil {
+				var err error
+				limit, err = integer(a, "limit")
+				if err != nil || limit < 1 || limit > 100 {
+					return nil, errors.New("backup page size must be between 1 and 100")
+				}
+			}
+			rows, e := s.ListPage(ctx, str(a, "workerId"), str(a, "after"), str(a, "scope"), str(a, "search"), int(limit))
 			if e != nil {
 				return nil, e
 			}
 			next := ""
-			if len(rows) > 100 {
-				rows = rows[:100]
-				next = rows[99].ID
+			if len(rows) > int(limit) {
+				rows = rows[:limit]
+				next = rows[limit-1].ID
 			}
 			return map[string]any{"transfers": rows, "nextCursor": next}, nil
 		}},

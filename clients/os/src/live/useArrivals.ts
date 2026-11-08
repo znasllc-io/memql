@@ -37,10 +37,20 @@ export function useArrivals<T>(
   snapshot: LiveSnapshot<T>,
   rowId: (row: T) => string,
   fingerprint: (row: T) => string,
+  baseline?: unknown,
+  pageCount?: number,
 ): Map<string, ArrivalTick> {
   const arrivals = useRef(emptyArrivals());
   const [, bump] = useState(0);
   const seenVersion = useRef(-1);
+  const seenBaseline = useRef({ source: baseline, pageCount });
+  if (seenBaseline.current.source !== baseline || seenBaseline.current.pageCount !== pageCount) {
+    seenBaseline.current = { source: baseline, pageCount };
+    // A navigation change establishes new fingerprints, but an actual
+    // recent event on a still-visible row keeps its earned cue.
+    arrivals.current = { ...arrivals.current, wasLive: false };
+    seenVersion.current = -1;
+  }
 
   if (seenVersion.current !== snapshot.version) {
     seenVersion.current = snapshot.version;

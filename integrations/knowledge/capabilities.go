@@ -93,6 +93,8 @@ func (i *Integration) IntegrationName() string { return "knowledge" }
 // write -- and the one-shot seed helper.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "trainingDomainRollups", Handler: i.trainingDomainRollups},
+		{Name: "trainingChunksBrowse", Handler: i.trainingChunksBrowse},
 		{Name: "reconcileReleaseSeeds", Handler: i.reconcileReleaseHandler},
 		{Name: "indexReleaseForWork", Handler: i.indexReleaseForWorkHandler},
 		{

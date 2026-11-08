@@ -1,0 +1,44 @@
+NOTICE:  extension "timescaledb" already exists, skipping
+Isolated review check: go test -count=1 -p=1 -parallel=4 -timeout=300s ./integrations/knowledge -run ^TestTrainingReviewCursorSurvivesConcurrentApprovalDB$ -v
+{"time":"2026-11-07T17:37:29.896112-07:00","level":"INFO","component":"memoryNodesDB","msg":"instance created"}
+{"time":"2026-11-07T17:37:29.896222-07:00","level":"INFO","component":"memoryNodesDB","msg":"starting"}
+{"time":"2026-11-07T17:37:29.904858-07:00","level":"INFO","component":"memoryNodesDB","msg":"write-gate pool opened","size":4}
+{"time":"2026-11-07T17:37:30.038367-07:00","level":"INFO","component":"memoryNodesDB","msg":"site owner restamp: done","migration":"20260912000000_site_owner_restamp","restamped":0,"unresolved":0}
+{"time":"2026-11-07T17:37:30.048833-07:00","level":"INFO","component":"memoryNodesDB","msg":"latest-row index ensured","table":"MemoryNodes","index":"memory_nodes_concept_id_created_at_desc_idx","outcome":"built","covering":"memory_nodes_concept_id_created_at_desc_idx","equivalents":null,"hypertable":false,"chunks":0,"duration":"10ms"}
+{"time":"2026-11-07T17:37:30.052647-07:00","level":"INFO","component":"memoryNodesDB","msg":"latest-row index ensured","table":"MemoryNodes","index":"memory_nodes_concept_id_created_at_desc_idx","outcome":"valid","covering":"memory_nodes_concept_id_created_at_desc_idx","equivalents":null,"hypertable":false,"chunks":0,"duration":"3ms"}
+{"time":"2026-11-07T17:37:30.072023-07:00","level":"INFO","component":"memoryNodesDB","msg":"module readiness history collapse: done","migration":"20260921000000_module_readiness_history_collapse","collapsedThisAttempt":0,"collapsedInAll":0,"batches":0,"largestBatch":0,"idsThisAttempt":0,"resumed":false,"duration":"11ms"}
+{"time":"2026-11-07T17:37:30.085327-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_recovery_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.094133-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_journal_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.162098-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_recipient_digest_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.171526-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_consent_digest_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.181752-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_email_provider_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.212175-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_retention_goal_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.222242-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_retention_time_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.242603-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"secret_memory_nodes_retention_time_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.264304-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_owner_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.349941-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_goal_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.360447-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_owner_walk_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.371214-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_signature_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.381663-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_revision_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.392242-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_tokenhash_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.402602-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_codeid_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.412411-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_codehash_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.423227-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_auth_session_hash_lookup_idx","chunks":0}
+{"time":"2026-11-07T17:37:30.477523-07:00","level":"INFO","component":"memoryNodesDB","msg":"MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend cannot be enabled; nothing was changed (memql#5421)","table":"MemoryNodes","triggers":"work_run_head_delete"}
+{"time":"2026-11-07T17:37:30.480765-07:00","level":"INFO","component":"memoryNodesDB","msg":"timescaledb extension enabled","version":"2.29.0","schema":"public","hasCreateHypertable":true,"hypertables":{"MemoryNodes":true,"SecretMemoryNodes":true},"compression":{"MemoryNodes":"blocked: DELETE trigger with a transition table: work_run_head_delete"}}
+{"time":"2026-11-07T17:37:30.482035-07:00","level":"INFO","component":"memoryNodesDB","msg":"startup ping succeeded","dsn":"postgres://memql:********@localhost:55432/memql_review_97cdd60aa1e34d2983bed65d29ee207b?sslmode=disable"}
+{"time":"2026-11-07T17:37:30.482114-07:00","level":"INFO","component":"memoryNodesDB","msg":"started"}
+{"time":"2026-11-07T17:37:30.482131-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopping"}
+{"time":"2026-11-07T17:37:30.482223-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopped"}
+=== RUN   TestTrainingReviewCursorSurvivesConcurrentApprovalDB
+{"time":"2026-11-07T17:37:30.585196-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:37:33.000609-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+    chunk_browse_db_test.go:141:
+            Error Trace:    /Users/znas/memql-os-lists/integrations/knowledge/chunk_browse_db_test.go:141
+            Error:          "[map[createdAt:2026-11-08T00:37:33.515627Z documentId:<nil> domainId:training-frontier-1794098253485627000 id:v1:knowledge:documentChunk:training-frontier-1794098253485627000-3 seq:<nil> source:fileUpload sourceRef:<nil> sourceTopic:<nil> superseded:<nil> supersededReason:<nil> text:training-frontier-1794098253485627000 pending tokenCount:<nil> validationStatus:unvalidated] map[createdAt:2026-11-08T00:37:33.515604Z documentId:<nil> domainId:training-frontier-1794098253485627000 id:v1:knowledge:documentChunk:training-frontier-1794098253485627000-2 seq:<nil> source:fileUpload sourceRef:<nil> sourceTopic:<nil> superseded:<nil> supersededReason:<nil> text:training-frontier-1794098253485627000 pending tokenCount:<nil> validationStatus:unvalidated] map[createdAt:2026-11-08T00:37:33.515571Z documentId:<nil> domainId:training-frontier-1794098253485627000 id:v1:knowledge:documentChunk:training-frontier-1794098253485627000-1 seq:<nil> source:fileUpload sourceRef:<nil> sourceTopic:<nil> superseded:<nil> supersededReason:<nil> text:training-frontier-1794098253485627000 pending tokenCount:<nil> validationStatus:unvalidated] map[createdAt:2026-11-08T00:37:33.487239Z documentId:<nil> domainId:training-frontier-1794098253485627000 id:v1:knowledge:documentChunk:training-frontier-1794098253485627000-0 seq:<nil> source:fileUpload sourceRef:<nil> sourceTopic:<nil> superseded:<nil> supersededReason:<nil> text:training-frontier-1794098253485627000 pending tokenCount:<nil> validationStatus:unvalidated]]" should have 5 item(s), but has 4
+            Test:           TestTrainingReviewCursorSurvivesConcurrentApprovalDB
+            Messages:       an earlier approval must not shorten later pages
+--- FAIL: TestTrainingReviewCursorSurvivesConcurrentApprovalDB (3.06s)
+FAIL
+FAIL    github.com/znasllc-io/memql/integrations/knowledge  4.493s
+FAIL

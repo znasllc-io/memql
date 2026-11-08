@@ -350,6 +350,47 @@ query registration myWorkersWithStatus {
   shape    workerRegistrationFull
 }
 
+/// The caller's machine directory, ten recent registrations at a time. This
+/// is separate from myWorkersWithStatus because routing needs the full fleet
+/// in stable first-registration order, while a directory needs recent/search.
+@cache(0)
+@actor
+query registration myMachinesBrowse {
+  args {
+    search string
+    includeRevoked bool
+  }
+  filter   row => row.ownerUserId == actor.userId
+               && (args.includeRevoked == true || row.revokedAt == nil)
+               && (args.search == nil || trim(args.search) == "" || row.displayName.includes(trim(args.search), true) || row.name.includes(trim(args.search), true) || row.?platformInfo.hostname.includes(trim(args.search), true) || row.?platformInfo.os.includes(trim(args.search), true) || row.?platformInfo.arch.includes(trim(args.search), true))
+  sort     "registeredAt", "desc", "row.id", "desc"
+  paginate 10
+  shape    workerDirectorySummary
+}
+
+/// Lightweight machine identities and heartbeat presence for desktop file
+/// provenance. Equipment, apps and routing settings are loaded only by the
+/// Fleet surfaces that use them. Consumers must follow the cursor if present.
+@cache(0)
+@actor
+query registration myMachinePresence {
+  filter   row => row.ownerUserId == actor.userId
+  sort     "registeredAt", "desc", "row.id", "desc"
+  paginate 200
+  shape    workerPresence
+}
+
+/// Open one owned machine independently of the directory's loaded page or search.
+@cache(0)
+@actor
+query registration myMachineById {
+  args {
+    registrationId string!
+  }
+  filter row => row.id == args.registrationId && row.ownerUserId == actor.userId
+  shape workerRegistrationFull
+}
+
 /// Every machine in the cluster, for a cluster owner; optionally narrowed to one owner. Backs
 /// /fleet/machines' operator view, which adds an owner column.
 /// Shared inference uses this same read, so heartbeat eligibility must not use cached status.

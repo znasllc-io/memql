@@ -1,3 +1,6 @@
+import { useEmailCatalogs } from "../catalogs";
+import { useEmailBrowse, useEmailRecord } from "../useBrowse";
+import { LoadMore } from "../../../kit/LoadMore";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -14,7 +17,6 @@ import {
   journeyFromRow,
   ruleName,
   templateFromRow,
-  templateIsArchived,
   templateProjection,
   useProjected,
   type TemplateRow,
@@ -28,7 +30,6 @@ import {
   TemplatesView,
   narrowsTemplates,
   organizationsOf,
-  templatesAsked,
   templatesListed,
   type TemplatesQuestion,
 } from "./TemplatesView";
@@ -76,6 +77,11 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
   const [openId, setOpenId] = useState("");
   const [requested, setRequested] = useState("");
   const [templatesQuestion, setTemplatesQuestion] = useState<TemplatesQuestion>(EVERY_TEMPLATE);
+  useEmailCatalogs(adding ? ["templates"] : ["journeys", "rules"], adding || openId !== "");
+  const browse = useEmailBrowse("templates", { search: templatesQuestion.search, accountId: templatesQuestion.accountId || undefined, status: templatesQuestion.state || undefined, includeArchived });
+  const detail = useEmailRecord("templates", openId);
+  // Only an empty unfiltered directory needs this small existence read.
+  const archived = useEmailBrowse("templates", { includeArchived: true, status: "archived" }, !includeArchived && !narrowsTemplates(templatesQuestion) && browse.snapshot.state === "live" && !browse.snapshot.error && browse.snapshot.rows.length === 0);
 
   useOpenRequest(openRequest, (target) => {
     if ("add" in target) {
@@ -92,19 +98,19 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
   // ---- the organizations in view -------------------------------------------
   const { accounts } = useAccountOptionsFeed();
   const organizations = useMemo(() => selectableOrganizations(accounts), [accounts]);
-  const layouts = useEmailLayouts(useMemo(() => organizations.map((organization) => organization.id), [organizations]));
+  const layouts = useEmailLayouts(useMemo(() => [...new Set([...browse.snapshot.rows, ...detail.snapshot.rows].map(templateFromRow).map(row => row.accountId).filter(Boolean))], [browse.snapshot.rows, detail.snapshot.rows]));
   const nameOf = (accountId: string) => organizationName(accounts, accountId);
 
   // ---- templates -------------------------------------------------------------
-  const rows = feeds.templates.snapshot.rows;
+  const rows = browse.snapshot.rows;
   const allTemplates = useProjected(rows, templateProjection);
-  const listedOrganizations = useMemo(() => organizationsOf(templatesListed(rows, includeArchived)), [rows, includeArchived]);
+  const listedOrganizations = organizations.map(organization => organization.id);
   const needle = templatesQuestion.search.trim().toLowerCase();
   const templatesKey = `${includeArchived}|${templatesQuestion.accountId}|${templatesQuestion.state}|${needle}`;
-  const source = useLiveView<Row, TemplateRow>(feeds.templates.source, templatesKey, (held) => templatesAsked(held, templatesQuestion, includeArchived));
+  const source = useLiveView<Row, TemplateRow>(browse.source, templatesKey, held => held.map(templateFromRow));
   // A row names its organization only where the rows shown are more than one organization's.
   const shownOrganizations = organizationsOf(source?.snapshot.rows ?? []);
-  const openTemplate = useMemo(() => recordNamed(rows, templateFromRow, openId), [rows, openId]);
+  const openTemplate = useMemo(() => recordNamed(detail.snapshot.rows, templateFromRow, openId) ?? recordNamed(rows, templateFromRow, openId), [detail.snapshot.rows, rows, openId]);
 
   // The active automations that send the open template. Editing it makes it a
   // draft: a series holds its emails until it is published again, and an event
@@ -130,7 +136,7 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
     <>
       <AutoRefresh onRefresh={layouts.reload} />
       {/* One read in flight at a time (AutoRefresh waits for it); gone when nothing is being written. */}
-      <AutoRefresh onRefresh={feeds.templates.reseed} enabled={allTemplates.some(isWriting)} busy={feeds.templates.snapshot.state !== "live"} intervalMs={WRITING_REREAD_MS} />
+      <AutoRefresh onRefresh={browse.reseed} resume={false} enabled={allTemplates.some(isWriting)} busy={browse.snapshot.state !== "live"} intervalMs={WRITING_REREAD_MS} />
     </>
   );
 
@@ -162,20 +168,20 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
             setOpenId("");
             setRequested("");
           }}
-          onReread={feeds.templates.reseed}
+          onReread={detail.reseed}
         />
       </>
     );
   }
   // ---- the list --------------------------------------------------------------
-  const templatesFailed = feeds.templates.snapshot.error !== "";
+  const templatesFailed = browse.snapshot.error !== "";
   // A TEMPLATE SOMEBODY ASKED FOR THAT THE CLUSTER DOES NOT HOLD, said in place --
   // only once the cluster has answered: while the feed reads, or when it could
   // not be asked, the template is not "missing", and its page opens if it arrives.
-  const templateMissing = requested !== "" && requested === openId && feeds.templates.snapshot.state === "live" && !templatesFailed;
+  const templateMissing = requested !== "" && requested === openId && detail.snapshot.state === "live" && !detail.snapshot.error && !openTemplate;
   const templatesNarrowed = narrowsTemplates(templatesQuestion);
   // A list the cluster says is empty has nothing to ask a question of (rule 2).
-  const templatesSettledEmpty = feeds.templates.snapshot.state === "live" && !templatesFailed && templatesListed(rows, includeArchived).length === 0;
+  const templatesSettledEmpty = browse.snapshot.state === "live" && !templatesFailed && templatesListed(rows, includeArchived).length === 0;
   const organizationChoices = (ids: readonly string[]) => ids.map((id) => ({ id, name: nameOf(id) }));
 
   return (
@@ -204,13 +210,14 @@ export function TemplatesSection({ feeds, includeArchived, openRequest }: {
         readings={layouts.readings}
         layoutsSettled={layouts.settled}
         organizationName={(accountId) => (shownOrganizations.length > 1 ? nameOf(accountId) : "")}
-        error={feeds.templates.snapshot.error}
+        error={browse.snapshot.error}
         narrowed={templatesNarrowed}
-        archivedHidden={!includeArchived && allTemplates.some(templateIsArchived)}
+        archivedHidden={!includeArchived && archived.snapshot.rows.length > 0}
         missing={templateMissing}
-        onRetry={feeds.templates.reseed}
+        onRetry={browse.reseed}
         onOpen={openTemplatePage}
       />
+      <LoadMore feed={browse} />
     </div>
   );
 }

@@ -1,73 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-import { useOsConnection } from "../../live/connection";
+import { useContext, useEffect, useMemo } from "react";
+import { useLiveCollection } from "../../live/useLiveCollection";
+import { LiveReadVisibility } from "../../live/useGraphRevision";
 import { fetchTrafficSummaries, windowSpec, type TrafficSummary, type TrafficWindow } from "./traffic";
 
-// The list's traffic figures: one read for every deployable on screen.
-//
-// ===========================================================================
-// ONE CALL, NOT ONE PER ROW
-// ===========================================================================
-// The builtin's summary mode exists for exactly this: twenty rows asking for
-// twenty series would pull twenty times a week of buckets to render twenty
-// timestamps. The whole list is one call, summed in the database.
-//
-// ===========================================================================
-// IT IS AN ON-DEMAND READ AND IT SAYS SO
-// ===========================================================================
-// v1:observability:siteTraffic is not a graph concept, so there is no
-// broadcast to subscribe to and none is wanted -- a figure that moved on
-// every request would be the strobe the arrival-cue rule exists to prevent.
-// The list re-reads on the window's own cadence, and a deployable ABSENT from
-// the answer is unmeasured rather than zero, which the row renders as nothing
-// rather than as "never".
-//
-// ===========================================================================
-// THE READ IS KEYED ON THE IDS, NOT ON THE ROWS
-// ===========================================================================
-// A live list's rows change identity on every folded event, so an effect
-// keyed on the array would re-read on every heartbeat in the cluster. It is
-// keyed on the sorted id STRING instead: the set of deployables on screen,
-// which changes when one is created or removed and not otherwise.
+interface SummarySnapshot { id: string; figures: Array<[string, TrafficSummary]>; readAt: string }
+
+/** One bounded request for the visible ids. Shared snapshots survive reopening;
+ * hidden panes stop their cadence, and obsolete requests cannot fill a new key. */
 export function useSiteTraffic(siteIds: readonly string[], window: TrafficWindow) {
-  const connection = useOsConnection();
-  const [figures, setFigures] = useState<Map<string, TrafficSummary>>(new Map());
-  const [readAt, setReadAt] = useState("");
-  const ids = useMemo(() => [...siteIds].sort(), [siteIds.join(",")]);
-  // The DEPENDENCY, not the data. `ids` is a fresh array every render, so an
-  // effect keyed on it would re-read on every folded event in the cluster;
-  // the joined string changes only when the SET on screen does. The ids
-  // themselves travel in a ref rather than being recovered by splitting the
-  // key -- a split would be a second, lossy spelling of the same list, and
-  // the day an id contains the separator it fails silently.
-  const key = ids.join(",");
-  const latest = useRef(ids);
-  latest.current = ids;
-  const asked = useRef(0);
-
-  const read = useCallback(async () => {
-    if (connection === null || key === "") return;
-    const mine = ++asked.current;
-    try {
-      const next = await fetchTrafficSummaries(connection.query, latest.current, window, new Date());
-      if (mine !== asked.current) return;
-      setFigures(next);
-      setReadAt(new Date().toISOString());
-    } catch {
-      // A FIGURE THAT COULD NOT BE READ IS AN ABSENT FIGURE, not a broken
-      // list: every row still renders everything else it knows, and the
-      // deployable page beside it reports the refusal in the server's own
-      // words where somebody asked for it directly.
-      if (mine !== asked.current) return;
-      setFigures(new Map());
-    }
-  }, [connection, key, window]);
-
+  const visible = useContext(LiveReadVisibility);
+  const ids = [...new Set(siteIds)].sort();
+  const key = JSON.stringify(ids);
+  const feed = useLiveCollection<SummarySnapshot>(ids.length ? `deployables:traffic:${window}:${key}` : null, connection => ({
+    concept: "v1:observability:siteTraffic", actions: [], paged: false,
+    seed: async (_cursor, signal) => {
+      const now = new Date();
+      const figures = await fetchTrafficSummaries(connection.query, ids, window, now, signal);
+      return { rows: [{ id: "summary", figures: [...figures], readAt: now.toISOString() }], nextCursor: "" };
+    },
+  }));
   useEffect(() => {
-    void read();
-    const timer = setInterval(() => void read(), windowSpec(window).refreshMs);
+    if (!visible || !ids.length) return;
+    const timer = setInterval(feed.reseed, windowSpec(window).refreshMs);
     return () => clearInterval(timer);
-  }, [read, window]);
-
-  return { figures, readAt };
+  }, [visible, key, window, feed.reseed]);
+  const row = feed.snapshot.rows[0];
+  const figures = useMemo(() => new Map(row?.figures ?? []), [row]);
+  return { figures, readAt: row?.readAt ?? "" };
 }

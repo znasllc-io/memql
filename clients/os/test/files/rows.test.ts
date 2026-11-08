@@ -188,6 +188,7 @@ describe("folderFromRow", () => {
     // whole tree on the first event that did not touch it.
     expect(row).toEqual({
       id: "f-1",
+      createdAt: "2026-08-20T10:00:00Z",
       name: "Client videos",
       parentFolderId: "f-0",
       archived: false,

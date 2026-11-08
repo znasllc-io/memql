@@ -28,8 +28,8 @@ const { useEmailFeeds, useEmailRecordFeeds } = await import("../../src/apps/emai
 const {
   audienceRow,
   campaignRow,
+  bundleResult,
   fakeConnection,
-  rowsResult,
   ruleRow,
   templateRow,
   withSession,
@@ -198,9 +198,9 @@ describe("a record named by an intent", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const conn = fakeConnection();
-    conn.query.campaigns.mockImplementation(async () => {
+    conn.query.executeNamed.mockImplementation(async () => {
       await gate;
-      return rowsResult([campaignRow({ id: "x1" })]);
+      return bundleResult([campaignRow({ id: "x1" })]);
     });
     const { navigate, consumeIntent, deliver } = mountWindow(conn);
 
@@ -286,7 +286,8 @@ describe("a record named by an intent", () => {
     // A refused read says nothing about whether the record exists, and the list
     // already says that it did not come back.
     const conn = fakeConnection();
-    conn.query.campaigns.mockRejectedValue(new Error("read refused"));
+    conn.query.campaignsBrowse.mockRejectedValue(new Error("read refused"));
+    conn.query.executeNamed.mockRejectedValue(new Error("read refused"));
     const { deliver } = mountWindow(conn);
     deliver({ id: "i1", payload: { campaignId: "x1" } });
 

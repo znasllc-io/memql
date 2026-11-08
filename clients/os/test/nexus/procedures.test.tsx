@@ -297,7 +297,8 @@ describe("the one act", () => {
     await waitFor(() => expect(rung("canary").getAttribute("aria-current")).toBe("step"));
     expect(within(rung("shadow")).getByText("Passed")).toBeTruthy();
     expect(screen.queryByText(/has not recorded the answer yet/)).toBeNull();
-    expect(conn.query.learnedProceduresForOwner).toHaveBeenCalledTimes(1);
+    expect(conn.query.learnedProceduresForOwner).not.toHaveBeenCalled();
+    expect(conn.query.nexusAutomationsBrowse).toHaveBeenCalledTimes(1);
   });
 });
 

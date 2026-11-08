@@ -36,21 +36,18 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
    use the available width.
-   Shared record lists draw dividers **only between items**: no top line on
-   the first, no bottom line on the last, and no lines for a single item.
-   Keep this in the shared list styles, including rows with separate actions
-   and live-list wrappers; never add per-app row borders.
-   **Horizontal dividers are on their way out** (the owner, 2026-11-04: they
-   "look pretty terrible" and crowd the page). A surface that has moved sets
-   `data-os-dividers="none"` on its root, and its record rows and details
-   sections then stand apart by spacing alone, with each row's hover wash
-   showing it is one target. Removing the line is not the whole job: the rows
-   must still read as separate items without it. Move a surface when it is
-   being worked on, not in a sweep of apps nobody asked to change; the default
-   follows once the surfaces have. A store's Reviews is the first; Cut release
-   is the second, and a guided flow moves through the kit `Wizard`'s
-   `dividers="none"`. Email's Templates and Settings, with the Brand page,
-   are the third.
+   **Every record list is flat and has no horizontal row dividers.** Use the
+   shared `RecordList` / `RecordRow` (or `LiveList` for live collections): rows
+   stand apart through spacing, aligned text and their whole-row hover wash.
+   This is the default across OS apps, including rows with separate actions
+   and live wrappers; never add per-app row borders. Keep names prominent,
+   descriptions and supporting facts quiet, and state legible in words with
+   a small tone mark. Row metadata is plain text, without tag, badge or chip
+   boxes; retain every fact, icon, tooltip and action. The shared row styles
+   give existing `Chip` content that plain-text treatment inside records.
+   Editable choices and removable filters remain controls outside the row.
+   `data-os-dividers="none"` still removes detail-section dividers on surfaces
+   using that layout; record lists do not need an opt-in.
 
    Selection controls use straight edges (`--os-selection-radius`), including
    local tabs, choice cards, menu options and equipment choices. Show selection

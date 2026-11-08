@@ -172,11 +172,11 @@ describe("the data-origins table", () => {
 
     // The fan-out is one read per connector, and on a healthy cluster every
     // answer is empty. Nothing has been asked yet.
-    expect(connection.query.outboxDeadLetters).not.toHaveBeenCalled();
+    expect(connection.query.outboxDeadLettersBrowse).not.toHaveBeenCalled();
 
     await click(screen.getByRole("button", { name: "Check shopify" }));
-    expect(connection.query.outboxDeadLetters).toHaveBeenCalledWith(
-      { target: "shopify" },
+    expect(connection.query.outboxDeadLettersBrowse).toHaveBeenCalledWith(
+      { target: "shopify", search: "" },
       expect.anything(),
     );
   });
@@ -202,7 +202,7 @@ describe("a dead letter's Retry and Discard", () => {
   };
 
   async function openBand() {
-    const connection = fakeConnection({ dataOrigins: [NEVER_RUN], outboxDeadLetters: [ENTRY] });
+    const connection = fakeConnection({ dataOrigins: [NEVER_RUN], outboxDeadLettersBrowse: [ENTRY] });
     mount(connection);
     await screen.findByText("v1:shopify:product");
     await click(screen.getByRole("button", { name: "Check shopify" }));

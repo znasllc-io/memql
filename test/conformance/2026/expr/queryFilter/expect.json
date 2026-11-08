@@ -758,6 +758,56 @@
       "concept": "ticket",
       "row": {},
       "expect": true
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "strpos(lower(payload #>> '{title}'), lower(?)) > 0",
+      "note": "Case folding runs in SQL before paging; the substring is a bound literal, never a wildcard pattern."
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "a disk%_ is full"
+      },
+      "expect": true
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "a DISK%_ is full"
+      },
+      "expect": true
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "a disk12 is full"
+      },
+      "expect": false
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "title-includes-ignore-case.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": 42
+      },
+      "expect": false
     }
   ]
 }

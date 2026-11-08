@@ -40,10 +40,14 @@ it("buffers ASR evidence before the transcript and ignores duplicate transcripts
  expect(session.getSnapshot().turns).toHaveLength(1); expect(session.getSnapshot().turns[0]?.activity).toEqual([activity]);
  session.voiceEvent({type:"transcript",turnId:"two",text:"Again"}); session.voiceEvent({type:"done",turnId:"one"}); expect(session.getSnapshot().busy).toBe(true);
 });
-it("keeps the latest conversation list when refreshes finish out of order", async () => {
- const first = deferred<{id:string;title:string}[]>(); let calls=0;
- const session = setup({list: () => ++calls === 1 ? first.promise : Promise.resolve([{id:"new",title:"New"}])});
- const pending = session.refresh(); await session.refresh(); first.resolve([]); await pending; expect(session.getSnapshot().conversations[0]?.id).toBe("new");
+it("shares a pending conversation history read across duplicate refreshes", async () => {
+ const first = deferred<{id:string;title:string}[]>();
+ const list = vi.fn(() => first.promise); const session = setup({list});
+ const release = session.retainHistory();
+ const one = session.refresh(); const two = session.refresh();
+ expect(one).toBe(two); expect(list).toHaveBeenCalledOnce();
+ first.resolve([{id:"new",title:"New"}]); await one;
+ expect(session.getSnapshot().conversations[0]?.id).toBe("new"); release(); session.dispose();
 });
 it("learns dictation estimates only from successful calls on the same route", () => {
  const session = setup(); const base = {kind:"model" as const,at:new Date().toISOString(),provider:"fleet:local",model:"whisper"};

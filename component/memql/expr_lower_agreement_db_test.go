@@ -55,6 +55,7 @@ func irV1Bodies() []string {
 		// Prefixes and substrings, blank needles included.
 		`row.irS startsWith "a"`, `row.irS startsWith ["b", "é"]`,
 		`row.irS.includes("b")`, `row.irS.includes("")`,
+		`row.irS.includes("B", true)`, `row.irS.includes("É", true)`, `row.irS.includes("%_", true)`, `row.irS.includes("", true)`,
 		// Collection predicates over row arrays.
 		`row.irTags.any(t => t == "a")`, `row.irTags.any(t => t != "a")`,
 		`row.irTags.all(t => t == "a")`, `row.irTags.all(t => t != "")`,

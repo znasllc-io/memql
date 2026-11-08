@@ -367,11 +367,15 @@ func (e *engineRowReader) rows(ctx context.Context, query string, args map[strin
 	}
 	b.WriteByte(')')
 
-	result, err := e.engine.Execute(ctx, b.String())
+	rows := []map[string]any{}
+	err := memql.WalkQueryPages(ctx, e.engine.Execute, b.String(), 10000, func(result *memql.ExecuteResult) error {
+		rows = append(rows, memql.MaterializeRows(result.OutputPayload())...)
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("reviews: %s: %w", query, err)
 	}
-	return memql.MaterializeRows(result), nil
+	return rows, nil
 }
 
 // rowsFor runs one of the pack's own queries through the seam.

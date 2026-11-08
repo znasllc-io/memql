@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -29,6 +30,64 @@ func (i *Integration) handleSkillCatalog(ctx context.Context, _ map[string]any, 
 		rows[n]["reviewedBaseline"] = baselines.IsInstalledSkillBaseline(row)
 	}
 	return i.resultNode(map[string]any{"skills": rows}), nil
+}
+
+// Catalog browsing verifies only the ten rows the authorized query selected.
+// The verification needs full content, but that content is not list data and
+// stays on the server until somebody opens the corresponding detail. The
+// nested cursor is scoped by the engine to the query and its search argument.
+func (i *Integration) handleSkillCatalogPage(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if _, err := requirePrincipal(ctx); err != nil {
+		return nil, err
+	}
+	baselines, ok := i.engine.(interface{ IsInstalledSkillBaseline(map[string]any) bool })
+	if !ok {
+		return nil, fmt.Errorf("installed skill baseline verifier is unavailable")
+	}
+	search, cursor := strings.TrimSpace(argString(args, "search")), argString(args, "cursor")
+	result, err := i.engine.Execute(memql.ContextWithCursor(ctx, cursor), "query "+call("skillsForTrainingPage", map[string]any{"search": search}))
+	if err != nil {
+		return nil, err
+	}
+	rows := memqlRows(result)
+	summaries := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		summary := map[string]any{"reviewedBaseline": baselines.IsInstalledSkillBaseline(row)}
+		for _, key := range []string{"id", "slug", "name", "description", "category", "version", "active", "status", "createdAt"} {
+			if value, exists := row[key]; exists {
+				summary[key] = value
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	next := ""
+	if result != nil && result.Meta != nil {
+		next = result.Meta.Cursor
+	}
+	return i.resultNode(map[string]any{"skills": summaries, "nextCursor": next}), nil
+}
+
+func (i *Integration) handleSkillCatalogEntry(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if _, err := requirePrincipal(ctx); err != nil {
+		return nil, err
+	}
+	baselines, ok := i.engine.(interface{ IsInstalledSkillBaseline(map[string]any) bool })
+	if !ok {
+		return nil, fmt.Errorf("installed skill baseline verifier is unavailable")
+	}
+	skillID := strings.TrimSpace(argString(args, "skillId"))
+	if skillID == "" {
+		return nil, fmt.Errorf("skill id is required")
+	}
+	row, err := one(i.store().query(ctx, "query "+call("skillById", map[string]any{"skillId": skillID})))
+	if err != nil {
+		return nil, err
+	}
+	if row != nil {
+		row = maps.Clone(row)
+		row["reviewedBaseline"] = baselines.IsInstalledSkillBaseline(row)
+	}
+	return i.resultNode(map[string]any{"skill": row}), nil
 }
 
 // A saved selection belongs to one owned step version. The shared gate and

@@ -13,17 +13,10 @@ export class SdkAskTransport implements AskTransport {
   constructor(private readonly dispatcher: () => Dispatcher | null, private readonly stream: AskStreamFn = aiChatStream) {
     const query = () => { const dispatcher = this.dispatcher(); if (!dispatcher) throw new Error("Not connected to the cluster."); return new QueryClient(dispatcher); };
     this.conversations = {
-      list: async () => {
-        const items: ConversationSummary[] = [];
-        const seen = new Set<string>(); let cursor = "";
-        do {
-          const result = await query().myAskConversations({}, cursor ? { cursor } : {});
-          items.push(...result.rows().map(row => flatten(row) as unknown as ConversationSummary));
-          cursor = result.meta()?.cursor ?? "";
-          if (cursor && seen.has(cursor)) throw new Error("Conversation history could not advance. Try again.");
-          seen.add(cursor);
-        } while (cursor);
-        return items;
+      list: async () => (await this.conversations.page!({})).rows,
+      page: async ({ search, cursor, signal }) => {
+        const result = await query().myAskConversationsBrowse({ search }, { cursor, signal });
+        return { rows: result.rows().map(row => flatten(row) as unknown as ConversationSummary), cursor: result.meta()?.cursor };
       },
       create: async () => {
         const result = await query().createAskConversation({ requestId: crypto.randomUUID(), title: "New conversation" });

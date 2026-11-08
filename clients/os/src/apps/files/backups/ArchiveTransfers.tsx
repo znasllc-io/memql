@@ -1,42 +1,42 @@
-import { useId, useEffect, useState } from "react";
+import { useId, useContext, useEffect, useRef, useState } from "react";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 import { Download } from "lucide-react";
-import { Button, Caption, Field, Input, Notice, RecordList, RecordRow, Select, Subhead, formatBytes } from "../../../kit";
+import { Button, Caption, Field, Input, Notice, RecordList, RecordRow, Select, Subhead, Refine, AutoRefresh, RecordListSkeleton, formatBytes } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { useOsConnection } from "../../../live/connection";
 import { Wizard } from "../../../kit/Wizard";
 import { machineName, type MachineRow } from "../../fleet/rows";
 import { absoluteBackupPath, transferActions, transferLabel, type BackupTransfer, type TransferAction } from "./transfers";
 
+import { usePagedCollection } from "../../../live/useLiveCollection";
+import { LiveReadVisibility } from "../../../live/useGraphRevision";
+import { LoadMore } from "../../../kit/LoadMore";
+import { flatten } from "../../../kit/rows";
+import { useDebouncedValue } from "../../../logs/useDebouncedValue";
+
 const actionLabel: Record<TransferAction, string> = { pause: "Pause", resume: "Resume", cancel: "Cancel transfer", trash: "Move to Bin", restore: "Restore", purge: "Purge" };
 export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: readonly MachineRow[]; refresh: number; onDownload: (source: BackupTransfer) => void }) {
   const connection = useOsConnection();
-  const [rows, setRows] = useState<BackupTransfer[]>([]);
-  const [error, setError] = useState("");
+  const visible = useContext(LiveReadVisibility);
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(),250);
+  const feed = usePagedCollection<BackupTransfer>(`files:transfers:${needle}`, conn => ({
+    concept: "integration:fileBackups:transfer", actions: [],
+    seed: async (cursor, signal) => {
+      const result = await conn.query.libraryBackupList({ after: cursor || undefined, scope: "all", search: needle || undefined, limit: 10 }, { signal });
+      const first = result.rows()[0];
+      const page = first ? flatten(first) : null;
+      if (!page || !Array.isArray(page.transfers)) throw new Error("The cluster returned no transfer list.");
+      return { rows: page.transfers as BackupTransfer[], nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : "" };
+    },
+  }));
+  const rows = feed.snapshot.rows;
+  const error = feed.snapshot.error;
+  const previousRefresh = useRef({connection,refresh});
+  useEffect(() => { const previous = previousRefresh.current; previousRefresh.current = {connection,refresh}; if(previous.connection === connection && previous.refresh !== refresh) feed.reseed(); }, [connection, refresh, feed.reseed]);
   const [busy, setBusy] = useState("");
   const [confirm, setConfirm] = useState("");
   const [actionError, setActionError] = useState("");
-  const [pages, setPages] = useState(1);
-  const [more, setMore] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (!connection) return;
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout>;
-    const read = async () => {
-      try {
-        let cursor = ""; const next: BackupTransfer[] = [];
-        for (let p = 0; p < pages; p++) {
-          const r = await connection.query.libraryBackupList({ after: cursor, scope: "all" }, { signal: abort.signal });
-          const page = r.rows()[0] as unknown as { transfers: BackupTransfer[]; nextCursor: string };
-          if (!page || !Array.isArray(page.transfers)) throw new Error("The cluster returned no transfer list.");
-          next.push(...page.transfers); cursor = page.nextCursor; if (!cursor) break;
-        }
-        if (!abort.signal.aborted) { setRows(next); setMore(!!cursor); setError(""); }
-      } catch (e) { if (!abort.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }
-      if (!abort.signal.aborted) timer = setTimeout(() => void read(), 3_000);
-    };
-    void read(); return () => { abort.abort(); clearTimeout(timer); };
-  }, [connection, refresh, revision, pages]);
   const act = async (job: BackupTransfer, action: TransferAction) => {
     if (!connection || busy) return;
     setBusy(job.id); setActionError("");
@@ -44,12 +44,15 @@ export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: 
       if (action === "cancel" && job.kind === "sync_file" && job.metadata.watchId) {
         await connection.query.setLibraryWatchedFolderStatus({ watchId: job.metadata.watchId, status: "paused" });
       }
-      const r = await connection.query.libraryBackupControl({ id: job.id, action }); const updated = r.rows()[0] as unknown as BackupTransfer; setRows(previous => previous.map(row => row.id === job.id ? updated : row).filter(row => !["cancelled", "deleted"].includes(row.state))); setConfirm(""); setRevision(n => n + 1); }
+      const r = await connection.query.libraryBackupControl({ id: job.id, action }); if (!r.rows()[0]) throw new Error("The transfer update returned no result."); setConfirm(""); feed.reseed(); }
     catch (e) { setActionError(e instanceof Error ? e.message : String(e)); } finally { setBusy(""); }
   };
   return <section aria-label="Backup transfers and downloads">
     <Subhead>Transfers and downloads</Subhead>
-    {rows.length === 0 && !error && <Caption>No transfers yet.</Caption>}
+    <AutoRefresh resume={false} onRefresh={feed.reseed} enabled={visible && connection !== null} busy={feed.snapshot.state === "seeding" || feed.loadingMore} intervalMs={rows.some(row => !["complete", "bin", "cancelled", "deleted"].includes(row.state)) ? 3000 : 15000} />
+    <Refine search={search} onSearch={setSearch} label="Search transfers" placeholder="Search transfers" />
+    {feed.snapshot.state === "seeding" && !rows.length ? <RecordListSkeleton label="Loading transfers" rows={3} /> : null}
+    {rows.length === 0 && !error && feed.snapshot.state !== "seeding" && <Caption>{needle ? "No transfers match." : "No transfers yet."}</Caption>}
     <RecordList>
     {rows.map(job => <article key={job.id}>
       <RecordRow name={job.name} secondary={`${machines.find(m => m.id === job.workerId) ? machineName(machines.find(m => m.id === job.workerId)!) : job.workerId} · ${job.path}`} state={transferLabel(job)}
@@ -66,7 +69,7 @@ export function ArchiveTransfers({ machines, refresh, onDownload }: { machines: 
       </InPlaceAsk>}
     </article>)}
     </RecordList>
-    {more && <Button onClick={() => setPages(n => n + 1)}>Show more</Button>}
+    <LoadMore feed={feed} />
     {actionError && <Notice tone="error" sentence="The transfer was not changed." detail={actionError} />}
     {error && <Notice tone="error" sentence="Transfers could not be updated." detail={error} />}
   </section>;

@@ -82,16 +82,20 @@ QueryClient.prototype.agentProgressRecovery = function (this: QueryClient, args:
 
 /** Human wording for the bounded recovery consent card. */
 export interface AgentRecoveryExplanationArgs {
+  needs: string[];
+  action: string;
 }
 
 export function buildAgentRecoveryExplanation(args: AgentRecoveryExplanationArgs): string {
-  void args;
-  return "logic agentRecoveryExplanation()";
+  const parts: string[] = [];
+  parts.push("needs: " + renderMemQLValue(args.needs));
+  parts.push("action: " + renderMemQLValue(args.action));
+  return "logic agentRecoveryExplanation(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    agentRecoveryExplanation(args?: AgentRecoveryExplanationArgs, opts?: QueryCallOptions): Promise<Result>;
+    agentRecoveryExplanation(args: AgentRecoveryExplanationArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -188,16 +192,22 @@ QueryClient.prototype.clusterInfraRefresh = function (this: QueryClient, args: C
 
 /** Table formats without authored rows reuse source rows; typed output owns its data. */
 export interface ComposeNeedsSourceRowsArgs {
+  outputKind: string;
+  format: string;
+  hasRows: boolean;
 }
 
 export function buildComposeNeedsSourceRows(args: ComposeNeedsSourceRowsArgs): string {
-  void args;
-  return "logic composeNeedsSourceRows()";
+  const parts: string[] = [];
+  parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  parts.push("format: " + renderMemQLValue(args.format));
+  parts.push("hasRows: " + renderMemQLValue(args.hasRows));
+  return "logic composeNeedsSourceRows(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    composeNeedsSourceRows(args?: ComposeNeedsSourceRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+    composeNeedsSourceRows(args: ComposeNeedsSourceRowsArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -473,16 +483,22 @@ QueryClient.prototype.knowledgeHasSeedArticles = function (this: QueryClient, ar
 
 /** Event-driven refresh uses the stale-signal threshold; the sweep uses cadence. */
 export interface KnowledgeRefreshEligibleArgs {
+  staleEvent: boolean;
+  staleSignalCount?: number;
+  due: boolean;
 }
 
 export function buildKnowledgeRefreshEligible(args: KnowledgeRefreshEligibleArgs): string {
-  void args;
-  return "logic knowledgeRefreshEligible()";
+  const parts: string[] = [];
+  parts.push("staleEvent: " + renderMemQLValue(args.staleEvent));
+  if (args.staleSignalCount !== undefined) parts.push("staleSignalCount: " + renderMemQLValue(args.staleSignalCount));
+  parts.push("due: " + renderMemQLValue(args.due));
+  return "logic knowledgeRefreshEligible(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    knowledgeRefreshEligible(args?: KnowledgeRefreshEligibleArgs, opts?: QueryCallOptions): Promise<Result>;
+    knowledgeRefreshEligible(args: KnowledgeRefreshEligibleArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -782,16 +798,24 @@ QueryClient.prototype.usersDueDeletionReminder = function (this: QueryClient, ar
 
 /** Choose a localized remedy; a retry never restores a consumed budget or erases completed effects. */
 export interface WorkSpineRecoveryActArgs {
+  symptom: string;
+  retriesSpent: number;
+  maxRetries: number;
+  hasGoal: boolean;
 }
 
 export function buildWorkSpineRecoveryAct(args: WorkSpineRecoveryActArgs): string {
-  void args;
-  return "logic workSpineRecoveryAct()";
+  const parts: string[] = [];
+  parts.push("symptom: " + renderMemQLValue(args.symptom));
+  parts.push("retriesSpent: " + renderMemQLValue(args.retriesSpent));
+  parts.push("maxRetries: " + renderMemQLValue(args.maxRetries));
+  parts.push("hasGoal: " + renderMemQLValue(args.hasGoal));
+  return "logic workSpineRecoveryAct(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workSpineRecoveryAct(args?: WorkSpineRecoveryActArgs, opts?: QueryCallOptions): Promise<Result>;
+    workSpineRecoveryAct(args: WorkSpineRecoveryActArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -801,16 +825,20 @@ QueryClient.prototype.workSpineRecoveryAct = function (this: QueryClient, args: 
 
 /** Explain which mandatory validator refused a proposed replan. */
 export interface WorkSpineReplanRefusalArgs {
+  stage: string;
+  message: string;
 }
 
 export function buildWorkSpineReplanRefusal(args: WorkSpineReplanRefusalArgs): string {
-  void args;
-  return "logic workSpineReplanRefusal()";
+  const parts: string[] = [];
+  parts.push("stage: " + renderMemQLValue(args.stage));
+  parts.push("message: " + renderMemQLValue(args.message));
+  return "logic workSpineReplanRefusal(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workSpineReplanRefusal(args?: WorkSpineReplanRefusalArgs, opts?: QueryCallOptions): Promise<Result>;
+    workSpineReplanRefusal(args: WorkSpineReplanRefusalArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
@@ -841,16 +869,20 @@ QueryClient.prototype.workSpineRoute = function (this: QueryClient, args: WorkSp
 
 /** Reusable section instruction policy, shared by inline and cataloguable live sections. */
 export interface WorkSpineSectionInstructionArgs {
+  section: Record<string, unknown>;
+  goal: string;
 }
 
 export function buildWorkSpineSectionInstruction(args: WorkSpineSectionInstructionArgs): string {
-  void args;
-  return "logic workSpineSectionInstruction()";
+  const parts: string[] = [];
+  parts.push("section: " + renderMemQLValue(args.section));
+  parts.push("goal: " + renderMemQLValue(args.goal));
+  return "logic workSpineSectionInstruction(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    workSpineSectionInstruction(args?: WorkSpineSectionInstructionArgs, opts?: QueryCallOptions): Promise<Result>;
+    workSpineSectionInstruction(args: WorkSpineSectionInstructionArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 

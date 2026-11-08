@@ -1,17 +1,18 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Boxes, Link2Off } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Head, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
+import { Button, Caption, Chip, Chips, Head, Notice, RecordList, RecordRow, Refine, Select, Subhead } from "../../kit";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
-import { useOsConnection } from "../../live/connection";
+import { usePagedCollection } from "../../live/useLiveCollection";
+import { LoadMore } from "../../kit/LoadMore";
 import { REJECTED, UNVALIDATED, VALIDATED } from "./concepts";
-import { chunkFromRow, groupChunksByDocument, type Chunk, type DomainMeta, type DomainRollup } from "./rows";
+import { chunkFromRow, groupChunksByDocument, type DomainMeta, type DomainRollup } from "./rows";
 
 /** The "no client" option's value. Not "" -- that is "any client". */
 const ACCOUNT_UNTAGGED = "\u0000untagged";
@@ -62,6 +63,7 @@ export function DomainsSection({
   // ACCOUNT_UNTAGGED narrows to domains carrying no tag at all, which is the
   // question somebody asks while they are tagging.
   const [accountFilter, setAccountFilter] = useState("");
+  const [search, setSearch] = useState("");
 
   // THE FILTER IS A FOLD, not a second read. `knowledgeDomainsAll` returns the
   // whole catalog and the chunk rollups are already here; narrowing on the
@@ -73,6 +75,8 @@ export function DomainsSection({
   // it under "no client" would make the untagged view lie about what is
   // untagged.
   const shown = feed.rollups.filter((rollup) => {
+    const meta = feed.domains.get(rollup.domainId);
+    if (search.trim() && ![rollup.domainId, meta?.name, meta?.category].join(" ").toLowerCase().includes(search.trim().toLowerCase())) return false;
     if (accountFilter === "") return true;
     const tag = feed.domains.get(rollup.domainId)?.accountId ?? "";
     return accountFilter === ACCOUNT_UNTAGGED ? tag === "" : tag === accountFilter;
@@ -82,6 +86,7 @@ export function DomainsSection({
   return (
     <div className="os-app-stack">
       <Head title="Domains" meta={feed.state === "ready" && !feed.error ? shown.length : undefined}>
+        <Refine label="Search domains" search={search} onSearch={setSearch} placeholder="Search domains" />
         <Select
           id="training-domain-account"
           label="Client"
@@ -115,7 +120,7 @@ export function DomainsSection({
       ) : null}
 
       {feed.state === "ready" && feed.rollups.length > 0 && shown.length === 0 ? (
-        <Caption>No domains are tagged with that client.</Caption>
+        <Caption>No domains match these filters.</Caption>
       ) : null}
 
       {feed.state === "ready" && feed.rollups.length === 0 ? (
@@ -199,52 +204,24 @@ function DomainCard({
  * has no way to know what is behind pages it has not asked for.
  */
 function DomainDetail({ domainId }: { domainId: string }) {
-  const connection = useOsConnection();
-  const [chunks, setChunks] = useState<Chunk[]>([]);
-  const [cursor, setCursor] = useState("");
-  const [exhausted, setExhausted] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const load = useCallback(
-    async (from: string, append: boolean) => {
-      if (connection === null) return;
-      setBusy(true);
-      try {
-        const result = await connection.query.documentChunksForDomain(
-          { domainId },
-          from === "" ? {} : { cursor: from },
-        );
-        const page = (result.rows() as Row[]).map(chunkFromRow);
-        setChunks((held) => (append ? [...held, ...page] : page));
-        const next = result.meta()?.cursor ?? "";
-        setCursor(next);
-        setExhausted(next === "");
-        setError("");
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+  const feed = usePagedCollection<Row>(`training:domain-chunks:${domainId}`, connection => ({
+    concept: "v1:knowledge:documentChunk", actions: [],
+    seed: async (cursor, signal) => {
+      const result = await connection.query.documentChunksForDomain({ domainId }, { cursor, signal });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    [connection, domainId],
-  );
-
-  useEffect(() => {
-    setChunks([]);
-    setCursor("");
-    setExhausted(false);
-    setError("");
-    void load("", false);
-  }, [load]);
-
+  }));
+  const chunks = feed.snapshot.rows.map(chunkFromRow);
+  const error = feed.snapshot.error;
+  const busy = feed.snapshot.state === "seeding" || feed.loadingMore;
+  const exhausted = !feed.hasMore;
   const groups = groupChunksByDocument(chunks);
 
   return (
     <div className="os-train-domain-detail">
       {error === "" ? null : (
         <Notice tone="error" sentence="This domain's chunks did not come back." detail={error}>
-          <Button onClick={() => void load("", false)}>Try again</Button>
+          <Button onClick={feed.reseed}>Try again</Button>
         </Notice>
       )}
 
@@ -271,11 +248,7 @@ function DomainDetail({ domainId }: { domainId: string }) {
           {chunks.length} chunk{chunks.length === 1 ? "" : "s"} loaded
           {exhausted ? " -- that is all of them" : ""}.
         </span>
-        {exhausted ? null : (
-          <Button onClick={() => void load(cursor, true)} busy={busy}>
-            Load more
-          </Button>
-        )}
+        <LoadMore feed={feed} />
       </div>
 
       {/* THE INERT ENTRY POINT. Attaching a domain to an agent rides

@@ -11,11 +11,11 @@ beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
 });
 
-function openIndex(access?: Parameters<typeof renderShell>[0] extends undefined ? never : { access: typeof ADMIN }) {
+async function openIndex(access?: Parameters<typeof renderShell>[0] extends undefined ? never : { access: typeof ADMIN }) {
   renderShell(access);
   openFromLauncher("Settings");
   gotoSection("Settings", "Apps");
-  return screen.getByRole("list", { name: "Installed apps" });
+  return screen.findByRole("list", { name: "Installed apps" });
 }
 
 /** The index row for an app, scoped to the list -- an app's name also
@@ -29,8 +29,8 @@ function entryFor(list: HTMLElement, name: string): HTMLElement {
 }
 
 describe("the apps index", () => {
-  it("lists exactly the apps this session may open", () => {
-    const list = openIndex({ access: ADMIN });
+  it("lists exactly the apps this session may open", async () => {
+    const list = await openIndex({ access: ADMIN });
     expect(within(list).getByText("Files")).toBeTruthy();
     expect(list.classList.contains("os-record-list")).toBe(true);
     expect(screen.getByRole("heading", { name: "Apps" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe(String(within(list).getAllByRole("listitem").length));
@@ -41,16 +41,16 @@ describe("the apps index", () => {
     expect(entryFor(list, "Settings")).toBeTruthy();
   });
 
-  it("omits admin-gated apps from a reader's index", () => {
-    const list = openIndex({ access: READER });
+  it("omits admin-gated apps from a reader's index", async () => {
+    const list = await openIndex({ access: READER });
     expect(within(list).queryByText("Users")).toBeNull();
     expect(within(list).queryByText("Training")).toBeNull();
     expect(within(list).queryByText("Fleet")).toBeNull();
     expect(within(list).getByText("Files")).toBeTruthy();
   });
 
-  it.each(["owner", "developer"])("opens Fleet settings for a %s", (role) => {
-    const list = openIndex({ access: { ...OWNER, role } });
+  it.each(["owner", "developer"])("opens Fleet settings for a %s", async (role) => {
+    const list = await openIndex({ access: { ...OWNER, role } });
     fireEvent.click(within(entryFor(list, "Fleet")).getByRole("button", { name: "Settings" }));
 
     // The Fleet window is open AND showing its own settings section -- which
@@ -61,13 +61,13 @@ describe("the apps index", () => {
     );
   });
 
-  it("focuses the app's EXISTING window rather than opening a second one", () => {
+  it("focuses the app's EXISTING window rather than opening a second one", async () => {
     renderShell({ access: OWNER });
     openFromLauncher("Fleet");
     openFromLauncher("Settings");
     gotoSection("Settings", "Apps");
 
-    const list = screen.getByRole("list", { name: "Installed apps" });
+    const list = await screen.findByRole("list", { name: "Installed apps" });
     fireEvent.click(within(entryFor(list, "Fleet")).getByRole("button", { name: "Settings" }));
 
     // One Fleet window, on its settings section. Open-by-id is the path
@@ -75,8 +75,8 @@ describe("the apps index", () => {
     expect(screen.getAllByRole("navigation", { name: "Fleet sections" })).toHaveLength(1);
   });
 
-  it("is a directory, not a host -- it never renders another app's settings UI", () => {
-    const list = openIndex({ access: OWNER });
+  it("is a directory, not a host -- it never renders another app's settings UI", async () => {
+    const list = await openIndex({ access: OWNER });
     // The Fleet's own settings surface offers an "open Fleet on" picker.
     // Nothing of it may appear inside the index.
     expect(within(list).queryByRole("combobox")).toBeNull();

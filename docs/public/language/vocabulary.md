@@ -15,7 +15,7 @@ Every named thing in the MemQL language -- construct, annotation, keyword, opera
 
 It is the companion to the [grammar](grammar.md): the grammar says what may be written, this says what each written thing does. Together they are what a model is given before it is asked to write MemQL.
 
-Edition `2026`, grammar version `2026.10-event-journal-on-write-bceec6b9`.
+Edition `2026`, grammar version `2026.11-case-insensitive-substring-bceec6b9`.
 
 | Section | Entries |
 |---|---:|
@@ -279,7 +279,7 @@ Every call an expression may make, one spelling each. `P` lowers to SQL; `M` run
 | `secret` | `secret(name string) string` | M | Returns the decrypted value of the secret named name, looked up among the partition secrets and then the global ones. A name that matches no secret is an error, and the value must never be logged. |
 | `shortId` | `shortId(value string) string` | M | Returns the bare short id of value by stripping one canonical concept prefix; a value that is already bare comes back unchanged. An absent or blank value yields the empty string. |
 | `string.count` | `string.count() number` | M | Returns the number of characters in the string, counting Unicode code points rather than bytes. An absent string counts as zero. |
-| `string.includes` | `string.includes(sub string) bool` | P | Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. |
+| `string.includes` | `string.includes(sub string, ignoreCase? bool) bool` | P | Reports whether sub occurs in the string. Pass true as ignoreCase for a case-insensitive search; in a pushed-down filter this option must be a literal boolean. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. |
 | `systemSecret` | `systemSecret(name string) string` | M | Returns the decrypted value of the global secret named name, with no partition lookup. A name that matches no secret is an error, and the value must never be logged. |
 | `systemVar` | `systemVar(name string) string` | M | Returns the plaintext value of the global configuration variable named name, with no partition lookup. A name that matches no variable is an error. |
 | `toString` | `toString(value any) string` | M | Returns value as text; a string comes back unchanged. An absent value yields the empty string. |

@@ -76,6 +76,7 @@ builtin reviewsUpdateSettings {
 @description("The moderation list: one store's reviews with the state their decision log gives them and the last decision on each. state defaults to waiting, oldest first; every other state, and all, is newest first. Projects the writer's email, because a moderator may need to reply; never served to a storefront.")
 @requiresCapability("execute", "app:deployables/reviews")
 builtin reviewsList {
+  search string @description("Literal case-insensitive review title, text, product or writer search, before pagination.")
   siteId  string  @required  @description("The store's site: the organization gate judges the act against its organization, and the store must be bound to it.")
   storeId  string   @required  @description("The store to list.")
   state    string   @description("waiting (the default), published, declined, removed, erased or all.")
@@ -151,6 +152,7 @@ builtin reviewsGet {
 @args(profile="object")
 @description("THE DECISION LOG: every decision on one store's reviews, newest first, each with who made it, when, on which revision, why, and the product, headline and current state of its review -- never the writer's name or address. Read under the caller's own actor.")
 builtin reviewsDecisionLog {
+  search string @description("Literal case-insensitive decision, note, product or review-title search, before pagination.")
   storeId  string   @required  @description("The store whose log to read.")
   siteId   string   @required  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
   limit    integer  @description("Page size; 50 when omitted, at most 200.")

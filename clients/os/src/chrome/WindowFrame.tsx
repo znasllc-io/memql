@@ -64,22 +64,30 @@ export function WindowFrame({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const searchDialog = useRef<HTMLDialogElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const { host: searchHost, openVisible: openContentSearch } = useWindowSearchHost();
-  const [pendingSearch, setPendingSearch] = useState(false);
+  const { host: searchHost, openVisible: openContentSearch, revision: searchRevision } = useWindowSearchHost();
+  const [pendingSearch, setPendingSearch] = useState<{ sectionId: string; revision: number } | null>(null);
   useEffect(() => {
-    if (!pendingSearch) return;
+    if (pendingSearch === null) return;
+    if (hidden || win.sectionId !== pendingSearch.sectionId || (win.sectionNavigation?.revision ?? 0) !== pendingSearch.revision) { setPendingSearch(null); return; }
     // The app may reveal a retained list in its layout effect after navigation.
     const frame = requestAnimationFrame(() => {
-      if (!openContentSearch()) { setSearchQuery(""); searchDialog.current?.showModal(); }
-      setPendingSearch(false);
+      if (!openContentSearch()) {
+        if (searchHost.loading > 0) return;
+        setSearchQuery(""); searchDialog.current?.showModal();
+      }
+      setPendingSearch(null);
     });
     return () => cancelAnimationFrame(frame);
-  }, [pendingSearch, win.sectionId, win.sectionNavigation?.revision]);
+  }, [pendingSearch, win.sectionId, win.sectionNavigation?.revision, searchRevision, hidden]);
   const searchApp = () => {
     if (openContentSearch()) return;
     if (manifest.searchSection) {
       actions.navigateSection(win.id, manifest.searchSection);
-      setPendingSearch(true);
+      setPendingSearch({ sectionId: manifest.searchSection, revision: (win.sectionNavigation?.revision ?? 0) + 1 });
+    } else if (searchHost.loading > 0) {
+      // Every app can register a current-section search after its chunk loads,
+      // including apps without a default search destination in the manifest.
+      setPendingSearch({ sectionId: win.sectionId, revision: win.sectionNavigation?.revision ?? 0 });
     } else { setSearchQuery(""); searchDialog.current?.showModal(); }
   };
   const content = useRef<HTMLDivElement>(null);

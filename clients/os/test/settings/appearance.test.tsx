@@ -36,53 +36,54 @@ describe("the theme registry", () => {
 });
 
 describe("the Appearance section", () => {
-  function openAppearance(storage = memStorage()) {
+  async function openAppearance(storage = memStorage()) {
     renderShell({ storage });
     openFromLauncher("Settings");
     gotoSection("Settings", "Appearance");
+    await screen.findByRole("radiogroup", { name: "Theme" });
     return storage;
   }
 
-  it("offers the built-in pack, selected", () => {
-    openAppearance();
+  it("offers the built-in pack, selected", async () => {
+    await openAppearance();
     const group = screen.getByRole("radiogroup", { name: "Theme" });
     const graphite = within(group).getByRole("radio", { name: "Graphite (built in)" });
     expect(graphite.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("sends you to the drawer to try one on, rather than previewing here", () => {
+  it("sends you to the drawer to try one on, rather than previewing here", async () => {
     // This panel is a WINDOW on the desktop it would be previewing, so it
     // cannot show a preview without previewing itself. An absent affordance
     // with no account of itself reads as an oversight, so it says where the
     // preview lives.
-    openAppearance();
+    await openAppearance();
     expect(screen.getByText(/Themes in the Launcher/i)).toBeTruthy();
   });
 
-  it("lists every built-in pack", () => {
-    openAppearance();
+  it("lists every built-in pack", async () => {
+    await openAppearance();
     const group = screen.getByRole("radiogroup", { name: "Theme" });
     for (const name of ["Graphite (built in)", "Vellum (built in)", "Cobalt (built in)"]) {
       expect(within(group).getByRole("radio", { name })).toBeTruthy();
     }
   });
 
-  it("applies the pack as data-os-theme on the document root", () => {
-    openAppearance();
+  it("applies the pack as data-os-theme on the document root", async () => {
+    await openAppearance();
     fireEvent.click(screen.getByRole("radio", { name: "Graphite (built in)" }));
     expect(document.documentElement.getAttribute("data-os-theme")).toBe("graphite");
   });
 
-  it("persists the pack through DesktopStore", () => {
-    const storage = openAppearance();
+  it("persists the pack through DesktopStore", async () => {
+    const storage = await openAppearance();
     fireEvent.click(screen.getByRole("radio", { name: "Graphite (built in)" }));
     const stored = storage.getItem(DESKTOP_STORE_KEY);
     expect(stored).toBeTruthy();
     expect(JSON.parse(stored!).themePack).toBe("graphite");
   });
 
-  it("never touches mode -- the two controls are orthogonal", () => {
-    openAppearance();
+  it("never touches mode -- the two controls are orthogonal", async () => {
+    await openAppearance();
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
 

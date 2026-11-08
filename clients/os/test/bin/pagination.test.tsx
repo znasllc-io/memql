@@ -1,0 +1,43 @@
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+const h = vi.hoisted(() => ({ connection: null as any }));
+vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection, osBridgePath: "", bridgePathFor: () => "" }));
+const { fakeConnection, artifactRow, folderRow } = await import("../files/harness");
+const { renderBin } = await import("./harness");
+const artifacts = Array.from({ length: 25 }, (_, n) => artifactRow({ id: `artifact-${n}`, title: `Archived ${String(n).padStart(2, "0")}`, archived: true, producedByWorkerName: n === 0 ? "Research workstation" : "Studio", createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T10:00:00Z` }));
+const folders = Array.from({ length: 25 }, (_, n) => folderRow({ id: `folder-${n}`, name: `Folder ${n}`, archived: true, createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T11:00:00Z` }));
+beforeEach(() => { h.connection = fakeConnection({ archived: artifacts, archivedFolders: folders }); });
+afterEach(cleanup);
+it("merges ten recent archived resources and retains the twenty-row window on reopen", async () => {
+  const first = await renderBin();
+  const rows = () => within(screen.getByRole("list", { name: "Archived items" })).getAllByRole("button");
+  expect(rows()).toHaveLength(10);
+  expect(rows()[0]?.textContent).toContain("Folder 24");
+  expect(rows()[1]?.textContent).toContain("Archived 24");
+  expect(h.connection.callsNamed("libraryArchivedArtifacts")).toHaveLength(0);
+  expect(h.connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(1);
+  expect(h.connection.callsNamed("libraryArchivedFoldersBrowse")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await waitFor(() => expect(rows()).toHaveLength(20));
+  first.unmount();
+  await renderBin();
+  expect(rows()).toHaveLength(20);
+  expect(h.connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(2);
+  expect(h.connection.callsNamed("libraryArchivedFoldersBrowse")).toHaveLength(2);
+});
+it("finds a machine name outside the first page and leaves other owners' events out", async () => {
+  await renderBin();
+  fireEvent.click(screen.getByRole("button", { name: "Search the Bin" }));
+  fireEvent.change(screen.getByPlaceholderText("Name, description, label or machine"), { target: { value: "RESEARCH" } });
+  await screen.findByText("Archived 00");
+  expect(within(screen.getByRole("list", { name: "Archived items" })).getAllByRole("button")).toHaveLength(1);
+  expect(h.connection.callsNamed("libraryArtifactsBrowse").at(-1)).toContain('search: "RESEARCH"');
+  await act(async () => h.connection.subscriptions.emit("v1:library:artifact", artifactRow({ id: "foreign", ownerUserId: "someone-else", archived: true, title: "Research private" })));
+  expect(screen.queryByText("Research private")).toBeNull();
+});
+it.each(["settings", "logs"])("does not request archived populations on %s", async section => {
+  await renderBin({ section });
+  expect(h.connection.callsNamed("libraryArtifactsBrowse")).toHaveLength(0);
+  expect(h.connection.callsNamed("libraryArchivedFoldersBrowse")).toHaveLength(0);
+  expect(h.connection.callsNamed("libraryArchivedFolders")).toHaveLength(0);
+});

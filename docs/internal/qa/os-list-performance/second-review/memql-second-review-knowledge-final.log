@@ -1,0 +1,3 @@
+{"class": "default", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=180s", "./integrations/knowledge"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok      github.com/znasllc-io/memql/integrations/knowledge  44.918s

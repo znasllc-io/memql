@@ -112,6 +112,8 @@ func AgentProgressRecoveryBuild(args AgentProgressRecoveryArgs) string {
 
 // AgentRecoveryExplanation -- Human wording for the bounded recovery consent card.
 type AgentRecoveryExplanationArgs struct {
+	Needs  []string
+	Action string
 }
 
 // AgentRecoveryExplanation calls the engine logic agentRecoveryExplanation.
@@ -121,8 +123,17 @@ func (qc *QueryClient) AgentRecoveryExplanation(ctx context.Context, args AgentR
 }
 
 func AgentRecoveryExplanationBuild(args AgentRecoveryExplanationArgs) string {
-	_ = args
-	return "logic agentRecoveryExplanation()"
+	var b strings.Builder
+	b.WriteString("logic agentRecoveryExplanation(")
+	b.WriteString("needs: ")
+	b.WriteString(renderMemQLValue(args.Needs))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	b.WriteString(")")
+	return b.String()
 }
 
 // AgentRecoveryNeedsConsent -- Only a verified consent refusal is a reason to ask for access.
@@ -210,6 +221,9 @@ func ClusterInfraRefreshBuild(args ClusterInfraRefreshArgs) string {
 
 // ComposeNeedsSourceRows -- Table formats without authored rows reuse source rows; typed output owns its data.
 type ComposeNeedsSourceRowsArgs struct {
+	OutputKind string
+	Format     string
+	HasRows    bool
 }
 
 // ComposeNeedsSourceRows calls the engine logic composeNeedsSourceRows.
@@ -219,8 +233,22 @@ func (qc *QueryClient) ComposeNeedsSourceRows(ctx context.Context, args ComposeN
 }
 
 func ComposeNeedsSourceRowsBuild(args ComposeNeedsSourceRowsArgs) string {
-	_ = args
-	return "logic composeNeedsSourceRows()"
+	var b strings.Builder
+	b.WriteString("logic composeNeedsSourceRows(")
+	b.WriteString("outputKind: ")
+	b.WriteString(quoteMemQL(args.OutputKind))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("format: ")
+	b.WriteString(quoteMemQL(args.Format))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("hasRows: ")
+	b.WriteString(fmt.Sprintf("%v", args.HasRows))
+	b.WriteString(")")
+	return b.String()
 }
 
 // ConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL body language has no clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go).
@@ -526,6 +554,9 @@ func KnowledgeHasSeedArticlesBuild(args KnowledgeHasSeedArticlesArgs) string {
 
 // KnowledgeRefreshEligible -- Event-driven refresh uses the stale-signal threshold; the sweep uses cadence.
 type KnowledgeRefreshEligibleArgs struct {
+	StaleEvent       bool
+	StaleSignalCount float64
+	Due              bool
 }
 
 // KnowledgeRefreshEligible calls the engine logic knowledgeRefreshEligible.
@@ -535,8 +566,24 @@ func (qc *QueryClient) KnowledgeRefreshEligible(ctx context.Context, args Knowle
 }
 
 func KnowledgeRefreshEligibleBuild(args KnowledgeRefreshEligibleArgs) string {
-	_ = args
-	return "logic knowledgeRefreshEligible()"
+	var b strings.Builder
+	b.WriteString("logic knowledgeRefreshEligible(")
+	b.WriteString("staleEvent: ")
+	b.WriteString(fmt.Sprintf("%v", args.StaleEvent))
+	if args.StaleSignalCount != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("staleSignalCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.StaleSignalCount))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("due: ")
+	b.WriteString(fmt.Sprintf("%v", args.Due))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryRevisionReviewGrounding -- Validate review evidence against the candidate, never an attached older draft. Presence is mechanical; correctness and missing requirements remain model judgments.
@@ -842,6 +889,10 @@ func UsersDueDeletionReminderBuild(args UsersDueDeletionReminderArgs) string {
 
 // WorkSpineRecoveryAct -- Choose a localized remedy; a retry never restores a consumed budget or erases completed effects.
 type WorkSpineRecoveryActArgs struct {
+	Symptom      string
+	RetriesSpent int
+	MaxRetries   int
+	HasGoal      bool
 }
 
 // WorkSpineRecoveryAct calls the engine logic workSpineRecoveryAct.
@@ -851,12 +902,33 @@ func (qc *QueryClient) WorkSpineRecoveryAct(ctx context.Context, args WorkSpineR
 }
 
 func WorkSpineRecoveryActBuild(args WorkSpineRecoveryActArgs) string {
-	_ = args
-	return "logic workSpineRecoveryAct()"
+	var b strings.Builder
+	b.WriteString("logic workSpineRecoveryAct(")
+	b.WriteString("symptom: ")
+	b.WriteString(quoteMemQL(args.Symptom))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("retriesSpent: ")
+	b.WriteString(fmt.Sprintf("%v", args.RetriesSpent))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("maxRetries: ")
+	b.WriteString(fmt.Sprintf("%v", args.MaxRetries))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("hasGoal: ")
+	b.WriteString(fmt.Sprintf("%v", args.HasGoal))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkSpineReplanRefusal -- Explain which mandatory validator refused a proposed replan.
 type WorkSpineReplanRefusalArgs struct {
+	Stage   string
+	Message string
 }
 
 // WorkSpineReplanRefusal calls the engine logic workSpineReplanRefusal.
@@ -866,8 +938,17 @@ func (qc *QueryClient) WorkSpineReplanRefusal(ctx context.Context, args WorkSpin
 }
 
 func WorkSpineReplanRefusalBuild(args WorkSpineReplanRefusalArgs) string {
-	_ = args
-	return "logic workSpineReplanRefusal()"
+	var b strings.Builder
+	b.WriteString("logic workSpineReplanRefusal(")
+	b.WriteString("stage: ")
+	b.WriteString(quoteMemQL(args.Stage))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("message: ")
+	b.WriteString(quoteMemQL(args.Message))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkSpineRoute -- Value-only routing; classification and effects remain in the enclosing Spine.
@@ -892,6 +973,8 @@ func WorkSpineRouteBuild(args WorkSpineRouteArgs) string {
 
 // WorkSpineSectionInstruction -- Reusable section instruction policy, shared by inline and cataloguable live sections.
 type WorkSpineSectionInstructionArgs struct {
+	Section map[string]any
+	Goal    string
 }
 
 // WorkSpineSectionInstruction calls the engine logic workSpineSectionInstruction.
@@ -901,8 +984,17 @@ func (qc *QueryClient) WorkSpineSectionInstruction(ctx context.Context, args Wor
 }
 
 func WorkSpineSectionInstructionBuild(args WorkSpineSectionInstructionArgs) string {
-	_ = args
-	return "logic workSpineSectionInstruction()"
+	var b strings.Builder
+	b.WriteString("logic workSpineSectionInstruction(")
+	b.WriteString("section: ")
+	b.WriteString(renderMemQLValue(args.Section))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("goal: ")
+	b.WriteString(quoteMemQL(args.Goal))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkSpineSustainedArtifact -- Capability artifacts need generation, storage and verification within the owner's ceilings.

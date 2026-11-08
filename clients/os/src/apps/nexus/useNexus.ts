@@ -11,56 +11,17 @@ import {
   RUN_CONCEPT,
   STEP_CONCEPT,
 } from "./concepts";
-import { modelCallFromRow, observationFromRow, sameRow, stepFromRow, type ModelCallRow, type ObservationRow } from "./rows";
+import { runFromRow, modelCallFromRow, observationFromRow, sameRow, stepFromRow, type ModelCallRow, type ObservationRow } from "./rows";
 
-// The Nexus app's feeds, and the one read that is deliberately not a feed.
-//
-// ===========================================================================
-// THREE FEEDS AT THE APP ROOT, ONE PER CONCEPT
-// ===========================================================================
-// Goals, runs and approvals are retained ONCE, at the app root, and passed
-// down. `useLiveCollection` constructs a collection per COMPONENT -- it
-// memoises on `[connection, key]` inside the hook and does not call the SDK's
-// shared registry -- so a second `useRuns()` inside the run page would open a
-// second subscription and run a second seed over the same concept, and the two
-// would then be free to disagree about what the cluster holds. That is the
-// Deployables map-and-list failure, and here it would be worse: the Goals
-// surface decides whether a run is in flight from the run feed and the run
-// page decides which acts to offer from the same fact.
-//
-// The rule is per CONCEPT, not per app, so three feeds is not three copies of
-// one thing: a goal, a run and an approval describe different things and
-// cannot disagree.
-//
-// ===========================================================================
-// STEPS ARE THE FOURTH, AND THEY ARE PER-RUN AND NOT AT THE ROOT
-// ===========================================================================
-// This is the rule the Deployables app wrote down about deployment timelines:
-// a per-run detail feed is retained BY THE PAGE and never by the root, because
-// subscribing a window to every step of every run in the cluster to render one
-// timeline is exactly what that rule forbids. A run can have hundreds of steps
-// and a person can have hundreds of runs.
-//
-// So the steps feed is keyed on the open run and lives as long as the page
-// does. `key` is null while no run is open, which is what `useLiveCollection`
-// takes to mean "no collection at all" rather than "a collection over
-// nothing".
-//
-// ===========================================================================
-// THE JOURNAL IS NOT LIVE AND THE SURFACE SAYS SO
-// ===========================================================================
-// `v1:work:modelCall` and `v1:work:observation` carry no broadcast routing
-// rule, deliberately, on volume grounds -- one row per model request and one
-// per tool result (design record section D). A `useLiveCollection` over either
-// would render "Loading from the cluster" and then a list that silently never
-// moved, which is WORSE than a plain read: the caption would be claiming
-// wiring that is not there. The visible journal therefore polls while its run is active, retains
-// useful rows during a failed refresh, and offers Retry. It stops polling when
-// the run finishes or the page closes.
+// Complete summary feeds are reserved for the Overview and the unresolved
+// approval-recovery set. Resource browsing uses useNexusDirectory's manual
+// ten-row pages; selected records and their joins are scoped by identity.
+// Steps and artifacts belong only to the opened run. The journal's concepts
+// do not broadcast, so its bounded reads poll while that run remains active.
 
 /** Every goal this caller owns, newest first. */
-export function useGoals(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("work:goals", (connection) => ({
+export function useGoals(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "work:goals" : null, (connection) => ({
     concept: GOAL_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.workGoalsForOwner({}, { signal });
@@ -82,13 +43,12 @@ export function useGoals(): LiveCollectionHandle<Row> {
  * Re-read events through the same projection so updates cannot put them back
  * into this app-wide collection. Run steps are still loaded only on opening.
  */
-export function useRuns(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("work:runs", (connection) => ({
+export function useRuns(enabled = true, recoveryOnly = false): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? (recoveryOnly ? "work:approval-recovery-runs" : "work:runs") : null, (connection) => ({
     concept: RUN_CONCEPT,
     seed: async (cursor, signal) => {
-      const result = await connection.query.workRunSummariesForOwner(
-        {}, { signal, ...(cursor !== "" ? { cursor } : {}) },
-      );
+      const method = recoveryOnly ? connection.query.workApprovalRecoveryRuns.bind(connection.query) : connection.query.workRunSummariesForOwner.bind(connection.query);
+      const result = await method({}, { signal, ...(cursor !== "" ? { cursor } : {}) });
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
@@ -96,6 +56,7 @@ export function useRuns(): LiveCollectionHandle<Row> {
       return result.rows()[0] ?? null;
     },
     rereadEveryEvent: true,
+    inScope: row => !recoveryOnly || (() => { const run = runFromRow(row); return !run.cancelRequested && ((run.status === "waiting" && run.waitingOnKind === "approval") || (run.status === "abandoned" && run.errorCode === "run_abandoned" && !!run.humanResumeId)); })(),
   }));
 }
 
@@ -106,8 +67,8 @@ export function useRuns(): LiveCollectionHandle<Row> {
  * row so an open detail can show its receipt; the list and waiting count
  * must project only pending rows. A decision is an update, not a deletion.
  */
-export function useApprovals(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("work:approvals", (connection) => ({
+export function useApprovals(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "work:approvals" : null, (connection) => ({
     concept: APPROVAL_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.workApprovalsForOwner({}, { signal });
