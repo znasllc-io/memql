@@ -231,6 +231,21 @@ func (s *store) pendingApprovalsForOwner(ctx context.Context) ([]map[string]any,
 	return s.query(ctx, "query workApprovalsForOwner()")
 }
 
+// routingReviewsForCluster reads the nightly routing reviews: every pending
+// one, or one by id whatever its decision. They are @serverOnly reads, and the
+// ACTOR in ctx decides the rows: the caller passes the system actor, built
+// after the routing-author check (routing_review.go says why).
+//
+// Two queries rather than one with an optional id: the engine refuses an empty
+// value compared against row.id, so "every pending review" cannot be the unset
+// form of "this review".
+func (s *store) routingReviewsForCluster(ctx context.Context, approvalId string) ([]map[string]any, error) {
+	if id := strings.TrimSpace(approvalId); id != "" {
+		return s.queryInternal(ctx, "query "+call("workRoutingReviewForCluster", map[string]any{"approvalId": id}))
+	}
+	return s.queryInternal(ctx, "query workRoutingReviewsForCluster()")
+}
+
 // currentProcedureHash is what a procedurePromotion approval's construct
 // hashes to NOW (epic memql#5408, D15). It reads under the CALLER's actor --
 // the only caller is a person deciding their own approval, and the construct

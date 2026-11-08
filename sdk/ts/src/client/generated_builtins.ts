@@ -7930,6 +7930,28 @@ QueryClient.prototype.workRecordGoalEvaluation = function (this: QueryClient, ar
   return this.executeNamed("workRecordGoalEvaluation", buildWorkRecordGoalEvaluation(args), opts);
 };
 
+/** The nightly routing reviews the caller may decide: the pending ones, oldest first, or one by id whatever its decision. No person owns a routing review -- the evidence fold raises it as the cluster -- so the owner-scoped approval reads never list one. An owner or developer, the people who may change routing, sees them; anyone else gets no rows. */
+export interface WorkRoutingReviewsArgs {
+  /** One routing review by id, decided or not. Omit for every pending one. */
+  approvalId?: string;
+}
+
+export function buildWorkRoutingReviews(args: WorkRoutingReviewsArgs): string {
+  const parts: string[] = [];
+  if (args.approvalId !== undefined) parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin workRoutingReviews(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRoutingReviews(args: WorkRoutingReviewsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRoutingReviews = function (this: QueryClient, args: WorkRoutingReviewsArgs = {} as WorkRoutingReviewsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRoutingReviews", buildWorkRoutingReviews(args), opts);
+};
+
 /** Inspect the catalog and verify baseline content against installed seeds. */
 export interface WorkSkillCatalogArgs {
 }

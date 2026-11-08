@@ -10226,6 +10226,29 @@ func WorkRecordGoalEvaluationBuild(args WorkRecordGoalEvaluationArgs) string {
 	return b.String()
 }
 
+// WorkRoutingReviews -- The nightly routing reviews the caller may decide: the pending ones, oldest first, or one by id whatever its decision. No person owns a routing review -- the evidence fold raises it as the cluster -- so the owner-scoped approval reads never list one. An owner or developer, the people who may change routing, sees them; anyone else gets no rows.
+type WorkRoutingReviewsArgs struct {
+	// One routing review by id, decided or not. Omit for every pending one.
+	ApprovalId string
+}
+
+// WorkRoutingReviews calls the engine builtin workRoutingReviews.
+func (qc *QueryClient) WorkRoutingReviews(ctx context.Context, args WorkRoutingReviewsArgs) (*Result, error) {
+	call := WorkRoutingReviewsBuild(args)
+	return qc.executeNamed(ctx, "workRoutingReviews", call)
+}
+
+func WorkRoutingReviewsBuild(args WorkRoutingReviewsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workRoutingReviews(")
+	if args.ApprovalId != "" {
+		b.WriteString("approvalId: ")
+		b.WriteString(quoteMemQL(args.ApprovalId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkSkillCatalog -- Inspect the catalog and verify baseline content against installed seeds.
 type WorkSkillCatalogArgs struct {
 }

@@ -1399,6 +1399,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// audit read; only applied booleans leave the capability boundary.
 		{Path: "work/queries.memql", Name: "workDocumentApprovedRevisions"}: true,
 
+		// The nightly routing review (design record 2026-11-08-routing-review-apply):
+		// the evidence fold raises it as the cluster, so NO person owns one and
+		// actor.userId scoping would list it to nobody. The work integration
+		// reads it under the system actor only after the caller passed the
+		// routing-author check routingRuleSave applies (owner or developer).
+		{Path: "work/queries.memql", Name: "workRoutingReviewsForCluster"}: true,
+		{Path: "work/queries.memql", Name: "workRoutingReviewForCluster"}:  true,
+
 		// Note reads borrow the backing owner only after artifact authorization.
 		// actor.userId cannot attest the original caller under that authority;
 		// only the integration may supply authorUserId, or a caller could ask

@@ -465,6 +465,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"permissionId": "string (required) -- the approval receipt"},
 		},
 		{
+			Name:        "routingReviews",
+			Description: "The nightly routing reviews an owner or developer may decide: the pending ones, oldest first, or one by id whatever its decision. Anyone else gets no rows.",
+			Handler:     i.handleRoutingReviews,
+			ArgsSchema: map[string]string{
+				"approvalId": "string -- one routing review by id, decided or not; omit for every pending one",
+			},
+		},
+		{
 			Name:        "decideApproval",
 			Description: "Decide one of the caller's pending approvals and resume the run parked on it. Refused when the artifact changed since it was approved. Returns {approvalId, runId, decision, runResumed}.",
 			Handler:     i.handleDecideApproval,
