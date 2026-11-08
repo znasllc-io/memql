@@ -5018,3 +5018,30 @@ replica. Protocol tests exercise a pull-request-disabled provider, lost ref repl
 current owner credentials and a changed default branch. UI tests verify the
 confirmation interval, exact commit argument, retained failures, sealed-release
 history after profile changes and separate installation apply authority.
+
+## Pinned Tailwind download recovery (2026-11-08)
+
+Native Mac checks failed before testing when GitHub's browser download route
+returned six HTTP 504 responses for Tailwind v4.1.11. The release metadata still
+named the uploaded asset, and GitHub's documented asset API reached its storage.
+`scripts/identity/build-css.sh` therefore tries that official API only after the
+ordinary download retries fail. Existing pinned compilers and successful ordinary
+downloads keep their current path; no mirror, credential or version change is used.
+
+The fallback reads at most 1 MiB of metadata from the fixed upstream repository.
+It requires the exact published tag, one matching platform asset, an uploaded
+numeric asset identity, a positive size below 256 MiB and a SHA256 digest. It
+constructs the API URL itself and permits HTTPS redirects only. Downloaded bytes
+must match the recorded size and digest before entering the compiler cache or
+being signed or executed. Temporary metadata and partial bytes are removed on
+failure; API unavailability or missing verification data stops the build. The
+digest proves agreement with GitHub's release metadata, not independent upstream
+build provenance. A later retry resolves the same pin afresh.
+
+`TestBuildCSSFallsBackToTheVerifiedOfficialAsset` in
+`scripts/identity/build_css_test.go` covers the normal path, successful fallback,
+refused metadata, failed requests and size/digest mismatch, including no signing
+or execution on refusal. The existing compiler signature and version tests remain
+in place. An isolated Mac validation downloaded through the real API helper,
+verified and signed the pinned asset, and compiled the stylesheet successfully.
+Native pipeline success is still required before releasing this source.

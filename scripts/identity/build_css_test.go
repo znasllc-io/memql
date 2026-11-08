@@ -1,6 +1,8 @@
 package identity
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -181,6 +183,170 @@ func TestBuildCSSReplacesACachedCompilerThatIsNotThePin(t *testing.T) {
 			}
 			if got, err := os.ReadFile(filepath.Join(root, "bin/tools", asset)); err != nil || string(got) != wantBinary {
 				t.Errorf("bin/tools/%s = %q, err = %v; want %q", asset, got, err, wantBinary)
+			}
+		})
+	}
+}
+
+// The browser route can fail while GitHub's official asset API still serves
+// the pin. These fixtures exercise the real metadata parser and digest check
+// without network access. Neither signing nor execution may see refused bytes.
+func TestBuildCSSFallsBackToTheVerifiedOfficialAsset(t *testing.T) {
+	pin := tailwindPin(t)
+	tools := hostTools(t, "bash", "basename", "cat", "chmod", "cp", "dirname", "mkdir", "mktemp", "mv", "python3", "rm", "tr")
+	const asset = "tailwindcss-macos-arm64"
+	primaryURL := "https://github.com/tailwindlabs/tailwindcss/releases/download/" + pin + "/" + asset
+	metadataURL := "https://api.github.com/repos/tailwindlabs/tailwindcss/releases/tags/" + pin
+	assetURL := "https://api.github.com/repos/tailwindlabs/tailwindcss/releases/assets/1234"
+	compiler := "#!/usr/bin/env bash\n" +
+		"printf executed >> execution.log\n" +
+		"[[ ${BUN_JSC_useJIT:-} == 0 ]] || exit 97\n" +
+		"while (($#)); do [[ $1 != --output ]] || printf verified > \"$2\"; shift; done\n"
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(compiler)))
+	for _, tc := range []struct {
+		name      string
+		primary   bool
+		mutate    func(map[string]any, map[string]any)
+		failure   string
+		payload   string
+		want      bool
+		wantAsset bool
+		oversized bool
+	}{
+		{name: "successful primary never calls the API", primary: true, want: true},
+		{name: "504 uses the same official asset", want: true, wantAsset: true},
+		{name: "missing platform asset", mutate: func(r, _ map[string]any) { r["assets"] = []any{} }},
+		{name: "wrong platform asset", mutate: func(_, a map[string]any) { a["name"] = "tailwindcss-linux-x64" }},
+		{name: "ambiguous platform asset", mutate: func(r, a map[string]any) { r["assets"] = []any{a, a} }},
+		{name: "wrong release tag", mutate: func(r, _ map[string]any) { r["tag_name"] = "v0.0.0" }},
+		{name: "draft release", mutate: func(r, _ map[string]any) { r["draft"] = true }},
+		{name: "invalid asset ID", mutate: func(_, a map[string]any) { a["id"] = "1234/../../other" }},
+		{name: "boolean asset ID", mutate: func(_, a map[string]any) { a["id"] = true }},
+		{name: "oversized asset", mutate: func(_, a map[string]any) { a["size"] = 256 * 1024 * 1024 }},
+		{name: "missing checksum", mutate: func(_, a map[string]any) { delete(a, "digest") }},
+		{name: "oversized metadata", oversized: true},
+		{name: "metadata request refused", failure: "metadata"},
+		{name: "asset request fails after partial download", failure: "asset", wantAsset: true},
+		{name: "checksum mismatch", payload: strings.Replace(compiler, "verified", "tampered", 1), wantAsset: true},
+		{name: "size mismatch", payload: compiler + "# extra bytes\n", wantAsset: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, write := buildCSSCheckout(t)
+			write("path/uname", "#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo arm64 ;; *) exit 64 ;; esac\n")
+			write("path/codesign", "#!/bin/sh\nprintf signed >> signing.log\n[ \"$1\" = --verify ]\n")
+			a := map[string]any{"id": 1234, "name": asset, "state": "uploaded", "size": len(compiler), "digest": digest,
+				// The resolver must construct the official asset URL, not trust
+				// a download location supplied by the metadata response.
+				"url": "https://untrusted.invalid/asset", "browser_download_url": "http://untrusted.invalid/asset"}
+			r := map[string]any{"tag_name": pin, "draft": false, "prerelease": false, "assets": []any{a}}
+			if tc.mutate != nil {
+				tc.mutate(r, a)
+			}
+			metadata, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.oversized {
+				metadata = append(metadata, []byte(strings.Repeat(" ", 1048576))...)
+			}
+			write("release.json", string(metadata))
+			payload := tc.payload
+			if payload == "" {
+				payload = compiler
+			}
+			write("release-asset", payload)
+			write("path/curl", `#!/usr/bin/env python3
+import json, os, pathlib, shutil, sys
+args = sys.argv[1:]
+with open("curl.jsonl", "a") as log:
+    log.write(json.dumps(args) + "\n")
+url = args[-1]
+output = pathlib.Path(args[args.index("-o") + 1])
+if url == os.environ["PRIMARY_URL"]:
+    if os.environ["PRIMARY_OK"] == "true":
+        shutil.copyfile("release-asset", output)
+        sys.exit(0)
+    output.write_text("partial browser response")
+    sys.stderr.write("curl: (22) The requested URL returned error: 504\n")
+    sys.exit(22)
+if url == os.environ["METADATA_URL"]:
+    if os.environ["FAILURE"] == "metadata":
+        output.write_text("partial metadata")
+        sys.exit(22)
+    shutil.copyfile("release.json", output)
+elif url == os.environ["ASSET_URL"]:
+    if os.environ["FAILURE"] == "asset":
+        output.write_text("partial asset")
+        sys.exit(22)
+    shutil.copyfile("release-asset", output)
+else:
+    sys.exit("unexpected URL: " + url)
+`)
+			cmd := exec.Command("bash", "scripts/identity/build-css.sh")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "path")+string(os.PathListSeparator)+tools,
+				"PRIMARY_URL="+primaryURL, "METADATA_URL="+metadataURL, "ASSET_URL="+assetURL,
+				fmt.Sprintf("PRIMARY_OK=%t", tc.primary), "FAILURE="+tc.failure)
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.want {
+				t.Fatalf("build-css: err = %v; want success %t\n%s", err, tc.want, out)
+			}
+			for _, marker := range []string{"signing.log", "execution.log"} {
+				_, err := os.Stat(filepath.Join(root, marker))
+				if (err == nil) != tc.want {
+					t.Errorf("%s present = %t; want %t (verification must precede signing/execution)", marker, err == nil, tc.want)
+				}
+			}
+			css, err := os.ReadFile(filepath.Join(root, "component/identity/web/static/app.css"))
+			if err != nil || (string(css) == "verified") != tc.want {
+				t.Errorf("compiled CSS = %q, err = %v; want success %t", css, err, tc.want)
+			}
+			binary, err := os.ReadFile(filepath.Join(root, "bin/tools", asset))
+			if tc.want && (err != nil || string(binary) != compiler) || !tc.want && !os.IsNotExist(err) {
+				t.Errorf("cached compiler = %q, err = %v; want verified file only on success", binary, err)
+			}
+			partials, err := filepath.Glob(filepath.Join(root, "bin/tools/.tailwind-download.*"))
+			if err != nil || len(partials) != 0 {
+				t.Errorf("temporary downloads remain: %v, err = %v", partials, err)
+			}
+			requests, err := os.ReadFile(filepath.Join(root, "curl.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var urls []string
+			for _, line := range strings.Split(strings.TrimSpace(string(requests)), "\n") {
+				var args []string
+				if err := json.Unmarshal([]byte(line), &args); err != nil {
+					t.Fatal(err)
+				}
+				url := args[len(args)-1]
+				urls = append(urls, url)
+				if url == primaryURL {
+					continue
+				}
+				joined := strings.Join(args, " ")
+				for _, required := range []string{"--proto =https", "--proto-redir =https", "--max-redirs 3", "--connect-timeout 20", "--max-time ", "--max-filesize "} {
+					if !strings.Contains(joined, required) {
+						t.Errorf("API request lacks %q: %v", required, args)
+					}
+				}
+				wantHeader, wantLimit := "Accept: application/vnd.github+json", "1048576"
+				if url == assetURL {
+					wantHeader, wantLimit = "Accept: application/octet-stream", fmt.Sprint(len(compiler))
+				}
+				if !strings.Contains(joined, wantHeader) || !strings.Contains(joined, "--max-filesize "+wantLimit) {
+					t.Errorf("wrong API content type or size limit: %v", args)
+				}
+			}
+			wantURLs := []string{primaryURL}
+			if !tc.primary {
+				wantURLs = append(wantURLs, metadataURL)
+			}
+			if tc.wantAsset {
+				wantURLs = append(wantURLs, assetURL)
+			}
+			if strings.Join(urls, "\n") != strings.Join(wantURLs, "\n") {
+				t.Errorf("requested URLs = %v; want %v", urls, wantURLs)
 			}
 		})
 	}

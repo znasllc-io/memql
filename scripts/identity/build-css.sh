@@ -113,6 +113,90 @@ function ensure_valid_signature() {
     fi
 }
 
+# GitHub's browser download route can return 504 while the same release asset
+# remains available through its documented API. Only use this second route
+# after the normal retries fail. Resolve the exact published pin and platform;
+# never accept a URL from metadata, another release, or unverified bytes. The
+# digest is checked before macOS signing can change the downloaded file.
+function download_tailwind_from_api() (
+    local platform="$1" bin_path="$2" temporary metadata asset_id asset_size asset_digest
+    require_cmd python3 || return 1
+    temporary="$(mktemp -d "${TOOLS_DIR}/.tailwind-download.XXXXXX")" || return 1
+    trap 'rm -rf "${temporary}"' EXIT
+    if ! curl -sSL --fail --proto '=https' --proto-redir '=https' --max-redirs 3 \
+        --connect-timeout 20 --max-time 60 --max-filesize 1048576 \
+        -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -o "${temporary}/release.json" \
+        "https://api.github.com/repos/tailwindlabs/tailwindcss/releases/tags/${TAILWIND_VERSION}"; then
+        log_error "could not read the official Tailwind release metadata"
+        return 1
+    fi
+    if ! metadata="$(python3 - "${temporary}/release.json" "${TAILWIND_VERSION}" "tailwindcss-${platform}" <<'PY'
+import json
+import re
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as source:
+        body = source.read(1048577)
+    if len(body) > 1048576:
+        raise ValueError("release metadata exceeds 1 MiB")
+    release = json.loads(body)
+    if not isinstance(release, dict) or release.get("tag_name") != sys.argv[2] or release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("release metadata does not name the exact published pin")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("release metadata has no asset list")
+    matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == sys.argv[3]]
+    if len(matches) != 1:
+        raise ValueError("release metadata must contain exactly one matching platform asset")
+    asset = matches[0]
+    asset_id, size, digest = asset.get("id"), asset.get("size"), asset.get("digest")
+    if type(asset_id) is not int or not 0 < asset_id <= 9223372036854775807 or asset.get("state") != "uploaded":
+        raise ValueError("release asset has no valid uploaded identity")
+    if type(size) is not int or not 0 < size < 256 * 1024 * 1024:
+        raise ValueError("release asset size is outside the permitted bound")
+    if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+        raise ValueError("release asset has no valid SHA256 digest")
+    print(asset_id, size, digest[7:])
+except (OSError, ValueError) as error:
+    sys.exit("Tailwind API fallback refused: " + str(error))
+PY
+    )"; then
+        return 1
+    fi
+    read -r asset_id asset_size asset_digest <<< "${metadata}"
+    if ! curl -sSL --fail --proto '=https' --proto-redir '=https' --max-redirs 3 \
+        --connect-timeout 20 --max-time 300 --max-filesize "${asset_size}" \
+        -H 'Accept: application/octet-stream' -H 'X-GitHub-Api-Version: 2022-11-28' \
+        -o "${temporary}/tailwindcss" \
+        "https://api.github.com/repos/tailwindlabs/tailwindcss/releases/assets/${asset_id}"; then
+        log_error "could not download the official Tailwind release asset"
+        return 1
+    fi
+    if ! python3 - "${temporary}/tailwindcss" "${asset_size}" "${asset_digest}" <<'PY'
+import hashlib
+import os
+import sys
+
+try:
+    if os.path.getsize(sys.argv[1]) != int(sys.argv[2]):
+        raise ValueError("release asset size does not match its metadata")
+    digest = hashlib.sha256()
+    with open(sys.argv[1], "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != sys.argv[3]:
+        raise ValueError("release asset SHA256 does not match its metadata")
+except (OSError, ValueError) as error:
+    sys.exit("Tailwind API fallback refused: " + str(error))
+PY
+    then
+        return 1
+    fi
+    mv "${temporary}/tailwindcss" "${bin_path}"
+)
+
 # resolve_tailwind_binary → echoes the path to the Tailwind CLI for
 # the current platform at the pin; downloads it from github releases
 # when bin/tools holds no working copy at the pin, and on macOS repairs
@@ -154,9 +238,13 @@ function resolve_tailwind_binary() {
     # TAILWIND_VERSION to the pin above -- so this download is the
     # host-side / cold-layer fallback.
     if ! curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 -o "${bin_path}" "${url}"; then
-        log_error "failed to download ${url}"
         rm -f "${bin_path}"
-        exit 1
+        log_info "browser download failed; trying the official Tailwind asset API"
+        if ! download_tailwind_from_api "${platform}" "${bin_path}"; then
+            log_error "failed to download verified Tailwind ${TAILWIND_VERSION} for ${platform}"
+            rm -f "${bin_path}"
+            exit 1
+        fi
     fi
     chmod +x "${bin_path}"
     ensure_valid_signature "${platform}" "${bin_path}"
