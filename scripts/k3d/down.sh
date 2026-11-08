@@ -87,8 +87,10 @@ function main() {
 
     local cluster purge
     cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
-    purge="$(cap_flag purge)"
-    [[ -z "$purge" && -n "${PURGE:-}" ]] && purge="$PURGE"
+    # "" or "1", read with cap_bool. PURGE in the environment is the default
+    # and an explicit --purge=<bool> beats it. Both used to be emptiness tests,
+    # so --purge=false and PURGE=0 removed the kubeconfig context.
+    if cap_bool purge "${PURGE:-false}"; then purge=1; else purge=""; fi
     cap_require cluster "$cluster"
 
     check_prerequisites

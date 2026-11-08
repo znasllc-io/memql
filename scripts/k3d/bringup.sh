@@ -477,16 +477,19 @@ function main() {
     REVISION="$(cap_param revision "$REVISION")"
     SERVERS="$(cap_param servers "$SERVERS")"
     AGENTS="$(cap_param agents "$AGENTS")"
-    NO_BUILD_NODE="$(cap_flag no-build-node)"
+    # Every boolean here is "" or "1", read with cap_bool, because each feeds
+    # an -n test or a ${VAR:+--flag} pass-through to up.sh. Read with
+    # cap_flag, --clean=false deleted the cluster and its database.
+    if cap_bool no-build-node; then NO_BUILD_NODE=1; else NO_BUILD_NODE=""; fi
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "$BUILD_NODE_CPUS")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "$BUILD_NODE_MEMORY")"
-    CLEAN="$(cap_flag clean)"
+    if cap_bool clean; then CLEAN=1; else CLEAN=""; fi
     ALLOW_BELOW_MINIMUM_FLAG=""
     if cap_bool allow-below-minimum "${MEMQL_ALLOW_BELOW_MINIMUM:-false}"; then
         ALLOW_BELOW_MINIMUM_FLAG=1
     fi
-    NO_SECRETS="$(cap_flag no-secrets)"
-    SWITCH="$(cap_flag switch)"
+    if cap_bool no-secrets; then NO_SECRETS=1; else NO_SECRETS=""; fi
+    if cap_bool switch; then SWITCH=1; else SWITCH=""; fi
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"
     APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-}")"
     OVERLAY_PATH="$(cap_param overlay-path "${MEMQL_K3D_OVERLAY_PATH:-}")"

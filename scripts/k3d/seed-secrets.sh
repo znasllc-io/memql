@@ -1231,7 +1231,15 @@ function main() {
     # the waiver install.mkcert already documents has to be reachable from here
     # too -- otherwise this change newly bricks `make secrets` on a headless
     # machine with no way out short of editing a script.
-    ALLOW_MISSING_CERTUTIL="$(cap_param allow-missing-certutil "${MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL:-}")"
+    #
+    # "" or "1", read with cap_bool, because it feeds a ${VAR:+--flag}
+    # pass-through: read with cap_param, --allow-missing-certutil=false and
+    # MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL=0 forwarded the waiver.
+    if cap_bool allow-missing-certutil "${MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL:-false}"; then
+        ALLOW_MISSING_CERTUTIL=1
+    else
+        ALLOW_MISSING_CERTUTIL=""
+    fi
     cap_require tls-cert "$TLS_CERT"
     cap_require tls-key  "$TLS_KEY"
 

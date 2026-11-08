@@ -2069,7 +2069,9 @@ inside (no branching on environment/version/role -- that lives in DSL `logic`;
 only mechanical idempotency branches).
 
 They `source scripts/lib/capability.sh` (`cap_init` / `cap_param` / `cap_ok` /
-`cap_fail` / `cap_info`-to-stderr / `--print-spec`).
+`cap_fail` / `cap_info`-to-stderr / `--print-spec`). **A boolean is read only
+with `cap_bool`** (`if cap_bool apply; then`), never `cap_flag`: its raw
+`"false"` is non-empty, so `--apply=false` passed every `-n` test.
 `scripts/lib/capability_contract_test.go` enforces the contract on every script
 that sources the library and gates non-interactivity across
 `scripts/{k3d,deploy,release,docs}`; the Go effect seam parses the envelope via
