@@ -268,7 +268,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // chunks (2026-11-06). One added, none removed; measured by the strict loader.
 // 197 -> 198: enrollLegacyPipelineLogs, the scheduled enrollment of step logs
 // written before logs had upload receipts (2026-11-08). One added, none removed.
-const shippedAutomationCount = 198
+// 198 -> 199: pipelineSecurityRemediation, the private retained-report-to-goal
+// workflow (2026-11-08). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 199
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
