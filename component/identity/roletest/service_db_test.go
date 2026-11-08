@@ -375,8 +375,8 @@ func (c *fixtureCatalog) Slugs() []string {
 }
 
 // installCatalog installs the ladder with the organization role scoped to
-// `organization`, for one case.
-func installCatalog(t *testing.T, organization string) {
+// `organization`, for one case, and returns it so the case can rename a role.
+func installCatalog(t *testing.T, organization string) *fixtureCatalog {
 	t.Helper()
 	vr := func(v, r string) auth.VerbResource { return auth.VerbResource{Verb: v, Resource: r} }
 	set := func(pairs ...auth.VerbResource) map[auth.VerbResource]bool {
@@ -417,6 +417,7 @@ func installCatalog(t *testing.T, organization string) {
 	previous := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(c)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	return c
 }
 
 // deploymentExec runs one fixture statement as the cluster acting: the system
@@ -492,6 +493,87 @@ func lastAudit(t *testing.T, s *Service, action string) identity.AuditEvent {
 	}
 	t.Fatalf("no %s audit event", action)
 	return identity.AuditEvent{}
+}
+
+// persona reads a persona's user row as Start and verification read it.
+func persona(t *testing.T, s *Service, userID string) identity.UserRow {
+	t.Helper()
+	u, err := s.Store.LookupUserById(fresh(context.Background()), userID)
+	require.NoError(t, err)
+	require.NotNil(t, u, userID)
+	return *u
+}
+
+// sessionRow is what a session's row records: the organization its Start
+// wrote (NULL when it wrote none), and whether the session is revoked.
+func sessionRow(t *testing.T, s *Service, id string) (account sql.NullString, revoked bool) {
+	t.Helper()
+	require.NoError(t, s.Store.DirectDB().QueryRowContext(context.Background(),
+		`SELECT account_id, revoked_at IS NOT NULL FROM identity_role_test_sessions WHERE id=$1`, id).Scan(&account, &revoked))
+	return account, revoked
+}
+
+// warnings keeps the message of everything logged at warning level or above.
+type warnings struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (w *warnings) Enabled(_ context.Context, level slog.Level) bool { return level >= slog.LevelWarn }
+func (w *warnings) Handle(_ context.Context, r slog.Record) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seen = append(w.seen, r.Message)
+	return nil
+}
+func (w *warnings) WithAttrs([]slog.Attr) slog.Handler { return w }
+func (w *warnings) WithGroup(string) slog.Handler      { return w }
+func (w *warnings) messages() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.seen...)
+}
+
+// captureWarnings gives the service's Store a logger, which the one in
+// realService does not have, and returns what it is warned.
+func captureWarnings(s *Service) *warnings {
+	w := &warnings{}
+	s.Store.Logger = slog.New(w)
+	return w
+}
+
+// refusingEngine runs every statement on the engine it wraps, save the
+// mutations it was last told to refuse, which fail as a refused write does.
+type refusingEngine struct {
+	identity.EngineExecutor
+	mu      sync.Mutex
+	refused []string
+}
+
+func (e *refusingEngine) refuse(mutations ...string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.refused = mutations
+}
+
+func (e *refusingEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	e.mu.Lock()
+	refused := e.refused
+	e.mu.Unlock()
+	for _, m := range refused {
+		if strings.HasPrefix(query, "mutation "+m+"(") {
+			return nil, fmt.Errorf("%s refused by the test", m)
+		}
+	}
+	return e.EngineExecutor.Execute(ctx, query)
+}
+
+// refuseWrites puts a refusingEngine, refusing nothing yet, between the
+// service and its engine.
+func refuseWrites(s *Service) *refusingEngine {
+	e := &refusingEngine{EngineExecutor: s.Store.Engine}
+	s.Store.Engine = e
+	return e
 }
 
 // TestAnOperatorMayNotTestARoleAboveOrHoldingWhatTheyDoNot: a custom role is
@@ -590,6 +672,65 @@ func TestAnOrganizationRoleTestIsAMemberOfThatOrganizationOnly(t *testing.T) {
 	require.ErrorIs(t, err, ErrDenied, "an organization with no active group has nothing to test in")
 }
 
+// TestAPersonaIsCalledWhatItTests: a persona is named for its role and, for an
+// organization role, its organization, and the next Start renames it when
+// either was renamed or the role moved to another organization -- before the
+// session it issues, and writing that one field of the persona's row alone. A
+// rename that fails is logged and the test starts all the same: the name is
+// what the persona is called, not what it may do.
+func TestAPersonaIsCalledWhatItTests(t *testing.T) {
+	service, engine := realService(t)
+	acme, beta := "org-"+uuid.NewString(), "org-"+uuid.NewString()
+	catalog := installCatalog(t, acme)
+	organization(t, engine, acme, "Acme")
+	organization(t, engine, beta, "Beta")
+	developer := seedOperator(t, service, "developer")
+	refusing := refuseWrites(service)
+	warned := captureWarnings(service)
+
+	first, err := service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	before := persona(t, service, first.UserID)
+	require.Equal(t, "Test Site moderator (Acme)", before.DisplayName)
+
+	organization(t, engine, acme, "Acme Corp")
+	second, err := service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, first.UserID, second.UserID, "one persona per operator and role")
+	after := persona(t, service, second.UserID)
+	require.Equal(t, "Test Site moderator (Acme Corp)", after.DisplayName, "the organization's group was renamed")
+	unchanged := before
+	unchanged.DisplayName, unchanged.CreatedAt = after.DisplayName, after.CreatedAt
+	require.Equal(t, unchanged, after, "the rename writes the display name and nothing else: role, email, active and the rest stay")
+	vc, err := service.VerifyRoleTest(context.Background(), second.Token)
+	require.NoError(t, err)
+	require.Equal(t, "Test Site moderator (Acme Corp)", vc.Name, "the session Start issued is the renamed persona's")
+
+	catalog.names[siteModerator] = "Content moderator"
+	_, err = service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, "Test Content moderator (Acme Corp)", persona(t, service, first.UserID).DisplayName, "the role was renamed")
+
+	installCatalog(t, beta)
+	_, err = service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, "Test Site moderator (Beta)", persona(t, service, first.UserID).DisplayName, "the role moved to another organization")
+	require.Empty(t, warned.messages())
+
+	refusing.refuse("updateUser")
+	organization(t, engine, beta, "Beta Labs")
+	refused, err := service.Start(developer, siteModerator)
+	require.NoError(t, err, "a rename that fails never stops the test")
+	_, err = service.VerifyRoleTest(context.Background(), refused.Token)
+	require.NoError(t, err)
+	require.Equal(t, "Test Site moderator (Beta)", persona(t, service, first.UserID).DisplayName)
+	require.Contains(t, warned.messages(), "role test: renaming a persona failed")
+	refusing.refuse()
+	_, err = service.Start(developer, siteModerator)
+	require.NoError(t, err)
+	require.Equal(t, "Test Site moderator (Beta Labs)", persona(t, service, first.UserID).DisplayName, "the next Start renames it")
+}
+
 // TestEndingAnOrganizationRoleTestRemovesItsMembership (review focus 3): a
 // role test of an organization role ends with no membership left behind --
 // ended by its operator or from its own tab -- and replacing the test keeps
@@ -635,6 +776,48 @@ func TestEndingAnOrganizationRoleTestRemovesItsMembership(t *testing.T) {
 	require.Empty(t, activeGroups(t, moved.UserID))
 }
 
+// TestEndAuditsTheOrganizationTheTestRanIn: Start records on the session the
+// organization its test runs in -- an empty one for a global role -- and End
+// audits that one, not wherever the role points by the time it ends. A session
+// from before Start recorded one has nothing to read, and End falls back to the
+// role's current organization, as every End did before.
+func TestEndAuditsTheOrganizationTheTestRanIn(t *testing.T) {
+	service, engine := realService(t)
+	acme, beta := "org-"+uuid.NewString(), "org-"+uuid.NewString()
+	installCatalog(t, acme)
+	organization(t, engine, acme, "Acme")
+	organization(t, engine, beta, "Beta")
+	owner := seedOperator(t, service, "owner")
+
+	ran, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	account, _ := sessionRow(t, service, ran.ID)
+	require.Equal(t, sql.NullString{String: acme, Valid: true}, account)
+	installCatalog(t, beta)
+	require.NoError(t, service.End(owner, ran.ID))
+	ended := lastAudit(t, service, "role_test_ended")
+	require.Equal(t, identity.AuditOutcomeSuccess, ended.Outcome)
+	require.Equal(t, siteModerator, ended.Detail["role"])
+	require.Equal(t, acme, ended.Detail["accountId"], "the organization the test ran in, not the one its role names now")
+	require.Empty(t, activeGroups(t, ran.UserID), "and its membership went, wherever the role went")
+
+	global, err := service.Start(owner, "reader")
+	require.NoError(t, err)
+	account, _ = sessionRow(t, service, global.ID)
+	require.Equal(t, sql.NullString{String: "", Valid: true}, account, "a global role's test runs in no organization, and says so")
+	require.NoError(t, service.End(owner, global.ID))
+	require.Equal(t, "", lastAudit(t, service, "role_test_ended").Detail["accountId"])
+
+	older, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	_, err = service.Store.DirectDB().ExecContext(context.Background(), `UPDATE identity_role_test_sessions SET account_id=NULL WHERE id=$1`, older.ID)
+	require.NoError(t, err)
+	installCatalog(t, acme)
+	require.NoError(t, service.End(owner, older.ID))
+	require.Equal(t, acme, lastAudit(t, service, "role_test_ended").Detail["accountId"],
+		"a session with no organization recorded audits its role's current one")
+}
+
 // TestADeveloperCannotTestAnOrganizationRoleWhoseGroupGivesWhatTheyLack (R16):
 // an organization role's persona holds its role's capabilities AND what its
 // organization's group grants, so the developer must hold both. A group
@@ -658,6 +841,36 @@ func TestADeveloperCannotTestAnOrganizationRoleWhoseGroupGivesWhatTheyLack(t *te
 	require.ErrorIs(t, err, ErrInvalid, "a running test stops once its group gives what its operator lacks")
 	_, err = service.Start(seedOperator(t, service, "owner"), siteModerator)
 	require.NoError(t, err, "an owner holds everything the group gives")
+}
+
+// TestARefusedStartAuditsTheOrganizationItWasFor: the organization a test of a
+// role would run in is the installed role's alone, so every Start audits it --
+// a refused one too, whether the role or the operator was refused.
+func TestARefusedStartAuditsTheOrganizationItWasFor(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	groupGrant(t, engine, organization(t, engine, acme, "Acme"), "update", "group")
+	developer := seedOperator(t, service, "developer")
+	ac, _ := auth.AccessFromContext(developer)
+
+	_, err := service.Start(developer, siteModerator)
+	require.ErrorIs(t, err, ErrDenied, "the group gives the persona update on group, which the developer does not hold")
+	refused := lastAudit(t, service, "role_test_started")
+	require.Equal(t, identity.AuditOutcomeFailure, refused.Outcome)
+	require.Equal(t, ac.UserId, refused.ActorUserId)
+	require.Equal(t, siteModerator, refused.Detail["role"])
+	require.Equal(t, acme, refused.Detail["accountId"], "the organization the refused test was for")
+
+	_, err = service.Start(seedOperator(t, service, "admin"), siteModerator)
+	require.ErrorIs(t, err, ErrDenied, "an admin tests nothing")
+	refused = lastAudit(t, service, "role_test_started")
+	require.Equal(t, identity.AuditOutcomeFailure, refused.Outcome)
+	require.Equal(t, acme, refused.Detail["accountId"], "refused before the operator was known, and still for that organization")
+
+	_, err = service.Start(developer, "admin")
+	require.ErrorIs(t, err, ErrDenied)
+	require.Equal(t, "", lastAudit(t, service, "role_test_started").Detail["accountId"], "a global role is for no organization")
 }
 
 // TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrEnd
@@ -693,6 +906,40 @@ func TestAnExpiredOrganizationRoleTestKeepsItsMembershipOnlyUntilTheNextStartOrE
 	require.Equal(t, []string{acmeGroup}, activeGroups(t, lapsed.UserID))
 	require.NoError(t, service.End(owner, other.ID))
 	require.Empty(t, activeGroups(t, lapsed.UserID), "the operator's next End removes it")
+}
+
+// TestAnEndWhoseMembershipStaysHasStillEndedTheTest: End revokes its session
+// first, on a statement of its own, so a membership that then fails to go
+// neither revives the test nor makes the End a failure. The failure is logged,
+// the membership admits nobody, and the operator's next Start or End removes
+// it, as it removes an expired test's.
+func TestAnEndWhoseMembershipStaysHasStillEndedTheTest(t *testing.T) {
+	service, engine := realService(t)
+	acme := "org-" + uuid.NewString()
+	installCatalog(t, acme)
+	acmeGroup := organization(t, engine, acme, "Acme")
+	owner := seedOperator(t, service, "owner")
+	refusing := refuseWrites(service)
+	warned := captureWarnings(service)
+
+	session, err := service.Start(owner, siteModerator)
+	require.NoError(t, err)
+	refusing.refuse("writeGroupMembership")
+	require.NoError(t, service.End(owner, session.ID), "the test ended, whatever became of its membership")
+	refusing.refuse()
+	_, revoked := sessionRow(t, service, session.ID)
+	require.True(t, revoked, "its session is revoked")
+	_, err = service.VerifyRoleTest(context.Background(), session.Token)
+	require.ErrorIs(t, err, ErrInvalid)
+	ended := lastAudit(t, service, "role_test_ended")
+	require.Equal(t, identity.AuditOutcomeSuccess, ended.Outcome)
+	require.Equal(t, acme, ended.Detail["accountId"])
+	require.Contains(t, warned.messages(), "role test: removing an ended test's membership failed")
+	require.Equal(t, []string{acmeGroup}, activeGroups(t, session.UserID), "the membership stays")
+
+	_, err = service.Start(owner, "reader")
+	require.NoError(t, err)
+	require.Empty(t, activeGroups(t, session.UserID), "until the operator's next Start removes it")
 }
 
 func offeredSlugs(t *testing.T, s *Service, ctx context.Context) []string {

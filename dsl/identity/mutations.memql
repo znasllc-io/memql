@@ -2568,12 +2568,14 @@ mutation identity updateIdentity {
 // deep merge today -- a caller changing one key of `preferences` sends
 // the whole spread.
 //
-// CALLERS: exactly one in production, the identity admin server
-// (component/identity/admin/handlers.go), which queries the user first
-// and stitches the full payload. update() with a full payload behaves
-// identically to insert(), so that path is unchanged. Two DB acceptance
-// tests also drive it as setup scaffolding, and both stamp an internal
-// origin.
+// CALLERS in production, each of them Go that has authorized the write
+// first: the identity admin surface (component/identity/adminops), which
+// queries the user first and either stitches the full payload -- update()
+// with a full payload behaves identically to insert(), so that path is
+// unchanged -- or sends displayName alone; and role testing
+// (component/identity/roletest), which sends displayName alone to rename
+// its own test persona. DB acceptance tests also drive it as setup
+// scaffolding, and each stamps an internal origin.
 //
 // An earlier version of this comment named four frontend preferences-sync
 // helpers as callers. They belonged to an SPA that has since been retired:
@@ -2598,11 +2600,13 @@ mutation identity updateIdentity {
 /// deliberately and permanently enough to be argued at the concept (memql#3349 / #3350). A client
 /// could name any user id and any role.
 ///
-/// @serverOnly is the right gate rather than a stop-gap, because this mutation has exactly one
-/// legitimate caller: the identity admin server (component/identity/admin/handlers.go), which
-/// already authorizes through admin/auth.go. The authorization genuinely lives in Go; this puts the
-/// boundary where it already is. The general update-by-id class -- an owner predicate checked
-/// before the write -- is memql#2803 Phase 5 and is deliberately NOT attempted here.
+/// @serverOnly is the right gate rather than a stop-gap, because every legitimate caller is Go that
+/// has authorized the write first: the identity admin surface (component/identity/adminops), behind
+/// its owner/admin gate, and role testing (component/identity/roletest), which renames its own test
+/// persona with a payload of displayName alone after the operator's gates. The authorization
+/// genuinely lives in Go; this puts the boundary where it already is. The general update-by-id
+/// class -- an owner predicate checked before the write -- is memql#2803 Phase 5 and is
+/// deliberately NOT attempted here.
 @serverOnly
 mutation user updateUser {
   args {
