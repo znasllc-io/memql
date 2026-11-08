@@ -307,11 +307,35 @@ Authored constructs are not part of the rule set the router reads.
 Each night MemQL folds the week's calls per model and level. Where a model's
 structured-failure rate at a level is above 30% over at least twenty calls, it
 opens a **Routing rule** approval in Nexus carrying the exact text of a rule
-that would exclude the model there. A later probe that measures the model well
-again proposes retiring the exclusion the same way. Approving records your
-decision and **does not change routing**: to apply it, make the change in
-Fleet > Routing > Rules. Declining is recorded, so the same week's evidence
-does not ask again.
+that would exclude the model there. Owners and developers see it and decide
+it: the people who can save a rule by hand.
+
+**Approving saves exactly that rule** into the routing configuration under a
+new revision, so it decides the next matching call on every replica, and the
+revision records who approved it. Declining is recorded, so the same week's
+evidence does not ask again. The rule then appears in Fleet > Routing > Rules
+like any other custom rule, and removing it there routes the model again. An
+approval that proposes retiring an exclusion removes the rule instead; the
+review raises one only from a probe measurement, which it does not take yet.
+
+Two limits follow from how the router matches rules:
+
+- **Demotions are proposed only where a saved rule can decide a call.** The
+  router takes the first matching rule, and the shipped rules are locked, so
+  they are tried before any saved rule. `fastLane`, `reasoningParks` and
+  `embeddingsBound` take every call at `fast`, `reasoning` and `embeddings`,
+  so a demotion saved there would decide nothing. The review proposes none at
+  those levels: it logs the model, the level and the rule in the way, and
+  counts the demotions it withheld. Today it proposes only at `strong`.
+- **One evidence demotion per level.** Every proposal sits at precedence 50,
+  and two custom rules cannot share a precedence, so approving a second
+  demotion at a level is refused, naming the rule already there. Remove or
+  re-number that rule in Fleet > Routing > Rules and approve again, or decline.
+
+Approving checks the rule against routing as it is at that moment, not as it
+was when the review was proposed. It is refused only when the rule could not
+be saved now: when it ties with another rule's precedence, or when another
+rule would always be tried first.
 
 ### "I want a paid model for everything"
 

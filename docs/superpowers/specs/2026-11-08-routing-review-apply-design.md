@@ -1,6 +1,6 @@
 # Approving a routing review changes routing
 
-**Date:** 2026-11-08. **Owner:** znas. **Status:** proposed.
+**Date:** 2026-11-08. **Owner:** znas. **Status:** implemented.
 **Builds on:** epic memql#5146 D5 (the nightly evidence review) and C5 of
 [levels, policies and rules](2026-09-07-levels-policies-rules-design.md), which
 made the routing configuration document the one way a custom rule exists.

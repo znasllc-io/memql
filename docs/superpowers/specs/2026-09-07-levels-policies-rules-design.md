@@ -411,10 +411,9 @@ dropping them would narrow a recorded annotation form.
 What D7 says about locked rules stands. The failure mode below, "two custom
 rules at one precedence", is refused at SAVE with both names.
 `component/routingrules.GenerateRule` survives as the nightly evidence review's
-one renderer (epic memql#5146, D5). Nothing applies an approved review yet:
-approving records the decision and does not change routing, and the approval's
-wording now says so. Wiring an approval into the routing configuration is
-separate work.
+one renderer (epic memql#5146, D5). Approving a review saves its exact rule
+into the routing configuration document, under the save path's own checks:
+[2026-11-08 routing review apply](2026-11-08-routing-review-apply-design.md).
 
 ## 5. Failure modes
 
