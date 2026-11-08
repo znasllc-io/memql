@@ -9,13 +9,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/netip"
 	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/edge/visit"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -103,10 +103,6 @@ const (
 	accessUnlockPerMinutePerAddress = 10
 	accessUnlockPerMinutePerSite    = 60
 	accessOtherPerMinutePerAddress  = 600
-
-	// accessIPv6KeyBits is how much of an IPv6 address names one budget (see
-	// accessClientAddress).
-	accessIPv6KeyBits = 64
 )
 
 // The headers the edge stamps and the bff reads are declared ONCE, in
@@ -263,53 +259,15 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 // shared bucket. With no usable entry the peer is the address, as the shopper's
 // is, which behind the ingress is the ingress itself.
 func accessClientAddress(r *http.Request) string {
-	if entry := accessRightMostForwarded(r); entry != "" {
-		if addr, err := netip.ParseAddr(entry); err == nil && addr.Zone() == "" {
-			return accessAddressKey(addr)
-		}
+	if addr, ok := visit.ClientAddress(r); ok {
+		return visit.AddressKey(addr)
 	}
+	// An unparseable peer is keyed on its own text, as before.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = strings.TrimSpace(r.RemoteAddr)
 	}
-	// The peer's own zone is nobody's to choose, and it says nothing about who this is.
-	if addr, err := netip.ParseAddr(host); err == nil {
-		return accessAddressKey(addr.WithZone(""))
-	}
 	return host
-}
-
-// accessAddressKey is what one address's budget is kept under: an IPv4 address, an
-// IPv4-mapped one as the address it maps, and an IPv6 address as its /64.
-func accessAddressKey(addr netip.Addr) string {
-	addr = addr.Unmap()
-	if addr.Is6() {
-		return netip.PrefixFrom(addr, accessIPv6KeyBits).Masked().String()
-	}
-	return addr.String()
-}
-
-// accessRightMostForwarded is the right-most non-empty entry of X-Forwarded-For
-// across every header line, or "" when there is none.
-//
-// It scans from the right without splitting, since the header is the caller's and
-// so is its length.
-func accessRightMostForwarded(r *http.Request) string {
-	lines := r.Header.Values("X-Forwarded-For")
-	for i := len(lines) - 1; i >= 0; i-- {
-		rest := lines[i]
-		for {
-			comma := strings.LastIndexByte(rest, ',')
-			if entry := strings.TrimSpace(rest[comma+1:]); entry != "" {
-				return entry
-			}
-			if comma < 0 {
-				break
-			}
-			rest = rest[:comma]
-		}
-	}
-	return ""
 }
 
 // accessRetryAfter is the whole seconds one token takes to come back to a bucket
