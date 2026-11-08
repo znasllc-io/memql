@@ -373,7 +373,8 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 		return out, err
 	}
 	// The session this Start issues is named before anything is written for
-	// it, so a warning on the way can say which one.
+	// it, so a warning on the way can say which one: the session it was
+	// issuing, which exists only if the Start then succeeds.
 	sessionID := uuid.NewString()
 	name := personaName(role, group)
 	if u == nil {
@@ -464,7 +465,7 @@ func (s *Service) rename(ctx context.Context, userID, role, sessionID, name stri
 	_, err := s.Store.Engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation updateUser(userId: %s, payload: {displayName: %s})`,
 		langparser.QuoteString(userID), langparser.QuoteString(name)))
 	if err != nil {
-		s.warn("role test: renaming a persona failed", err, "persona", userID, "role", role, "session", sessionID)
+		s.warn("role test: renaming a persona failed", err, "userId", userID, "role", role, "sessionId", sessionID)
 	}
 }
 
@@ -763,7 +764,7 @@ func (s *Service) End(ctx context.Context, sessionID string) (err error) {
 	// role's own next End. Its own name, so End's err, which the deferred audit
 	// reads, is never shadowed here.
 	if releaseErr := s.release(ctx, db, actorID, role, userID, true); releaseErr != nil {
-		s.warn("role test: removing an ended test's membership failed", releaseErr, "persona", userID, "role", role, "session", sessionID)
+		s.warn("role test: removing an ended test's membership failed", releaseErr, "userId", userID, "role", role, "sessionId", sessionID)
 	}
 	s.sweep(ctx, db, actorID, role)
 	return nil
