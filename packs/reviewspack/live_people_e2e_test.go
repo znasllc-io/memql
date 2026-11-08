@@ -178,7 +178,12 @@ func TestLiveE2E_SettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	if err := w.nameApprover(w.as(w.colleague), w.outsider); err == nil || !strings.Contains(err.Error(), approverRefusal) {
 		t.Fatalf("the approver handing the role outside the organization: err = %v, want %q", err, approverRefusal)
 	}
-	if err := w.nameApprover(w.as(w.colleague), w.moderator); err != nil {
+	// Named in the canonical spelling a token carries, and stored bare.
+	if err := w.nameApprover(w.as(w.colleague), "v1:identity:user:"+w.moderator); err != nil {
 		t.Fatalf("the approver handing the role to the store's moderator: %v", err)
+	}
+	settings = payloadOf(t, w.eng, w.as(w.moderator), `builtin reviewsSettings(storeId: `+quote(w.store)+`, siteId: `+quote(w.site)+`)`)
+	if saved, _ := settings["settings"].(map[string]any); saved["removalApproverUserId"] != w.moderator {
+		t.Fatalf("the approver saved = %v, want %s, the bare id", saved["removalApproverUserId"], w.moderator)
 	}
 }

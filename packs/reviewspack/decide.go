@@ -187,9 +187,10 @@ func (p *Provider) isRemovalApprover(ctx context.Context, storeID, userID string
 }
 
 // namesApprover reports whether a store's settings row names userID as the
-// owner who approves removals, in either spelling of the id (sameUser): the
-// approver is chosen by the bare id reviewsPeople answers, and a signed-in
-// caller's id is the token's.
+// owner who approves removals, in either spelling of a user id (sameUser): the
+// approver is chosen by the bare id reviewsPeople answers and stored by it
+// (writeSettings), though a row written before that may carry the canonical
+// spelling its namer sent, and a signed-in caller's id is the token's.
 func namesApprover(settings map[string]any, userID string) bool {
 	return sameUser(strings.TrimSpace(asString(settings["removalApproverUserId"])), userID)
 }

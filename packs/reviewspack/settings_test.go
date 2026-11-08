@@ -328,6 +328,24 @@ func TestTheApproverIsKnownInEitherSpellingOfTheirId(t *testing.T) {
 	}
 }
 
+// THE APPROVER IS STORED BY THEIR BARE ID, however the namer spelled it: the
+// spelling reviewsPeople answers and clients write, so the row reads the same
+// whoever named the person and however.
+func TestTheApproverIsStoredByTheirBareId(t *testing.T) {
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		out, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs("v1:identity:user:mod-1"), false)
+		if err != nil {
+			t.Fatalf("%s naming v1:identity:user:mod-1: %v", namer.name, err)
+		}
+		if out["removalApproverUserId"] != "mod-1" {
+			t.Errorf("%s naming v1:identity:user:mod-1 saved %v, want mod-1", namer.name, out["removalApproverUserId"])
+		}
+	}
+}
+
 // AN ID OF ANOTHER CONCEPT NAMES NOBODY. A person's id is spelled bare or under
 // the user concept's own prefix, and that prefix is the only one this package
 // strips (bareUser). `v1:accounts:account:mod-1` is some other row's id that
