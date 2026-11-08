@@ -119,6 +119,11 @@ func TestOnlyTheCurrentOwnerOrAnOperatorNamesTheRemovalApprover(t *testing.T) {
 // approverRefusal is the one sentence a refused removal approver gets.
 const approverRefusal = "reviews: Choose someone in this store's organization who can moderate reviews."
 
+// approverArgs names who as the store's removal approver.
+func approverArgs(who string) map[string]any {
+	return map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": who}
+}
+
 // THE REMOVAL APPROVER IS ONE OF THE STORE'S OWN PEOPLE WHO CAN MODERATE IT
 // (review focus 4). Not somebody outside the store's organization, however much
 // they hold in their own; not one of the cluster's operators, who host the
@@ -247,6 +252,55 @@ func TestTheApproverIsKnownInEitherSpellingOfTheirId(t *testing.T) {
 	if _, err := writeSettings(t, canonical, existingSettings(),
 		map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": "mod-1"}, false); err != nil {
 		t.Fatalf("the approver, signed in under their canonical id, handing the role on: %v", err)
+	}
+}
+
+// AN ID OF ANOTHER CONCEPT NAMES NOBODY. A person's id is spelled bare or under
+// the user concept's own prefix, and that prefix is the only one this package
+// strips (bareUser). `v1:accounts:account:mod-1` is some other row's id that
+// happens to end the way mod-1's does; reading it as mod-1 would let a stray
+// id, or a caller who means it, name a person nobody named -- as the approver,
+// or as one of the store's people.
+func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{"v1:identity:user:mod-1", "mod-1", true},
+		{"mod-1", "v1:identity:user:mod-1", true},
+		{"mod-1", "mod-1", true},
+		{"v1:accounts:account:mod-1", "mod-1", false},
+		{"v1:identity:group:mod-1", "v1:identity:user:mod-1", false},
+		{"v1:identity:user:", "", false},
+	} {
+		if got := sameUser(c.a, c.b); got != c.same {
+			t.Errorf("sameUser(%q, %q) = %v, want %v", c.a, c.b, got, c.same)
+		}
+	}
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		if _, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs("v1:accounts:account:mod-1"), false); err == nil || err.Error() != approverRefusal {
+			t.Errorf("%s naming v1:accounts:account:mod-1: err = %v, want %q", namer.name, err, approverRefusal)
+		}
+	}
+	// A membership spells its member the same two ways: solo-2 under the user
+	// concept's prefix is solo-2, and the row naming an account's id is nobody's.
+	roster := shopRoster()
+	held := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	roster.members["group-shop"] = append(roster.members["group-shop"],
+		rosterMember("group-shop", "v1:accounts:account:solo-1", "added", "active"),
+		rosterMember("group-shop", "v1:identity:user:solo-2", "added", "active"))
+	roster.users["solo-1"], roster.users["solo-2"] = rosterUser("solo-1", "Sol One", "user", true), rosterUser("solo-2", "Sol Two", "user", true)
+	roster.holds["solo-1"], roster.holds["solo-2"] = held, held
+	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,mod-1,solo-2" {
+		t.Fatalf("people = %s, want owner-1,mod-1,solo-2: a member spelled under another concept's prefix is nobody", got)
 	}
 }
 

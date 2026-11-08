@@ -490,7 +490,7 @@ func (p *Provider) organizationMembers(sys context.Context, account string) ([]s
 			if strings.TrimSpace(asString(member["status"])) != "active" {
 				continue
 			}
-			if id := memql.BareShortId(asString(member["userId"])); id != "" {
+			if id := bareUser(asString(member["userId"])); id != "" {
 				ids[id] = true
 			}
 		}
@@ -532,8 +532,21 @@ func displayNameOf(row map[string]any) string {
 // sameUser reports whether two user ids name one person. They arrive in two
 // spellings: a signed-in caller's as the token carried it -- canonical,
 // `v1:identity:user:<id>`, on a deployed cluster -- and a chosen or stored one
-// as clients write ids, bare. Empty names nobody.
+// as clients write ids, bare. Both are made bare by bareUser, so an id of
+// another concept matches no person's. Empty names nobody.
 func sameUser(a, b string) bool {
-	a, b = memql.BareShortId(a), memql.BareShortId(b)
+	a, b = bareUser(a), bareUser(b)
 	return a != "" && a == b
+}
+
+// userIDPrefix is a person's canonical id prefix.
+const userIDPrefix = "v1:identity:user:"
+
+// bareUser is a user id as clients write it: the user concept's prefix
+// stripped, and no other. memql.BareShortId strips ANY concept's prefix, which
+// read `v1:accounts:account:mod-1` as the person mod-1; here it stays what it
+// is, an id of another concept, and names nobody. Every user id this
+// package's people code makes bare goes through it.
+func bareUser(id string) string {
+	return bareID(id, userIDPrefix)
 }
