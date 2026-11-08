@@ -4952,6 +4952,47 @@ back (`component/automations/journal_step_result.go`).
   `TestResumeV1_DB_AMutationReceiptHoldsItsRowOnceAndNoSchema`, which resumes
   over a real mutation's stored receipt.
 
+## An event firing records only the trigger it can read (2026-11-08)
+
+A run's `triggerEvent` is written on its first version and copied by every
+later one (each receipt's run write, the close), because the row is
+append-only with a read-merge write. A graph event's payload is the whole row
+that fired it, so a run fired by a staged inbound delivery copied the delivery's
+headers and body, about 24 KB raw, into each of its versions. What it records
+now is in `component/automations/journal_trigger.go`.
+
+- **Trigger:** an event firing (triggeredBy `event:<topic>`) of an automation the
+  loader could analyse (`computeJournalTriggerReads`, beside `computeReads`).
+- **Chosen path:** the recorded payload keeps the keys its declared args bind,
+  the `event.payload.<key>` paths its statements name, the dedup key's keys
+  (`Automation.Reads`) and `id` / `nodeId`; a root run records the correlation
+  its first attempt derived from the whole payload as its cause.
+- **Evidence it is enough:** resume rebinds args from the recorded payload and
+  continues the recorded cause; adoption (a run with no steps) re-executes from
+  it and recomputes a chain head from the dedup key's keys; the per-row budget
+  reads `id` / `nodeId`; a body can no longer read `event.<field>` at all
+  (refused at compile), only its args or the whole event.
+- **What keeps the whole payload:** a body that hands `event` on or reads
+  `event.payload` whole, a logic it reaches whose body names `event`, a call the
+  function registry cannot resolve, any precondition, and every trigger that is
+  not an event firing (a sub-automation's call, which child continuation compares
+  whole; an http trigger; an operator's run). Of the shipped tree, 35 of 39 event
+  automations are projected; the four that are not hand `event` to a logic.
+- **Alternatives:** a separate write-once trigger row needs its own concept,
+  reads and retention for every run; a storage-level reference for large
+  subtrees is a storage format change. Both keep bytes nothing reads.
+- **Survives a retry or a replica change:** the recorded trigger is the row's;
+  a run recorded before the change keeps its whole payload and resumes as before.
+- **Tests:** `TestJournalTriggerReadsAreWhatTheRunCanRead`,
+  `TestARecordedTriggerResumesAsTheFirstAttemptRan` (through stored JSON, at the
+  root and in a chain), `TestShippedEventAutomationsRecordWhatTheyRead`, and the
+  Postgres-backed `TestResumeV1_DB_AProjectedTriggerResumesWithWhatItReads`: a
+  firing with 38 KB of unread payload stores 4 versions in 3,652 payload bytes
+  against 119,400 recorded whole, and resumes with the same args and cause.
+- **Unverified:** no production run has been observed with the change; the share
+  of production's event runs it shrinks is not measured, and the October sample
+  predates the inbound handlers journaling only on write.
+
 ## Current-step operation completion and retained partial effects
 
 An execution previously could finish after an honest answer said its requested

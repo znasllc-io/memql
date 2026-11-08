@@ -303,7 +303,9 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	}
 	// @loop and @mode (epic memql#5380), judged against the trigger filter
 	// prepareExpressions just parsed (loop_prepare.go).
-	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
+	functionSource := newFunctionSource(l.functions, l.registry)
+	automation.Reads = computeReads(&automation, functionSource)
+	automation.JournalTriggerReads = computeJournalTriggerReads(&automation, functionSource)
 	if err := prepareLoopAndMode(&automation); err != nil {
 		return nil, err
 	}
@@ -816,7 +818,9 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	if err := prepareDeployerFleetContract(&automation); err != nil {
 		return nil, err
 	}
-	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
+	functionSource := newFunctionSource(l.functions, l.registry)
+	automation.Reads = computeReads(&automation, functionSource)
+	automation.JournalTriggerReads = computeJournalTriggerReads(&automation, functionSource)
 
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)

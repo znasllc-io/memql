@@ -26,12 +26,14 @@ package automations
 // journal boundaries instead: a failed write stops advancement and cancels
 // in-flight calls. It does not assert exactly-once external effects.
 //
-// THREE THINGS ARE DELIBERATELY NOT RECORDED. Resolved step arguments, which
+// FOUR THINGS ARE DELIBERATELY NOT RECORDED. Resolved step arguments, which
 // may carry resolved secrets (epic A2 decides redaction); a step's children
 // (forEach and parallel branches), which ride inside the parent's trimmed
-// result exactly as they ride inside AutomationExecution.Steps; and, of an
+// result exactly as they ride inside AutomationExecution.Steps; of an
 // engine result's rows, each node's concept schema, and the rows themselves
-// when the step's recorded value already holds them (journal_step_result.go).
+// when the step's recorded value already holds them (journal_step_result.go);
+// and, of an event firing's trigger, the payload keys its run cannot read,
+// which every version of the run row would otherwise copy (journal_trigger.go).
 //
 // A SANDBOXED DRY-RUN WRITES NOTHING, for the reason it minted no
 // checkpoint (memql#2932): nothing resumes a preview, and the write would
@@ -584,7 +586,8 @@ func rfc3339(t time.Time) string {
 // triggerEvent as `cause` whenever the run is in a chain, so a resume or a
 // recovery that adopts the row runs at the depth this attempt did (epic
 // memql#5380). A root's is zero, and the run re-derives its correlation from
-// the event it records.
+// the event it records -- unless the payload it records is projected
+// (journal_trigger.go), when its correlation is recorded as its cause.
 func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) {
 	if j == nil || automation == nil || exec == nil {
 		return
@@ -616,15 +619,9 @@ func (j *workJournal) openRunArgs(automation *Automation, exec *AutomationExecut
 		"startedAt":             rfc3339(exec.StartedAt),
 	}
 	if triggeringEvent != nil {
-		trigger := map[string]any{
-			"topic":   triggeringEvent.Topic,
-			"kind":    triggeringEvent.Kind.String(),
-			"payload": triggeringEvent.Payload,
-		}
-		if !parent.IsZero() {
-			trigger["cause"] = parent
-		}
-		args["triggerEvent"] = trigger
+		// Only what the run can read of its trigger, for an event firing: every
+		// later version of the row copies this (journal_trigger.go).
+		args["triggerEvent"] = recordedTrigger(automation, exec.TriggeredBy, triggeringEvent, parent)
 	}
 	return args
 }
