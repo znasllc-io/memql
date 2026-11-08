@@ -196,9 +196,17 @@ print(json.dumps({"ok": True, "updated": os.environ.get("TEST_BOOTSTRAP_UPDATED"
         self.assertFalse(any("restart" in json.loads(line) for line in self.calls.read_text().splitlines()))
 
     def test_standalone_script_loads_runtime_from_the_same_tag(self):
-        downloaded = self.root / "upgrade-linux.sh"
-        downloaded.write_bytes(SCRIPT.read_bytes())
         runtime = SCRIPT.parents[3] / "scripts" / "lib" / "capability.sh"
+        # Native lanes put temporary files beneath .git/memql-scratch. A
+        # standalone download can then have an unrelated checkout runtime
+        # exactly three parents above it. That runtime must never be sourced.
+        unrelated = self.root / "unrelated-checkout"
+        decoy_runtime = unrelated / "scripts" / "lib" / "capability.sh"
+        decoy_runtime.parent.mkdir(parents=True)
+        decoy_runtime.write_bytes(runtime.read_bytes())
+        downloaded = unrelated / ".git" / "memql-scratch" / "fixture" / "upgrade-linux.sh"
+        downloaded.parent.mkdir(parents=True)
+        downloaded.write_bytes(SCRIPT.read_bytes())
         curl_record = self.root / "curl.json"
         self.env["TEST_CAPABILITY_RUNTIME"] = str(runtime)
         self.env["TEST_CURL_RECORD"] = str(curl_record)
@@ -211,6 +219,7 @@ pathlib.Path(args[args.index("-o") + 1]).write_bytes(pathlib.Path(os.environ["TE
         process = SUITE_PROCESSES.run(["bash", str(downloaded), "--version=1.1.0", "--confirm=restart-worker"], env=self.env)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
         self.assertTrue(self.result(process)["ok"])
+        self.assertTrue(curl_record.is_file(), "standalone script reused an unrelated ancestor runtime instead of fetching its pinned release")
         args = json.loads(curl_record.read_text())
         self.assertIn("https://raw.githubusercontent.com/znasllc-io/memql/refs/tags/cockpit/v1.1.0/scripts/lib/capability.sh", args)
         self.assertEqual(args[args.index("--proto-redir") + 1], "=https")

@@ -29,9 +29,15 @@ function bootstrap_fail() {
 }
 
 function load_capability_runtime() {
-    local entry="${BASH_SOURCE[0]:-}" runtime="" version="" arg temporary=""
+    local entry="${BASH_SOURCE[0]:-}" entry_directory="" runtime="" version="" arg temporary=""
     if [[ -f "$entry" && "${entry##*/}" == upgrade-linux.sh ]]; then
-        runtime="$(cd "$(dirname "$entry")/../../.." && pwd)/scripts/lib/capability.sh"
+        entry_directory="$(cd "$(dirname "$entry")" && pwd -P)"
+        # A standalone download can sit three levels below another checkout
+        # (for example in its native CI scratch directory). Only the actual
+        # installer source layout may use that checkout's runtime.
+        if [[ "$entry_directory" == */cockpit/scripts/install ]]; then
+            runtime="$entry_directory/../../../scripts/lib/capability.sh"
+        fi
     fi
     if [[ ! -f "$runtime" ]]; then
         for arg in "$@"; do

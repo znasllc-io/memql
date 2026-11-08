@@ -20,16 +20,21 @@ function show_bootstrap_help() {
 }
 
 function load_runtime() {
-    local version="" argument entry="${BASH_SOURCE[0]:-}"
+    local version="" argument entry="${BASH_SOURCE[0]:-}" source_dir=""
     for argument in "$@"; do
         case "$argument" in
             --version=*) version="${argument#*=}" ;;
             --help|-h) show_bootstrap_help; exit 0 ;;
         esac
     done
-    if [[ -f "$entry" && "${entry##*/}" == upgrade-mac.sh \
-        && -f "$(dirname "$entry")/../../../scripts/lib/capability.sh" && -f "$(dirname "$entry")/lib.sh" ]]; then
-        UPGRADE_SOURCE="$(cd "$(dirname "$entry")" && pwd)"
+    if [[ -f "$entry" && "${entry##*/}" == upgrade-mac.sh ]]; then
+        source_dir="$(cd "$(dirname "$entry")" && pwd -P)"
+    fi
+    # A downloaded copy may sit beneath a checkout's scratch directory. Only
+    # the canonical source layout may borrow that checkout's helper scripts.
+    if [[ "$source_dir" == */cockpit/scripts/install \
+        && -f "$source_dir/../../../scripts/lib/capability.sh" && -f "$source_dir/lib.sh" ]]; then
+        UPGRADE_SOURCE="$source_dir"
         # shellcheck source=../../../scripts/lib/capability.sh
         source "$UPGRADE_SOURCE/../../../scripts/lib/capability.sh"
         return

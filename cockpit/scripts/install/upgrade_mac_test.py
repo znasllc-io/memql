@@ -196,6 +196,24 @@ sys.exit(int(os.environ.get("TEST_HELPER_EXIT", "0")))
             self.assertIn("--proto-redir", args)
             self.assertTrue(any("cockpit/v0.23.0/" in arg for arg in args))
 
+    def test_standalone_inside_checkout_ignores_ancestor_and_sibling_helpers(self):
+        checkout = self.root / "checkout"
+        copied = checkout / ".git/memql-scratch/fixture/upgrade-mac.sh"
+        copied.parent.mkdir(parents=True)
+        copied.write_bytes(SCRIPT.read_bytes())
+        ancestor_runtime = checkout / "scripts/lib/capability.sh"
+        ancestor_runtime.parent.mkdir(parents=True)
+        ancestor_runtime.write_bytes((REPO / "scripts/lib/capability.sh").read_bytes())
+        (copied.parent / "lib.sh").write_bytes(SCRIPT.with_name("lib.sh").read_bytes())
+        result, body = self.run_upgrade(script=copied)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(body["ok"])
+        requests = [json.loads(line) for line in self.downloads.read_text().splitlines()]
+        urls = [next(arg for arg in args if arg.startswith("https://")) for args in requests]
+        self.assertEqual(len(urls), 4)
+        self.assertIn("/cockpit/v0.23.0/scripts/lib/capability.sh", urls[0])
+        self.assertIn("/cockpit/v0.23.0/cockpit/scripts/install/lib.sh", urls[1])
+
     def test_bad_flags_return_capability_error(self):
         result, body = self.run_upgrade("--version=latest")
         self.assertEqual(result.returncode, 2)
