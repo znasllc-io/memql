@@ -865,6 +865,9 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin siteAccessCodeRegenerate(")) {
         if (seed.accessRegenerateError !== undefined) throw new Error(seed.accessRegenerateError);
         const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.accessCodes?.find((r) => r["id"] === codeId)?.["guest"] === true) {
+          throw new Error(refusedByEngine("siteAccessCodeRegenerate", "Guest access has no code to regenerate. Change when it ends, or turn it off."));
+        }
         const row = codePastTheGate("siteAccessCodeRegenerate", codeId);
         refuseIfEnded("siteAccessCodeRegenerate", row);
         const code = nextAccessCode();

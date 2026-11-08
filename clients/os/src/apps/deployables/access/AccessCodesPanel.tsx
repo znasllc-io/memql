@@ -79,12 +79,27 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   // The panel itself is the last resort: a list with every gate gone has no Add.
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const backTo = useRef<string | null>(null);
   const [refocus, setRefocus] = useState(0);
   useEffect(() => {
     if (refocus === 0) return;
-    const back = opener.current?.isConnected ? opener.current : root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
+    // The control that asked, else the one named for it (Allow guests is drawn again after its form
+    // closes, so the button that asked is not the one on screen), else Add, else the panel.
+    const named = backTo.current === null ? null : root.current?.querySelector<HTMLElement>(backTo.current);
+    backTo.current = null;
+    const back = opener.current?.isConnected ? opener.current : named ?? root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
     back?.focus();
   }, [refocus]);
+  // A NEW GUEST PASS TAKES FOCUS WHEN ITS ROW ARRIVES: the form is gone, and the row comes with the re-read.
+  const focusPass = useRef(false);
+  const passId = access.guestPass?.id;
+  useEffect(() => {
+    if (!focusPass.current || passId === undefined) return;
+    const target = root.current?.querySelector<HTMLElement>('.access-guest button[aria-label="Change end date"]');
+    if (target === null || target === undefined) return;
+    focusPass.current = false;
+    target.focus();
+  }, [passId]);
   const returnFocus = (): void => setRefocus((n) => n + 1);
 
   const askFor = (event: MouseEvent<HTMLElement>, codeId: string, act: RowAct): void => {
@@ -194,8 +209,10 @@ export function AccessCodesPanel({ site, onBusyChange }: {
           access={access}
           asked={guestPass !== undefined && asked?.codeId === guestPass.id ? asked.act : null}
           onAllow={() => {
-            // THE ACT IS GONE ONCE GUESTS ARE ALLOWED, so there is nothing to give focus back to.
+            // CANCEL GIVES FOCUS BACK TO THIS ACT, which is drawn again with the part; a created pass
+            // clears it (`onCreated`), because the act is gone then.
             opener.current = null;
+            backTo.current = ".access-guest .os-head button";
             access.clearRefusal();
             setAsked(null);
             setFormGates(gates ?? []);
@@ -268,8 +285,16 @@ export function AccessCodesPanel({ site, onBusyChange }: {
           }}
           onCreated={(outcome) => {
             setAdding(null);
+            if (adding === "guest") {
+              opener.current = null;
+              backTo.current = null;
+              // Created: the new row takes focus when it arrives. Not known: the list is what to look at.
+              if (outcome === "done") focusPass.current = true;
+              else returnFocus();
+              return;
+            }
             // A new code takes focus for itself. Without one, nothing else will.
-            if (outcome === "unknown" || adding === "guest") returnFocus();
+            if (outcome === "unknown") returnFocus();
           }}
         />
       ) : (

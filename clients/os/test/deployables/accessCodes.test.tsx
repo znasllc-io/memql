@@ -1612,4 +1612,20 @@ describe("guest access", () => {
     mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass()] });
     expect(await screen.findByText("No access codes yet")).toBeTruthy();
   });
+
+  it("Cancel on the Allow guests form returns focus to Allow guests", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    const back = await screen.findByRole("button", { name: "Allow guests" });
+    expect(document.activeElement).toBe(back);
+  });
+
+  it("a successful Allow guests leaves focus on the new row's Change end date", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    const change = await screen.findByRole("button", { name: "Change end date" });
+    await waitFor(() => expect(document.activeElement).toBe(change));
+  });
 });
