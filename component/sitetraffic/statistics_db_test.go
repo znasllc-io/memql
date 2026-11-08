@@ -203,7 +203,11 @@ func addMember(t *testing.T, eng *memql.MemQLEngine, siteId, userId string) {
 }
 
 // seedSystemOwnedSite creates a site the way the seed materializer creates the
-// cluster's own surfaces, and returns its bare id.
+// cluster's own surfaces, and returns its bare id. The site is deleted again
+// when the test ends -- by the system actor, the one caller the systemOwned
+// delete guard admits (component/memql/platform_site_delete_guard.go) -- so a
+// cluster owner's list on the shared database does not gain a system-owned
+// fixture every run.
 func seedSystemOwnedSite(t *testing.T, eng *memql.MemQLEngine, slug string) string {
 	t.Helper()
 	id := "site-traffic-" + slug
@@ -212,6 +216,11 @@ func seedSystemOwnedSite(t *testing.T, eng *memql.MemQLEngine, slug string) stri
 	if _, err := eng.Execute(systemActorCtx(), q); err != nil {
 		t.Fatalf("seed the system-owned site: %v", err)
 	}
+	t.Cleanup(func() {
+		if _, err := eng.Execute(systemActorCtx(), fmt.Sprintf(`mutation deleteSite(siteId: %s)`, langparser.QuoteString(id))); err != nil {
+			t.Errorf("delete the system-owned fixture %s: %v", id, err)
+		}
+	})
 	return id
 }
 
@@ -1042,20 +1051,15 @@ func TestSystemOwnedSitesAreNeverInTheAnswer(t *testing.T) {
 	owner := operatorCtx("user-owner-" + sfx)
 
 	// The cluster owner can read the system-owned row, so leaving it out is
-	// this read's doing and not the row gate's.
-	res, err := eng.Execute(owner, "query sitesAll()")
+	// this read's doing and not the row gate's. Asked BY ID: sitesAll is
+	// sorted by hostname, and on a shared database holding more deployables
+	// than its first page the row need not be on it.
+	res, err := eng.Execute(owner, fmt.Sprintf("query siteById(siteId: %s)", langparser.QuoteString(system)))
 	if err != nil {
-		t.Fatalf("read sitesAll: %v", err)
+		t.Fatalf("read the system-owned site: %v", err)
 	}
-	visible := false
-	for _, row := range memql.MaterializeRows(res) {
-		id, _ := row["id"].(string)
-		if memql.BareShortId(id) == system && row["systemOwned"] == true {
-			visible = true
-		}
-	}
-	if !visible {
-		t.Fatalf("precondition: the cluster owner does not see the system-owned site %s in sitesAll", system)
+	if rows := memql.MaterializeRows(res); len(rows) != 1 || rows[0]["systemOwned"] != true {
+		t.Fatalf("precondition: the cluster owner does not read the system-owned site %s; got %v", system, rows)
 	}
 
 	for name, q := range map[string]StatisticsQuery{
@@ -1098,6 +1102,109 @@ func TestAnEveryDeployableReadWalksEveryPageOfTheList(t *testing.T) {
 	got := readStatistics(t, userCtx(member), eng, db, StatisticsQuery{Period: statsperiod.Last7Days, Now: time.Date(2038, 3, 4, 9, 0, 0, 0, time.UTC)})
 	if line := sitesLine(got.Sites); line != strings.Join(want, "; ") {
 		t.Errorf("sites = %s, want all three organizations' deployables: %s", line, strings.Join(want, "; "))
+	}
+}
+
+// A BLANK OR MALFORMED ID NAMES NOTHING; IT NEVER WIDENS THE READ. A list the
+// caller sent is a list they named, so one whose every id is blank or not a
+// string gets what an unreadable id gets -- nothing -- and not what naming
+// none gets, which is every deployable they may read. Asked of the handler,
+// because the wire's raw argument is where "named" is decided, and asked by
+// staff, who reach every deployable, so a widened read cannot hide.
+func TestABlankOrMalformedIdNamesNothingAndNeverWidensTheRead(t *testing.T) {
+	eng, db := statisticsTest(t)
+	sfx := suffix(t)
+	siteA := seedDeployable(t, eng, "user-a-"+sfx, "a-"+sfx)
+	siteB := seedDeployable(t, eng, "user-b-"+sfx, "b-"+sfx)
+	day := utcDay(2038, 7, 1)
+	seedDailyStats(t, db, siteA, day, measured(2, 2, 1, 3, 4))
+	seedDailyStats(t, db, siteB, day, measured(5, 5, 1, 6, 7))
+	i := NewIntegration(eng, func() *bun.DB { return db }, quietLogger())
+	i.now = func() time.Time { return dayAt(day, 12, 0) }
+	staff := operatorCtx("user-owner-" + sfx)
+
+	// read answers the site ids and the visitors total of one call.
+	read := func(name string, args map[string]any) ([]string, any) {
+		t.Helper()
+		args["period"] = "7d"
+		nodes, err := i.handleStatistics(staff, args, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(nodes) != 1 {
+			t.Fatalf("%s: %d nodes, want 1", name, len(nodes))
+		}
+		var p map[string]any
+		if err := json.Unmarshal(nodes[0].Payload, &p); err != nil {
+			t.Fatalf("%s: decode: %v", name, err)
+		}
+		var ids []string
+		sites, _ := p["sites"].([]any)
+		for _, s := range sites {
+			site, _ := s.(map[string]any)
+			id, _ := site["siteId"].(string)
+			ids = append(ids, id)
+		}
+		totals, _ := p["totals"].(map[string]any)
+		return ids, totals["visitors"]
+	}
+
+	for name, args := range map[string]map[string]any{
+		"a blank site id":           {"siteIds": []any{""}},
+		"a non-string site id":      {"siteIds": []any{42}},
+		"blank, null and a number":  {"siteIds": []any{" ", nil, 3.5}},
+		"one blank site id":         {"siteIds": "  "},
+		"a blank organization":      {"accountIds": []any{""}},
+		"a non-string organization": {"accountIds": []any{7}},
+	} {
+		if ids, visitors := read(name, args); len(ids) != 0 || visitors != nil {
+			t.Errorf("%s: answered sites %v and %v visitors, want nothing: the caller named something, and it names no deployable", name, ids, visitors)
+		}
+	}
+
+	// And what still widens, and what does not: naming none reads every
+	// deployable, and a usable id beside a blank one is read.
+	for name, c := range map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"no siteIds at all":              {map[string]any{}, siteB + "," + siteA},
+		"an empty list":                  {map[string]any{"siteIds": []any{}}, siteB + "," + siteA},
+		"a usable id beside a blank one": {map[string]any{"siteIds": []any{"", siteA}}, siteA},
+		"an organization beside a blank": {map[string]any{"accountIds": []any{"", accountOf(siteB)}}, siteB},
+	} {
+		if ids, _ := read(name, c.args); strings.Join(ids, ",") != c.want {
+			t.Errorf("%s: sites %v, want %s", name, ids, c.want)
+		}
+	}
+}
+
+// A NAMED DEPLOYABLE PAST THE FIRST PAGE IS READ. Named ids resolve against
+// every page of sitesAll -- the walk a read naming none makes -- and only the
+// ids the walk did not return (an archived deployable's) fall back to the
+// bounded per-id lookup, so a list longer than one page, and than the
+// fallback's sixteen lookups, is answered whole rather than short. Pages of
+// one, so eighteen organizations cross seventeen boundaries whatever else
+// the shared database holds.
+func TestANamedDeployablePastTheFirstPageIsRead(t *testing.T) {
+	eng, db := statisticsTest(t)
+	defer func(size int) { sitesPageSize = size }(sitesPageSize)
+	sitesPageSize = 1
+	sfx := suffix(t)
+	member := "user-member-" + sfx
+	n := maxIndividualLookups + 2
+	var named []string
+	for k := 0; k < n; k++ {
+		site := seedDeployable(t, eng, fmt.Sprintf("user-%02d-%s", k, sfx), fmt.Sprintf("n%02d-%s", k, sfx))
+		addMember(t, eng, site, member)
+		seedDailyStats(t, db, site, utcDay(2038, 8, 3), measured(1, 1, 1, 1, 1))
+		named = append(named, site)
+	}
+
+	got := readStatistics(t, userCtx(member), eng, db, StatisticsQuery{SiteIds: named, Period: statsperiod.Last7Days, Now: time.Date(2038, 8, 4, 9, 0, 0, 0, time.UTC)})
+
+	if len(got.Sites) != n || num(got.Totals.Visitors) != strconv.Itoa(n) {
+		t.Errorf("%d deployables and %s visitors, want all %d of them: a named deployable past the first page was left out", len(got.Sites), num(got.Totals.Visitors), n)
 	}
 }
 

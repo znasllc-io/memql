@@ -333,8 +333,10 @@ func (i *Integration) handleStatistics(ctx context.Context, args map[string]any,
 		now = i.now()
 	}
 	stats, err := NewReader(db, i.engine).Statistics(ctx, StatisticsQuery{
-		SiteIds:    stringsArg(args, "siteIds"),
-		AccountIds: stringsArg(args, "accountIds"),
+		// namedIdsArg, not stringsArg: a list of blank ids is NAMED and names
+		// nothing, and must not read as no list at all (statisticsSites).
+		SiteIds:    namedIdsArg(args, "siteIds"),
+		AccountIds: namedIdsArg(args, "accountIds"),
 		Period:     statsperiod.Period(stringArg(args, "period")),
 		Now:        now,
 	})
@@ -426,6 +428,36 @@ func stringsArg(args map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+// namedIdsArg decodes a list of ids the way the statistics read needs it:
+// KEEPING THAT IT WAS NAMED. stringsArg drops a blank or non-string element,
+// so a list holding nothing usable decodes to empty -- the spelling of "none
+// named", which the statistics read answers with every deployable the caller
+// may read. Here such an element is kept as "", which names no deployable, so
+// the list stays named and its answer stays empty.
+//
+// Absent, null and an empty list name nothing (nil or empty). A string is one
+// id, blank or not. Any other value is a list of one unusable id.
+func namedIdsArg(args map[string]any, key string) []string {
+	switch v := args[key].(type) {
+	case nil:
+		return nil
+	case []any:
+		out := make([]string, len(v))
+		for i, e := range v {
+			if s, ok := e.(string); ok {
+				out[i] = s
+			}
+		}
+		return out
+	case []string:
+		return append([]string{}, v...)
+	case string:
+		return []string{v}
+	default:
+		return []string{""}
+	}
 }
 
 // timeArg parses an RFC3339 instant. A malformed one is REFUSED rather than

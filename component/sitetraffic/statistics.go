@@ -23,14 +23,18 @@ import (
 //
 // The statistics tables are dedicated tables, outside the parser and the
 // row-authz filter path, so the gate is the site's own, asked of the engine
-// under the caller's actor, as for the traffic read (reader.go). Named
-// deployables go through readableSites. A read that names none covers every
-// deployable `sitesAll` hands the caller, kept to the organizations they name
+// under the caller's actor, as for the traffic read (reader.go). Both paths
+// walk every page of `sitesAll` under that actor (walkReadableSites). Named
+// deployables are kept to the ones on it, plus a few looked up by id
+// (readableNamedSites, for an archived one). A read that names none covers
+// every deployable on it, kept to the organizations they name
 // (readableSitesForAccounts). Either way an id or an organization the caller
 // cannot reach is dropped, so a client's member who names another client's
 // deployable or organization gets exactly the answer a deployable with no
 // traffic gets -- no refusal, no figure, not even the day counting started.
-// The cluster's own system-owned surfaces are never in an answer (D16).
+// A named list whose ids are all blank names nothing, and answers the same
+// (statisticsSites). The cluster's own system-owned surfaces are never in an
+// answer (D16).
 //
 // # Absent is never zero
 //
@@ -74,12 +78,15 @@ import (
 // StatisticsQuery is one statistics read.
 type StatisticsQuery struct {
 	// SiteIds names the deployables, as bare ids, at most maxSitesPerRead.
-	// Empty means every deployable the caller may read.
+	// Empty means every deployable the caller may read. A list that is not
+	// empty is named even when none of its ids is usable: blank ids name no
+	// deployable, and the answer is empty.
 	SiteIds []string
 	// AccountIds keeps a read that names no deployables to these
 	// organizations, as bare ids. It narrows what the caller may read and
 	// never widens it, and it is not consulted when SiteIds names the
-	// deployables: the names are already narrower than any organization.
+	// deployables: the names are already narrower than any organization. As
+	// with SiteIds, a list of blank ids names no organization and keeps none.
 	AccountIds []string
 	// Period is one of statsperiod's.
 	Period statsperiod.Period
@@ -201,11 +208,18 @@ func (r *Reader) Statistics(ctx context.Context, q StatisticsQuery) (Statistics,
 }
 
 // statisticsSites narrows the query to bare site ids under the caller.
+//
+// WHETHER DEPLOYABLES WERE NAMED is the length of the list the caller sent,
+// blanks included, and never the number of usable ids in it: a list of blank
+// ids names no deployable and answers empty, where reading it as "none named"
+// would answer every deployable the caller may read -- for staff, the whole
+// cluster -- under the label of the one they asked about. The handler keeps
+// an unusable element as "" for exactly this (namedIdsArg).
 func (r *Reader) statisticsSites(ctx context.Context, q StatisticsQuery) ([]string, error) {
 	if len(q.SiteIds) == 0 {
 		return r.readableSitesForAccounts(ctx, q.AccountIds)
 	}
-	rows, err := r.readableSiteRows(ctx, q.SiteIds)
+	rows, err := r.readableNamedSites(ctx, q.SiteIds)
 	if err != nil {
 		return nil, err
 	}

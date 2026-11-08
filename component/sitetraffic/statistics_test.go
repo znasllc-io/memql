@@ -43,6 +43,37 @@ func TestAStatisticsReadWithoutItsHandlesSaysWhatIsMissing(t *testing.T) {
 	}
 }
 
+// A list the caller NAMED stays named however unusable its elements are: a
+// blank or non-string id decodes to "" (which names no deployable), never to
+// an empty list (which names none, and reads every deployable).
+func TestNamedIdsArgKeepsThatAListWasNamed(t *testing.T) {
+	for name, c := range map[string]struct {
+		value any
+		want  []string
+	}{
+		"absent":                 {nil, nil},
+		"an empty list":          {[]any{}, []string{}},
+		"a blank id":             {[]any{""}, []string{""}},
+		"a non-string id":        {[]any{42}, []string{""}},
+		"blank, null and number": {[]any{" ", nil, 3.5}, []string{" ", "", ""}},
+		"a usable id kept":       {[]any{"", "site-a"}, []string{"", "site-a"}},
+		"a single id":            {"site-a", []string{"site-a"}},
+		"a single blank":         {"  ", []string{"  "}},
+		"a typed list":           {[]string{"site-a", ""}, []string{"site-a", ""}},
+		"something else":         {map[string]any{"id": "site-a"}, []string{""}},
+	} {
+		args := map[string]any{}
+		if c.value != nil {
+			args["siteIds"] = c.value
+		}
+		// Absent and empty both name nothing (len 0); everything else names
+		// something, usable or not (len > 0).
+		if got := namedIdsArg(args, "siteIds"); fmt.Sprintf("%q", got) != fmt.Sprintf("%q", c.want) {
+			t.Errorf("%s: %q, want %q", name, got, c.want)
+		}
+	}
+}
+
 func i64(v int64) *int64     { return &v }
 func f64(v float64) *float64 { return &v }
 
