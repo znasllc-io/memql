@@ -9,6 +9,7 @@ require (
 	github.com/a-h/templ v0.3.1070
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/uuid v1.6.0
+	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/stretchr/testify v1.12.1
 	github.com/tliron/commonlog v0.2.21
 	github.com/tliron/glsp v0.2.2
@@ -27,6 +28,11 @@ require (
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/oschwald/maxminddb-golang/v2 v2.1.1 // indirect
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 )
 
 require (
@@ -81,7 +87,7 @@ require (
 	github.com/openai/openai-go/v3 v3.81.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/oschwald/geoip2-golang v1.13.0 // indirect
+	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.28 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect
