@@ -159,39 +159,68 @@ func ProposalHash(ruleSource string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// RuleName is the generated rule's name, derived from the model and level.
+// RuleName is the generated rule's name, derived from the direction, the model
+// and the level.
 //
 // DERIVED rather than random, so a second fold of the same evidence produces
-// the same name and the authoring pipeline treats it as the same rule rather
-// than as a second one beside it.
+// the same name, and a promotion names the demotion it lifts by deriving it
+// again (integrations/work's routing review decision).
+//
+// ITS SHAPE IS A SAVED RULE'S: lowerCamelCase letters and digits. An approved
+// demotion is saved into the routing configuration through routingRuleSave's
+// own checks (component/memql's ValidateRuleProposal), which refuse any other
+// shape, and so do MemQL OS's rule forms. Until 2026-11-08 the name joined
+// its parts with underscores, so no approved demotion could have been saved.
+//
+// The model part is the model id's letters and digits with each run
+// capitalised, for a reader, then the first eight hex digits of the SHA-256 of
+// the EXACT model id, for uniqueness: "qwen3.5:9b" and "qwen35:9b" share their
+// letters and digits, and one name for both would let approving one replace
+// the other's demotion. Nothing reads the model back out of a name; it travels
+// on the evidence row and in the rule's @exclude, byte-identical to what the
+// router selects on.
 func RuleName(direction, modelId, level string) string {
-	// The direction is capitalised by hand rather than through strings.Title,
-	// which is deprecated and, more to the point, would apply Unicode word
-	// rules to a value from a closed two-word set.
-	word := direction
-	if word != "" {
-		word = strings.ToUpper(word[:1]) + word[1:]
-	}
-	return "evidence" + word + "_" + slugForRule(modelId) + "_" + level
+	return "evidence" + upperFirst(direction) + upperFirst(level) + modelWords(modelId) + ProposalHash(modelId)[:8]
 }
 
-// slugForRule reduces a model tag to something a rule name may carry.
-//
-// A tag holds ':' and '/' and a rule name is an identifier, so the translation
-// is unavoidable -- and it is one-way BY DESIGN: nothing reads the model back
-// out of a rule name. The model id travels on the evidence row, where it stays
-// byte-identical to what the router selects on.
-func slugForRule(modelId string) string {
+// maxModelWords bounds the readable part of a rule name; the digest after it
+// is what keeps a truncated name unique.
+const maxModelWords = 40
+
+// modelWords is a model id's ASCII letters and digits, each run capitalised.
+func modelWords(modelId string) string {
 	var b strings.Builder
+	startOfRun := true
 	for _, r := range modelId {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'z':
+			if startOfRun {
+				r -= 'a' - 'A'
+			}
 			b.WriteRune(r)
+			startOfRun = false
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			startOfRun = false
 		default:
-			b.WriteRune('_')
+			startOfRun = true
 		}
 	}
-	return b.String()
+	words := b.String()
+	if len(words) > maxModelWords {
+		words = words[:maxModelWords]
+	}
+	return words
+}
+
+// upperFirst capitalises a word from a closed ASCII set (a direction, a level)
+// by hand rather than through strings.Title, which is deprecated and would
+// apply Unicode word rules to a value that has none.
+func upperFirst(word string) string {
+	if word == "" {
+		return ""
+	}
+	return strings.ToUpper(word[:1]) + word[1:]
 }
 
 // SortWindows orders windows so a fold writes them in a stable order.
