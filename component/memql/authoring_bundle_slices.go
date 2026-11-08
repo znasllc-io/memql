@@ -130,6 +130,7 @@ var splitterHandledKeywords = map[string]bool{
 	"spec":       true,
 	"trait":      true,
 	"shape":      true,
+	"rule":       true,
 	"automation": true,
 	"action":     true,
 	"capability": true,

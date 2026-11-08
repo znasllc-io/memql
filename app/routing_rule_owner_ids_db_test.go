@@ -10,14 +10,12 @@ package app
 // its id -- owned that id, and everybody else's rule of that name was refused
 // at the bundle write.
 //
-// WHAT THIS CHECKS IS THE BUNDLE WRITE, deliberately. Gate 1 refuses every
-// generated routing rule today -- the bundle splitter it runs classifies no
-// `rule` region, and createAuthoringConstruct's kind enum has no `rule` -- so
-// no activation here reaches active. That defect predates this change and is
-// reported with it. The bundle write comes BEFORE the gate (a refused gate is
-// recorded on the bundle), so it is where another person's row blocked the
-// owner, and it is what these assertions read; they hold unchanged once the
-// gate accepts a rule.
+// WHAT THIS CHECKS IS THE BUNDLE WRITE, deliberately. The bundle write comes
+// BEFORE Gate 1 (a refused gate is recorded on the bundle), so it is where
+// another person's row blocked the owner, and it is what these assertions
+// read. They were written while Gate 1 still refused every generated rule and
+// do not depend on what the activation after the write does; that a rule arms
+// is app/routing_rule_arming_db_test.go's claim.
 
 import (
 	"context"
@@ -129,10 +127,9 @@ func TestASecondUserCannotTakeOrBlockTheFirstUsersRoutingRule(t *testing.T) {
 		}
 	}
 
-	// Retired however the test ends, once a rule can arm: a bundle left active
-	// is armed by every later reconcile against this shared database. Through
-	// the mutation as the author -- the activator's Retire hands the engine the
-	// bare owner the builtin passes, which the reported defect makes refuse.
+	// Retired however the test ends: a bundle left active is armed by every
+	// later reconcile against this shared database. Through the mutation as the
+	// author, so the cleanup does not depend on the activator under test.
 	retireWhenDone := func(who routingRuleAuthor, name string) {
 		t.Cleanup(func() {
 			id := routingrules.BundleIdFor(who.owner, name)

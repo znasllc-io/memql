@@ -184,9 +184,9 @@ func (a *Activator) Retire(ctx context.Context, owner, name string) (Result, err
 //
 // There is no rule row and no version: an edit rewrites the same bundle in
 // place. Nothing armed under the name-only id needs to be found again,
-// because nothing ever was: the bundle splitter Gate 1 runs has never
-// classified a `rule` region, so Gate 1 has refused every generated rule
-// since this package landed, and a refused rule is never activated.
+// because nothing ever was: until after ids carried their owner, the bundle
+// splitter Gate 1 runs classified no `rule` region, so Gate 1 refused every
+// generated rule, and a refused rule is never activated.
 func BundleIdFor(owner, name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	sum := sha256.Sum256([]byte(memql.BareShortId(owner) + "\x00" + name))

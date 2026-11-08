@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -120,6 +121,21 @@ func unsupportedKindInBundle(err string) bool {
 		strings.Contains(err, "no recognizable constructs found in bundle source")
 }
 
+// lockedAnnotationLine is the one annotation the authoring path refuses ON
+// PURPOSE. Accepting @locked is the embedded tree's alone -- a runtime-authored
+// rule that could lock itself would evaluate before every shipped rule -- and
+// every shipped rule carries it (dsl/rules/rules.memql), so boot accepts those
+// bytes and Gate 1 refuses them, in its own words, by design.
+//
+// The gate removes the annotation before the authoring pass and COUNTS what it
+// removed, rather than excluding the refusal: excluding it would exclude every
+// shipped rule, and the splitter learning the `rule` kind (memql#6022
+// follow-up) is what brought rules under this gate. So the rest of every
+// shipped rule is still held to parity, and the one deliberate divergence is a
+// number in the output. That the refusal itself holds is
+// TestGateOneRefusesALockedRuleForBeingLocked.
+var lockedAnnotationLine = regexp.MustCompile(`(?m)^[ \t]*@locked[ \t]*\n`)
+
 // TestAuthoringPathValidatesEveryDslFile is the parity gate.
 //
 // Every construct of a kind the sandbox COMPILES, in every .memql file in the
@@ -151,6 +167,7 @@ func TestAuthoringPathValidatesEveryDslFile(t *testing.T) {
 	constructsChecked := 0
 	filesChecked := 0
 	unsupported := 0
+	lockedRemoved := 0
 
 	paths := make([]string, 0, len(files))
 	for rel := range files {
@@ -166,9 +183,13 @@ func TestAuthoringPathValidatesEveryDslFile(t *testing.T) {
 		if strings.TrimSpace(string(src)) == "" {
 			continue
 		}
+		// The one deliberate divergence, removed and counted (lockedAnnotationLine).
+		source := string(src)
+		lockedRemoved += len(lockedAnnotationLine.FindAllStringIndex(source, -1))
+		source = lockedAnnotationLine.ReplaceAllString(source, "")
 		// The ORIGIN is the whole point: the same tree-relative path the boot
 		// loader derives its domain from, and the one the extension sends.
-		report := ValidateBundle(string(src), rel)
+		report := ValidateBundle(source, rel)
 		if len(report.Diagnostics) == 0 {
 			continue // no recognizable constructs (e.g. a comment-only file)
 		}
@@ -193,8 +214,9 @@ func TestAuthoringPathValidatesEveryDslFile(t *testing.T) {
 	// the same reason, so nobody reads this pass as covering the whole tree.
 	t.Logf("validated %d construct(s) across %d file(s) through the authoring path; "+
 		"%d excluded as kinds the bundle splitter deliberately does not author "+
-		"(prompt / provider / tool / builtin / policy / seed)",
-		constructsChecked, filesChecked, unsupported)
+		"(prompt / provider / tool / builtin / policy / seed); "+
+		"%d @locked annotation(s) removed first, the one authority runtime authoring does not grant",
+		constructsChecked, filesChecked, unsupported, lockedRemoved)
 	if constructsChecked < 100 {
 		t.Fatalf("only %d construct(s) were checked across %d file(s) -- the sweep is broken, "+
 			"not the tree; a green run here would mean nothing", constructsChecked, filesChecked)
