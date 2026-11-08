@@ -77,7 +77,12 @@ concept pipeline {
 /// (driverHeartbeatAt) and after every step (stages), and every version copies the whole row,
 /// policySnapshot included -- the full source of every workflow construct the run may execute, about
 /// 14 KB that never changes after open. On production on 2026-11-06 that was 3,831 versions of 30
-/// runs in a day, ~17 KB each, and 1.7 GB in the week of October 29. Nothing reads a superseded
+/// runs in a day, ~17 KB each, and 1.7 GB in the week of October 29, about three quarters of them
+/// heartbeats. Where pipeline-run observation storage is on (migration
+/// 20261108190000_pipeline_run_lease_observations), a heartbeat is not a version at all: a write
+/// changing only driverHeartbeatAt replaces the run's one current observation in memory_liveness,
+/// which every read and row-version fence merges, while claims, stages and the conclusion stay
+/// versions and carry the observed heartbeat. Nothing reads a superseded
 /// version: every query takes the newest per id, and the row-version fences compare only the newest
 /// createdAt (component/pipelinerun/store_dsl.go). So superseded versions expire after a day and are
 /// not archived; the newest version of every run stays, and the whole-run operational retention

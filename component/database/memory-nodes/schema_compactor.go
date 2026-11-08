@@ -71,9 +71,14 @@ func (c *SchemaCompactor) run(ctx context.Context, markStarted func()) error {
 			if err == nil && enabled {
 				_, err = CompactSchemaBatch(batchCtx, db)
 				if err == nil {
+					// Each observation store has its own reader handshake
+					// (liveness.go), advertised on every tick in rollout order.
 					_, err = EnableLivenessStorageWhenReady(batchCtx, db, c.nodeID())
 					if err == nil {
 						_, err = EnableReconcileObservationsWhenReady(batchCtx, db, c.nodeID())
+					}
+					if err == nil {
+						_, err = EnablePipelineRunObservationsWhenReady(batchCtx, db, c.nodeID())
 					}
 				}
 			}
