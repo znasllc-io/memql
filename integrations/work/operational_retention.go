@@ -99,13 +99,26 @@ func retentionShare(left time.Duration, policies int) time.Duration {
 // appear orphaned and permits retirement while that parent is still running.
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
-// Three things keep a finished pipeline run past its window, and all are read
+// Four things keep a finished pipeline run past its window, and all are read
 // without presentation gates: hiding a staged row must not let what it authorizes
 // disappear.
 //
 // Artifact cleanup authorizes each provider effect through these journals.
 // Preserve that authority until all bytes and Library presentations are retired,
 // including files pinned by publications or deliberately retained by their owner.
+//
+// A PRE-RECEIPT STEP LOG HOLDS ITS PRODUCER TOO, while its row in
+// pipeline_legacy_log_enrollment is pending. The scheduled enrollment
+// (component/pipelinerun EnrollLegacyLogs) proves each such log's step against
+// these journals before it writes the log's receipt, and from then on the
+// receipt's hold above takes over. A journal retired first would leave the log
+// unprovable, and its bytes and Library rows unretired for good: on the
+// production installation the oldest of those journals reach their window
+// about 2026-11-15. A refused row holds nothing, since the enrollment has given
+// up on it. The list only shrinks and is read once per statement, an
+// uncorrelated NOT IN like the candidates' below, and its work_run_id is NOT
+// NULL, so the NOT IN cannot turn NULL. TestRetentionKeepsAPipelineRunWhileItsLegacyLogsAwaitEnrollment
+// holds which rows it keeps.
 //
 // A LIVE CANDIDATE HOLDS EVERY RUN IT NAMES: the run of each evidence entry, and the run
 // a reused step stood on. Coverage reads the first whole (completeRun, integrations/release)
@@ -216,6 +229,7 @@ func retentionHeldBackSQL(concept string) string {
  a.owner_user_id=regexp_replace(n.payload->>'ownerUserId','^v1:identity:user:','')
  AND a.identity->>'WorkRunID'=regexp_replace(` + work + `,'^v1:work:run:','')
  AND (a.state<>'retired' OR a.library_purged_at IS NULL))
+ AND COALESCE(regexp_replace(` + work + `,'^v1:work:run:',''),'') NOT IN (SELECT e.work_run_id FROM pipeline_legacy_log_enrollment e WHERE e.state='pending')
  AND COALESCE(regexp_replace(` + work + `,'^v1:work:run:',''),'') NOT IN (SELECT named.run FROM (SELECT unnest(ARRAY[e->>'workRunId',e->'reusedFrom'->>'workRunId']) AS run FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'evidence') e
  WHERE c.state NOT IN ('retired','archived') AND jsonb_typeof(c.manifest->'evidence')='array') named WHERE named.run<>'')
  AND (COALESCE(` + source + `->>'event','')<>'` + string(pipelines.EventRelease) + `' OR (COALESCE(` + source + `->>'repository',''),COALESCE(` + source + `->>'sha','')) NOT IN (SELECT k->>'repository',k->>'commit' FROM release_candidates c CROSS JOIN LATERAL jsonb_array_elements(c.manifest->'components') k

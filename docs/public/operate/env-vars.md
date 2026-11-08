@@ -1176,7 +1176,7 @@ read.
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned, goalless runs the scheduler fired on a schedule or on an event, their steps and closed approvals |
-| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs and their work journals, steps and closed approvals, then the pipeline's goal once no run remains. Native artifact receipts keep their authorizing journals until byte and Library cleanup completes, and a live release candidate keeps every run it names, the runs it reused a step from and every attempt of its release. Generated files use [separate retention](pipelines-substrate.md#retention) |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs and their work journals, steps and closed approvals, then the pipeline's goal once no run remains. Native artifact receipts keep their authorizing journals until byte and Library cleanup completes, a step log still waiting in the legacy log enrollment list keeps its run's journals until it is enrolled or refused, and a live release candidate keeps every run it names, the runs it reused a step from and every attempt of its release. Generated files use [separate retention](pipelines-substrate.md#retention) |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history; also when the daily soft delete hides a row |
 | `MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS` | `1` | Soft-deleted worker invocations of any outcome, counted from the soft delete |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
