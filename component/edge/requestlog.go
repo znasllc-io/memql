@@ -16,7 +16,8 @@
 // page's path, where the visitor arrived from, their country, device, browser
 // and operating system, and a visitor id. They exist because a client is
 // promised visitors, pages and sources, and a count of requests answers none
-// of those.
+// of those. Neither a bot's request nor one served under a preview grant (an
+// operator testing a candidate version) is ever a page view.
 //
 // # What it never carries
 //
@@ -66,7 +67,7 @@ type RequestRecord struct {
 	Measured bool
 	// PageView is a person opening a page: a browser navigation
 	// (visit.IsPageView, spec D2) or an accepted page-change ping. Never true
-	// for a bot.
+	// for a bot, nor for a request served under a preview grant.
 	PageView bool
 	// Bot is true when the user agent is empty or names automation. Set on
 	// every record, so bot requests count under health and stay out of
@@ -157,6 +158,21 @@ type recordingWriter struct {
 	// record is built after it returns. A non-empty value makes the record
 	// a page view of that path (addVisitFields).
 	viewPath string
+	// servedUnderPreview is true when serve answered the request under a
+	// preview grant (markServedUnderPreview): an operator exercising a
+	// candidate version, or a storefront's private testing origin. Carried
+	// here for viewPath's reason, and it keeps such a request from ever being
+	// a page view -- it is testing, not visiting.
+	servedUnderPreview bool
+}
+
+// markServedUnderPreview notes on the writer that serve is answering this
+// request under a preview grant. The writer is a recordingWriter only while
+// the request is being recorded; otherwise there is nothing to mark.
+func markServedUnderPreview(w http.ResponseWriter) {
+	if rec, ok := w.(*recordingWriter); ok {
+		rec.servedUnderPreview = true
+	}
 }
 
 func (w *recordingWriter) WriteHeader(status int) {
@@ -236,8 +252,9 @@ func PathClassesForTest() []string {
 }
 
 // addVisitFields fills the visit half of a record whose outcome (Status,
-// PathClass, ServedAt) is already set. viewPath is the writer's: non-empty
-// only for an accepted page-change ping.
+// PathClass, ServedAt) is already set. served is the request's recording
+// writer, which carries what serve learned beyond the path class: the path an
+// accepted page-change ping named, and whether a preview grant was in force.
 //
 // It runs on the serving goroutine after the response is written, so it is
 // bounded work and nothing else: string matching, one HMAC under a secret held
@@ -246,14 +263,19 @@ func PathClassesForTest() []string {
 //
 // The user agent and the client address are locals of this function and
 // leave it only as what is derived from them.
-func (h *Handler) addVisitFields(record *RequestRecord, r *http.Request, site *Site, viewPath string) {
+func (h *Handler) addVisitFields(record *RequestRecord, r *http.Request, site *Site, served *recordingWriter) {
 	userAgent := r.UserAgent()
 	agent := visit.Classify(userAgent)
+	viewPath := served.viewPath
 	record.Measured = true
 	record.Bot = agent.Bot
-	// A bot is never a page view, not even through a ping: a headless browser
-	// runs the view script exactly as a person's browser does.
-	record.PageView = !agent.Bot && (viewPath != "" || visit.IsPageView(r, record.PathClass, record.Status))
+	// Never a page view: a bot, not even through a ping (a headless browser
+	// runs the view script exactly as a person's browser does); nor a request
+	// served under a preview grant, which is an operator testing a candidate
+	// and would put their checks into a client's visitor figures. Both are
+	// still recorded, so health counts every request the edge answered.
+	record.PageView = !agent.Bot && !served.servedUnderPreview &&
+		(viewPath != "" || visit.IsPageView(r, record.PathClass, record.Status))
 	if !record.PageView {
 		return
 	}

@@ -104,7 +104,8 @@ type Record struct {
 	Measured bool
 	// PageView is a person opening a page: a browser navigation (spec D2) or
 	// an accepted page-change ping from a single-page app. Never true for a
-	// bot.
+	// bot, nor for a request the edge served under a preview grant (an
+	// operator testing a candidate version, not a visitor).
 	PageView bool
 	// Bot is true when the user agent was empty or named automation. Set on
 	// every row, page view or not, so bot requests count under health and

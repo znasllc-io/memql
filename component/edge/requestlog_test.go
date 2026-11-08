@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // requestlog_test.go -- the edge's per-request record (epic memql#4906).
@@ -627,8 +629,9 @@ func TestAnAcceptedPingIsAPageViewWithNoSource(t *testing.T) {
 		}
 	}
 
+	acceptedPing := &recordingWriter{ResponseWriter: httptest.NewRecorder(), viewPath: "/products/b"}
 	req, got := ping(chromeOnWindows)
-	h.addVisitFields(&got, req, visitSite(), "/products/b")
+	h.addVisitFields(&got, req, visitSite(), acceptedPing)
 	if !got.Measured || !got.PageView || got.Bot {
 		t.Errorf("measured=%v pageView=%v bot=%v, want an accepted ping to be a page view", got.Measured, got.PageView, got.Bot)
 	}
@@ -643,7 +646,7 @@ func TestAnAcceptedPingIsAPageViewWithNoSource(t *testing.T) {
 	}
 
 	req, bot := ping("")
-	h.addVisitFields(&bot, req, visitSite(), "/products/b")
+	h.addVisitFields(&bot, req, visitSite(), acceptedPing)
 	if !bot.Measured || !bot.Bot || bot.PageView {
 		t.Errorf("measured=%v bot=%v pageView=%v, want a bot's ping to be no page view", bot.Measured, bot.Bot, bot.PageView)
 	}
@@ -674,6 +677,61 @@ func TestAPageViewWithNoSecretOrCountryDatabaseLeavesThoseEmpty(t *testing.T) {
 	_, records = serveVisit(t, navigate(visitRequest(http.MethodGet, "/", chromeOnWindows)), map[string]string{"index.html": "ROOT"}, unheld, nil)
 	if len(records) != 1 || !records[0].PageView || records[0].Visitor != "" {
 		t.Errorf("a keeper holding no secret for the day gave %+v, want a page view with no visitor", records)
+	}
+}
+
+// A PREVIEW IS TESTING, NOT VISITING. An operator exercising a candidate
+// version through a preview grant is answered on the site's own origin, by the
+// same serving path, with the same Fetch Metadata a visitor's browser sends,
+// so nothing about the request itself says it is not a visit. Counting it
+// would put an operator's checks into a client's visitor figures. It is still
+// recorded, because health counts every request the edge answered, but like a
+// bot's: no page view, no dimension and no visitor.
+func TestAPreviewServedRequestIsNotAPageView(t *testing.T) {
+	site := previewSiteRow(siteStatusLiveValue)
+	exec := newStubPreviewExec()
+	token := exec.issue(t, PreviewGrant{ID: "g-statistics", SiteID: site.ID, CandidateRef: candidateRef})
+	visitors, countries := visitFakes()
+	log := &captureRecorder{}
+	h := NewHandler(Options{
+		Resolver:    staticResolver{site: site},
+		Opener:      previewBundles(),
+		PreviewExec: exec,
+		RequestLog:  log,
+		Visitors:    visitors,
+		Countries:   countries,
+	})
+	navigation := func(underGrant bool) *http.Request {
+		req := navigate(visitRequest(http.MethodGet, "/", chromeOnWindows))
+		req.Host = site.Hostname
+		if underGrant {
+			req.AddCookie(&http.Cookie{Name: memql.PreviewCookieName, Value: token})
+		}
+		return req
+	}
+
+	previewed := httptest.NewRecorder()
+	h.ServeHTTP(previewed, navigation(true))
+	if previewed.Code != http.StatusOK || !strings.Contains(previewed.Body.String(), "the candidate version") {
+		t.Fatalf("the grant was not honoured (%d), so this test would prove nothing: %.120s", previewed.Code, previewed.Body.String())
+	}
+	// The same navigation without the grant IS a page view, so the difference
+	// between the two records is the grant's and nothing else's.
+	h.ServeHTTP(httptest.NewRecorder(), navigation(false))
+
+	if len(log.records) != 2 {
+		t.Fatalf("recorded %d requests, want 2 -- a previewed request still counts for health", len(log.records))
+	}
+	preview, public := log.records[0], log.records[1]
+	if !preview.Measured || preview.PageView || preview.Bot {
+		t.Errorf("previewed: measured=%v pageView=%v bot=%v, want a measured request by a person that is no page view", preview.Measured, preview.PageView, preview.Bot)
+	}
+	assertNoVisitDimensions(t, preview)
+	if !public.PageView || public.Visitor == "" {
+		t.Errorf("public: pageView=%v visitor=%q, want the same navigation without a grant to be a page view with a visitor", public.PageView, public.Visitor)
+	}
+	if len(visitors.calls) != 1 || len(countries.asked) != 1 {
+		t.Errorf("the visitor secret was consulted %d times and the country database %d, want once each, for the public request only", len(visitors.calls), len(countries.asked))
 	}
 }
 

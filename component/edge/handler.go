@@ -187,7 +187,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Bytes:      rec.bytes,
 		DurationNs: time.Since(started).Nanoseconds(),
 	}
-	h.addVisitFields(&record, r, site, rec.viewPath)
+	h.addVisitFields(&record, r, site, rec)
 	h.requestLog.Record(record)
 }
 
@@ -247,6 +247,12 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 	if grant != nil {
 		h.notePreviewSeen(grant)
 		previewHeaders(w)
+		// THE REQUEST LOG MUST KNOW, and serve returns only a path class: a
+		// request served under a grant is an operator testing a candidate,
+		// never a visitor, so it is recorded for health but is no page view.
+		// Marked on the writer, as a ping's path is, rather than widening what
+		// serve returns to every caller.
+		markServedUnderPreview(w)
 		site = previewSite(site, grant)
 		// AND THE STATUS SWITCH IS SKIPPED, which is the one place a preview
 		// changes an answer -- a draft deployable is 404 for everybody, and an
