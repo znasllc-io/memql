@@ -97,7 +97,7 @@ func TestReopenRefusesWithoutItsOwnerAndWritesNothing(t *testing.T) {
 			if run != nil {
 				t.Fatal("Reopen returned a usable run")
 			}
-			run.Heartbeat(context.Background())
+			run.RecordDriver(context.Background())
 			step, err := run.Step(context.Background(), "extract")
 			if err == nil || step != nil {
 				t.Fatal("missing journal must refuse an intent")
@@ -114,7 +114,7 @@ func TestReopenRefusesWithoutItsOwnerAndWritesNothing(t *testing.T) {
 }
 
 // Every write a RUNNER-OWNED run adds (epic memql#5477) carries the stamp and
-// the owner's actor too: the queued steps, the heartbeat, the full receipt,
+// the owner's actor too: the queued steps, the driver record, the full receipt,
 // both cancels, and every write made through a reopened handle. Without the
 // stamp each @serverOnly write is refused with a WARN and nothing else.
 func TestEveryRunnerWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
@@ -128,7 +128,7 @@ func TestEveryRunnerWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	run.Heartbeat(context.Background())
+	run.RecordDriver(context.Background())
 	mustJournalStep(t, run, context.Background(), "extract").Finish(context.Background(), Receipt{
 		Status: "done", DurationMs: 10, Binding: map[string]any{"surface": "cluster"},
 		LogFileID: "v1:library:file:log", ArtifactFileIDs: []string{"v1:library:file:a"},
@@ -137,7 +137,7 @@ func TestEveryRunnerWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
 	run.Cancelled(context.Background(), "pipeline_cancelled", "stopped")
 
 	reopened := j.Reopen("user-1", run.GoalID(), run.RunID(), w.Steps, time.Now())
-	reopened.Heartbeat(context.Background())
+	reopened.RecordDriver(context.Background())
 	mustJournalStep(t, reopened, context.Background(), "extract").Finish(context.Background(), Receipt{Status: "failed", Code: "x", Message: "y"})
 	reopened.Failed(context.Background(), "x", "y")
 
@@ -235,7 +235,7 @@ func TestANilJournalIsSafeAllTheWayDown(t *testing.T) {
 	step.Skipped(context.Background(), "z")
 	step.Finish(context.Background(), Receipt{Status: "done"})
 	step.Cancelled(context.Background(), "z")
-	run.Heartbeat(context.Background())
+	run.RecordDriver(context.Background())
 	run.Succeeded(context.Background(), nil)
 	run.Failed(context.Background(), "x", "y")
 	run.Cancelled(context.Background(), "x", "y")

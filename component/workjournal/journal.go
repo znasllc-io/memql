@@ -38,9 +38,12 @@
 //
 // Its second writer is a RUNNER-OWNED run (epic memql#5477): a pipeline's,
 // which the pipelines driver opens on an agent node with every step queued
-// (Work.QueueSteps), closes one receipt at a time (Step.Finish), beats while
-// it runs (Run.Heartbeat), and hands to another replica's driver when the
-// first goes silent (Journal.Reopen). Its triggeredBy (Work.TriggeredBy) is
+// (Work.QueueSteps), closes one receipt at a time (Step.Finish), and hands to
+// another replica's driver when the first goes silent (Journal.Reopen). Its
+// liveness is the driver's lease on the pipelines run, not this row's
+// heartbeat (WithRunnerOwnedLiveness), so the journal writes none for it and
+// records only which node drives it after a takeover (Run.RecordDriver). Its
+// triggeredBy (Work.TriggeredBy) is
 // what tells integrations/work that the run is not its to dispatch, sweep or
 // re-run. A step the driver retries journals each attempt as a version of the
 // step's one row (Run.StepAttempt), and the outcome of an attempt that another
@@ -65,6 +68,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -144,6 +148,43 @@ type Journal struct {
 	// beat overrides HeartbeatInterval so a test can watch several beats.
 	beat  time.Duration
 	guard WriteGuard
+	// runnerLiveness says the runs this journal opens are judged alive by
+	// their runner's own lease, never by heartbeatAt (WithRunnerOwnedLiveness).
+	runnerLiveness bool
+}
+
+// WithRunnerOwnedLiveness returns an independent journal for a runner that
+// judges its runs' liveness itself, on a lease of its own: the pipelines
+// driver, whose lease is driverHeartbeatAt on the v1:pipelines:run row
+// (component/pipelinerun/lease.go). The shared journal is unchanged.
+//
+// WHY THE WORK RUN THEN BEATS NOT AT ALL. heartbeatAt exists for one reader:
+// the work sweep, which closes or hands back a `running` run whose beat is a
+// minute old. It reads a pipeline's run past in every shape
+// (integrations/work's runnerOwnsRecovery), because the driver's recovery
+// claims a silent run back under the lease and resumes it from the journal,
+// and no other reader judges the field: the OS keeps it out of every
+// fingerprint and shows it nowhere. Yet a pipeline's run was beaten twice
+// over -- this package's goroutine every HeartbeatInterval, and the driver's
+// lease renewal every 30 s -- and every beat appended a whole version of the
+// row: on production on 2026-11-06, 6,912 versions of 25 runs in a day, and
+// 356 MB in the week of October 29, kept the 30 days its run is.
+//
+// So a journal with this option starts no heartbeat goroutine, opens the run
+// WITHOUT a heartbeatAt (no value is the honest one: nothing beats the row),
+// and Run.RecordDriver writes only a change of driving node. What a takeover
+// needs is untouched, because none of it reads this row's beat: the claim
+// judges the lease, and the resume reads the step rows.
+//
+// Install it before Begin or Reopen, like WithWriteGuard; the options
+// compose in either order.
+func (j *Journal) WithRunnerOwnedLiveness() *Journal {
+	if j == nil {
+		return nil
+	}
+	next := *j
+	next.runnerLiveness = true
+	return &next
 }
 
 // New builds a journal. A nil engine yields a journal whose methods are all
@@ -278,10 +319,15 @@ type Run struct {
 	started time.Time
 	// stop ends the heartbeat and done says it has ended; closing twice is
 	// guarded by stopOnce, because a caller may close a run on more than one
-	// path.
+	// path. Both are nil on a handle with no heartbeat goroutine: one Reopen
+	// returned, or one whose runner owns its liveness.
 	stop     chan struct{}
 	done     chan struct{}
 	stopOnce sync.Once
+	// nodeRecorded says the row already names this journal's node as the one
+	// driving the run, so RecordDriver has nothing to write. Begin's handle
+	// starts true (the run opened with its node); Reopen's starts false.
+	nodeRecorded atomic.Bool
 }
 
 // GoalID and RunID are what a caller records elsewhere -- a log line, a
@@ -355,6 +401,14 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		}
 	}
 
+	// The first heartbeat rides the first version, so a driver that dies
+	// before its first tick still leaves something to judge it by -- except on
+	// a run whose runner owns its liveness, which nothing judges by it
+	// (WithRunnerOwnedLiveness) and which therefore carries none.
+	beatAt := started.Format(time.RFC3339Nano)
+	if j.runnerLiveness {
+		beatAt = ""
+	}
 	runCall := call("mutation createWorkRun",
 		arg("runId", runID),
 		arg("goalId", goalID),
@@ -370,7 +424,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("status", "running"),
 		arg("nodeId", j.nodeID),
 		arg("startedAt", started.Format(time.RFC3339)),
-		arg("heartbeatAt", started.Format(time.RFC3339Nano)),
+		arg("heartbeatAt", beatAt),
 		arg("goalSignature", w.GoalSignature),
 		arg("parentRunId", w.ParentRunID),
 		objectArg("variables", w.Variables),
@@ -385,9 +439,12 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 			return nil, fmt.Errorf("workjournal: record step order: %w", err)
 		}
 	}
-	run := &Run{
-		j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started,
-		stop: make(chan struct{}), done: make(chan struct{}),
+	run := &Run{j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started}
+	// The run opened naming this journal's node, so this handle has no
+	// driver change to record.
+	run.nodeRecorded.Store(true)
+	if !j.runnerLiveness {
+		run.stop, run.done = make(chan struct{}), make(chan struct{})
 	}
 	if w.QueueSteps {
 		if err := run.queue(ctx); err != nil {
@@ -402,12 +459,16 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	)); err != nil {
 		return nil, fmt.Errorf("workjournal: activate goal: %w", err)
 	}
-	go run.heartbeat(ctx)
+	if run.stop != nil {
+		go run.heartbeat(ctx)
+	}
 	return run, nil
 }
 
 // heartbeat says the run is still being worked, every HeartbeatInterval,
-// until the run closes or the caller's context ends.
+// until the run closes or the caller's context ends. It is started for every
+// run Begin opens except one whose runner owns its liveness
+// (WithRunnerOwnedLiveness).
 //
 // A GOROUTINE AND NOT A WRITE PER STEP, because the stages that need it most
 // are the long ones: the Library pass embeds every chunk of a large file inside
@@ -532,6 +593,10 @@ func (r *Run) queue(ctx context.Context) error {
 // picked it up: the close reports the run's wall clock, which a takeover does
 // not reset. A zero started omits the wall clock rather than measuring from
 // year one.
+//
+// The handle does not know which node the row names, so its first
+// RecordDriver writes this journal's node: the one write a takeover adds to
+// the run row.
 func (j *Journal) Reopen(ownerUserID, goalID, runID string, steps []StepDecl, started time.Time) *Run {
 	if j == nil || j.engine == nil {
 		return nil
@@ -844,20 +909,32 @@ func (s *Step) finish(ctx context.Context, r Receipt) error {
 	))
 }
 
-// Heartbeat says the run is still being driven: heartbeatAt, and the node
-// beating, which is the node running it -- after a takeover, the replica that
-// reopened it rather than the one that opened it. It writes NOTHING ELSE. The
-// beat comes from a goroutine that can lose a race with the run's close, and
-// a beat that also wrote a status would reopen a closed run.
-func (r *Run) Heartbeat(ctx context.Context) {
-	if r == nil || r.j == nil {
-		return
+// RecordDriver records which node drives the run -- after a takeover, the
+// replica that reopened it rather than the one that opened it -- and writes
+// only when that is news: at most once per handle, and never for a handle
+// Begin returned, whose run opened naming its node. A write that did not land
+// is returned, and tried again by the next call; nothing to write is nil.
+//
+// It replaces a heartbeat that wrote heartbeatAt and nodeId on every lease
+// renewal of a pipeline's run, a version of the row every 30 seconds that no
+// reader judged (WithRunnerOwnedLiveness). The node a run is driven on changes
+// only when the driver does, so that is the only time it is written.
+//
+// It writes NOTHING ELSE. It is called from the lease renewal, a goroutine
+// that can lose a race with the run's close, and a write that also named a
+// status would reopen a closed run.
+func (r *Run) RecordDriver(ctx context.Context) error {
+	if r == nil || r.j == nil || strings.TrimSpace(r.j.nodeID) == "" || r.nodeRecorded.Load() {
+		return nil
 	}
-	r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
+	err := r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
 		arg("runId", r.runID),
-		arg("heartbeatAt", r.j.now().UTC().Format(time.RFC3339)),
 		arg("nodeId", r.j.nodeID),
 	))
+	if err == nil {
+		r.nodeRecorded.Store(true)
+	}
+	return err
 }
 
 // Succeeded closes the run.

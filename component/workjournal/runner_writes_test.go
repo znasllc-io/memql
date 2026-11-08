@@ -429,25 +429,99 @@ func TestCancelledClosesTheStepAndTheRun(t *testing.T) {
 	}
 }
 
-// TestHeartbeatWritesTheBeatAndNothingElse. The driver beats every 30 s from
-// a goroutine that can lose a race with the run's close; a beat that also
-// wrote a status would reopen a closed run, so it writes the time and the node
-// beating -- the replica a resumed driver runs on, which is the run's node now
-// -- and nothing else.
-func TestHeartbeatWritesTheBeatAndNothingElse(t *testing.T) {
-	engine := &countingEngine{}
-	j, clock := newClockedJournal(engine)
+// TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten. A pipeline's work run is
+// judged alive by its driver's lease and by nothing else (the work sweep reads
+// it past), so the journal must start no heartbeat goroutine for it and open it
+// carrying no heartbeatAt: before 2026-11-08 the goroutine and the lease
+// renewal each appended a whole version of the row, 6,912 a day for 25 runs on
+// production. Counted over many beat intervals so a goroutine that was started
+// would have written several times.
+func TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten(t *testing.T) {
+	engine := &lockedEngine{}
+	j := New(engine, nil, "agent-1").WithRunnerOwnedLiveness()
+	j.beat = time.Millisecond
 	run, err := j.Begin(context.Background(), pipelineWork())
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	clock.advance(30 * time.Second)
+	time.Sleep(25 * time.Millisecond)
+	run.RecordDriver(context.Background())
+	if err := run.Succeeded(context.Background(), nil); err != nil {
+		t.Fatalf("Succeeded: %v", err)
+	}
+	calls := engine.snapshot()
+	if got := heartbeatsIn(calls); got != 0 {
+		t.Fatalf("a run whose runner owns its liveness carried %d heartbeat(s): %v", got, calls)
+	}
+	// Exactly the opening, the step order, three queued steps, the goal's
+	// activation and the close: no version of the run row beyond what the
+	// run itself said.
+	if got := len(callsNamed(calls, "updateWorkRun")); got != 2 {
+		t.Fatalf("the run row was written %d times after it opened, want 2 (step order, close): %v", got, calls)
+	}
+	if run.stop != nil || run.done != nil {
+		t.Fatal("a heartbeat goroutine was armed for a run nothing judges by its heartbeat")
+	}
+}
+
+// TestTheOptionLeavesTheSharedJournalBeating. The Library pass and an app
+// session's recording share a journal with no runner of their own to judge
+// them: the work sweep judges them by heartbeatAt, so they must keep beating.
+// The option returns a copy, and it composes with the write guard in either
+// order.
+func TestTheOptionLeavesTheSharedJournalBeating(t *testing.T) {
+	base := New(&countingEngine{}, nil, "agent-1")
+	owned := base.WithRunnerOwnedLiveness()
+	if base.runnerLiveness || !owned.runnerLiveness {
+		t.Fatal("the option changed the shared journal, or did not take")
+	}
+	guard := func(ctx context.Context, write func(context.Context) error) error { return write(ctx) }
+	if !owned.WithWriteGuard(guard).runnerLiveness || !base.WithWriteGuard(guard).WithRunnerOwnedLiveness().runnerLiveness {
+		t.Fatal("the option and the write guard do not compose")
+	}
+	var nilJournal *Journal
+	if nilJournal.WithRunnerOwnedLiveness() != nil {
+		t.Fatal("a nil journal became a usable one")
+	}
+}
+
+// TestRecordDriverWritesTheNodeOnceAfterATakeover. The node a pipeline's run
+// is driven on changes only when another replica takes it over, so the only
+// write the lease renewal makes to the work run is that node, once per
+// reopened handle -- and never for the handle that opened the run naming its
+// own node. A write that did not land is tried again by the next renewal.
+func TestRecordDriverWritesTheNodeOnceAfterATakeover(t *testing.T) {
+	engine := &countingEngine{}
+	opener := New(engine, nil, "agent-1").WithRunnerOwnedLiveness()
+	opened, err := opener.Begin(context.Background(), pipelineWork())
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
 	before := len(engine.calls)
-	run.Heartbeat(context.Background())
-	beat := onlyCallNamed(t, engine.calls[before:], "updateWorkRun")
-	want := map[string]any{"runId": run.RunID(), "heartbeatAt": clock.at.Format(time.RFC3339), "nodeId": "agent-1"}
-	if !reflect.DeepEqual(beat, want) {
-		t.Fatalf("heartbeat = %v, want exactly %v", beat, want)
+	for range 3 {
+		opened.RecordDriver(context.Background())
+	}
+	if len(engine.calls) != before {
+		t.Fatalf("the opening handle wrote its own node again: %v", engine.calls[before:])
+	}
+
+	taker := New(engine, nil, "agent-2").WithRunnerOwnedLiveness()
+	resumed := taker.Reopen("user-1", opened.GoalID(), opened.RunID(), pipelineWork().Steps, clockStart)
+	engine.fail = true
+	resumed.RecordDriver(context.Background())
+	engine.fail = false
+	for range 3 {
+		resumed.RecordDriver(context.Background())
+	}
+	writes := callsNamed(engine.calls[before:], "updateWorkRun")
+	if len(writes) != 2 {
+		t.Fatalf("a takeover wrote its node %d times, want the failed attempt and one that landed: %v", len(writes), writes)
+	}
+	want := map[string]any{"runId": opened.RunID(), "nodeId": "agent-2"}
+	for _, w := range writes {
+		if got := parsedArgs(t, w); !reflect.DeepEqual(got, want) {
+			t.Fatalf("driver record = %v, want exactly %v", got, want)
+		}
 	}
 }
 

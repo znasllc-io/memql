@@ -4705,6 +4705,49 @@ tag).
 hops. Live fleet-to-cloud failover and a production maintenance window for the
 contract-5 switch are not verified.
 
+## A pipeline's work run is not beaten (2026-11-08)
+
+The pipelines driver's lease is a pipeline run's liveness, and the `v1:work:run`
+it compiled into is no longer beaten beside it (`guardJournal` and `reopened`,
+`component/pipelinerun/lease.go` and `driver.go`; `WithRunnerOwnedLiveness` and
+`Run.RecordDriver`, `component/workjournal/journal.go`).
+
+- **Trigger:** every work run the pipelines driver opens or takes over.
+- **Evidence:** a work run's `heartbeatAt` has one reader, the work sweep, and it
+  reads a pipeline's run past in every shape (`runnerOwnsRecovery`,
+  `integrations/work/dispatch.go`). The claim judges `driverHeartbeatAt` on the
+  `v1:pipelines:run` row, and the OS keeps the field out of every fingerprint and
+  shows it nowhere. Yet the journal's goroutine beat the work run every 20 s and
+  the lease renewal every 30 s, each a whole version of the row: 6,912 versions
+  of 25 runs in a day on production on 2026-11-06, 356 MB in the week of October
+  29, each kept the 30 days its run is.
+- **Chosen path:** the driver's journal carries `WithRunnerOwnedLiveness`, so the
+  work run opens with no `heartbeatAt` and no heartbeat goroutine, and the lease
+  renewal no longer writes it. The one field the beat also kept current, `nodeId`,
+  changes only when the driver does: a takeover records it once at reopen, and
+  the renewal retries a record that did not land.
+- **Alternatives:** moving the beat into `memory_liveness`, as the worker status
+  fields were on 2026-11-06, keeps a value nobody reads and needs a third reader
+  handshake; a slower beat keeps the cost.
+- **Fallback and stop conditions:** a failed node record never stops a drive; it
+  is a record, not authority. A lost lease stops it as before, at the renewal's
+  fresh read.
+- **Invariant:** a takeover reads only the pipelines run's lease and the work
+  run's step rows, so nothing it decides changed; the work sweep still never
+  judges a pipeline's run. The Library pass and an app session's recording keep
+  their heartbeat, because the sweep judges them by it.
+- **Survives a retry or a replica change:** a run opened before the change keeps
+  the last `heartbeatAt` it was given, which nothing reads, and is taken over the
+  same way.
+- **Tests:** the Postgres-backed `TestLeaseRenewalsWriteNoWorkRunVersionsOverRealRows`
+  (ten renewals, a takeover and ten more leave the work run at 3 versions while
+  the lease row still takes one per renewal), `TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten`,
+  `TestRecordDriverWritesTheNodeOnceAfterATakeover`,
+  `TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt` and
+  `TestTheHeartbeatRenewsTheLeaseAndReadsACancel`.
+- **Unverified:** no production run has been observed with the change; the
+  saving is the 2026-11-06 measurement projected.
+
 ## The timing table learns from the steps it balances (2026-11-02)
 
 The pipeline's timing table has one row per package and one reader:

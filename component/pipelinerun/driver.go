@@ -589,7 +589,7 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 		}
 		if len(rows) > 0 {
 			if why := dr.resume(rows); why != "" {
-				if !dr.reopenFromRows(rows) {
+				if !dr.reopenFromRows(ctx, rows) {
 					return nil, false
 				}
 				v := dr.diverged(ctx, why)
@@ -603,7 +603,7 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 				dr.abort("reopening the run's work run", errors.New("the run row names no work goal to reopen"))
 				return nil, false
 			}
-			dr.workRun.Store(w)
+			dr.reopened(ctx, w)
 			dr.setFacts()
 			clean := true
 			for _, track := range dr.tracks {
@@ -1180,7 +1180,7 @@ func (dr *runDriver) settleStoredWork(ctx context.Context, rec receipt) bool {
 		dr.abort("reading the work run's steps to close them", err)
 		return false
 	}
-	if !dr.reopenFromRows(rows) {
+	if !dr.reopenFromRows(ctx, rows) {
 		return false
 	}
 	for _, t := range dr.tracks {
@@ -1203,7 +1203,7 @@ func (dr *runDriver) settleStoredWork(ctx context.Context, rec receipt) bool {
 // nothing of its last attempt's resources, which the replica that recorded the
 // outcome may not have confirmed gone either, and stopping the run's work is
 // what releases them.
-func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
+func (dr *runDriver) reopenFromRows(ctx context.Context, rows []WorkStep) bool {
 	dr.adoptRows(rows)
 	decls := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
@@ -1217,8 +1217,20 @@ func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 		dr.abort("reopening the run's work run", errors.New("the run row names no work goal to reopen"))
 		return false
 	}
-	dr.workRun.Store(w)
+	dr.reopened(ctx, w)
 	return true
+}
+
+// reopened makes w, a work run this drive took over, the drive's own, and
+// records this node on it as the one driving it: the one write a takeover
+// adds to the work run row, which nothing beats (guardJournal). Here and not
+// only at the next lease renewal, so a takeover that concludes within one
+// renewal still names its node. A record that did not land is retried by the
+// renewal (renew); it is a record and not authority, so it never stops the
+// drive.
+func (dr *runDriver) reopened(ctx context.Context, w *workjournal.Run) {
+	dr.workRun.Store(w)
+	_ = w.RecordDriver(ctx)
 }
 
 // stateFromRow is a step's state as its row's receipt says it ended -- its

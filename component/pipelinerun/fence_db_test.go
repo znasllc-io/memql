@@ -74,7 +74,12 @@ func TestClaimFencingPersistsAcrossDriversOverRealRows(t *testing.T) {
 	if err := pending.Finish(ctx, workjournal.Receipt{Status: "failed", Code: "obsolete"}); !errors.Is(err, errLeaseLost) {
 		t.Fatalf("stale receipt: %v", err)
 	}
-	work.Heartbeat(ctx)
+	// The old process's late driver record, through a handle of its own: a
+	// reopened one has a node to record, which is the write that could land
+	// after the takeover.
+	if err := old.d.Journal.Reopen(p.OwnerUserID, work.GoalID(), work.RunID(), nil, testNow).RecordDriver(ctx); !errors.Is(err, errLeaseLost) {
+		t.Fatalf("stale driver record: %v", err)
+	}
 	if err := work.Failed(ctx, "obsolete", "old process returned"); !errors.Is(err, errLeaseLost) {
 		t.Fatalf("stale terminal: %v", err)
 	}

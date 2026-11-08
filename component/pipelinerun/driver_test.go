@@ -1106,8 +1106,15 @@ func TestTheHeartbeatRenewsTheLeaseAndReadsACancel(t *testing.T) {
 	if cancels := dh.exec.cancelled(); len(cancels) != 1 {
 		t.Errorf("the runner was told: %v", cancels)
 	}
-	if beats := dh.work.callsNamed("updateWorkRun"); !slices.ContainsFunc(beats, func(c journalCall) bool { return c.Args["heartbeatAt"] != nil }) {
-		t.Errorf("the work run beats with the lease")
+	// The lease is the run's liveness, so the work run is never beaten: no
+	// heartbeat at open, none per renewal, and no driver record from the
+	// replica that opened it (guardJournal, workjournal's
+	// WithRunnerOwnedLiveness). Two renewals happened above.
+	if opens := dh.work.callsNamed("createWorkRun"); slices.ContainsFunc(opens, func(c journalCall) bool { return c.Args["heartbeatAt"] != nil }) {
+		t.Errorf("the work run opened with a heartbeat nothing judges: %v", opens)
+	}
+	if beats := dh.work.callsNamed("updateWorkRun"); slices.ContainsFunc(beats, func(c journalCall) bool { return c.Args["heartbeatAt"] != nil || c.Args["nodeId"] != nil }) {
+		t.Errorf("the work run was beaten with the lease: %v", beats)
 	}
 }
 
@@ -1329,6 +1336,21 @@ func TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt(t *testing.T) {
 	}
 	if n := len(dh.work.callsNamed("createWorkRun")); n != 1 {
 		t.Errorf("the work run is reopened, never opened twice: %d", n)
+	}
+	// The takeover names its node on the work run once, and that is the only
+	// write to the run row between its opening and its close: the work run
+	// is never beaten (guardJournal).
+	var records []journalCall
+	for _, c := range dh.work.callsNamed("updateWorkRun") {
+		if c.Args["heartbeatAt"] != nil {
+			t.Errorf("the work run was beaten: %v", c.Args)
+		}
+		if c.Args["nodeId"] != nil {
+			records = append(records, c)
+		}
+	}
+	if len(records) != 1 || argString(records[0].Args, "nodeId") != "agent-b" || len(records[0].Args) != 2 {
+		t.Errorf("the takeover records agent-b once, and nothing else with it: %v", records)
 	}
 	for key, want := range map[string]int{"checks.vet": 1, "tests.unit": 1, "tests.lint": 1} {
 		if n := len(dh.work.receiptsOf(key)); n != want {
