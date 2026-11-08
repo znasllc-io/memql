@@ -1116,10 +1116,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		//
 		// Meanwhile the row holds the caller's own cluster-wide `role`, which
 		// is a plain settable enum, and a payload SPLAT names no fields so
-		// validateMutationCallerArgs cannot see it. The one legitimate caller
-		// is the identity admin server, which already authorizes in
-		// admin/auth.go -- so origin gating puts the boundary where the
-		// authorization already lives.
+		// validateMutationCallerArgs cannot see it. Every legitimate caller is
+		// Go that has authorized the write first: the identity admin surface
+		// (component/identity/adminops), behind its owner/admin gate, and role
+		// testing (component/identity/roletest), which renames its own test
+		// persona with a payload of displayName alone after the operator's
+		// gates -- so origin gating puts the boundary where the authorization
+		// already lives.
 		{Path: "identity/mutations.memql", Name: "updateUser"}: true,
 		// memql#2987, the node-token trio. All three were @public while
 		// projecting identityFull -- which includes `credentials` -- and

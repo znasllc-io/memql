@@ -1003,9 +1003,11 @@ func (s *Service) writeUser(ctx context.Context, u *userRow) error {
 		"role":         u.Role,
 		"internal":     u.Internal,
 		"active":       u.Active,
-		// Written back unconditionally so an ordinary profile edit cannot
-		// silently clear them. updateUser is a payload splat: a field absent
-		// from the map is a field the write resets.
+		// Written back as read, like every field above: the payload is the
+		// whole row this service read and merged. Leaving one out would not
+		// reset it -- updateUser merges shallowly (update()), so a field
+		// absent from the payload keeps its stored value, the rule
+		// user_display_name.go relies on to send displayName alone.
 		"sharedMailbox": u.SharedMailbox,
 		"signInPolicy":  signInPolicyOrDefault(u.SignInPolicy),
 	}
