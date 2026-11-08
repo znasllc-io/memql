@@ -18,8 +18,9 @@ import { useReviewPeople, type ReviewsScope, type ReviewWrites } from "./useRevi
 //
 // WHO MAY CHANGE WHAT IS THE ENGINE'S TOO (reviewsSettings' `may`): a store
 // with no settings is set up by the cluster's operators, and only the store's
-// current owner, or an operator, names who approves removals. A field this
-// person may not change is shown, not offered.
+// current owner, or an operator, names who approves removals -- so, with
+// nobody named, only an operator does. A field this person may not change is
+// shown, not offered.
 //
 // THE REMOVAL APPROVER IS ONE OF THE STORE'S PEOPLE WHO CAN MODERATE IT
 // (reviewsPeople), so they are chosen from those people by name, never typed
@@ -140,6 +141,13 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   const noMatch = people.value?.truncated
     ? `Nobody among the first ${moderators.length} by that name.`
     : "Nobody who can moderate this store by that name.";
+  // NOBODY NAMED, ONLY AN OPERATOR CAN NAME ONE: besides an operator, the
+  // store's current approver is the only one who may (writeSettings). So the
+  // approver who is no operator is told beside Clear that saving nobody leaves
+  // them unable to name anybody again. Both are the settings read's answers
+  // (packs/reviewspack/reads.go): `approvesRemovals` is true for the viewer
+  // named, and `nameSender` for an operator, alone.
+  const clearingLocksOut = value.viewer.approvesRemovals && !value.may.nameSender;
 
   async function save() {
     if (problem !== "" || Object.keys(changes).length === 0) return;
@@ -221,15 +229,19 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
                 ) : (
                   <>
                     {approverWords(approverId, approverName, moderators.length > 0)}
-                    {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
+                    {value.may.nameApprover ? "" : approverId === "" ? " Only the cluster's operators can name one." : " Only that owner, or the cluster's operators, can name someone else."}
                   </>
                 )}
               </Caption>
               {/* NAMING NOBODY: the draft's approver set to "", which Save sends
                   as "" and the engine takes as nobody. Offered to whoever may
-                  name one, only while someone is named. */}
+                  name one, only while someone is named, with what it leaves
+                  beside it for the approver who is no operator. */}
               {namesApprover && approverId !== "" ? (
-                <Button tone="quiet" onClick={() => set("removalApproverUserId")("")}>Clear the approver</Button>
+                <>
+                  <Button tone="quiet" onClick={() => set("removalApproverUserId")("")}>Clear the approver</Button>
+                  {clearingLocksOut ? <Caption>Once you clear the approver and save, only the cluster&rsquo;s operators can name someone.</Caption> : null}
+                </>
               ) : null}
             </SettingRow>
             <SettingRow label="Who can moderate">
