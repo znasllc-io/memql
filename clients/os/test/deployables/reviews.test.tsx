@@ -646,6 +646,33 @@ describe("who can moderate", () => {
     await waitFor(() => expect(connection.callsNamed("reviewsPeople")).toHaveLength(reads + 1));
   });
 
+  it.each([
+    ["who can moderate could not be read", { peopleError: "reviews: reading the organization's people: the connection to the database dropped" }],
+    ["nobody who can moderate is listed", { people: { storeId: "store-live", people: [] } as unknown as Row }],
+    ["the approver sorts past the people listed", { people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }],
+  ])("offer Clear to whoever may name the approver though this page cannot name them, when %s", async (_why, over) => {
+    // Somebody is named and the page cannot say who: no reason to keep them.
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, ...over }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    const approver = settingRow("Removal approver");
+    expect(await within(approver).findByText(/^Someone (this page cannot name|not among the people listed) is the one person/)).toBeTruthy();
+    expect(within(approver).getByRole("button", { name: "Clear the approver" })).toBeTruthy();
+  });
+
+  it("say nothing of choosing to a viewer who may not name the approver, when who can moderate could not be read", async () => {
+    // The seed's own settings: a moderator who is not the approver.
+    await openReviews(reviewsSeed({ peopleError: "reviews: reading the organization's people: the connection to the database dropped" }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    expect(await within(settingRow("Who can moderate")).findByText("Who can moderate this store could not be read.")).toBeTruthy();
+    const approver = settingRow("Removal approver");
+    // Nobody could be chosen by them whatever was read, so the read is no reason.
+    expect(within(approver).queryByText(/Nobody can be chosen/)).toBeNull();
+    expect(within(approver).queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    expect(within(approver).getByText(/Only that owner, or the cluster's operators, can name someone else\.$/)).toBeTruthy();
+  });
+
   it("draw who approves as the shape of a name while who can moderate is read, never a sentence about them", async () => {
     // The settings name Avery, whom this session's roster cannot name: until
     // the people who can moderate are read, nothing on hand says who she is.
