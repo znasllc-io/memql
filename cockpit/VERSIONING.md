@@ -13,8 +13,11 @@ A release **is** an annotated git tag of the form `cockpit/vMAJOR.MINOR.PATCH`
 (e.g. `cockpit/v0.9.0`) on the monorepo’s `main`. Everything else mirrors that tag:
 
 - The [`VERSION`](VERSION) file carries the plain semver string
-  (`0.9.0`, no `v` prefix, no build suffix). It tracks the most
-  recent tag and is bumped in the same commit that precedes the tag.
+  (`0.9.0`, no `v` prefix, no build suffix). It names the prepared release,
+  or the most recent release when no newer one is being prepared. Update the
+  three version stamps together before verifying the release source. Repairs
+  and final preparation may retain that version while its tag is still absent.
+  Once a tag exists, its source is immutable; another source needs a new version.
 - The binary stamps its version at build time. `make` resolves the
   version via `git describe --tags --exact-match --match 'cockpit/v*'` (the exact tag when
   the checkout sits on one) and falls back to the `VERSION` file
@@ -83,6 +86,9 @@ changes, update that matrix in the monorepo and reference it here.
    changes, the version is correct, and the tag is `cockpit/vX.Y.Z`. The native
    workflow confirms the immutable tag and starts the release build. Never move
    a published tag. A separate component release needs its own verified commit.
+   If the engine claims the prepared source first, land a Cockpit-only
+   preparation commit and wait for its full push check. An unpublished Cockpit
+   version whose tag is still absent can keep its synchronized stamps.
 4. Wait for the complete native release run. Prepare its release candidate,
    review every platform asset and checksum, and publish through MemQL's
    approved release flow. The configured publication target uses this exact

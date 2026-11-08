@@ -4,15 +4,16 @@ Use the tokenless bootstrap command once when the installed Cockpit predates
 menu updates. Finish active work first: older workers cannot report whether
 they are busy, and the explicit confirmation permits this one-time restart.
 
-Download `cockpit/scripts/install/upgrade-linux.sh` from the chosen published
-`cockpit/vX.Y.Z` tag and run it as the signed-in desktop user:
+Run the command below as the signed-in desktop user, replacing both occurrences
+of `X.Y.Z` with the chosen published Cockpit version:
 
 ```bash
-bash upgrade-linux.sh --version=X.Y.Z --confirm=restart-worker
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/refs/tags/cockpit/vX.Y.Z/cockpit/scripts/install/upgrade-linux.sh | bash -s -- --version=X.Y.Z --confirm=restart-worker'
 ```
 
-Replace `X.Y.Z` with the published Cockpit version. The wrapper and its helper
-runtime must come from that same release. It discovers `memql-worker.service`,
+The command downloads the wrapper from that exact release tag and reports a
+download failure as an error. The wrapper and its helper runtime must come
+from the same release. It discovers `memql-worker.service`,
 keeps its selected executable path and build variant, verifies the selected
 release's checksum, and delegates replacement to that release's updater.
 It requires no token and does not pair again, rewrite service definitions,

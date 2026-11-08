@@ -5,15 +5,16 @@ menu updates. Finish active work first: older workers cannot report whether
 they are busy. `--confirm=restart-worker` explicitly permits their one-time
 stop and restart.
 
-Download `cockpit/scripts/install/upgrade-mac.sh` from the chosen published
-`cockpit/vX.Y.Z` tag and run it as the signed-in desktop user:
+Run the command below as the signed-in desktop user, replacing both occurrences
+of `X.Y.Z` with the chosen published Cockpit version:
 
 ```bash
-bash upgrade-mac.sh --version=X.Y.Z --confirm=restart-worker
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql/refs/tags/cockpit/vX.Y.Z/cockpit/scripts/install/upgrade-mac.sh | bash -s -- --version=X.Y.Z --confirm=restart-worker'
 ```
 
-Replace `X.Y.Z` with the published Cockpit version. The wrapper and its helper
-runtime must come from that same release. It discovers the existing per-user
+The command downloads the wrapper from that exact release tag and reports a
+download failure as an error. The wrapper and its helper runtime must come
+from the same release. It discovers the existing per-user
 worker LaunchAgent, verifies the selected native release's checksum and code
 signature, and delegates the upgrade to that release's updater. Existing
 `0.22.1+...` computer-use installations are supported. The executable path,
