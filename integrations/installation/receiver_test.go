@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +47,18 @@ func (f *receiverFixture) Do(_ context.Context, method, path, contentType string
 	f.reads[path]++
 	if f.before != nil {
 		f.before(path, f.reads[path])
+	}
+	if u, err := url.Parse(path); err == nil && strings.HasSuffix(u.Path, "/applications") {
+		q := u.Query()
+		name := strings.TrimPrefix(q.Get("fieldSelector"), "metadata.name=")
+		if !receiverDNS.MatchString(name) || q.Get("fieldSelector") != "metadata.name="+name || q.Get("watch") != "" || q.Get("limit") != "2" || len(q) != 2 {
+			return nil, errors.New("fixture has no unfiltered list or unrecorded watch")
+		}
+		app, ok := f.objects[u.Path+"/"+name]
+		if !ok {
+			return nil, errors.New("unknown fixture Application")
+		}
+		return json.Marshal(map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "ApplicationList", "metadata": map[string]any{"resourceVersion": "fixture-head-" + resourceText(resourceMap(app, "metadata"), "resourceVersion")}, "items": []any{app}})
 	}
 	value, ok := f.objects[path]
 	if !ok {

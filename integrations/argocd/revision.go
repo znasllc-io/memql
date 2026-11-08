@@ -52,18 +52,23 @@ type Target struct {
 // All fields are revalidated after recovery; an editable DSL object cannot
 // grant permission to call this native adapter.
 type Intent struct {
-	FormatVersion    int             `json:"formatVersion"`
-	RequestID        string          `json:"requestId"`
-	Target           Target          `json:"target"`
-	BeforeGeneration int64           `json:"beforeGeneration"`
-	BeforeMarker     string          `json:"beforeMarker"`
-	BeforeSpec       json.RawMessage `json:"beforeSpec"`
-	Revision         string          `json:"revision"`
-	Prune            bool            `json:"prune"`
+	FormatVersion         int             `json:"formatVersion"`
+	RequestID             string          `json:"requestId"`
+	Target                Target          `json:"target"`
+	BeforeGeneration      int64           `json:"beforeGeneration"`
+	BeforeResourceVersion string          `json:"beforeResourceVersion,omitempty"`
+	WatchResourceVersion  string          `json:"watchResourceVersion,omitempty"`
+	BeforeMarker          string          `json:"beforeMarker"`
+	BeforeSpec            json.RawMessage `json:"beforeSpec"`
+	Revision              string          `json:"revision"`
+	Prune                 bool            `json:"prune"`
 }
 
 // Snapshot owns a decoded response; callers cannot mutate it after review.
-type Snapshot struct{ object map[string]any }
+type Snapshot struct {
+	object       map[string]any
+	watchVersion string
+}
 
 // Facts report an observation, never a completed installation verdict. Even an
 // Argo sync that succeeded still needs workload, traffic and cleanup evidence.
@@ -114,7 +119,8 @@ func (c *Client) Read(ctx context.Context, target Target) (Snapshot, error) {
 // PlanRevision changes only targetRevision in the existing single-source Git
 // Application. Image digests must already be committed in the reviewed overlay;
 // this adapter cannot add image overrides, change repositories, or target a
-// different namespace/project. BeforeGeneration fences changes away and back.
+// different namespace/project. Format 1 retains the strict generation fence;
+// a snapshot with a list boundary creates format 2 and requires complete history.
 func PlanRevision(snapshot Snapshot, id, revision string, prune bool) (Intent, error) {
 	obj := snapshot.object
 	meta := object(obj, "metadata")
@@ -134,6 +140,11 @@ func PlanRevision(snapshot Snapshot, id, revision string, prune bool) (Intent, e
 		Target:           Target{Namespace: stringAt(meta, "namespace"), Name: stringAt(meta, "name"), UID: stringAt(meta, "uid")},
 		BeforeGeneration: generation, BeforeMarker: marker(obj), BeforeSpec: spec, Revision: revision, Prune: prune,
 	}
+	if snapshot.watchVersion != "" {
+		intent.FormatVersion = 2
+		intent.BeforeResourceVersion = stringAt(meta, "resourceVersion")
+		intent.WatchResourceVersion = snapshot.watchVersion
+	}
 	_, _, _, err = intent.validate()
 	return intent, err
 }
@@ -150,7 +161,7 @@ func DecodeIntent(body []byte) (Intent, error) {
 	if err != nil {
 		return Intent{}, err
 	}
-	allowed := map[string]bool{"formatVersion": true, "requestId": true, "target": true, "beforeGeneration": true, "beforeMarker": true, "beforeSpec": true, "revision": true, "prune": true}
+	allowed := map[string]bool{"formatVersion": true, "requestId": true, "target": true, "beforeGeneration": true, "beforeResourceVersion": true, "watchResourceVersion": true, "beforeMarker": true, "beforeSpec": true, "revision": true, "prune": true}
 	for key := range obj {
 		if !allowed[key] {
 			return Intent{}, errors.New("ArgoCD intent contains a noncanonical field")
@@ -175,9 +186,14 @@ func (i Intent) validate() (before, after map[string]any, digest string, err err
 	if _, err = i.Target.path(); err != nil {
 		return
 	}
-	if i.FormatVersion != 1 || !requestID.MatchString(i.RequestID) || !commitSHA.MatchString(i.Revision) ||
+	if (i.FormatVersion != 1 && i.FormatVersion != 2) || !requestID.MatchString(i.RequestID) || !commitSHA.MatchString(i.Revision) ||
 		i.BeforeGeneration < 1 || len(i.BeforeMarker) > 128 {
 		err = errors.New("ArgoCD intent requires a request identity, generation and immutable Git commit")
+		return
+	}
+	if (i.FormatVersion == 1 && (i.BeforeResourceVersion != "" || i.WatchResourceVersion != "")) ||
+		(i.FormatVersion == 2 && (!validResourceVersion(i.BeforeResourceVersion) || !validResourceVersion(i.WatchResourceVersion))) {
+		err = errors.New("ArgoCD intent has an invalid Application history boundary")
 		return
 	}
 	before, err = decodeObject(i.BeforeSpec)
@@ -232,6 +248,16 @@ func (i Intent) validate() (before, after map[string]any, digest string, err err
 // the SAME intent. A matching marker never causes another sync, even if that
 // sync failed. There is no detached watcher, blind patch retry, or polling loop.
 func (c *Client) Apply(ctx context.Context, intent Intent) (Facts, error) {
+	return c.apply(ctx, intent, nil)
+}
+
+// ApplyWithContinuity accepts only a call-local proof produced by a complete
+// authenticated watch. Persisted cursor data alone cannot authorize a patch.
+func (c *Client) ApplyWithContinuity(ctx context.Context, intent Intent, proof *ContinuityProof) (Facts, error) {
+	return c.apply(ctx, intent, proof)
+}
+
+func (c *Client) apply(ctx context.Context, intent Intent, proof *ContinuityProof) (Facts, error) {
 	before, after, digest, err := intent.validate()
 	if err != nil {
 		return Facts{}, err
@@ -246,7 +272,15 @@ func (c *Client) Apply(ctx context.Context, intent Intent) (Facts, error) {
 	}
 	meta := object(obj, "metadata")
 	generation, err := integer(meta["generation"])
-	if err != nil || generation != intent.BeforeGeneration || marker(obj) != intent.BeforeMarker || !equalJSON(object(obj, "spec"), before) {
+	expectedGeneration := intent.BeforeGeneration
+	if intent.FormatVersion == 2 {
+		if proof == nil || proof.intent != digest || proof.version != stringAt(meta, "resourceVersion") ||
+			proof.generation != generation || time.Since(proof.observed) > 30*time.Second {
+			return Facts{}, errors.New("ArgoCD revision requires fresh complete Application history")
+		}
+		expectedGeneration = proof.generation
+	}
+	if err != nil || generation != expectedGeneration || marker(obj) != intent.BeforeMarker || !equalJSON(object(obj, "spec"), before) {
 		return Facts{}, ErrChanged
 	}
 	if err := idle(obj); err != nil {
@@ -265,7 +299,7 @@ func (c *Client) Apply(ctx context.Context, intent Intent) (Facts, error) {
 	patch := []map[string]any{
 		{"op": "test", "path": "/metadata/uid", "value": intent.Target.UID},
 		{"op": "test", "path": "/metadata/resourceVersion", "value": stringAt(meta, "resourceVersion")},
-		{"op": "test", "path": "/metadata/generation", "value": intent.BeforeGeneration},
+		{"op": "test", "path": "/metadata/generation", "value": expectedGeneration},
 		{"op": "test", "path": "/spec", "value": before},
 		{"op": "add", "path": "/metadata/annotations", "value": annotations},
 		{"op": "replace", "path": "/spec", "value": after},

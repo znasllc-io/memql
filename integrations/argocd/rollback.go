@@ -67,17 +67,17 @@ func PlanUnappliedRollback(snapshot Snapshot, prior Intent, request string) (Int
 	if err != nil {
 		return Intent{}, err
 	}
-	a, err := expected.Digest()
-	if err != nil {
-		return Intent{}, err
-	}
-	b, err := prior.Digest()
-	if err != nil || a != b {
-		return Intent{}, ErrChanged
-	}
 	before, _, _, err := prior.validate()
 	if err != nil {
 		return Intent{}, err
+	}
+	// A retained history-backed forward intent and this fresh GET use different
+	// intent formats. Compare their actual baseline, not their encoding. This
+	// reversal deliberately retains the strict generation fence: a changed
+	// baseline cannot be adopted without separately admitted reversal evidence.
+	if expected.Target != prior.Target || expected.BeforeGeneration != prior.BeforeGeneration ||
+		expected.BeforeMarker != prior.BeforeMarker || !equalJSON(object(snapshot.object, "spec"), before) {
+		return Intent{}, ErrChanged
 	}
 	reversal, err := PlanRevision(snapshot, request, stringAt(object(before, "source"), "targetRevision"), prior.Prune)
 	if err != nil {

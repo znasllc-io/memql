@@ -135,6 +135,13 @@ func (r *receiverReads) object(ctx context.Context, version, kind, plural, names
 		// Status writes do not change configuration. Recheck exact RV during this
 		// observation, but do not invalidate recovery for a status-only heartbeat.
 		read.stable = []any{version, kind, namespace, name, read.uid, meta["generation"], meta["labels"], meta["annotations"], meta["ownerReferences"], body["spec"]}
+		if kind == "Application" {
+			// An Argo CRD without a /status subresource increments generation on
+			// status writes. Native preparation and writes instead require retained
+			// complete Application history. Keep spec/identity/metadata here and
+			// the exact RV fence within this individual authenticated observation.
+			read.stable = []any{version, kind, namespace, name, read.uid, "application-history-v1", meta["labels"], meta["annotations"], meta["ownerReferences"], body["spec"]}
+		}
 	}
 	r.reads[path] = read
 	return body, nil

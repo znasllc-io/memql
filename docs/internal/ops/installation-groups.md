@@ -201,6 +201,62 @@ selection resumes the saved intent; observing it cannot apply a missing one.
 The native passes are bounded, so an installation's DSL can schedule subsequent
 passes under its authorized operator context. A timer does not grant authority.
 
+### Application status and retained change history
+
+Some installed Application CRDs have no status subresource. Their routine
+controller status updates advance `metadata.generation` even when the complete
+spec is unchanged. Comparing that generation in the long-lived configuration
+digest refused preparation after a healthy Argo refresh. Removing the generation
+check alone would hide a configuration edit followed by a restoration.
+
+New preparations therefore capture a name-filtered Application list's global
+resource version and retain a history cursor with each original intent in
+`installation_preparations.application_continuity`. An object's own resource
+version may predate history compaction even when freshly read, so it cannot
+replace the list boundary. A call-owned guard checks the cursor every ten
+seconds while preparation or pre-apply verification is running. It is joined
+before the call returns or dispatches an owned Application write; no detached
+controller or timer acquires installation authority.
+
+An unchanged object version refreshes the global boundary without a watch.
+Otherwise a bounded watch must account for every intervening event through the
+freshly read object. The original UID, complete spec, intent marker and idle
+operation must remain unchanged. Status-driven generation advances are accepted;
+a real edit, including one restored before the next read, permanently invalidates
+that preparation. Missing, expired or malformed history refuses and does not
+advance the cursor. Concurrent replicas compare and persist cursors under the
+existing original-operator, installation-head and workflow locks. A slower
+successful read cannot erase another replica's invalidation. Recovery starts
+from the retained cursor, never from a newly invented baseline.
+
+The final patch needs a fresh native proof for the exact observed object version
+and tests UID, resource version, generation and complete spec atomically. Cursor
+JSON is not such a proof. Already owned effects reconcile through their original
+intent marker. Existing intent-format-1 records and rollback intents retain
+their strict generation fences; this change does not rebind uncertain reversals.
+If a paused preparation loses required Kubernetes history, cancel it and prepare
+again. An uncertain started effect must instead be reconciled from its saved
+intent. The additive cursor migration cannot be reversed while retained history
+exists.
+
+Installers need `get`, `list` and `watch` on only their configured Application
+names. Keep `resourceNames` on that Role rule: each list/watch supplies the exact
+`metadata.name` field selector. Unfiltered collections and unrelated Application
+names remain unauthorized. Patch permissions, credentials and subjects do not
+change. Activate the scoped read permissions before deploying an engine that
+uses history-backed preparation.
+
+Regression coverage is in
+[`continuity_test.go`](../../../integrations/argocd/continuity_test.go),
+[`application_continuity_db_test.go`](../../../integrations/installation/application_continuity_db_test.go)
+and the existing group recovery/rollback protocol suite. The PostgreSQL cases
+cover replica recovery, sticky invalidation, cancellation, unavailable-history
+retry and joined lifecycle cancellation. The opt-in
+`TestApplicationHistoryThroughInstalledKubernetes` observes a real status-driven
+generation change using an explicitly selected operator connection and named
+Application. It performs no writes and does not qualify installer RBAC or live
+installation completion; those still require their own checks.
+
 ## Rollback
 
 `Preparer.RollbackSelected` accepts only the installation and exact selected plan

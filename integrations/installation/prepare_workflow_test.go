@@ -176,7 +176,10 @@ func TestPreparationPortsConcurrentReservationsKeepOneScope(t *testing.T) {
 	config, err := readReceiver(ctx, receiver, "memql", "receiver", factory)
 	require.NoError(t, err)
 	request := preparationRequest{InstallationID: receiver.config.InstallationID, RequestID: "concurrent-reserve", CandidateID: after.CandidateID, CatalogDigest: images.next.Digest(), OverlayRevision: strings.Repeat("b", 40)}
-	scope := &preparationWorkflowScope{host: host, request: request, operator: "operator", configuration: config}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	scope := &preparationWorkflowScope{host: host, request: request, operator: "operator", configuration: config, cancelContinuity: cancel}
+	defer func() { _ = scope.continuity.stop() }()
 	_, err = scope.resolve(ctx, nil)
 	require.NoError(t, err)
 	operation := scope.operations()["installationReservePreparation"]

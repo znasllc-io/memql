@@ -761,6 +761,14 @@ selection, cadence, retries and the installation workflow; native preparation
 owns fresh artifact and cluster evidence, effect fencing and rollback authority.
 This boundary also applies when an automation calls the discovery builtins.
 
+Installation preparation tolerates routine Argo Application status refreshes
+while retaining checks for real configuration changes, including an edit later
+restored to its original value. The receiver keeps the checked history with the
+preparation so another replica can resume it. If required Kubernetes history is
+no longer available after a pause, cancel the unfinished preparation and prepare
+again. A started installation must be reconciled from its saved intent; missing
+history never authorizes replacing an uncertain operation.
+
 
 ## Restore a selected installation
 
