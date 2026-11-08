@@ -218,6 +218,16 @@ func (e *MemQLEngine) ApplyRoutingReview(ctx context.Context, change RoutingRevi
 		if approved.Name != strings.TrimSpace(change.SaveName) {
 			return RoutingReviewApplied{}, fmt.Errorf("the approved text declares rule %q, but the review proposes %q; nothing was saved", approved.Name, change.SaveName)
 		}
+		if !isRuleIdentifier(approved.Name) {
+			// A REVIEW RAISED BEFORE 2026-11-08 names its rule with underscores
+			// (component/router's RuleName then), a shape no saved rule may take
+			// (ValidateRuleProposal, and MemQL OS's rule forms). Approving it can
+			// never save it, so the refusal says so and names the way out,
+			// rather than quoting an identifier rule the person never wrote.
+			return RoutingReviewApplied{}, fmt.Errorf("this review proposes rule %q under a name from before reviews could be applied, which a saved rule cannot take, "+
+				"so approving it can never change routing. Decline it; the nightly review proposes the change again under a name that can be saved "+
+				"while the evidence still holds", approved.Name)
+		}
 	} else if _, shipped := e.rules.Lookup(retireName); shipped {
 		return RoutingReviewApplied{}, fmt.Errorf("%q is a shipped rule and cannot be removed; out-rank it with a custom rule at a higher precedence", retireName)
 	}

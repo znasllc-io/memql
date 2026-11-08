@@ -306,3 +306,18 @@ func TestApplyRetriesOnceRoutingMoved(t *testing.T) {
 	require.Equal(t, "app:codex", inner.doc.Overrides["localOnly"].Primary, "the other writer's change must survive the retry")
 	require.Contains(t, inner.doc.Rules, "evidenceDemotionStrongM")
 }
+
+func TestApplyRefusesAReviewRaisedUnderTheOldRuleName(t *testing.T) {
+	// The fold named rules with underscores until 2026-11-08, a shape no saved
+	// rule may take. A review raised then can never be applied, and the person
+	// approving it must be told so -- and that declining is the way out --
+	// rather than meet an identifier rule they never wrote.
+	eng, store, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotion_m_strong", SaveSource: evidenceRule("evidenceDemotion_m_strong", "strong", "m"),
+	})
+	require.ErrorContains(t, err, "Decline")
+	require.ErrorContains(t, err, "evidenceDemotion_m_strong")
+	require.EqualValues(t, 0, store.doc.Revision)
+	require.Empty(t, store.doc.Rules)
+}
