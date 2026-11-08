@@ -48,8 +48,20 @@ describe("release preparation", () => {
   });
   it("keeps exact source revisions optional and copyable without changing the selected run", async () => {
     const f = releaseFixture();
-    const writeText = vi.fn().mockResolvedValue(undefined);
+    const pendingCopies: Array<() => void> = [];
+    const writeText = vi.fn(() => new Promise<void>((resolve) => pendingCopies.push(resolve)));
     vi.stubGlobal("navigator", { clipboard: { writeText } });
+    async function copyAndConfirm(label: string, copiedLabel: string) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(writeText).toHaveBeenLastCalledWith(buildRun.sha);
+      expect(screen.queryByRole("button", { name: copiedLabel })).toBeNull();
+      const completeCopy = pendingCopies.shift();
+      expect(completeCopy).toBeDefined();
+      // Commit the clipboard completion before inspecting its temporary
+      // feedback, rather than polling against the real two-second decay.
+      await act(async () => { completeCopy!(); });
+      expect(screen.getByRole("button", { name: copiedLabel })).toBeTruthy();
+    }
     render(<ReleaseBrowser query={f.query} connected />);
     await start();
     await screen.findByRole("button", { name: /^Use run: Build engine 0\.25\.0,/ });
@@ -61,16 +73,13 @@ describe("release preparation", () => {
     expect(screen.getByText(buildRun.title).closest("details")).toBeNull();
     fireEvent.click(screen.getByText("Source revision"));
     expect(pickerDetails.open).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Copy Revision" }));
-    await screen.findByRole("button", { name: "Copied Revision" });
-    expect(writeText).toHaveBeenLastCalledWith(buildRun.sha);
+    await copyAndConfirm("Copy Revision", "Copied Revision");
     await choose();
     const selectedDetails = screen.getByText(buildRun.sha).closest("details")!;
     expect(selectedDetails.open).toBe(false);
     fireEvent.click(screen.getByText("Source revisions"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy engine / build" }));
-    await screen.findByRole("button", { name: "Copied engine / build" });
-    expect(writeText).toHaveBeenLastCalledWith(buildRun.sha);
+    await copyAndConfirm("Copy engine / build", "Copied engine / build");
+    expect(writeText).toHaveBeenCalledTimes(2);
     await pressBar("Prepare release");
     await screen.findByText("Versions");
     expect(f.state.calls.find((c) => c.kind === "assemble")?.args).toEqual({ planName: "engine-release", runs: { build: "work-build-1" } });
