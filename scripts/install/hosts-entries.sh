@@ -320,10 +320,23 @@ function _hosts_on_exit() {
 
 # apply <mode> <path> -- renders the desired file, and writes it only when it
 # actually differs. Returns 0 when it wrote, 1 when the file was already right.
+#
+# EVERY STEP FAILS CLOSED BY HAND. main() calls this as `if apply ...; then`,
+# and bash ignores `set -e` for the whole body of a function called as a
+# condition, and for everything it calls, so a step that fails here does not
+# stop the script. A lost render once fell through to `cat` an empty temp file
+# over the operator's hosts file -- truncating it -- before the write's own
+# error was reported. So each step is checked explicitly, and the hosts file is
+# opened only once its complete new content is staged and read back
+# (TestHostsEntriesAFailedStagingLeavesTheFileAlone). What this cannot guard is
+# the final write failing partway, a full disk under the hosts file itself,
+# which leaves it partly written as any in-place write would.
 function apply() {
-    local mode="$1" path="$2"
+    local mode="$1" path="$2" rendered compared
 
-    _TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/memql-hosts.XXXXXX")"
+    if ! _TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/memql-hosts.XXXXXX")"; then
+        cap_fail 5 "could not create a temporary file; ${path} was not changed"
+    fi
     # COMPOSED with capability.sh's EXIT trap rather than replacing it. A bare
     # `trap cleanup_tmp EXIT` overwrote it, and with it the guarantee that an
     # unexpected abort still emits a failure envelope -- so from this line on,
@@ -333,11 +346,27 @@ function apply() {
     # _cap_on_exit cleanup_tmp's 0 instead of the abort's code, so an abort
     # still said nothing.
     trap _hosts_on_exit EXIT
-    render "$mode" > "$_TMP_FILE"
 
-    if cmp -s "$_TMP_FILE" "$path"; then
-        return 1
+    # Rendered into memory first (the `.` sentinel keeps the trailing newlines a
+    # command substitution would strip, which byte-exactness depends on), then
+    # staged in one write and read back, so a failed or short write is caught
+    # while it still costs nothing.
+    rendered="$(render "$mode"; printf '.')"
+    rendered="${rendered%.}"
+    if ! printf '%s' "$rendered" > "$_TMP_FILE" \
+        || [[ "$(cat "$_TMP_FILE"; printf '.')" != "${rendered}." ]]; then
+        cap_fail 5 "could not stage the new contents of ${path}; ${path} was not changed"
     fi
+
+    # cmp exits 1 for "different" and 2 for "could not compare"; only the first
+    # is a reason to write.
+    compared=0
+    cmp -s "$_TMP_FILE" "$path" || compared=$?
+    case "$compared" in
+        0) return 1 ;;
+        1) ;;
+        *) cap_fail 5 "could not compare ${path} with its new contents; ${path} was not changed" ;;
+    esac
     # Write THROUGH the existing file so its inode, owner and mode survive --
     # a mv would hand /etc/hosts a fresh inode owned by whoever ran us. `tee`
     # is the elevated spelling of the same write, and takes the content on

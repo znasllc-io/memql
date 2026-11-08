@@ -473,6 +473,55 @@ func TestHostsEntriesUnterminatedBlockIsExitFive(t *testing.T) {
 	}
 }
 
+// A step that fails while the new contents are being prepared must leave the
+// hosts file exactly as it was.
+//
+// main() calls apply() as an `if` condition, and bash ignores `set -e` for the
+// whole body of a function called that way, so these failures used to fall
+// through. With the render lost, `cmp` read the empty temp file as different
+// and `cat` wrote it over the operator's file -- truncating it -- before its own
+// error was reported as "failed to write". Each stub here is first on PATH and
+// breaks one step.
+func TestHostsEntriesAFailedStagingLeavesTheFileAlone(t *testing.T) {
+	cases := []struct {
+		name, tool, stub string
+	}{
+		{"the temp path is not a file", "mktemp", "#!/bin/sh\nprintf '%s\\n' \"$HOSTS_TEST_DIR\"\n"},
+		{"no temp file can be made", "mktemp", "#!/bin/sh\necho 'mktemp: cannot create temp file' >&2\nexit 1\n"},
+		{"the comparison cannot be made", "cmp", "#!/bin/sh\necho 'cmp: read error' >&2\nexit 2\n"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, tc.tool), []byte(tc.stub), 0o755); err != nil {
+				t.Fatalf("write %s stub: %v", tc.tool, err)
+			}
+			env := append(hostsSandbox(t, hostsNoSudo), "HOSTS_TEST_DIR="+t.TempDir())
+			for _, kv := range env {
+				if p, ok := strings.CutPrefix(kv, "PATH="); ok {
+					env = append(env, "PATH="+bin+string(os.PathListSeparator)+p)
+					break
+				}
+			}
+			original := "127.0.0.1 localhost\n::1 localhost\n"
+			path := hostsFixture(t, original)
+
+			got, code, out := hostsRunEnv(t, env, "--action=add", "--hosts-file="+path, "--confirm="+hostsConfirmAdd)
+			if after := hostsRead(t, path); after != original {
+				t.Fatalf("the hosts file changed although its new contents were never ready\n got: %q\nwant: %q\n%s",
+					after, original, out)
+			}
+			if code != 5 || got.OK || got.Error == nil || got.Error.Code != 5 {
+				t.Errorf("want exit 5 and a failure envelope, got exit %d: %s", code, out)
+			}
+			if got.Error != nil && !strings.Contains(got.Error.Message, "was not changed") {
+				t.Errorf("the message should say the file was left alone; got: %s", got.Error.Message)
+			}
+		})
+	}
+}
+
 //=============================================================================
 // THE FRONT DOOR + THE RESULT ENVELOPE
 //=============================================================================

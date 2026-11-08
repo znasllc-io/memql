@@ -257,7 +257,11 @@ before calling `_cap_on_exit` (`_install_on_exit` in
 itself a failing command on every abort and errexit abandons the handler there.
 An inline `trap 'cleanup; _cap_on_exit' EXIT` hands `_cap_on_exit` cleanup's
 status instead. `_cap_on_exit` may exit, so nothing after it in a handler is
-sure to run.
+sure to run. Replacing the trap with a cleanup of its own
+(`trap 'rm -rf "$WORK"' EXIT`) or clearing it (`trap - EXIT`) drops the
+guarantee: from that line on, an abort reaches the caller with nothing on
+stdout. Only an `EXIT` handler may clear the trap, to stop itself running
+twice.
 
 ### Progress lines: `cap_progress`
 
@@ -341,8 +345,10 @@ source `capability.sh`):
   with exactly one failure envelope, under any bash, and so does a script
   killed by an expansion error under bash 3.2 where one is available (the
   `bash32-smoke` CI lane runs that case under the real interpreter);
-- an `EXIT` trap that composes `_cap_on_exit` with cleanup hands it the
-  script's own status, with errexit off.
+- every `EXIT` trap a capability script installs reaches `_cap_on_exit`: one
+  that composes it with cleanup hands it the script's own status, with errexit
+  off, and one that replaces or clears it is refused
+  (`TestCapabilityTrapsHandCapOnExitTheRealStatus`).
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt
