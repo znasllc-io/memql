@@ -1628,4 +1628,23 @@ describe("guest access", () => {
     const change = await screen.findByRole("button", { name: "Change end date" });
     await waitFor(() => expect(document.activeElement).toBe(change));
   });
+
+  it("a pass that re-reads as opening nothing leaves focus on a control in the panel, and a later read does not move it", async () => {
+    // The pass the fake writes copies no organization, so against this site it is the stale one.
+    const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [] }, { site: siteRow({ id: "site-desk", hostname: "desk.memql.example.com", packageId: "pkg-desk", packageDeployableName: "client-desk", accountId: "acme" } as never) });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    const off = await screen.findByRole("button", { name: "Turn off" });
+    expect(screen.queryByRole("button", { name: "Change end date" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(off));
+    // A later write re-reads, and the pass's id arriving again must not pull focus back.
+    const add = screen.getByRole("button", { name: "Add an access code" });
+    add.focus();
+    await click(add);
+    await typeInto(screen.getByLabelText("Name") as HTMLInputElement, "Later");
+    await click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(connection.callsNamed("siteAccessCodeCreate")).toHaveLength(1));
+    await screen.findByText(/only time it is shown/);
+    expect(document.activeElement).not.toBe(screen.queryByRole("button", { name: "Turn off" }));
+  });
 });

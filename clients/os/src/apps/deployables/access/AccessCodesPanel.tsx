@@ -95,10 +95,12 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   const passId = access.guestPass?.id;
   useEffect(() => {
     if (!focusPass.current || passId === undefined) return;
-    const target = root.current?.querySelector<HTMLElement>('.access-guest button[aria-label="Change end date"]');
-    if (target === null || target === undefined) return;
+    // Spent whatever is found, so it can never act on a later arrival. A pass that opens nothing has
+    // no Change end date, and the part's last resort is the panel, as everywhere here.
     focusPass.current = false;
-    target.focus();
+    const part = root.current?.querySelector<HTMLElement>(".access-guest");
+    const target = part?.querySelector<HTMLElement>('button[aria-label="Change end date"]') ?? part?.querySelector<HTMLElement>('button[aria-label="Turn off"]') ?? root.current;
+    target?.focus();
   }, [passId]);
   const returnFocus = (): void => setRefocus((n) => n + 1);
 
