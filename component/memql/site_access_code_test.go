@@ -532,3 +532,37 @@ func TestAWellFormedCredentialIsWhatAMintProduces(t *testing.T) {
 		}
 	}
 }
+
+// A guest pass is a code row with no code behind it: its digest is a fixed function of the
+// site, so the bff finds it by the same codeHash lookup a typed code uses.
+func TestAccessGuestPassDigestIsFixedPerSite(t *testing.T) {
+	bare := AccessGuestPassDigest("abc123")
+	if bare != AccessGuestPassDigest("v1:platform:site:abc123") {
+		t.Fatal("a bare and a prefixed site id must give the same pass digest")
+	}
+	if bare == AccessGuestPassDigest("abc124") {
+		t.Fatal("two sites must not share a pass digest")
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(bare) {
+		t.Fatalf("pass digest is not 64 lowercase hex characters: %q", bare)
+	}
+}
+
+// What makes the pass safe is that no visitor can type its way onto the digest: the
+// preimage is not a well-formed code, and no minted code lands on it.
+func TestNoTypedCodeReachesAGuestPassDigest(t *testing.T) {
+	site := "abc123"
+	if AccessCodeWellFormed("guest:" + site) {
+		t.Fatal("the pass preimage must not be a well-formed code")
+	}
+	pass := AccessGuestPassDigest(site)
+	for i := 0; i < 1000; i++ {
+		code, digest, _, err := MintAccessCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digest == pass || AccessCodeDigest(code) == pass {
+			t.Fatal("a minted code reached a guest pass digest")
+		}
+	}
+}

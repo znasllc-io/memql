@@ -157,6 +157,19 @@ func AccessCodeDigest(raw string) string {
 	return hexSHA256(NormalizeAccessCode(raw))
 }
 
+// AccessGuestPassDigest is the codeHash of a site's guest pass: lowercase hex SHA-256 of
+// "guest:" and the site's bare id.
+//
+// A guest pass is a siteAccessCode row with no code behind it, so its digest has to be
+// something no typed code can produce, and it has to be findable by the same codeHash index
+// a typed code is. The preimage holds a colon and lowercase letters, and a code is
+// normalized to exactly 25 symbols of the alphabet before it is hashed, so no visitor input
+// and no minted code can land on this digest. It is fixed per site, bare or prefixed id
+// alike, so the row is found without a second column to search.
+func AccessGuestPassDigest(siteID string) string {
+	return hexSHA256("guest:" + BareShortId(siteID))
+}
+
 // AccessCodeWellFormed reports whether what a visitor typed could be a code at all:
 // exactly 25 symbols once it has been normalized.
 //
@@ -346,6 +359,10 @@ const (
 
 	// AccessCallPath runs a construct the session's gate reaches.
 	AccessCallPath = AccessSurfacePathPrefix + "call"
+
+	// AccessGuestPath opens a gate through the site's guest pass, with no code. It is the
+	// bff's route; on the site's own origin the same act is AccessGuestInboundPath.
+	AccessGuestPath = AccessSurfacePathPrefix + "guest"
 )
 
 // What a visitor's browser sees of the surface, and the two caps on what it may send.
@@ -359,6 +376,10 @@ const (
 	// is under the /_memql/ marker with every other reserved path, so the origin keeps one
 	// reserved namespace, and a bundle may not claim it and never could.
 	AccessInboundPath = "/_memql/access"
+
+	// AccessGuestInboundPath is the guest route on a deployable's own origin, beneath the
+	// same reserved path as unlock, so the edge maps it to AccessGuestPath.
+	AccessGuestInboundPath = AccessInboundPath + "/guest"
 
 	// AccessSmallBodyBytes caps unlock, leave and the session check. A code is 29
 	// characters and a leave says nothing, so 1 KiB is generous for all of them.
