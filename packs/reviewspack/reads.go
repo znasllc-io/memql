@@ -639,9 +639,9 @@ func (p *Provider) inOrganization(sys context.Context, account, userID string) (
 	}
 	for _, m := range memberships {
 		// The membership must be the named person's own, as this package
-		// spells people: the engine answers mod-1's memberships for the id
-		// `v1:identity:user:mod-1`, which is all bareUser leaves of an id with
-		// the prefix twice, and that id is nobody's here.
+		// spells people (bareUser): a row that names them under another
+		// concept's prefix, or the user's twice, is nobody's here, as it is
+		// on the list (organizationMembers).
 		if strings.TrimSpace(asString(m["status"])) == "active" && bareUser(asString(m["userId"])) == userID &&
 			slices.Contains(groups, memql.BareShortId(asString(m["groupId"]))) {
 			return true, nil
@@ -677,7 +677,8 @@ func displayNameOf(row map[string]any) string {
 // spellings: a signed-in caller's as the token carried it -- canonical,
 // `v1:identity:user:<id>`, on a deployed cluster -- and a chosen or stored one
 // as clients write ids, bare. Both are made bare by bareUser, so an id of
-// another concept matches no person's. Empty names nobody.
+// another concept, or one with the user's prefix twice, matches no person's.
+// Empty names nobody.
 func sameUser(a, b string) bool {
 	a, b = bareUser(a), bareUser(b)
 	return a != "" && a == b
@@ -689,8 +690,15 @@ const userIDPrefix = "v1:identity:user:"
 // bareUser is a user id as clients write it: the user concept's prefix
 // stripped, and no other. memql.BareShortId strips ANY concept's prefix, which
 // read `v1:accounts:account:mod-1` as the person mod-1; here it stays what it
-// is, an id of another concept, and names nobody. Every user id this
-// package's people code makes bare goes through it.
+// is, an id of another concept, and names nobody. An id with the user's prefix
+// twice is "": stripped once it is still canonical, which no person is spelled
+// as here, so it names nobody either -- never somebody the list offers and the
+// write refuses. Every user id this package's people code makes bare goes
+// through it.
 func bareUser(id string) string {
-	return bareID(id, userIDPrefix)
+	bare := bareID(id, userIDPrefix)
+	if strings.HasPrefix(bare, userIDPrefix) {
+		return ""
+	}
+	return bare
 }

@@ -352,8 +352,10 @@ func TestTheApproverIsStoredByTheirBareId(t *testing.T) {
 // happens to end the way mod-1's does; reading it as mod-1 would let a stray
 // id, or a caller who means it, name a person nobody named -- as the approver,
 // or as one of the store's people. Nor is a user id with the prefix twice
-// anybody's: stripped once it is still canonical, which no person is spelled as
-// here, though the engine answers mod-1's memberships for it.
+// anybody's, not even its own: stripped once it is still canonical, which no
+// person is spelled as here, though the engine answers mod-1's memberships for
+// it -- so a membership spelled so lists nobody, as the write names nobody by
+// it.
 func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 	for _, c := range []struct {
 		a, b string
@@ -365,6 +367,7 @@ func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 		{"v1:accounts:account:mod-1", "mod-1", false},
 		{"v1:identity:group:mod-1", "v1:identity:user:mod-1", false},
 		{"v1:identity:user:v1:identity:user:mod-1", "mod-1", false},
+		{"v1:identity:user:v1:identity:user:mod-1", "v1:identity:user:v1:identity:user:mod-1", false},
 		{"v1:identity:user:", "", false},
 	} {
 		if got := sameUser(c.a, c.b); got != c.same {
@@ -383,20 +386,24 @@ func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 	}
 	// A membership spells its member the same two ways: solo-2 under the user
 	// concept's prefix is solo-2, and the row naming an account's id is nobody's.
+	// So is the row naming solo-3 with the prefix twice, whom the engine would
+	// answer as solo-3: listed, they would be offered and then refused.
 	roster := shopRoster()
 	held := heldIn("acct-shop", readData, openDeployables, moderateReviews)
 	roster.members["group-shop"] = append(roster.members["group-shop"],
 		rosterMember("group-shop", "v1:accounts:account:solo-1", "added", "active"),
-		rosterMember("group-shop", "v1:identity:user:solo-2", "added", "active"))
+		rosterMember("group-shop", "v1:identity:user:solo-2", "added", "active"),
+		rosterMember("group-shop", "v1:identity:user:v1:identity:user:solo-3", "added", "active"))
 	roster.users["solo-1"], roster.users["solo-2"] = rosterUser("solo-1", "Sol One", "user", true), rosterUser("solo-2", "Sol Two", "user", true)
-	roster.holds["solo-1"], roster.holds["solo-2"] = held, held
+	roster.users["solo-3"] = rosterUser("solo-3", "Sol Three", "user", true)
+	roster.holds["solo-1"], roster.holds["solo-2"], roster.holds["solo-3"] = held, held, held
 	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
 		map[string]any{"storeId": "store-live", "siteId": "site-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,mod-1,solo-2" {
-		t.Fatalf("people = %s, want owner-1,mod-1,solo-2: a member spelled under another concept's prefix is nobody", got)
+		t.Fatalf("people = %s, want owner-1,mod-1,solo-2: a member spelled under another concept's prefix, or under the user's twice, is nobody", got)
 	}
 }
 
