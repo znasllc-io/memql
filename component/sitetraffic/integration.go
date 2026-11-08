@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -62,7 +63,15 @@ const rollupConcept = "integration:siteTraffic:rollup"
 // (auth.MaintenanceActor("siteStatisticsRollupSweep")).
 const rollupPrincipal = "system:maintenance:siteStatisticsRollupSweep"
 
-// Integration exposes the read and the rollup.
+// countryRefreshConcept is the concept of the one node the country refresh
+// answers with, its report; like rollupConcept it is stored nowhere.
+const countryRefreshConcept = "integration:siteTraffic:countryRefresh"
+
+// countryRefreshPrincipal is the only caller the country refresh admits: the
+// maintenance principal of its daily automation.
+const countryRefreshPrincipal = "system:maintenance:geoCountryRefreshSweep"
+
+// Integration exposes the read, the rollup and the country refresh.
 type Integration struct {
 	engine Engine
 	bunDB  func() *bun.DB
@@ -78,6 +87,12 @@ type Integration struct {
 	// lock in rollup.go is what keeps two REPLICAS apart; this keeps one
 	// process from stacking its own runs.
 	rollupRunning atomic.Bool
+
+	// countryBaseURL and httpClient are the country refresh's source and
+	// transport. Fields so a test points them at an httptest.Server and never
+	// reaches the internet; NewIntegration sets the production defaults.
+	countryBaseURL string
+	httpClient     *http.Client
 }
 
 // NewIntegration wires the handles. The db getter is resolved lazily at call
@@ -87,7 +102,11 @@ func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *I
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Integration{engine: engine, bunDB: bunDB, logger: logger}
+	return &Integration{
+		engine: engine, bunDB: bunDB, logger: logger,
+		countryBaseURL: defaultCountryBaseURL,
+		httpClient:     &http.Client{Timeout: 2 * time.Minute},
+	}
 }
 
 func init() {
@@ -118,6 +137,11 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "rollup",
 			Description: "Fold the edge's request log into hourly and daily website statistics: today and every hour of it, every earlier logged day not yet final (a day is final once recomputed at or after 02:00 UTC the next day), then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
 			Handler:     i.handleRollup,
+		},
+		{
+			Name:        "countryRefresh",
+			Description: "Download the current month's DB-IP IP-to-Country Lite database into edge_geo_country when the stored release is older, falling back to the previous month while DB-IP has not published the current one. Admits only the geoCountryRefreshSweep maintenance principal.",
+			Handler:     i.handleCountryRefresh,
 		},
 	}
 }
@@ -177,6 +201,51 @@ func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int)
 	return []memorynodes.MemoryNode{{
 		ID:        "siteStatisticsRollup",
 		Concept:   rollupConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: now.UTC(),
+		Payload:   payload,
+	}}, nil
+}
+
+// handleCountryRefresh runs the monthly country download for its daily
+// automation, and for nobody else (handleRollup's rule).
+//
+// A FAILED DOWNLOAD IS A WARN AND AN ANSWER, NOT AN ERROR. The stored database
+// is untouched and keeps serving, and the next day's run tries again, so there
+// is nothing for a person to act on; an erroring automation would fail every
+// day on a cluster with no route to the internet and bury real failures. The
+// report's Reason carries the cause for anyone reading the run, and the Warn
+// is what an operator searching logs finds. Only a refused principal is an
+// error, because that is a wiring fault and not a transient one.
+func (i *Integration) handleCountryRefresh(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	actor, ok := auth.AccessFromContext(ctx)
+	if !ok || actor == nil || actor.UserId != countryRefreshPrincipal || !actor.IsClusterOwner() {
+		return nil, fmt.Errorf("country refresh requires the engine maintenance principal")
+	}
+	var db *bun.DB
+	if i.bunDB != nil {
+		db = i.bunDB()
+	}
+	now := time.Now()
+	if i.now != nil {
+		now = i.now()
+	}
+	rep, err := refreshCountries(ctx, db, i.httpClient, i.countryBaseURL, now)
+	if err != nil {
+		i.logger.Warn("Country database refresh failed; the stored release stays in use",
+			"component", "sitetraffic", "release", rep.Release, "error", err)
+		rep.Reason = err.Error()
+	} else if rep.Downloaded {
+		i.logger.Info("Country database refreshed (IP Geolocation by DB-IP, CC BY 4.0)",
+			"component", "sitetraffic", "release", rep.Release)
+	}
+	payload, err := json.Marshal(rep)
+	if err != nil {
+		return nil, fmt.Errorf("country refresh: encode the report: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        "geoCountryRefresh",
+		Concept:   countryRefreshConcept,
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: now.UTC(),
 		Payload:   payload,

@@ -113,6 +113,11 @@ var maintenanceAutomations = map[string]string{
 		"Go handler. Without it the automation's RoleReader system actor is refused every five minutes, nothing " +
 		"is folded, and every deployable's statistics read as not measured -- a failure that looks like a site " +
 		"nobody has measured yet",
+	"geoCountryRefreshSweep": "the daily check that downloads DB-IP's monthly country database into edge_geo_country " +
+		"(the 2026-11-08 statistics design). The table is a dedicated one no row admission ever sees, and builtin " +
+		"geoCountryRefresh admits this principal and no other caller in its Go handler. Without it the automation's " +
+		"RoleReader system actor is refused every day, the database is never refreshed, and every visit's country " +
+		"ages or stays unknown -- a failure that looks like a site whose visitors are simply untraceable",
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
 		"nothing looks exactly like a sweep with nothing to retire",

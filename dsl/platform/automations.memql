@@ -149,6 +149,26 @@ automation siteStatisticsRollupSweep {
   roll := builtin siteStatisticsRollup()
 }
 
+/// Keep the country database current: download DB-IP's IP-to-Country Lite file when the stored
+/// release is older than this month (the 2026-11-08 statistics design).
+///
+/// DAILY AT 04:10 UTC ON THE CRON LEADER, BUT A DOWNLOAD HAPPENS ONCE A MONTH: the builtin does
+/// nothing while the stored release is the current month, so the daily schedule exists only to
+/// retry. DB-IP serves the current and the previous month and answers 404 for older ones, which is
+/// why the cluster fetches the file itself instead of pinning one in the image; a first-of-month
+/// 404 falls back to the previous month and the next day's run picks up the new one.
+///
+/// OFFLINE IS NOT A FAILURE: a cluster with no route to DB-IP keeps the stored database (or none,
+/// and then visits have no country), the builtin logs a Warn and answers with the reason, and the
+/// run still succeeds, so a quiet cluster does not fail every day.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller. IP Geolocation by DB-IP, CC BY 4.0.
+@trigger(schedule="0 10 4 * * *")
+automation geoCountryRefreshSweep {
+  refresh := builtin geoCountryRefresh()
+}
+
 /// The FOURTH observation of a storefront preview, and the only passive one (epic memql#5531,
 /// issue memql#5547): an order arrived in the mirror under a store somebody is exercising a
 /// candidate against.

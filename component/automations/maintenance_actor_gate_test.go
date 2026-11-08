@@ -103,6 +103,12 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
 		"demoteProcedures",
+		// geoCountryRefreshSweep (the 2026-11-08 statistics design) downloads
+		// DB-IP's monthly country database into a dedicated table outside
+		// graph admission; builtin geoCountryRefresh admits this principal and
+		// nobody else, so under the default RoleReader actor every run is
+		// refused and the country data is never refreshed.
+		"geoCountryRefreshSweep",
 		"logsRetentionSweep",
 		"mineProcedureCorpusAcrossAutomations",
 		"onProcedurePromotionDecided",
