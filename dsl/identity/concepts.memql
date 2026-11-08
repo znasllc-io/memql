@@ -767,8 +767,9 @@ concept group {
 /// audit concept.
 ///
 /// UNOWNED for the reason the group is (D2): the row records a decision the deployment made about
-/// a person, not a row that person owns. Written only by integrations/groups, never by a mutation
-/// a caller can reach.
+/// a person, not a row that person owns. Written only by integrations/groups and, for the
+/// `role-test` origin, by role testing (component/identity/roletest), which places an organization
+/// role's test persona in that organization's group -- never by a mutation a caller can reach.
 @displayCard(primary="userId", secondary="origin", status="status")
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
 concept groupMembership {

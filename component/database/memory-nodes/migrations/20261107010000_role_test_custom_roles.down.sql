@@ -3,10 +3,20 @@
 -- their sessions first (a session references its persona), then the persona
 -- rows. Each such test ends, exactly as End would end it. The persona user
 -- rows stay as inert identities, as a failed Start leaves one: with no session
--- and no login factor nothing can authenticate as them. An organization
--- persona's role-test membership is a graph row this SQL does not rewrite; it
--- admits nobody for the same reason, and the up's code removes it on that
--- operator's next Start or End if the up is applied again.
+-- and no login factor nothing can authenticate as them.
+--
+-- AN ORGANIZATION ROLE PERSONA'S MEMBERSHIP OUTLIVES THIS, AND NOTHING REMOVES
+-- IT BY ITSELF. It is a graph row this SQL does not rewrite, and role testing
+-- finds it only through the persona row deleted here (the sweep reads
+-- identity_role_test_personas), so no later Start or End reaches it -- not even
+-- with the up applied again, whose next test of that role is a new persona. It
+-- admits nobody, for the reason above, but the persona stays a member of that
+-- organization's group until an operator removes it by hand: groupMemberRemove
+-- with the membership's groupId and the persona's userId. After this down every
+-- active membership of origin `role-test` is one of these, because only an
+-- organization role's test places one; to know them in advance, run before it
+--   SELECT role, user_id FROM identity_role_test_personas
+--    WHERE role NOT IN ('reader', 'writer', 'developer', 'admin');
 DELETE FROM identity_role_test_sessions
     WHERE role NOT IN ('reader', 'writer', 'developer', 'admin')
        OR user_id IN (SELECT user_id FROM identity_role_test_personas WHERE role NOT IN ('reader', 'writer', 'developer', 'admin'));
