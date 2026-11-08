@@ -1551,6 +1551,7 @@ const VIEWS: Record<
   "release-cut": { render: () => <ReleaseJourneyPreview phase="new" /> },
   "release-cut-version": { render: () => <ReleaseJourneyPreview phase="prepared" /> },
   "release-cut-building": { render: () => <ReleaseJourneyPreview phase="building" /> },
+  "release-cut-progress": { framed: true, render: () => <WindowBody fallback="Pipelines"><ReleaseJourneyPreview phase="building" progress bounded /></WindowBody> },
   "release-cut-review": { render: () => <ReleaseJourneyPreview phase="ready" /> },
   "release-cut-uncertain": { render: () => <ReleaseJourneyPreview phase="uncertain" /> },
   "release-cut-published": { render: () => <ReleaseJourneyPreview phase="published" /> },
@@ -2390,16 +2391,34 @@ function ReleasePreview({ empty = false, fail = false, pending = false, file = f
   return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
 }
 
-function ReleaseJourneyPreview({ phase, unavailable = false, skipped = false, untested = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean; skipped?: boolean; untested?: boolean }) {
+function ReleaseJourneyPreview({ phase, unavailable = false, skipped = false, untested = false, progress = false, bounded = false }: { phase: Parameters<typeof releaseJourneyFixture>[0]; unavailable?: boolean; skipped?: boolean; untested?: boolean; progress?: boolean; bounded?: boolean }) {
   const [fixture] = useState(() => {
     const f = releaseJourneyFixture(phase);
     f.journey.failedGet = unavailable;
     if (skipped) f.skipped();
     if (untested) f.journey.untestedPrepare = "None of the newest 20 commits on main has passed its required checks: 2 running, 1 failed, 17 untested. Check the source again once a commit's checks pass.";
     if (phase === "uncertain") { f.journey.build.reason = "The build start response was lost. Its recorded attempt must be checked before continuing."; f.journey.build.pipelineRunId = ""; f.journey.build.workRunId = ""; }
+    if (progress) {
+      f.journey.build.workRunId = "";
+      Object.assign(f.journey.run, { workRunId: "", status: "queued", stages: [] });
+      const startedAt = Date.now();
+      const execute = f.query.executeNamed;
+      f.query.executeNamed = async (...args) => {
+        if (args[0] === "releaseObserveBuild") {
+          const observations = Math.floor((Date.now() - startedAt) / 20_000) + 1;
+          f.journey.build.updatedAt = new Date(Date.UTC(2026, 10, 8, 9, 0, observations)).toISOString();
+          if (observations >= 2) {
+            f.journey.build.workRunId = "release-work";
+            Object.assign(f.journey.run, { workRunId: "release-work", status: observations >= 3 ? "completed" : "in_progress", conclusion: observations >= 3 ? "success" : "", stages: [{ name: "Images", status: observations >= 3 ? "passed" : "running", steps: 7 }] });
+          }
+          if (observations >= 3) Object.assign(f.journey.build, { phase: "built", actions: ["resume"] });
+        }
+        return execute(...args);
+      };
+    }
     return f;
   });
-  return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected openRequest={phase === "new" ? undefined : { intentId: releaseIntentId, revision: 1 }} /></div>;
+  return <div style={{ height: bounded ? "100%" : "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected openRequest={phase === "new" ? undefined : { intentId: releaseIntentId, revision: 1 }} /></div>;
 }
 
 function App() {

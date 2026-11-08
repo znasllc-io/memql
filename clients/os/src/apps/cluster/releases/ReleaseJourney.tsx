@@ -174,10 +174,20 @@ function References({ build }: { build: ReleaseBuild }) {
 
 function BuildProgress({ build, query, available, visible, runs, runsFresh }: { build: ReleaseBuild; query: ReleaseQueries | null; available: boolean; visible: boolean; runs: readonly RunRow[]; runsFresh: boolean }) {
   const live = runs.find(run => run.id === build.pipelineRunId);
-  const direct = useReleaseRead(`release-run:${build.pipelineRunId}`, query && available && build.pipelineRunId && !live ? async signal => {
+  const runKey = `release-run:${build.pipelineRunId}:${build.workRunId}`;
+  const direct = useReleaseRead(runKey, query && available && build.pipelineRunId && !live ? async signal => {
     const result = await query.pipelineRunForOwner({ runId: build.pipelineRunId }, { signal });
     return result.rows().map(runFromRow).find(run => run.id === build.pipelineRunId) ?? null;
   } : null, visible, query, 0);
+  // A just-started run can be read before its work identity and stages exist.
+  // Follow the existing journal observations when no live directory owns it;
+  // keep one timer, and never compare an earlier work identity to a newer one.
+  const observed = useRef({ runKey, updatedAt: build.updatedAt });
+  useEffect(() => {
+    const previous = observed.current;
+    observed.current = { runKey, updatedAt: build.updatedAt };
+    if (!live && previous.runKey === runKey && previous.updatedAt !== build.updatedAt) direct.retry();
+  }, [runKey, build.updatedAt, live, direct.retry]);
   const run = live ?? direct.value;
   const matches = run && run.pipelineId === build.pipelineId && run.repository === build.repository && run.sha === build.sha && run.event === "release" && run.mode === "full" && run.version === build.tag && (!build.workRunId || run.workRunId === build.workRunId);
   if (run && !matches) return <Notice tone="error" sentence="The build details do not match this release request." />;

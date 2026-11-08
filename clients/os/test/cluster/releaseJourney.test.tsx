@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
 import { readProfiles } from "../../src/apps/cluster/releases/assembly";
@@ -194,6 +194,46 @@ describe("guided release", () => {
     await screen.findByText(/Prepare a version change/);
     await press("Open repository");
     expect(openRepository).toHaveBeenCalledWith("source-package"); expect(writes(f)).toEqual([]);
+  });
+  it("follows a newly assigned work run after the release starts without a directory row", async () => {
+    vi.useFakeTimers();
+    const f = releaseJourneyFixture("building");
+    const direct = vi.spyOn(f.query, "pipelineRunForOwner");
+    f.journey.build.workRunId = "";
+    f.journey.run.workRunId = "";
+    f.journey.run.stages = [];
+    await act(async () => { render(<ReleaseBrowser query={f.query} connected />); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open release engine 0.25.0" })); });
+    expect(screen.getByText("No stage detail recorded")).toBeTruthy();
+    f.journey.build.workRunId = releaseRun.workRunId;
+    f.journey.run.workRunId = releaseRun.workRunId;
+    f.journey.run.stages = [{ name: "images", status: "running", steps: 7 }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(screen.queryByText("The build details do not match this release request.")).toBeNull();
+    expect(screen.getByText("images")).toBeTruthy();
+    expect(direct).toHaveBeenCalledTimes(2);
+    const source = screen.getByRole("button", { name: /^Source / });
+    source.focus();
+    Object.assign(f.journey.run, { status: "completed", conclusion: "success", stages: [{ name: "images", status: "passed", steps: 7 }] });
+    Object.assign(f.journey.build, { phase: "built", actions: ["resume"], updatedAt: "2026-10-06T18:02:00Z" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(within(screen.getByRole("list", { name: "Build stages" })).getByText("Passed")).toBeTruthy();
+    expect(document.activeElement).toBe(source);
+    expect(direct).toHaveBeenCalledTimes(3);
+    expect(writes(f)).toEqual([]);
+  });
+  it("refuses a newly observed run whose source no longer matches the release", async () => {
+    vi.useFakeTimers();
+    const f = releaseJourneyFixture("building");
+    await act(async () => { render(<ReleaseBrowser query={f.query} connected />); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open release engine 0.25.0" })); });
+    expect(screen.getByText("Build engine 0.25.0")).toBeTruthy();
+    f.journey.run.sha = "e".repeat(40);
+    f.journey.build.updatedAt = "2026-10-06T18:02:00Z";
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(screen.getByText("The build details do not match this release request.")).toBeTruthy();
+    expect(screen.queryByText("Build engine 0.25.0")).toBeNull();
+    expect(writes(f)).toEqual([]);
   });
   it("uses the exact owning live run and refuses a same-ID row with different source facts", async () => {
     const f = releaseJourneyFixture("building");

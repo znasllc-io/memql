@@ -29,6 +29,11 @@ exercises the separate installation-pin confirmation. These are fixtures; no
 GitHub ref or installation is changed. Add `width=narrow` to bound a window
 to 390 pixels, and check both `mode=light` and `mode=dark`.
 
+`view=release-cut-progress` starts with a queued run before its work identity is
+assigned. The existing twenty-second journal observations advance it to running,
+then passed. Leave Build open and check the live stages without reloading; focus
+and the selected step must stay put. This fixture makes no release or publication.
+
 Fleet > Routing > Routes has a view per state: `routing-routes` (also
 `-member` and `-old-cluster`), `routing-route-local` (also `-member`),
 `routing-route-busy` (capacity reasons), `routing-route-mine`,

@@ -2656,6 +2656,13 @@ and artifact storage failures do not hide durable candidate/publication history.
 Navigation carries the owner-only `app:cluster/releases` resource; native owner and
 candidate ownership gates remain authoritative.
 
+Cut release uses the matching live run when the directory owns it. Otherwise,
+each new journal observation refreshes its exact run read without adding a second
+poll timer. The read also binds the work-run identity once assigned, so the early
+queued snapshot cannot contradict the later build. Source, tag, pipeline and work
+identity checks still reject a different execution. Progress preserves the selected
+step and focus and never submits a build, retry or publication.
+
 Preparation accepts either a configured assembly plan or an opt-in release profile.
 Profiles bind their current configuration identity and completed source runs; the
 installed recipe resolves artifact names and versions before the owner reviews the
