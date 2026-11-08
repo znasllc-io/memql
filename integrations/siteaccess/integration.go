@@ -69,7 +69,11 @@ import (
 // NOR ARE GUESTS LET IN INSIDE A RUN, for a reason of a pass's own. It has no code for a
 // journal to keep, but a pass opens a gate of a deployable to anybody who asks, and that
 // is an operator's act and never DSL's (design record 2026-11-08, G-D1): a run is DSL
-// acting, so it is refused, in words that give that reason.
+// acting, so it is refused, in words that give that reason. FOR THE SAME REASON A RUN DOES
+// NOT RE-TIME A PASS: extending one, or reviving one past its end, keeps the deployable
+// open to anybody, and shortening one is still deciding who may come in until when. A run
+// MAY REMOVE A PASS, as it may a code, because ending guest access only narrows who can
+// get in.
 //
 // # A refusal is a sentence
 //
@@ -657,6 +661,14 @@ func (i *Integration) setExpiry(ctx context.Context, actor, codeID string, args 
 	if err != nil {
 		return target{}, time.Time{}, err
 	}
+	// A RUN DOES NOT RE-TIME A GUEST PASS (see the file note). It is asked once the row
+	// says it is a pass, and before anything about its state, since no state of the pass
+	// would make the answer different.
+	if t.code.Guest {
+		if err := refuseInARun(ctx, guestEndInARun); err != nil {
+			return target{}, time.Time{}, err
+		}
+	}
 	if err := refuseIfEnded(t); err != nil {
 		return target{}, time.Time{}, err
 	}
@@ -1050,12 +1062,13 @@ func refuseInARun(ctx context.Context, sentence string) error {
 	return nil
 }
 
-// The two reasons a run is refused. A code's is the journal, which would keep the code,
-// and the act it comes from adds what to do. A guest pass has no code, and its reason is
-// that letting anybody in is an operator's decision.
+// The reasons a run is refused. A code's is the journal, which would keep the code, and
+// the act it comes from adds what to do. A guest pass has no code, and its reason is that
+// letting anybody in, or keeping them in for longer, is an operator's decision.
 const (
-	codeInARun   = "An access code is minted only by a person in Deployables, because a run's journal would keep it."
-	guestsInARun = "Guests are let in only by a person in Deployables, because opening a deployable to anyone is an operator's decision and never a run's. Allow guests there."
+	codeInARun     = "An access code is minted only by a person in Deployables, because a run's journal would keep it."
+	guestsInARun   = "Guests are let in only by a person in Deployables, because opening a deployable to anyone is an operator's decision and never a run's. Allow guests there."
+	guestEndInARun = "When guest access ends is changed only by a person in Deployables, because keeping a deployable open to anyone is an operator's decision and never a run's. Change it there."
 )
 
 // requireCaller is the person behind an act, bare, for `lastChangedBy`.

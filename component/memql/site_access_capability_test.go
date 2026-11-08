@@ -39,11 +39,11 @@ import (
 // dsl/platform/builtins.memql declares, and a rename on either side fails this
 // before it can turn the gate off.
 //
-// The split is the spec's: minting, listing the codes and listing the gates are
-// asked about the SITE (minting has no code yet, and the other two ask about every
-// code of one site), and every act on an existing code is asked about the CODE,
-// whose accountId was copied off its site at mint time -- so an act on a code
-// resolves its organization without reading the site again.
+// The split is the spec's: minting a code or a guest pass, listing the codes and
+// listing the gates are asked about the SITE (a mint has no code yet, and the other
+// two ask about every code of one site), and every act on an existing code is asked
+// about the CODE, whose accountId was copied off its site at mint time -- so an act
+// on a code resolves its organization without reading the site again.
 func TestSiteAccessBuiltinsNameTheirOrganizationTarget(t *testing.T) {
 	fns := loadedSiteAccessTree(t)
 
@@ -58,6 +58,7 @@ func TestSiteAccessBuiltinsNameTheirOrganizationTarget(t *testing.T) {
 		argument string
 	}{
 		{"siteAccessCodeCreate", "integration.siteAccess.create", "v1:platform:site", "siteId"},
+		{"siteAccessGuestPassCreate", "integration.siteAccess.guestPassCreate", "v1:platform:site", "siteId"},
 		{"siteAccessGates", "integration.siteAccess.gates", "v1:platform:site", "siteId"},
 		{"siteAccessCodesForSite", "integration.siteAccess.list", "v1:platform:site", "siteId"},
 		{"siteAccessCodeRegenerate", "integration.siteAccess.regenerate", "v1:platform:siteAccessCode", "codeId"},

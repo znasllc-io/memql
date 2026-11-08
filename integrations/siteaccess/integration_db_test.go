@@ -2252,6 +2252,71 @@ func TestALogicCannotPutACodeInItsJournal(t *testing.T) {
 	require.Equal(t, 1, w.codesOnSiteDistinct(w.site), "a logic minted a code")
 }
 
+// A RUN DOES NOT RE-TIME A GUEST PASS, for the reason it does not mint one: extending a
+// pass, or reviving one past its end, keeps a deployable open to anybody, and that is an
+// operator's act and never DSL's (G-D1). Through the real logic runner, beside the same
+// call on a code, which a run may still make, and beside removing the pass, which only
+// narrows who can get in and so stays a run's to do.
+func TestALogicCannotReTimeAGuestPass(t *testing.T) {
+	w := newWorld(t, "logicguest")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	pass := w.allowGuests(operator, nil)
+	codeID, _ := w.mint(operator, nil)
+	stamp := time.Now().UnixNano()
+	started := time.Now().Add(-time.Second)
+	t.Cleanup(func() {
+		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
+			Where("concept IN (?, ?)", "v1:work:run", "v1:work:step").Where(`"createdAt" >= ?`, started).
+			Where("payload::text LIKE ?", "%"+w.site+"%").Exec(context.Background())
+	})
+	run := func(name, call string) error {
+		t.Helper()
+		logic := w.registerLogic(fmt.Sprintf("logic %s%d {\n  done := builtin %s\n  return done\n}", name, stamp, call))
+		_, err := w.eng.Execute(operator, logic+"()")
+		return err
+	}
+	retime := func(name, id, to string) error {
+		t.Helper()
+		return run(name, fmt.Sprintf("siteAccessCodeSetExpiry(codeId: %s, expiresAt: %s)", langparser.QuoteString(id), langparser.QuoteString(to)))
+	}
+
+	t.Run("a guest pass is refused, and nothing changes", func(t *testing.T) {
+		for name, to := range map[string]string{
+			"extendGuestAccessFromALogic":  after(30 * 24 * time.Hour),
+			"shortenGuestAccessFromALogic": after(10 * time.Minute),
+		} {
+			before, versions, events := w.row(pass), w.versions(pass, 0), len(w.events(pass))
+			err := retime(name, pass, to)
+			require.Error(t, err, "%s: a logic changed when guest access ends", name)
+			require.Contains(t, err.Error(), "When guest access ends is changed only by a person in Deployables", "%s: refused, but not for this reason", name)
+			require.Equal(t, before, w.row(pass), "%s: a refused re-time changed the pass", name)
+			require.Equal(t, versions, w.versions(pass, 0), "%s: a refused re-time wrote a version", name)
+			require.Len(t, w.events(pass), events, "%s: a refused re-time was audited", name)
+		}
+	})
+
+	t.Run("nor is a pass past its end revived", func(t *testing.T) {
+		w.moveExpiry(pass, time.Now().Add(-time.Minute))
+		before := w.row(pass)
+		err := retime("reviveGuestAccessFromALogic", pass, after(time.Hour))
+		require.Error(t, err, "a logic let guests in again")
+		require.Contains(t, err.Error(), "When guest access ends is changed only by a person in Deployables", "refused, but not for this reason")
+		require.Equal(t, before, w.row(pass), "a logic revived guest access")
+	})
+
+	t.Run("a code is re-timed as before", func(t *testing.T) {
+		to := after(3 * time.Hour)
+		require.NoError(t, retime("retimeACodeFromALogic", codeID, to), "a logic can no longer re-time a code")
+		require.Equal(t, to, w.row(codeID)["expiresAt"])
+	})
+
+	t.Run("a guest pass can still be turned off", func(t *testing.T) {
+		require.NoError(t, run("turnOffGuestAccessFromALogic", fmt.Sprintf("siteAccessCodeRemove(codeId: %s)", langparser.QuoteString(pass))),
+			"a logic can no longer end guest access, which only narrows who can get in")
+		require.NotEmpty(t, w.row(pass)["revokedAt"])
+	})
+}
+
 // ---------------------------------------------------------------------------
 // a row's owner has no say
 // ---------------------------------------------------------------------------
