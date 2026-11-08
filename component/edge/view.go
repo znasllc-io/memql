@@ -29,7 +29,9 @@
 // tune the next one. A refusal is no error a visitor or the site's developer
 // should find in a console either. So every outcome is the same empty 204 with
 // the same headers, and only the request log says what happened: a refused
-// ping is recorded for health and is no page view.
+// ping is recorded for health and is no page view. Nothing is logged either:
+// how many pings arrive is the sender's to choose, so a line per refusal would
+// let any page write the edge's logs.
 //
 // # Why same-origin only
 //

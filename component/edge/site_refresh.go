@@ -56,8 +56,9 @@ func refreshScriptTag(version string) string {
 
 // hostedDocument reads a bundle document and inserts the hosting layer's tags
 // -- the version monitor's, the page-change script's (view.go), or both, as
-// serveFile renders them -- at one point: right after <head>, else after the
-// doctype or ahead of <body> when the document writes no <head>.
+// serveFile renders them -- at one point: right after <head>. A document that
+// writes no <head> gets them ahead of its <body>, or failing that after its
+// doctype, or at the very start.
 //
 // Insert without serializing the document: reserialization would change the
 // bytes of inline scripts whose exact hashes are already in its CSP. An
