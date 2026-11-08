@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -39,6 +40,20 @@ func TestRepositorySourceRegistrationRestoresAcrossReplicasWithoutChangingDeploy
 	}
 	t.Setenv(secret.EnvMasterKey, testMasterKey)
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	// Everything this test writes goes when it ends. It once left all of it, and
+	// the run it opens below mattered most: it stays in flight with a heartbeat
+	// that only goes stale, so any sweep over a database this test had run
+	// against found it. Ids named by the suffix go by pattern. The engine chose
+	// the ids of the two packages and two source connections, but their payloads
+	// carry the suffix (the repository's URL, the credential's id), and matching
+	// on that also cleans up when the test fails before it has learned the ids.
+	// A new kind of row with an engine-chosen id has to be added to this list.
+	t.Cleanup(func() {
+		pattern := "%" + suffix + "%"
+		_, _ = db.NewDelete().Model((*concept.MemoryNode)(nil)).
+			Where("id LIKE ? OR (concept IN ('v1:platform:package', 'v1:platform:sourceConnection') AND payload::text LIKE ?)", pattern, pattern).
+			Exec(context.Background())
+	})
 	owner, stranger := "registration-owner-"+suffix, "registration-other-"+suffix
 	seedTiePrincipal(t, first, owner, auth.RoleOwner)
 	seedTiePrincipal(t, first, stranger, auth.RoleOwner)
