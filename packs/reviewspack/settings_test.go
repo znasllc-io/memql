@@ -221,6 +221,68 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	}
 }
 
+// A PERSON IS ONE OF THE STORE'S PEOPLE THROUGH AN ACTIVE GROUP OF ITS
+// ORGANIZATION, whatever the engine answers for them there. Whether they can
+// moderate is the engine's verdict (canModerate); whether they are the
+// organization's is their membership's, and neither the list nor the approver
+// check takes the one for the other. Everybody tried here is answered able to
+// moderate in the store's organization, and is off the list and refused as the
+// approver all the same: the only group that would make them its person is
+// another organization's, or archived, or no longer any group of an
+// organization that has none.
+func TestOnlyAnActiveGroupOfItsOrganizationMakesSomebodyTheStoresPerson(t *testing.T) {
+	able := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	noGroups := func() *orgRoster {
+		r := shopRoster()
+		delete(r.groups, "acct-shop")
+		return r
+	}
+	for _, c := range []struct {
+		who, why string
+		roster   func() *orgRoster
+	}{
+		{"visitor-1", "a person whose only group is another organization's", func() *orgRoster {
+			r := shopRoster()
+			r.members["group-other"] = append(r.members["group-other"], rosterMember("group-other", "visitor-1", "added", "active"))
+			r.users["visitor-1"], r.holds["visitor-1"] = rosterUser("visitor-1", "Vic Visitor", "user", true), able
+			return r
+		}},
+		{"former-1", "an active member of the organization's archived group", func() *orgRoster {
+			r := shopRoster()
+			archived := rosterGroup("group-shop-old", "acct-shop")
+			archived["status"] = "archived"
+			r.groups["acct-shop"] = append(r.groups["acct-shop"], archived)
+			r.members["group-shop-old"] = []map[string]any{rosterMember("group-shop-old", "former-1", "added", "active")}
+			r.users["former-1"], r.holds["former-1"] = rosterUser("former-1", "Fran Former", "user", true), able
+			return r
+		}},
+		{"mod-1", "an active member of groups the organization, which has none, no longer holds", noGroups},
+	} {
+		people, err := readPeople(t, operatorCtxFor("op-1"), settingsReader(existingSettings()), c.roster(), theStore)
+		if err != nil {
+			t.Fatalf("%s (%s): %v", c.who, c.why, err)
+		}
+		for _, id := range peopleIDs(people) {
+			if id == c.who {
+				t.Errorf("%s (%s) is listed among the store's people: %v", c.who, c.why, peopleIDs(people))
+			}
+		}
+		for _, namer := range []struct {
+			ctx  context.Context
+			name string
+		}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+			if _, err := writeSettingsOn(t, namer.ctx, c.roster(), existingSettings(), approverArgs(c.who), false); err == nil || err.Error() != approverRefusal {
+				t.Errorf("%s naming %s (%s): err = %v, want %q", namer.name, c.who, c.why, err, approverRefusal)
+			}
+		}
+	}
+	// An organization with no groups has no people at all.
+	people, err := readPeople(t, operatorCtxFor("op-1"), settingsReader(existingSettings()), noGroups(), theStore)
+	if err != nil || len(people) != 0 {
+		t.Fatalf("people of an organization with no groups = %v (%v), want nobody", peopleIDs(people), err)
+	}
+}
+
 // NAMING THE APPROVER ASKS ABOUT THAT PERSON ALONE. Whether the one person named
 // can moderate is answered from the organization's groups, the person's own
 // memberships, their own user row and the engine's answer for them -- never

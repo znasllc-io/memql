@@ -311,6 +311,9 @@ const peopleActor = "reviews-people"
 // LIST, once every member has been judged and the list sorted by what each is
 // called (moderatorsIn) -- never on the members before, where it kept the
 // first ids whoever they were. reviewsPeople says when it cut (truncated).
+//
+// The number is also prose: reviewsPeople's description in dsl/builtins.memql
+// says "at most 100 of them", and changes with it.
 const maxPeople = 100
 
 // Moderator is one person who can moderate a store's reviews. Nothing else of
