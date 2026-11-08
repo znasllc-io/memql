@@ -2,6 +2,7 @@ package sitetraffic
 
 import (
 	"context"
+	"errors"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -56,6 +57,10 @@ type VisitorSecrets struct {
 	now      func() time.Time
 
 	current atomic.Pointer[daySecret]
+
+	// deleteEarlier removes secrets of days before day. A field so a test can
+	// make it fail once; production uses purgeSQL.
+	deleteEarlier func(ctx context.Context, db *bun.DB, day time.Time) error
 	running atomic.Bool
 	readyCh chan struct{}
 
@@ -80,8 +85,20 @@ func NewVisitorSecrets(logger *slog.Logger, provider func() *bun.DB, now func() 
 		now:      now,
 		readyCh:  make(chan struct{}),
 		stop:     make(chan struct{}),
+
+		deleteEarlier: purgeSQL,
 	}
 }
+
+func purgeSQL(ctx context.Context, db *bun.DB, day time.Time) error {
+	_, err := db.NewRaw("DELETE FROM edge_visitor_secret WHERE day < ?", day).Exec(ctx)
+	return err
+}
+
+// errPurge marks a failure of the delete half of a rotation, so the warning
+// can say which half failed: visitors ARE being counted then, but an earlier
+// day's secret is still stored.
+var errPurge = errors.New("delete earlier secrets")
 
 // Visitor returns the visitor id for a request at time at, or "" when the held
 // secret is not that UTC day's (none held, rotation pending or failed).
@@ -122,10 +139,18 @@ func (v *VisitorSecrets) rotate(ctx context.Context, day time.Time) error {
 		return fmt.Errorf("stored secret for %s is empty", day.Format("2006-01-02"))
 	}
 	v.current.Store(&daySecret{day: day, secret: stored})
-	// Published before the delete: a failed delete leaves old rows but never
-	// leaves requests without a secret, and the next rotation retries it.
-	if _, err := db.NewRaw("DELETE FROM edge_visitor_secret WHERE day < ?", day).Exec(ctx); err != nil {
-		return fmt.Errorf("delete earlier secrets: %w", err)
+	// Published before the delete: a failed delete never leaves requests
+	// without a secret. tick retries the delete on every pass, because the
+	// held day alone says nothing about whether earlier rows are gone.
+	return v.purge(ctx, db, day)
+}
+
+// purge deletes every secret older than day. On a table of at most a couple of
+// rows it costs nothing, which is why tick runs it every time rather than
+// tracking a "delete pending" flag that could itself be wrong.
+func (v *VisitorSecrets) purge(ctx context.Context, db *bun.DB, day time.Time) error {
+	if err := v.deleteEarlier(ctx, db, day); err != nil {
+		return fmt.Errorf("%w: %w", errPurge, err)
 	}
 	return nil
 }
@@ -141,8 +166,8 @@ func (v *VisitorSecrets) Start(ctx context.Context) {
 }
 
 // loop rotates at each UTC midnight and re-checks hourly, so a replica whose
-// midnight rotation failed (database blip) recovers within the hour instead
-// of going without visitors until the next day.
+// midnight rotation or purge failed (database blip) recovers within the hour
+// instead of going without visitors, or keeping a stale secret, for a day.
 func (v *VisitorSecrets) loop(ctx context.Context) {
 	for {
 		now := v.now()
@@ -165,15 +190,28 @@ func (v *VisitorSecrets) loop(ctx context.Context) {
 	}
 }
 
-// tick rotates when the held secret is not today's.
+// tick rotates when the held secret is not today's, and otherwise re-runs the
+// purge: the promise is that after midnight no stored secret outlives its day,
+// and a delete that failed at rotation would otherwise wait a full day.
 func (v *VisitorSecrets) tick(ctx context.Context) {
 	day := utcMidnight(v.now())
-	if cur := v.current.Load(); cur != nil && cur.day.Equal(day) {
-		return
-	}
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if err := v.rotate(rctx, day); err != nil {
+	var err error
+	if cur := v.current.Load(); cur != nil && cur.day.Equal(day) {
+		db := v.provider()
+		if db == nil {
+			return
+		}
+		err = v.purge(rctx, db, day)
+	} else {
+		err = v.rotate(rctx, day)
+	}
+	switch {
+	case err == nil:
+	case errors.Is(err, errPurge):
+		v.logger.Warn("could not delete earlier days' visitor secrets; visitors are still counted, but those secrets stay stored until a later hourly check succeeds", "err", err)
+	default:
 		v.logger.Warn("could not rotate the visitor secret; unique visitors are not counted until it succeeds", "err", err)
 	}
 }

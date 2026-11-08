@@ -3,6 +3,7 @@ package sitetraffic
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -95,5 +96,49 @@ func TestARequestFromYesterdayGetsNoVisitorAfterRotation(t *testing.T) {
 	}
 	if got := v.Visitor("s", "k", "ua", day.Add(time.Second)); got == "" {
 		t.Fatal("a request from the held day must get a visitor")
+	}
+}
+
+func TestAFailedPurgeIsRetriedOnTheNextTickWithoutChangingTheSecret(t *testing.T) {
+	db := edgeTestDB(t)
+	ctx := context.Background()
+	d1, d2 := utcDay(2044, 5, 10), utcDay(2044, 5, 11)
+	clock := d2.Add(time.Hour)
+	v := NewVisitorSecrets(quietLogger(), func() *bun.DB { return db }, func() time.Time { return clock })
+	if err := v.rotate(ctx, d1); err != nil {
+		t.Fatal(err)
+	}
+	failOnce := true
+	v.deleteEarlier = func(ctx context.Context, db *bun.DB, day time.Time) error {
+		if failOnce {
+			failOnce = false
+			return errors.New("injected")
+		}
+		return purgeSQL(ctx, db, day)
+	}
+	if err := v.rotate(ctx, d2); !errors.Is(err, errPurge) {
+		t.Fatalf("want a purge failure, got %v", err)
+	}
+	before := v.Visitor("s", "k", "ua", clock)
+	if before == "" {
+		t.Fatal("visitors must still be counted when only the purge failed")
+	}
+	count := func() int {
+		var n int
+		if err := db.NewRaw("SELECT count(*) FROM edge_visitor_secret WHERE day = ?", d1).Scan(ctx, &n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count() != 1 {
+		t.Fatal("the earlier day's row must remain after the failed delete")
+	}
+	clock = clock.Add(time.Hour)
+	v.tick(ctx)
+	if count() != 0 {
+		t.Fatal("the next tick must remove the earlier day's row")
+	}
+	if after := v.Visitor("s", "k", "ua", clock); after != before {
+		t.Fatalf("the held secret must not change: %q vs %q", before, after)
 	}
 }
