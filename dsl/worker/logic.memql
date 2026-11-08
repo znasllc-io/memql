@@ -10,7 +10,11 @@
 // than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-user
 // invocation queries already filter on the isNotDeleted trait (see
 // dsl/worker/queries.memql) so the rows disappear from UIs the moment
-// the soft-delete lands.
+// the soft-delete lands. The nightly work retention sweep then
+// archives and deletes each soft-deleted row a day later, counted
+// from the soft delete (MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS):
+// the soft delete is a newer version, and judged by the 90-day window
+// it would keep the row another 90 days.
 //
 // Different from auditEventRetentionSweep on the identity side
 // (default 365) because per-call telemetry is high-volume and

@@ -35,6 +35,22 @@ const DefaultSystemRunRetentionDays = 30
 const EnvPipelinesRunRetentionDays = "MEMQL_PIPELINES_RUN_RETENTION_DAYS"
 const DefaultPipelinesRunRetentionDays = 30
 
+// EnvWorkerInvocationDeletedRetentionDays is how long a SOFT-DELETED worker
+// invocation is kept before it is archived and deleted: counted from the
+// tombstone, which workerInvocationRetentionSweep (dsl/worker) writes once a row
+// is older than MEMQL_WORKER_INVOCATION_RETENTION_DAYS. The tombstone IS the
+// retention decision; this is only the grace before the physical delete.
+//
+// Before 2026-11-08 the tombstone reset the row's age. Physical retention
+// judges a record by its NEWEST version, the tombstone was that version, and
+// the only invocation policy was the 90-day one -- so a row hidden at day 90
+// was deleted at day 180, and a row that never reached a terminal outcome,
+// which that policy does not select, was never deleted at all. One day after
+// the tombstone, whatever the outcome: a row the sweep hid at 90 days is gone
+// by day 91, and the tombstone version lives a day.
+const EnvWorkerInvocationDeletedRetentionDays = "MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS"
+const DefaultWorkerInvocationDeletedRetentionDays = 1
+
 // pipelinesRunConcept is spelled here, as integrations/pipelinesteps spells it
 // for itself: component/pipelinerun owns the name and this module does not
 // depend on it. TestRetentionPredicatesSelectOnlyWhatTheirConceptsDeclare reads
@@ -266,6 +282,10 @@ var operationalPolicies = []operationalPolicy{
 	{"v1:safety:classification", "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS", 90, "TRUE"},
 	{"v1:safety:outputScreening", "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS", 90, "TRUE"},
 	{"v1:worker:invocation", "MEMQL_WORKER_INVOCATION_RETENTION_DAYS", 90, `COALESCE(n.payload->>'outcome','') IN ('success','failure','cancelled','timeout','denied_by_scope','denied_by_policy','denied_by_classifier','kill_switch_engaged','no_worker_available','rerouted')`},
+	// A soft-deleted invocation, counted from its tombstone: the policy above
+	// never sees it again, because the tombstone is its newest version and is
+	// younger than 90 days for 90 days (EnvWorkerInvocationDeletedRetentionDays).
+	{"v1:worker:invocation", EnvWorkerInvocationDeletedRetentionDays, DefaultWorkerInvocationDeletedRetentionDays, `n.payload->>'deleted' = 'true'`},
 	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND (n.payload->>'triggeredBy' = '` + automations.TriggeredBySchedule + `' OR n.payload->>'triggeredBy' LIKE '` + automations.TriggeredByEventPrefix + `%') AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
 	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
 	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},

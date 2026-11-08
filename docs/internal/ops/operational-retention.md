@@ -13,8 +13,17 @@ owner: znas
 compiled maintenance principal. It performs verified archival and physical
 retirement for the policies documented in [environment variables](../../public/operate/env-vars.md#operational-record-retention).
 The earlier audit/safety jobs remain count observations; this central job is now
-the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
-physical retention measures from the latest version, including that tombstone.
+the actual archive/delete path. Worker soft deletion remains a UI lifecycle step:
+`workerInvocationRetentionSweep` (02:30 UTC) hides an invocation past
+`MEMQL_WORKER_INVOCATION_RETENTION_DAYS` by appending a `deleted: true` version.
+Physical retention measures a record from its latest version, which is then that
+tombstone, so a soft-deleted invocation has its own policy, counted from the
+tombstone: `MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS` (default 1), for any
+outcome. Before 2026-11-08 the 90-day policy was the only one, the tombstone
+restarted it, and a row hidden at day 90 was deleted at about day 180; a row that
+never reached a terminal outcome, which that policy does not select, was never
+deleted. Test: `TestOperationalRetentionDBRetiresASoftDeletedInvocationADayAfterItsTombstone`
+(`integrations/work/operational_retention_invocation_db_test.go`).
 
 ## Declared concept retention
 

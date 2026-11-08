@@ -13,7 +13,9 @@ use work.concepts.{ run, step }
 /// failure / cancelled / timeout / denied). Operator reads these for plan debugging; auditor reads
 /// identity:auditEvent for the security timeline. Linkage between the two layers is via
 /// correlationId. Retention default 90 days, tunable via WORKER_INVOCATION_RETENTION_DAYS; the
-/// workerInvocationRetentionSweep cron soft-deletes rows past their TTL.
+/// workerInvocationRetentionSweep cron soft-deletes rows past their TTL, and the nightly work
+/// retention sweep archives and deletes a soft-deleted row a day later
+/// (MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS, counted from the tombstone).
 ///
 /// TIER: the composite `owner, clusterOwner` (memql#4406). It carries `argsRedacted` and
 /// `outputPreview`, and outputPreview's own field doc says the quiet part out loud -- "Sensitive
@@ -54,7 +56,7 @@ concept invocation {
   bytesIn        int  @description("Bytes the worker streamed in (e.g. fs_write payload).")
   bytesOut       int  @description("Bytes the worker streamed out (stdout + stderr + fs_read body, etc).")
   outputPreview  string  @description("First 1024 chars of stdout/data, for quick debugging without fetching the full body. Sensitive tokens are NOT scrubbed here -- preview is for owner eyes, audit-log readers don't see this field.")
-  deleted        bool  @description("Soft-delete flag. softDeleteWorkerInvocation stamps this true once the workerInvocationRetentionSweep cron retires a row past its WORKER_INVOCATION_RETENTION_DAYS window; the underlying time-series row survives for forensic recovery. Queries filter deleted rows out via isNotDeleted (payload.deleted!=true).")
+  deleted        bool  @description("Soft-delete flag. softDeleteWorkerInvocation stamps this true once the workerInvocationRetentionSweep cron retires a row past its WORKER_INVOCATION_RETENTION_DAYS window. Queries filter deleted rows out via isNotDeleted (payload.deleted!=true). The row stays for MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS (default 1) after the stamp, and is then archived and deleted by the nightly work retention sweep, whatever its outcome; forensic recovery reads the archive.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="workerId", target=registration, direction="outgoing")

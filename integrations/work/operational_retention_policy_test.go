@@ -309,10 +309,13 @@ func TestRetentionShareIsWhatIsLeftOverWhatIsStillToRun(t *testing.T) {
 	n := len(operationalPolicies)
 	equal := retentionRunBudget / time.Duration(n)
 
+	// Equal up to the remainder of integer nanoseconds: the budget divides
+	// exactly among eight policies and not among nine, where each share is
+	// rounded down and the remainder rides forward a nanosecond at a time.
 	left := retentionRunBudget
 	for k := 0; k < n; k++ {
 		share := retentionShare(left, n-k)
-		if share != equal {
+		if share < equal || share > equal+time.Duration(n) {
 			t.Fatalf("policy %d of %d, every policy before it having used its share, may spend %s, want %s", k, n, share, equal)
 		}
 		left -= share
