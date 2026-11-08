@@ -376,6 +376,7 @@ func (r *orgRoster) rows(ctx context.Context, query string, args map[string]stri
 	case "groupsForUser":
 		// Every group's rows for the person, whatever their status, as the
 		// membersOfGroup double answers them: the status is the pack's to read.
+		// The person is matched as the engine matches a member (asMember).
 		groups := make([]string, 0, len(r.members))
 		for group := range r.members {
 			groups = append(groups, group)
@@ -383,13 +384,13 @@ func (r *orgRoster) rows(ctx context.Context, query string, args map[string]stri
 		sort.Strings(groups)
 		for _, group := range groups {
 			for _, m := range r.members[group] {
-				if asString(m["userId"]) == about {
+				if asMember(asString(m["userId"])) == asMember(about) {
 					out = append(out, m)
 				}
 			}
 		}
 	case "userByIdSystem":
-		if row, ok := r.users[about]; ok {
+		if row, ok := r.users[engineUser(about)]; ok {
 			out = []map[string]any{row}
 		}
 	default:
@@ -409,6 +410,23 @@ func (r *orgRoster) rows(ctx context.Context, query string, args map[string]stri
 	return out, true, nil
 }
 
+// asMember is a member's id as groupsForUser's filter compares it: the engine
+// stores a membership's userId canonical and takes a bare id it is asked about
+// as a user's; an id already carrying a prefix it compares as given.
+func asMember(id string) string {
+	if strings.Contains(id, ":") {
+		return id
+	}
+	return "v1:identity:user:" + id
+}
+
+// engineUser is the person an id names to the engine's user-row read and its
+// resolver, which take a user's canonical id and their bare one as the same
+// person.
+func engineUser(id string) string {
+	return strings.TrimPrefix(id, "v1:identity:user:")
+}
+
 // read is who each read of query was about, in the order they were made.
 func (r *orgRoster) read(query string) []string {
 	out := []string{}
@@ -425,7 +443,7 @@ func (r *orgRoster) ResolveOrganizationDecisionsFor(ctx context.Context, userId 
 	if r.failRead {
 		auth.NoteReadFailure(ctx, errors.New("the grant rows could not be read"))
 	}
-	return r.holds[userId]
+	return r.holds[engineUser(userId)]
 }
 
 // withRoster answers the roster's reads and hands every other read on.

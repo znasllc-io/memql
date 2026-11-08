@@ -351,7 +351,9 @@ func TestTheApproverIsStoredByTheirBareId(t *testing.T) {
 // strips (bareUser). `v1:accounts:account:mod-1` is some other row's id that
 // happens to end the way mod-1's does; reading it as mod-1 would let a stray
 // id, or a caller who means it, name a person nobody named -- as the approver,
-// or as one of the store's people.
+// or as one of the store's people. Nor is a user id with the prefix twice
+// anybody's: stripped once it is still canonical, which no person is spelled as
+// here, though the engine answers mod-1's memberships for it.
 func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 	for _, c := range []struct {
 		a, b string
@@ -362,6 +364,7 @@ func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 		{"mod-1", "mod-1", true},
 		{"v1:accounts:account:mod-1", "mod-1", false},
 		{"v1:identity:group:mod-1", "v1:identity:user:mod-1", false},
+		{"v1:identity:user:v1:identity:user:mod-1", "mod-1", false},
 		{"v1:identity:user:", "", false},
 	} {
 		if got := sameUser(c.a, c.b); got != c.same {
@@ -372,8 +375,10 @@ func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
 		ctx  context.Context
 		name string
 	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
-		if _, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs("v1:accounts:account:mod-1"), false); err == nil || err.Error() != approverRefusal {
-			t.Errorf("%s naming v1:accounts:account:mod-1: err = %v, want %q", namer.name, err, approverRefusal)
+		for _, who := range []string{"v1:accounts:account:mod-1", "v1:identity:user:v1:identity:user:mod-1"} {
+			if _, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs(who), false); err == nil || err.Error() != approverRefusal {
+				t.Errorf("%s naming %s: err = %v, want %q", namer.name, who, err, approverRefusal)
+			}
 		}
 	}
 	// A membership spells its member the same two ways: solo-2 under the user

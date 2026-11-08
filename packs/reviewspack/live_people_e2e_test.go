@@ -148,10 +148,10 @@ func TestLiveE2E_ReviewsPeopleListsTheStoresModerators(t *testing.T) {
 // store's organization or to an operator, through the real engine.
 func TestLiveE2E_SettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	w := newPeopleWorld(t)
-	// The last is the store's moderator's id under another concept's prefix,
-	// which names nobody.
+	// The last two are the store's moderator's id under another concept's
+	// prefix, and under the user prefix twice: neither names anybody.
 	for _, who := range []string{w.outsider, w.staff, w.persona, w.away, w.bystander, "user-reviews-people-nobody-" + w.n,
-		"v1:accounts:account:" + w.colleague} {
+		"v1:accounts:account:" + w.colleague, "v1:identity:user:v1:identity:user:" + w.colleague} {
 		if err := w.nameApprover(w.operator(), who); err == nil || !strings.Contains(err.Error(), approverRefusal) {
 			t.Errorf("an operator naming %s the approver: err = %v, want %q", who, err, approverRefusal)
 		}

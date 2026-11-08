@@ -638,8 +638,10 @@ func (p *Provider) inOrganization(sys context.Context, account, userID string) (
 		return false, fmt.Errorf("reviews: reading the person's memberships: %w", err)
 	}
 	for _, m := range memberships {
-		// The membership must be the named person's own: its member, as this
-		// package spells people, is the id asked about.
+		// The membership must be the named person's own, as this package
+		// spells people: the engine answers mod-1's memberships for the id
+		// `v1:identity:user:mod-1`, which is all bareUser leaves of an id with
+		// the prefix twice, and that id is nobody's here.
 		if strings.TrimSpace(asString(m["status"])) == "active" && bareUser(asString(m["userId"])) == userID &&
 			slices.Contains(groups, memql.BareShortId(asString(m["groupId"]))) {
 			return true, nil
