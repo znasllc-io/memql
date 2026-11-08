@@ -15,6 +15,7 @@ struct HomeStatus: Decodable {
     let enabled: Bool
     let state: String
     let os_url: String?
+    let auto_paused: Bool?
 }
 struct WorkerStatus: Decodable {
     let version: String
@@ -42,25 +43,21 @@ struct WorkerStatus: Decodable {
                                 setupWaiting: setup?.waitingForPermissions == true)
     }
 }
-struct LogEntry: Decodable {
-    let time: String
-    let level: String
-    let home: String
-    let message: String
-}
 struct Reply: Decodable {
     let ok: Bool
     let error: String?
     let status: WorkerStatus?
-    let logs: [LogEntry]?
+    let logs: [WorkerLogEntry]?
+    let log_cursor: String?
+    let log_has_more: Bool?
+    let log_reset: String?
 }
 
-final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearchFieldDelegate, NSWindowDelegate {
+final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var item: NSStatusItem!
     private var snapshot: WorkerStatus?
     private var workerError = "Connecting to background worker…"
     private var busy = false
-    private var logsBusy = false
     private var trackingMenu = false
     private var pendingHomes: Set<String> = []
     private var timer: Timer?
@@ -84,20 +81,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     /// refresh: the window opens itself once when a wait begins, and a person
     /// who then closes it is not followed.
     private var setupWasWaiting = false
-    private var logWindow: NSWindow?
-    private var logText: NSTextView!
-    private var search: NSSearchField!
-    private var levelFilter: NSPopUpButton!
-    private var homeFilter: NSPopUpButton!
-    private var follow: NSButton!
-    private var logSummary: NSTextField!
-    private var logs: [LogEntry] = []
-    private var logFailure: String?
-    private var following = true
-    private let timeParser = ISO8601DateFormatter()
-    private let timeDisplay: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm:ss"; return f
-    }()
+    private var logWindow: WorkerLogsWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = registerContainingBundles()
@@ -113,7 +97,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refresh()
             self?.refreshUpdateProgress()
-            if self?.following == true, self?.logWindow?.isVisible == true { self?.refreshLogs() }
+            self?.logWindow?.refresh()
         }
         if openPermissionsAfterLaunch { showPermissions() }
         restoreUpdateOutcome()
@@ -252,8 +236,8 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
             for home in snapshot.homes {
                 let server = entry("\(home.server) — \(home.state)")
                 let submenu = NSMenu(); submenu.autoenablesItems = false
-                submenu.addItem(heading(home.state == "Paused" ? "Connections paused on this Mac" : "\(home.state) · this Mac"))
-                let toggle = entry(home.enabled ? "Pause connection" : "Allow connecting", action: #selector(toggleHome(_:)), payload: home.id)
+                submenu.addItem(heading(home.auto_paused == true ? "No connection for 10 minutes." : home.state == "Paused" ? "Connections paused on this Mac" : "\(home.state) · this Mac"))
+                let toggle = entry(home.auto_paused == true ? "Try again" : home.enabled ? "Pause connection" : "Allow connecting", action: #selector(toggleHome(_:)), payload: home.id)
                 toggle.isEnabled = !updateState.installing && !pendingHomes.contains(home.id)
                 homeToggleActions.append(toggle)
                 submenu.addItem(toggle)
@@ -300,7 +284,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         menuQuitAction = quit; menu.addItem(quit)
         item.menu = menu
     }
-    @objc private func retry() { refresh(); refreshLogs() }
+    @objc private func retry() { refresh(); logWindow?.refresh() }
     @objc private func toggleHome(_ sender: NSMenuItem) {
         guard !updateState.installing, let id = sender.representedObject as? String,
               let home = snapshot?.homes.first(where: { $0.id == id }) else { return }
@@ -515,7 +499,7 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
         window?.orderFrontRegardless()
     }
     private func windowsChanged() {
-        let open = [permissionWindow?.window, logWindow, aboutWindow?.window].contains { $0?.isVisible == true }
+        let open = [permissionWindow?.window, logWindow?.window, aboutWindow?.window].contains { $0?.isVisible == true }
         if !open && NSApp.activationPolicy() != .accessory { NSApp.setActivationPolicy(.accessory) }
     }
     func windowWillClose(_ notification: Notification) {
@@ -576,91 +560,27 @@ final class CockpitApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSSearc
     }
 
     @objc private func showLogs() {
-        if logWindow == nil { makeLogWindow() }
+        if logWindow == nil {
+            let logs = WorkerLogsWindow()
+            logs.window?.delegate = self
+            logs.read = { [weak self] cursor, done in
+                guard let self else { return }
+                self.request(["--action=logs", "--log-cursor=\(cursor)"]) { reply, error in
+                    guard let reply, reply.ok else {
+                        done(nil, error ?? "Worker logs are unavailable. Use Refresh to try again.")
+                        return
+                    }
+                    done(WorkerLogPage(entries: reply.logs ?? [], cursor: reply.log_cursor ?? "", hasMore: reply.log_has_more == true,
+                                       reset: reply.log_reset), nil)
+                }
+            }
+            logWindow = logs
+        }
         showInDock()
-        bringForward(logWindow)
-        refreshLogs()
+        bringForward(logWindow?.window)
+        logWindow?.refresh()
     }
-    private func makeLogWindow() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 580), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "MemQL — Worker Logs"
-        window.minSize = NSSize(width: 650, height: 360)
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-        let content = window.contentView!
-        search = NSSearchField(); search.placeholderString = "Search worker logs"; search.delegate = self
-        levelFilter = NSPopUpButton(); levelFilter.addItems(withTitles: ["All levels", "INFO", "WARN", "ERROR", "DEBUG"])
-        levelFilter.target = self; levelFilter.action = #selector(filtersChanged)
-        homeFilter = NSPopUpButton(); homeFilter.addItem(withTitle: "All servers")
-        homeFilter.target = self; homeFilter.action = #selector(filtersChanged)
-        follow = NSButton(title: "Pause follow", target: self, action: #selector(toggleFollow))
-        follow.bezelStyle = .rounded
-        let refreshButton = NSButton(title: "Refresh", target: self, action: #selector(refreshLogs)); refreshButton.bezelStyle = .rounded
-        let toolbar = NSStackView(views: [search, homeFilter, levelFilter, follow, refreshButton])
-        toolbar.orientation = .horizontal; toolbar.spacing = 8
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = false; scroll.borderType = .bezelBorder
-        logText = NSTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 480))
-        logText.isEditable = false; logText.isSelectable = true
-        logText.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        logText.textContainerInset = NSSize(width: 12, height: 10)
-        logText.isHorizontallyResizable = false; logText.isVerticallyResizable = true
-        logText.autoresizingMask = [.width]
-        logText.textContainer?.widthTracksTextView = true
-        scroll.documentView = logText
-        logSummary = NSTextField(labelWithString: "Local worker diagnostics · credentials redacted · no uploads")
-        logSummary.font = NSFont.systemFont(ofSize: 11); logSummary.textColor = .secondaryLabelColor
-        for view in [toolbar, scroll, logSummary!] { view.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(view) }
-        NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: content.topAnchor, constant: 16), toolbar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), toolbar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            search.widthAnchor.constraint(greaterThanOrEqualToConstant: 180), homeFilter.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
-            scroll.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 12), scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16), scroll.bottomAnchor.constraint(equalTo: logSummary.topAnchor, constant: -12),
-            logSummary.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), logSummary.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
-        ])
-        window.center(); logWindow = window
-    }
-    @objc private func refreshLogs() {
-        if logWindow == nil || logsBusy { return }
-        logsBusy = true
-        request(["--action=logs"]) { [weak self] reply, error in
-            guard let self else { return }
-            self.logsBusy = false
-            if reply?.ok == true { self.logs = reply?.logs ?? []; self.logFailure = nil }
-            else { self.logFailure = error ?? "Worker log unavailable" }
-            let selected = self.homeFilter.titleOfSelectedItem
-            let homes = Array(Set(self.logs.map(\.home).filter { !$0.isEmpty })).sorted()
-            self.homeFilter.removeAllItems(); self.homeFilter.addItems(withTitles: ["All servers"] + homes)
-            if let selected, self.homeFilter.itemTitles.contains(selected) { self.homeFilter.selectItem(withTitle: selected) }
-            self.renderLogs()
-        }
-    }
-    @objc private func toggleFollow() { following.toggle(); follow.title = following ? "Pause follow" : "Resume follow"; if following { refreshLogs() }; renderLogs() }
-    @objc private func filtersChanged() { renderLogs() }
-    func controlTextDidChange(_ notification: Notification) { renderLogs() }
-    private func renderLogs() {
-        guard logText != nil else { return }
-        let needle = search.stringValue.lowercased()
-        let level = levelFilter.titleOfSelectedItem ?? "All levels"
-        let home = homeFilter.titleOfSelectedItem ?? "All servers"
-        let visible = logs.filter { entry in
-            (level == "All levels" || entry.level == level) && (home == "All servers" || entry.home == home) && (needle.isEmpty || "\(entry.time) \(entry.level) \(entry.home) \(entry.message)".lowercased().contains(needle))
-        }
-        let text = NSMutableAttributedString(string: "")
-        for entry in visible {
-            timeParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            var date = timeParser.date(from: entry.time)
-            if date == nil { timeParser.formatOptions = [.withInternetDateTime]; date = timeParser.date(from: entry.time) }
-            let stamp = date.map(timeDisplay.string) ?? entry.time
-            let color: NSColor = entry.level == "ERROR" ? .systemRed : entry.level == "WARN" ? .systemOrange : .labelColor
-            let line = "\(stamp)  \(entry.level.padding(toLength: 5, withPad: " ", startingAt: 0))  \(entry.home.isEmpty ? "worker" : entry.home)\n\(entry.message)\n\n"
-            text.append(NSAttributedString(string: line, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: color]))
-        }
-        if visible.isEmpty { text.append(NSAttributedString(string: logFailure ?? "No matching worker log entries.")) }
-        let oldPosition = logText.enclosingScrollView?.contentView.bounds.origin ?? .zero
-        logText.textStorage?.setAttributedString(text)
-        if following { logText.scrollToEndOfDocument(nil) }
-        else { logText.enclosingScrollView?.contentView.scroll(to: oldPosition) }
-        logSummary.stringValue = logFailure ?? "\(visible.count) entries · latest 300 · \(following ? "following" : "follow paused") · local only · credentials redacted"
-    }
+
 }
 
 // Register both real bundles without showing UI or starting the worker.

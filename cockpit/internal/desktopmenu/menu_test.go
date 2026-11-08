@@ -2,6 +2,7 @@ package desktopmenu
 
 import (
 	"bytes"
+	"encoding/json"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -128,5 +129,28 @@ func TestDesktopLifecycleUsesSessionAndRemovesOnlyMenu(t *testing.T) {
 	}
 	if contents, _ := os.ReadFile(worker); string(contents) != "keep worker enrollment" {
 		t.Fatal("worker enrollment changed")
+	}
+}
+
+func TestHomeConnectionActionsKeepManualPauseDistinctFromAutomaticRetry(t *testing.T) {
+	var home Home
+	if err := json.Unmarshal([]byte(`{"id":"home-a","server":"Example","state":"Paused automatically","enabled":false,"auto_paused":true}`), &home); err != nil {
+		t.Fatal(err)
+	}
+	label, detail, enabled := homeConnectionAction(home)
+	if label != "Try again" || detail == "" || !enabled {
+		t.Fatalf("automatic pause does not offer explicit retry: %q %q %t", label, detail, enabled)
+	}
+	// A successful retry clears the server's marker. The same control then
+	// pauses, without leaving the previous failure explanation standing.
+	home.AutoPaused, home.Enabled = false, true
+	label, detail, enabled = homeConnectionAction(home)
+	if label != "Pause connection" || detail != "" || enabled {
+		t.Fatalf("active home kept automatic-pause action: %q %q %t", label, detail, enabled)
+	}
+	home.Enabled = false
+	label, detail, enabled = homeConnectionAction(home)
+	if label != "Allow connecting" || detail != "" || !enabled {
+		t.Fatalf("manual pause presented as a failed connection: %q %q %t", label, detail, enabled)
 	}
 }

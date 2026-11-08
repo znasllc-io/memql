@@ -410,6 +410,11 @@ func (c *Client) Install(ctx context.Context, requested string) (r Result) {
 			_ = c.cancel(cancelCtx, before.PID)
 		}
 	}()
+	if reserved {
+		if err = c.validateReservation(ctx, before); err != nil {
+			return failed(r, err)
+		}
+	}
 	defer func() {
 		if legacyStopped {
 			recoveryCtx, stop := context.WithTimeout(context.Background(), 60*time.Second)
@@ -508,6 +513,26 @@ func validateWorker(s workerStatus, path string) error {
 	}
 	return nil
 }
+
+// The saved choices can change between the preflight status and prepare.
+// Once reserved, the worker fences both manual and automatic policy changes;
+// validate that exact snapshot before journaling/swapping or finishing a
+// recovery. A mismatch is a safe retry, never permission to adopt new choices.
+func (c *Client) validateReservation(ctx context.Context, before workerStatus) error {
+	current, err := c.status(ctx)
+	if err != nil {
+		return errors.New("The reserved worker could not be verified. Check its status and retry")
+	}
+	if current.PID != before.PID || validateWorker(current, c.Executable) != nil ||
+		current.Version != before.Version || !sameHomes(current.Homes, before.Homes) {
+		return errors.New("The worker or its saved connections changed while preparing the update. Check its status and retry")
+	}
+	if current.Busy == nil || *current.Busy || !current.UpdatePending {
+		return errors.New("The worker no longer has an idle update reservation. Finish active work, then retry")
+	}
+	return nil
+}
+
 func sameHomes(a, b []homeStatus) bool {
 	if len(a) != len(b) {
 		return false

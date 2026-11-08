@@ -45,16 +45,22 @@ and roots MERGE on reload, so adding one does not un-authorise another.
 
 `fs.deny` still applies: a folder you marked never-touch is not one to upload.
 
-**2. Sign in on this machine.**
+**2. Explicitly enable background sign-in on this machine.** Replace
+`my-cluster` with the saved name from `memql cluster list`:
 
 ```bash
-memql login
+MEMQL_COCKPIT_CRED_STORE=file memql login my-cluster
 ```
 
 This is separate from pairing, and both are needed. The worker token this
 machine runs on authenticates its *stream*; the Library needs a **user**
-sign-in, and a PAT will not do (PATs verify only on the identity node). Once
-signed in, the session refreshes silently — the worker never opens a browser.
+sign-in, and a PAT will not do (PATs verify only on the identity node). The
+background worker reads the existing file credential store, since opening the
+OS keyring could display a prompt while nobody is watching. This explicit
+opt-in stores credentials in owner-only files under `~/.memql/credentials`;
+ordinary `memql login my-cluster` may instead use the OS keyring. No credentials
+are copied between stores automatically. Once signed in, the session refreshes
+silently — the worker never opens a browser.
 
 **3. Arrange the backup in MemQL OS.** Files → Backups → **+**:
 pick this machine, type the folder's full path, choose where it lands.
@@ -84,6 +90,14 @@ The worker checks schedules every five minutes. Each folder runs only when its
 default to daily; older arrangements keep their five-minute cadence. Missed runs
 are combined into one catch-up run after reconnecting. `--once` runs immediately
 but still respects paused status and local policy.
+
+Missing personal sign-in affects optional backups, not the machine's worker
+connection. The worker logs one warning while sign-in is missing and continues
+the same scheduled checks. A successful watched-folder read logs recovery;
+other failures remain visible. It still reports watches refused by local path
+policy, including when no folders are allowed. The sign-in and policy recovery
+behavior is covered by [the sweep regression](../internal/worker/backup/signin_test.go)
+and [the credential-store regression](../internal/worker/backup_wiring_test.go).
 
 Ordinary uploads are independent copies and do not retain host paths or follow
 local changes. Only a configured directory backup sends `backupWatchId`, which
@@ -119,7 +133,7 @@ Run `memql worker backup`. It answers the three questions in order.
 
 | What you see | What it means |
 |---|---|
-| `Sign-in: NONE` | Run `memql login` here. |
+| `Sign-in: NONE` | Explicitly enable background sign-in with the file-store command above. |
 | `Allowed folders: NONE` | Add the folder to `backup.roots` above. |
 | `REFUSED: ...` beside a folder | That path is not under any allowed root, or `fs.deny` covers it. |
 | `No watched folders are set up for you` | Nothing is arranged yet — set one up in MemQL OS. |

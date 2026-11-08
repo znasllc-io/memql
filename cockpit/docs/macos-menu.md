@@ -352,6 +352,36 @@ changing their connection policy; the menu refuses an ambiguous pause.
 Menu status distinguishes paused,
 pausing, connected, connecting/retrying, and an unavailable background worker.
 
+A saved, menu-managed home that cannot maintain a healthy worker connection
+for ten continuous minutes pauses automatically. Brief outages keep using the
+normal reconnect backoff. A healthy connection must complete registration and send its regular
+heartbeat; a TCP connection or a short-lived registration alone does not reset
+the failure window. Idle, healthy workers continue heartbeating normally.
+An outbound heartbeat that stalls for a minute ends that stream so reconnect
+can proceed instead of leaving the menu indefinitely showing Connected.
+
+The menu labels this **Paused automatically**, explains the ten-minute limit,
+and offers **Try again**. Retrying reuses the saved enrollment and begins a
+fresh ten-minute window; it does not repair a revoked or invalid credential.
+The automatic-pause marker and disabled state are saved with the selected home,
+so restarting or updating Cockpit cannot resume it. Other homes and their work
+continue. Manual pause remains available and retains its existing meaning.
+The failure window uses elapsed time in the running worker; time spent shut
+down or a long gap when the supervisor could not observe connections (such as
+machine sleep) is not counted as failed connection attempts. A healthy stream
+that stops completing normal heartbeats also expires after ten minutes,
+including a local probe stalled before a heartbeat send. A persistence failure leaves
+the current policy intact and reports the error rather than claiming a durable
+pause.
+
+The updater's active handoff reservation temporarily defers automatic pause
+without resetting the failure window. After cancellation or expiry, the
+supervisor evaluates that home again. Explicit single-home command-line
+overrides have no saved per-home controls and retain their normal reconnect
+behavior. The heartbeat-send timeout still applies in that mode. Regression
+coverage is in [`connection_pause_test.go`](../internal/worker/connection_pause_test.go)
+and [`heartbeat_deadline_test.go`](../internal/worker/heartbeat_deadline_test.go).
+
 **Quit menu bar — worker keeps running** quits only the companion. It does not
 change any server policy. The companion returns at the next login, or launch
 `MemQL Cockpit.app` again.
@@ -503,11 +533,24 @@ No certificate or workflow-signing configuration is modified by onboarding.
 ## Logs and local control
 
 **Show Logs** opens a native window with text search, server and severity
-filters, and follow/pause. It shows the latest 300 entries from a bounded tail
-of the local worker log. The worker strips secrets and URL paths/queries and
-admits only diagnostic attributes into structured entries. Logs remain local;
-there is no upload/export endpoint. When the service is down, the CLI can read
-the current user's default worker log directly for troubleshooting.
+filters, follow/pause, and copy. It starts with the latest 300 complete entries
+and collects new entries while the window is visible. Scrolling away from the
+bottom pauses following, not collection; **Resume follow** returns to the
+newest entry. An unchanged refresh leaves the text and selection untouched.
+New entries preserve the reading position while following is paused. Failed
+reads retain the last successful view and show a retryable error.
+
+The window retains up to 2,000 entries or approximately 2 MiB of text for this
+session. The footer reports when older entries leave that bounded history.
+Rotation, truncation, oversized records and a missed backlog are reported;
+they do not silently clear the entries already displayed. Search and filters
+apply to retained history, not the entire log file.
+
+The worker strips secrets and URL paths/queries and admits only diagnostic
+attributes into structured entries. Logs remain local; copy puts only the
+displayed, redacted text on the clipboard. There is no upload endpoint. When
+the service is down, the CLI can read the current user's default worker log
+directly for troubleshooting.
 
 The current OS user controls their own worker. There is no cluster-role gate.
 The local socket is `~/.memql/control/worker.sock`, inside an owner-only `0700`
@@ -520,6 +563,17 @@ memql worker control --action=logs
 memql worker control --action=home --home=example --enabled=false
 memql worker control --action=home --home=example --enabled=true
 ```
+
+Log responses include stable entry `id` values, `log_cursor`, `log_has_more`,
+and an optional `log_reset` reason. Pass the returned cursor as
+`--log-cursor=...` to request new complete records. Each page bounds input and
+encoded entries to 256 KiB and contains at most 300 entries. A backlog beyond
+1 MiB resumes from the bounded tail with an explicit gap. Cursors identify
+byte boundaries in the one owned worker log; they cannot select another path.
+Only a successful response advances the viewer's cursor. The reader and
+native history regressions live in
+[`control_logs_test.go`](../internal/worker/control_logs_test.go) and
+[`WorkerLogsTests.swift`](../native/macos/tests/WorkerLogsTests.swift).
 
 The control service refuses to share a live socket with a second worker.
 Single-home CLI overrides are not controlled by the menu; use the normal

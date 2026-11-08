@@ -178,6 +178,11 @@ func (c *Client) resumeUpdate(ctx context.Context, r Result) Result {
 			_ = c.cancel(cancelCtx, before.PID)
 		}
 	}()
+	if reserved {
+		if err := c.validateReservation(ctx, before); err != nil {
+			return failed(r, err)
+		}
+	}
 	ready := before
 	if !alreadyReady {
 		r.OK = true

@@ -115,6 +115,10 @@ type Runner struct {
 	// waits it is asked for instead, which is how the backoff and the hold
 	// are asserted exactly rather than timed.
 	pause func(ctx context.Context, d time.Duration) bool
+	// Fleet observes application health, not just a successful transport dial.
+	connectionHealth func(*Connection, bool)
+	// Tests can fire the bounded heartbeat watchdog without waiting a minute.
+	heartbeatDeadline func(time.Duration, func()) func() bool
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -497,6 +501,12 @@ func (r *Runner) runStream(ctx context.Context, conn *Connection) (healthy bool,
 	for {
 		msg, err := conn.Recv()
 		if err != nil {
+			// Publish the loss before waiting for owned work to stop. A hung
+			// cleanup is not evidence that this registration is still healthy.
+			r.conn.CompareAndSwap(conn, nil)
+			if r.connectionHealth != nil {
+				r.connectionHealth(conn, false)
+			}
 			// A disconnect ends every live app session with a named
 			// error. The stream is the only channel back to the caller,
 			// so a session that outlived it has nowhere to report and
@@ -586,7 +596,8 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 	// held is a step's beat waiting out setupBeatSpacing; nil when none is.
 	var held <-chan time.Time
 	send := func(hw *hardware.Inventory) bool {
-		if err := conn.SendHeartbeat(0, nil, r.inventory(ctx), hw, r.capacityReport(ctx), r.setupReport()); err != nil {
+		inventory, capacity, setup := r.inventory(ctx), r.capacityReport(ctx), r.setupReport()
+		if err := r.boundedHeartbeat(conn, func() error { return conn.SendHeartbeat(0, nil, inventory, hw, capacity, setup) }); err != nil {
 			r.logger.Warn("worker heartbeat failed; reconnecting", "error", err)
 			return false
 		}
@@ -654,6 +665,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context, conn *Connection, beat *atom
 				return
 			}
 			beat.Store(true)
+			if r.connectionHealth != nil {
+				r.connectionHealth(conn, true)
+			}
 		}
 	}
 }
