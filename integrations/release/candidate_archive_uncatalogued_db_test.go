@@ -4,10 +4,14 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"database/sql"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 const archiveSupersessionDown = "../../component/database/memory-nodes/migrations/20261108210000_release_archive_supersession.down.sql"
@@ -362,5 +366,156 @@ func TestUncataloguedClassificationFollowsATwoHopRenewal(t *testing.T) {
 	}
 	if got, _, err := classifyUncatalogued(ownerCtx(), tx, rec.Manifest.OwnerUserID, rec); err == nil {
 		t.Fatal("a release bound outside the candidate's renewals was accepted", got)
+	}
+}
+
+// twoRegistryFixture publishes the same image to a second registry target, so a
+// candidate can hold a complete destination beside one that never began.
+func twoRegistryFixture(t *testing.T, db *sql.DB, origin string) (*candidatePreparer, pl.ReleaseCandidate, *candidateLibraryFixture) {
+	t.Helper()
+	p, c, library, _ := candidatePublicationFixture(t, db, origin)
+	mirror := p.targetReader.targets["registry"]
+	mirror.ID, mirror.Repository = "registry-2", mirror.Repository+"-mirror"
+	p.targetReader.targets[mirror.ID] = mirror
+	_, _, digest, err := mirror.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Destinations = append(c.Destinations, pl.ReleaseDestination{TargetID: mirror.ID, TargetDigest: digest, Component: "engine", Artifact: "image", Operation: "publish"})
+	return p, c, library
+}
+
+// withMovedTarget returns a host whose current configuration moved one target's
+// repository, so that target no longer resolves to its approved digest.
+func withMovedTarget(p *candidatePreparer, targetID string) *candidatePreparer {
+	reader := *p.targetReader
+	reader.targets = maps.Clone(p.targetReader.targets)
+	moved := reader.targets[targetID]
+	moved.Repository += "-moved"
+	reader.targets[targetID] = moved
+	other := *p
+	other.targetReader = &reader
+	return &other
+}
+
+func TestArchiveWithoutCatalogRefusesAnUnavailablePublishedImage(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider.unusable.Store(true)
+	if _, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot); err == nil || !library.pins[request.CandidateID] {
+		t.Fatal("an unavailable published image passed verification", err)
+	}
+	if record, err := p.ledger.get(ownerCtx(), request.CandidateID); err != nil || record.State != "approved" {
+		t.Fatal("failed verification changed the candidate", record.State, err)
+	}
+	provider.unusable.Store(false)
+	proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+	a := c.Components[0].Artifacts[0]
+	if err != nil || len(proof.Targets) != 1 || proof.Targets[0] != (candidateArchiveTarget{TargetID: "registry", Digest: a.Digest, ImageDigest: a.ImageDigest, Platform: a.Platform, Size: a.Size}) {
+		t.Fatal("an available published image did not verify", proof.Targets, err)
+	}
+}
+
+func TestArchiveWithoutCatalogReadsNoProviderForUnpublishedEffects(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, library := twoRegistryFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.ledger.beginPublication(ownerCtx(), request.CandidateID, request.ApprovalID, "registry", "engine", "image"); err != nil {
+		t.Fatal(err)
+	}
+	ageIntents(t, db, request.CandidateID, "2 hours 1 minute")
+	snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := provider.reads.Load()
+	proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+	want := []candidateUncataloguedDestination{
+		{TargetID: "registry", Component: "engine", Artifact: "image", Outcome: "pending"},
+		{TargetID: "registry-2", Component: "engine", Artifact: "image", Outcome: "notBegun"},
+	}
+	if err != nil || len(proof.Targets) != 0 || !slices.Equal(proof.Destinations, want) || provider.reads.Load() != before {
+		t.Fatal("effects that never completed reached a provider or were misrecorded", proof.Destinations, err)
+	}
+	if proof.CandidateID != request.CandidateID || proof.ApprovalID != request.ApprovalID || !proof.ObservedAt.Equal(snapshot.observedAt) || proof.SupersededBy["engine"] == "" || !library.pins[request.CandidateID] {
+		t.Fatal("the proof did not carry the snapshot's identity", proof)
+	}
+}
+
+func TestArchiveWithoutCatalogVerifiesARenewedPredecessorThroughItsSuccessor(t *testing.T) {
+	db := candidateTestDB(t)
+	first, manifest, remote := candidateDraftWorkflowFixture(t, db)
+	a := preparePublication(t, db, first, manifest)
+	if _, err := first.draft(ownerCtx(), draftRequest(a), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.publish(ownerCtx(), a); err != nil {
+		t.Fatal(err)
+	}
+	next := freshDraftHost(first, db)
+	next.engineRevision = func() string { return strings.Repeat("e", 40) }
+	b := preparePublication(t, db, next, manifest)
+	if _, err := next.draft(ownerCtx(), draftRequest(b), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := next.publish(ownerCtx(), b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := next.draft(ownerCtx(), draftRequest(b), true); err != nil {
+		t.Fatal(err)
+	}
+	trust := sealArchiveFixture(t, next, b)
+	snapshot, err := first.ledger.uncataloguedSnapshot(ownerCtx(), a.CandidateID, "fixture", trust)
+	if err != nil || len(snapshot.destinations) != 1 || snapshot.destinations[0].Outcome != "verified" || snapshot.bound["registry"].CandidateID != b.CandidateID || snapshot.supersededBy["engine"] != b.CandidateID {
+		t.Fatal("the predecessor did not snapshot its successor's release", snapshot.destinations, err)
+	}
+	remote.asset.mu.Lock()
+	remote.asset.corrupt = true
+	remote.asset.mu.Unlock()
+	if _, err := first.verifyUncataloguedInputs(ownerCtx(), snapshot); err == nil {
+		t.Fatal("a changed asset on the successor's release passed verification")
+	}
+	remote.asset.mu.Lock()
+	remote.asset.corrupt = false
+	remote.asset.mu.Unlock()
+	proof, err := first.verifyUncataloguedInputs(ownerCtx(), snapshot)
+	if err != nil || len(proof.Targets) != 1 || proof.Targets[0].TargetID != "registry" {
+		t.Fatal("the successor's published release did not verify the predecessor", proof.Targets, err)
+	}
+	if remote.creates != 1 || remote.tags != 1 || remote.promotes != 1 || remote.asset.uploads != 1 {
+		t.Fatal("verification repeated a release effect", remote.creates, remote.tags, remote.promotes, remote.asset.uploads)
+	}
+}
+
+func TestArchiveWithoutCatalogResolvesOnlyDestinationsItReads(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, _ := twoRegistryFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof, err := withMovedTarget(p, "registry-2").verifyUncataloguedInputs(ownerCtx(), snapshot); err != nil || len(proof.Targets) != 1 {
+		t.Fatal("a moved target that needs no read blocked verification", proof.Targets, err)
+	}
+	if _, err := withMovedTarget(p, "registry").verifyUncataloguedInputs(ownerCtx(), snapshot); err == nil || !strings.Contains(err.Error(), "changed since candidate review") {
+		t.Fatal("a published destination verified against a moved target", err)
 	}
 }
