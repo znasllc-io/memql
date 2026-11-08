@@ -1,10 +1,12 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // routing_review_apply_test.go -- the nightly routing review's half of the
@@ -156,4 +158,151 @@ func TestParseApprovedRuleRefusesLockedAndDisabled(t *testing.T) {
 	require.ErrorContains(t, err, "@locked", "a locked rule belongs to the embedded tree alone")
 	_, err = parseApprovedRule(strings.Replace(source, "rule ", "@disabled\nrule ", 1))
 	require.ErrorContains(t, err, "@disabled", "a disabled rule decides nothing, so approving it would change nothing")
+}
+
+func developerCtx() context.Context {
+	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "dev-1", Role: auth.RoleDeveloper})
+}
+
+func TestApplySavesTheExactApprovedRuleUnderANewRevision(t *testing.T) {
+	eng, store, base := evidenceFixture(t)
+	got, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, RoutingReviewApplied{Rule: "evidenceDemotionStrongM", Revision: 1, Changed: true}, got)
+	require.EqualValues(t, 1, store.doc.Revision)
+	require.Equal(t, "dev-1", store.doc.UpdatedBy)
+	saved := store.doc.Rules["evidenceDemotionStrongM"]
+	require.Equal(t, []string{"fleet:m"}, saved.Excludes)
+	require.Equal(t, 50, saved.Precedence)
+	require.Equal(t, "strong", saved.When.Level)
+	require.False(t, saved.Locked)
+
+	// Another replica reads the same document on its next call.
+	_, rules, err := policyFixture(store).SnapshotRouting(developerCtx(), base)
+	require.NoError(t, err)
+	_, ok := rules.Lookup("evidenceDemotionStrongM")
+	require.True(t, ok)
+}
+
+func TestApplyIsANoOpWhenAlreadySaved(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	change := RoutingReviewChange{SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m")}
+	_, err := eng.ApplyRoutingReview(developerCtx(), change)
+	require.NoError(t, err)
+	got, err := eng.ApplyRoutingReview(developerCtx(), change)
+	require.NoError(t, err)
+	require.Equal(t, RoutingReviewApplied{Rule: "evidenceDemotionStrongM", Revision: 1, Changed: false}, got)
+	require.EqualValues(t, 1, store.doc.Revision, "a retried decide must not write a second revision")
+}
+
+func TestApplyRefusesAWriter(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	writer := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "w-1", Role: auth.RoleWriter})
+	_, err := eng.ApplyRoutingReview(writer, RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"),
+	})
+	require.ErrorContains(t, err, "owner or developer")
+	require.EqualValues(t, 0, store.doc.Revision)
+	require.Empty(t, store.doc.Rules)
+}
+
+func TestApplyRefusesANameMismatch(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongOther", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"),
+	})
+	require.ErrorContains(t, err, "evidenceDemotionStrongOther")
+	require.EqualValues(t, 0, store.doc.Revision)
+}
+
+func TestApplyRefusesABeatenRule(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionFastM", SaveSource: evidenceRule("evidenceDemotionFastM", "fast", "m"),
+	})
+	require.ErrorContains(t, err, `"fastLane"`)
+	require.EqualValues(t, 0, store.doc.Revision)
+	require.Empty(t, store.doc.Rules)
+}
+
+func TestApplyRefusesASecondDemotionAtTheLevel(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongA", SaveSource: evidenceRule("evidenceDemotionStrongA", "strong", "a"),
+	})
+	require.NoError(t, err)
+	_, err = eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongB", SaveSource: evidenceRule("evidenceDemotionStrongB", "strong", "b"),
+	})
+	require.ErrorContains(t, err, `"evidenceDemotionStrongA"`)
+	require.ErrorContains(t, err, "Fleet > Routing > Rules")
+	require.EqualValues(t, 1, store.doc.Revision)
+	require.Len(t, store.doc.Rules, 1)
+}
+
+func TestApplyRetiresTheDemotion(t *testing.T) {
+	eng, store, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"),
+	})
+	require.NoError(t, err)
+
+	got, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{RetireName: "evidenceDemotionStrongM"})
+	require.NoError(t, err)
+	require.Equal(t, RoutingReviewApplied{Rule: "evidenceDemotionStrongM", Revision: 2, Changed: true}, got)
+	require.EqualValues(t, 2, store.doc.Revision)
+	require.NotContains(t, store.doc.Rules, "evidenceDemotionStrongM")
+
+	got, err = eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{RetireName: "evidenceDemotionStrongM"})
+	require.NoError(t, err)
+	require.Equal(t, RoutingReviewApplied{Rule: "evidenceDemotionStrongM", Revision: 2, Changed: false}, got)
+
+	_, err = eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{RetireName: "fastLane"})
+	require.ErrorContains(t, err, "fastLane")
+	require.EqualValues(t, 2, store.doc.Revision)
+}
+
+func TestApplyRefusesAChangeThatIsBothOrNeither(t *testing.T) {
+	eng, _, _ := evidenceFixture(t)
+	_, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{})
+	require.Error(t, err)
+	_, err = eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"), RetireName: "evidenceDemotionStrongM",
+	})
+	require.Error(t, err)
+}
+
+// movingStore is another writer landing between the apply's read and its
+// swap: the first CompareAndSwap finds the revision moved under it.
+type movingStore struct {
+	*testPolicyStore
+	moved bool
+}
+
+func (s *movingStore) CompareAndSwap(ctx context.Context, expected int64, doc PolicyDocument) error {
+	if !s.moved {
+		s.moved = true
+		s.testPolicyStore.mu.Lock()
+		s.testPolicyStore.doc.Revision++
+		s.testPolicyStore.doc.Overrides["localOnly"] = PolicyConfig{Name: "localOnly", Primary: "app:codex"}
+		s.testPolicyStore.mu.Unlock()
+	}
+	return s.testPolicyStore.CompareAndSwap(ctx, expected, doc)
+}
+
+func TestApplyRetriesOnceRoutingMoved(t *testing.T) {
+	_, _, base := evidenceFixture(t)
+	inner := &testPolicyStore{doc: PolicyDocument{Overrides: map[string]PolicyConfig{}}}
+	store := &movingStore{testPolicyStore: inner}
+	eng := &MemQLEngine{policies: policyFixture(store), rules: base}
+	got, err := eng.ApplyRoutingReview(developerCtx(), RoutingReviewChange{
+		SaveName: "evidenceDemotionStrongM", SaveSource: evidenceRule("evidenceDemotionStrongM", "strong", "m"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, RoutingReviewApplied{Rule: "evidenceDemotionStrongM", Revision: 2, Changed: true}, got)
+	require.EqualValues(t, 2, inner.doc.Revision)
+	require.Equal(t, "app:codex", inner.doc.Overrides["localOnly"].Primary, "the other writer's change must survive the retry")
+	require.Contains(t, inner.doc.Rules, "evidenceDemotionStrongM")
 }

@@ -99,6 +99,7 @@ func (e *MemQLEngine) routingRulesBuiltin(ctx context.Context, _ map[string]any,
 	}
 	return out, nil
 }
+
 // routingConfigurationSource is the SourceFile every saved rule carries, so a
 // duplicate or a tie names "routing configuration" beside the other rule's file.
 const routingConfigurationSource = "routing configuration"
