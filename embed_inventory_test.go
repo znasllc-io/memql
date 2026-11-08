@@ -91,7 +91,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/core/costestimate":                 1,  // prices.json: measured API-equivalent price evidence.
 	"github.com/znasllc-io/memql/core/num":                          1,  // Actual numeric conversion source used by the packaged renderer.
 	"github.com/znasllc-io/memql/component/memql":                   1,  // os_navigation.json: generated OS navigation contract
-	"github.com/znasllc-io/memql/component/edge":                    1,  // site_refresh.js, shared browser deployment monitor
+	"github.com/znasllc-io/memql/component/edge":                    2,  // site_refresh.js, shared browser deployment monitor. +1 view.js, the page-change ping script (website statistics), measured with go list (2026-11-08)
 	"github.com/znasllc-io/memql":                                   1,  // VERSION
 	"github.com/znasllc-io/memql/component/architecture/embedded":   1,  // platform.graph.json only; source topology is generated, not embedded.
 	// Installation owner landing adds one migration pair; 152 files measured with go list (2026-11-06).

@@ -375,8 +375,9 @@ func TestHostedSitesMayAskForTheMicrophoneAndNothingElse(t *testing.T) {
 	}
 }
 
-// Byte-identity tests compare the published source, excluding the hosting
-// layer's version monitor. site_refresh_test.go checks the complete response.
-var refreshTag = regexp.MustCompile(`<script src="/_memql/site-refresh.js" data-memql-version="[a-f0-9]{32}" defer></script>`)
+// Byte-identity tests compare the published source, excluding the two tags the
+// hosting layer inserts: the version monitor and the page-change ping script.
+// site_refresh_test.go and view_test.go check the complete response.
+var hostingLayerTags = regexp.MustCompile(`<script src="/_memql/site-refresh.js" data-memql-version="[a-f0-9]{32}" defer></script>|<script src="/_memql/view.js" defer></script>`)
 
-func sourceHTML(body string) string { return refreshTag.ReplaceAllString(body, "") }
+func sourceHTML(body string) string { return hostingLayerTags.ReplaceAllString(body, "") }

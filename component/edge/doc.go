@@ -86,4 +86,22 @@
 // It does read the cookie's name: a __Host- cookie reaches every path on the origin,
 // so these four routes forward it and no other credential, and every other way out
 // of this package removes it.
+//
+// # The page-change ping
+//
+// Two exact paths on a deployable's own origin are answered by the edge itself,
+// ahead of the generic /_memql/* proxy, and are never forwarded (view.go):
+//
+//	GET  /_memql/view.js  ->  the page-change script, cached for a day
+//	POST /_memql/view     ->  a page change the script reported; 204 always
+//
+// A single-page app navigates once, and every page after the first is a
+// history.pushState the edge never sees. The script reports those and never
+// the first load, which the navigation already counted, and the edge inserts
+// it into every HTML document of a live, non-system deployable, beside the
+// refresh script (handler.go). A ping from the site's own origin, naming a path
+// within its address's budget, becomes a page view in the request log
+// (requestlog.go). A beacon is a plain POST that cannot open a stream, so this
+// is an owner-approved HTTP exception (2026-11-08); it reads no cookie, and it
+// answers every outcome with the same 204 so a refusal discloses nothing.
 package edge

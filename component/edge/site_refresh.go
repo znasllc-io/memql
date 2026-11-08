@@ -48,15 +48,25 @@ func serveSiteRefresh(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "site-refresh.js", time.Time{}, bytes.NewReader(siteRefreshScript))
 }
 
+// refreshScriptTag is the version monitor's tag, carrying the deployment
+// version the document was served under.
+func refreshScriptTag(version string) string {
+	return `<script src="` + siteRefreshPath + `" data-memql-version="` + version + `" defer></script>`
+}
+
+// hostedDocument reads a bundle document and inserts the hosting layer's tags
+// -- the version monitor's, the page-change script's (view.go), or both, as
+// serveFile renders them -- at one point: right after <head>, else after the
+// doctype or ahead of <body> when the document writes no <head>.
+//
 // Insert without serializing the document: reserialization would change the
 // bytes of inline scripts whose exact hashes are already in its CSP. An
 // external same-origin script keeps the existing script-src policy intact.
-func refreshingDocument(fsys fs.FS, name, version string) ([]byte, error) {
+func hostedDocument(fsys fs.FS, name, tags string) ([]byte, error) {
 	data, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return nil, err
 	}
-	tag := []byte(`<script src="` + siteRefreshPath + `" data-memql-version="` + version + `" defer></script>`)
 	tokenizer := html.NewTokenizer(bytes.NewReader(data))
 	offset, insertion := 0, 0
 	for {
@@ -81,8 +91,8 @@ func refreshingDocument(fsys fs.FS, name, version string) ([]byte, error) {
 			}
 		}
 	}
-	result := make([]byte, 0, len(data)+len(tag))
+	result := make([]byte, 0, len(data)+len(tags))
 	result = append(result, data[:insertion]...)
-	result = append(result, tag...)
+	result = append(result, tags...)
 	return append(result, data[insertion:]...), nil
 }

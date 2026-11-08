@@ -22,6 +22,10 @@ type filePolicy struct {
 	assetPrefix     string
 	immutable       bool
 	suppressRefresh bool
+	// viewScript inserts the page-change script into an HTML document
+	// (carriesViewScript, view.go). A flag of its own rather than the inverse
+	// of suppressRefresh, because the two conditions are independent.
+	viewScript bool
 }
 
 func assetPrefixFor(site *Site) string {

@@ -823,6 +823,43 @@ how to declare a gate are in [Access codes](site-access-codes.md).
 
 ---
 
+## Counting a single-page app's pages
+
+A page view is counted from the navigation that opens a page. A single-page app
+navigates once and changes pages with `history.pushState` after that, which the
+edge never sees. So the edge also inserts a small script into every HTML
+document of a live deployable that is not system-owned, beside the version
+monitor, and the script reports those changes. Nothing is added to the site's
+build, and the site's content policy (`script-src 'self'`, `connect-src 'self'`)
+already admits it.
+
+The edge answers two exact paths on the site's own origin for this
+(`component/edge/view.go`), ahead of the generic `/_memql/*` proxy:
+
+| On the site's origin | Does |
+|---|---|
+| `GET /_memql/view.js` | serves the script, cached for a day |
+| `POST /_memql/view` | takes a page change the script reported, and answers `204` |
+
+- **The first load is never reported.** The navigation that loaded the page was
+  already counted, so the script reports only a later change of
+  `location.pathname`.
+- **A ping counts only from the site itself.** Its `Origin` must name the site's
+  own host or, with no `Origin`, `Sec-Fetch-Site` must say `same-origin`. The
+  body is the path, at most 1 KiB, and one address may send 120 a minute to a
+  site on each replica.
+- **Every ping is answered `204`,** whether it counted or not, so the route says
+  nothing about why one was refused. A refused ping is still a request the edge
+  answered, and counts under health.
+- **Nothing is forwarded and no cookie is read,** whatever the site's `apiProxy`
+  says. A ping from a page an operator is previewing is not a page view, as the
+  navigation that opened it is not.
+
+What a page view records, and what is never stored, is in
+[Statistics and health](deployables.md#statistics-and-health).
+
+---
+
 ## Rollback
 
 `updateSiteBundle` is deploy AND rollback -- the same write, aimed at a
@@ -1234,7 +1271,8 @@ rather than trusting this paragraph's age.
   `dsl/platform/seeds.memql`.
 - Serving path: `component/edge/handler.go`, `resolve.go`, `csp.go`,
   `runtimeconfig.go`, `proxy.go`, `bundle.go`, `blob.go`; the access-code
-  routes are `access.go` ([Access codes](site-access-codes.md)).
+  routes are `access.go` ([Access codes](site-access-codes.md)), and the
+  page-change ping and its script are `view.go`.
 - Publish path: `component/edge/publish.go`,
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.
 - Node wiring: `app/transport_edge.go`, `app/build_edge.go`.

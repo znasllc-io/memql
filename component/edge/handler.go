@@ -110,6 +110,12 @@ type Handler struct {
 	// Built once here for the reason shopperRate is: a lazy build on a public,
 	// unauthenticated path is a data race with a public trigger.
 	accessRate *accessLimits
+	// viewRate is the per-(site, address) budget in front of the page-change
+	// ping (view.go), built once here for shopperRate's reason. viewNow is the
+	// clock it is read against: time.Now, which a test freezes, because the
+	// bucket refills twice a second and a count against it must be exact.
+	viewRate *shopperBucket
+	viewNow  func() time.Time
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -134,6 +140,8 @@ func NewHandler(opts Options) *Handler {
 		hashCache:      newBundleCache(cspHashCacheBytes),
 		shopperRate:    newShopperBucket(shopperRatePerMinute()),
 		accessRate:     newAccessLimits(),
+		viewRate:       newShopperBucket(viewPingPerMinute),
+		viewNow:        time.Now,
 	}
 }
 
@@ -322,6 +330,20 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		serveSiteRefresh(w, r)
 		return pathClassConfig
 	}
+	// THE PAGE-CHANGE PING (view.go), an owner-approved HTTP exception the edge
+	// answers itself. ABOVE the /_memql/ proxy branch, whose marker it shares,
+	// so neither route is ever forwarded whatever the site's apiProxy says.
+	// BELOW serve's preview substitution, so a ping from a page served under a
+	// grant arrives here already marked as served under it, and is never a page
+	// view. Exact paths, as the refresh script's is, and for the same reason as
+	// the runtime document no entry in component/server.EdgePaths(): the edge's
+	// declared surface is "/", and these live under it.
+	switch r.URL.Path {
+	case viewScriptPath:
+		return serveViewScript(w, r)
+	case viewPingPath:
+		return h.serveViewPing(w, r, site)
+	}
 	// Cluster-wide identity discovery, ahead of the bundle lookup and for
 	// every site alike -- see runtimeconfig.go. Not a new entry in
 	// component/server.EdgePaths(): the edge's declared surface is exactly
@@ -389,6 +411,15 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 
 	securityHeaders(w, r)
 
+	// What serveFile inserts into an HTML document, the same for both document
+	// paths below: the refresh script unless this is an extension runtime's
+	// subtree, and the page-change script on a live deployable's own origin.
+	policy := filePolicy{
+		assetPrefix:     assetPrefixFor(site),
+		suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site)),
+		viewScript:      carriesViewScript(site),
+	}
+
 	// THE POLICY IS SET AFTER RESOLUTION, NOT BEFORE, and the ordering is
 	// the whole of what makes inline-script hashes work (scripthash.go).
 	// Which hashes belong in script-src is a property of the DOCUMENT being
@@ -408,7 +439,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		// twice per request.
 		etag, hasETag := assetETagFor(fsys, name, site.BundleRef)
 		h.setContentSecurityPolicy(w, r, site, fsys, name, etag, hasETag)
-		h.serveFile(w, r, fsys, name, etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
+		h.serveFile(w, r, fsys, name, etag, hasETag, policy)
 		return classifyServed(name, false)
 	}
 
@@ -420,7 +451,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 			// on a hard reload while the root keeps working.
 			etag, hasETag := assetETagFor(fsys, "index.html", site.BundleRef)
 			h.setContentSecurityPolicy(w, r, site, fsys, "index.html", etag, hasETag)
-			h.serveFile(w, r, fsys, "index.html", etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
+			h.serveFile(w, r, fsys, "index.html", etag, hasETag, policy)
 			return pathClassFallback
 		}
 	}
@@ -551,8 +582,16 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 	}
 	version := w.Header().Get(deploymentVersionHeader)
 	refreshDocument := isHTMLDocument(name) && version != "" && !policy.suppressRefresh
+	viewDocument := isHTMLDocument(name) && policy.viewScript
 	if refreshDocument && hasETag {
 		etag = strongETag(etag, "site-refresh-v2", version, policy.assetPrefix)
+	}
+	// THE VALIDATOR SAYS WHETHER THE PAGE-CHANGE TAG IS IN, so a copy a browser
+	// or a CDN stored without it (before this release, or while the deployable
+	// was not live) is answered in full rather than revalidated as current. A
+	// 304 would keep that copy, and its in-app pages would go uncounted.
+	if viewDocument && hasETag {
+		etag = strongETag(etag, "view-v1")
 	}
 	compressed := gzipFile(w, r, name)
 	if compressed {
@@ -570,8 +609,17 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 		}
 	}
 
-	if refreshDocument {
-		data, err := refreshingDocument(fsys, name, version)
+	if refreshDocument || viewDocument {
+		// Both tags at one insertion point, the monitor first, as it has
+		// always been placed.
+		tags := ""
+		if refreshDocument {
+			tags += refreshScriptTag(version)
+		}
+		if viewDocument {
+			tags += viewScriptTag
+		}
+		data, err := hostedDocument(fsys, name, tags)
 		if err != nil {
 			w.Header().Del("ETag")
 			w.Header().Del("Content-Encoding")

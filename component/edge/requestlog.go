@@ -79,7 +79,8 @@ type RequestRecord struct {
 	// only give a later query something to filter back out.
 
 	// Path is the page's path with no query or fragment
-	// (visit.NormalizePath), or the path an accepted ping named.
+	// (visit.NormalizePath): a navigation's, or the one an accepted ping
+	// named, normalized the same way.
 	Path string
 	// Source is where a navigation arrived from: a utm_source, a referring
 	// host, or "direct". Empty for a navigation inside the site and for
@@ -151,12 +152,13 @@ type recordingWriter struct {
 	http.ResponseWriter
 	status int
 	bytes  int64
-	// viewPath is the normalized path an ACCEPTED page-change ping named,
-	// set by the ping handler and empty for every other request. It rides
-	// on the writer because the writer is the one thing both the ping
-	// handler and ServeHTTP hold: serve returns only a path class, and the
-	// record is built after it returns. A non-empty value makes the record
-	// a page view of that path (addVisitFields).
+	// viewPath is the path an ACCEPTED page-change ping named, decoded as a
+	// request line's path is, set by the ping handler (view.go) and empty for
+	// every other request. It rides on the writer because the writer is the
+	// one thing both the ping handler and ServeHTTP hold: serve returns only a
+	// path class, and the record is built after it returns. A value that
+	// normalizes to a path makes the record a page view of that path
+	// (addVisitFields).
 	viewPath string
 	// servedUnderPreview is true when serve answered the request under a
 	// preview grant (markServedUnderPreview): an operator exercising a
@@ -266,7 +268,13 @@ func PathClassesForTest() []string {
 func (h *Handler) addVisitFields(record *RequestRecord, r *http.Request, site *Site, served *recordingWriter) {
 	userAgent := r.UserAgent()
 	agent := visit.Classify(userAgent)
-	viewPath := served.viewPath
+	// NORMALIZED HERE, WHOEVER SET IT. The ping handler only accepts a body
+	// that normalizes to a path, and this does not take its word for it: the
+	// promise that the record carries clean text is kept where the record is
+	// filled, so it holds however viewPath came to be set. Once, as a
+	// navigation's path is normalized once, so one page is one row whichever
+	// way it was reached; a value that normalizes to nothing is no page view.
+	viewPath := visit.NormalizePath(served.viewPath)
 	record.Measured = true
 	record.Bot = agent.Bot
 	// Never a page view: a bot, not even through a ping (a headless browser

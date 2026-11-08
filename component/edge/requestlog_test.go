@@ -757,6 +757,16 @@ func TestARecordCarriesOnlyCleanText(t *testing.T) {
 	if !got.PageView || got.Path != "/products/a" || got.Source != "newsletter" {
 		t.Errorf("pageView=%v path=%q source=%q, want a page view of /products/a from newsletter", got.PageView, got.Path, got.Source)
 	}
+	assertRecordIsCleanText(t, got)
+}
+
+// assertRecordIsCleanText fails when any string on the record carries a control
+// character or a byte that is not UTF-8. Every string field is checked, not
+// only the ones a test expects to be dirty, so a field added later that copies
+// client text unchanged fails here too. The page-change ping's coverage
+// (view_test.go) shares it.
+func assertRecordIsCleanText(t *testing.T, got RequestRecord) {
+	t.Helper()
 	fields := reflect.ValueOf(got)
 	for i := 0; i < fields.NumField(); i++ {
 		if fields.Field(i).Kind() != reflect.String {
@@ -766,5 +776,45 @@ func TestARecordCarriesOnlyCleanText(t *testing.T) {
 		if !utf8.ValidString(value) || strings.IndexFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 			t.Errorf("%s = %q carries a control character or a byte that is not UTF-8", fields.Type().Field(i).Name, value)
 		}
+	}
+}
+
+// THE CLEAN-TEXT GUARANTEE HOLDS HOWEVER viewPath WAS SET. The ping handler
+// leaves only a path that normalizes, but addVisitFields does not take its
+// word for it: it normalizes viewPath as it normalizes a navigation's path, so
+// a value that is not a path is no page view and one carrying control
+// characters, a query or a fragment is recorded as the page alone.
+func TestAViewPathIsNormalizedHoweverItWasSet(t *testing.T) {
+	h := NewHandler(Options{})
+	for name, tc := range map[string]struct {
+		viewPath, path string
+	}{
+		"no leading slash":          {"products", ""},
+		"nothing but noise":         {"\x00\x01\x7f", ""},
+		"a NUL, a query, a slash":   {"/products/\x00a/?x=1#top", "/products/a"},
+		"invalid UTF-8 and a tab":   {"/products/\xffa\t/b", "/products/a/b"},
+		"already a normalized path": {"/products/b", "/products/b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := RequestRecord{
+				SiteId:    "site-1",
+				ServedAt:  time.Date(2026, 11, 8, 14, 30, 0, 0, time.UTC),
+				Status:    http.StatusNoContent,
+				PathClass: pathClassView,
+			}
+			served := &recordingWriter{ResponseWriter: httptest.NewRecorder(), viewPath: tc.viewPath}
+			h.addVisitFields(&got, visitRequest(http.MethodPost, "/_memql/view", chromeOnWindows), visitSite(), served)
+			assertRecordIsCleanText(t, got)
+			if tc.path == "" {
+				if got.PageView {
+					t.Errorf("viewPath %q made a page view of %q, want none: it names no page", tc.viewPath, got.Path)
+				}
+				assertNoVisitDimensions(t, got)
+				return
+			}
+			if !got.PageView || got.Path != tc.path {
+				t.Errorf("viewPath %q: pageView=%v path=%q, want a page view of %q", tc.viewPath, got.PageView, got.Path, tc.path)
+			}
+		})
 	}
 }
