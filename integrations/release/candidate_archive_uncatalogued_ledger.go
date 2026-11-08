@@ -26,10 +26,15 @@ import (
 // candidate may archive without a catalog. The longest publication operation is
 // bounded at releasePublicationOperationLimit (70 minutes) and both lifecycle
 // workflows at one hour, so no writer of this candidate can still be acting.
-// The fence then makes the ledger refuse any later completion, because every
-// effect requires an approved candidate under the same row lock.
+// A resumed publication restarts the period (beginPublication touches its
+// pending intent), and the release a renewed predecessor's files live on is
+// held to it as well as the candidate's own drafts. The fence then makes the
+// ledger refuse any later completion, because every effect requires an
+// approved candidate under the same row lock.
 // TestArchiveWithoutCatalogQuietPeriodExceedsEveryPublicationBound holds it there.
 const uncataloguedQuietPeriod = 2 * time.Hour
+
+var errPublicationMayBeRunning = errors.New("a publication effect of this candidate may still be running; archive it once nothing has changed for two hours")
 
 // renewalHopLimit bounds the succession chain a predecessor's release is
 // followed through. Each renewal needs a fresh owner approval, so a real chain
@@ -88,6 +93,18 @@ func (l *candidateLedger) uncataloguedSnapshot(ctx context.Context, key, publish
 	rec, err := readCandidate(ctx, tx, owner, key)
 	if err != nil {
 		return candidateUncataloguedSnapshot{}, err
+	}
+	// Decided under the row lock, as archiveSnapshot decides it: a candidate a
+	// peer already archived on this basis comes back archived, and the caller
+	// resumes releasing its references instead of refusing a finished fence.
+	if rec.State == "archived" {
+		if rec, err = readCandidateApproval(ctx, tx, owner, rec); err != nil {
+			return candidateUncataloguedSnapshot{}, err
+		}
+		if err := readSupersessionArchive(ctx, tx, owner, rec); err != nil {
+			return candidateUncataloguedSnapshot{}, err
+		}
+		return candidateUncataloguedSnapshot{record: rec}, tx.Commit()
 	}
 	snapshot, err := readUncatalogued(ctx, tx, owner, rec)
 	if err != nil {
@@ -308,7 +325,7 @@ OR EXISTS(SELECT 1 FROM release_draft_intents WHERE candidate_id=$1 AND owner_us
 		return err
 	}
 	if recent {
-		return errors.New("a publication effect of this candidate may still be running; archive it once nothing has changed for two hours")
+		return errPublicationMayBeRunning
 	}
 	return nil
 }
@@ -387,7 +404,10 @@ func classifyUncatalogued(ctx context.Context, tx *sql.Tx, owner string, rec can
 func boundRelease(ctx context.Context, tx *sql.Tx, owner string, rec candidateRecord, entry candidatePublication, target candidateFileTarget) (candidateDraftRecord, error) {
 	var holder, approval string
 	var body []byte
-	err := tx.QueryRowContext(ctx, `SELECT candidate_id,approval_id,plan FROM release_draft_intents WHERE resource_key=$1 AND owner_user_id=$2`, draftResourceKey(target), owner).Scan(&holder, &approval, &body)
+	var uploading, recent bool
+	err := tx.QueryRowContext(ctx, `SELECT candidate_id,approval_id,plan,upload_lease_until>clock_timestamp(),
+ state IN ('creating','promoting') AND updated_at>clock_timestamp()-($3::bigint*interval '1 millisecond')
+FROM release_draft_intents WHERE resource_key=$1 AND owner_user_id=$2`, draftResourceKey(target), owner, uncataloguedQuietPeriod.Milliseconds()).Scan(&holder, &approval, &body, &uploading, &recent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return candidateDraftRecord{}, errors.New("file publication has no native release record")
 	}
@@ -398,6 +418,14 @@ func boundRelease(ctx context.Context, tx *sql.Tx, owner string, rec candidateRe
 		if err := requireRenewedInto(ctx, tx, rec.ID, holder); err != nil {
 			return candidateDraftRecord{}, err
 		}
+	}
+	// After a renewal the release is the successor's, and an effect on it is
+	// just as live for the files this candidate uploaded there.
+	if uploading {
+		return candidateDraftRecord{}, errDraftUploadRunning
+	}
+	if recent {
+		return candidateDraftRecord{}, errPublicationMayBeRunning
 	}
 	var approvedBy string
 	if err := tx.QueryRowContext(ctx, `SELECT approval_id,approved_by FROM release_candidate_approvals WHERE candidate_id=$1`, holder).Scan(&approval, &approvedBy); err != nil || approvedBy != owner {

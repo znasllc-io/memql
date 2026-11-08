@@ -554,7 +554,9 @@ things hold:
   configuration; one that no longer matches its approved digest refuses.
 - **Nothing it began is still running.** No upload is in progress, and no pending
   publication or draft creation or promotion has changed in the last two hours,
-  longer than any publication operation runs.
+  longer than any publication operation runs. Resuming a publication restarts
+  that period, and for a renewed candidate the successor's release, which holds
+  its files, is held to the same rule.
 
 Every declared destination is recorded with its outcome:
 

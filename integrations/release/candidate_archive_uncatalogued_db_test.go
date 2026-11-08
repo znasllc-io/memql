@@ -248,6 +248,20 @@ func TestUncataloguedSnapshotRefusesBeforeAnyProviderRead(t *testing.T) {
 		ageIntents(t, db, request.CandidateID, "1 hour 59 minutes")
 		refuses(t, p, library, request.CandidateID, trust, "may still be running")
 	})
+	t.Run("pending resumed after 2h1m", func(t *testing.T) {
+		p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		begin := func() {
+			t.Helper()
+			if _, err := p.ledger.beginPublication(ownerCtx(), request.CandidateID, request.ApprovalID, request.TargetID, request.Component, request.Artifact); err != nil {
+				t.Fatal(err)
+			}
+		}
+		begin()
+		ageIntents(t, db, request.CandidateID, "2 hours 1 minute")
+		begin() // a resumed publication is running again
+		refuses(t, p, library, request.CandidateID, trust, "may still be running")
+	})
 	t.Run("pending 2h1m is quiet", func(t *testing.T) {
 		p, c, _, _ := candidatePublicationFixture(t, db, provider.server.URL)
 		request := preparePublication(t, db, p, c)
@@ -797,5 +811,71 @@ func TestArchiveWithoutCatalogRefusesACatalogArchivedCandidate(t *testing.T) {
 	}
 	if count, basis, _ := archiveRows(t, db, request.CandidateID); count != 1 || basis != "catalog" {
 		t.Fatal("the catalog archive's evidence changed", count, basis)
+	}
+}
+
+// A renewed predecessor's uploaded file lives on its successor's release, so
+// that release's own effects decide whether anything is still running.
+func TestUncataloguedSnapshotWaitsForTheReleaseItsFilesLiveOn(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	first, manifest, _ := candidateDraftWorkflowFixture(t, db)
+	a := preparePublication(t, db, first, manifest)
+	if _, err := first.draft(ownerCtx(), draftRequest(a), false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.publish(ownerCtx(), a); err != nil {
+		t.Fatal(err)
+	}
+	next := freshDraftHost(first, db)
+	next.engineRevision = func() string { return strings.Repeat("e", 40) }
+	b := preparePublication(t, db, next, manifest)
+	if _, err := next.draft(ownerCtx(), draftRequest(b), false); err != nil {
+		t.Fatal(err)
+	}
+	successor := func(statement string) {
+		t.Helper()
+		if _, err := db.Exec(statement, b.CandidateID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := func() (candidateUncataloguedSnapshot, error) {
+		return first.ledger.uncataloguedSnapshot(ownerCtx(), a.CandidateID, "fixture", trust)
+	}
+	successor(`UPDATE release_draft_intents SET state='promoting',updated_at=clock_timestamp() WHERE candidate_id=$1`)
+	if _, err := snapshot(); err == nil || !strings.Contains(err.Error(), "may still be running") {
+		t.Fatal("the successor's promotion in progress did not hold the predecessor", err)
+	}
+	successor(`UPDATE release_draft_intents SET updated_at=clock_timestamp()-interval '2 hours 1 minute' WHERE candidate_id=$1`)
+	if got, err := snapshot(); err != nil || len(got.destinations) != 1 || got.destinations[0].Outcome != "uploaded" {
+		t.Fatal("a promotion quiet for longer than the bound held the predecessor", got.destinations, err)
+	}
+	successor(`UPDATE release_draft_intents SET state='ready',upload_lease_id='held',upload_lease_until=clock_timestamp()+interval '1 minute' WHERE candidate_id=$1`)
+	if _, err := snapshot(); err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatal("an upload to the successor's release did not hold the predecessor", err)
+	}
+}
+
+// A host that read the candidate before a peer's fence must resume the peer's
+// reference release, not refuse: the decision is taken under the snapshot's row
+// lock, where the archived state is already visible.
+func TestUncataloguedSnapshotResumesACandidateArchivedOnAnotherHost(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	p, c, _, _ := candidatePublicationFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, c)
+	if _, err := p.publish(ownerCtx(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.archiveWithoutCatalog(ownerCtx(), request.CandidateID, "fixture", trust); err != nil {
+		t.Fatal(err)
+	}
+	provider.unusable.Store(true)
+	before := provider.reads.Load()
+	snapshot, err := freshDraftHost(p, candidateTestDB(t)).ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil || snapshot.record.State != "archived" || snapshot.record.ApprovalID != request.ApprovalID || provider.reads.Load() != before {
+		t.Fatal("a candidate a peer archived was refused instead of resumed", snapshot.record.State, err)
 	}
 }

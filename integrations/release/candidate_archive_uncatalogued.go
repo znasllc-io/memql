@@ -79,19 +79,12 @@ func (p *candidatePreparer) archiveWithoutCatalog(ctx context.Context, key, publ
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	record, err := p.ledger.get(ctx, key)
+	snapshot, err := p.ledger.uncataloguedSnapshot(ctx, key, publisher, trust)
 	if err != nil {
 		return candidateRecord{}, err
 	}
-	if record.State == "archived" {
-		if err := p.ledger.requireSupersessionArchive(ctx, record); err != nil {
-			return candidateRecord{}, err
-		}
-	} else {
-		snapshot, err := p.ledger.uncataloguedSnapshot(ctx, key, publisher, trust)
-		if err != nil {
-			return candidateRecord{}, err
-		}
+	record := snapshot.record
+	if record.State != "archived" {
 		proof, err := p.verifyUncataloguedInputs(ctx, snapshot)
 		if err != nil {
 			return candidateRecord{}, err
@@ -108,18 +101,6 @@ func (p *candidatePreparer) archiveWithoutCatalog(ctx context.Context, key, publ
 		releaseErr = p.ledger.recordArchiveInputsReleased(ctx, record.ID)
 	}
 	return record, releaseErr
-}
-
-func (l *candidateLedger) requireSupersessionArchive(ctx context.Context, rec candidateRecord) error {
-	owner, err := candidateOwner(ctx)
-	if err != nil {
-		return err
-	}
-	db, err := l.database()
-	if err != nil {
-		return err
-	}
-	return readSupersessionArchive(ctx, db, owner, rec)
 }
 
 // The destinations it reads are resolved as archival resolves them, through the
