@@ -1,0 +1,49 @@
+NOTICE:  extension "timescaledb" already exists, skipping
+Fresh isolated database; original conversation owner/speaker assertion plus capability shortlist regressions
+{"time":"2026-11-07T16:58:37.798834-07:00","level":"INFO","component":"memoryNodesDB","msg":"instance created"}
+{"time":"2026-11-07T16:58:37.798944-07:00","level":"INFO","component":"memoryNodesDB","msg":"starting"}
+{"time":"2026-11-07T16:58:37.807349-07:00","level":"INFO","component":"memoryNodesDB","msg":"write-gate pool opened","size":4}
+{"time":"2026-11-07T16:58:37.924281-07:00","level":"INFO","component":"memoryNodesDB","msg":"site owner restamp: done","migration":"20260912000000_site_owner_restamp","restamped":0,"unresolved":0}
+{"time":"2026-11-07T16:58:37.938463-07:00","level":"INFO","component":"memoryNodesDB","msg":"latest-row index ensured","table":"MemoryNodes","index":"memory_nodes_concept_id_created_at_desc_idx","outcome":"built","covering":"memory_nodes_concept_id_created_at_desc_idx","equivalents":null,"hypertable":false,"chunks":0,"duration":"14ms"}
+{"time":"2026-11-07T16:58:37.943602-07:00","level":"INFO","component":"memoryNodesDB","msg":"latest-row index ensured","table":"MemoryNodes","index":"memory_nodes_concept_id_created_at_desc_idx","outcome":"valid","covering":"memory_nodes_concept_id_created_at_desc_idx","equivalents":null,"hypertable":false,"chunks":0,"duration":"4ms"}
+{"time":"2026-11-07T16:58:37.961836-07:00","level":"INFO","component":"memoryNodesDB","msg":"module readiness history collapse: done","migration":"20260921000000_module_readiness_history_collapse","collapsedThisAttempt":0,"collapsedInAll":0,"batches":0,"largestBatch":0,"idsThisAttempt":0,"resumed":false,"duration":"9ms"}
+{"time":"2026-11-07T16:58:37.977963-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_recovery_idx","chunks":0}
+{"time":"2026-11-07T16:58:37.992008-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_journal_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.050599-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_recipient_digest_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.061667-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_consent_digest_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.071534-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_email_provider_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.08222-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_retention_goal_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.093495-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_retention_time_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.113689-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"secret_memory_nodes_retention_time_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.137063-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_owner_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.211003-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_goal_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.223495-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_owner_walk_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.236106-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_signature_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.248908-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_work_run_revision_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.2618-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_tokenhash_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.274452-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_codeid_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.289038-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_access_codehash_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.303951-07:00","level":"INFO","component":"memoryNodesDB","msg":"work index verified","index":"memory_nodes_auth_session_hash_lookup_idx","chunks":0}
+{"time":"2026-11-07T16:58:38.344886-07:00","level":"INFO","component":"memoryNodesDB","msg":"MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend cannot be enabled; nothing was changed (memql#5421)","table":"MemoryNodes","triggers":"work_run_head_delete"}
+{"time":"2026-11-07T16:58:38.349081-07:00","level":"INFO","component":"memoryNodesDB","msg":"timescaledb extension enabled","version":"2.29.0","schema":"public","hasCreateHypertable":true,"hypertables":{"MemoryNodes":true,"SecretMemoryNodes":true},"compression":{"MemoryNodes":"blocked: DELETE trigger with a transition table: work_run_head_delete"}}
+{"time":"2026-11-07T16:58:38.350261-07:00","level":"INFO","component":"memoryNodesDB","msg":"startup ping succeeded","dsn":"postgres://memql:********@localhost:55432/memql_pipeline_1daa7af793d44d91a38ecf8b1377ad24?sslmode=disable"}
+{"time":"2026-11-07T16:58:38.350293-07:00","level":"INFO","component":"memoryNodesDB","msg":"started"}
+{"time":"2026-11-07T16:58:38.350317-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopping"}
+{"time":"2026-11-07T16:58:38.350345-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopped"}
+=== RUN   TestConversationRecallKeepsSpeakerAndOwner
+{"time":"2026-11-07T16:58:38.456837-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+--- PASS: TestConversationRecallKeepsSpeakerAndOwner (3.57s)
+=== RUN   TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext
+--- PASS: TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext (0.00s)
+=== RUN   TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist
+=== RUN   TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=true
+=== RUN   TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=false
+--- PASS: TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist (0.00s)
+    --- PASS: TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=true (0.00s)
+    --- PASS: TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=false (0.00s)
+=== RUN   TestRetitleRunIsNotOfferedAsAnAgentCapability
+--- PASS: TestRetitleRunIsNotOfferedAsAnAgentCapability (0.00s)
+=== RUN   TestCapabilityDiscoveryRanksRelevantPartialMatches
+--- PASS: TestCapabilityDiscoveryRanksRelevantPartialMatches (0.00s)
+PASS
+ok  	github.com/znasllc-io/memql/component/memql	5.536s

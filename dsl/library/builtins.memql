@@ -516,3 +516,27 @@ builtin libraryGenerateImage {
  height int! @description("Height in pixels, 256 through 1536.")
  level string! @description("Requested inference quality, such as strong.")
 }
+
+/// Exact folder counts and distinct label options, reduced from authorized metadata pages.
+@sdk
+@executor("integration.library.browseFacets")
+builtin libraryBrowseFacets {
+ archived bool
+ folderId string
+ kind string
+ source string
+ accountId string
+ label string
+ search string
+ ids []string
+ folderIds []string
+ sourceRefs []string
+}
+
+/// Ten current lesson heads, with exact revision folding before search and paging.
+@sdk
+@executor("integration.library.trainingLessonsPage")
+builtin libraryTrainingLessonsPage {
+ search string
+ cursor string
+}

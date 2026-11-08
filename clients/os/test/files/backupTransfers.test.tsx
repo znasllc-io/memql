@@ -71,3 +71,18 @@ it("limits archive input and exposes only legal state transitions", () => {
   expect(transferActions({ ...job, state: "complete", kind: "sync_file" })).toEqual([]);
   expect(formatStorageBytes(5e12)).toBe("5 TB");
 });
+
+
+it("loads one transfer page at a time, restores it, and searches older archives", async () => {
+ const transfers=Array.from({length:25},(_,n)=>({...job,id:`backup-${n}`,name:`archive-${n}.zip`,state:"complete"}));
+ const connection=fakeConnection({transfers:transfers as never});h.connection=connection;
+ const props={machines,refresh:0,onDownload:vi.fn()};let view=render(<ArchiveTransfers {...props} />);
+ await screen.findByText("archive-9.zip");expect(screen.queryByText("archive-10.zip")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"Load more"}));await screen.findByText("archive-19.zip");
+ expect(connection.callsNamed("libraryBackupList")).toHaveLength(2);view.unmount();
+ view=render(<ArchiveTransfers {...props} />);expect(screen.getByText("archive-19.zip")).toBeTruthy();expect(connection.callsNamed("libraryBackupList")).toHaveLength(2);
+ fireEvent.click(screen.getByRole("button",{name:"Search transfers"}));
+ fireEvent.change(screen.getByRole("textbox",{name:"Search transfers"}),{target:{value:"archive-24"}});
+ await screen.findByText("archive-24.zip");expect(connection.callsNamed("libraryBackupList").at(-1)).toContain('search: "archive-24"');
+ view.unmount();
+});

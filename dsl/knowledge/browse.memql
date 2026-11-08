@@ -1,0 +1,31 @@
+use library.concepts.{ file }
+
+/// Training's recent file worklist, searched before the ten-row page boundary.
+@actor
+query file trainingFilesBrowse {
+ args {
+   search string
+ }
+ filter row => row.ownerUserId == actor.userId && row.archived != true
+   && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.summary.includes(trim(args.search), true))
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape trainingFileRow
+}
+
+/// The file worklist has no blob, image, routing or provenance payloads.
+@row
+shape file trainingFileRow {
+ row.id
+ row.createdAt
+ ownerUserId
+ name
+ mimeType
+ size
+ status
+ summary
+ failureReason
+ embeddingStatus
+ trainedIntoDomainIds
+ archived
+}

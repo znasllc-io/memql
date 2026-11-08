@@ -58,6 +58,8 @@ builtin libraryBackupRead {
 @executor("integration.fileBackups.list")
 @args(profile="object")
 builtin libraryBackupList {
+  search string
+  limit int
   scope enum("active", "archives", "all")
   workerId string
   after string

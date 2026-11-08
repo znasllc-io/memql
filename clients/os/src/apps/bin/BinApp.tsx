@@ -5,7 +5,7 @@ import { Folder as FolderIcon } from "lucide-react";
 
 import { Caption, Check, Chip, Head, LiveList, Panel, Refine, RecordRow, listCount, formatFreshness, formatMoment, useNow } from "../../kit";
 import { useOsConnection } from "../../live/connection";
-import { useMachines } from "../../live/machines";
+import { useMachinePresence } from "../../live/machines";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { kindGlyph } from "../files/glyphs";
@@ -18,9 +18,11 @@ import {
   type FilesSettingsStore,
 } from "../files/settings";
 import { BinDetail } from "./BinDetail";
-import { useTwoFeedView } from "../../live/mergedView";
+import { useMergedPagedCollections } from "../../live/useMergedPagedCollections";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 import { planRestore, runRestore } from "./restore";
-import { binFingerprint, binItemFromArtifact, binItemFromFolder, filterBinItems, orderBinItems, type BinItem } from "./rows";
+import { binFingerprint, binItemFromArtifact, binItemFromFolder, orderBinItems, type BinItem } from "./rows";
 import { useBinFeeds } from "./useBin";
 
 // The Bin: MemQL OS's archive, docked permanently and unable to destroy
@@ -61,14 +63,15 @@ export function BinApp({
   const [settings, setSettings] = useState<FilesSettings>(() => settingsStore.load());
 
   const connection = useOsConnection();
-  const { presence } = useMachines();
+  const { presence } = useMachinePresence();
   // One clock for every relative time in the list, so two rows a second apart
   // never disagree about what "now" is.
   const now = useNow(30_000);
-  const { artifacts, folders } = useBinFeeds();
 
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
+  const { artifacts, folders, names: folderNamesFeed } = useBinFeeds(needle, sectionId !== "settings" && sectionId !== "logs");
   const [restoring, setRestoring] = useState("");
   const [restoreError, setRestoreError] = useState("");
 
@@ -79,12 +82,12 @@ export function BinApp({
   // would render "Library (top level)" -- which is a different, wrong answer.
   const folderNames = useMemo(() => {
     const names = new Map<string, string>();
-    for (const raw of folders.snapshot.rows) {
+    for (const raw of folderNamesFeed.snapshot.rows) {
       const row = folderFromRow(raw);
       if (row.id !== "") names.set(row.id, row.name.trim() || row.id);
     }
     return names;
-  }, [folders.snapshot]);
+  }, [folderNamesFeed.snapshot]);
 
   const folderNameOf = useCallback(
     (folderId: string) => {
@@ -98,11 +101,11 @@ export function BinApp({
   // whole reason the order is computed here: folders and artifacts arrive on
   // separate reads, and a Bin that listed every folder and then every file
   // would bury the thing somebody just threw away in the middle of it.
-  const viewKey = `bin:${search.trim().toLowerCase()}`;
-  const list = useTwoFeedView<Row, Row, BinItem>(
-    artifacts.source,
-    folders.source,
+  const viewKey = `bin:${needle}`;
+  const pagination = useMergedPagedCollections<Row, Row, BinItem>(
     viewKey,
+    artifacts,
+    folders,
     (artifactRows, folderRows) => {
       const items = artifactRows
         .map(artifactFromRow)
@@ -119,9 +122,11 @@ export function BinApp({
         .map(folderFromRow)
         .filter((f) => f.id !== "" && !f.deleted)
         .map(binItemFromFolder);
-      return filterBinItems(orderBinItems([...items, ...folderItems]), search);
+      return orderBinItems([...items, ...folderItems]);
     },
   );
+
+  const list = pagination.source;
 
   // The selected item's full index row, for the facts the projection drops.
   // Read off the feed the list already holds -- one source of truth for the
@@ -189,13 +194,14 @@ export function BinApp({
 
   return (
     <div className="os-bin">
-      <Head title="Bin" meta={listCount(list?.snapshot)}>
+      <Head title="Bin" meta={listCount(list?.snapshot) === undefined || needle !== search.trim() ? undefined : `${list?.snapshot.rows.length ?? 0} shown`}>
+        {!search ? <span className="os-caption">Recent</span> : null}
         {/* The search rides the Refine affordance (DESIGN.md rule 2) --
             collapsed until asked, never standing chrome over the list. */}
         <Refine
           search={search}
           onSearch={setSearch}
-          placeholder="Name, label or machine"
+          placeholder="Name, description, label or machine"
           label="Search the Bin"
         />
       </Head>
@@ -237,6 +243,7 @@ export function BinApp({
               />
             )}
           />
+          <LoadMore feed={pagination} />
           <Caption>
             Newest first -- an archive re-writes the row, so for most items this is the order they
             were archived in.

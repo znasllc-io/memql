@@ -80,14 +80,13 @@ export function FilesApp({
   const { state: osState } = useOs();
   const provider = useEdgeUploadProvider(uploads);
 
-  const { artifacts, folders, files, compositions } = useLibraryFeeds();
 
   // The backups feed is RETAINED AT THE APP ROOT like its three siblings, not
   // inside the section, so switching away and back does not tear the
   // subscription down and re-seed. `useLiveCollection` retains inside an
   // effect, and a hook cannot be called conditionally anyway -- the section
   // switch below returns early.
-  const backupsFeed = useBackupsFeed();
+  const backupsFeed = useBackupsFeed(sectionId === "backups");
   const backups = useLiveView<Row, BackupRow>(backupsFeed.source, "backups", (rows) =>
     rows.map(backupFromRow).filter((backup) => backup.id !== "" && !backup.archived),
   );
@@ -154,8 +153,12 @@ export function FilesApp({
     return { membership, shortcuts, deskIndexByArtifactId, desksWithItems: desksWithItems.size };
   }, [osState.shell.desks, osState.surfaces]);
 
-  // The whole content population, unfiltered -- what "empty" and the rail's
-  // counts are honestly about.
+  const { artifacts, folders, files, compositions, counts, labels, facetsError, effectiveFilter } = useLibraryFeeds(
+    filter, desk.membership, sectionId !== "settings" && sectionId !== "logs" && sectionId !== "backups", sectionId === "backups",
+  );
+
+  // Loaded directory pages only. Exact counts/facets and archive membership
+  // have separate authorized reads; partial pages never stand in for totals.
   const content = useMemo(
     () =>
       artifacts.snapshot.rows
@@ -251,7 +254,7 @@ export function FilesApp({
   const list = useLiveView<Row, ArtifactRow>(artifacts.source, `files:list:${filterKey}`, (rows) =>
     applyFilters(
       rows.map(artifactFromRow).filter((r) => r.id !== ""),
-      filter,
+      effectiveFilter,
       desk.membership,
       materialized,
     ),
@@ -278,10 +281,14 @@ export function FilesApp({
     [folders.snapshot],
   );
 
-  const materializedRail = useMemo(
-    () => foldMaterializedRail(materialized, content, tree),
-    [materialized, content, tree],
-  );
+  const materializedRail = useMemo(() => {
+    if (filter.place !== "materializer" || !counts) return foldMaterializedRail(materialized, content, tree);
+    const entries = [...counts].flatMap(([id, count]) => {
+      const folder = tree.byId.get(id)?.folder;
+      return folder ? [{ folder, count }] : [];
+    }).sort((a, b) => a.folder.name.localeCompare(b.folder.name));
+    return { folders: entries, total: [...counts.values()].reduce((total, value) => total + value, 0) };
+  }, [filter.place, counts, materialized, content, tree]);
 
   // The Bin place's folders: flat and alphabetical (epic memql#4842, #4846).
   // Deliberately not a tree -- archived folders' ancestry mixes live and
@@ -360,6 +367,9 @@ export function FilesApp({
     <BrowseSection
       list={list}
       artifacts={artifacts}
+      counts={counts}
+      labelOptions={labels}
+      facetsError={facetsError}
       files={files.snapshot.rows}
       foldersState={folders.snapshot.state}
       tree={tree}

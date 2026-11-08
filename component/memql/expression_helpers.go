@@ -88,6 +88,8 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		}
 	case *ComparisonExpression:
 		clone := *node
+		// TextConcat is immutable; field rewrites replace its operand through
+		// mapFields instead of changing shared parts in a cached plan.
 		clone.Field = FieldReference{
 			Raw:      node.Field.Raw,
 			Parts:    append([]string(nil), node.Field.Parts...),

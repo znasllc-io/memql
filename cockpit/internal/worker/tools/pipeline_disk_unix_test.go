@@ -137,3 +137,27 @@ func TestPipelineDiskAdmissionRunsOnlyUnderHostReservation(t *testing.T) {
 		t.Fatalf("lock bypassed: %v", failed)
 	}
 }
+
+// Each step already running is presumed to still need the whole minimum: a
+// step is admitted only when the disk holds it for every one of them and for
+// itself.
+func TestPipelineDiskAdmissionReservesTheMinimumForEveryRunningStep(t *testing.T) {
+	previous := pipelineAvailableDiskBytes
+	pipelineAvailableDiskBytes = func(string) (uint64, error) { return 50 << 30, nil }
+	t.Cleanup(func() { pipelineAvailableDiskBytes = previous })
+	workspace := t.TempDir()
+	for running, admitted := range []bool{true, true, false} {
+		err := checkPipelineDisk(workspace, 20480, running)
+		if admitted != (err == nil) {
+			t.Fatalf("50 GiB free beside %d running steps at 20 GiB each: %v", running, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "for each of the 2 already running") {
+			t.Fatalf("the refusal does not say why: %v", err)
+		}
+	}
+	// One step alone keeps the sentence it always had.
+	pipelineAvailableDiskBytes = func(string) (uint64, error) { return 10 << 30, nil }
+	if err := checkPipelineDisk(workspace, 20480, 0); err == nil || !strings.Contains(err.Error(), "20480 MiB required by pipelines.min_free_disk_mib") {
+		t.Fatalf("one step's refusal changed: %v", err)
+	}
+}

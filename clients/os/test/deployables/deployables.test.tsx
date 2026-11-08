@@ -684,7 +684,7 @@ describe("the Source stop", () => {
       expect(source.textContent).not.toContain("ghp_");
       expect(within(source).queryByText("revoked")).toBeNull();
       // The credentials feed is the root's, read once, and never a value.
-      expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(2);
+      expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(1);
       expect(connection.calls.some((c) => c.includes("token"))).toBe(false);
     });
 

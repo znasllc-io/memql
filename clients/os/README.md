@@ -301,6 +301,12 @@ and focus recovery. Reads with no broadcast source retain `AutoRefresh` recovery
 Do not poll healthy graph feeds or automatically repeat probes or writes.
 Failed initial reads also need recovery, even if a collection has no prior rows.
 
+By-id live rereads use the SDK's quoted string literal for every opaque row ID.
+The OS test connections decode that literal before looking
+up their seeded rows, including escaped characters and spaces. Treating the
+quoted value as a bare token silently misses the row and leaves stale UI data;
+opening a seeded detail alone cannot prove that its subsequent reread worked.
+
 Browser return uses `live/resume` for coalesced focus, visibility, online and
 page-restoration events. `OsConnectionProvider` wakes the existing connection;
 SDK reconnect attempts are serialized. `ConnectionNotice` owns delayed feedback
@@ -378,6 +384,61 @@ every app epic after it:
 - **Per-app settings** are their own versioned, sanitized store
   (`fleet/settings.ts`) rather than a corner of the desktop document, so an
   app learning a checkbox cannot cost anyone their desks.
+
+## Resource browsing and session retention
+
+Use `RecordList`/`RecordRow` for resource directories and `LoadMore` with
+`usePagedCollection` for their data. Rows use spacing, plain metadata and
+status text; horizontal row rules and boxed chips are suppressed within the
+shared row. Names, descriptions, provenance, actions and keyboard focus remain.
+
+Browse reads return ten recent records. Search and resource filters run on the
+server before pagination; the cursor is opaque and the server owns its order.
+A selected record has an independently authorized by-id read, so an older link
+never requires walking the directory. A displayed partial count is marked with
+`+` or `shown`; exact folder/facet counts come from separate authorized reducers.
+Complete finite choice catalogs remain explicit, demand-driven editor reads.
+When two paged feeds form one ordered list, `useMergedPagedCollections` exposes
+another ten only after both current frontiers cover that window with enough
+projected rows, or are exhausted. While an initial source is unresolved or live
+removals leave holes, the view exposes only a provably ordered prefix. It fills
+holes up to the already-requested limit, without growing that limit or reading
+when every consumer is hidden/closed. Failed repairs stop and expose the normal
+retry/reconnection state; an unknown empty prefix is never claimed as empty.
+Page counts alone cannot prove the merged records are the most recent.
+Overlapping repairs/advances share one promise across windows; a Load more click
+during repair still requests the next ten. A transport interruption, abort or
+busy no-op is not page completion; a successful sibling is retained for retry.
+
+`live/sessionCollections.ts` owns one store per authenticated connection.
+Collection keys include every query argument; committed visible consumers retain
+them. Closing a window stops its subscriptions after a five-second navigation
+grace period while preserving rows, cursors and loaded page depth in memory.
+Reopening shows that cache immediately and repairs missed changes in the
+background. Sign-out closes the store; a document reload starts a new session.
+No resource cache is persisted to browser storage. Legacy composed feeds that
+close over component setters explicitly opt out of retained caching.
+
+The SDK subscribes before seeding and reconciles buffered events by version.
+Identical graph filters share one wire subscription, and individual consumers
+release independently. Computed views request compact ID-only notifications and
+coalesce bursts before refreshing. Session-backed reads own resume recovery;
+periodic refresh controls disable their separate resume trigger. Computed
+views pass `onPaneResume` to `useGraphRevision` and request
+`reseed({ ifIdle: true })` for that courtesy repair: reopening after the grace
+period must not queue a second copy of the repair started by session retention.
+Actual graph invalidations still use ordinary `reseed()` so a change during an
+in-flight read queues a following read instead of getting lost. Scoped detail readers reject unrelated event IDs before
+rereading. Unseen id-only directory events trigger a coalesced bounded refresh;
+older full-payload events cannot grow a partially loaded recent directory with
+unrequested historical rows. Reconnect, load-more failures and late responses
+preserve the last usable answer and never replace a newer live update.
+
+Regression evidence, fixture sizes, access checks and reproducible timings are
+recorded in [the resource-list audit](qa/resource-lists.md) and
+[engine execution evidence](../../docs/internal/qa/os-list-performance/README.md).
+Timing is measured separately; deterministic tests enforce row/page/request and
+payload bounds, correct cursors, authorized scopes and race handling.
 
 ## Users, the second app (memql#4733, rebuilt by epic memql#5167)
 
@@ -546,10 +607,10 @@ of the Packages half this passage replaces and survived it unchanged.
   so a row that carried one would be dropped here rather than rendered. There
   is no chip, fact or tooltip in this app that could show a value.
   **`lastUsedAt` is the heartbeat rule's second sharpest case** after
-  `lastCheckedAt`: every fetch of every source under a credential writes it,
-  the ten-minute poll feed included, so naming it in the arrival-cue
-  fingerprint would ring the card on a timer for as long as anything tracks a
-  repository. The fingerprint is label, status, host and fingerprint;
+  `lastCheckedAt`: the fetches of every source under a credential write it,
+  the ten-minute poll feed included, once an hour while any of them runs, so
+  naming it in the arrival-cue fingerprint would ring the card on a timer for
+  as long as anything tracks a repository. The fingerprint is label, status, host and fingerprint;
   `lastUsedAt` and `revokedAt` are displayed and never rung.
 
 - **A STOP OWNS ITS OWN REFUSAL** (`page/stops/*`, one component per stop).
@@ -1013,6 +1074,15 @@ request, and opens its saved Nexus goal or approval. Installed roles never
 establish upstream repository ownership. Request history is server-backed;
 connection failures do not become a claim of read-only access or empty history.
 
+Preparation reads the exact owned run, independently of scope approval. A
+terminal failure or a waiting run with a recorded error exposes its reason and
+**Revise request**; a waiting run without an error remains in progress. Revision
+preserves the statement and paths but creates a new immutable request only on
+explicit submission. A completed proposal takes precedence over an earlier
+execution error. `test/pipelines/repositoryChange.test.tsx` covers these states;
+the QA views `repository-preparation-waiting-error` and
+`repository-preparation-waiting` exercise the rendered distinction.
+
 - **TWO MORE FEEDS AT THE ROOT, AND TWO ON THE RUN PAGE.** The caller's
   pipelines and runs are retained by `DeployablesApp` like every other concept
   here; a run's work steps and Library files are retained by its page while it
@@ -1271,17 +1341,19 @@ Ordinary uploads are independent copies. Host-path tracking belongs only to
 explicit folder backups; see the [upload contract](../../docs/public/operate/library.md#uploads-and-folder-backups).
 Backups use a plus action, a full-page form, a schedule, and a hidden-file switch.
 
-- **THE SEED IS PICKED FOR THE FILTER THAT CANNOT BE SERVER-SIDE.** The
-  browse seeds from `libraryArtifactsByLens(lens: "artifact")`, not
-  `libraryArtifacts`, because the default read carries `archived != true` and
-  a show-archived toggle over it could only ever show the rows that flipped
-  while the window was open. The facet read deliberately carries no archive
-  conjunct, and the artifact lens IS this app's population (file / document /
-  generated_output), so one paged seed holds the complete truth and every
-  filter -- archived, kind, source, search, folder scope -- stays a
-  client-side fold. `folderId` filtering must be client-side anyway: a row
-  promoted before folders existed has no member at all, and only the fold
-  reads absence and the empty string as the same answer, the root.
+- **FILTERS PRECEDE PAGINATION.** `libraryArtifactsBrowse` and its oldest-first
+  companion apply archive, kind, source, account, labels, folder and text filters
+  on the server, including the legacy missing-folder/root equivalence. Each
+  filter has an independent retained cursor. Exact folder counts and label
+  choices use `libraryBrowseFacets`, which folds every authorized source page
+  without sending the artifact population to the browser. Backing file metadata
+  is read for the selected inspector, not for every list row.
+
+- **RECURSIVE ACTIONS REQUIRE COMPLETE MEMBERSHIP.** Folder archive previews
+  read every page of the selected subtree, including archived files. Execution
+  rereads that scope before building its archive/delete plan. A ten-row browse
+  page must never be used to decide that a folder is empty. The directory and
+  destructive-action regression cases live in `test/files/directory.test.tsx`.
 
 - **ONE UPLOAD PATH, PINNED.** Every surface -- desk drop, upload button,
   drop-onto-window, drop-onto-folder -- rides `items/edgeUpload.ts`:
@@ -1363,17 +1435,11 @@ rules rather than repetitions of the five before it.
   promotion into `kit/`: the kit is the OS's shared VOCABULARY (rows, chips,
   notices, the live list), and a picker over one domain's concept is not
   vocabulary. Putting it there would make every app depend on a concept most
-  of them otherwise know nothing about. `useAccountOptions` opens ONE
-  COLLECTION PER MOUNTING COMPONENT, so five surfaces mounting a picker at
-  once open five subscriptions -- `live/useLiveCollection.ts` memoises on
-  `[connection, key]` and constructs a collection per component; it does NOT
-  call the SDK's shared `LiveRegistry`. That is accepted ACROSS apps and is
-  not accepted INSIDE one, and the difference is what the two feeds decide:
-  two readings inside one app would be free to disagree while deciding
-  whether a form or a list renders, which is why `AccountsApp` retains
-  exactly one and passes it down. `apps/accounts/tie.tsx` is the long form of
-  this and is the account to trust -- this bullet claimed the opposite until
-  memql#4827.
+  of them otherwise know nothing about. `useAccountOptions` retains one shared
+  connection-scoped collection for its key, so multiple pickers share the seed
+  and wire subscription. Disabled or hidden pickers do not start a catalog
+  read. The account directory uses a separate ten-row browse query; the complete
+  account-choice catalog is requested only by editors that need valid options.
 
 - **THE PEOPLE BAND IS FIRST, AND IT COUNTS PEOPLE RATHER THAN ROWS** (epic
   memql#5167). It is the band the other five are about: the people are who the
@@ -1398,10 +1464,10 @@ rules rather than repetitions of the five before it.
   refuses `domain_not_verified` and a checkbox that can only fail is one
   somebody has to read past; and nothing anywhere has a Check-now button,
   because the reconciler walks on its own schedule and a button could only lie
-  about DNS propagating. `domainLastCheckedAt` is written on EVERY pass, so it
-  is out of the arrival fingerprint -- while `domainStatus` and `joinOnDomain`
-  are in it, because a domain that became proven is what a person would call a
-  change.
+  about DNS propagating. `domainLastCheckedAt` moves on a timer (an unchanged
+  failure is restamped every thirty minutes), so it is out of the arrival
+  fingerprint -- while `domainStatus` and `joinOnDomain` are in it, because a
+  domain that became proven is what a person would call a change.
 
 - **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
   deployables require one organization. The first ownership form requires the
@@ -1729,6 +1795,16 @@ on screen. Unknown or unreadable facts never promise an editor draft. The
 engine's copy tests hold file types, blank formats, packages and filed names to
 the OS model.
 
+Materialized, Templates and Recipes use ten-row server-filtered directories.
+The composition page independently reads its record by ID and batches status
+reads for unfinished visible/selected runs. Provenance sources and model
+contributions remain in these composition metadata rows; execution input
+snapshots remain separately authorized. Template and recipe pickers load their
+complete catalogs only when an editor needs them. `test/materializer/feeds.test.tsx`
+checks paging, older-record search, reopen retention and batched run lookups;
+`component/memql/compose_browse_db_test.go` checks real DSL pagination, archive
+filtering, writer isolation, cluster-owner access and response bounds.
+
 ### Making and the file's page
 
 Starting keeps the wizard in view. File becomes its current step; the status
@@ -2054,13 +2130,13 @@ commerce cut is recorded in
 
 ## Nexus, the tenth app (the work spine, sub-projects A and B)
 
-The shared run feed pages through `workRunSummariesForOwner` and re-reads
-every live event through `workRunSummaryForOwner`. Keep captured inputs,
-compiled workflows and document outputs out of this retained navigation
-collection: full run history can exceed the browser transport ceiling. The
-summary preserves task titles, conversation scope and recovery controls;
-execution receipts are loaded only for the open run. Full run reads remain
-available to replay and other consumers.
+The Goals, Runs, Approvals and Automations directories use ten-row browse
+queries with server search and retained page depth. Goal/run/approval detail
+reads are independent of their directory; scoped batched joins retrieve the
+status and relationship evidence needed by visible rows. Keep captured inputs,
+compiled workflows and document outputs out of retained navigation summaries.
+Execution receipts load for the open run; complete run reads remain available
+to replay and other authorized consumers.
 
 `src/apps/nexus/` is the goal surface: what a person asked the system to do,
 drawn as a place the work arrives at, plus the runs that carry it out, the
@@ -2440,18 +2516,16 @@ Four things about it are new rules rather than repetitions.
   server publishes no shape, so it has its own state instead of collapsing
   into an empty list.
 
-- **ARRIVALS ARE COUNTED, NEVER SPLICED, and that is why this list is not
-  `LiveList`.** `browseConceptPage` walks `createdAt asc` with a cursor
-  bound to that ordering, so a row created while somebody reads belongs
-  AFTER pages the walk has not reached -- splicing it draws it among rows it
-  does not belong between, and the next page fetches it again. `LiveList`
-  takes a `LiveCollection`, whose model is one authoritative fold that
-  events are applied INTO; a paged walk is not one, and dressing it as one
-  puts the arrival ring on a row whose position is wrong. So new rows land
-  in a band with a reload. An id-only event (`payloadOmitted`, the `granted`
-  tier's fan-out) is re-read through the ordinary authorized path and a
-  refusal DROPS it -- counting those blind would tell somebody "4 new rows"
-  about rows they may not read.
+- **CONCEPT ROW ARRIVALS USE AN EXPLICIT CHANGE BAND.** Concept browsing uses
+  ten newest-first rows and retains loaded pages for the session. Search covers
+  registered public text/enum fields through the ordinary authorized engine
+  query plan; secret fields are excluded. Its cursor binds the concept, search
+  and field selection. Events do not insert rows into the inspected page:
+  changes appear in a band and Reload refreshes the retained page window.
+  Id-only events are reread through the authorized by-id path before counting,
+  so the band never claims a new row the person cannot read. A disconnected
+  walk retains inspected rows and says it is reconnecting; it cannot claim an
+  unread concept is empty or a partial sample is exhaustive.
 
 - **A CONCEPT WITH NO `@displayCard` GETS ITS ID, NOT A GUESS.** The
   tempting fallback -- `name`, then `title`, then `label` -- is a guess that
@@ -2595,6 +2669,18 @@ release catalog” records the signed publication evidence after confirmation. I
 completion comes from a fresh candidate read, including recovery from a lost reply.
 Unavailable catalog metadata does not hide candidate history or imply an absent
 record. Installation is a separate choice; publication alone does not update it.
+A sealed release does not re-resolve current publication targets when reopened
+after an engine upgrade. Its installation handoff carries the exact candidate,
+catalog digest and display label through the Cluster app intent; receiving native
+authority remains mandatory.
+
+Repository change requests support GitHub's explicit owner-push policy. A prepared
+branch has an exact diff link and a separate confirmation before `main` moves.
+The UI offers this only with fresh own-source authority and a fresh saved proposal.
+The server independently checks ownership, policy, revocation and the exact commit.
+Installation proposals use the same separate confirmation when operator configuration
+selects `landingMode: "owner_push"`. A landed pin becomes a reviewed installation
+choice; it does not apply a plan. Reconnecting and status refreshes never land changes.
 
 ### Mesh (epic memql#5338)
 

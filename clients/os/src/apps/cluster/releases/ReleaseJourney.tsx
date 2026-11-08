@@ -15,7 +15,7 @@ import { useReleaseRead } from "./useReleaseRead";
 export interface ReleaseNavigation {
   onOpenRun?: (runId: string) => void;
   onOpenRepository?: (packageId: string) => void;
-  onUpdates?: () => void;
+  onUpdates?: (release: { candidateId: string; catalogDigest: string; label: string }) => void;
 }
 interface Props extends ReleaseNavigation {
   intentId: string; query: ReleaseQueries | null; connected: boolean; visible: boolean;
@@ -34,7 +34,12 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
   const build = intent.value;
   const candidateId = build?.candidateId ?? "";
   const candidate = useReleaseRead(`journey-candidate:${candidateId}`, available && candidateId ? async signal => readCandidate(await query.releaseGetCandidate({ candidateId }, { signal }), candidateId) : null, visible, query);
-  const targets = useReleaseRead(`journey-targets:${candidateId}`, available && candidateId ? async signal => readTargets(await query.releaseCandidateTargets({ candidateId }, { signal }), candidateId) : null, visible, query);
+  // Publication authority is checked against the current engine and profile.
+  // A sealed release is history: upgrading that engine must not make its signed
+  // result or installation handoff depend on permission to publish it again.
+  // Unpublished candidates still require fresh targets before either write.
+  const published = build?.phase === "published" && build.catalog.state === "sealed";
+  const targets = useReleaseRead(`journey-targets:${candidateId}`, available && candidateId && !published ? async signal => readTargets(await query.releaseCandidateTargets({ candidateId }, { signal }), candidateId) : null, visible, query);
   const pipeline = useReleaseRead(`journey-pipeline:${build?.pipelineId ?? ""}`, available && build ? async signal => {
     const result = await query.pipelineForOwner({ pipelineId: build.pipelineId }, { signal });
     return result.rows().map(pipelineFromRow).find(row => row.id === build.pipelineId && row.repository === build.repository) ?? null;
@@ -90,7 +95,7 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
     { id: "source", name: "Source", sentence: "Check the reviewed source", answer: build?.repository, state: state("source"), body: build ? <SourceDetails build={build} /> : null },
     { id: "version", name: "Version", sentence: "Confirm the release version", answer: build?.version || undefined, state: state("version"), body: build ? <>
       <Facts><Fact label="Version" value={build.version || "Unavailable"} /><Fact label="Tag" value={build.tag || "Unavailable"} copyValue={build.tag || undefined} /></Facts>
-      {build.reasonCode === "version_prepare_required" ? <Caption>Prepare a normal version change in this repository, have it reviewed and merged, then check the new source in a new release request. The existing tag will not be moved.</Caption> : <Caption>Starting the build creates or verifies the tag at this source revision and runs the full release checks. It does not approve, publish or install a release.</Caption>}
+      {build.reasonCode === "version_prepare_required" ? <Caption>Prepare a version change in this repository, land it on the default branch and wait for its checks to pass, then check the new source. The existing tag will not be moved.</Caption> : <Caption>Starting the build creates or verifies the tag at this source revision and runs the full release checks. It does not approve, publish or install a release.</Caption>}
       <References build={build} />
     </> : null },
     { id: "build", name: "Build", sentence: "Build and verify artifacts", state: state("build"), body: build ? <>
@@ -115,7 +120,7 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
   const acts: Act[] = [{ label: sealed ? "Done" : "Leave", text: !busy, onAct: back }];
   let consequence: string | undefined;
   if (!busy) {
-    if (!intent.fresh || intent.error || candidate.error || targets.error || error) acts.push({ label: "Read status again", onAct: checkAgain });
+    if (!intent.fresh || intent.error || candidate.error || (!published && targets.error) || error) acts.push({ label: "Read status again", onAct: checkAgain });
     else if (open === "version" && allowed("start")) {
       consequence = confirmation === "start" ? `Create or verify ${build!.tag} at the reviewed source and start its full build. Publication and installation remain separate.` : undefined;
       acts.push({ label: "Start release build", tone: "primary", onAct: () => confirmation === "start" ? void act("start") : confirm("start") });
@@ -127,14 +132,14 @@ export function ReleaseJourney({ intentId, query, connected, visible, runs = [],
     } else if (open === "publish" && allowed("publish") && reviewed && candidate.value?.state === "approved" && candidate.value.approvalId === build!.approvalId) {
       consequence = confirmation === "publish" ? "Publish the approved artifacts, make file releases public and sign their catalog evidence. No installation will change." : undefined;
       acts.push({ label: "Publish release", tone: "primary", onAct: () => confirmation === "publish" ? void act("publish") : confirm("publish") });
-    } else if (sealed && onUpdates) acts.push({ label: "Review installation choices", tone: "primary", onAct: onUpdates });
+    } else if (sealed && onUpdates) acts.push({ label: "Review installation choices", tone: "primary", onAct: () => onUpdates({ candidateId: build!.candidateId!, catalogDigest: build!.catalog.digest!, label: buildTitle(build!) }) });
     else if (open === "version" && build?.reasonCode === "version_prepare_required" && pipeline.fresh && pipeline.value?.packageId && onOpenRepository) acts.push({ label: "Open repository", onAct: () => onOpenRepository(pipeline.value!.packageId) });
     else if (open === "build" && build?.pipelineRunId && onOpenRun) acts.push({ label: "Open build details", onAct: () => onOpenRun(build.pipelineRunId) });
     if (confirmation) acts[0] = { label: "Cancel", text: true, onAct: () => confirm(null) };
   }
   return <Wizard icon={<PackageCheck size={26} />} title="Cut release" label="Cut release steps" dividers="none" back={{ label: "Releases", onSelect: back }} steps={steps} open={open} onOpen={id => { setStep(id as JourneyStep); confirm(null); }} acts={acts}
     status={{ word: busy ? busy === "approve" ? "Recording approval" : busy === "publish" ? "Publishing release" : busy === "start" ? "Starting release build" : "Checking interrupted release" : !available ? "Disconnected" : !intent.fresh ? "Release status unavailable" : build ? sealed ? "In release catalog" : buildWord(build) : "Release unavailable", detail: consequence, tone: busy || (intent.fresh && build && ["tagging", "building", "publishing"].includes(build.phase)) ? "busy" : "none" }}
-    notices={<>{!available ? <Notice sentence="Disconnected. The saved release is kept; no action is repeated on reconnect." /> : null}{!build && available && !intent.error ? <ContentSkeleton label="Reading release progress" /> : null}{intent.error || candidate.error || targets.error ? <Notice tone="error" sentence={intent.error || candidate.error || targets.error} /> : null}{build?.reason ? <Notice tone={build.phase === "blocked" || build.phase === "uncertain" ? "warn" : "info"} sentence={build.reason} /> : null}{candidate.value && !exactCandidate ? <Notice tone="error" sentence="The release candidate does not match this request’s source and version." /> : null}{error ? <Notice tone="error" sentence={error} next="The request may have completed. Read its status before trying again." /> : null}</>}
+    notices={<>{!available ? <Notice sentence="Disconnected. The saved release is kept; no action is repeated on reconnect." /> : null}{!build && available && !intent.error ? <ContentSkeleton label="Reading release progress" /> : null}{intent.error || candidate.error || (!published && targets.error) ? <Notice tone="error" sentence={intent.error || candidate.error || targets.error} /> : null}{build?.reason ? <Notice tone={build.phase === "blocked" || build.phase === "uncertain" ? "warn" : "info"} sentence={build.reason} /> : null}{candidate.value && !exactCandidate ? <Notice tone="error" sentence="The release candidate does not match this request’s source and version." /> : null}{error ? <Notice tone="error" sentence={error} next="The request may have completed. Read its status before trying again." /> : null}</>}
   />;
 }
 

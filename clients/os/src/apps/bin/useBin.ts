@@ -1,76 +1,51 @@
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
-
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useSession } from "../../chrome/access";
+import { flatten } from "../../kit/rows";
+import { useLiveCollection, usePagedCollection } from "../../live/useLiveCollection";
 import { ARTIFACT_CONCEPT, FOLDER_CONCEPT } from "../files/concepts";
+import { artifactFromRow, folderFromRow, isContentKind } from "../files/rows";
 
-// The Bin's feeds: the caller's archived index rows and archived folders.
-//
-// ===========================================================================
-// TWO DEDICATED READS, WHERE FILES FOLDS ONE WHOLE POPULATION
-// ===========================================================================
-// The Files browse seeds from `libraryArtifactsByLens(lens: "artifact")` --
-// which deliberately carries no archive conjunct -- because its show-archived
-// TOGGLE has to answer from a set that does not depend on when you looked. The
-// reasoning inverts here. The Bin IS the archived set; nothing in this window
-// ever shows anything else, and seeding it from the whole Library would pull
-// every row somebody owns in order to render the few they threw away.
-//
-// The feed is still LIVE, because a subscription is scoped by CONCEPT rather
-// than by query: an archive somewhere else arrives as an update on
-// v1:library:artifact, the fold admits it, and the row rises in the Bin at the
-// moment it leaves Files. `component/node/routing.go` broadcasts created and
-// updated for artifact, file and folder alike, so all of that works with no
-// engine change.
-//
-// ===========================================================================
-// A THIRD FEED, AND IT IS NOT A VIOLATION OF THE ONE-FEED RULE
-// ===========================================================================
-// The rule the Deployables app states is per CONCEPT, not per app: what must
-// never happen is two subscriptions over the SAME concept, free to disagree
-// about what the cluster holds. Two concepts cannot disagree, because they
-// describe different things.
-//
-// The Bin does NOT retain a feed over v1:library:file. A file row is read on
-// DEMAND when somebody selects an item, because its size, its origin path and
-// its link state are detail-panel facts and keeping every archived file's row
-// live would subscribe this window to the analysis churn of the whole Library
-// to render one panel.
-
-export interface BinFeeds {
-  artifacts: LiveCollectionHandle<Row>;
-  folders: LiveCollectionHandle<Row>;
-}
-
-export function useBinFeeds(): BinFeeds {
-  const artifacts = useLiveCollection<Row>("bin:artifacts", (connection) => ({
+/** The archive reads only searched ten-row pages. Folder names are a separate
+ * structural directory so "was filed in" stays accurate beyond loaded pages. */
+export function useBinFeeds(search = "", enabled = true) {
+  const viewer = useSession().access?.userId ?? "";
+  const needle = search.trim();
+  const key = JSON.stringify(needle);
+  const artifacts = usePagedCollection<Row>(enabled ? `bin:artifacts:${key}` : null, connection => ({
     concept: ARTIFACT_CONCEPT,
     seed: async (cursor, signal) => {
-      const result = await connection.query.libraryArchivedArtifacts(
-        {},
-        { signal, ...(cursor !== "" ? { cursor } : {}) },
-      );
+      const result = await connection.query.libraryArtifactsBrowse({ archived: true, search: needle || undefined }, { signal, ...(cursor ? { cursor } : {}) });
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, ARTIFACT_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
+    reread: async (id, signal) => await getRowByConceptAndId(connection.query, ARTIFACT_CONCEPT, id, { signal }) as Row | null,
+    comparePageRows: (a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(b["id"]).localeCompare(String(a["id"])),
+    inScope: raw => {
+      const row = artifactFromRow(raw);
+      return row.ownerUserId === viewer && row.archived && isContentKind(row.kind) && (!needle || [row.title, row.summary, row.id, row.producedByWorkerName, ...row.labels].some(value => value.toLowerCase().includes(needle.toLowerCase())));
     },
   }));
-
-  const folders = useLiveCollection<Row>("bin:folders", (connection) => ({
+  const folders = usePagedCollection<Row>(enabled ? `bin:folders:${key}` : null, connection => ({
     concept: FOLDER_CONCEPT,
     seed: async (cursor, signal) => {
-      const result = await connection.query.libraryArchivedFolders(
-        {},
-        { signal, ...(cursor !== "" ? { cursor } : {}) },
-      );
+      const result = await connection.query.libraryArchivedFoldersBrowse({ search: needle || undefined }, { signal, ...(cursor ? { cursor } : {}) });
       return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, FOLDER_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
+    reread: async (id, signal) => await getRowByConceptAndId(connection.query, FOLDER_CONCEPT, id, { signal }) as Row | null,
+    comparePageRows: (a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(b["id"]).localeCompare(String(a["id"])),
+    inScope: raw => {
+      const row = folderFromRow(raw);
+      return rowString(flatten(raw), "ownerUserId") === viewer && row.archived && !row.deleted && (!needle || row.name.toLowerCase().includes(needle.toLowerCase()));
     },
   }));
-
-  return { artifacts, folders };
+  const names = useLiveCollection<Row>(enabled ? "bin:folder-names" : null, connection => ({
+    concept: FOLDER_CONCEPT,
+    seed: async (cursor, signal) => {
+      const result = await connection.query.libraryArchivedFolders({}, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (id, signal) => await getRowByConceptAndId(connection.query, FOLDER_CONCEPT, id, { signal }) as Row | null,
+    comparePageRows: (a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(b["id"]).localeCompare(String(a["id"])),
+    inScope: raw => { const row = folderFromRow(raw); return rowString(flatten(raw), "ownerUserId") === viewer && row.archived && !row.deleted; },
+  }));
+  return { artifacts, folders, names };
 }

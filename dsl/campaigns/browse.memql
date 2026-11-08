@@ -1,0 +1,97 @@
+use common.traits.{ isNotArchived }
+
+// OS directories search the authorized resource set before a ten-row page.
+// The original queries remain complete cursor-walk sources for editors,
+// pickers and execution. Organization/legacy ownership gates remain the
+// engine's concept-bound gates, exactly as in queries.memql.
+
+/// Recent campaigns, narrowed before pagination. audienceIds comes from the
+/// authorized audience-name search so campaign search retains that relation.
+@actor
+query campaign campaignsBrowse {
+  args {
+    search string
+    status string
+    audienceIds []string
+  }
+  filter row => (row.testSourceCampaignId == nil || row.testSourceCampaignId == "")
+             && (args.status == nil || args.status == "" || (args.status == "progress" && row.status != "sent" && row.status != "cancelled" && row.status != "failed") || row.status == args.status)
+             && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.fromName.includes(trim(args.search), true) || row.replyTo.includes(trim(args.search), true) || (args.audienceIds != nil && row.audienceId in args.audienceIds))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape campaignFull
+}
+
+/// Authorized audience identities matching a campaign-search phrase.
+@actor
+query audience audienceNamesMatching {
+  args { search string! }
+  filter row => row.name.includes(trim(args.search), true)
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 200
+  shape audienceIdentity
+}
+
+/// Recent audiences with name, description, archive and confirmation search.
+@actor
+query audience audiencesBrowse {
+  args { search string
+    includeArchived bool
+    confirmation string }
+  filter row => (args.includeArchived == true || isNotArchived(row))
+             && (args.confirmation == nil || args.confirmation == "" || row.confirmation == args.confirmation)
+             && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.description.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape audienceFull
+}
+
+/// Recent template summaries; bodies and documents are still read by id.
+@actor
+query template templatesBrowse {
+  args { search string
+    includeArchived bool
+    accountId string
+    status string }
+  filter row => (args.includeArchived == true || isNotArchived(row))
+             && (args.accountId == nil || args.accountId == "" || row.accountId == args.accountId)
+             && (args.status == nil || args.status == "" || row.status == args.status)
+             && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.subject.includes(trim(args.search), true) || row.preheader.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape templateSummary
+}
+
+/// Recent journeys, one ordered input to the Email automation directory.
+@actor
+query journey journeysBrowse {
+  args { search string
+    includeArchived bool
+    trigger string }
+  filter row => (args.includeArchived == true || isNotArchived(row))
+             && (args.trigger == nil || args.trigger == "" || row.trigger.kind == args.trigger)
+             && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape journeyFull
+}
+
+/// Recent event rules, the other ordered automation-directory input.
+@actor
+query emailRule emailRulesBrowse {
+  args { search string
+    trigger string }
+  filter row => (args.trigger == nil || args.trigger == "" || args.trigger == "event")
+             && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.triggerConcept.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+  shape emailRuleFull
+}
+
+/// Names and ids only; no roster or subscriber payloads travel with search.
+@row
+shape audience audienceIdentity {
+  row.id
+  row.createdAt
+  name
+}

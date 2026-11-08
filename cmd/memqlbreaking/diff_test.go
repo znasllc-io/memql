@@ -88,6 +88,66 @@ func TestAnnotationKeywordWideningKeepsExistingContracts(t *testing.T) {
 	}
 }
 
+func TestFunctionTrailingOptionalParametersKeepExistingContracts(t *testing.T) {
+	const original = "string.includes(sub string) bool [P]"
+	for _, tc := range []struct {
+		name, old, now string
+		compatible     bool
+	}{
+		{"optional flag", original, "string.includes(sub string, ignoreCase? bool) bool [P]", true},
+		{"several optional parameters", original, "string.includes(sub string, ignoreCase? bool, locale? string) bool [P]", true},
+		{"existing optional suffix", "lookup(key string, scope? string) any [M]", "lookup(key string, scope? string, limit? number) any [M]", true},
+		{"empty original parameter list", "clock() datetime [M]", "clock(zone? string) datetime [M]", true},
+		{"required addition", original, "string.includes(sub string, ignoreCase bool) bool [P]", false},
+		{"required after optional", original, "string.includes(sub string, ignoreCase? bool, locale string) bool [P]", false},
+		{"inserted optional parameter", original, "string.includes(ignoreCase? bool, sub string) bool [P]", false},
+		{"removed parameter", original, "string.includes() bool [P]", false},
+		{"changed existing type", original, "string.includes(sub number, ignoreCase? bool) bool [P]", false},
+		{"changed existing name", original, "string.includes(needle string, ignoreCase? bool) bool [P]", false},
+		{"changed existing optionality", original, "string.includes(sub? string, ignoreCase? bool) bool [P]", false},
+		{"required formerly optional", "lookup(key string, scope? string) any [M]", "lookup(key string, scope string, limit? number) any [M]", false},
+		{"changed return", original, "string.includes(sub string, ignoreCase? bool) number [P]", false},
+		{"changed tier", original, "string.includes(sub string, ignoreCase? bool) bool [M]", false},
+		{"changed receiver", original, "list.includes(sub string, ignoreCase? bool) bool [P]", false},
+		{"changed function name", original, "string.matches(sub string, ignoreCase? bool) bool [P]", false},
+		{"duplicate parameter name", original, "string.includes(sub string, sub? bool) bool [P]", false},
+		{"new variadic", original, "string.includes(sub string, flags? ...bool) bool [P]", false},
+		{"existing variadic", "join(parts ...string) string [M]", "join(parts ...string, separator? string) string [M]", false},
+		{"existing positional overload", "references(label? string, pred lambda) rows [P]", "references(label? string, pred lambda, limit? number) rows [P]", false},
+		{"parameter reordered", "pair(first string, second bool) any [M]", "pair(second bool, first string, flag? bool) any [M]", false},
+		{"missing tier", "string.includes(sub string) bool", "string.includes(sub string, flag? bool) bool", false},
+		{"unrecognized syntax", original, "string.includes(sub string, flag? bool) bool [P] altered", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := Surface{Functions: map[string]Item{"function": {Name: "function", Form: tc.old}}}
+			now := Surface{Functions: map[string]Item{"function": {Name: "function", Form: tc.now}}}
+			fs := Diff(old, now, Reservations{})
+			if tc.compatible && len(fs) != 0 {
+				t.Fatalf("compatible extension reported a break: %+v", fs)
+			}
+			if !tc.compatible && (len(fs) != 1 || fs[0].Category != CategoryMeaning) {
+				t.Fatalf("incompatible contract did not remain a meaning break: %+v", fs)
+			}
+		})
+	}
+}
+
+func TestCapturedIncludesOptionalFlagWidensTheCommittedContract(t *testing.T) {
+	old := Surface{Functions: map[string]Item{"string.includes": {Name: "string.includes", Form: "string.includes(sub string) bool [P]"}}}
+	now := Surface{Functions: captureFunctions()}
+	if fs := Diff(old, now, Reservations{}); len(fs) != 0 {
+		t.Fatalf("the catalog's optional flag must preserve existing calls: %+v", fs)
+	}
+	// An annotation or construct that merely looks like a function signature
+	// cannot use this compatibility rule to bypass its own contract checks.
+	for _, kind := range []string{"annotation", "construct"} {
+		fs := diffOneItem(kind, old.Functions["string.includes"], now.Functions["string.includes"])
+		if len(fs) != 1 || fs[0].Category != CategoryMeaning {
+			t.Fatalf("function widening escaped its bucket for %s: %+v", kind, fs)
+		}
+	}
+}
+
 // An ADDITION is never a finding. memqlbreaking reports BREAKS; a command that
 // reports every change is a command whose output nobody reads, and the one
 // signal that matters drowns.

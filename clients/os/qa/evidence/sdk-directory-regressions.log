@@ -1,0 +1,2894 @@
+
+> @znasllc-io/memql-sdk-core@0.9.0 test
+> tsc -p tsconfig.test.json && node --test dist-test/test/*.js
+
+TAP version 13
+# Subtest: access review carries the decision and preserves delivery failures and server refusals
+ok 1 - access review carries the decision and preserves delivery failures and server refusals
+  ---
+  duration_ms: 3.643375
+  type: 'test'
+  ...
+# Subtest: aiChat -- one-shot round trip resolves with assistant message
+ok 2 - aiChat -- one-shot round trip resolves with assistant message
+  ---
+  duration_ms: 1.586333
+  type: 'test'
+  ...
+# Subtest: aiChat -- throws on QueryError reply
+ok 3 - aiChat -- throws on QueryError reply
+  ---
+  duration_ms: 0.272583
+  type: 'test'
+  ...
+# Subtest: chat modes carry an optional selected-machine pin verbatim
+ok 4 - chat modes carry an optional selected-machine pin verbatim
+  ---
+  duration_ms: 0.348292
+  type: 'test'
+  ...
+# Subtest: chat modes carry an optional level beside the provider, omitted when empty
+ok 5 - chat modes carry an optional level beside the provider, omitted when empty
+  ---
+  duration_ms: 0.312834
+  type: 'test'
+  ...
+# Subtest: chat modes carry attached artifact ids, omitted when there are none
+ok 6 - chat modes carry attached artifact ids, omitted when there are none
+  ---
+  duration_ms: 3.064042
+  type: 'test'
+  ...
+# Subtest: aiChat -- rejects empty messages array
+ok 7 - aiChat -- rejects empty messages array
+  ---
+  duration_ms: 0.245375
+  type: 'test'
+  ...
+# Subtest: aiChat -- propagates AbortSignal
+ok 8 - aiChat -- propagates AbortSignal
+  ---
+  duration_ms: 0.731916
+  type: 'test'
+  ...
+# Subtest: aiChatStream -- chunks land in deltas iterator, final result resolves
+ok 9 - aiChatStream -- chunks land in deltas iterator, final result resolves
+  ---
+  duration_ms: 0.493625
+  type: 'test'
+  ...
+# Subtest: aiChatStream -- queryError surfaces on result + iterator
+ok 10 - aiChatStream -- queryError surfaces on result + iterator
+  ---
+  duration_ms: 0.251041
+  type: 'test'
+  ...
+# Subtest: aiSuggest -- forwards domain + payload, returns structured result
+ok 11 - aiSuggest -- forwards domain + payload, returns structured result
+  ---
+  duration_ms: 0.347416
+  type: 'test'
+  ...
+# Subtest: aiSuggest -- rejects empty domain
+ok 12 - aiSuggest -- rejects empty domain
+  ---
+  duration_ms: 0.071584
+  type: 'test'
+  ...
+# Subtest: validateBundle -- rides authoringValidateBundle with the sources verbatim
+ok 13 - validateBundle -- rides authoringValidateBundle with the sources verbatim
+  ---
+  duration_ms: 1.655042
+  type: 'test'
+  ...
+# Subtest: sessionDefineBundle -- rides its OWN envelope field, not validate's
+ok 14 - sessionDefineBundle -- rides its OWN envelope field, not validate's
+  ---
+  duration_ms: 1.84825
+  type: 'test'
+  ...
+# Subtest: validateBundle -- absent numeric position fields decode to 0, not undefined
+ok 15 - validateBundle -- absent numeric position fields decode to 0, not undefined
+  ---
+  duration_ms: 0.931834
+  type: 'test'
+  ...
+# Subtest: validateBundle -- stringified int32 positions decode to numbers
+ok 16 - validateBundle -- stringified int32 positions decode to numbers
+  ---
+  duration_ms: 0.230834
+  type: 'test'
+  ...
+# Subtest: validateBundle -- the rule code decodes, and is the empty string when absent
+ok 17 - validateBundle -- the rule code decodes, and is the empty string when absent
+  ---
+  duration_ms: 0.292375
+  type: 'test'
+  ...
+# Subtest: validateBundle -- ok=true with no diagnostics array yields an empty list
+ok 18 - validateBundle -- ok=true with no diagnostics array yields an empty list
+  ---
+  duration_ms: 0.680791
+  type: 'test'
+  ...
+# Subtest: sessionDefineBundle -- decodes defined constructs and the bundle-level error
+ok 19 - sessionDefineBundle -- decodes defined constructs and the bundle-level error
+  ---
+  duration_ms: 0.286625
+  type: 'test'
+  ...
+# Subtest: sessionDefineBundle -- a successful define reports error as the empty string
+ok 20 - sessionDefineBundle -- a successful define reports error as the empty string
+  ---
+  duration_ms: 0.172541
+  type: 'test'
+  ...
+# Subtest: validateBundle -- a queryError reply throws with the engine message
+ok 21 - validateBundle -- a queryError reply throws with the engine message
+  ---
+  duration_ms: 0.704625
+  type: 'test'
+  ...
+# Subtest: sessionDefineBundle -- an unrelated reply envelope throws rather than resolving empty
+ok 22 - sessionDefineBundle -- an unrelated reply envelope throws rather than resolving empty
+  ---
+  duration_ms: 0.327
+  type: 'test'
+  ...
+# Subtest: AuthoringClient -- refuses construction without a dispatcher
+ok 23 - AuthoringClient -- refuses construction without a dispatcher
+  ---
+  duration_ms: 0.12925
+  type: 'test'
+  ...
+# Subtest: failedDiagnostics -- a skipped construct is not a failure
+ok 24 - failedDiagnostics -- a skipped construct is not a failure
+  ---
+  duration_ms: 0.056916
+  type: 'test'
+  ...
+# Subtest: failedDiagnostics -- an all-clean set yields nothing
+ok 25 - failedDiagnostics -- an all-clean set yields nothing
+  ---
+  duration_ms: 0.037125
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- rides durablePromoteBundle with the sources verbatim
+ok 26 - durablePromoteBundle -- rides durablePromoteBundle with the sources verbatim
+  ---
+  duration_ms: 0.098167
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- an ordinary promote carries NO allowBreaking field
+ok 27 - durablePromoteBundle -- an ordinary promote carries NO allowBreaking field
+  ---
+  duration_ms: 0.098334
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- allowBreaking:false stays off the wire; true puts it on
+ok 28 - durablePromoteBundle -- allowBreaking:false stays off the wire; true puts it on
+  ---
+  duration_ms: 0.064292
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- rides its OWN envelope field, not promote's
+ok 29 - durableDemoteBundle -- rides its OWN envelope field, not promote's
+  ---
+  duration_ms: 0.072417
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- a refusal resolves with the diff rather than throwing
+ok 30 - durablePromoteBundle -- a refusal resolves with the diff rather than throwing
+  ---
+  duration_ms: 0.123209
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- an uncounted change decodes rowCountKnown=false with rowsAffected 0
+ok 31 - durablePromoteBundle -- an uncounted change decodes rowCountKnown=false with rowsAffected 0
+  ---
+  duration_ms: 0.055291
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- an overridden breaking change lands with the diff still attached
+ok 32 - durablePromoteBundle -- an overridden breaking change lands with the diff still attached
+  ---
+  duration_ms: 0.099959
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- a first promote yields an empty diff list and an empty error
+ok 33 - durablePromoteBundle -- a first promote yields an empty diff list and an empty error
+  ---
+  duration_ms: 0.0535
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- decodes retire and remove as distinct outcomes
+ok 34 - durableDemoteBundle -- decodes retire and remove as distinct outcomes
+  ---
+  duration_ms: 0.077292
+  type: 'test'
+  ...
+# Subtest: DemoteOutcomeRetired / DemoteOutcomeRemoved -- match the engine vocabulary
+ok 35 - DemoteOutcomeRetired / DemoteOutcomeRemoved -- match the engine vocabulary
+  ---
+  duration_ms: 0.025959
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- a non-concept outcome carries no concept id and no rows
+ok 36 - durableDemoteBundle -- a non-concept outcome carries no concept id and no rows
+  ---
+  duration_ms: 0.05825
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- an outcome value this build does not know passes through verbatim
+ok 37 - durableDemoteBundle -- an outcome value this build does not know passes through verbatim
+  ---
+  duration_ms: 0.039334
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- a rejection reports the error with nothing demoted
+ok 38 - durableDemoteBundle -- a rejection reports the error with nothing demoted
+  ---
+  duration_ms: 0.0435
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- a successful demote reports error as the empty string
+ok 39 - durableDemoteBundle -- a successful demote reports error as the empty string
+  ---
+  duration_ms: 0.036166
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- the owner-only refusal surfaces the engine's message
+ok 40 - durablePromoteBundle -- the owner-only refusal surfaces the engine's message
+  ---
+  duration_ms: 0.0965
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- the owner-only refusal surfaces the engine's message
+ok 41 - durableDemoteBundle -- the owner-only refusal surfaces the engine's message
+  ---
+  duration_ms: 0.046041
+  type: 'test'
+  ...
+# Subtest: durablePromoteBundle -- an unrelated reply envelope throws rather than resolving empty
+ok 42 - durablePromoteBundle -- an unrelated reply envelope throws rather than resolving empty
+  ---
+  duration_ms: 0.398958
+  type: 'test'
+  ...
+# Subtest: durableDemoteBundle -- a promote reply is not accepted as a demote reply
+ok 43 - durableDemoteBundle -- a promote reply is not accepted as a demote reply
+  ---
+  duration_ms: 0.223417
+  type: 'test'
+  ...
+# Subtest: run sends a runAutomation envelope carrying every requested field
+ok 44 - run sends a runAutomation envelope carrying every requested field
+  ---
+  duration_ms: 1.890667
+  type: 'test'
+  ...
+# Subtest: a schedule-kind run omits payload entirely -- it fires with an EMPTY event
+ok 45 - a schedule-kind run omits payload entirely -- it fires with an EMPTY event
+  ---
+  duration_ms: 0.1615
+  type: 'test'
+  ...
+# Subtest: run rejects an empty automation name before touching the wire
+ok 46 - run rejects an empty automation name before touching the wire
+  ---
+  duration_ms: 0.191083
+  type: 'test'
+  ...
+# Subtest: run reassembles accepted -> steps -> complete and fires the hooks live
+ok 47 - run reassembles accepted -> steps -> complete and fires the hooks live
+  ---
+  duration_ms: 0.227666
+  type: 'test'
+  ...
+# Subtest: a run that STARTED and FAILED resolves with its trace -- it is an answer, not an error
+ok 48 - a run that STARTED and FAILED resolves with its trace -- it is an answer, not an error
+  ---
+  duration_ms: 0.184416
+  type: 'test'
+  ...
+# Subtest: a refused run throws an AutomationRunError carrying the gRPC code
+ok 49 - a refused run throws an AutomationRunError carrying the gRPC code
+  ---
+  duration_ms: 1.673125
+  type: 'test'
+  ...
+# Subtest: isPermissionDenied and isUnavailable classify a refusal without string-matching
+ok 50 - isPermissionDenied and isUnavailable classify a refusal without string-matching
+  ---
+  duration_ms: 0.189666
+  type: 'test'
+  ...
+# Subtest: an interceptor refusal arrives as a queryError and still settles the run
+ok 51 - an interceptor refusal arrives as a queryError and still settles the run
+  ---
+  duration_ms: 0.207083
+  type: 'test'
+  ...
+# Subtest: abort settles the run and releases the stream registration
+ok 52 - abort settles the run and releases the stream registration
+  ---
+  duration_ms: 0.659416
+  type: 'test'
+  ...
+# Subtest: run frames route through the real Dispatcher by request_id
+ok 53 - run frames route through the real Dispatcher by request_id
+  ---
+  duration_ms: 0.696042
+  type: 'test'
+  ...
+# Subtest: an interceptor refusal reaches the run through the REAL Dispatcher
+ok 54 - an interceptor refusal reaches the run through the REAL Dispatcher
+  ---
+  duration_ms: 0.13275
+  type: 'test'
+  ...
+# Subtest: AutomationRunError exposes the raw engine message alongside the formatted one
+ok 55 - AutomationRunError exposes the raw engine message alongside the formatted one
+  ---
+  duration_ms: 0.041042
+  type: 'test'
+  ...
+# Subtest: AutomationRunError -- an absent engine message is empty, never the (no message) sentinel
+ok 56 - AutomationRunError -- an absent engine message is empty, never the (no message) sentinel
+  ---
+  duration_ms: 0.042125
+  type: 'test'
+  ...
+# Subtest: AutomationRunError -- the raw message survives the streamed refusal path
+ok 57 - AutomationRunError -- the raw message survives the streamed refusal path
+  ---
+  duration_ms: 0.117792
+  type: 'test'
+  ...
+# Subtest: bareShortId strips a canonical node id to its short segment
+ok 58 - bareShortId strips a canonical node id to its short segment
+  ---
+  duration_ms: 0.57725
+  type: 'test'
+  ...
+# Subtest: bareShortId admits a namespace containing a slash (memql\#3898)
+ok 59 - bareShortId admits a namespace containing a slash (memql\#3898)
+  ---
+  duration_ms: 0.110083
+  type: 'test'
+  ...
+# Subtest: bareShortId is idempotent on an already-bare id
+ok 60 - bareShortId is idempotent on an already-bare id
+  ---
+  duration_ms: 1.971584
+  type: 'test'
+  ...
+# Subtest: bareShortId preserves a 3-segment concept TYPE, which names no row
+ok 61 - bareShortId preserves a 3-segment concept TYPE, which names no row
+  ---
+  duration_ms: 0.385208
+  type: 'test'
+  ...
+# Subtest: bareShortId returns anything it cannot decompose unchanged
+ok 62 - bareShortId returns anything it cannot decompose unchanged
+  ---
+  duration_ms: 0.244042
+  type: 'test'
+  ...
+# Subtest: bareShortId keeps a shortId that itself contains colons
+ok 63 - bareShortId keeps a shortId that itself contains colons
+  ---
+  duration_ms: 0.121417
+  type: 'test'
+  ...
+# Subtest: sameEntityId matches a canonical id against its bare form
+ok 64 - sameEntityId matches a canonical id against its bare form
+  ---
+  duration_ms: 0.297875
+  type: 'test'
+  ...
+# Subtest: sameEntityId matches identical ids in either shape
+ok 65 - sameEntityId matches identical ids in either shape
+  ---
+  duration_ms: 0.12425
+  type: 'test'
+  ...
+# Subtest: sameEntityId does not match different users
+ok 66 - sameEntityId does not match different users
+  ---
+  duration_ms: 0.347458
+  type: 'test'
+  ...
+# Subtest: sameEntityId refuses an empty id rather than matching
+ok 67 - sameEntityId refuses an empty id rather than matching
+  ---
+  duration_ms: 0.27275
+  type: 'test'
+  ...
+# Subtest: a call the bridge refused for overload settles with the bridge's sentence
+ok 68 - a call the bridge refused for overload settles with the bridge's sentence
+  ---
+  duration_ms: 4.385209
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: PreserveOrder with nanosecond stamps and reversed ID order
+ok 69 - rows() -- Go/TS parity: PreserveOrder with nanosecond stamps and reversed ID order
+  ---
+  duration_ms: 1.031167
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: single builtin reply with a zero timestamp
+ok 70 - rows() -- Go/TS parity: single builtin reply with a zero timestamp
+  ---
+  duration_ms: 0.134375
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: timestamps compare by instant including timezone offsets
+ok 71 - rows() -- Go/TS parity: timestamps compare by instant including timezone offsets
+  ---
+  duration_ms: 0.130834
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: equal instants retain the wire key order
+ok 72 - rows() -- Go/TS parity: equal instants retain the wire key order
+  ---
+  duration_ms: 0.054375
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: numeric object keys use JavaScript enumeration order on ties
+ok 73 - rows() -- Go/TS parity: numeric object keys use JavaScript enumeration order on ties
+  ---
+  duration_ms: 0.114625
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: missing and invalid timestamps match TypeScript placement
+ok 74 - rows() -- Go/TS parity: missing and invalid timestamps match TypeScript placement
+  ---
+  duration_ms: 0.045333
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: flattening uses payload fields over intrinsics
+ok 75 - rows() -- Go/TS parity: flattening uses payload fields over intrinsics
+  ---
+  duration_ms: 0.074625
+  type: 'test'
+  ...
+# Subtest: rows() -- Go/TS parity: flat rows and non-node objects stay intact alongside builtin maps
+ok 76 - rows() -- Go/TS parity: flat rows and non-node objects stay intact alongside builtin maps
+  ---
+  duration_ms: 0.132709
+  type: 'test'
+  ...
+# Subtest: rows() -- a builtin's id-keyed node map unwraps to one flattened row per node
+ok 77 - rows() -- a builtin's id-keyed node map unwraps to one flattened row per node
+  ---
+  duration_ms: 0.242084
+  type: 'test'
+  ...
+# Subtest: rows() -- the handler's order survives: createdAt descending at nanosecond precision
+ok 78 - rows() -- the handler's order survives: createdAt descending at nanosecond precision
+  ---
+  duration_ms: 0.271
+  type: 'test'
+  ...
+# Subtest: rows() -- a single reply node unwraps the same way
+ok 79 - rows() -- a single reply node unwraps the same way
+  ---
+  duration_ms: 0.098792
+  type: 'test'
+  ...
+# Subtest: rows() -- a flat data row (a logic's object-literal return) is left exactly as it was
+ok 80 - rows() -- a flat data row (a logic's object-literal return) is left exactly as it was
+  ---
+  duration_ms: 0.041625
+  type: 'test'
+  ...
+# Subtest: rows() -- an object whose values are not node envelopes is not mistaken for one
+ok 81 - rows() -- an object whose values are not node envelopes is not mistaken for one
+  ---
+  duration_ms: 0.03375
+  type: 'test'
+  ...
+# Subtest: rows() -- a nanosecond stamp trimmed by Go's RFC3339Nano still sorts by instant
+ok 82 - rows() -- a nanosecond stamp trimmed by Go's RFC3339Nano still sorts by instant
+  ---
+  duration_ms: 0.041875
+  type: 'test'
+  ...
+# Subtest: emits a sort+paginate query so the keyset window applies
+ok 83 - emits a sort+paginate query so the keyset window applies
+  ---
+  duration_ms: 1.530333
+  type: 'test'
+  ...
+# Subtest: honors an explicit page size
+ok 84 - honors an explicit page size
+  ---
+  duration_ms: 0.174167
+  type: 'test'
+  ...
+# Subtest: falls back to the default page size for a non-positive value
+ok 85 - falls back to the default page size for a non-positive value
+  ---
+  duration_ms: 0.077375
+  type: 'test'
+  ...
+# Subtest: forwards the continuation cursor
+ok 86 - forwards the continuation cursor
+  ---
+  duration_ms: 0.158375
+  type: 'test'
+  ...
+# Subtest: omits the cursor on a first page
+ok 87 - omits the cursor on a first page
+  ---
+  duration_ms: 0.062375
+  type: 'test'
+  ...
+# Subtest: preserves the full nested node shape rather than flattening
+ok 88 - preserves the full nested node shape rather than flattening
+  ---
+  duration_ms: 0.3265
+  type: 'test'
+  ...
+# Subtest: returns the next cursor when the engine mints one
+ok 89 - returns the next cursor when the engine mints one
+  ---
+  duration_ms: 0.104583
+  type: 'test'
+  ...
+# Subtest: returns an empty cursor when the set is exhausted
+ok 90 - returns an empty cursor when the set is exhausted
+  ---
+  duration_ms: 0.056042
+  type: 'test'
+  ...
+# Subtest: rejects an empty concept id
+ok 91 - rejects an empty concept id
+  ---
+  duration_ms: 0.41275
+  type: 'test'
+  ...
+# Subtest: getRowByConceptAndId queries by concept and id
+ok 92 - getRowByConceptAndId queries by concept and id
+  ---
+  duration_ms: 0.3815
+  type: 'test'
+  ...
+# Subtest: getRowByConceptAndId returns null when nothing matches
+ok 93 - getRowByConceptAndId returns null when nothing matches
+  ---
+  duration_ms: 0.123167
+  type: 'test'
+  ...
+# Subtest: getRowByConceptAndId preserves opaque IDs in live rereads
+ok 94 - getRowByConceptAndId preserves opaque IDs in live rereads
+  ---
+  duration_ms: 0.143084
+  type: 'test'
+  ...
+# Subtest: getRowByConceptAndId rejects a missing row id
+ok 95 - getRowByConceptAndId rejects a missing row id
+  ---
+  duration_ms: 0.058083
+  type: 'test'
+  ...
+# Subtest: browses only concept roots, excluding graph neighbors even when bare ids match
+ok 96 - browses only concept roots, excluding graph neighbors even when bare ids match
+  ---
+  duration_ms: 0.10325
+  type: 'test'
+  ...
+# Subtest: keeps root ordering when expansion encountered a later root first
+ok 97 - keeps root ordering when expansion encountered a later root first
+  ---
+  duration_ms: 0.09325
+  type: 'test'
+  ...
+# Subtest: an explicit empty root set yields no rows even if the bundle contains neighbors
+ok 98 - an explicit empty root set yields no rows even if the bundle contains neighbors
+  ---
+  duration_ms: 0.043834
+  type: 'test'
+  ...
+# Subtest: a bundle without root ids cannot make graph neighbors into concept rows
+ok 99 - a bundle without root ids cannot make graph neighbors into concept rows
+  ---
+  duration_ms: 0.042833
+  type: 'test'
+  ...
+# Subtest: server search preserves raw nodes and carries only its query-bound continuation
+ok 100 - server search preserves raw nodes and carries only its query-bound continuation
+  ---
+  duration_ms: 0.1225
+  type: 'test'
+  ...
+# Subtest: server search refuses malformed page envelopes instead of showing false emptiness
+ok 101 - server search refuses malformed page envelopes instead of showing false emptiness
+  ---
+  duration_ms: 0.200709
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire carries the declaration for all three states
+ok 102 - conceptsFromWire carries the declaration for all three states
+  ---
+  duration_ms: 0.677459
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire says nothing rather than guessing when the server predates the fields
+ok 103 - conceptsFromWire says nothing rather than guessing when the server predates the fields
+  ---
+  duration_ms: 0.071084
+  type: 'test'
+  ...
+# Subtest: sends a follow subscribe with a request id and follow=true
+ok 104 - sends a follow subscribe with a request id and follow=true
+  ---
+  duration_ms: 1.439083
+  type: 'test'
+  ...
+# Subtest: decodes the reset snapshot and incremental deltas, parsing the uint64 generation string
+ok 105 - decodes the reset snapshot and incremental deltas, parsing the uint64 generation string
+  ---
+  duration_ms: 0.492708
+  type: 'test'
+  ...
+# Subtest: a delta for another subscription's request id is never delivered here
+ok 106 - a delta for another subscription's request id is never delivered here
+  ---
+  duration_ms: 0.074458
+  type: 'test'
+  ...
+# Subtest: surfaces a queryError refusal through onError instead of hanging
+ok 107 - surfaces a queryError refusal through onError instead of hanging
+  ---
+  duration_ms: 0.106333
+  type: 'test'
+  ...
+# Subtest: unsubscribe removes the listener and sends UnsubscribeMsg for the snapshot's id
+ok 108 - unsubscribe removes the listener and sends UnsubscribeMsg for the snapshot's id
+  ---
+  duration_ms: 0.094334
+  type: 'test'
+  ...
+# Subtest: unsubscribe before the snapshot removes the listener and sends no UnsubscribeMsg
+ok 109 - unsubscribe before the snapshot removes the listener and sends no UnsubscribeMsg
+  ---
+  duration_ms: 0.055209
+  type: 'test'
+  ...
+# Subtest: an AbortSignal unsubscribes
+ok 110 - an AbortSignal unsubscribes
+  ---
+  duration_ms: 0.119583
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire carries fields with the authoring kind, requiredness and enum members
+ok 111 - conceptsFromWire carries fields with the authoring kind, requiredness and enum members
+  ---
+  duration_ms: 0.719333
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire keeps both relationship axes apart
+ok 112 - conceptsFromWire keeps both relationship axes apart
+  ---
+  duration_ms: 0.080292
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire says nothing rather than nothing-there when the server predates the fields
+ok 113 - conceptsFromWire says nothing rather than nothing-there when the server predates the fields
+  ---
+  duration_ms: 1.440208
+  type: 'test'
+  ...
+# Subtest: conceptsFromWire treats an empty published list the same as an absent one
+ok 114 - conceptsFromWire treats an empty published list the same as an absent one
+  ---
+  duration_ms: 0.104291
+  type: 'test'
+  ...
+# Subtest: Connection.dial -- bearer travels as subprotocol, never on the URL (\#2511)
+ok 115 - Connection.dial -- bearer travels as subprotocol, never on the URL (\#2511)
+  ---
+  duration_ms: 5.287791
+  type: 'test'
+  ...
+# Subtest: Connection.dial -- no auth offers no subprotocols
+ok 116 - Connection.dial -- no auth offers no subprotocols
+  ---
+  duration_ms: 2.182042
+  type: 'test'
+  ...
+# Subtest: Connection.dial -- legacyUrlToken stamps bearer on the URL, offers no subprotocol (\#2524)
+ok 117 - Connection.dial -- legacyUrlToken stamps bearer on the URL, offers no subprotocol (\#2524)
+  ---
+  duration_ms: 1.873166
+  type: 'test'
+  ...
+# Subtest: Connection.dial -- default (no legacy flag) keeps bearer off the URL
+ok 118 - Connection.dial -- default (no legacy flag) keeps bearer off the URL
+  ---
+  duration_ms: 1.966292
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- fires at 70% of the token's own lifetime
+ok 119 - computeRotateDelayMs -- fires at 70% of the token's own lifetime
+  ---
+  duration_ms: 1.816416
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- a browser 14 minutes FAST schedules the same 630s
+ok 120 - computeRotateDelayMs -- a browser 14 minutes FAST schedules the same 630s
+  ---
+  duration_ms: 0.270166
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- a browser 14 minutes SLOW schedules the same 630s
+ok 121 - computeRotateDelayMs -- a browser 14 minutes SLOW schedules the same 630s
+  ---
+  duration_ms: 0.09325
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- a 20s token schedules the 30s floor, not 14s
+ok 122 - computeRotateDelayMs -- a 20s token schedules the 30s floor, not 14s
+  ---
+  duration_ms: 0.102417
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- subtracts the time already elapsed since receipt
+ok 123 - computeRotateDelayMs -- subtracts the time already elapsed since receipt
+  ---
+  duration_ms: 0.125708
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- an elapsed-past target still waits the floor, never 0
+ok 124 - computeRotateDelayMs -- an elapsed-past target still waits the floor, never 0
+  ---
+  duration_ms: 0.103625
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- honours a custom fraction
+ok 125 - computeRotateDelayMs -- honours a custom fraction
+  ---
+  duration_ms: 0.10475
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- no iat falls back to exp - now, still floored
+ok 126 - computeRotateDelayMs -- no iat falls back to exp - now, still floored
+  ---
+  duration_ms: 0.104333
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- an expired token waits the floor rather than spinning
+ok 127 - computeRotateDelayMs -- an expired token waits the floor rather than spinning
+  ---
+  duration_ms: 0.27325
+  type: 'test'
+  ...
+# Subtest: computeRotateDelayMs -- an explicit floor replaces the default in both directions
+ok 128 - computeRotateDelayMs -- an explicit floor replaces the default in both directions
+  ---
+  duration_ms: 0.26125
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- reads both iat and exp
+ok 129 - decodeJwtLifetime -- reads both iat and exp
+  ---
+  duration_ms: 0.509166
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- exp with no iat reports iat null
+ok 130 - decodeJwtLifetime -- exp with no iat reports iat null
+  ---
+  duration_ms: 0.058042
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- null for a token with no exp
+ok 131 - decodeJwtLifetime -- null for a token with no exp
+  ---
+  duration_ms: 0.036208
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- null for a non-JWT / single segment
+ok 132 - decodeJwtLifetime -- null for a non-JWT / single segment
+  ---
+  duration_ms: 0.025292
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- null for an unparseable payload
+ok 133 - decodeJwtLifetime -- null for an unparseable payload
+  ---
+  duration_ms: 0.04575
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- null when exp is non-numeric
+ok 134 - decodeJwtLifetime -- null when exp is non-numeric
+  ---
+  duration_ms: 0.034792
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- a non-numeric iat degrades to the no-iat fallback
+ok 135 - decodeJwtLifetime -- a non-numeric iat degrades to the no-iat fallback
+  ---
+  duration_ms: 0.039959
+  type: 'test'
+  ...
+# Subtest: decodeJwtLifetime -- an iat at or after exp degrades to the no-iat fallback
+ok 136 - decodeJwtLifetime -- an iat at or after exp degrades to the no-iat fallback
+  ---
+  duration_ms: 0.037458
+  type: 'test'
+  ...
+# Subtest: Connection auto-rotates in place shortly before the bearer expires (\#1110)
+ok 137 - Connection auto-rotates in place shortly before the bearer expires (\#1110)
+  ---
+  duration_ms: 145.652917
+  type: 'test'
+  ...
+# Subtest: the retry path never re-fires under the rotation floor (memql\#4326)
+ok 138 - the retry path never re-fires under the rotation floor (memql\#4326)
+  ---
+  duration_ms: 193.452417
+  type: 'test'
+  ...
+# Subtest: the handshake's language facts are readable off the connection
+ok 139 - the handshake's language facts are readable off the connection
+  ---
+  duration_ms: 4.446584
+  type: 'test'
+  ...
+# Subtest: a node that predates the fields states an empty string for each
+ok 140 - a node that predates the fields states an empty string for each
+  ---
+  duration_ms: 2.237542
+  type: 'test'
+  ...
+# Subtest: precondition: this process has no global WebSocket
+ok 141 - precondition: this process has no global WebSocket
+  ---
+  duration_ms: 0.3795
+  type: 'test'
+  ...
+# Subtest: Connection.dial succeeds with an injected socket and no global WebSocket
+ok 142 - Connection.dial succeeds with an injected socket and no global WebSocket
+  ---
+  duration_ms: 4.072833
+  type: 'test'
+  ...
+# Subtest: Connection.dial waits for a CONNECTING injected socket to open
+ok 143 - Connection.dial waits for a CONNECTING injected socket to open
+  ---
+  duration_ms: 7.854083
+  type: 'test'
+  ...
+# Subtest: a send on a closed socket reports socket-not-open, not a missing global
+ok 144 - a send on a closed socket reports socket-not-open, not a missing global
+  ---
+  duration_ms: 2.941583
+  type: 'test'
+  ...
+# Subtest: concurrent Retry and browser-return requests share one reconnect handshake
+ok 145 - concurrent Retry and browser-return requests share one reconnect handshake
+  ---
+  duration_ms: 10.984792
+  type: 'test'
+  ...
+# Subtest: backoff is exponential, capped, and drawn with FULL jitter
+ok 146 - backoff is exponential, capped, and drawn with FULL jitter
+  ---
+  duration_ms: 0.131916
+  type: 'test'
+  ...
+# Subtest: a dropped stream reconnects and replays every subscription
+ok 147 - a dropped stream reconnects and replays every subscription
+  ---
+  duration_ms: 6.284291
+  type: 'test'
+  ...
+# Subtest: the cycle notification fires AFTER the replay, never before
+ok 148 - the cycle notification fires AFTER the replay, never before
+  ---
+  duration_ms: 4.676958
+  type: 'test'
+  ...
+# Subtest: status transitions are observable and done() waits for FINAL close
+ok 149 - status transitions are observable and done() waits for FINAL close
+  ---
+  duration_ms: 26.975125
+  type: 'test'
+  ...
+# Subtest: a deliberate close never reconnects
+ok 150 - a deliberate close never reconnects
+  ---
+  duration_ms: 33.172667
+  type: 'test'
+  ...
+# Subtest: an exhausted attempt budget ends the connection rather than retrying forever
+ok 151 - an exhausted attempt budget ends the connection rather than retrying forever
+  ---
+  duration_ms: 4.768208
+  type: 'test'
+  ...
+# Subtest: without the opt-in, nothing changes: one dial, done() on close
+ok 152 - without the opt-in, nothing changes: one dial, done() on close
+  ---
+  duration_ms: 1.811333
+  type: 'test'
+  ...
+# Subtest: listConstructs sends a listConstructs envelope carrying a requestId
+ok 153 - listConstructs sends a listConstructs envelope carrying a requestId
+  ---
+  duration_ms: 1.877125
+  type: 'test'
+  ...
+# Subtest: a fully-populated construct round-trips every field
+ok 154 - a fully-populated construct round-trips every field
+  ---
+  duration_ms: 0.266791
+  type: 'test'
+  ...
+# Subtest: an all-defaults construct arrives fully typed, with args as an array
+ok 155 - an all-defaults construct arrives fully typed, with args as an array
+  ---
+  duration_ms: 0.090834
+  type: 'test'
+  ...
+# Subtest: an automation carries its trigger through the decode
+ok 156 - an automation carries its trigger through the decode
+  ---
+  duration_ms: 0.091875
+  type: 'test'
+  ...
+# Subtest: a scheduled automation carries its cron and no event
+ok 157 - a scheduled automation carries its cron and no event
+  ---
+  duration_ms: 0.080042
+  type: 'test'
+  ...
+# Subtest: a construct with no trigger leaves it undefined rather than empty
+ok 158 - a construct with no trigger leaves it undefined rather than empty
+  ---
+  duration_ms: 0.068083
+  type: 'test'
+  ...
+# Subtest: a NULL trigger reads as absent, not as a crash
+ok 159 - a NULL trigger reads as absent, not as a crash
+  ---
+  duration_ms: 0.072125
+  type: 'test'
+  ...
+# Subtest: a null trigger does not make a real one disappear
+ok 160 - a null trigger does not make a real one disappear
+  ---
+  duration_ms: 0.120125
+  type: 'test'
+  ...
+# Subtest: a promoted construct keeps its source and reports no path
+ok 161 - a promoted construct keeps its source and reports no path
+  ---
+  duration_ms: 0.3875
+  type: 'test'
+  ...
+# Subtest: an unrecognised origin resolves to core rather than passing through
+ok 162 - an unrecognised origin resolves to core rather than passing through
+  ---
+  duration_ms: 3.249917
+  type: 'test'
+  ...
+# Subtest: a queryError reply throws with the engine's message
+ok 163 - a queryError reply throws with the engine's message
+  ---
+  duration_ms: 0.750917
+  type: 'test'
+  ...
+# Subtest: an unexpected reply envelope throws rather than resolving empty
+ok 164 - an unexpected reply envelope throws rather than resolving empty
+  ---
+  duration_ms: 0.123791
+  type: 'test'
+  ...
+# Subtest: a count within the window is exact
+ok 165 - a count within the window is exact
+  ---
+  duration_ms: 0.657292
+  type: 'test'
+  ...
+# Subtest: a count that reached the window says it is at least that many
+ok 166 - a count that reached the window says it is at least that many
+  ---
+  duration_ms: 0.059666
+  type: 'test'
+  ...
+# Subtest: only the engine's own true makes a count a floor
+ok 167 - only the engine's own true makes a count a floor
+  ---
+  duration_ms: 1.3975
+  type: 'test'
+  ...
+# Subtest: a count carried as a string is read as the number it names
+ok 168 - a count carried as a string is read as the number it names
+  ---
+  duration_ms: 0.246042
+  type: 'test'
+  ...
+# Subtest: a result that is not a count has no count
+ok 169 - a result that is not a count has no count
+  ---
+  duration_ms: 0.382833
+  type: 'test'
+  ...
+# Subtest: deployControl -- getDeploymentStatus sends its own request field
+ok 170 - deployControl -- getDeploymentStatus sends its own request field
+  ---
+  duration_ms: 3.628833
+  type: 'test'
+  ...
+# Subtest: deployControl -- suggestNextVersion sends its own request field
+ok 171 - deployControl -- suggestNextVersion sends its own request field
+  ---
+  duration_ms: 0.183542
+  type: 'test'
+  ...
+# Subtest: deployControl -- rollback sends its own request field
+ok 172 - deployControl -- rollback sends its own request field
+  ---
+  duration_ms: 0.103625
+  type: 'test'
+  ...
+# Subtest: deployControl -- rolloutAction sends its own request field
+ok 173 - deployControl -- rolloutAction sends its own request field
+  ---
+  duration_ms: 0.125458
+  type: 'test'
+  ...
+# Subtest: deployControl -- cutVersion sends its own request field
+ok 174 - deployControl -- cutVersion sends its own request field
+  ---
+  duration_ms: 2.249208
+  type: 'test'
+  ...
+# Subtest: deployControl -- deploy sends its own request field
+ok 175 - deployControl -- deploy sends its own request field
+  ---
+  duration_ms: 0.321833
+  type: 'test'
+  ...
+# Subtest: deployControl -- rollbackDeployment sends its own request field
+ok 176 - deployControl -- rollbackDeployment sends its own request field
+  ---
+  duration_ms: 0.164792
+  type: 'test'
+  ...
+# Subtest: deployControl -- repair sends its own request field
+ok 177 - deployControl -- repair sends its own request field
+  ---
+  duration_ms: 0.0775
+  type: 'test'
+  ...
+# Subtest: deployControl -- getDeploymentStatus maps the full status
+ok 178 - deployControl -- getDeploymentStatus maps the full status
+  ---
+  duration_ms: 0.44525
+  type: 'test'
+  ...
+# Subtest: deployControl -- an empty status reply reads as empty, not undefined
+ok 179 - deployControl -- an empty status reply reads as empty, not undefined
+  ---
+  duration_ms: 0.350583
+  type: 'test'
+  ...
+# Subtest: deployControl -- suggestNextVersion maps the proposals
+ok 180 - deployControl -- suggestNextVersion maps the proposals
+  ---
+  duration_ms: 0.11525
+  type: 'test'
+  ...
+# Subtest: deployControl -- an action returns its audit event id
+ok 181 - deployControl -- an action returns its audit event id
+  ---
+  duration_ms: 0.122959
+  type: 'test'
+  ...
+# Subtest: deployControl -- an action that RAN and FAILED resolves with ok=false
+ok 182 - deployControl -- an action that RAN and FAILED resolves with ok=false
+  ---
+  duration_ms: 0.094709
+  type: 'test'
+  ...
+# Subtest: deployControl -- repair acknowledges the kick-off and names the record to poll
+ok 183 - deployControl -- repair acknowledges the kick-off and names the record to poll
+  ---
+  duration_ms: 0.052958
+  type: 'test'
+  ...
+# Subtest: deployControl -- a repair refused for its provider resolves ok=false with its audit id
+ok 184 - deployControl -- a repair refused for its provider resolves ok=false with its audit id
+  ---
+  duration_ms: 0.055208
+  type: 'test'
+  ...
+# Subtest: deployControl -- PERMISSION_DENIED surfaces as a typed error
+ok 185 - deployControl -- PERMISSION_DENIED surfaces as a typed error
+  ---
+  duration_ms: 0.216542
+  type: 'test'
+  ...
+# Subtest: deployControl -- UNIMPLEMENTED (node has no deploy service) is distinguishable
+ok 186 - deployControl -- UNIMPLEMENTED (node has no deploy service) is distinguishable
+  ---
+  duration_ms: 0.065875
+  type: 'test'
+  ...
+# Subtest: deployControl -- a reply with neither ok nor an error code is rejected
+ok 187 - deployControl -- a reply with neither ok nor an error code is rejected
+  ---
+  duration_ms: 0.056666
+  type: 'test'
+  ...
+# Subtest: deployControl -- a queryError reply surfaces as an error
+ok 188 - deployControl -- a queryError reply surfaces as an error
+  ---
+  duration_ms: 0.056333
+  type: 'test'
+  ...
+# Subtest: deployControl -- an unexpected reply envelope is rejected
+ok 189 - deployControl -- an unexpected reply envelope is rejected
+  ---
+  duration_ms: 0.06625
+  type: 'test'
+  ...
+# Subtest: deployControl -- required arguments are validated before sending
+ok 190 - deployControl -- required arguments are validated before sending
+  ---
+  duration_ms: 0.147417
+  type: 'test'
+  ...
+# Subtest: deployControl -- cutVersion omits empty bump/version rather than sending blanks
+ok 191 - deployControl -- cutVersion omits empty bump/version rather than sending blanks
+  ---
+  duration_ms: 0.07225
+  type: 'test'
+  ...
+# Subtest: deployControl -- an AbortSignal cancels an in-flight call
+ok 192 - deployControl -- an AbortSignal cancels an in-flight call
+  ---
+  duration_ms: 0.083
+  type: 'test'
+  ...
+# Subtest: deployControl -- a dispatcher is required
+ok 193 - deployControl -- a dispatcher is required
+  ---
+  duration_ms: 0.046417
+  type: 'test'
+  ...
+# Subtest: DeployControlError exposes the raw engine message alongside the formatted one
+ok 194 - DeployControlError exposes the raw engine message alongside the formatted one
+  ---
+  duration_ms: 0.03375
+  type: 'test'
+  ...
+# Subtest: DeployControlError -- an absent engine message is empty, never the (no message) sentinel
+ok 195 - DeployControlError -- an absent engine message is empty, never the (no message) sentinel
+  ---
+  duration_ms: 0.036
+  type: 'test'
+  ...
+# Subtest: seq decodes protojson's uint64 string
+ok 196 - seq decodes protojson's uint64 string
+  ---
+  duration_ms: 0.528167
+  type: 'test'
+  ...
+# Subtest: seq decodes a plain number from a bridge that emits one
+ok 197 - seq decodes a plain number from a bridge that emits one
+  ---
+  duration_ms: 0.069125
+  type: 'test'
+  ...
+# Subtest: every unusable seq spelling reads as 0, the same as an older server
+ok 198 - every unusable seq spelling reads as 0, the same as an older server
+  ---
+  duration_ms: 5.054541
+  type: 'test'
+  ...
+# Subtest: gapBefore is a real boolean, absent or not
+ok 199 - gapBefore is a real boolean, absent or not
+  ---
+  duration_ms: 0.189792
+  type: 'test'
+  ...
+# Subtest: the continuity fields do not disturb the payload-omitted contract
+ok 200 - the continuity fields do not disturb the payload-omitted contract
+  ---
+  duration_ms: 0.150916
+  type: 'test'
+  ...
+# Subtest: every declared exports subpath has a source module the build will emit
+ok 201 - every declared exports subpath has a source module the build will emit
+  ---
+  duration_ms: 0.869042
+  type: 'test'
+  ...
+# Subtest: every public src/ directory is reachable through a subpath export
+ok 202 - every public src/ directory is reachable through a subpath export
+  ---
+  duration_ms: 3.635
+  type: 'test'
+  ...
+# Subtest: fileNameProblem accepts a file name, with or without its extension
+ok 203 - fileNameProblem accepts a file name, with or without its extension
+  ---
+  duration_ms: 0.494917
+  type: 'test'
+  ...
+# Subtest: fileNameProblem asks for a name when there is none
+ok 204 - fileNameProblem asks for a name when there is none
+  ---
+  duration_ms: 0.092958
+  type: 'test'
+  ...
+# Subtest: fileNameProblem refuses a place: a slash, a backslash or a control character
+ok 205 - fileNameProblem refuses a place: a slash, a backslash or a control character
+  ---
+  duration_ms: 0.053167
+  type: 'test'
+  ...
+# Subtest: fileNameProblem refuses a name over 150 characters, and says how long one may be
+ok 206 - fileNameProblem refuses a name over 150 characters, and says how long one may be
+  ---
+  duration_ms: 0.67025
+  type: 'test'
+  ...
+# Subtest: fileNameProblem refuses an extension of the file's own format with nothing before it
+ok 207 - fileNameProblem refuses an extension of the file's own format with nothing before it
+  ---
+  duration_ms: 0.065333
+  type: 'test'
+  ...
+# Subtest: fileNameStem drops one extension of the file's own format, as the cluster does
+ok 208 - fileNameStem drops one extension of the file's own format, as the cluster does
+  ---
+  duration_ms: 0.056875
+  type: 'test'
+  ...
+# Subtest: barrel import installs generated methods on QueryClient.prototype
+ok 209 - barrel import installs generated methods on QueryClient.prototype
+  ---
+  duration_ms: 0.786958
+  type: 'test'
+  ...
+# Subtest: builder composes the kind-prefixed named-args call
+ok 210 - builder composes the kind-prefixed named-args call
+  ---
+  duration_ms: 0.419709
+  type: 'test'
+  ...
+# Subtest: builder omits optional args that are undefined
+ok 211 - builder omits optional args that are undefined
+  ---
+  duration_ms: 0.161333
+  type: 'test'
+  ...
+# Subtest: generated method dispatches through executeNamed's executeQuery envelope
+ok 212 - generated method dispatches through executeNamed's executeQuery envelope
+  ---
+  duration_ms: 2.715291
+  type: 'test'
+  ...
+# Subtest: generated method surfaces a queryError as a thrown, name-prefixed error
+ok 213 - generated method surfaces a queryError as a thrown, name-prefixed error
+  ---
+  duration_ms: 0.361375
+  type: 'test'
+  ...
+# Subtest: concept metadata joins constructs to canonical ids and composes topics
+ok 214 - concept metadata joins constructs to canonical ids and composes topics
+  ---
+  duration_ms: 0.071167
+  type: 'test'
+  ...
+# Subtest: the @sdk builtins are installed on the prototype and compose the kind-prefixed form
+ok 215 - the @sdk builtins are installed on the prototype and compose the kind-prefixed form
+  ---
+  duration_ms: 0.155083
+  type: 'test'
+  ...
+# Subtest: revokeCurrentSession -- happy path
+ok 216 - revokeCurrentSession -- happy path
+  ---
+  duration_ms: 1.701709
+  type: 'test'
+  ...
+# Subtest: revokeCurrentSession -- no_session rides errorCode
+ok 217 - revokeCurrentSession -- no_session rides errorCode
+  ---
+  duration_ms: 0.131042
+  type: 'test'
+  ...
+# Subtest: revokeAllSessions -- returns revokedCount
+ok 218 - revokeAllSessions -- returns revokedCount
+  ---
+  duration_ms: 0.094833
+  type: 'test'
+  ...
+# Subtest: createWorkerToken -- returns plain token (one-shot)
+ok 219 - createWorkerToken -- returns plain token (one-shot)
+  ---
+  duration_ms: 0.11375
+  type: 'test'
+  ...
+# Subtest: createWorkerToken -- omits optional fields when absent
+ok 220 - createWorkerToken -- omits optional fields when absent
+  ---
+  duration_ms: 0.075084
+  type: 'test'
+  ...
+# Subtest: revokeWorkerToken -- happy path
+ok 221 - revokeWorkerToken -- happy path
+  ---
+  duration_ms: 0.083583
+  type: 'test'
+  ...
+# Subtest: mintAccountToken -- returns plain token and subject (one-shot)
+ok 222 - mintAccountToken -- returns plain token and subject (one-shot)
+  ---
+  duration_ms: 0.142583
+  type: 'test'
+  ...
+# Subtest: mintAccountToken -- rejects missing required args
+ok 223 - mintAccountToken -- rejects missing required args
+  ---
+  duration_ms: 0.195541
+  type: 'test'
+  ...
+# Subtest: revokeAccountToken -- happy path carries the audit id
+ok 224 - revokeAccountToken -- happy path carries the audit id
+  ---
+  duration_ms: 0.979791
+  type: 'test'
+  ...
+# Subtest: the subscription opens BEFORE the seed read goes out
+ok 225 - the subscription opens BEFORE the seed read goes out
+  ---
+  duration_ms: 19.568375
+  type: 'test'
+  ...
+# Subtest: the seed walks every page, and folds arrivals during it by id
+ok 226 - the seed walks every page, and folds arrivals during it by id
+  ---
+  duration_ms: 9.808583
+  type: 'test'
+  ...
+# Subtest: an update, an insert and a delete that arrive between two pages all survive the seed
+ok 227 - an update, an insert and a delete that arrive between two pages all survive the seed
+  ---
+  duration_ms: 20.335
+  type: 'test'
+  ...
+# Subtest: an event older than the row the walk read does not roll it back; a newer one wins
+ok 228 - an event older than the row the walk read does not roll it back; a newer one wins
+  ---
+  duration_ms: 12.8265
+  type: 'test'
+  ...
+# Subtest: an id-only event whose re-read lands while a seed reads survives the seed
+ok 229 - an id-only event whose re-read lands while a seed reads survives the seed
+  ---
+  duration_ms: 19.177166
+  type: 'test'
+  ...
+# Subtest: a reseed keeps folding arrivals onto the rows on screen, and keeps them when it lands
+ok 230 - a reseed keeps folding arrivals onto the rows on screen, and keeps them when it lands
+  ---
+  duration_ms: 19.644417
+  type: 'test'
+  ...
+# Subtest: a seed keeps one arrival per row, however many events arrive while it reads
+ok 231 - a seed keeps one arrival per row, however many events arrive while it reads
+  ---
+  duration_ms: 14.274917
+  type: 'test'
+  ...
+# Subtest: a seed keeps the row the read returned when an OLDER version lands while it reads
+ok 232 - a seed keeps the row the read returned when an OLDER version lands while it reads
+  ---
+  duration_ms: 13.405916
+  type: 'test'
+  ...
+# Subtest: a NEWER version that lands while a seed reads wins over the read
+ok 233 - a NEWER version that lands while a seed reads wins over the read
+  ---
+  duration_ms: 13.45275
+  type: 'test'
+  ...
+# Subtest: two versions that land out of order while a seed reads leave the newer one
+ok 234 - two versions that land out of order while a seed reads leave the newer one
+  ---
+  duration_ms: 18.00525
+  type: 'test'
+  ...
+# Subtest: an older version delivered after a newer one is refused, outside a seed too
+ok 235 - an older version delivered after a newer one is refused, outside a seed too
+  ---
+  duration_ms: 6.873375
+  type: 'test'
+  ...
+# Subtest: versions compare at every digit the wire carries, not as strings
+ok 236 - versions compare at every digit the wire carries, not as strings
+  ---
+  duration_ms: 6.830166
+  type: 'test'
+  ...
+# Subtest: a row whose version is unknown is taken as it arrives
+ok 237 - a row whose version is unknown is taken as it arrives
+  ---
+  duration_ms: 6.739042
+  type: 'test'
+  ...
+# Subtest: a delete removes the row whatever version the read returned
+ok 238 - a delete removes the row whatever version the read returned
+  ---
+  duration_ms: 13.158167
+  type: 'test'
+  ...
+# Subtest: an older copy out of the read's scope does not take a newer row out of the list
+ok 239 - an older copy out of the read's scope does not take a newer row out of the list
+  ---
+  duration_ms: 6.871667
+  type: 'test'
+  ...
+# Subtest: a feed's own supersedes still decides, over the version
+ok 240 - a feed's own supersedes still decides, over the version
+  ---
+  duration_ms: 6.792625
+  type: 'test'
+  ...
+# Subtest: a row a newer copy took out of the read's scope is not brought back by a late older one
+ok 241 - a row a newer copy took out of the read's scope is not brought back by a late older one
+  ---
+  duration_ms: 5.698666
+  type: 'test'
+  ...
+# Subtest: a deleted row is not brought back by a late older copy; a removal with no time keeps nothing
+ok 242 - a deleted row is not brought back by a late older copy; a removal with no time keeps nothing
+  ---
+  duration_ms: 5.581208
+  type: 'test'
+  ...
+# Subtest: a copy newer than the one that took a row out brings it back
+ok 243 - a copy newer than the one that took a row out brings it back
+  ---
+  duration_ms: 6.871541
+  type: 'test'
+  ...
+# Subtest: a seed's replay does not bring back a row removed while it read
+ok 244 - a seed's replay does not bring back a row removed while it read
+  ---
+  duration_ms: 12.023917
+  type: 'test'
+  ...
+# Subtest: a feed's own supersedes keeps no tombstones
+ok 245 - a feed's own supersedes keeps no tombstones
+  ---
+  duration_ms: 6.92075
+  type: 'test'
+  ...
+# Subtest: what took a row out keeps it out across a reseed; a copy at that version or newer is placed
+ok 246 - what took a row out keeps it out across a reseed; a copy at that version or newer is placed
+  ---
+  duration_ms: 16.920834
+  type: 'test'
+  ...
+# Subtest: the tombstones are bounded: the oldest is forgotten first
+ok 247 - the tombstones are bounded: the oldest is forgotten first
+  ---
+  duration_ms: 6.344375
+  type: 'test'
+  ...
+# Subtest: a row removed again is remembered as the newest word on it, and forgotten last
+ok 248 - a row removed again is remembered as the newest word on it, and forgotten last
+  ---
+  duration_ms: 7.811042
+  type: 'test'
+  ...
+# Subtest: a removal whose time cannot be read records nothing
+ok 249 - a removal whose time cannot be read records nothing
+  ---
+  duration_ms: 6.857042
+  type: 'test'
+  ...
+# Subtest: a removal with no time that arrives while a tombstone exists leaves the tombstone
+ok 250 - a removal with no time that arrives while a tombstone exists leaves the tombstone
+  ---
+  duration_ms: 6.677167
+  type: 'test'
+  ...
+# Subtest: a copy with no version time is placed against a tombstone, which it then clears
+ok 251 - a copy with no version time is placed against a tombstone, which it then clears
+  ---
+  duration_ms: 6.76825
+  type: 'test'
+  ...
+# Subtest: created upserts, updated replaces, deleted removes -- matched on the KIND
+ok 252 - created upserts, updated replaces, deleted removes -- matched on the KIND
+  ---
+  duration_ms: 6.746291
+  type: 'test'
+  ...
+# Subtest: an id-only event is resolved through the authorized re-read
+ok 253 - an id-only event is resolved through the authorized re-read
+  ---
+  duration_ms: 13.064666
+  type: 'test'
+  ...
+# Subtest: a REFUSED re-read drops the event silently -- no row, no error
+ok 254 - a REFUSED re-read drops the event silently -- no row, no error
+  ---
+  duration_ms: 17.050333
+  type: 'test'
+  ...
+# Subtest: a re-read that finds nothing removes the row
+ok 255 - a re-read that finds nothing removes the row
+  ---
+  duration_ms: 12.890042
+  type: 'test'
+  ...
+# Subtest: inScope governs FOLDED rows; the seed narrows itself
+ok 256 - inScope governs FOLDED rows; the seed narrows itself
+  ---
+  duration_ms: 5.532916
+  type: 'test'
+  ...
+# Subtest: the scope re-filter keeps a broad subscription from widening a scoped read
+ok 257 - the scope re-filter keeps a broad subscription from widening a scoped read
+  ---
+  duration_ms: 6.866083
+  type: 'test'
+  ...
+# Subtest: gap_before re-seeds ONCE, and reports degraded while it does
+ok 258 - gap_before re-seeds ONCE, and reports degraded while it does
+  ---
+  duration_ms: 13.282375
+  type: 'test'
+  ...
+# Subtest: a burst of gaps coalesces into one extra seed
+ok 259 - a burst of gaps coalesces into one extra seed
+  ---
+  duration_ms: 14.232583
+  type: 'test'
+  ...
+# Subtest: a NON-CONTIGUOUS seq is a gap, and a zero seq never is
+ok 260 - a NON-CONTIGUOUS seq is a gap, and a zero seq never is
+  ---
+  duration_ms: 25.01825
+  type: 'test'
+  ...
+# Subtest: the gap is read STREAM-WIDE: a neighbour's drop re-seeds this collection too
+ok 261 - the gap is read STREAM-WIDE: a neighbour's drop re-seeds this collection too
+  ---
+  duration_ms: 11.662125
+  type: 'test'
+  ...
+# Subtest: a reconnect re-seeds, and a drop reports disconnected while keeping rows
+ok 262 - a reconnect re-seeds, and a drop reports disconnected while keeping rows
+  ---
+  duration_ms: 12.657458
+  type: 'test'
+  ...
+# Subtest: two callers on one key share one subscription and one seed
+ok 263 - two callers on one key share one subscription and one seed
+  ---
+  duration_ms: 6.541791
+  type: 'test'
+  ...
+# Subtest: a remount inside the linger window issues ZERO new reads
+ok 264 - a remount inside the linger window issues ZERO new reads
+  ---
+  duration_ms: 12.919292
+  type: 'test'
+  ...
+# Subtest: the collection is torn down after the linger expires
+ok 265 - the collection is torn down after the linger expires
+  ---
+  duration_ms: 32.860084
+  type: 'test'
+  ...
+# Subtest: LiveValue collapses concurrent identical reads into one round trip
+ok 266 - LiveValue collapses concurrent identical reads into one round trip
+  ---
+  duration_ms: 5.705583
+  type: 'test'
+  ...
+# Subtest: a failing seed keeps the rows it has and says so
+ok 267 - a failing seed keeps the rows it has and says so
+  ---
+  duration_ms: 13.030792
+  type: 'test'
+  ...
+# Subtest: the snapshot is identity-stable until something changes
+ok 268 - the snapshot is identity-stable until something changes
+  ---
+  duration_ms: 6.429625
+  type: 'test'
+  ...
+# Subtest: rereadEveryEvent resolves a FULL-payload event through the read too
+ok 269 - rereadEveryEvent resolves a FULL-payload event through the read too
+  ---
+  duration_ms: 11.986166
+  type: 'test'
+  ...
+# Subtest: rereadEveryEvent without a reread falls back to trusting the payload
+ok 270 - rereadEveryEvent without a reread falls back to trusting the payload
+  ---
+  duration_ms: 11.709625
+  type: 'test'
+  ...
+# Subtest: event re-reads share a connection-wide bound and coalesce queued row updates
+ok 271 - event re-reads share a connection-wide bound and coalesce queued row updates
+  ---
+  duration_ms: 22.542917
+  type: 'test'
+  ...
+# Subtest: updates during an in-flight re-read request one fresh answer after it settles
+ok 272 - updates during an in-flight re-read request one fresh answer after it settles
+  ---
+  duration_ms: 23.617584
+  type: 'test'
+  ...
+# Subtest: deletes discard queued re-reads and prevent in-flight answers from restoring rows
+ok 273 - deletes discard queued re-reads and prevent in-flight answers from restoring rows
+  ---
+  duration_ms: 30.632125
+  type: 'test'
+  ...
+# Subtest: disconnect discards queued re-reads and ignores late answers
+ok 274 - disconnect discards queued re-reads and ignores late answers
+  ---
+  duration_ms: 31.860208
+  type: 'test'
+  ...
+# Subtest: close discards queued re-reads and ignores late answers
+ok 275 - close discards queued re-reads and ignores late answers
+  ---
+  duration_ms: 19.432
+  type: 'test'
+  ...
+# Subtest: a refused background read releases capacity for the next authorized row
+ok 276 - a refused background read releases capacity for the next authorized row
+  ---
+  duration_ms: 5.633084
+  type: 'test'
+  ...
+# Subtest: supersedes refuses a row that would roll a newer one backwards
+ok 277 - supersedes refuses a row that would roll a newer one backwards
+  ---
+  duration_ms: 6.491625
+  type: 'test'
+  ...
+# Subtest: onGap gives a hand-rolled consumer the same continuity signal
+ok 278 - onGap gives a hand-rolled consumer the same continuity signal
+  ---
+  duration_ms: 0.143417
+  type: 'test'
+  ...
+# Subtest: a capped paged seed reports incomplete membership and a complete reseed clears it
+ok 279 - a capped paged seed reports incomplete membership and a complete reseed clears it
+  ---
+  duration_ms: 11.913584
+  type: 'test'
+  ...
+# Subtest: manual pages request one page per action and keep the loaded depth on recovery
+ok 280 - manual pages request one page per action and keep the loaded depth on recovery
+  ---
+  duration_ms: 13.272667
+  type: 'test'
+  ...
+# Subtest: load-more coalesces clicks and live changes win over a late page
+ok 281 - load-more coalesces clicks and live changes win over a late page
+  ---
+  duration_ms: 6.703959
+  type: 'test'
+  ...
+# Subtest: a failed next page preserves rows and its cursor for retry
+ok 282 - a failed next page preserves rows and its cursor for retry
+  ---
+  duration_ms: 6.765708
+  type: 'test'
+  ...
+# Subtest: released session pages pause work but reopen immediately with their cached rows
+ok 283 - released session pages pause work but reopen immediately with their cached rows
+  ---
+  duration_ms: 35.007541
+  type: 'test'
+  ...
+# Subtest: reconnect during load-more aborts the old page and repairs only completed pages
+ok 284 - reconnect during load-more aborts the old page and repairs only completed pages
+  ---
+  duration_ms: 12.913458
+  type: 'test'
+  ...
+# Subtest: manual directories coalesce omitted events for unloaded rows into one bounded refresh
+ok 285 - manual directories coalesce omitted events for unloaded rows into one bounded refresh
+  ---
+  duration_ms: 133.328416
+  type: 'test'
+  ...
+# Subtest: manual directory events respect the loaded ordering boundary but admit new arrivals
+ok 286 - manual directory events respect the loaded ordering boundary but admit new arrivals
+  ---
+  duration_ms: 6.481166
+  type: 'test'
+  ...
+# Subtest: identity scope rejects unrelated events before by-id reads and summaries can disable subscriptions
+ok 287 - identity scope rejects unrelated events before by-id reads and summaries can disable subscriptions
+  ---
+  duration_ms: 18.086042
+  type: 'test'
+  ...
+# Subtest: parseRefBinding reads a relationship path and refuses everything else
+ok 288 - parseRefBinding reads a relationship path and refuses everything else
+  ---
+  duration_ms: 1.795209
+  type: 'test'
+  ...
+# Subtest: one read per (concept, id set), not one per cell
+ok 289 - one read per (concept, id set), not one per cell
+  ---
+  duration_ms: 0.486459
+  type: 'test'
+  ...
+# Subtest: a second ask for cached ids issues no read at all
+ok 290 - a second ask for cached ids issues no read at all
+  ---
+  duration_ms: 0.1965
+  type: 'test'
+  ...
+# Subtest: concurrent asks for the same set share ONE read
+ok 291 - concurrent asks for the same set share ONE read
+  ---
+  duration_ms: 0.15575
+  type: 'test'
+  ...
+# Subtest: a row the read did not return is cached as ABSENT, and asked for once
+ok 292 - a row the read did not return is cached as ABSENT, and asked for once
+  ---
+  duration_ms: 0.106125
+  type: 'test'
+  ...
+# Subtest: a failed read caches nothing
+ok 293 - a failed read caches nothing
+  ---
+  duration_ms: 0.185875
+  type: 'test'
+  ...
+# Subtest: the three cache states are distinguishable
+ok 294 - the three cache states are distinguishable
+  ---
+  duration_ms: 0.080208
+  type: 'test'
+  ...
+# Subtest: the cache is bounded, so a long scroll does not retain every target row
+ok 295 - the cache is bounded, so a long scroll does not retain every target row
+  ---
+  duration_ms: 1.572334
+  type: 'test'
+  ...
+# Subtest: materialize starts once, follows to ready, and resolves the artifact
+ok 296 - materialize starts once, follows to ready, and resolves the artifact
+  ---
+  duration_ms: 7.896375
+  type: 'test'
+  ...
+# Subtest: a failed composition throws its reason
+ok 297 - a failed composition throws its reason
+  ---
+  duration_ms: 0.674417
+  type: 'test'
+  ...
+# Subtest: a failed composition with no reason still says something
+ok 298 - a failed composition with no reason still says something
+  ---
+  duration_ms: 2.215958
+  type: 'test'
+  ...
+# Subtest: a composition cancelled elsewhere ends the follow without cancelling it again
+ok 299 - a composition cancelled elsewhere ends the follow without cancelling it again
+  ---
+  duration_ms: 1.737333
+  type: 'test'
+  ...
+# Subtest: a composition that can no longer be read is an explicit failure
+ok 300 - a composition that can no longer be read is an explicit failure
+  ---
+  duration_ms: 1.558458
+  type: 'test'
+  ...
+# Subtest: no compositionId in the reply is an explicit error
+ok 301 - no compositionId in the reply is an explicit error
+  ---
+  duration_ms: 0.106459
+  type: 'test'
+  ...
+# Subtest: followComposition resolves a ready composition and never hands anything off
+ok 302 - followComposition resolves a ready composition and never hands anything off
+  ---
+  duration_ms: 1.858875
+  type: 'test'
+  ...
+# Subtest: the first look comes 300 ms after the start, and each one after it a whole interval later
+ok 303 - the first look comes 300 ms after the start, and each one after it a whole interval later
+  ---
+  duration_ms: 2.156833
+  type: 'test'
+  ...
+# Subtest: a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms
+ok 304 - a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms
+  ---
+  duration_ms: 1.259875
+  type: 'test'
+  ...
+# Subtest: aborting cancels the composition once and stops polling
+ok 305 - aborting cancels the composition once and stops polling
+  ---
+  duration_ms: 33.759458
+  type: 'test'
+  ...
+# Subtest: a stop that lands while the composition is being read ends the wait at once, with one cancel
+ok 306 - a stop that lands while the composition is being read ends the wait at once, with one cancel
+  ---
+  duration_ms: 300.93775
+  type: 'test'
+  ...
+# Subtest: a stop while a ready composition waits for its Files entry takes one last look and keeps the file
+ok 307 - a stop while a ready composition waits for its Files entry takes one last look and keeps the file
+  ---
+  duration_ms: 314.547542
+  type: 'test'
+  ...
+# Subtest: a stop while a ready composition's Files entry is still missing ends the follow without cancelling it
+ok 308 - a stop while a ready composition's Files entry is still missing ends the follow without cancelling it
+  ---
+  duration_ms: 314.281416
+  type: 'test'
+  ...
+# Subtest: a stop already in effect when the Files entry was looked for does not look again
+ok 309 - a stop already in effect when the Files entry was looked for does not look again
+  ---
+  duration_ms: 301.184833
+  type: 'test'
+  ...
+# Subtest: a composition that finishes while the stop is on its way keeps its file
+ok 310 - a composition that finishes while the stop is on its way keeps its file
+  ---
+  duration_ms: 312.603792
+  type: 'test'
+  ...
+# Subtest: a stop that raced a finished composition, whose Files entry is not there yet, ends without a second cancel
+ok 311 - a stop that raced a finished composition, whose Files entry is not there yet, ends without a second cancel
+  ---
+  duration_ms: 314.11925
+  type: 'test'
+  ...
+# Subtest: a composition that failed while the stop was on its way reports why, as a poll would have
+ok 312 - a composition that failed while the stop was on its way reports why, as a poll would have
+  ---
+  duration_ms: 313.853791
+  type: 'test'
+  ...
+# Subtest: a composition stopped from elsewhere while the stop was on its way is a stop
+ok 313 - a composition stopped from elsewhere while the stop was on its way is a stop
+  ---
+  duration_ms: 312.925541
+  type: 'test'
+  ...
+# Subtest: a cancel that took effect is not followed by another look at the composition
+ok 314 - a cancel that took effect is not followed by another look at the composition
+  ---
+  duration_ms: 313.335417
+  type: 'test'
+  ...
+# Subtest: a cancel the cluster answers with nothing is a stop, and is not followed by another look
+ok 315 - a cancel the cluster answers with nothing is a stop, and is not followed by another look
+  ---
+  duration_ms: 312.344458
+  type: 'test'
+  ...
+# Subtest: a cancel that says it finished a composition that still reads as unfinished is a stop, and does not loop
+ok 316 - a cancel that says it finished a composition that still reads as unfinished is a stop, and does not loop
+  ---
+  duration_ms: 312.028083
+  type: 'test'
+  ...
+# Subtest: an already stopped signal cancels the composition without reading it
+ok 317 - an already stopped signal cancels the composition without reading it
+  ---
+  duration_ms: 0.248625
+  type: 'test'
+  ...
+# Subtest: stopping before the request is sent starts nothing
+ok 318 - stopping before the request is sent starts nothing
+  ---
+  duration_ms: 0.070375
+  type: 'test'
+  ...
+# Subtest: a long follow leaves no abort listener behind: each lives only as long as its wait
+ok 319 - a long follow leaves no abort listener behind: each lives only as long as its wait
+  ---
+  duration_ms: 34.530459
+  type: 'test'
+  ...
+# Subtest: a run that stopped before the file was finished fails the follow with the run's message
+ok 320 - a run that stopped before the file was finished fails the follow with the run's message
+  ---
+  duration_ms: 0.445083
+  type: 'test'
+  ...
+# Subtest: a run in state "failed" with no message still fails the follow, in plain words
+ok 321 - a run in state "failed" with no message still fails the follow, in plain words
+  ---
+  duration_ms: 1.477208
+  type: 'test'
+  ...
+# Subtest: a run in state "cancelled" with no message still fails the follow, in plain words
+ok 322 - a run in state "cancelled" with no message still fails the follow, in plain words
+  ---
+  duration_ms: 1.44475
+  type: 'test'
+  ...
+# Subtest: a run in state "abandoned" with no message still fails the follow, in plain words
+ok 323 - a run in state "abandoned" with no message still fails the follow, in plain words
+  ---
+  duration_ms: 1.481209
+  type: 'test'
+  ...
+# Subtest: a run that is still working does not stop the follow
+ok 324 - a run that is still working does not stop the follow
+  ---
+  duration_ms: 4.196916
+  type: 'test'
+  ...
+# Subtest: a ready composition keeps its file even when its run is recorded as stopped
+ok 325 - a ready composition keeps its file even when its run is recorded as stopped
+  ---
+  duration_ms: 1.668209
+  type: 'test'
+  ...
+# Subtest: only the run that carries this composition can explain its stop
+ok 326 - only the run that carries this composition can explain its stop
+  ---
+  duration_ms: 1.767958
+  type: 'test'
+  ...
+# Subtest: a run that cannot be read does not stop the follow
+ok 327 - a run that cannot be read does not stop the follow
+  ---
+  duration_ms: 2.871667
+  type: 'test'
+  ...
+# Subtest: startMaterialize sends only what the person set
+ok 328 - startMaterialize sends only what the person set
+  ---
+  duration_ms: 0.132291
+  type: 'test'
+  ...
+# Subtest: startMaterialize carries every field the request declares
+ok 329 - startMaterialize carries every field the request declares
+  ---
+  duration_ms: 0.181875
+  type: 'test'
+  ...
+# Subtest: startMaterialize never forwards a field the request type does not declare
+ok 330 - startMaterialize never forwards a field the request type does not declare
+  ---
+  duration_ms: 0.06525
+  type: 'test'
+  ...
+# Subtest: a refusal to start reaches the caller as the cluster's sentence alone
+ok 331 - a refusal to start reaches the caller as the cluster's sentence alone
+  ---
+  duration_ms: 0.428708
+  type: 'test'
+  ...
+# Subtest: a request with no request id is refused before anything is sent
+ok 332 - a request with no request id is refused before anything is sent
+  ---
+  duration_ms: 0.063709
+  type: 'test'
+  ...
+# Subtest: a described request whose id the hand-off would refuse is refused before the file is made
+ok 333 - a described request whose id the hand-off would refuse is refused before the file is made
+  ---
+  duration_ms: 0.223875
+  type: 'test'
+  ...
+# Subtest: a described request may use the longest id the hand-off can carry
+ok 334 - a described request may use the longest id the hand-off can carry
+  ---
+  duration_ms: 0.083541
+  type: 'test'
+  ...
+# Subtest: an id the hand-off never uses is not held to its pattern
+ok 335 - an id the hand-off never uses is not held to its pattern
+  ---
+  duration_ms: 0.073333
+  type: 'test'
+  ...
+# Subtest: the id is trimmed once, and the file and its description are asked for under the same one
+ok 336 - the id is trimmed once, and the file and its description are asked for under the same one
+  ---
+  duration_ms: 1.396584
+  type: 'test'
+  ...
+# Subtest: handOffDescription comments on the whole document, then asks the Library to write it
+ok 337 - handOffDescription comments on the whole document, then asks the Library to write it
+  ---
+  duration_ms: 0.093375
+  type: 'test'
+  ...
+# Subtest: the request ids it derives are ones the Library accepts
+ok 338 - the request ids it derives are ones the Library accepts
+  ---
+  duration_ms: 0.251292
+  type: 'test'
+  ...
+# Subtest: a retried hand-off reuses its request ids, so the Library returns the first receipts
+ok 339 - a retried hand-off reuses its request ids, so the Library returns the first receipts
+  ---
+  duration_ms: 0.066834
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: the Library refuses the comment
+ok 340 - handOffDescription reports a failure instead of throwing: the Library refuses the comment
+  ---
+  duration_ms: 0.090833
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: the comment is not confirmed
+ok 341 - handOffDescription reports a failure instead of throwing: the comment is not confirmed
+  ---
+  duration_ms: 0.069459
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: the Library cannot start the revision
+ok 342 - handOffDescription reports a failure instead of throwing: the Library cannot start the revision
+  ---
+  duration_ms: 0.2965
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: the revision is not confirmed
+ok 343 - handOffDescription reports a failure instead of throwing: the revision is not confirmed
+  ---
+  duration_ms: 0.078958
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: the request id is not one the Library accepts
+ok 344 - handOffDescription reports a failure instead of throwing: the request id is not one the Library accepts
+  ---
+  duration_ms: 0.1345
+  type: 'test'
+  ...
+# Subtest: handOffDescription reports a failure instead of throwing: there is nothing to send
+ok 345 - handOffDescription reports a failure instead of throwing: there is nothing to send
+  ---
+  duration_ms: 0.0325
+  type: 'test'
+  ...
+# Subtest: a refusal that arrives with the construct's name and the engine's frame in front is shown without either
+ok 346 - a refusal that arrives with the construct's name and the engine's frame in front is shown without either
+  ---
+  duration_ms: 0.150042
+  type: 'test'
+  ...
+# Subtest: the lookups it makes are worded the same way
+ok 347 - the lookups it makes are worded the same way
+  ---
+  duration_ms: 0.115459
+  type: 'test'
+  ...
+# Subtest: the retry without attachments words its own refusal the same way
+ok 348 - the retry without attachments words its own refusal the same way
+  ---
+  duration_ms: 0.183334
+  type: 'test'
+  ...
+# Subtest: only the construct's own name is taken off, and only from the front
+ok 349 - only the construct's own name is taken off, and only from the front
+  ---
+  duration_ms: 0.141416
+  type: 'test'
+  ...
+# Subtest: handOffDescription attaches every reference the Library accepts, and reports nothing
+ok 350 - handOffDescription attaches every reference the Library accepts, and reports nothing
+  ---
+  duration_ms: 0.119375
+  type: 'test'
+  ...
+# Subtest: a PDF is reported rather than attached, and the image still goes with the revision
+ok 351 - a PDF is reported rather than attached, and the image still goes with the revision
+  ---
+  duration_ms: 0.129666
+  type: 'test'
+  ...
+# Subtest: with only unsupported references the comment goes without attachments and the revision still opens
+ok 352 - with only unsupported references the comment goes without attachments and the revision still opens
+  ---
+  duration_ms: 0.1545
+  type: 'test'
+  ...
+# Subtest: the Library's own type and size rules decide what is attached
+ok 353 - the Library's own type and size rules decide what is attached
+  ---
+  duration_ms: 0.536417
+  type: 'test'
+  ...
+# Subtest: a reference of a type or size the Library refuses is reported by label
+ok 354 - a reference of a type or size the Library refuses is reported by label
+  ---
+  duration_ms: 0.349916
+  type: 'test'
+  ...
+# Subtest: no more than eight references are attached, and the rest are reported
+ok 355 - no more than eight references are attached, and the rest are reported
+  ---
+  duration_ms: 0.151417
+  type: 'test'
+  ...
+# Subtest: attachments may total exactly 16 MiB and no more
+ok 356 - attachments may total exactly 16 MiB and no more
+  ---
+  duration_ms: 0.06725
+  type: 'test'
+  ...
+# Subtest: a reference that would pass 16 MiB is reported, and later ones that still fit are attached
+ok 357 - a reference that would pass 16 MiB is reported, and later ones that still fit are attached
+  ---
+  duration_ms: 0.072708
+  type: 'test'
+  ...
+# Subtest: Markdown attachments may total exactly 64 KiB and no more
+ok 358 - Markdown attachments may total exactly 64 KiB and no more
+  ---
+  duration_ms: 0.063625
+  type: 'test'
+  ...
+# Subtest: Markdown over 64 KiB in all is reported, while a small one and an image after it still go
+ok 359 - Markdown over 64 KiB in all is reported, while a small one and an image after it still go
+  ---
+  duration_ms: 0.081958
+  type: 'test'
+  ...
+# Subtest: references that are not files, or do not resolve, are reported; a repeated one is attached once
+ok 360 - references that are not files, or do not resolve, are reported; a repeated one is attached once
+  ---
+  duration_ms: 0.114583
+  type: 'test'
+  ...
+# Subtest: a reference listed twice is attached once, or reported once, and the same file under two ids counts once
+ok 361 - a reference listed twice is attached once, or reported once, and the same file under two ids counts once
+  ---
+  duration_ms: 0.067458
+  type: 'test'
+  ...
+# Subtest: a reference with no label is reported by what it points at
+ok 362 - a reference with no label is reported by what it points at
+  ---
+  duration_ms: 0.100041
+  type: 'test'
+  ...
+# Subtest: when the Library refuses an attachment the comment is sent once more without them, and they are reported
+ok 363 - when the Library refuses an attachment the comment is sent once more without them, and they are reported
+  ---
+  duration_ms: 0.132333
+  type: 'test'
+  ...
+# Subtest: a refusal that is not about an attachment is not retried without them
+ok 364 - a refusal that is not about an attachment is not retried without them
+  ---
+  duration_ms: 0.079208
+  type: 'test'
+  ...
+# Subtest: with no attachment to take off there is nothing to retry
+ok 365 - with no attachment to take off there is nothing to retry
+  ---
+  duration_ms: 0.047834
+  type: 'test'
+  ...
+# Subtest: if the comment fails again without its attachments, that failure is the one reported
+ok 366 - if the comment fails again without its attachments, that failure is the one reported
+  ---
+  duration_ms: 0.068375
+  type: 'test'
+  ...
+# Subtest: materialize on a described Markdown request returns the revision once the file is in Files
+ok 367 - materialize on a described Markdown request returns the revision once the file is in Files
+  ---
+  duration_ms: 1.902834
+  type: 'test'
+  ...
+# Subtest: materialize puts the references past the Library's Markdown total on its result
+ok 368 - materialize puts the references past the Library's Markdown total on its result
+  ---
+  duration_ms: 1.388583
+  type: 'test'
+  ...
+# Subtest: materialize hands nothing on when a picked file is one the Library cannot attach
+ok 369 - materialize hands nothing on when a picked file is one the Library cannot attach
+  ---
+  duration_ms: 0.5245
+  type: 'test'
+  ...
+# Subtest: a picked file with no row makes it a file the composer writes
+ok 370 - a picked file with no row makes it a file the composer writes
+  ---
+  duration_ms: 3.269417
+  type: 'test'
+  ...
+# Subtest: a refused read is the cluster's sentence, and materialize starts nothing
+ok 371 - a refused read is the cluster's sentence, and materialize starts nothing
+  ---
+  duration_ms: 0.370083
+  type: 'test'
+  ...
+# Subtest: a stop during the read starts nothing
+ok 372 - a stop during the read starts nothing
+  ---
+  duration_ms: 0.123084
+  type: 'test'
+  ...
+# Subtest: materialize waits for the Files entry before it hands the description over
+ok 373 - materialize waits for the Files entry before it hands the description over
+  ---
+  duration_ms: 2.951292
+  type: 'test'
+  ...
+# Subtest: a failed hand-off leaves the file and says why, and materialize still resolves
+ok 374 - a failed hand-off leaves the file and says why, and materialize still resolves
+  ---
+  duration_ms: 1.695833
+  type: 'test'
+  ...
+# Subtest: stopping after the file exists keeps the file, sends nothing, and says the description was not sent
+ok 375 - stopping after the file exists keeps the file, sends nothing, and says the description was not sent
+  ---
+  duration_ms: 0.332208
+  type: 'test'
+  ...
+# Subtest: stopping after a blank file exists returns the file as it is: there was no description to send
+ok 376 - stopping after a blank file exists returns the file as it is: there was no description to send
+  ---
+  duration_ms: 1.4975
+  type: 'test'
+  ...
+# Subtest: a stop during the wait for a described file's Files entry still returns the file once the entry is there
+ok 377 - a stop during the wait for a described file's Files entry still returns the file once the entry is there
+  ---
+  duration_ms: 312.742625
+  type: 'test'
+  ...
+# Subtest: a stop before the file exists still ends materialize with nothing returned
+ok 378 - a stop before the file exists still ends materialize with nothing returned
+  ---
+  duration_ms: 302.671833
+  type: 'test'
+  ...
+# Subtest: a described file that was finished while the stop was on its way is returned, and its description is not sent
+ok 379 - a described file that was finished while the stop was on its way is returned, and its description is not sent
+  ---
+  duration_ms: 313.116167
+  type: 'test'
+  ...
+# Subtest: a blank file that was finished while the stop was on its way is returned as it is
+ok 380 - a blank file that was finished while the stop was on its way is returned as it is
+  ---
+  duration_ms: 314.321916
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for a blank Markdown file
+ok 381 - materialize makes no Library hand-off call for a blank Markdown file
+  ---
+  duration_ms: 0.619917
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for a statement of only spaces
+ok 382 - materialize makes no Library hand-off call for a statement of only spaces
+  ---
+  duration_ms: 1.349333
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for Markdown through a template
+ok 383 - materialize makes no Library hand-off call for Markdown through a template
+  ---
+  duration_ms: 2.317375
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for Markdown from a recipe
+ok 384 - materialize makes no Library hand-off call for Markdown from a recipe
+  ---
+  duration_ms: 1.112667
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for a package
+ok 385 - materialize makes no Library hand-off call for a package
+  ---
+  duration_ms: 2.802584
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for a described file that is not Markdown
+ok 386 - materialize makes no Library hand-off call for a described file that is not Markdown
+  ---
+  duration_ms: 1.368666
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for Markdown from a query
+ok 387 - materialize makes no Library hand-off call for Markdown from a query
+  ---
+  duration_ms: 1.159083
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for Markdown from a concept row
+ok 388 - materialize makes no Library hand-off call for Markdown from a concept row
+  ---
+  duration_ms: 0.716333
+  type: 'test'
+  ...
+# Subtest: materialize makes no Library hand-off call for Markdown from a file and a query
+ok 389 - materialize makes no Library hand-off call for Markdown from a file and a query
+  ---
+  duration_ms: 0.842917
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown holds when nothing is picked, and for each file the Library takes
+ok 390 - isDescribedMarkdown holds when nothing is picked, and for each file the Library takes
+  ---
+  duration_ms: 0.299708
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown keeps the composer for any file the Library refuses, alone or beside one it takes
+ok 391 - isDescribedMarkdown keeps the composer for any file the Library refuses, alone or beside one it takes
+  ---
+  duration_ms: 0.141584
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown keeps the composer for a file in the Bin, one it does not know, and one it cannot read
+ok 392 - isDescribedMarkdown keeps the composer for a file in the Bin, one it does not know, and one it cannot read
+  ---
+  duration_ms: 0.057291
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown keeps the composer for a record or a query among the files
+ok 393 - isDescribedMarkdown keeps the composer for a record or a query among the files
+  ---
+  duration_ms: 0.0425
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown matches the server's shape rule, whatever the files
+ok 394 - isDescribedMarkdown matches the server's shape rule, whatever the files
+  ---
+  duration_ms: 0.06375
+  type: 'test'
+  ...
+# Subtest: isDescribedMarkdown asks the lookup for each file by its ref as it was given
+ok 395 - isDescribedMarkdown asks the lookup for each file by its ref as it was given
+  ---
+  duration_ms: 0.043833
+  type: 'test'
+  ...
+# Subtest: libraryFileFacts reads a file row's name, size and whether it is archived
+ok 396 - libraryFileFacts reads a file row's name, size and whether it is archived
+  ---
+  duration_ms: 0.065542
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown reads each picked file's row once, and only those it is not told
+ok 397 - readDescribedMarkdown reads each picked file's row once, and only those it is not told
+  ---
+  duration_ms: 0.078833
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown trusts what it is told, even that a file cannot be read
+ok 398 - readDescribedMarkdown trusts what it is told, even that a file cannot be read
+  ---
+  duration_ms: 0.061167
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown reads a file by its ref with the spaces taken off
+ok 399 - readDescribedMarkdown reads a file by its ref with the spaces taken off
+  ---
+  duration_ms: 0.048166
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown reads nothing for a request that cannot be described
+ok 400 - readDescribedMarkdown reads nothing for a request that cannot be described
+  ---
+  duration_ms: 0.080708
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown reads nothing when nothing is picked, and says the request is described
+ok 401 - readDescribedMarkdown reads nothing when nothing is picked, and says the request is described
+  ---
+  duration_ms: 0.037042
+  type: 'test'
+  ...
+# Subtest: readDescribedMarkdown says a file the Library cannot attach, one in the Bin and one with no row are not described
+ok 402 - readDescribedMarkdown says a file the Library cannot attach, one in the Bin and one with no row are not described
+  ---
+  duration_ms: 0.111292
+  type: 'test'
+  ...
+# Subtest: the client barrel exports the materialize surface
+ok 403 - the client barrel exports the materialize surface
+  ---
+  duration_ms: 0.049375
+  type: 'test'
+  ...
+# Subtest: identifier keys stay bare and everything else is quoted
+ok 404 - identifier keys stay bare and everything else is quoted
+  ---
+  duration_ms: 0.448166
+  type: 'test'
+  ...
+# Subtest: keys sort on their RAW name, before quoting
+ok 405 - keys sort on their RAW name, before quoting
+  ---
+  duration_ms: 0.060083
+  type: 'test'
+  ...
+# Subtest: listModules -- sends modulesList and normalizes rows
+ok 406 - listModules -- sends modulesList and normalizes rows
+  ---
+  duration_ms: 5.391125
+  type: 'test'
+  ...
+# Subtest: listModules -- payload-level error throws with the engine's message
+ok 407 - listModules -- payload-level error throws with the engine's message
+  ---
+  duration_ms: 0.258416
+  type: 'test'
+  ...
+# Subtest: getModuleDetail -- sends (kind, name) and normalizes env vars
+ok 408 - getModuleDetail -- sends (kind, name) and normalizes env vars
+  ---
+  duration_ms: 0.196667
+  type: 'test'
+  ...
+# Subtest: setPackEnabled -- round-trips the flip and keeps restartRequired honest
+ok 409 - setPackEnabled -- round-trips the flip and keeps restartRequired honest
+  ---
+  duration_ms: 0.101958
+  type: 'test'
+  ...
+# Subtest: setPackEnabled -- owner refusal throws
+ok 410 - setPackEnabled -- owner refusal throws
+  ---
+  duration_ms: 0.1265
+  type: 'test'
+  ...
+# Subtest: Nexus generated queries preserve search, facets and selected identities
+ok 411 - Nexus generated queries preserve search, facets and selected identities
+  ---
+  duration_ms: 0.652875
+  type: 'test'
+  ...
+# Subtest: resource directory builders retain search, facets and scoped detail arguments
+ok 412 - resource directory builders retain search, facets and scoped detail arguments
+  ---
+  duration_ms: 0.354083
+  type: 'test'
+  ...
+# Subtest: listDomains sends listPackDomains with a requestId and maps the reply
+ok 413 - listDomains sends listPackDomains with a requestId and maps the reply
+  ---
+  duration_ms: 2.872666
+  type: 'test'
+  ...
+# Subtest: listFiles carries the domain and coerces an int64 size from string or number
+ok 414 - listFiles carries the domain and coerces an int64 size from string or number
+  ---
+  duration_ms: 0.233375
+  type: 'test'
+  ...
+# Subtest: readFile carries domain and path and returns the source with its origin
+ok 415 - readFile carries domain and path and returns the source with its origin
+  ---
+  duration_ms: 0.116083
+  type: 'test'
+  ...
+# Subtest: readFile resolves found=false rather than throwing for a missing file
+ok 416 - readFile resolves found=false rather than throwing for a missing file
+  ---
+  duration_ms: 0.077584
+  type: 'test'
+  ...
+# Subtest: a queryError reply throws with the engine's message, naming the call
+ok 417 - a queryError reply throws with the engine's message, naming the call
+  ---
+  duration_ms: 0.200792
+  type: 'test'
+  ...
+# Subtest: an unexpected reply envelope throws rather than resolving empty
+ok 418 - an unexpected reply envelope throws rather than resolving empty
+  ---
+  duration_ms: 0.072292
+  type: 'test'
+  ...
+# Subtest: deepStripNulls drops null and undefined at the top level
+ok 419 - deepStripNulls drops null and undefined at the top level
+  ---
+  duration_ms: 0.595083
+  type: 'test'
+  ...
+# Subtest: deepStripNulls recurses into nested objects
+ok 420 - deepStripNulls recurses into nested objects
+  ---
+  duration_ms: 0.104292
+  type: 'test'
+  ...
+# Subtest: deepStripNulls recurses into arrays and their elements
+ok 421 - deepStripNulls recurses into arrays and their elements
+  ---
+  duration_ms: 0.750166
+  type: 'test'
+  ...
+# Subtest: deepStripNulls preserves falsy-but-defined values
+ok 422 - deepStripNulls preserves falsy-but-defined values
+  ---
+  duration_ms: 0.195334
+  type: 'test'
+  ...
+# Subtest: deepStripNulls returns primitives unchanged
+ok 423 - deepStripNulls returns primitives unchanged
+  ---
+  duration_ms: 0.193541
+  type: 'test'
+  ...
+# Subtest: isSyntheticDomainId matches bridge- prefix only
+ok 424 - isSyntheticDomainId matches bridge- prefix only
+  ---
+  duration_ms: 0.060667
+  type: 'test'
+  ...
+# Subtest: displayDomainIds drops synthetic ids and keeps order
+ok 425 - displayDomainIds drops synthetic ids and keeps order
+  ---
+  duration_ms: 0.101708
+  type: 'test'
+  ...
+# Subtest: a refused session rejects with the server's own sentence
+ok 426 - a refused session rejects with the server's own sentence
+  ---
+  duration_ms: 8.176583
+  type: 'test'
+  ...
+# Subtest: a refused session stops reading the microphone
+ok 427 - a refused session stops reading the microphone
+  ---
+  duration_ms: 2.072792
+  type: 'test'
+  ...
+# Subtest: an aborted session stops reading the microphone
+ok 428 - an aborted session stops reading the microphone
+  ---
+  duration_ms: 3.395292
+  type: 'test'
+  ...
+# Subtest: partials stream and Complete resolves the final transcript
+ok 429 - partials stream and Complete resolves the final transcript
+  ---
+  duration_ms: 3.630625
+  type: 'test'
+  ...
+# Subtest: the Start envelope declares the format the wire expects
+ok 430 - the Start envelope declares the format the wire expects
+  ---
+  duration_ms: 1.908875
+  type: 'test'
+  ...
+# Subtest: executeNamed -- forwards opts.cursor onto ExecuteQueryMsg.cursor
+ok 431 - executeNamed -- forwards opts.cursor onto ExecuteQueryMsg.cursor
+  ---
+  duration_ms: 1.606625
+  type: 'test'
+  ...
+# Subtest: executeNamed -- omits the cursor field entirely when unset (first page)
+ok 432 - executeNamed -- omits the cursor field entirely when unset (first page)
+  ---
+  duration_ms: 0.135833
+  type: 'test'
+  ...
+# Subtest: executeNamed -- omits the cursor field for an empty-string cursor
+ok 433 - executeNamed -- omits the cursor field for an empty-string cursor
+  ---
+  duration_ms: 0.075958
+  type: 'test'
+  ...
+# Subtest: executeNamed -- exhausted page mints no nextCursor (meta cursor empty)
+ok 434 - executeNamed -- exhausted page mints no nextCursor (meta cursor empty)
+  ---
+  duration_ms: 0.077709
+  type: 'test'
+  ...
+# Subtest: executeRaw -- forwards opts.cursor onto the wire
+ok 435 - executeRaw -- forwards opts.cursor onto the wire
+  ---
+  duration_ms: 0.092042
+  type: 'test'
+  ...
+# Subtest: executeNamed -- a refusal arrives in its frames, and refusalSentence leaves the sentence
+ok 436 - executeNamed -- a refusal arrives in its frames, and refusalSentence leaves the sentence
+  ---
+  duration_ms: 0.193334
+  type: 'test'
+  ...
+# Subtest: refusalSentence -- takes off the call, the engine's frame and a Go package, once each
+ok 437 - refusalSentence -- takes off the call, the engine's frame and a Go package, once each
+  ---
+  duration_ms: 0.708458
+  type: 'test'
+  ...
+# Subtest: refusalSentence -- leaves alone what is not one of its frames
+ok 438 - refusalSentence -- leaves alone what is not one of its frames
+  ---
+  duration_ms: 0.25325
+  type: 'test'
+  ...
+# Subtest: refusalSentence -- an empty named frame carries no sentence
+ok 439 - refusalSentence -- an empty named frame carries no sentence
+  ---
+  duration_ms: 0.432042
+  type: 'test'
+  ...
+# Subtest: queryPage sends generated search arguments with a bounded order, cursor and cancellation
+ok 440 - queryPage sends generated search arguments with a bounded order, cursor and cancellation
+  ---
+  duration_ms: 1.668792
+  type: 'test'
+  ...
+# Subtest: queryPage rejects invalid bounds, mismatched builders and executable sort text before sending
+ok 441 - queryPage rejects invalid bounds, mismatched builders and executable sort text before sending
+  ---
+  duration_ms: 0.302958
+  type: 'test'
+  ...
+# Subtest: all query clients sharing a connection admit only four server queries
+ok 442 - all query clients sharing a connection admit only four server queries
+  ---
+  duration_ms: 16.973958
+  type: 'test'
+  ...
+# Subtest: cancelling a sent query cancels server work and holds admission until it settles
+ok 443 - cancelling a sent query cancels server work and holds admission until it settles
+  ---
+  duration_ms: 0.900375
+  type: 'test'
+  ...
+# Subtest: repeated invalidations cancel queued reads before they reach the server
+ok 444 - repeated invalidations cancel queued reads before they reach the server
+  ---
+  duration_ms: 4.860625
+  type: 'test'
+  ...
+# Subtest: disconnect rejects queued calls without replaying them on the replacement transport
+ok 445 - disconnect rejects queued calls without replaying them on the replacement transport
+  ---
+  duration_ms: 0.28525
+  type: 'test'
+  ...
+# Subtest: sustained background refreshes leave capacity for actions and control messages
+ok 446 - sustained background refreshes leave capacity for actions and control messages
+  ---
+  duration_ms: 0.494625
+  type: 'test'
+  ...
+# Subtest: a runaway producer has a bounded client queue and never overfills the wire
+ok 447 - a runaway producer has a bounded client queue and never overfills the wire
+  ---
+  duration_ms: 0.817166
+  type: 'test'
+  ...
+# Subtest: a base role slug passes through unchanged
+ok 448 - a base role slug passes through unchanged
+  ---
+  duration_ms: 0.434625
+  type: 'test'
+  ...
+# Subtest: a CUSTOM role slug passes through unchanged -- the memql\#5166 point
+ok 449 - a CUSTOM role slug passes through unchanged -- the memql\#5166 point
+  ---
+  duration_ms: 0.066208
+  type: 'test'
+  ...
+# Subtest: an absent role is empty, and empty is UNKNOWN rather than least-privileged
+ok 450 - an absent role is empty, and empty is UNKNOWN rather than least-privileged
+  ---
+  duration_ms: 1.059917
+  type: 'test'
+  ...
+# Subtest: a name the catalog could not resolve is empty, not fabricated
+ok 451 - a name the catalog could not resolve is empty, not fabricated
+  ---
+  duration_ms: 0.108959
+  type: 'test'
+  ...
+# Subtest: accessSummaryFromWire is null for an absent payload
+ok 452 - accessSummaryFromWire is null for an absent payload
+  ---
+  duration_ms: 0.123208
+  type: 'test'
+  ...
+# Subtest: requests the whole catalog with an empty payload
+ok 453 - requests the whole catalog with an empty payload
+  ---
+  duration_ms: 0.790709
+  type: 'test'
+  ...
+# Subtest: passes a domain restriction through
+ok 454 - passes a domain restriction through
+  ---
+  duration_ms: 0.125791
+  type: 'test'
+  ...
+# Subtest: drops malformed catalog entries instead of surfacing them
+ok 455 - drops malformed catalog entries instead of surfacing them
+  ---
+  duration_ms: 0.067958
+  type: 'test'
+  ...
+# Subtest: surfaces a queryError as a thrown, named error
+ok 456 - surfaces a queryError as a thrown, named error
+  ---
+  duration_ms: 0.184375
+  type: 'test'
+  ...
+# Subtest: subscribeGraph sends structured concept + actions, no filter
+ok 457 - subscribeGraph sends structured concept + actions, no filter
+  ---
+  duration_ms: 1.849459
+  type: 'test'
+  ...
+# Subtest: subscribeGraph with no options means all concepts + all actions
+ok 458 - subscribeGraph with no options means all concepts + all actions
+  ---
+  duration_ms: 0.25825
+  type: 'test'
+  ...
+# Subtest: compact graph subscription survives reconnect replay
+ok 459 - compact graph subscription survives reconnect replay
+  ---
+  duration_ms: 0.150166
+  type: 'test'
+  ...
+# Subtest: subscribe rejects graph_events (default and explicit)
+ok 460 - subscribe rejects graph_events (default and explicit)
+  ---
+  duration_ms: 0.274
+  type: 'test'
+  ...
+# Subtest: subscribe forwards a non-graph free-text filter
+ok 461 - subscribe forwards a non-graph free-text filter
+  ---
+  duration_ms: 0.086458
+  type: 'test'
+  ...
+# Subtest: subscribeGraph routes matching events to the handler
+ok 462 - subscribeGraph routes matching events to the handler
+  ---
+  duration_ms: 0.213625
+  type: 'test'
+  ...
+# Subtest: subscribeGraph unsubscribe stops delivery and sends an unsubscribe
+ok 463 - subscribeGraph unsubscribe stops delivery and sends an unsubscribe
+  ---
+  duration_ms: 0.103209
+  type: 'test'
+  ...
+# Subtest: an id-only event surfaces payloadOmitted and carries only the identity
+ok 464 - an id-only event surfaces payloadOmitted and carries only the identity
+  ---
+  duration_ms: 0.493708
+  type: 'test'
+  ...
+# Subtest: an ordinary event reports payloadOmitted false, not undefined
+ok 465 - an ordinary event reports payloadOmitted false, not undefined
+  ---
+  duration_ms: 0.297541
+  type: 'test'
+  ...
+# Subtest: identical graph readers share one wire subscription across replay and independent release
+ok 466 - identical graph readers share one wire subscription across replay and independent release
+  ---
+  duration_ms: 0.432291
+  type: 'test'
+  ...
+# Subtest: graph sharing preserves concept, action and authorization-payload distinctions
+ok 467 - graph sharing preserves concept, action and authorization-payload distinctions
+  ---
+  duration_ms: 0.185708
+  type: 'test'
+  ...
+# Subtest: the omitted graph action filter shares the explicit all-actions subscription
+ok 468 - the omitted graph action filter shares the explicit all-actions subscription
+  ---
+  duration_ms: 0.0535
+  type: 'test'
+  ...
+# Subtest: graph readers registered while offline survive replay and release cleanly
+ok 469 - graph readers registered while offline survive replay and release cleanly
+  ---
+  duration_ms: 0.082
+  type: 'test'
+  ...
+# Subtest: listTools -- happy path returns the catalog + cursor
+ok 470 - listTools -- happy path returns the catalog + cursor
+  ---
+  duration_ms: 2.23
+  type: 'test'
+  ...
+# Subtest: listTools -- forwards cursor on follow-up page
+ok 471 - listTools -- forwards cursor on follow-up page
+  ---
+  duration_ms: 0.109041
+  type: 'test'
+  ...
+# Subtest: listTools -- queryError throws
+ok 472 - listTools -- queryError throws
+  ---
+  duration_ms: 0.259875
+  type: 'test'
+  ...
+# Subtest: callTool -- forwards args + returns content
+ok 473 - callTool -- forwards args + returns content
+  ---
+  duration_ms: 0.136792
+  type: 'test'
+  ...
+# Subtest: callTool -- isError rides the result (no throw)
+ok 474 - callTool -- isError rides the result (no throw)
+  ---
+  duration_ms: 0.122333
+  type: 'test'
+  ...
+# Subtest: callTool -- rejects missing name
+ok 475 - callTool -- rejects missing name
+  ---
+  duration_ms: 0.077291
+  type: 'test'
+  ...
+# Subtest: a version time is ordered by the instant it names, not by its spelling
+ok 476 - a version time is ordered by the instant it names, not by its spelling
+  ---
+  duration_ms: 0.459292
+  type: 'test'
+  ...
+# Subtest: it keeps every digit the wire carries, to the nanosecond
+ok 477 - it keeps every digit the wire carries, to the nanosecond
+  ---
+  duration_ms: 0.190875
+  type: 'test'
+  ...
+# Subtest: whole seconds weigh more than any fraction
+ok 478 - whole seconds weigh more than any fraction
+  ---
+  duration_ms: 0.0775
+  type: 'test'
+  ...
+# Subtest: the same instant is the same order, however it is spelled
+ok 479 - the same instant is the same order, however it is spelled
+  ---
+  duration_ms: 0.126792
+  type: 'test'
+  ...
+# Subtest: it claims no order where either side is not a time to order by
+ok 480 - it claims no order where either side is not a time to order by
+  ---
+  duration_ms: 0.083125
+  type: 'test'
+  ...
+1..480
+# tests 480
+# suites 0
+# pass 480
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5006.630166

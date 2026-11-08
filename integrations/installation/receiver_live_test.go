@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -74,4 +75,39 @@ func TestReceivingRendererThroughInstalledArgo(t *testing.T) {
 	digest, err := reads.finish(ctx)
 	require.NoError(t, err, "all authenticated renderer inputs must remain unchanged during qualification")
 	t.Logf("installed renderer inputs=%d digest=%s; pinned runtime image and TLS identity verified", len(reads.reads), digest)
+}
+
+type installedDiscoveryAPI struct{ kubeconfig string }
+
+// Discovery only: this probe cannot read namespaced objects or credentials.
+var installedDiscoveryPath = regexp.MustCompile(`^(version|api|apis|api/v1|apis/[a-z0-9.-]+/[a-z0-9.-]+)$`)
+
+func (a installedDiscoveryAPI) Do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	if method != http.MethodGet || contentType != "" || len(body) != 0 || !installedDiscoveryPath.MatchString(path) {
+		return nil, errors.New("installed discovery test permits only API catalog reads")
+	}
+	result, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig="+a.kubeconfig,
+		"get", "--raw=/"+path, "--request-timeout=10s").Output()
+	if err != nil {
+		return nil, errors.New("installed discovery API read failed")
+	}
+	return result, nil
+}
+
+func TestReceivingDiscoveryThroughInstalledKubernetes(t *testing.T) {
+	kubeconfig := os.Getenv("MEMQL_INSTALLATION_DISCOVERY_TEST_KUBECONFIG")
+	if kubeconfig == "" {
+		t.Skip("set MEMQL_INSTALLATION_DISCOVERY_TEST_KUBECONFIG for the explicit read-only discovery check")
+	}
+	require.True(t, filepath.IsAbs(kubeconfig), "select the operator connection explicitly")
+	_, err := os.Stat(kubeconfig)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	reads := newReceiverReads(installedDiscoveryAPI{kubeconfig: kubeconfig})
+	version, resources, err := reads.discovery(ctx)
+	require.NoError(t, err)
+	_, err = reads.finish(ctx)
+	require.NoError(t, err, "discovery must retain every resource contract while tolerating reordered inventories")
+	t.Logf("installed Kubernetes %s: %d authenticated discovery inputs and %d renderer API entries verified", version, len(reads.reads), len(resources))
 }

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
+import { readTheBar, useFakeDate } from "../readTheBar";
 import { RepositoryChange, validRequestPaths } from "../../src/apps/pipelines/RepositoryChange";
 import { fakeConnection, withSession } from "../deployables/harness";
 function mount(over: Parameters<typeof fakeConnection>[0] = {}) { const c = fakeConnection(over); h.connection=c; render(withSession(<RepositoryChange sourceId="source-one" />)); return c; }
@@ -169,5 +170,98 @@ describe("saved proposal navigation", () => {
     fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
     await screen.findByText("Independent review passed");
     expect(screen.queryByRole("link",{name:"Open pull request"})).toBeNull();
+  });
+});
+
+describe("proposal preparation progress", () => {
+  const authority = {...permission, canWrite:true, route:"own", landingMode:"owner_push"};
+  const request = {...deliveryReceipt, operation:"propose_change", id:"stopped-request", goalId:"draft-goal", runId:"draft-run"};
+  const stopped = {id:"draft-run", goalId:"draft-goal", status:"failed", errorMessage:"Independent review refused removal of the existing parent address."};
+  it.each(["failed", "waiting"])("shows a %s execution refusal separately from scope approval and revises without replaying", async status => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,status}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText(status === "waiting" ? "Proposal preparation needs attention." : "Proposal preparation stopped.");
+    expect(screen.queryByText("Preparing the requested change…")).toBeNull();
+    expect(screen.getByText(stopped.errorMessage)).toBeTruthy();
+    expect(screen.getByText("Approved for the requested work")).toBeTruthy();
+    expect(screen.queryByText(/Prepare a pull request within/)).toBeNull();
+    expect(c.callsNamed("workRunSummaryForOwner")[0]).toContain('runId: "draft-run"');
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button",{name:"Revise request"}));
+    expect((screen.getByLabelText("What should change?") as HTMLTextAreaElement).value).toBe(request.statement);
+    expect((screen.getByLabelText("Files or folders this request may change") as HTMLTextAreaElement).value).toBe("clients/os/");
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button",{name:"Start requested work"}));
+    await waitFor(()=>expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(1));
+    expect(c.callsNamed("repositoryChangeRequest")[0]).not.toContain('requestId: "stopped-request"');
+  });
+  it.each(["", "   "])("keeps a waiting attempt without an error in progress: %j", async errorMessage => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,status:"waiting",errorMessage}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparing the requested change…");
+    expect(screen.queryByRole("button",{name:"Revise request"})).toBeNull();
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+  });
+  it("keeps an unavailable attempt distinct from a failed attempt", async () => {
+    mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaryError:"Saved execution could not be read"});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparation progress is unavailable.");
+    expect(screen.queryByText("Proposal preparation stopped.")).toBeNull();
+    expect(screen.queryByRole("button",{name:"Revise request"})).toBeNull();
+  });
+  it("does not associate another goal's result with this request", async () => {
+    mount({repositoryAuthority:authority,changeRequests:[request],workRunSummaries:[{...stopped,goalId:"different-goal"}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByText("Preparation progress is unavailable.");
+    expect(screen.queryByText(stopped.errorMessage)).toBeNull();
+  });
+  it("does not replace a complete native proposal with an execution failure", async () => {
+    const c=mount({repositoryAuthority:authority,changeRequests:[{...request,proposal:{state:"complete",landingMode:"owner_push",branch:"memql/reviewed",commit:"a".repeat(40),expectedHead:"b".repeat(40),baseBranch:"main"}}],workRunSummaries:[stopped]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByRole("button",{name:"Land change"});
+    expect(screen.queryByText("Proposal preparation stopped.")).toBeNull();
+    expect(c.callsNamed("workRunSummaryForOwner")).toHaveLength(0);
+  });
+});
+
+
+describe("explicit owner landing", () => {
+  useFakeDate();
+  const proposal = {state:"complete", landingMode:"owner_push", branch:"memql/change-proposal", commit:"a".repeat(40), expectedHead:"b".repeat(40), baseBranch:"main"};
+  const request = {...deliveryReceipt, operation:"propose_change", proposal};
+  const authority = {...permission, canWrite:true, route:"own", landingMode:"owner_push"};
+  it("reviews an exact change and confirms landing separately from drafting or releasing", async () => {
+    const c = mount({repositoryAuthority:authority, changeRequests:[{...request}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    const land = await screen.findByRole("button",{name:"Land change"});
+    expect(screen.getByRole("link",{name:"Review proposed changes"}).getAttribute("href")).toBe(`https://github.com/acme/shop/compare/${proposal.expectedHead}...${proposal.commit}`);
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    fireEvent.click(land);
+    fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
+    await readTheBar(); fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    await screen.findByText("Change landed on main.");
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(1);
+    expect(c.callsNamed("repositoryChangeLand")[0]).toContain(`expectedCommit: "${proposal.commit}"`);
+    expect(c.callsNamed("repositoryChangeRequest")).toHaveLength(0);
+    expect(screen.queryByRole("button",{name:"Land change"})).toBeNull();
+  });
+  it("keeps a failed landing bound to the same reviewed commit", async () => {
+    const c = mount({repositoryAuthority:authority, changeRequests:[{...request}], repositoryChangeError:"default branch moved since review; prepare a new proposal"});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    fireEvent.click(await screen.findByRole("button",{name:"Land change"}));
+    await readTheBar(); fireEvent.click(screen.getByRole("button",{name:"Confirm landing"}));
+    await screen.findByText(/default branch moved since review/);
+    expect(screen.queryByText("Change landed on main.")).toBeNull();
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(1);
+  });
+  it("does not offer owner landing to a requester or for unconfirmed policy", async () => {
+    const c=mount({repositoryAuthority:permission,changeRequests:[{...request}]});
+    fireEvent.click(await screen.findByRole("button",{name:/Make saved filters easier to use/}));
+    await screen.findByRole("link",{name:"Review proposed changes"});
+    expect(screen.queryByRole("button",{name:"Land change"})).toBeNull();
+    expect(c.callsNamed("repositoryChangeLand")).toHaveLength(0);
   });
 });

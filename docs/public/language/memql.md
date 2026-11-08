@@ -655,6 +655,17 @@ restart. The cluster-owner builtin `conceptRetentionSweep(dryRun: true)` preview
 one page per concept and table without deleting or advancing progress. Expiry is
 asynchronous; TTL is eligibility for maintenance, not a query visibility filter.
 
+Deleting a version does not by itself give its disk back. Versions are stored
+in time chunks of seven days, and new versions only ever land in the newest
+chunk, so the space a retention delete frees inside an older, closed chunk is
+reused by nothing. The nightly `reclaimClosedChunkSpace` automation returns it:
+at 04:20 UTC it rewrites at most one closed chunk that would give back at least
+256 MiB and 30% of its size, and only when the volume has room for the chunk's
+live data and indexes twice over and the WAL archive is keeping up. Rows are
+never changed by the rewrite. A cluster owner previews a pass with
+`closedChunkCompaction(dryRun: true)`; the decision rules, the stop switch and
+the report are in [Closed-chunk compaction](../operate/database-platform.md#closed-chunk-compaction).
+
 `observability.logLine` uses the same annotation through its chunk-aware nightly
 sweeper. Logs require whole days, `keepLatest=false` and `archive="required"`.
 Its declaration takes precedence over `MEMQL_LOGS_RETENTION_DAYS`; the environment
@@ -969,6 +980,23 @@ query note notesMentioning {
 A predicate that can push down belongs in `filter`, where the database narrows
 the rows before any of them is read.
 
+For a case-insensitive substring search over the whole resource, use
+`row.title.includes(args.q, true)` in `filter`. The optional second argument
+defaults to false and must be a literal boolean in a filter. Both modes treat
+`%`, `_` and quotes as literal characters. Keep the query's caller scope and
+`paginate` bound: search then selects matches before taking the page, including
+older records the client has not loaded. `refine` is not a substitute for this
+search because it only examines the page already read.
+
+To search a combined name, `filter` also accepts
+`(row.firstName + " " + row.lastName).includes(args.q, true)`. This receiver
+joins schema-declared string or datetime fields and string literals; a missing
+or null field contributes empty text. Each `+` subexpression must have a
+string literal or an already joined string on one side. Two fields alone,
+untyped values and numeric, object or list operands are refused. This narrow
+form keeps the complete-name search before pagination; it does not admit
+general row arithmetic into filters.
+
 ### Retired spellings
 
 Edition 2026 retires the spellings below. The parser refuses each one wherever
@@ -1271,15 +1299,35 @@ sort(
   (epic 5, 5.13 / memql#1993): it was O(offset) and drifted under
   concurrent inserts. To fetch the next page, pass the `nextCursor` from
   the prior response back as the query cursor; the engine pushes a
-  `WHERE (createdAt, id) <keyset> (?, ?)` predicate and continues from the
-  encoded position. The first page is bounded by a plain SQL `LIMIT`.
+  predicate over the declared sort keys and continues from the encoded
+  position. The first page is bounded by a plain SQL `LIMIT`.
+
+Wrapping a named query, as in `paginate(query recentItems(), 10)`, may narrow
+its declared page size. The effective size is the smaller of the caller's
+limit and the query's own cap, applied in SQL before materialization. A larger
+caller limit cannot widen that cap. Repeating `paginate` in the same authored
+expression or declaration remains an error.
 
 A full bounded page reports `hasMore: true` because it cannot prove
-exhaustion. Payload-field ordering currently has no keyset continuation: a
-full page in that order has no cursor. A consumer requiring the complete set
-must refuse that incomplete traversal or use a query ordered by the row's
-`createdAt`/`id`, with a fixed `asOf` when a stable snapshot is required. The
-absence of a cursor alone is not proof that every row was returned.
+exhaustion. Named queries bound to a concept support cursor continuation over
+schema-declared `string`, `datetime` and string-enum payload fields, with
+`row.createdAt` and `row.id` tie-breakers. Text ordering is bytewise;
+`datetime` retains its string ordering. Missing, null and blank fields sort
+last in either direction. Use an explicit stable `row.id` tie-breaker when
+updates should not move rows with equal resource timestamps.
+
+Text row intrinsics (`createdBy`, `concept`, `type`) also support continuation,
+as leading or secondary keys. Their whitespace and blank-value handling
+matches the in-process comparator; the cursor includes every declared key,
+including an explicit descending `id` tie-breaker.
+
+Unbound payload sorts and unsupported types (including objects and numeric
+fields) still use the bounded in-memory sort and emit no cursor. A consumer
+requiring the complete set must refuse that incomplete traversal or use a
+query ordered by the row's `createdAt`/`id`, with a fixed `asOf` when a stable
+snapshot is required. The absence of a cursor alone is not proof that every
+row was returned. Cursors bind the sort order, not a frozen dataset: a row
+whose sort value changes can move across a continuation boundary.
 
 **Default-cap backstop (memql#1965).** A query that arrives with NO
 explicit window — neither `paginate` nor `sort` — is treated as an

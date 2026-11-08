@@ -1,8 +1,13 @@
 import { readiness, verdict } from "../setup/harness";
 import type { Readiness } from "../../src/live/readiness";
 import type { ReactNode } from "react";
-import { vi, type Mock } from "vitest";
-import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { afterEach, vi, type Mock } from "vitest";
+import { Result, SubscriptionManager, type Connection, type Dispatcher, type Row } from "@znasllc-io/memql-sdk-core/client";
+
+import { disposeSessionCollections } from "../../src/live/sessionCollections";
+
+const sessions = new Set<Connection>();
+afterEach(() => { for (const connection of sessions) disposeSessionCollections(connection); sessions.clear(); });
 
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/config";
@@ -55,33 +60,33 @@ export interface FakeSubscriptions {
 }
 
 function fakeSubscriptions(): FakeSubscriptions {
-  const handlers = new Map<string, Set<{ handler: (event: FakeEvent) => void }>>();
+  const active = new Map<string, { concept?: string }>();
   const peaks = new Map<string, number>();
+  let deliver: (message: unknown) => void = () => {};
+  const counts = () => {
+    const result = new Map<string, number>();
+    for (const options of active.values()) { const concept = options.concept ?? "*"; result.set(concept, (result.get(concept) ?? 0) + 1); }
+    return result;
+  };
+  const dispatcher = {
+    send(message: { subscribe?: { subscriptionId: string; concept?: string }; unsubscribe?: { subscriptionId: string } }) {
+      if (message.subscribe) active.set(message.subscribe.subscriptionId, message.subscribe);
+      if (message.unsubscribe) active.delete(message.unsubscribe.subscriptionId);
+      for (const [concept, count] of counts()) peaks.set(concept, Math.max(peaks.get(concept) ?? 0, count));
+      return "message";
+    },
+    addEventListener(handler: (message: unknown) => void) { deliver = handler; return () => {}; },
+  } as unknown as Dispatcher;
+  const manager = new SubscriptionManager(dispatcher);
   return {
-    subscribeGraph: vi.fn((handler: (event: FakeEvent) => void, opts: { concept?: string }) => {
-      const concept = opts.concept ?? "*";
-      // One entry per CALL, so the same function subscribed twice counts twice.
-      const entry = { handler };
-      const set = handlers.get(concept) ?? new Set();
-      set.add(entry);
-      handlers.set(concept, set);
-      peaks.set(concept, Math.max(peaks.get(concept) ?? 0, set.size));
-      return () => { set.delete(entry); };
-    }),
+    subscribeGraph: vi.fn((handler, opts) => manager.subscribeGraph(handler, opts)),
     emit(concept, payload, kind = "NODE_UPDATED") {
-      for (const { handler } of [...(handlers.get(concept) ?? [])]) {
-        handler({
-          subscriptionId: "sub-1",
-          kind,
-          timestamp: new Date(),
-          payload,
-          payloadOmitted: false,
-          seq: 0,
-          gapBefore: false,
-        });
+      for (const [subscriptionId, options] of [...active]) {
+        if (options.concept && options.concept !== concept) continue;
+        deliver({ event: { subscriptionId, kind: `EVENT_KIND_${kind}`, payload, seq: 0, gapBefore: false } });
       }
     },
-    open: () => new Map([...handlers].filter(([, set]) => set.size > 0).map(([concept, set]) => [concept, set.size])),
+    open: counts,
     peak: () => new Map(peaks),
   };
 }
@@ -262,16 +267,45 @@ export function fakeConnection(seed: FakeSeed = {}) {
   // runs (emitted) is read back whole by id, as the engine would answer it.
   const subscriptions = fakeSubscriptions();
   const written = new Map<string, Row>();
+  const changes = new Map<string, Map<string, Row>>();
   // Each organization's brand kit, as saved: a save is read back by the next read.
   const brandKits: Row[] = seed.brandKits instanceof Error ? [] : [...(seed.brandKits ?? [])];
   let brandSaves = 0;
   const emit = subscriptions.emit;
   subscriptions.emit = (concept, payload, kind) => {
+    const rows = changes.get(concept) ?? new Map<string, Row>();
+    rows.set(String(payload.id), payload);
+    changes.set(concept, rows);
     if (concept === "v1:campaigns:template" && typeof payload.id === "string") written.set(payload.id, payload);
     emit(concept, payload, kind);
   };
-  return {
+  const concepts: Record<string, Row[] | undefined> = { "v1:campaigns:campaign": seed.campaigns, "v1:campaigns:audience": seed.audiences, "v1:campaigns:template": seed.templates, "v1:campaigns:journey": seed.journeys, "v1:campaigns:emailRule": seed.emailRules, "v1:platform:site": seed.sites };
+  const latest = (concept: string) => [...new Map([...(concepts[concept] ?? []).map(row => [String(row.id), row] as const), ...[...(changes.get(concept) ?? new Map())]]).values()];
+  const browse = (kind: string, pageSize = 10) => vi.fn(async (args: Record<string, unknown> = {}, opts?: { cursor?: string }) => {
+    const concept = `v1:campaigns:${kind}`;
+    const needle = String(args.search ?? "").trim().toLowerCase();
+    const rows = latest(concept).filter(row => {
+      if (kind === "campaign" && row.testSourceCampaignId) return false;
+      if (kind !== "campaign" && pageSize === 10 && !args.includeArchived && row.status === "archived") return false;
+      if (args.accountId && row.accountId !== args.accountId) return false;
+      if (args.confirmation && row.confirmation !== args.confirmation) return false;
+      if (args.status && (args.status === "progress" ? ["sent", "cancelled", "failed"].includes(String(row.status)) : row.status !== args.status)) return false;
+      if (args.trigger && (kind === "emailRule" ? "event" : (row.trigger as { kind?: string } | undefined)?.kind) !== args.trigger) return false;
+      const keys = kind === "campaign" ? ["name", "fromName", "replyTo"] : kind === "template" ? ["name", "subject", "preheader"] : kind === "audience" && pageSize === 200 ? ["name"] : ["name", "description", "triggerConcept"];
+      return !needle || keys.some(key => String(row[key] ?? "").toLowerCase().includes(needle)) || kind === "campaign" && Array.isArray(args.audienceIds) && args.audienceIds.includes(row.audienceId);
+    }).sort((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")) || String(a.id).localeCompare(String(b.id)));
+    const offset = Number(opts?.cursor?.replace("offset:", "") ?? 0);
+    return pagedResult(rows.slice(offset, offset + pageSize), offset + pageSize < rows.length ? `offset:${offset + pageSize}` : "");
+  });
+  const connection = {
+    status: "connected",
     query: {
+      campaignsBrowse: browse("campaign"),
+      audiencesBrowse: browse("audience"),
+      templatesBrowse: browse("template"),
+      journeysBrowse: browse("journey"),
+      emailRulesBrowse: browse("emailRule"),
+      audienceNamesMatching: browse("audience", 200),
       sitesAll: reader(seed.sites),
       newslettersForAudience: reader(seed.newsletters, (row, args) => row.audienceId === args.audienceId),
       newsletterWelcomesForAudience: reader(seed.welcomes),
@@ -423,11 +457,19 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignActivateEmailRule: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       campaignRetireEmailRule: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
 
-      executeNamed: vi.fn(async (_name: string, _filter: string) => bundleResult([])),
+      executeNamed: vi.fn(async (name: string, filter: string) => {
+        if (name !== "conceptRow") return bundleResult([]);
+        const concept = /concept==([^ ]+)/.exec(filter)?.[1] ?? "";
+        const idText = /id==("(?:[^"\\]|\\.)*")/.exec(filter)?.[1];
+        const id = idText ? JSON.parse(idText) as string : "";
+        return bundleResult(latest(concept).filter(row => String(row.id).split(":").pop() === id.split(":").pop()));
+      }),
     },
     subscriptions,
     dispatcher: { sendAndWait: vi.fn() },
   };
+  sessions.add(connection as unknown as Connection);
+  return connection;
 }
 
 export type FakeConnection = ReturnType<typeof fakeConnection>;

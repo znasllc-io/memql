@@ -148,6 +148,9 @@ export interface FakeQuery {
   createGoal: ReturnType<typeof vi.fn>;
 
   myWorkersWithStatus: ReturnType<typeof vi.fn>;
+  myMachinesBrowse: ReturnType<typeof vi.fn>;
+  myMachineById: ReturnType<typeof vi.fn>;
+  myMachinePresence: ReturnType<typeof vi.fn>;
   myRoutingPolicies: ReturnType<typeof vi.fn>;
   myWorkspaces: ReturnType<typeof vi.fn>;
   clusterNodes: ReturnType<typeof vi.fn>;
@@ -329,8 +332,24 @@ export function fakeConnection(seed: Partial<Record<FleetRead, Row[]>> = {}, mor
   const builtin = (key: FleetRead): Answer => async () => builtinReply(key, seed[key] ?? []);
   const answers: Record<FleetRead, Answer> = {
     myWorkersWithStatus: read("myWorkersWithStatus"),
+    myMachinesBrowse: async (args, opts) => {
+      const text = String(args.search ?? "").trim().toLowerCase();
+      const rows = (seed.myMachinesBrowse ?? seed.myWorkersWithStatus ?? []).filter(row => {
+        const platform = row.platformInfo as Record<string, unknown> | undefined;
+        return (args.includeRevoked === true || !row.revokedAt) && (!text || [row.name, row.displayName, platform?.hostname, platform?.os, platform?.arch].some(value => String(value ?? "").toLowerCase().includes(text)));
+      }).sort((a, b) => String(b.registeredAt ?? "").localeCompare(String(a.registeredAt ?? "")) || String(b.id).localeCompare(String(a.id)));
+      const start = Number(opts?.cursor || 0);
+      return new Result({ data: rows.slice(start, start + 10).map(row => Object.fromEntries(["id", "createdAt", "ownerUserId", "name", "displayName", "connectedNodeId", "lastSeenAt", "revokedAt", "registeredAt", "platformInfo", "activeCount"].map(key => [key, row[key]]))), meta: { cursor: start + 10 < rows.length ? String(start + 10) : "" } } as never);
+    },
+    myMachineById: async args => rowsResult((seed.myMachineById ?? seed.myMachinesBrowse ?? seed.myWorkersWithStatus ?? []).filter(row => row.id === args.registrationId)),
+    myMachinePresence: async () => rowsResult((seed.myMachinePresence ?? seed.myWorkersWithStatus ?? []).map(row => Object.fromEntries(["id", "createdAt", "ownerUserId", "name", "displayName", "connectedNodeId", "lastSeenAt", "revokedAt", "registeredAt"].map(key => [key, row[key]])))),
     myRoutingPolicies: read("myRoutingPolicies"),
-    myWorkspaces: read("myWorkspaces"),
+    myWorkspaces: async (args, opts) => {
+      const search = String(args.search ?? "").toLowerCase();
+      const rows = (seed.myWorkspaces ?? []).filter(row => (args.includeReleased !== false || row.status !== "released") && (!search || [row.runId,row.nodeId,row.storageRoot,row.releasedReason].some(value => String(value ?? "").toLowerCase().includes(search))));
+      const offset = Number(opts?.cursor || 0);
+      return new Result({data:rows.slice(offset,offset+10),meta:{cursor:offset+10<rows.length?String(offset+10):""}} as never);
+    },
     clusterNodes: read("clusterNodes"),
     invocationsForWorker: read("invocationsForWorker"),
     firstMachineActivity: read("firstMachineActivity"),

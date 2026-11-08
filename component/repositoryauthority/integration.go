@@ -54,9 +54,13 @@ func (i *Integration) Access(ctx context.Context, sourceID string) (Access, erro
 	if _, err := person(ctx, "execute", RequestCapability); err != nil {
 		return out, nil
 	}
+	out.LandingMode = "pull_request"
+	if a.PullRequestsDisabled {
+		out.LandingMode = "owner_push"
+	}
 	out.CanRequest = true
 	out.Operations = []string{OperationPropose}
-	if r.ReviewTemplate != "" && r.DeliveryTemplate != "" {
+	if !a.PullRequestsDisabled && r.ReviewTemplate != "" && r.DeliveryTemplate != "" {
 		out.Operations = append(out.Operations, OperationDeliver)
 	}
 	out.Route = "maintainer"
@@ -141,6 +145,9 @@ func (i *Integration) open(ctx context.Context, actor string, req Request, s Sou
 		}
 		if !a.CanWrite || a.RepositoryID != repoID || !strings.EqualFold(maintainer.Repository, s.Repository) {
 			return Receipt{}, errors.New("configured maintainer has no current write authority for this repository identity")
+		}
+		if req.Operation == OperationDeliver && a.PullRequestsDisabled {
+			return Receipt{}, errors.New("pull requests are disabled; prepare a proposal and confirm owner landing separately")
 		}
 		rec.Maintainer = maintainer
 		rec.Immediate = !remote && same(actor, s.OwnerUserID) && same(actor, maintainer.OwnerUserID) && s.ID == maintainer.ID

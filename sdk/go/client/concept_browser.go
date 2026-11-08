@@ -118,7 +118,9 @@ func (qc *QueryClient) GetRowByConceptAndId(ctx context.Context, conceptId, rowI
 	// where `;` was retired), and the TS SDK's getRowByConceptAndId already
 	// emits it. Two SDKs spelling the same two-clause filter differently is a
 	// difference every reader has to stop and confirm is not meaningful.
-	payload, err := qc.executeRaw(ctx, fmt.Sprintf("concept==%s && id==%s", conceptId, rowId))
+	// IDs are opaque strings: digit-leading IDs must not parse as numbers,
+	// and punctuation must stay inside the ID when rereading a live event.
+	payload, err := qc.executeRaw(ctx, fmt.Sprintf("concept==%s && id==%s", conceptId, quoteMemQL(rowId)))
 	if err != nil {
 		return nil, fmt.Errorf("GetRowByConceptAndId(%s, %s): %w", conceptId, rowId, err)
 	}

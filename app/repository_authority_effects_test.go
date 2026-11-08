@@ -23,6 +23,11 @@ import (
 // This transport exercises the production GitHub client and app adapter. It
 // implements the provider protocol, never a successful proposal port or grant.
 type authorityProtocol struct {
+	pullRequestsDisabled                  bool
+	mainHead                              string
+	ownerWrites                           int
+	ownerRevoked                          bool
+	mainDescendsFromProposal              bool
 	t                                     *testing.T
 	client                                *githubapp.Client
 	grant                                 repositoryauthority.Authorization
@@ -92,9 +97,13 @@ func (p *authorityProtocol) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	switch {
 	case endpoint == "":
-		out = map[string]any{"id": p.repositoryID, "full_name": "acme/repo", "default_branch": "main", "private": true}
+		out = map[string]any{"has_pull_requests": !p.pullRequestsDisabled, "id": p.repositoryID, "full_name": "acme/repo", "default_branch": "main", "private": true}
 	case endpoint == "/branches/main":
-		out = map[string]any{"commit": map[string]string{"sha": p.base}}
+		head := p.base
+		if p.mainHead != "" {
+			head = p.mainHead
+		}
+		out = map[string]any{"commit": map[string]string{"sha": head}}
 	case strings.HasPrefix(endpoint, "/branches/memql/change-"):
 		if p.revokeAt == "branch lookup" {
 			p.revoked = true
@@ -143,6 +152,25 @@ func (p *authorityProtocol) RoundTrip(r *http.Request) (*http.Response, error) {
 		p.branch = p.commit
 		code = 502
 		out = map[string]any{} // lost write reply must be read back
+	case endpoint == "/git/refs/heads/main" && r.Method == http.MethodPatch:
+		require.Equal(p.t, "Bearer owner-token", r.Header.Get("Authorization"))
+		var body struct {
+			SHA   string
+			Force bool
+		}
+		require.NoError(p.t, json.NewDecoder(r.Body).Decode(&body))
+		require.False(p.t, body.Force)
+		require.Equal(p.t, p.commit, body.SHA)
+		p.mainHead = body.SHA
+		p.ownerWrites++
+		code = 502
+		out = map[string]any{}
+	case strings.HasPrefix(endpoint, "/compare/"):
+		if p.mainDescendsFromProposal {
+			out = map[string]any{"status": "ahead", "ahead_by": 1, "behind_by": 0, "base_commit": map[string]string{"sha": p.commit}, "merge_base_commit": map[string]string{"sha": p.commit}}
+			break
+		}
+		out = map[string]any{"status": "diverged", "ahead_by": 1, "behind_by": 1, "base_commit": map[string]string{"sha": p.commit}, "merge_base_commit": map[string]string{"sha": p.base}}
 	case endpoint == "/pulls":
 		if r.Method == http.MethodGet {
 			if p.revokeAt == "PR lookup" {
@@ -290,4 +318,75 @@ func TestRepositoryEffectsPreserveApprovedExecutableFileMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, p.treeFiles, 1)
 	require.Equal(t, "100755", p.treeFiles[0]["mode"], "replacement preserves observed executable bit")
+}
+
+func (p *authorityProtocol) RepositoryOwnerWriterToken(c context.Context, credential, owner, org, repo string) (string, error) {
+	if _, _, err := p.InstallationToken(c, credential, owner, org, repo); err != nil {
+		return "", err
+	}
+	if p.ownerRevoked {
+		return "", errors.New("owner connection revoked")
+	}
+	return "owner-token", nil
+}
+
+func TestRepositoryOwnerProposalAndLanding(t *testing.T) {
+	p := newAuthorityProtocol(t)
+	p.pullRequestsDisabled = true
+	receipt, err := proposeRepositoryChange(t.Context(), p, p, p.grant, p.proposal())
+	require.NoError(t, err)
+	require.Equal(t, "owner_push", receipt.LandingMode)
+	require.Empty(t, receipt.PullRequestURL)
+	require.Zero(t, p.prWrites)
+	require.Zero(t, p.ownerWrites)
+	authorize := func(context.Context) error { return nil }
+	landed, err := landRepositoryChange(t.Context(), p, p.grant, p.proposal(), receipt, authorize)
+	require.NoError(t, err)
+	require.Equal(t, receipt.Commit, landed)
+	require.Equal(t, 1, p.ownerWrites)
+	_, err = landRepositoryChange(t.Context(), p, p.grant, p.proposal(), receipt, authorize)
+	require.NoError(t, err)
+	require.Equal(t, 1, p.ownerWrites, "lost replies reconcile without another default-branch update")
+}
+
+func TestRepositoryOwnerLandingRefusesChangedAuthorityOrBase(t *testing.T) {
+	for _, scenario := range []string{"base moved", "owner revoked", "request revoked", "PR policy changed", "repository replaced", "different branch"} {
+		t.Run(scenario, func(t *testing.T) {
+			p := newAuthorityProtocol(t)
+			p.pullRequestsDisabled = true
+			receipt, err := proposeRepositoryChange(t.Context(), p, p, p.grant, p.proposal())
+			require.NoError(t, err)
+			authorize := func(context.Context) error { return nil }
+			switch scenario {
+			case "base moved":
+				p.mainHead = strings.Repeat("9", 40)
+			case "owner revoked":
+				p.ownerRevoked = true
+			case "request revoked":
+				authorize = func(context.Context) error { return errors.New("revoked") }
+			case "PR policy changed":
+				p.pullRequestsDisabled = false
+			case "repository replaced":
+				p.repositoryID++
+			case "different branch":
+				receipt.BaseBranch = "other"
+			}
+			_, err = landRepositoryChange(t.Context(), p, p.grant, p.proposal(), receipt, authorize)
+			require.Error(t, err)
+			require.Zero(t, p.ownerWrites)
+		})
+	}
+}
+
+func TestRepositoryOwnerLandingRecoversAfterAnotherOwnerCommit(t *testing.T) {
+	p := newAuthorityProtocol(t)
+	p.pullRequestsDisabled = true
+	receipt, err := proposeRepositoryChange(t.Context(), p, p, p.grant, p.proposal())
+	require.NoError(t, err)
+	p.mainHead = strings.Repeat("9", 40)
+	p.mainDescendsFromProposal = true
+	landed, err := landRepositoryChange(t.Context(), p, p.grant, p.proposal(), receipt, func(context.Context) error { return nil })
+	require.NoError(t, err)
+	require.Equal(t, receipt.Commit, landed)
+	require.Zero(t, p.ownerWrites, "a later owner commit preserves the earlier landing receipt without moving main")
 }

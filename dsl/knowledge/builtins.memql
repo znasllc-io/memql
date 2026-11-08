@@ -206,3 +206,17 @@ builtin knowledgeIndexReleaseForWork { }
 builtin modelCatalogResearchTurn {
   catalog []object!
 }
+
+/// Stream authorized chunk pages into complete domain counters before transport.
+@sdk
+@executor("integration.knowledge.trainingDomainRollups")
+builtin knowledgeTrainingDomainRollups {}
+
+/// Ten pending chunks from the existing shared-domain index, admitted at writer rank.
+@sdk
+@executor("integration.knowledge.trainingChunksBrowse")
+builtin trainingChunksBrowse {
+ pending bool
+ search string
+ cursor string
+}

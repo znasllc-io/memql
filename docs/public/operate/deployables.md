@@ -431,7 +431,7 @@ clusterOwner)`:
 | `encryptedValue` | the token, sealed by `secret.Encrypt` under `MEMQL_MASTER_KEY` on the node that received it. No client-readable shape projects it |
 | `fingerprint` | the token's last four characters, prefixed with `...`, for telling two apart |
 | `status` | `active` or `revoked` |
-| `lastUsedAt` | when a fetch or the poll last unsealed it. A HEARTBEAT: displayed, never treated as news |
+| `lastUsedAt` | when a fetch, the poll or a pipeline last unsealed it, to within an hour: a use is stamped only when the stored value is more than an hour old, so a source polled every ten minutes moves it once an hour. A HEARTBEAT: displayed, never treated as news |
 | `revokedAt` | when it was revoked. The row is never deleted |
 
 **The token crosses the wire once.** `sourceCredentialCreate({host, label,

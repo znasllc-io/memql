@@ -566,7 +566,7 @@ test("a copy newer than the one that took a row out brings it back", async () =>
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: T2 } }));
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T3 } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent", "restored, and back in the list");
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
   assert.equal(gone.has("a"), false, "and nothing is kept for a row the list holds");
   // Back in the list, the row it holds is the judge again.
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
@@ -611,13 +611,13 @@ test("a feed's own supersedes keeps no tombstones", async () => {
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T4 } }));
-  assert.equal((handle.value as unknown as { gone: Map<string, string> }).gone.size, 0, "nothing is kept for the removal");
+  assert.equal((handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone.size, 0, "nothing is kept for the removal");
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sending");
   store.dispose();
 });
 
-test("what took a row out keeps it out across a reseed; a copy at that version or newer is placed", async () => {
+test("what deleted a row keeps it out across a reseed; a strictly newer copy is placed", async () => {
   // A reseed's read does not return a removed row, so it says nothing about
   // how old a late copy of it is. The version that took the row out still does.
   const subs = new FakeSubscriptions();
@@ -651,11 +651,11 @@ test("what took a row out keeps it out across a reseed; a copy at that version o
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late, after", createdAt: T2 } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "nor after it");
 
-  // A refusal needs a STRICTLY older version: the same one, or a newer one, is placed.
-  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "at the removal's version", createdAt: T3 } }));
+  // A recreation must be newer than the deleted version.
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "after the removal's version", createdAt: T4 } }));
   subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "b", v: "re-created", createdAt: T4 } }));
   const rows = byId(handle.value.snapshot.rows);
-  assert.equal(rows["a"]?.["v"], "at the removal's version");
+  assert.equal(rows["a"]?.["v"], "after the removal's version");
   assert.equal(rows["b"]?.["v"], "re-created");
   store.dispose();
 });
@@ -667,7 +667,7 @@ test("the tombstones are bounded: the oldest is forgotten first", async () => {
   await settle();
 
   for (let n = 0; n < 1_100; n++) subs.deliver(event({ kind: "NODE_DELETED", payload: { id: `r${n}`, createdAt: T3 } }));
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
   assert.equal(gone.size, 1_024);
   assert.equal(gone.has("r0"), false, "the first removed is the first forgotten");
   assert.equal(gone.has("r1099"), true);
@@ -682,12 +682,12 @@ test("a row removed again is remembered as the newest word on it, and forgotten 
   const store = new LiveStore(hostWith(subs).host);
   const handle = store.collection<Row>("k", { concept: "c", seed: async () => ({ rows: [], nextCursor: "" }) });
   await settle();
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
 
   for (let n = 0; n < 1_024; n++) subs.deliver(event({ kind: "NODE_DELETED", payload: { id: `r${n}`, createdAt: T3 } }));
   assert.equal(gone.size, 1_024);
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "r0", createdAt: T4 } }));
-  assert.equal(gone.get("r0"), T4, "the newer removal is the one kept");
+  assert.equal(gone.get("r0")?.at, T4, "the newer removal is the one kept");
   // One more row removed forces one to be forgotten: the oldest word, which is r1's now.
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "extra", createdAt: T3 } }));
   assert.equal(gone.size, 1_024);
@@ -710,7 +710,7 @@ test("a removal whose time cannot be read records nothing", async () => {
     seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }, { id: "b", v: "read", createdAt: T1 }], nextCursor: "" }),
   });
   await settle();
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
 
   for (const [id, createdAt] of [["a", "yesterday"], ["b", 42]] as const) {
     subs.deliver(event({ kind: "NODE_DELETED", payload: { id, createdAt } as Row }));
@@ -731,14 +731,14 @@ test("a removal with no time that arrives while a tombstone exists leaves the to
     seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }], nextCursor: "" }),
   });
   await settle();
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
 
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
-  assert.equal(gone.get("a"), T3);
+  assert.equal(gone.get("a")?.at, T3);
   // The row is already out; a second removal that says nothing of when says
   // nothing about what the first one did.
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a" } }));
-  assert.equal(gone.get("a"), T3, "the version that took it out is still kept");
+  assert.equal(gone.get("a")?.at, T3, "the version that took it out is still kept");
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late", createdAt: T2 } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "so a late older copy is still refused");
   store.dispose();
@@ -754,10 +754,10 @@ test("a copy with no version time is placed against a tombstone, which it then c
     seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }], nextCursor: "" }),
   });
   await settle();
-  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  const gone = (handle.value as unknown as { gone: Map<string, { at: string; deleted: boolean }> }).gone;
 
   subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
-  assert.equal(gone.get("a"), T3);
+  assert.equal(gone.get("a")?.at, T3);
   subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "no time" } }));
   assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "no time");
   assert.equal(gone.has("a"), false, "and the row it brought back needs no tombstone");
@@ -1116,6 +1116,43 @@ test("a failing seed keeps the rows it has and says so", async () => {
   store.dispose();
 });
 
+test("coalesced refresh refusals update the cached snapshot even while already degraded", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host);
+  const refusals: Array<(error: Error) => void> = [];
+  let attempt = 0;
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => {
+      if (++attempt === 1) return { rows: [{ id: "a" }], nextCursor: "" };
+      return new Promise((_resolve, reject) => refusals.push(reject));
+    },
+  });
+  await settle();
+  const observed: string[] = [];
+  handle.value.subscribe(() => observed.push(handle.value.snapshot.error));
+  handle.value.reseed();
+  handle.value.reseed(); // a simultaneous session-resume request
+  const pending = handle.value.snapshot;
+  assert.equal(pending.state, "degraded");
+  assert.equal(pending.error, "");
+
+  refusals[0]!(new Error("The cluster refused the refresh."));
+  await settle();
+  const firstFailure = handle.value.snapshot;
+  assert.notEqual(firstFailure, pending);
+  assert.equal(firstFailure.error, "The cluster refused the refresh.");
+  assert.equal(firstFailure.state, "degraded");
+  assert.equal(firstFailure.rows.length, 1);
+  assert.equal(attempt, 3, "the pending refresh runs once");
+
+  refusals[1]!(new Error("The caller no longer has access."));
+  await settle();
+  assert.notEqual(handle.value.snapshot, firstFailure);
+  assert.equal(handle.value.snapshot.error, "The caller no longer has access.");
+  assert.deepEqual(observed, ["", "The cluster refused the refresh.", "The caller no longer has access."]);
+  store.dispose();
+});
+
 test("the snapshot is identity-stable until something changes", async () => {
   // What keeps a binding from re-rendering on every unrelated event.
   const subs = new FakeSubscriptions();
@@ -1413,5 +1450,420 @@ test("a capped paged seed reports incomplete membership and a complete reseed cl
   handle.value.reseed();
   await settle();
   assert.equal(handle.value.snapshot.truncated, false);
+  store.dispose();
+});
+
+
+test("manual pages request one page per action and keep the loaded depth on recovery", async () => {
+  const h = hostWith(new FakeSubscriptions());
+  const store = new LiveStore(h.host);
+  const read = countingSeed([
+    { rows: Array.from({ length: 10 }, (_, n) => ({ id: String(n) })), nextCursor: "ten" },
+    { rows: Array.from({ length: 10 }, (_, n) => ({ id: String(n + 10) })), nextCursor: "twenty" },
+    { rows: [{ id: "20" }], nextCursor: "" },
+  ]);
+  const { value } = store.collection("paged", { concept: "c", seed: read.seed, manualPages: true });
+  await settle();
+  assert.deepEqual(read.calls, [""]);
+  assert.equal(value.snapshot.rows.length, 10);
+  assert.equal(value.snapshot.hasMore, true);
+  await value.loadMore();
+  assert.deepEqual(read.calls, ["", "ten"]);
+  assert.equal(value.snapshot.rows.length, 20);
+  h.cycle(1);
+  await settle();
+  assert.deepEqual(read.calls, ["", "ten", "", "ten"]);
+  assert.equal(value.snapshot.rows.length, 20);
+  await value.loadMore();
+  assert.equal(value.snapshot.rows.length, 21);
+  assert.equal(value.snapshot.hasMore, false);
+  await value.loadMore();
+  assert.equal(read.calls.length, 5);
+  store.dispose();
+});
+
+test("load-more coalesces clicks and live changes win over a late page", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let complete!: (page: { rows: Row[]; nextCursor: string }) => void;
+  let calls = 0;
+  const { value } = store.collection<Row>("paged", {
+    concept: "c", manualPages: true,
+    seed: async cursor => {
+      calls++;
+      if (!cursor) return { rows: [{ id: "held", createdAt: "2026-11-07T00:00:00Z", name: "before" }], nextCursor: "next" };
+      return new Promise(resolve => { complete = resolve; });
+    },
+  });
+  await settle();
+  const loading = value.loadMore();
+  await value.loadMore();
+  assert.equal(calls, 2);
+  assert.equal(value.snapshot.loadingMore, true);
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "held", createdAt: "2026-11-07T00:01:00Z", name: "after" } }));
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "removed" } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "arrived" } }));
+  complete({ rows: [{ id: "held", createdAt: "2026-11-07T00:00:00Z", name: "before" }, { id: "removed" }, { id: "older" }], nextCursor: "" });
+  await loading;
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["held", "arrived", "older"]);
+  assert.equal(value.snapshot.rows[0]?.name, "after");
+  assert.equal(value.snapshot.loadingMore, false);
+  store.dispose();
+});
+
+test("a failed next page preserves rows and its cursor for retry", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host);
+  let failed = false;
+  const cursors: string[] = [];
+  const { value } = store.collection<Row>("paged", { concept: "c", manualPages: true, seed: async cursor => {
+    cursors.push(cursor);
+    if (!cursor) return { rows: [{ id: "first" }], nextCursor: "next" };
+    if (!failed) { failed = true; throw new Error("temporarily unavailable"); }
+    return { rows: [{ id: "second" }], nextCursor: "" };
+  } });
+  await settle();
+  await value.loadMore();
+  assert.equal(value.snapshot.loadMoreError, "temporarily unavailable");
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first"]);
+  assert.equal(value.snapshot.hasMore, true);
+  await value.loadMore();
+  assert.deepEqual(cursors, ["", "next", "next"]);
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first", "second"]);
+  assert.equal(value.snapshot.loadMoreError, "");
+  store.dispose();
+});
+
+test("the final manual page replays older arrivals after removing its loaded boundary", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let finish!: (page: { rows: Row[]; nextCursor: string }) => void;
+  const { value } = store.collection<Row>("last-page", {
+    concept: "c", manualPages: true,
+    comparePageRows: (a, b) => Number(b.position) - Number(a.position),
+    seed: async cursor => cursor
+      ? new Promise(resolve => { finish = resolve; })
+      : { rows: [{ id: "first", position: 30 }], nextCursor: "last" },
+  });
+  await settle();
+  const more = value.loadMore();
+  // The new row belongs behind the snapshot being read. While that page is
+  // pending it is outside the loaded window; once the read exhausts the set,
+  // keeping the old boundary would lose this row with no Load more remaining.
+  subs.deliver(event({ payload: { id: "late-older", position: 10 } }));
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first"]);
+  finish({ rows: [{ id: "last", position: 20 }], nextCursor: "" });
+  await more;
+  assert.equal(value.snapshot.hasMore, false);
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first", "last", "late-older"]);
+  store.dispose();
+});
+
+test("failed re-reads of visible rows mark stale data while unseen refusals stay silent", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let failed = true;
+  const { value } = store.collection<Row>("known-row", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "visible", value: failed ? "old" : "current" }], nextCursor: "" }),
+    reread: async () => { throw new Error("private server refusal details"); },
+  });
+  await settle();
+  subs.deliver(event({ payloadOmitted: true, payload: { id: "unseen" } }));
+  await settle();
+  assert.equal(value.snapshot.state, "live");
+  assert.equal(value.snapshot.error, "", "an unauthorized unseen identity must not be announced");
+  subs.deliver(event({ payloadOmitted: true, payload: { id: "visible" } }));
+  await settle();
+  assert.equal(value.snapshot.state, "degraded");
+  assert.equal(value.snapshot.error, "Some updates could not be refreshed. Refresh to try again.");
+  assert.deepEqual(value.snapshot.rows, [{ id: "visible", value: "old" }]);
+  failed = false;
+  value.reseed();
+  await settle();
+  assert.equal(value.snapshot.state, "live");
+  assert.equal(value.snapshot.error, "");
+  assert.deepEqual(value.snapshot.rows, [{ id: "visible", value: "current" }]);
+  store.dispose();
+});
+
+test("full payloads arriving during an omitted-event read request a fresh authoritative answer", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let finish!: (row: Row | null) => void;
+  let reads = 0;
+  const current = { id: "visible", createdAt: "2026-11-07T00:00:03Z", value: "current" };
+  const { value } = store.collection<Row>("mixed-delivery", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "visible", createdAt: "2026-11-07T00:00:01Z", value: "old" }], nextCursor: "" }),
+    reread: async () => ++reads === 1 ? new Promise(resolve => { finish = resolve; }) : current,
+  });
+  await settle();
+  subs.deliver(event({ kind: "NODE_UPDATED", payloadOmitted: true, payload: { id: "visible", createdAt: "2026-11-07T00:00:02Z" } }));
+  await settle();
+  // A remote node can omit a payload while the next local write includes it.
+  // The first read may have observed the row outside the query's scope. Its
+  // late null answer must not be the final word after the newer full event.
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: current }));
+  assert.deepEqual(value.snapshot.rows, [current]);
+  finish(null);
+  await settle();
+  assert.equal(reads, 2, "all notifications during an in-flight read need one follow-up, including full payloads");
+  assert.deepEqual(value.snapshot.rows, [current]);
+  store.dispose();
+});
+
+test("session repair refuses known older row versions and deletion tombstones without retaining absent members", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host, { lingerMs: 0, cacheReleased: true });
+  let initial = true;
+  let returnedVersion = T1;
+  const spec: LiveCollectionSpec<Row> = {
+    concept: "c", manualPages: true,
+    seed: async () => ({ rows: [
+      { id: "updated", createdAt: returnedVersion, value: "snapshot" },
+      { id: "deleted", createdAt: returnedVersion },
+      ...(initial ? [{ id: "left-the-read", createdAt: T1 }] : []),
+    ], nextCursor: "" }),
+  };
+  const first = store.collection("repair", spec);
+  await settle();
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "updated", createdAt: T3, value: "current" } }));
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "deleted", createdAt: T3 } }));
+  first.release();
+  await settle();
+  initial = false;
+  const reopened = store.collection("repair", spec);
+  await settle();
+  assert.deepEqual(reopened.value.snapshot.rows, [{ id: "updated", createdAt: T3, value: "current" }],
+    "a stale repair must neither roll back known versions nor resurrect a known deletion; absent IDs still leave");
+  returnedVersion = T4;
+  reopened.value.reseed();
+  await settle();
+  assert.deepEqual(reopened.value.snapshot.rows.map(row => row.id), ["updated", "deleted"], "a newer authoritative version may recreate the row");
+  assert.equal(reopened.value.snapshot.rows[0]?.createdAt, T4);
+  store.dispose();
+});
+
+test("a transport-failed page preserves its frontier and only full recovery restores liveness", async () => {
+  const h = hostWith(new FakeSubscriptions());
+  const store = new LiveStore(h.host);
+  let failNext = true;
+  const cursors: string[] = [];
+  const { value } = store.collection<Row>("transport-page", {
+    concept: "c", manualPages: true,
+    seed: async cursor => {
+      cursors.push(cursor);
+      if (!cursor) return { rows: [{ id: "first" }], nextCursor: "next" };
+      if (failNext) {
+        failNext = false;
+        throw Object.assign(new Error("stream interrupted"), { reason: "transport" });
+      }
+      return { rows: [{ id: "second" }], nextCursor: "" };
+    },
+  });
+  await settle();
+  await value.loadMore();
+  assert.equal(value.snapshot.pageCount, 1);
+  assert.equal(value.snapshot.hasMore, true);
+  assert.equal(value.snapshot.state, "disconnected");
+  assert.deepEqual(value.snapshot.rows, [{ id: "first" }]);
+  await value.loadMore();
+  assert.equal(value.snapshot.pageCount, 2);
+  assert.deepEqual(cursors, ["", "next", "next"]);
+  assert.equal(value.snapshot.state, "disconnected", "one successful page does not repair the earlier disconnected window");
+  h.cycle(1);
+  await settle();
+  assert.deepEqual(cursors, ["", "next", "next", "", "next"]);
+  assert.equal(value.snapshot.state, "live");
+  assert.deepEqual(value.snapshot.rows, [{ id: "first" }, { id: "second" }]);
+  store.dispose();
+});
+
+test("courtesy resume repairs reuse in-flight work without suppressing real invalidations", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host, { lingerMs: 0, cacheReleased: true });
+  let reads = 0;
+  const answers: Array<(page: { rows: Row[]; nextCursor: string }) => void> = [];
+  const spec: LiveCollectionSpec<Row> = {
+    concept: "c", seed: async () => {
+      if (++reads === 1) return { rows: [{ id: "initial" }], nextCursor: "" };
+      return new Promise(resolve => { answers.push(resolve); });
+    },
+  };
+  const first = store.collection("resume", spec);
+  await settle();
+  first.release();
+  await settle();
+  const reopened = store.collection("resume", spec);
+  assert.equal(reads, 2, "resuming a parked collection already starts its repair");
+  reopened.value.reseed({ ifIdle: true });
+  reopened.value.reseed({ ifIdle: true });
+  answers.shift()!({ rows: [{ id: "resumed" }], nextCursor: "" });
+  await settle();
+  assert.equal(reads, 2, "the pane's courtesy resume must not queue the same repair twice");
+  reopened.value.reseed({ ifIdle: true });
+  assert.equal(reads, 3, "an idle courtesy repair still starts a read");
+  reopened.value.reseed(); // Real graph invalidation after this read began.
+  reopened.value.reseed({ ifIdle: true });
+  answers.shift()!({ rows: [{ id: "before-change" }], nextCursor: "" });
+  await settle();
+  assert.equal(reads, 4, "a courtesy repair cannot erase a real pending invalidation");
+  answers.shift()!({ rows: [{ id: "after-change" }], nextCursor: "" });
+  await settle();
+  assert.deepEqual(reopened.value.snapshot.rows, [{ id: "after-change" }]);
+  store.dispose();
+});
+
+test("equal-version deletion tombstones reject stale events, pages and repairs until a newer version exists", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const deleted = { id: "deleted", createdAt: T1 };
+  const { value } = store.collection<Row>("equal-deletion", {
+    concept: "c", manualPages: true,
+    seed: async cursor => ({ rows: [deleted], nextCursor: cursor ? "" : "next" }),
+  });
+  await settle();
+  // A deletion may identify the version being deleted, not mint a newer row
+  // timestamp. Replaying precisely that deleted version cannot recreate it.
+  subs.deliver(event({ kind: "NODE_DELETED", payload: deleted }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: deleted }));
+  assert.deepEqual(value.snapshot.rows, [], "an equal-version delayed event must stay deleted");
+  await value.loadMore();
+  assert.deepEqual(value.snapshot.rows, [], "a late page must not restore the deleted version");
+  value.reseed();
+  await settle();
+  assert.deepEqual(value.snapshot.rows, [], "a stale repair must not restore the deleted version");
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "deleted", createdAt: T2 } }));
+  assert.deepEqual(value.snapshot.rows, [{ id: "deleted", createdAt: T2 }], "a strictly newer recreation is admitted");
+  store.dispose();
+});
+
+test("a scope-only removal can admit the same row version when the scope changes", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let visible = true;
+  const row = { id: "scoped", createdAt: T1 };
+  const { value } = store.collection<Row>("scope-version", {
+    concept: "c", inScope: () => visible,
+    seed: async () => ({ rows: [row], nextCursor: "" }),
+  });
+  await settle();
+  visible = false;
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: row }));
+  assert.deepEqual(value.snapshot.rows, []);
+  visible = true;
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: row }));
+  assert.deepEqual(value.snapshot.rows, [row], "leaving a dynamic scope is different from deleting the row");
+  store.dispose();
+});
+
+test("released session pages pause work but reopen immediately with their cached rows", async () => {
+  const subs = new FakeSubscriptions();
+  const h = hostWith(subs);
+  const store = new LiveStore(h.host, { lingerMs: 0, cacheReleased: true });
+  const read = countingSeed([{ rows: [{ id: "one" }], nextCursor: "two" }, { rows: [{ id: "two" }], nextCursor: "" }]);
+  const spec = { concept: "c", manualPages: true, seed: read.seed };
+  const first = store.collection("paged", spec);
+  await settle();
+  await first.value.loadMore();
+  first.release();
+  await settle();
+  assert.equal(subs.subs.length, 0, "closed apps do not retain a live subscription");
+  h.cycle(1);
+  await settle();
+  assert.equal(read.calls.length, 2, "reconnect does not wake dormant lists");
+  const next = store.collection("paged", spec);
+  assert.equal(next.value, first.value);
+  assert.deepEqual(next.value.snapshot.rows.map(row => row.id), ["one", "two"]);
+  await settle();
+  assert.deepEqual(read.calls, ["", "two", "", "two"]);
+  store.dispose();
+  const anotherSession = new LiveStore(h.host, { cacheReleased: true });
+  const fresh = anotherSession.collection("paged", spec);
+  assert.equal(fresh.value.snapshot.rows.length, 0, "session caches never cross connections");
+  await settle();
+  assert.equal(fresh.value.snapshot.rows.length, 1);
+  anotherSession.dispose();
+});
+
+test("reconnect during load-more aborts the old page and repairs only completed pages", async () => {
+  const h = hostWith(new FakeSubscriptions());
+  const store = new LiveStore(h.host);
+  let finish!: (page: { rows: Row[]; nextCursor: string }) => void;
+  let oldSignal!: AbortSignal;
+  let calls = 0;
+  const { value } = store.collection<Row>("paged", { concept: "c", manualPages: true, seed: async (cursor, signal) => {
+    calls++;
+    if (!cursor) return { rows: [{ id: calls === 1 ? "before" : "fresh" }], nextCursor: "next" };
+    oldSignal = signal;
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  await settle();
+  const more = value.loadMore();
+  h.status("reconnecting");
+  h.cycle(1);
+  assert.equal(oldSignal.aborted, true);
+  finish({ rows: [{ id: "stale" }], nextCursor: "" });
+  await more;
+  await settle();
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["fresh"]);
+  assert.equal(value.snapshot.hasMore, true);
+  assert.equal(calls, 3);
+  store.dispose();
+});
+
+test("manual directories coalesce omitted events for unloaded rows into one bounded refresh", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let reads = 0;
+  let rereads = 0;
+  const { value } = store.collection<Row>("directory", {
+    concept: "c", manualPages: true,
+    seed: async () => { reads++; return { rows: [{ id: "visible" }], nextCursor: "older" }; },
+    reread: async () => { rereads++; return null; },
+  });
+  await settle();
+  for (let n = 0; n < 1_000; n++) subs.deliver(event({ kind: "NODE_UPDATED", payloadOmitted: true, payload: { id: `unloaded-${n}` } }));
+  assert.equal(rereads, 0);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  await settle();
+  assert.equal(reads, 2, "one initial page and one coalesced directory refresh");
+  assert.equal(value.snapshot.rows.length, 1);
+  store.dispose();
+});
+
+test("manual directory events respect the loaded ordering boundary but admit new arrivals", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const { value } = store.collection<Row>("directory", {
+    concept: "c", manualPages: true,
+    comparePageRows: (a, b) => Number(b.position) - Number(a.position),
+    seed: async () => ({ rows: [{ id: "visible", position: 50 }], nextCursor: "older" }),
+  });
+  await settle();
+  for (let n = 0; n < 50; n++) subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: `old-${n}`, position: n } }));
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["visible"]);
+  subs.deliver(event({ payload: { id: "new", position: 51 } }));
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["visible", "new"]);
+  store.dispose();
+});
+
+test("identity scope rejects unrelated events before by-id reads and summaries can disable subscriptions", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let reads = 0;
+  store.collection<Row>("detail", {
+    concept: "c", eventInScope: id => id === "selected",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    reread: async id => { reads++; return { id }; },
+  });
+  store.collection<Row>("summary", { concept: "c", actions: [], seed: async () => ({ rows: [], nextCursor: "" }) });
+  await settle();
+  assert.equal(subs.subs.length, 1);
+  for (let n = 0; n < 100; n++) subs.deliver(event({ payloadOmitted: true, payload: { id: `unrelated-${n}` } }));
+  await settle();
+  assert.equal(reads, 0);
+  subs.deliver(event({ payloadOmitted: true, payload: { id: "selected" } }));
+  await settle();
+  assert.equal(reads, 1);
   store.dispose();
 });

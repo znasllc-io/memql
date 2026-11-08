@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -53,6 +54,60 @@ func pointAt(f *Fleet, clusters map[string]*fakeCluster) {
 			}
 		}
 		return r, nil
+	}
+}
+
+// The updater restarts the service, not enrollment. Exercise both production
+// Fleet instances and their real registration handshake against fixture
+// transports, reloading the unchanged registry between versions.
+func TestFleetUpdateRestartRegistersNewVersionWithSameIdentity(t *testing.T) {
+	fleet, path := controlFixture(t)
+	if err := saveHomeEnabled(path, "b", false); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	previous := cockpitVersion()
+	defer SetVersion(previous)
+	machineID := ""
+	for _, version := range []string{"0.22.2+gfixtureold", "0.23.0+gfixturenew"} {
+		SetVersion(version)
+		workers, err := LoadWorkers(path, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fleet, err = NewFleet(FleetOptions{Logger: quietLogger(), Workers: workers, WorkersPath: path})
+		if err != nil {
+			t.Fatal(err)
+		}
+		clusters := map[string]*fakeCluster{"a": newFakeCluster(func(int) answer { return accept() }), "b": newFakeCluster(func(int) answer { return accept() })}
+		pointAt(fleet, clusters)
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- fleet.Run(ctx) }()
+		func() {
+			defer func() { cancel(); <-done }()
+			stream := clusters["a"].next(t)
+			eventuallyControl(t, func() bool {
+				status := fleet.LocalStatus()
+				return len(status.Homes) == 2 && status.Homes[0].State == "Connected" && status.Homes[1].State == "Paused"
+			})
+			register := stream.register()
+			if register.GetVersion() != version {
+				t.Fatalf("cluster received %q, expected updated build %q", register.GetVersion(), version)
+			}
+			id := register.GetLabels()[LabelMachineId]
+			if id == "" || machineID != "" && id != machineID {
+				t.Fatalf("update changed machine identity from %q to %q", machineID, id)
+			}
+			machineID = id
+			if clusters["b"].dialCount() != 0 {
+				t.Fatal("the paused cluster connected during the update restart")
+			}
+		}()
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Fatal("restart changed enrollment or connection choices")
 	}
 }
 

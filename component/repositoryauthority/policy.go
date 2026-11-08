@@ -21,7 +21,7 @@ const deliveryContract = "repository.delivery-recipe.v1"
 
 // RecipeOperationNames is shared by native preflight and Work dispatch.
 func RecipeOperationNames() []string {
-	return []string{"repositoryChangeContext", "ai", "repositoryChangePropose", "repositoryChangeReview", "repositoryChangeReportReview", "repositoryChangeQueue"}
+	return []string{"repositoryChangeContext", "repositoryChangeEditFiles", "ai", "repositoryChangePropose", "repositoryChangeReview", "repositoryChangeReportReview", "repositoryChangeQueue"}
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`)

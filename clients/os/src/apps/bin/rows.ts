@@ -76,7 +76,7 @@ export function binItemFromFolder(row: FolderRow): BinItem {
     producedByRunId: "",
     labels: [],
     folderId: row.parentFolderId,
-    changedAt: "",
+    changedAt: row.createdAt ?? "",
   };
 }
 
@@ -103,13 +103,13 @@ export function binFingerprint(item: BinItem): string {
  * arrive on separate reads and a Bin that listed all the folders and then all
  * the files would put the thing somebody just threw away in the middle. The
  * tie-break is the id, so the order is total and never reshuffles under
- * somebody watching it -- a folder carries no timestamp at all and every one
- * of them would otherwise be free to swap places on any update.
+ * somebody watching it. Both concepts carry their last-write timestamp and
+ * use the server's descending id tie-break.
  */
 export function orderBinItems(items: readonly BinItem[]): BinItem[] {
   return [...items].sort((a, b) => {
     if (a.changedAt !== b.changedAt) return a.changedAt < b.changedAt ? 1 : -1;
-    return a.id.localeCompare(b.id);
+    return b.id.localeCompare(a.id);
   });
 }
 

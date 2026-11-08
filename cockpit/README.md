@@ -133,6 +133,30 @@ launcher and service honor `XDG_CONFIG_HOME` and `XDG_DATA_HOME`. The desktop
 must provide a tray host to display the icon. macOS keeps its existing native
 [menu bar companion](docs/macos-menu.md).
 
+## Update from the desktop menu
+
+The Mac menu bar and Linux tray include **About MemQL Cockpit**, the installed
+version and build, and **Check for updates**. They check published stable
+Cockpit releases at launch and hourly. An upward arrow on the MemQL icon
+means a newer release is available; opening the menu shows its version.
+**Update to … and restart** installs that release and restarts the existing
+worker and menu. Checking never installs an update automatically.
+
+Updates keep the build variant, cluster enrollments, machine identity, local
+models, policies, and paused connections. Active work must finish first. The
+download is verified before a brief reservation prevents new cluster work
+from starting during replacement. A failed worker restart restores the prior
+installation. A running updated worker and a reconnected server are reported
+separately: an offline server continues through the normal reconnect loop.
+
+An installation the current user cannot replace, or an unsupported service
+layout, shows the reason and requires an installer update. macOS updates
+verify the app signature and preserve the installed signing identity. A local
+development build reuses its already configured certificate when available;
+ad-hoc releases may require fresh macOS permissions.
+See [desktop updates](docs/desktop-updates.md) for verification, recovery,
+and the equivalent command-line actions.
+
 The [installer design guide](scripts/install/README.md) describes the terminal
 conventions and includes a safe local preview command.
 

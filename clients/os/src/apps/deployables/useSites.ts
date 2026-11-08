@@ -47,8 +47,8 @@ import { SITE_CONCEPT } from "./concepts";
  * restart the collection from empty the moment access resolved, unmounting
  * whatever was open.
  */
-export function useSites(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("deployables:sites", (connection) => ({
+export function useSites(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "deployables:sites" : null, (connection) => ({
     concept: SITE_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.sitesAll({}, { signal });

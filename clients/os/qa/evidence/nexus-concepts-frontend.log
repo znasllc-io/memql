@@ -1,0 +1,12 @@
+
+> @znasllc-io/memql-os@0.1.0 test
+> vitest run --run test/nexus test/concepts
+
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  31 passed (31)
+      Tests  571 passed (571)
+   Start at  16:25:09
+   Duration  9.15s (tests 66%, environment 15%, import 11%, transform 7%, setup 1%)

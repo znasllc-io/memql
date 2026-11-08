@@ -10,12 +10,13 @@ import hashlib
 import io
 import json
 import os
-import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+
+from fixture_process import SUITE_PROCESSES
 
 HERE = Path(__file__).resolve().parent
 ROOT_INSTALL = HERE.parent.parent / "install.sh"
@@ -74,8 +75,7 @@ else: sys.stdout.buffer.write(body)
 
     def run_command(self, command, input_text=None):
         self.fixture.write_text(json.dumps(self.pages))
-        return subprocess.run(command, input=input_text, env=self.env, cwd=self.root,
-                              text=True, capture_output=True, timeout=20)
+        return SUITE_PROCESSES.run(command, input=input_text, env=self.env, cwd=self.root)
 
     def resolve(self):
         return self.run_command([sys.executable, str(HERE / "release-version.py"),

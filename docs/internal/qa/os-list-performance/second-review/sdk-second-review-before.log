@@ -1,0 +1,64 @@
+TAP version 13
+# Subtest: the final manual page replays older arrivals after removing its loaded boundary
+not ok 1 - the final manual page replays older arrivals after removing its loaded boundary
+  ---
+  duration_ms: 7.418333
+  type: 'test'
+  location: '/Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1376:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+
+      [
+        'first',
+        'last',
+    -   'late-older'
+      ]
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'first'
+    1: 'last'
+    2: 'late-older'
+  actual:
+    0: 'first'
+    1: 'last'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1397:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: failed re-reads of visible rows mark stale data while unseen refusals stay silent
+not ok 2 - failed re-reads of visible rows mark stale data while unseen refusals stay silent
+  ---
+  duration_ms: 17.542416
+  type: 'test'
+  location: '/Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1400:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    'live' !== 'degraded'
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'degraded'
+  actual: 'live'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1416:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 59.772209

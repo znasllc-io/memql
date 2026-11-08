@@ -71,6 +71,7 @@ type Runner struct {
 	conn            atomic.Pointer[Connection]
 	active          sync.WaitGroup
 	activeCalls     atomic.Int64
+	update          *updateAdmission
 	lastReadvertise atomic.Int64
 
 	// pendingReadvertise is the one-shot floor bypass armed by
@@ -857,6 +858,9 @@ func (r *Runner) busy() bool {
 	if r.sessions != nil && r.sessions.Live() > 0 {
 		return true
 	}
+	if r.sessions != nil && r.sessions.LiveSignIns() > 0 {
+		return true
+	}
 	if r.calls != nil && r.calls.Live() > 0 {
 		return true
 	}
@@ -882,6 +886,17 @@ func (r *Runner) inventory(ctx context.Context) []apps.Info {
 func (r *Runner) handleMessage(ctx context.Context, conn *Connection, msg *memqlv1.WorkerServerMessage) error {
 	if msg == nil {
 		return nil
+	}
+	// Admission and the active-work registration below share the update
+	// lock. A successful prepare cannot race a newly admitted start from a
+	// different home. Cancellation, pings and results remain available.
+	if startsWorkerWork(msg) && r.update != nil {
+		r.update.mu.Lock()
+		if r.update.finishing || time.Now().Before(r.update.until) {
+			r.update.mu.Unlock()
+			return refuseUpdating(conn, msg)
+		}
+		defer r.update.mu.Unlock()
 	}
 	switch payload := msg.GetPayload().(type) {
 	case *memqlv1.WorkerServerMessage_ToolDispatch:

@@ -39,7 +39,7 @@ func handleMenu(args []string) {
 		case *start:
 			err = desktopmenu.Start()
 		default:
-			err = desktopmenu.Run(executable)
+			err = desktopmenu.Run(executable, version, buildVariant)
 		}
 	}
 	if err != nil {

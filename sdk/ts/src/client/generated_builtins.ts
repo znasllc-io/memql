@@ -1491,6 +1491,31 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
   return this.executeNamed("composeRunRecipe", buildComposeRunRecipe(args), opts);
 };
 
+/** Ten recent readable rows matching public declared text fields. The generic Concepts inspector retains raw node structure; secret fields are never searched. */
+export interface ConceptRowsSearchArgs {
+  conceptId: string;
+  search: string;
+  cursor?: string;
+}
+
+export function buildConceptRowsSearch(args: ConceptRowsSearchArgs): string {
+  const parts: string[] = [];
+  parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  parts.push("search: " + renderMemQLValue(args.search));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin conceptRowsSearch(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    conceptRowsSearch(args: ConceptRowsSearchArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.conceptRowsSearch = function (this: QueryClient, args: ConceptRowsSearchArgs = {} as ConceptRowsSearchArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("conceptRowsSearch", buildConceptRowsSearch(args), opts);
+};
+
 /** Continue the owner's open, unaccepted goal using feedback on its exact finished result. Preserves the run, completed work, usage and permissions. Native planning chooses the remaining work; no technical step selection is required. A closed/accepted, cancelled or changed result refuses. Repeating the same request id and payload records no second continuation. */
 export interface ContinueRunArgs {
   runId: string;
@@ -1777,6 +1802,41 @@ QueryClient.prototype.decideApproval = function (this: QueryClient, args: Decide
   return this.executeNamed("decideApproval", buildDecideApproval(args), opts);
 };
 
+/** Ten recent authorized deployables or repository sources. Combines deployed, pending and declared apps before search and pagination; returns exact archived counts and complete source summaries without full catalogs in the browser. */
+export interface DeployableDirectoryPageArgs {
+  resource?: string;
+  search?: string;
+  kind?: string;
+  status?: string;
+  accountId?: string;
+  source?: string;
+  archived?: boolean;
+  cursor?: string;
+}
+
+export function buildDeployableDirectoryPage(args: DeployableDirectoryPageArgs): string {
+  const parts: string[] = [];
+  if (args.resource !== undefined) parts.push("resource: " + renderMemQLValue(args.resource));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin deployableDirectoryPage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    deployableDirectoryPage(args: DeployableDirectoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.deployableDirectoryPage = function (this: QueryClient, args: DeployableDirectoryPageArgs = {} as DeployableDirectoryPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("deployableDirectoryPage", buildDeployableDirectoryPage(args), opts);
+};
+
 /** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
@@ -1905,6 +1965,52 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
+};
+
+/** Read one captured test message with its body from the past seven days. Owner or developer only. */
+export interface EmailInboxMessageArgs {
+  messageId: string;
+}
+
+export function buildEmailInboxMessage(args: EmailInboxMessageArgs): string {
+  const parts: string[] = [];
+  parts.push("messageId: " + renderMemQLValue(args.messageId));
+  return "builtin emailInboxMessage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInboxMessage(args: EmailInboxMessageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInboxMessage = function (this: QueryClient, args: EmailInboxMessageArgs = {} as EmailInboxMessageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInboxMessage", buildEmailInboxMessage(args), opts);
+};
+
+/** Read ten captured test message summaries from the past seven days. Search decrypts at most 100 stored messages per request; nextCursor continues a sparse search. Owner or developer only. */
+export interface EmailInboxPageArgs {
+  search?: string;
+  accountId?: string;
+  cursor?: string;
+}
+
+export function buildEmailInboxPage(args: EmailInboxPageArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin emailInboxPage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInboxPage(args: EmailInboxPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInboxPage = function (this: QueryClient, args: EmailInboxPageArgs = {} as EmailInboxPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInboxPage", buildEmailInboxPage(args), opts);
 };
 
 /** The email layouts an organization can start from: the built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, category, wireframe, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: for a built-in layout, pass it to campaignCreateTemplateFromLayout or campaignComposeEmail as layoutId. */
@@ -2854,6 +2960,25 @@ QueryClient.prototype.knowledgeInstallCapabilityCorpora = function (this: QueryC
   return this.executeNamed("knowledgeInstallCapabilityCorpora", buildKnowledgeInstallCapabilityCorpora(args), opts);
 };
 
+/** Stream authorized chunk pages into complete domain counters before transport. */
+export interface KnowledgeTrainingDomainRollupsArgs {
+}
+
+export function buildKnowledgeTrainingDomainRollups(args: KnowledgeTrainingDomainRollupsArgs): string {
+  void args;
+  return "builtin knowledgeTrainingDomainRollups()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeTrainingDomainRollups(args?: KnowledgeTrainingDomainRollupsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeTrainingDomainRollups = function (this: QueryClient, args: KnowledgeTrainingDomainRollupsArgs = {} as KnowledgeTrainingDomainRollupsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeTrainingDomainRollups", buildKnowledgeTrainingDomainRollups(args), opts);
+};
+
 /** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */
 export interface LanguageStatusArgs {
 }
@@ -3089,6 +3214,8 @@ QueryClient.prototype.libraryBackupDownloadBlock = function (this: QueryClient, 
 
 /** libraryBackupList wraps the builtin named "libraryBackupList". */
 export interface LibraryBackupListArgs {
+  search?: string;
+  limit?: number;
   // Enum: active | archives | all
   scope?: string;
   workerId?: string;
@@ -3097,6 +3224,8 @@ export interface LibraryBackupListArgs {
 
 export function buildLibraryBackupList(args: LibraryBackupListArgs): string {
   const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
   if (args.scope !== undefined) parts.push("scope: " + renderMemQLValue(args.scope));
   if (args.workerId !== undefined) parts.push("workerId: " + renderMemQLValue(args.workerId));
   if (args.after !== undefined) parts.push("after: " + renderMemQLValue(args.after));
@@ -3260,6 +3389,45 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryBackupUsage = function (this: QueryClient, args: LibraryBackupUsageArgs = {} as LibraryBackupUsageArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryBackupUsage", buildLibraryBackupUsage(args), opts);
+};
+
+/** Exact folder counts and distinct label options, reduced from authorized metadata pages. */
+export interface LibraryBrowseFacetsArgs {
+  archived?: boolean;
+  folderId?: string;
+  kind?: string;
+  source?: string;
+  accountId?: string;
+  label?: string;
+  search?: string;
+  ids?: string[];
+  folderIds?: string[];
+  sourceRefs?: string[];
+}
+
+export function buildLibraryBrowseFacets(args: LibraryBrowseFacetsArgs): string {
+  const parts: string[] = [];
+  if (args.archived !== undefined) parts.push("archived: " + renderMemQLValue(args.archived));
+  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
+  if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.label !== undefined) parts.push("label: " + renderMemQLValue(args.label));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.ids !== undefined) parts.push("ids: " + renderMemQLValue(args.ids));
+  if (args.folderIds !== undefined) parts.push("folderIds: " + renderMemQLValue(args.folderIds));
+  if (args.sourceRefs !== undefined) parts.push("sourceRefs: " + renderMemQLValue(args.sourceRefs));
+  return "builtin libraryBrowseFacets(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryBrowseFacets(args: LibraryBrowseFacetsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryBrowseFacets = function (this: QueryClient, args: LibraryBrowseFacetsArgs = {} as LibraryBrowseFacetsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryBrowseFacets", buildLibraryBrowseFacets(args), opts);
 };
 
 /** Read owned document history metadata, with a version cursor and branch provenance. */
@@ -3642,6 +3810,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryTrainFile = function (this: QueryClient, args: LibraryTrainFileArgs = {} as LibraryTrainFileArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryTrainFile", buildLibraryTrainFile(args), opts);
+};
+
+/** Ten current lesson heads, with exact revision folding before search and paging. */
+export interface LibraryTrainingLessonsPageArgs {
+  search?: string;
+  cursor?: string;
+}
+
+export function buildLibraryTrainingLessonsPage(args: LibraryTrainingLessonsPageArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin libraryTrainingLessonsPage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryTrainingLessonsPage(args: LibraryTrainingLessonsPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryTrainingLessonsPage = function (this: QueryClient, args: LibraryTrainingLessonsPageArgs = {} as LibraryTrainingLessonsPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryTrainingLessonsPage", buildLibraryTrainingLessonsPage(args), opts);
 };
 
 /** The archived days: one row per logs/<day>/<nodeType>.ndjson.gz object in the archive container with its size, newest day first. Empty when no archive is configured, and the row says which. Admin and above. */
@@ -5009,11 +5200,15 @@ QueryClient.prototype.releaseAssembleProfileCandidate = function (this: QueryCli
 /** Read this owner's saved release journeys, including interrupted attempts. */
 export interface ReleaseBuildsArgs {
   limit?: number;
+  cursor?: string;
+  search?: string;
 }
 
 export function buildReleaseBuilds(args: ReleaseBuildsArgs): string {
   const parts: string[] = [];
   if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
   return "builtin releaseBuilds(" + parts.join(", ") + ")";
 }
 
@@ -5048,6 +5243,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseCancelInstallation = function (this: QueryClient, args: ReleaseCancelInstallationArgs = {} as ReleaseCancelInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseCancelInstallation", buildReleaseCancelInstallation(args), opts);
+};
+
+/** Cancel or continue cancelling the original operator's unfinished preparation. Native cleanup retains its reservation until producer and artifact fences complete. */
+export interface ReleaseCancelInstallationPreparationArgs {
+  installationId: string;
+  preparationId: string;
+}
+
+export function buildReleaseCancelInstallationPreparation(args: ReleaseCancelInstallationPreparationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("preparationId: " + renderMemQLValue(args.preparationId));
+  return "builtin releaseCancelInstallationPreparation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCancelInstallationPreparation(args: ReleaseCancelInstallationPreparationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCancelInstallationPreparation = function (this: QueryClient, args: ReleaseCancelInstallationPreparationArgs = {} as ReleaseCancelInstallationPreparationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCancelInstallationPreparation", buildReleaseCancelInstallationPreparation(args), opts);
 };
 
 /** Read configured release sources and exact publication target identities. Owner only. */
@@ -5155,12 +5373,14 @@ QueryClient.prototype.releaseCandidateTargets = function (this: QueryClient, arg
 export interface ReleaseCandidatesArgs {
   cursor?: string;
   limit?: number;
+  search?: string;
 }
 
 export function buildReleaseCandidates(args: ReleaseCandidatesArgs): string {
   const parts: string[] = [];
   if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
   if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
   return "builtin releaseCandidates(" + parts.join(", ") + ")";
 }
 
@@ -5267,6 +5487,7 @@ export interface ReleaseDiscoverPublishedCandidatesArgs {
   sourceId: string;
   cursor?: string;
   limit?: number;
+  search?: string;
 }
 
 export function buildReleaseDiscoverPublishedCandidates(args: ReleaseDiscoverPublishedCandidatesArgs): string {
@@ -5274,6 +5495,7 @@ export function buildReleaseDiscoverPublishedCandidates(args: ReleaseDiscoverPub
   parts.push("sourceId: " + renderMemQLValue(args.sourceId));
   if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
   if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
   return "builtin releaseDiscoverPublishedCandidates(" + parts.join(", ") + ")";
 }
 
@@ -5388,6 +5610,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseInstallationStatus = function (this: QueryClient, args: ReleaseInstallationStatusArgs = {} as ReleaseInstallationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseInstallationStatus", buildReleaseInstallationStatus(args), opts);
+};
+
+/** Confirm the exact saved installation pin with its connected GitHub owner. Only explicitly configured owner-push repositories support this operation. Landing makes a revision selectable; applying remains a separate action. */
+export interface ReleaseLandInstallationProposalArgs {
+  proposalId: string;
+  expectedCommit: string;
+}
+
+export function buildReleaseLandInstallationProposal(args: ReleaseLandInstallationProposalArgs): string {
+  const parts: string[] = [];
+  parts.push("proposalId: " + renderMemQLValue(args.proposalId));
+  parts.push("expectedCommit: " + renderMemQLValue(args.expectedCommit));
+  return "builtin releaseLandInstallationProposal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseLandInstallationProposal(args: ReleaseLandInstallationProposalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseLandInstallationProposal = function (this: QueryClient, args: ReleaseLandInstallationProposalArgs = {} as ReleaseLandInstallationProposalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseLandInstallationProposal", buildReleaseLandInstallationProposal(args), opts);
 };
 
 /** List verified published releases; identified developers, admins and owners may read. */
@@ -5852,6 +6097,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.repositoryChangeAccess = function (this: QueryClient, args: RepositoryChangeAccessArgs = {} as RepositoryChangeAccessArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("repositoryChangeAccess", buildRepositoryChangeAccess(args), opts);
+};
+
+/** Explicitly land this maintainer's exact saved proposal when pull requests are disabled. Uses the connected person's grant, never the installation identity. No rebase, force push, release or deployment is implied. Retry the same commit after an uncertain answer; a changed default branch requires a new proposal. */
+export interface RepositoryChangeLandArgs {
+  requestId: string;
+  expectedCommit: string;
+}
+
+export function buildRepositoryChangeLand(args: RepositoryChangeLandArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("expectedCommit: " + renderMemQLValue(args.expectedCommit));
+  return "builtin repositoryChangeLand(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    repositoryChangeLand(args: RepositoryChangeLandArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.repositoryChangeLand = function (this: QueryClient, args: RepositoryChangeLandArgs = {} as RepositoryChangeLandArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("repositoryChangeLand", buildRepositoryChangeLand(args), opts);
 };
 
 /** Authenticated peer request intake; sender ownership and decisions are never imported. */
@@ -7585,6 +7853,31 @@ QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: Store
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
 };
 
+/** Ten pending chunks from the existing shared-domain index, admitted at writer rank. */
+export interface TrainingChunksBrowseArgs {
+  pending?: boolean;
+  search?: string;
+  cursor?: string;
+}
+
+export function buildTrainingChunksBrowse(args: TrainingChunksBrowseArgs): string {
+  const parts: string[] = [];
+  if (args.pending !== undefined) parts.push("pending: " + renderMemQLValue(args.pending));
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin trainingChunksBrowse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    trainingChunksBrowse(args: TrainingChunksBrowseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.trainingChunksBrowse = function (this: QueryClient, args: TrainingChunksBrowseArgs = {} as TrainingChunksBrowseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("trainingChunksBrowse", buildTrainingChunksBrowse(args), opts);
+};
+
 /** Accept the exact finished results after the owner reviews them. Only a human interactive request may close the goal this way; model success is not acceptance. */
 export interface WorkAcceptGoalResultsArgs {
   goalId: string;
@@ -7654,6 +7947,50 @@ declare module "./query.js" {
 
 QueryClient.prototype.workSkillCatalog = function (this: QueryClient, args: WorkSkillCatalogArgs = {} as WorkSkillCatalogArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workSkillCatalog", buildWorkSkillCatalog(args), opts);
+};
+
+/** Inspect one skill and verify its complete current content against installed seeds. */
+export interface WorkSkillCatalogEntryArgs {
+  skillId: string;
+}
+
+export function buildWorkSkillCatalogEntry(args: WorkSkillCatalogEntryArgs): string {
+  const parts: string[] = [];
+  parts.push("skillId: " + renderMemQLValue(args.skillId));
+  return "builtin workSkillCatalogEntry(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillCatalogEntry(args: WorkSkillCatalogEntryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillCatalogEntry = function (this: QueryClient, args: WorkSkillCatalogEntryArgs = {} as WorkSkillCatalogEntryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillCatalogEntry", buildWorkSkillCatalogEntry(args), opts);
+};
+
+/** Ten recent skills with verified baseline provenance. Search precedes paging. */
+export interface WorkSkillCatalogPageArgs {
+  search?: string;
+  cursor?: string;
+}
+
+export function buildWorkSkillCatalogPage(args: WorkSkillCatalogPageArgs): string {
+  const parts: string[] = [];
+  if (args.search !== undefined) parts.push("search: " + renderMemQLValue(args.search));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  return "builtin workSkillCatalogPage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSkillCatalogPage(args: WorkSkillCatalogPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSkillCatalogPage = function (this: QueryClient, args: WorkSkillCatalogPageArgs = {} as WorkSkillCatalogPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSkillCatalogPage", buildWorkSkillCatalogPage(args), opts);
 };
 
 /** Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>. */

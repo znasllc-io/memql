@@ -642,7 +642,9 @@ Neither are the reserved roots, spec and trait applications, or construct calls
   so it lives in a query filter or spec body.
 - *Pushed down on a row field* entries compile to SQL when their input is a
   field of the row (`row.title.includes(args.q)`, `row.tags.any(t => ...)`)
-  and run in process on any other value.
+  and run in process on other values. `string.includes` also pushes down the
+  [declared text-field join](memql.md#the-refine-clause)
+  `(row.firstName + " " + row.lastName).includes(args.q, true)`.
 - *In process* entries run in the engine. In a filter or spec body they take
   only values that do not read the row, which are computed once before the query
   ([plan constants](memql.md#plan-constants)): `row.expiresAt < addDuration(now, "P1D")`
@@ -701,7 +703,7 @@ argument does what each entry says.
 | `list.take(n number) list` | In process | Returns the first n elements of the list, or all of them when there are fewer; a negative n takes none. An absent list yields an empty list. |  |
 | `list.where(pred lambda) list` | In process | Returns the elements of the list that pred holds for, in order. An absent list yields an empty list. |  |
 | `string.count() number` | In process | Returns the number of characters in the string, counting Unicode code points rather than bytes. An absent string counts as zero. |  |
-| `string.includes(sub string) bool` | Pushed down on a row field, in process otherwise | Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. | `contains(s, sub)` |
+| `string.includes(sub string, ignoreCase? bool) bool` | Pushed down on a row field, in process otherwise | Reports whether sub occurs in the string. Pass true as ignoreCase for a case-insensitive search; in a pushed-down filter this option must be a literal boolean. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. | `contains(s, sub)` |
 
 <!-- END GENERATED: function catalog -->
 

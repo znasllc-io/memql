@@ -7,11 +7,19 @@ use common.traits.{ isActiveRecord }
 
 use common.shapes.{ documentChunkDomainLite, documentChunkFull }
 
-/// Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to
-/// render per-domain chunk counts in the Knowledge panel.
-@unbounded("distinct chunk domain ids -- a bounded dedupe enumeration consumed whole")
+/// Cursor-paged shared chunk metadata for complete counts and bounded review joins.
+/// Optional filters only narrow this existing index; full text stays domain-scoped.
 query documentChunk allDocumentChunkDomains {
-  filter  row => row.domainId != ""
+  args {
+    asOf datetime
+    pending bool
+    search string
+  }
+  filter row => row.domainId != "" && (args.asOf == nil || row.createdAt <= args.asOf)
+    && (args.pending != true || (row.superseded != true && (row.validationStatus == nil || (row.validationStatus != "validated" && row.validationStatus != "rejected"))))
+    && (args.search == nil || trim(args.search) == "" || row.text.includes(trim(args.search), true) || row.sourceRef.includes(trim(args.search), true) || row.domainId.includes(trim(args.search), true))
+  sort "row.createdAt", "desc"
+  paginate 500
   shape   documentChunkDomainLite
 }
 
@@ -27,14 +35,20 @@ query documentChunk allDocumentChunkDomains {
 /// (read-what's-there-now-to-decide-what-to-supersede).
 query documentChunk documentChunksForDomain {
   args {
-    domainId  string!
+    domainId string!
+    ids []string
+    asOf datetime
+    pending bool
+    search string
   }
-  filter  row => row.domainId == args.domainId
+  filter row => row.domainId == args.domainId && (args.ids == nil || row.id in args.ids) && (args.asOf == nil || row.createdAt <= args.asOf)
+    && (args.pending != true || (row.superseded != true && (row.validationStatus == nil || (row.validationStatus != "validated" && row.validationStatus != "rejected"))))
+    && (args.search == nil || trim(args.search) == "" || row.text.includes(trim(args.search), true) || row.sourceRef.includes(trim(args.search), true) || row.domainId.includes(trim(args.search), true))
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
   sort     "row.createdAt", "desc"
-  paginate 50
+  paginate 10
   shape   documentChunkFull
 }
 

@@ -1,0 +1,3 @@
+{"class": "memql", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=1200s", "./component/memql"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok      github.com/znasllc-io/memql/component/memql 297.300s

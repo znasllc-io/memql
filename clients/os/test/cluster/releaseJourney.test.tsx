@@ -141,6 +141,29 @@ describe("guided release", () => {
     expect(writes(f).filter(c => c.name === "releasePublishBuild")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
   });
+  it("keeps a sealed release and its installation handoff available after the publisher changes", async () => {
+    const f = releaseJourneyFixture("published"), updates = vi.fn();
+    const targets = vi.spyOn(f.query, "releaseCandidateTargets").mockRejectedValue(new Error("release profile authority or installed resolver changed"));
+    render(<ReleaseBrowser query={f.query} connected onUpdates={updates} />);
+    await open();
+    await screen.findByText("Release available");
+    await press("Review installation choices");
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(targets).not.toHaveBeenCalled();
+    expect(screen.queryByText(/authority or installed resolver changed/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
+    expect(writes(f)).toEqual([]);
+  });
+  it("still refuses approval when an unpublished candidate loses its publication authority", async () => {
+    const f = releaseJourneyFixture("ready");
+    vi.spyOn(f.query, "releaseCandidateTargets").mockRejectedValue(new Error("release profile authority or installed resolver changed"));
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    await screen.findByText(/authority or installed resolver changed/);
+    expect(screen.queryByRole("button", { name: "Approve release" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
+    expect(writes(f)).toEqual([]);
+  });
   it("does not offer publication for a mismatched candidate or approval", async () => {
     const f = releaseJourneyFixture("ready"); f.journey.syncApproval = false;
     Object.assign(f.journey.build, { approvalId: "recorded-approval", actions: ["publish"] });
@@ -168,7 +191,7 @@ describe("guided release", () => {
     const f = releaseJourneyFixture("blocked"), openRepository = vi.fn();
     Object.assign(f.journey.build, { reasonCode: "version_prepare_required", reason: "This version was already released from another revision.", actions: [] });
     render(<ReleaseBrowser query={f.query} connected onOpenRepository={openRepository} />); await open();
-    await screen.findByText(/Prepare a normal version change/);
+    await screen.findByText(/Prepare a version change/);
     await press("Open repository");
     expect(openRepository).toHaveBeenCalledWith("source-package"); expect(writes(f)).toEqual([]);
   });

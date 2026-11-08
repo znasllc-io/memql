@@ -1,3 +1,5 @@
+import { LoadMore } from "../../kit/LoadMore";
+import type { PagedCollectionHandle } from "../../live/useLiveCollection";
 import {
   FileText,
   FileSpreadsheet,
@@ -65,6 +67,11 @@ export interface MaterializedSectionProps {
   onMake: () => void;
   navigation?: boolean;
   source: LiveListSource<SdkRow> | null;
+  feed?: PagedCollectionHandle<SdkRow>;
+  search?: string;
+  onSearch?: (value: string) => void;
+  format?: string;
+  onFormat?: (value: string) => void;
   showArchived: boolean;
   selectedId: string;
   onSelect: (id: string) => void;
@@ -75,6 +82,11 @@ export interface MaterializedSectionProps {
 
 export function MaterializedSection({
   source,
+  feed,
+  search: controlledSearch,
+  onSearch,
+  format: controlledFormat,
+  onFormat,
   onMake,
   navigation = true,
   showArchived,
@@ -83,8 +95,10 @@ export function MaterializedSection({
   error,
   onRetry,
 }: MaterializedSectionProps) {
-  const [search, setSearch] = useState("");
-  const [format, setFormat] = useState("");
+  const [localSearch, setLocalSearch] = useState("");
+  const [localFormat, setLocalFormat] = useState("");
+  const search = controlledSearch ?? localSearch, setSearch = onSearch ?? setLocalSearch;
+  const format = controlledFormat ?? localFormat, setFormat = onFormat ?? setLocalFormat;
 
   // THE VIEW KEY IS WHERE A RE-BASELINE IS EXPRESSED. Revealing rows the
   // browser already had is not news, so a filter change rebuilds the view
@@ -196,6 +210,7 @@ export function MaterializedSection({
           );
         }}
       />
+      {feed ? <LoadMore feed={feed} /> : null}
     </div>
   );
 }
@@ -213,7 +228,7 @@ function CountMeta({
   // has its explanation beside it rather than in somebody's head.
   return (
     <>
-      {n} {n === 1 ? "composition" : "compositions"}
+      {n}{view?.snapshot.hasMore ? "+" : ""} {n === 1 ? "composition" : "compositions"}
       {showArchived ? ", archived included" : ""}
     </>
   );

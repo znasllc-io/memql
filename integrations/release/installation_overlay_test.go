@@ -79,6 +79,9 @@ func TestInstallationOverlayPinsOnlySignedDeclaredImageSlots(t *testing.T) {
 }
 
 type overlayHub struct {
+	ownerPush                                                     bool
+	mainHead                                                      string
+	ownerWrites                                                   int
 	t                                                             *testing.T
 	before, after, base, branch, headRepo, baseRepo, mergeContent string
 	proposed, merged, revoked, revokeOnLookup                     bool
@@ -109,8 +112,27 @@ func (h *overlayHub) RoundTrip(r *http.Request) (*http.Response, error) {
 		h.t.Fatal("missing app token")
 	}
 	switch {
+	case endpoint == "":
+		value = map[string]any{"id": 42, "full_name": "acme/install", "default_branch": "main", "has_pull_requests": !h.ownerPush}
+	case endpoint == "/git/refs/heads/main" && r.Method == http.MethodPatch:
+		require.Equal(h.t, "Bearer owner-token", r.Header.Get("Authorization"))
+		var body struct {
+			SHA   string
+			Force bool
+		}
+		require.NoError(h.t, json.NewDecoder(r.Body).Decode(&body))
+		require.False(h.t, body.Force)
+		require.Equal(h.t, h.branch, body.SHA)
+		h.mainHead = body.SHA
+		h.ownerWrites++
+		code = 502
+		value = map[string]any{}
 	case endpoint == "/branches/main":
-		value = map[string]any{"commit": map[string]any{"sha": h.base}}
+		head := h.base
+		if h.mainHead != "" {
+			head = h.mainHead
+		}
+		value = map[string]any{"commit": map[string]any{"sha": head}}
 	case strings.HasPrefix(endpoint, "/branches/memql/update-"):
 		if h.branch == "" {
 			code = 404
@@ -375,4 +397,49 @@ func TestInstallationOverlayRechecksAuthorityAfterPullRequestLookup(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, 1, h.refs)
 	require.Equal(t, 1, h.prs)
+}
+
+func (a overlayTestAccess) RepositoryOwnerWriterToken(context.Context, string, string, string, string) (string, error) {
+	if a.hub.revoked {
+		return "", errors.New("owner grant revoked")
+	}
+	return "owner-token", nil
+}
+func TestInstallationOwnerLandingIsSeparateAndRecoverable(t *testing.T) {
+	s, h := overlayFixture(t)
+	h.ownerPush = true
+	s.configuration.LandingMode = "owner_push"
+	raw, err := json.Marshal(s.configuration)
+	require.NoError(t, err)
+	s.integration.resolver.systemVariable = func(context.Context, string) (string, error) { return string(raw), nil }
+	ctx := ownerCtx()
+	_, err = s.build(ctx, nil)
+	require.NoError(t, err)
+	_, err = s.reserve(ctx, nil)
+	require.NoError(t, err)
+	_, err = s.propose(ctx, nil)
+	require.NoError(t, err)
+	require.Zero(t, h.prs)
+	require.Zero(t, h.ownerWrites)
+	saved, err := s.load(ctx, s.id)
+	require.NoError(t, err)
+	require.Equal(t, "proposed", saved.summary().State)
+	_, err = s.integration.handleInstallationProposalLand(ctx, map[string]any{"proposalId": s.id, "expectedCommit": strings.Repeat("f", 40)}, 0)
+	require.Error(t, err)
+	require.Zero(t, h.ownerWrites)
+	h.revoked = true
+	_, err = s.integration.handleInstallationProposalLand(ctx, map[string]any{"proposalId": s.id, "expectedCommit": saved.BranchCommit}, 0)
+	require.Error(t, err)
+	require.Zero(t, h.ownerWrites)
+	h.revoked = false
+	for range 2 {
+		_, err = s.integration.handleInstallationProposalLand(ctx, map[string]any{"proposalId": s.id, "expectedCommit": saved.BranchCommit}, 0)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 1, h.ownerWrites)
+	require.Zero(t, h.prs)
+	saved, err = s.load(ctx, s.id)
+	require.NoError(t, err)
+	require.Equal(t, "landed", saved.summary().State)
+	require.Equal(t, saved.BranchCommit, saved.summary().OverlayRevision)
 }

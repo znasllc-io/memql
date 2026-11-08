@@ -425,6 +425,14 @@ func isProvenanceLeaf(name string) bool {
 func rewriteFilterFieldRefs(expr ExpressionNode) error {
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		if node.TextConcat != nil {
+			mapped, err := node.TextConcat.mapFields(filterFieldRef)
+			if err != nil {
+				return err
+			}
+			node.TextConcat = mapped
+			return nil
+		}
 		field, err := filterFieldRef(node.Field)
 		if err != nil {
 			return err

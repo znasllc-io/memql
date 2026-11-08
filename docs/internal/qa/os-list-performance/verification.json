@@ -1,0 +1,1691 @@
+{
+  "generatedAt": "2026-11-08T00:22:14.279163+00:00",
+  "scope": "Local source verification and synthetic fixtures; not deployed and not production response-time evidence.",
+  "status": "All recorded automated verification and independent final review passed. Repository finalization is tracked separately.",
+  "os": {
+    "passedTests": 6885,
+    "failedTests": 0,
+    "pendingTests": 0,
+    "passedFiles": 484,
+    "reportedSuitesIncludingNested": 1857,
+    "snapshotsMatched": 2,
+    "typecheck": "passed",
+    "typecheckLog": "clients/os/qa/evidence/final-typecheck.log",
+    "note": "Refreshed after final CDC-gap recovery fix. All file statuses passed. Test stderr includes jsdom unsupported window.open/navigation notices; no failed assertions.",
+    "currentReport": "memql-os-recovery-verified.json",
+    "command": "npm --prefix clients/os test -- --maxWorkers=4 --reporter=json --outputFile=/tmp/memql-os-recovery-verified.json"
+  },
+  "sdk": {
+    "tests": 481,
+    "pass": 481,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "database": {
+    "isolation": "Fresh disposable database for each class via scripts/ci/pipeline-db-tests.py; MEMQL_REQUIRE_DB=1.",
+    "engine": [
+      {
+        "package": "github.com/znasllc-io/memql/component/memql",
+        "status": "passed",
+        "result": "325.075s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/baseloader",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/callgraph",
+        "status": "passed",
+        "result": "0.796s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/dslgate",
+        "status": "passed",
+        "result": "0.505s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/dslimports",
+        "status": "passed",
+        "result": "1.525s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/offline",
+        "status": "passed",
+        "result": "17.055s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/readiness",
+        "status": "passed",
+        "result": "0.491s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/readscale",
+        "status": "passed",
+        "result": "22.248s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/sense",
+        "status": "passed",
+        "result": "2.715s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/sync",
+        "status": "passed",
+        "result": "0.335s"
+      }
+    ],
+    "native": [
+      {
+        "package": "github.com/znasllc-io/memql/component/packages",
+        "status": "passed",
+        "result": "102.031s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/work",
+        "status": "passed",
+        "result": "141.921s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/library",
+        "status": "passed",
+        "result": "107.206s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/release",
+        "status": "passed",
+        "result": "239.359s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/filebackups",
+        "status": "passed",
+        "result": "2.369s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/releasecatalog",
+        "status": "passed",
+        "result": "0.714s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/email",
+        "status": "passed",
+        "result": "26.199s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/knowledge",
+        "status": "passed",
+        "result": "44.400s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/packs/reviewspack",
+        "status": "passed",
+        "result": "10.906s"
+      }
+    ],
+    "engineLog": "final-engine.log",
+    "nativeLog": "final-native-db.log"
+  },
+  "complementaryGoPackages": {
+    "initialCounts": {
+      "passed": 201,
+      "failed": 5,
+      "no_test_files": 36
+    },
+    "selectedPackageCount": 242,
+    "initialFailures": [
+      "github.com/znasllc-io/memql/cmd/memql-lsp",
+      "github.com/znasllc-io/memql/cmd/memql-lsp/internal/grammar",
+      "github.com/znasllc-io/memql/integrations",
+      "github.com/znasllc-io/memql/scripts/ci",
+      "github.com/znasllc-io/memql/test/dslconformance"
+    ],
+    "repairedFailures": [
+      "github.com/znasllc-io/memql/cmd/memql-lsp",
+      "github.com/znasllc-io/memql/cmd/memql-lsp/internal/grammar",
+      "github.com/znasllc-io/memql/integrations",
+      "github.com/znasllc-io/memql/scripts/ci",
+      "github.com/znasllc-io/memql/test/dslconformance"
+    ],
+    "pendingFailures": [],
+    "initialPackageResults": [
+      {
+        "package": "github.com/znasllc-io/memql",
+        "status": "passed",
+        "result": "106.570s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/admin-preview",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/attributematrix",
+        "status": "passed",
+        "result": "0.325s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/conceptsnapshot",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/deploy-gate-check",
+        "status": "passed",
+        "result": "0.349s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/docs-gen",
+        "status": "passed",
+        "result": "0.694s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/docs-gen/bundle",
+        "status": "passed",
+        "result": "0.477s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/dslgrammar",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/envscan",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/envscan/scan",
+        "status": "passed",
+        "result": "5.534s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/frontdoorhosts",
+        "status": "passed",
+        "result": "0.757s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/frontdoorpaths",
+        "status": "passed",
+        "result": "0.607s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/healthcheck",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/installation-source",
+        "status": "passed",
+        "result": "1.564s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-arch",
+        "status": "passed",
+        "result": "0.627s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-bench",
+        "status": "passed",
+        "result": "1.825s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp",
+        "status": "failed",
+        "result": "35.415s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp/internal/grammar",
+        "status": "failed",
+        "result": "0.314s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp/internal/position",
+        "status": "passed",
+        "result": "0.277s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-verify",
+        "status": "passed",
+        "result": "0.923s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memqlbreaking",
+        "status": "passed",
+        "result": "0.306s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memqlfmt",
+        "status": "passed",
+        "result": "0.295s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memqllint",
+        "status": "passed",
+        "result": "95.360s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memqlmigrate",
+        "status": "passed",
+        "result": "9.146s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/ocisnapshot",
+        "status": "passed",
+        "result": "0.524s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/platformgraph",
+        "status": "passed",
+        "result": "0.880s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/shopifyschema",
+        "status": "passed",
+        "result": "1.527s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/cmd/memql",
+        "status": "passed",
+        "result": "0.796s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/access",
+        "status": "passed",
+        "result": "0.779s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/auth",
+        "status": "passed",
+        "result": "5.197s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/config",
+        "status": "passed",
+        "result": "0.733s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/crash",
+        "status": "passed",
+        "result": "0.325s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/desktopmenu",
+        "status": "passed",
+        "result": "0.613s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/lint",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/setupproject",
+        "status": "passed",
+        "result": "2.169s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker",
+        "status": "passed",
+        "result": "5.121s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/apps",
+        "status": "passed",
+        "result": "2.819s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/appsession",
+        "status": "passed",
+        "result": "52.806s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/backup",
+        "status": "passed",
+        "result": "0.672s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/capacity",
+        "status": "passed",
+        "result": "2.207s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/consent",
+        "status": "passed",
+        "result": "2.543s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/hardware",
+        "status": "passed",
+        "result": "0.520s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/harness",
+        "status": "passed",
+        "result": "67.256s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/inference",
+        "status": "passed",
+        "result": "0.650s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/modelcall",
+        "status": "passed",
+        "result": "43.124s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/models",
+        "status": "passed",
+        "result": "0.308s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/probe",
+        "status": "passed",
+        "result": "0.454s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/processprobe",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/tools",
+        "status": "passed",
+        "result": "37.972s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/transfer",
+        "status": "passed",
+        "result": "0.813s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/internal/worker/workbench",
+        "status": "passed",
+        "result": "3.297s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/scripts/inference",
+        "status": "passed",
+        "result": "0.304s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/scripts/install",
+        "status": "passed",
+        "result": "194.084s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cockpit/scripts/macos",
+        "status": "passed",
+        "result": "1.528s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions",
+        "status": "passed",
+        "result": "0.492s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions/bind",
+        "status": "passed",
+        "result": "0.351s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions/capability",
+        "status": "passed",
+        "result": "0.521s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions/fingerprint",
+        "status": "passed",
+        "result": "0.332s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions/pin",
+        "status": "passed",
+        "result": "0.420s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/actions/surfaceresolver",
+        "status": "passed",
+        "result": "0.292s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/architecture",
+        "status": "passed",
+        "result": "47.427s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/architecture/embedded",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/architecture/extract",
+        "status": "passed",
+        "result": "0.367s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/architecture/model",
+        "status": "passed",
+        "result": "0.292s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/auth",
+        "status": "passed",
+        "result": "0.686s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/bus",
+        "status": "passed",
+        "result": "0.345s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/bus/gen",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/compose",
+        "status": "passed",
+        "result": "0.867s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/compose/emaildoc",
+        "status": "passed",
+        "result": "9.646s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/conceptfields",
+        "status": "passed",
+        "result": "0.731s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/config",
+        "status": "passed",
+        "result": "0.269s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/deploycontrol",
+        "status": "passed",
+        "result": "3.082s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/edge",
+        "status": "passed",
+        "result": "1.142s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/envregistry",
+        "status": "passed",
+        "result": "0.339s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/errorpages",
+        "status": "passed",
+        "result": "0.401s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/events",
+        "status": "passed",
+        "result": "0.528s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/fileprocessor",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/frontdoor",
+        "status": "passed",
+        "result": "0.835s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/healing",
+        "status": "passed",
+        "result": "0.322s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/inbound",
+        "status": "passed",
+        "result": "0.546s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/annotations",
+        "status": "passed",
+        "result": "0.490s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/ast",
+        "status": "passed",
+        "result": "0.312s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/bodymigrate",
+        "status": "passed",
+        "result": "0.266s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/compiler",
+        "status": "passed",
+        "result": "0.363s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/deprecation",
+        "status": "passed",
+        "result": "0.301s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/dslclause",
+        "status": "passed",
+        "result": "0.345s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/dslspec",
+        "status": "passed",
+        "result": "5.587s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/dslspec/internal/bnfmatch",
+        "status": "passed",
+        "result": "0.435s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/functions",
+        "status": "passed",
+        "result": "0.317s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/pagination",
+        "status": "passed",
+        "result": "0.274s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/parser",
+        "status": "passed",
+        "result": "2.691s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/language/tiers",
+        "status": "passed",
+        "result": "0.276s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/mcp",
+        "status": "passed",
+        "result": "0.959s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/metadata",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/metrics",
+        "status": "passed",
+        "result": "0.800s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/observe",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/outbound",
+        "status": "passed",
+        "result": "0.912s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/pipelinenotify",
+        "status": "passed",
+        "result": "0.978s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/pipelines",
+        "status": "passed",
+        "result": "0.467s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/planner",
+        "status": "passed",
+        "result": "0.348s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/procedure",
+        "status": "passed",
+        "result": "0.368s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/procedure/reference",
+        "status": "passed",
+        "result": "0.417s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/provenance",
+        "status": "passed",
+        "result": "0.364s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving",
+        "status": "passed",
+        "result": "14.889s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/capability",
+        "status": "passed",
+        "result": "0.429s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/cassette",
+        "status": "passed",
+        "result": "1.133s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/figure",
+        "status": "passed",
+        "result": "0.393s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/goalfixture",
+        "status": "passed",
+        "result": "16.526s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/scenario",
+        "status": "passed",
+        "result": "0.381s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/scorecard",
+        "status": "passed",
+        "result": "0.286s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/proving/world",
+        "status": "passed",
+        "result": "0.272s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/releasecatalog",
+        "status": "passed",
+        "result": "0.716s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/router",
+        "status": "passed",
+        "result": "1.020s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/routingrules",
+        "status": "passed",
+        "result": "0.557s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/safety",
+        "status": "passed",
+        "result": "0.274s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/safety/approval",
+        "status": "passed",
+        "result": "0.303s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/safety/llm",
+        "status": "passed",
+        "result": "0.288s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/safety/recorder",
+        "status": "passed",
+        "result": "0.267s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/secret",
+        "status": "passed",
+        "result": "0.284s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/service",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/service/users",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/sitepublish",
+        "status": "passed",
+        "result": "4.583s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/skills",
+        "status": "passed",
+        "result": "0.459s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/work",
+        "status": "passed",
+        "result": "0.530s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/work/goaleval",
+        "status": "passed",
+        "result": "0.453s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/workjournal",
+        "status": "passed",
+        "result": "0.575s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/airoute",
+        "status": "passed",
+        "result": "0.387s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/audio",
+        "status": "passed",
+        "result": "0.342s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/baseparser",
+        "status": "passed",
+        "result": "1.744s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/baseregistry",
+        "status": "passed",
+        "result": "0.369s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/buildinfo",
+        "status": "passed",
+        "result": "0.447s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/capabilityresult",
+        "status": "passed",
+        "result": "0.330s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/common",
+        "status": "passed",
+        "result": "0.340s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/component",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/computerpermission",
+        "status": "passed",
+        "result": "0.471s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/costestimate",
+        "status": "passed",
+        "result": "0.300s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/docsmd",
+        "status": "passed",
+        "result": "0.378s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/dslfs",
+        "status": "passed",
+        "result": "0.493s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/emailconfig",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/env",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/filetxn",
+        "status": "passed",
+        "result": "1.738s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/fleetmemory",
+        "status": "passed",
+        "result": "0.696s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/gatecontext",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/grpclimits",
+        "status": "passed",
+        "result": "0.550s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/grpctls",
+        "status": "passed",
+        "result": "0.764s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/httpstream",
+        "status": "passed",
+        "result": "0.559s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/httptls",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/id",
+        "status": "passed",
+        "result": "0.759s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/librarykey",
+        "status": "passed",
+        "result": "0.358s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/literalparity",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/logger",
+        "status": "passed",
+        "result": "0.332s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/maketargets",
+        "status": "passed",
+        "result": "0.423s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/num",
+        "status": "passed",
+        "result": "0.517s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/readabletext",
+        "status": "passed",
+        "result": "0.368s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/releasewire",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/repowalk",
+        "status": "passed",
+        "result": "0.280s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/core/vendorname",
+        "status": "passed",
+        "result": "0.324s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/cnpg",
+        "status": "passed",
+        "result": "0.270s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/fleet",
+        "status": "passed",
+        "result": "5.058s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/components/cnpg-db",
+        "status": "passed",
+        "result": "2.289s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/components/dsl-mount",
+        "status": "passed",
+        "result": "0.681s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/components/pipelines",
+        "status": "passed",
+        "result": "0.295s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/components/pipelines-capacity",
+        "status": "passed",
+        "result": "1.734s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/components/tenant",
+        "status": "passed",
+        "result": "4.513s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/monitoring",
+        "status": "passed",
+        "result": "0.319s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/overlays",
+        "status": "passed",
+        "result": "29.289s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/k8s/overlays/local",
+        "status": "passed",
+        "result": "6.141s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/deploy/kueue/install",
+        "status": "passed",
+        "result": "1.129s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/docs",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/dsl",
+        "status": "passed",
+        "result": "0.347s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/examples/deploypack",
+        "status": "passed",
+        "result": "0.540s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/examples/shopifypack",
+        "status": "passed",
+        "result": "0.657s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations",
+        "status": "failed",
+        "result": "0.318s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/agent",
+        "status": "passed",
+        "result": "13.923s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/agent/worker",
+        "status": "passed",
+        "result": "0.669s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/agentdef",
+        "status": "passed",
+        "result": "0.286s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/agents",
+        "status": "passed",
+        "result": "1.164s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/argocd",
+        "status": "passed",
+        "result": "6.887s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/argocd/gen",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/auth",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/azureblob",
+        "status": "passed",
+        "result": "1.747s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/backgroundcapacity",
+        "status": "passed",
+        "result": "0.571s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/customdomain",
+        "status": "passed",
+        "result": "1.331s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/database",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/deployversion",
+        "status": "passed",
+        "result": "0.538s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/fileprocessor",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/githubrelease",
+        "status": "passed",
+        "result": "0.973s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/harnessrecall",
+        "status": "passed",
+        "result": "0.880s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/identity",
+        "status": "passed",
+        "result": "0.663s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/npmregistry",
+        "status": "passed",
+        "result": "0.345s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/ociregistry",
+        "status": "passed",
+        "result": "1.456s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/openai",
+        "status": "passed",
+        "result": "0.574s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/pipelinesteps",
+        "status": "passed",
+        "result": "43.694s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/rbac",
+        "status": "passed",
+        "result": "0.807s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/router",
+        "status": "passed",
+        "result": "0.870s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/skills",
+        "status": "passed",
+        "result": "0.596s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/storagehealth",
+        "status": "passed",
+        "result": "0.546s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/stt",
+        "status": "passed",
+        "result": "0.726s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/timeutil",
+        "status": "passed",
+        "result": "0.532s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/voice",
+        "status": "passed",
+        "result": "0.393s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/worktrace",
+        "status": "passed",
+        "result": "0.562s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/audit-pagination",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci",
+        "status": "failed",
+        "result": "43.327s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci/affected",
+        "status": "passed",
+        "result": "0.422s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci/prtiming",
+        "status": "passed",
+        "result": "0.272s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci/pyyaml",
+        "status": "passed",
+        "result": "0.665s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci/selection",
+        "status": "passed",
+        "result": "7.953s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/cidb",
+        "status": "passed",
+        "result": "5.609s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/citags",
+        "status": "passed",
+        "result": "0.564s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/cluster/rolling-drain",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/deploy",
+        "status": "passed",
+        "result": "60.109s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/dev",
+        "status": "passed",
+        "result": "72.309s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/docs",
+        "status": "passed",
+        "result": "19.591s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/identity",
+        "status": "passed",
+        "result": "16.151s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/install",
+        "status": "passed",
+        "result": "129.338s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/install/graph",
+        "status": "passed",
+        "result": "11.570s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/k3d",
+        "status": "passed",
+        "result": "193.454s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/lib",
+        "status": "passed",
+        "result": "7.519s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/make",
+        "status": "passed",
+        "result": "0.460s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/migrate-concepts",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/migrations/construct_invocation",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/migrations/event_payload_args",
+        "status": "passed",
+        "result": "0.334s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/migrations/expressions_go_fixtures",
+        "status": "passed",
+        "result": "0.754s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/os",
+        "status": "passed",
+        "result": "1.620s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/release",
+        "status": "passed",
+        "result": "28.585s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/restructure-by-construct",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/sdk-gen",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/secrets",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/gen",
+        "status": "passed",
+        "result": "0.362s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/authoring",
+        "status": "passed",
+        "result": "0.346s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/client",
+        "status": "passed",
+        "result": "0.525s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/constructs",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/dslspec",
+        "status": "passed",
+        "result": "0.414s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/modules",
+        "status": "passed",
+        "result": "0.359s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/pack",
+        "status": "passed",
+        "result": "0.380s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/sense",
+        "status": "passed",
+        "result": "0.334s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/voice",
+        "status": "no_test_files",
+        "result": "[no test files]"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/sdk/go/worker",
+        "status": "passed",
+        "result": "0.473s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/test/authoring",
+        "status": "passed",
+        "result": "6.307s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/test/conformance",
+        "status": "passed",
+        "result": "57.349s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/test/dslconformance",
+        "status": "failed",
+        "result": "15.186s"
+      }
+    ],
+    "repairResults": [
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp",
+        "status": "passed",
+        "result": "32.799s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp/internal/grammar",
+        "status": "passed",
+        "result": "0.265s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memql-lsp/internal/position",
+        "status": "passed",
+        "result": "0.979s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations",
+        "status": "passed",
+        "result": "0.299s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/scripts/ci",
+        "status": "passed",
+        "result": "43.214s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/cmd/memqlbreaking",
+        "status": "passed",
+        "result": "0.469s"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/test/dslconformance",
+        "status": "passed",
+        "result": "15.106s",
+        "log": "final-dsl-conformance.log"
+      }
+    ],
+    "repairLog": "final-unit-repairs.log",
+    "note": "The initial aggregate command failed in five packages. Successful complete-package reruns repair all five; the initial run is not relabeled as all-green.",
+    "currentCounts": {
+      "passed": 206,
+      "no_test_files": 36,
+      "failed": 0
+    }
+  },
+  "browser": {
+    "flows": 48,
+    "directories": 12,
+    "checks": "10 initial, 20 after Load more, 1 server-search match, 20 restored; no horizontal overflow, row dividers, boxed row metadata or browser errors.",
+    "matrices": [
+      {
+        "path": "clients/os/qa/evidence/concepts-browser-checks.json",
+        "sourceFile": "concepts-browser-checks.json",
+        "bytes": 966,
+        "sha256": "ddf0f64bfaa715a73203afddf777019d7f7a9f47f9145f0da0e33f4b141c7b75",
+        "flows": 4,
+        "views": [
+          "concepts-paged"
+        ],
+        "viewportWidths": [
+          390,
+          1280
+        ],
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "allChecksPassed": true
+      },
+      {
+        "path": "clients/os/qa/evidence/identity-fleet-browser-checks.json",
+        "sourceFile": "identity-fleet-browser-checks.json",
+        "bytes": 2870,
+        "sha256": "1e711c19b7fddffb252d76c3751bd720caf88ee79548219a5a1b2aabe3338457",
+        "flows": 12,
+        "views": [
+          "accounts-paged",
+          "fleet-paged",
+          "users-paged"
+        ],
+        "viewportWidths": [
+          390,
+          1280
+        ],
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "allChecksPassed": true
+      },
+      {
+        "path": "clients/os/qa/evidence/nexus-browser-checks.json",
+        "sourceFile": "nexus-browser-checks.json",
+        "bytes": 3942,
+        "sha256": "258bf3ca98c89b4a3240106254dc64f10ba443d964059fa6e75ed5985d4fb3ff",
+        "flows": 16,
+        "views": [
+          "nexus-approvals-paged",
+          "nexus-automations-paged",
+          "nexus-goals-paged",
+          "nexus-runs-paged"
+        ],
+        "viewportWidths": [
+          390,
+          1280
+        ],
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "allChecksPassed": true
+      },
+      {
+        "path": "clients/os/qa/evidence/resource-browser-checks.json",
+        "sourceFile": "resource-browser-checks.json",
+        "bytes": 4018,
+        "sha256": "2124c7b977d47f5e277d5fa4ca7324c37886f16639995c653908d24d42072155",
+        "flows": 16,
+        "views": [
+          "files-paged",
+          "materializer-materialized-paged",
+          "materializer-recipes-paged",
+          "materializer-templates-paged"
+        ],
+        "viewportWidths": [
+          390,
+          1280
+        ],
+        "themes": [
+          "dark",
+          "light"
+        ],
+        "allChecksPassed": true
+      }
+    ],
+    "retainedPngCount": 35,
+    "note": "32 matrix-specific Accounts/Users/Fleet/Nexus/Concepts screenshots plus 3 representative/exploratory screenshots; every flow has a JSON result, not every flow has a screenshot."
+  },
+  "build": {
+    "baselineCommit": "8b7b3a4830650adbe7a0ed3547e727e861979fbf",
+    "commands": [
+      "npm --prefix sdk/ts run build",
+      "npm --prefix clients/os run build (baseline checkout)",
+      "npm --prefix clients/os run build (working checkout)"
+    ],
+    "comparison": "same installed OS dependencies and generated SDK; initial HTML assets only; bytes not network latency",
+    "builds": {
+      "baseline": {
+        "assets": [
+          {
+            "path": "/assets/index-DIWhzwnO.js",
+            "bytes": 3348838,
+            "gzipBytes": 952580
+          },
+          {
+            "path": "/assets/index-B6TiTsYG.css",
+            "bytes": 344810,
+            "gzipBytes": 56448
+          }
+        ],
+        "initialJsBytes": 3348838,
+        "initialJsGzipBytes": 952580,
+        "htmlHasModulePreloads": false
+      },
+      "after": {
+        "assets": [
+          {
+            "path": "/assets/index-Bf4kSZ9O.js",
+            "bytes": 1363296,
+            "gzipBytes": 350709
+          },
+          {
+            "path": "/assets/index-SbKrFc3Q.css",
+            "bytes": 279427,
+            "gzipBytes": 45705
+          }
+        ],
+        "initialJsBytes": 1363296,
+        "initialJsGzipBytes": 350709,
+        "htmlHasModulePreloads": false
+      }
+    },
+    "initialJsReductionPercent": 59.29,
+    "initialJsGzipReductionPercent": 63.18,
+    "gzipLevel": 6
+  },
+  "finalDslGates": {
+    "status": "passed",
+    "conformance": {
+      "package": "test/dslconformance",
+      "seconds": 15.106,
+      "log": "final-dsl-conformance.log"
+    },
+    "lint": {
+      "files": 375,
+      "diagnostics": 0,
+      "log": "final-dsl-gates.log",
+      "note": "go run rebuilt the embedded engine tree; the documented namespace collision notice refers to the same source files."
+    },
+    "languageCompatibility": {
+      "status": "no_breaks",
+      "baseline": "component/language/surface/2026.json",
+      "log": "final-dsl-gates.log"
+    },
+    "sdkGeneration": {
+      "status": "no_drift",
+      "log": "final-sdk-generation.log"
+    },
+    "diffWhitespace": "passed"
+  },
+  "sourceLogFingerprints": {
+    "memql-os-verified.json": {
+      "sourceFile": "memql-os-verified.json",
+      "bytes": 2331746,
+      "sha256": "fac02d2dbda348d3bea46fee05ab38b4da3e2bd05d414d0f10cc6f9cbe368292"
+    },
+    "sdk-refusal-final.log": {
+      "sourceFile": "sdk-refusal-final.log",
+      "bytes": 99423,
+      "sha256": "6ad415d01650402f83c3ac2cf3eb58b5c8e90d26b6588edd86f521f23defd119"
+    },
+    "memql-engine-clean-final.log": {
+      "sourceFile": "memql-engine-clean-final.log",
+      "bytes": 1098,
+      "sha256": "a8ddbc7882357f2a40c67b5d1fdcbf5425449d4a542b89634950964740a7daba"
+    },
+    "memql-native-db-final.log": {
+      "sourceFile": "memql-native-db-final.log",
+      "bytes": 1576,
+      "sha256": "7b476f5ba328abdc8efa2e94049a02cba76b7a4121c3f334a6e57fe9625a7942"
+    },
+    "memql-units-final.log": {
+      "sourceFile": "memql-units-final.log",
+      "bytes": 24477,
+      "sha256": "2851d50122a1fd4ba0431187a82c61f1c5cb7fa8cff0a06ecf56243128ec4c25"
+    },
+    "memql-unit-repairs-final.log": {
+      "sourceFile": "memql-unit-repairs-final.log",
+      "bytes": 361,
+      "sha256": "f511b52c30812ea61528f46e5206273390a53c7fb3ea036ad742037d546fe6ca"
+    },
+    "memql-dslconformance-final.log": {
+      "sourceFile": "memql-dslconformance-final.log",
+      "bytes": 61,
+      "sha256": "f5e4a91a358ea060be820145cc32961520c61bb410703d7786ad3e1d671be229"
+    },
+    "memql-list-traits-db-final.log": {
+      "sourceFile": "memql-list-traits-db-final.log",
+      "bytes": 56,
+      "sha256": "3e054f5dc4238bedd3878391dfe15c4d41100b3e31f3d2e5481b86572828610f"
+    },
+    "memql-accounts-pii-scope.log": {
+      "sourceFile": "memql-accounts-pii-scope.log",
+      "bytes": 56,
+      "sha256": "b4b30e1c354d5c7759a604e48ddf9eb054e3b4fc4564811bf8acd9ec5013a960"
+    },
+    "memql-sdk-gen-check-final2.log": {
+      "sourceFile": "memql-sdk-gen-check-final2.log",
+      "bytes": 108,
+      "sha256": "6037c9e0de4d78ccd82dfa2015e69e955bb44ffce4692ad8f3a21ed91ea05fdb"
+    },
+    "memql-dsl-gates-final.log": {
+      "sourceFile": "memql-dsl-gates-final.log",
+      "bytes": 1029,
+      "sha256": "a4ce201a5d21c73ce2481b0033bc16cd24a00673b9ab386ec87f180bce6eea65"
+    },
+    "memql-os-recovery-verified.json": {
+      "sourceFile": "memql-os-recovery-verified.json",
+      "bytes": 2332426,
+      "sha256": "a43b9583f25d3ce7f5fb6f3e537851d1998c77ca431445c8c0877f52d84b51f5"
+    },
+    "memql-os-recovery-verified.log": {
+      "sourceFile": "memql-os-recovery-verified.log",
+      "bytes": 3365,
+      "sha256": "2dea07022d466db593c3a7bb418d3c9b5204ee2119e36df06690bbb17394afba"
+    },
+    "final-typecheck.log": {
+      "sourceFile": "final-typecheck.log",
+      "bytes": 87,
+      "sha256": "4091f7c86a3c9103cc911aa678ed2faa056405c22e0608389a4051fb6d658c5d"
+    },
+    "startup-build-after.log": {
+      "sourceFile": "startup-build-after.log",
+      "bytes": 9522,
+      "sha256": "2ec90e74c4051b49d2ceebfc7b36789e549692d2099b23f347c8c70fb0f6066d"
+    }
+  },
+  "finalTargetedDatabaseRepairs": [
+    {
+      "scope": "Pipeline shared-trait browsing and mutation across replicas",
+      "status": "passed",
+      "seconds": 5.791,
+      "log": "final-pipeline-traits-db.log"
+    },
+    {
+      "scope": "Accounts organization membership and PII fields; outsider/anonymous boundary; missing active identity",
+      "status": "passed",
+      "seconds": 6.758,
+      "log": "final-accounts-pii-scope.log"
+    }
+  ],
+  "verificationHistory": [
+    {
+      "scope": "Full OS run before final legacy-reader CDC-gap recovery fix",
+      "passedTests": 6884,
+      "passedFiles": 484,
+      "sourceFingerprint": "memql-os-verified.json"
+    }
+  ],
+  "independentFinalReview": {
+    "status": "completed",
+    "remainingFindings": 0,
+    "fixedFinding": "Component-owned cacheReleased:false readers were not repaired after a CDC sequence gap.",
+    "regressionEvidence": "clients/os/qa/evidence/noncached-gap-regression.json",
+    "focusedBefore": {
+      "failed": 1,
+      "pending": 7
+    },
+    "focusedAfter": {
+      "passed": 85,
+      "failed": 0,
+      "pending": 0
+    },
+    "finalVerification": "Full 6885-test OS suite, source/test typecheck and production build refreshed after the fix.",
+    "scope": "Only OS lifecycle code and tests changed; SDK/backend verification remains applicable."
+  }
+}

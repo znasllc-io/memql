@@ -70,27 +70,27 @@ changes, update that matrix in the monorepo and reference it here.
 
 ## Releasing
 
-1. Land the release changes on `main` through PRs and update a clean main checkout.
-2. From the monorepo root, run `make -C cockpit release` to inspect the recommendation, then
-   `make -C cockpit release ARGS="--prepare"` to open the version PR. An explicit version
-   uses `ARGS="--version=X.Y.Z --prepare"`. This stamps `cockpit/VERSION`,
+1. Prepare the release changes and update `cockpit/VERSION`,
    `cockpit/cmd/memql/main.go`, and `cockpit/internal/worker/connect.go` together.
-   The first release from this repository needs an explicit version: with no
-   `cockpit/v*` tag yet, the recommendation counts from the start of `cockpit/`,
-   and the Cockpit commits made in `znasllc-io/memql-cockpit` after its v0.20.1
-   release are not in this history.
-3. After native checks pass and that PR merges, update main, record its full
-   commit SHA, and create an immutable annotated tag at that exact commit:
-   `git tag -a cockpit/vX.Y.Z <reviewed-sha> -m "cockpit/vX.Y.Z"` followed by
-   `git push origin refs/tags/cockpit/vX.Y.Z`. Never move a published tag.
-4. In MemQL Pipelines, open the connected MemQL monorepo source, choose **Run release**,
-   and supply `cockpit/vX.Y.Z`. A tag push alone does not start a release build.
-5. Wait for the complete native release run. Prepare its release candidate,
+   `make -C cockpit release` can display a version recommendation. Its older
+   `--prepare` PR workflow is not used while this repository has PRs disabled.
+2. Test the changed paths, reconcile the latest `main`, and push as the owner,
+   following the monorepo's [branch workflow](../CLAUDE.md#branch-workflow).
+   Wait for the full `MemQL / memql / push` check to pass. Resolve failures before
+   cutting a release.
+3. In MemQL OS, open **Pipelines > Releases > Cut release**, select the Cockpit
+   profile, and check the source. Verify that the saved commit includes the
+   changes, the version is correct, and the tag is `cockpit/vX.Y.Z`. The native
+   workflow confirms the immutable tag and starts the release build. Never move
+   a published tag. A separate component release needs its own verified commit.
+4. Wait for the complete native release run. Prepare its release candidate,
    review every platform asset and checksum, and publish through MemQL's
    approved release flow. The configured publication target uses this exact
    source SHA and version. Verify the completed receipts and installer downloads
    before marking the GitHub release ready for users.
 
-The release helper opens a PR; it does not push main or publish a partially built
-release. Native build steps receive no release publication credentials. Retrying
-publication reuses the verified retained artifacts and durable receipts.
+Follow [Cutting a release](../docs/public/operate/release-cutting.md) for source
+verification, candidate approval and recovery. Native build steps receive no
+release publication credentials. Retrying publication reuses the verified
+retained artifacts and durable receipts. Publishing Cockpit does not change the
+cluster's installed engine version.

@@ -26,6 +26,7 @@ func repoEndpoint(owner, repo string) string {
 
 // RepositoryInfo is what a pipeline needs to know about a repository.
 type RepositoryInfo struct {
+	HasPullRequests         *bool
 	ID                      int64
 	FullName, DefaultBranch string
 	Private                 bool
@@ -34,15 +35,16 @@ type RepositoryInfo struct {
 // Repository reads owner/repo (GET /repos/{owner}/{repo}).
 func (c *Client) Repository(ctx context.Context, bearer, owner, repo string) (RepositoryInfo, error) {
 	var payload struct {
-		ID            int64  `json:"id"`
-		FullName      string `json:"full_name"`
-		DefaultBranch string `json:"default_branch"`
-		Private       bool   `json:"private"`
+		HasPullRequests *bool  `json:"has_pull_requests"`
+		ID              int64  `json:"id"`
+		FullName        string `json:"full_name"`
+		DefaultBranch   string `json:"default_branch"`
+		Private         bool   `json:"private"`
 	}
 	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo), bearer, &payload); err != nil {
 		return RepositoryInfo{}, err
 	}
-	return RepositoryInfo{ID: payload.ID, FullName: payload.FullName, DefaultBranch: payload.DefaultBranch, Private: payload.Private}, nil
+	return RepositoryInfo{HasPullRequests: payload.HasPullRequests, ID: payload.ID, FullName: payload.FullName, DefaultBranch: payload.DefaultBranch, Private: payload.Private}, nil
 }
 
 // BranchHead answers the commit at the tip of branch, and its message

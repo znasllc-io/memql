@@ -117,6 +117,12 @@ func TestKeysetEligibleSort(t *testing.T) {
 		t.Errorf("createdAt asc: eligible=%v desc=%v, want true,false", ok, desc)
 	}
 
+	// A timestamp leading the sort cannot hide an additional text key from
+	// the legacy two-value codec. Execution must enable the value-key codec.
+	secondary, _ := compileSortFields([]SortField{{Field: "createdAt"}, {Field: "createdBy"}})
+	if ok, _ := keysetEligibleSort(secondary); ok {
+		t.Error("a secondary intrinsic key requires the value-key codec")
+	}
 	// A leading payload sort forces a full in-memory scan -> not SQL-keyset
 	// eligible (the cursor falls back to the in-memory comparator path).
 	payloadSorter, _ := compileSortFields([]SortField{{Field: "payload.title", Direction: SortDirectionAsc}})

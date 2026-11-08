@@ -294,9 +294,10 @@ describe("the domain rail", () => {
 
 describe("the arrival fingerprint", () => {
   it("excludes domainLastCheckedAt", () => {
-    // The walk writes it on EVERY pass, so a digest built over it changes
-    // every two minutes -- and the account list would ring on a timer, which
-    // is the standing badge the cue exists not to be.
+    // The walk restamps it on a timer (every thirty minutes while a check
+    // keeps failing the same way), so a digest built over it would change for
+    // nothing a person did -- and the account list would ring on a timer,
+    // which is the standing badge the cue exists not to be.
     // Projected through the real `accountFromRow`, so the fingerprint is taken
     // over the same shape the list holds rather than over a literal a test
     // wrote.

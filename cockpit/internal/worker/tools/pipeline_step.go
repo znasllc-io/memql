@@ -224,7 +224,10 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	timeout := pipelineStepTimeout(req.timeoutSec, settings.MaxTimeoutSec)
 	stepCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	reservation, err := acquirePipelineReservation()
+	// A slot of the machine's pipelines.max_concurrent_steps (one unless the
+	// owner names more), recorded with what this step asked for before any
+	// measurement, so a step admitted at the same moment charges it.
+	reservation, err := acquirePipelineSlot(settings.ConcurrentSteps(), pipelineSlotUseOf(ctx, req))
 	if err != nil {
 		code := "pipeline_capacity_unavailable"
 		if errors.Is(err, errPipelineBusy) {
@@ -235,12 +238,16 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 		return refuse(code, err)
 	}
 	defer reservation.close()
-	if reservation.dirty {
-		if err := reconcilePipelineReservation(stepCtx, reservation); err != nil {
-			return refuse("pipeline_recovery_required", err)
+	// Every interrupted attempt on the machine is reconciled first, this
+	// slot's and any other slot no running step holds, as the one record
+	// always was; running slots are left alone.
+	if err := reconcileInterruptedPipelines(stepCtx, reservation); err != nil {
+		if errors.Is(err, errPipelineBusy) {
+			return refuse("pipeline_capacity_busy", err)
 		}
+		return refuse("pipeline_recovery_required", err)
 	}
-	if err := checkPipelineDisk(settings.WorkspaceRoot, settings.MinFreeDiskMiB); err != nil {
+	if err := checkPipelineDisk(settings.WorkspaceRoot, settings.MinFreeDiskMiB, len(reservation.others())); err != nil {
 		return refuse("pipeline_capacity_busy", err)
 	}
 	if err := checkPipelineRuntime(stepCtx, &req); err != nil {
@@ -249,16 +256,20 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	if req.dockerEndpoint != "" {
 		stepCtx = withPipelineDockerEndpoint(stepCtx, req.dockerEndpoint)
 	}
-	if err := checkPipelineHeadroom(stepCtx, req); err != nil {
+	if err := checkPipelineHeadroom(stepCtx, req, reservation.others()); err != nil {
 		return refuse("pipeline_capacity_busy", err)
 	}
 	if len(req.caches) > 0 {
-		if err := preparePipelineCache(&req); err != nil {
+		release, err := preparePipelineCache(&req)
+		if err != nil {
 			return refuse("pipeline_cache_unavailable", err)
 		}
 		defer func() {
+			release()
 			// Uncertain containers may still be writing: never prune beneath
-			// them or release the capacity reservation to another build.
+			// them or release the capacity reservation to another build. The
+			// prune itself also waits while any other slot holds an
+			// interrupted attempt.
 			if !reservation.dirty {
 				if err := prunePipelineCaches(); err != nil {
 					emit(true, []byte("memql: cache retention could not complete; the next cached build will recheck it\n"))
@@ -288,11 +299,13 @@ func runPipelineStep(ctx context.Context, agentID string, args map[string]any, p
 	}
 	// Checkout may consume the remaining headroom. Refusal is still safe to
 	// reroute: the pipeline command has never started, and the deferred cleanup
-	// must confirm removal before returning a retryable capacity response.
-	if err := checkPipelineDisk(dir, settings.MinFreeDiskMiB); err != nil {
+	// must confirm removal before returning a retryable capacity response. The
+	// steps running beside this one are read again: they may have changed
+	// while it cloned.
+	if err := checkPipelineDisk(dir, settings.MinFreeDiskMiB, len(reservation.others())); err != nil {
 		return refuse("pipeline_capacity_busy", err)
 	}
-	if err := checkPipelineHeadroom(stepCtx, req); err != nil {
+	if err := checkPipelineHeadroom(stepCtx, req, reservation.others()); err != nil {
 		return refuse("pipeline_capacity_busy", err)
 	}
 	exitCode, fail := run.command(stepCtx)

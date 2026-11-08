@@ -86,6 +86,9 @@ func TestSignInFinishesAndAsksForACheck(t *testing.T) {
 	sender := &signInSender{}
 	m.StartSignIn(context.Background(), sender, &memqlv1.AppSignInStart{SignInId: "s1", App: apps.IDClaudeCode})
 	waiting := sender.waitFor(t, signInWaiting)
+	if m.LiveSignIns() != 1 {
+		t.Fatal("interactive sign-in must prevent a worker update")
+	}
 	if waiting.GetUrl() != "https://claude.com/cai/oauth/authorize?code=true" || !waiting.GetNeedsCode() || waiting.GetExpiresAt() == nil {
 		t.Fatalf("got %+v", waiting)
 	}
@@ -96,7 +99,7 @@ func TestSignInFinishesAndAsksForACheck(t *testing.T) {
 		readiness.mu.Lock()
 		rechecked := append([]string(nil), readiness.rechecked...)
 		readiness.mu.Unlock()
-		if len(rechecked) == 1 && rechecked[0] == apps.IDClaudeCode {
+		if len(rechecked) == 1 && rechecked[0] == apps.IDClaudeCode && m.LiveSignIns() == 0 {
 			return
 		}
 		if time.Now().After(deadline) {

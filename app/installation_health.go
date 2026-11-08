@@ -7,11 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/uptrace/bun/migrate"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/releasecatalog"
+	"github.com/znasllc-io/memql/core/releasewire"
 	"github.com/znasllc-io/memql/integrations/installation"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
@@ -55,7 +58,8 @@ func installedMigrationDigest(rows migrate.MigrationSlice) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// This adapter opens the same authenticated TLS gRPC surface that clients use.
+// This adapter opens the configured authenticated TLS client surface. A PAT
+// uses Identity's bounded HTTP reader; JWTs retain the SDK gRPC path.
 // The protected pre-update credential must still authenticate and resolve its
 // own stored user after the selected engine and workload images are running.
 func installationServingProbe(ctx context.Context, endpoint, token, roots, nonce string) (installation.HealthObservation, error) {
@@ -69,6 +73,24 @@ func installationServingProbe(ctx context.Context, endpoint, token, roots, nonce
 		if !trust.AppendCertsFromPEM([]byte(roots)) {
 			return out, errors.New("installation continuity certificate roots are invalid")
 		}
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return out, errors.New("invalid installation continuity endpoint")
+	}
+	if u.Path == releasewire.ReadPath {
+		health, err := releasecatalog.ReadIdentityHTTP(ctx, endpoint, token, trust, releasewire.Request{Operation: "health", Nonce: nonce})
+		if err != nil {
+			return out, err
+		}
+		user, err := releasecatalog.ReadIdentityHTTP(ctx, endpoint, token, trust, releasewire.Request{Operation: "current-user"})
+		if err != nil {
+			return out, err
+		}
+		return installationHealthReply(health, user, nonce)
+	}
+	if strings.HasPrefix(token, "mql_pat_") {
+		return out, errors.New("personal access tokens require the Identity installation-read HTTPS endpoint")
 	}
 	conn, err := client.Connect(ctx, client.ConnectConfig{Endpoint: endpoint, Token: token, RootCAs: trust})
 	if err != nil {

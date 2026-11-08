@@ -473,8 +473,15 @@ readonly DB_GATED_TREES=(
 # purity_test.go makes "reaches no database" a build-graph fact.
 # `component/pipelinerun`, the engine side, is a root-module package and is
 # covered by the root pattern like any other.
+#
+# Cockpit is a separate release module already included by go.work. Its
+# packages remain in the non-DB complement: the generic Go lanes own unit
+# tests/build/vet, as memql-package.yaml declares. The separate Cockpit lanes
+# still add Docker integration and macOS computer-use validation; the local
+# `make cockpit-test` target remains available for the focused module suite.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
+	"cockpit"
 	"component/actions"
 	"component/architecture"
 	"component/auth"

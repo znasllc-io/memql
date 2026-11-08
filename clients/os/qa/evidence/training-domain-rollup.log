@@ -1,0 +1,24 @@
+{"time":"2026-11-07T16:45:30.094403-07:00","level":"INFO","component":"memoryNodesDB","msg":"instance created"}
+{"time":"2026-11-07T16:45:30.094531-07:00","level":"INFO","component":"memoryNodesDB","msg":"starting"}
+{"time":"2026-11-07T16:45:30.113731-07:00","level":"INFO","component":"memoryNodesDB","msg":"write-gate pool opened","size":4}
+{"time":"2026-11-07T16:45:30.284826-07:00","level":"INFO","component":"memoryNodesDB","msg":"MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend cannot be enabled; nothing was changed (memql#5421)","table":"MemoryNodes","triggers":"work_run_head_delete"}
+{"time":"2026-11-07T16:45:30.296654-07:00","level":"INFO","component":"memoryNodesDB","msg":"timescaledb extension enabled","version":"2.29.0","schema":"public","hasCreateHypertable":true,"hypertables":{"MemoryNodes":true,"SecretMemoryNodes":true},"compression":{"MemoryNodes":"blocked: DELETE trigger with a transition table: work_run_head_delete"}}
+{"time":"2026-11-07T16:45:30.304667-07:00","level":"INFO","component":"memoryNodesDB","msg":"startup ping succeeded","dsn":"postgres://memql:********@localhost:55432/memql?sslmode=disable"}
+{"time":"2026-11-07T16:45:30.304734-07:00","level":"INFO","component":"memoryNodesDB","msg":"started"}
+{"time":"2026-11-07T16:45:30.30475-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopping"}
+{"time":"2026-11-07T16:45:30.304772-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopped"}
+=== RUN   TestTrainingReviewNativePagesAndDomainBoundaryDB
+{"time":"2026-11-07T16:45:30.674742-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T16:45:34.615918-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+--- PASS: TestTrainingReviewNativePagesAndDomainBoundaryDB (6.39s)
+=== RUN   TestTrainerCorpusWalkPreservesPromptBudgetAndRejectsPartialDB
+{"time":"2026-11-07T16:45:36.996342-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T16:45:38.813744-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+--- PASS: TestTrainerCorpusWalkPreservesPromptBudgetAndRejectsPartialDB (5.38s)
+=== RUN   TestTrainingDomainRollupsDB
+{"time":"2026-11-07T16:45:42.312929-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T16:45:43.900911-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+    domain_index_db_test.go:62: training domains fixture=600 chunks/3 domains old_first_page_rows=500 old_wire_bytes=44001 complete_rollup_bytes=367 native_elapsed_us=302307
+--- PASS: TestTrainingDomainRollupsDB (4.30s)
+PASS
+ok  	github.com/znasllc-io/memql/integrations/knowledge	18.926s

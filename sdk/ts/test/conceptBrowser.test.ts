@@ -151,7 +151,7 @@ test("getRowByConceptAndId queries by concept and id", async () => {
   const d = new MockDispatcher();
   d.setReply(bundleReply([{ id: "a1", payload: { name: "Sofia" } }]));
   const row = await getRowByConceptAndId(client(d), "v1:agents:agent", "a1");
-  assert.equal(d.lastQuery(), "concept==v1:agents:agent && id==a1");
+  assert.equal(d.lastQuery(), 'concept==v1:agents:agent && id=="a1"');
   assert.deepEqual(row?.["payload"], { name: "Sofia" });
 });
 
@@ -160,6 +160,21 @@ test("getRowByConceptAndId returns null when nothing matches", async () => {
   d.setReply(bundleReply([]));
   const row = await getRowByConceptAndId(client(d), "v1:agents:agent", "nope");
   assert.equal(row, null);
+});
+
+test("getRowByConceptAndId preserves opaque IDs in live rereads", async () => {
+  for (const id of ["097e5b08773cee93e2ea5fe2940e53d3", "123", 'a" || id=="other', "a\\b"]) {
+    const d = new MockDispatcher();
+    d.setReply(bundleReply([{ id, payload: { status: "completed" } }]));
+    const row = await getRowByConceptAndId(client(d), "v1:pipelines:run", id);
+    const prefix = "concept==v1:pipelines:run && id==";
+    assert.ok(d.lastQuery().startsWith(prefix));
+    // Parsing the whole literal rejects trailing operators and catches IDs
+    // accidentally rendered as numbers instead of preserving their identity.
+    assert.equal(JSON.parse(d.lastQuery().slice(prefix.length)), id);
+    assert.equal(row?.["id"], id);
+    assert.deepEqual(row?.["payload"], { status: "completed" });
+  }
 });
 
 test("getRowByConceptAndId rejects a missing row id", async () => {
@@ -208,4 +223,20 @@ test("a bundle without root ids cannot make graph neighbors into concept rows", 
   d.setReply({ queryResult: { result: { bundle: { nodes: [{ id: "neighbor", concept: "v1:test:thing" }] } } } });
   const page = await browseConceptPage(client(d), "v1:test:thing");
   assert.deepEqual(page.rows, []);
+});
+
+test("server search preserves raw nodes and carries only its query-bound continuation", async () => {
+  const d = new MockDispatcher();
+  const row = { id: "old", concept: "v1:work:goal", payload: { statement: "Earlier Needle%_" }, createdAt: "2026-01-01T00:00:00Z" };
+  d.setReply({ queryResult: { requestId: "r", result: { data: [{ rows: [row], nextCursor: "opaque-next" }] } } });
+  const page = await browseConceptPage(client(d), "v1:work:goal", { search: 'needle%_" || true', pageSize: 10, cursor: "opaque-before" });
+  assert.deepEqual(page, { rows: [row], nextCursor: "opaque-next" });
+  assert.equal(d.lastQuery(), 'builtin conceptRowsSearch(conceptId: "v1:work:goal", search: "needle%_\\" || true", cursor: "opaque-before")');
+  assert.equal(d.lastCursor(), undefined);
+});
+
+test("server search refuses malformed page envelopes instead of showing false emptiness", async () => {
+  const d = new MockDispatcher();
+  d.setReply({ queryResult: { requestId: "r", result: { data: [] } } });
+  await assert.rejects(browseConceptPage(client(d), "v1:work:goal", { search: "invoice" }), /invalid page/);
 });

@@ -11,6 +11,7 @@ import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
 import { holds } from "../../system/roles";
+import type { ProposedRelease } from "./updates/InstallationProposals";
 import { UpdatesSection } from "./updates/UpdatesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import { CapacitySection } from "./capacity/CapacitySection";
@@ -77,6 +78,17 @@ export function ClusterApp({
   // the guard fires on open and never again -- an operator who then clicks
   // Readiness is not dragged back to their default.
   const applied = useRef(false);
+  const [releaseSelection, setReleaseSelection] = useState<ProposedRelease | null>(null);
+  useEffect(() => {
+    const release = intent?.payload.release;
+    if (!release || typeof release !== "object" || Array.isArray(release)) return;
+    const selected = release as Record<string, unknown>;
+    if (typeof selected.candidateId !== "string" || !selected.candidateId || typeof selected.catalogDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(selected.catalogDigest) || typeof selected.label !== "string") return;
+    applied.current = true;
+    setReleaseSelection({ candidateId: selected.candidateId, catalogDigest: selected.catalogDigest, label: selected.label });
+    navigate("updates");
+    consumeIntent?.(intent!.id);
+  }, [intent, navigate, consumeIntent]);
   const pipelines = useAppReach("pipelines");
   useEffect(() => {
     if (intent?.payload.storageWarning !== true) return;
@@ -119,7 +131,7 @@ export function ClusterApp({
   }
   if (sectionId === "releases") return <div className="os-cluster"><Head title="Releases" /><RecordList as="ul" label="Release management"><RecordRow name="Open releases in Pipelines" onOpen={() => pipelines.open("releases")} /></RecordList></div>;
   if (sectionId === "capacity") return <CapacitySection visible={windowVisible} />;
-  if (sectionId === "updates") return <UpdatesSection visible={windowVisible} />;
+  if (sectionId === "updates") return <UpdatesSection visible={windowVisible} releaseSelection={releaseSelection} clearReleaseSelection={() => setReleaseSelection(null)} />;
   if (sectionId === "modules") return <ModulesSection />;
   if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "automations") return <AutomationsSection />;

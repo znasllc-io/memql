@@ -73,3 +73,34 @@ func TestStorageReportMissingAndUnavailable(t *testing.T) {
 	require.False(t, got.Available)
 	require.True(t, strings.Contains(got.Reason, "could not be read"))
 }
+
+// Read is the same verified report for a native caller: the closed-chunk
+// compaction's room check (component/retention) reads it behind its own owner
+// gate. The figures arrive as the monitor wrote them, and an unavailable report
+// is an error carrying the builtin's own reason, never a zero reading.
+func TestReadReturnsTheVerifiedReportOrItsReason(t *testing.T) {
+	observed := time.Date(2026, 11, 6, 4, 15, 0, 500_000_000, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/namespaces/memql/events/database-health":
+			message, _ := json.Marshal(map[string]any{"observedAt": float64(observed.UnixNano()) / 1e9, "dataBytes": 27_960_000_000, "dataCapacityBytes": 35_433_480_192, "walBytes": 1_000_000_000, "walCapacityBytes": 34_359_738_368, "issues": []string{"archive-not-progressing"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"source": map[string]string{"component": "database-health"}, "involvedObject": map[string]string{"apiVersion": "postgresql.cnpg.io/v1", "kind": "Cluster", "name": "memql-db", "namespace": "memql", "uid": "current"}, "message": string(message)})
+		case "/apis/postgresql.cnpg.io/v1/namespaces/memql/clusters/memql-db":
+			_ = json.NewEncoder(w).Encode(map[string]any{"metadata": map[string]string{"uid": "current"}})
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	i := &Integration{api: deploycontrol.NewClusterAPIWith(server.URL, "test", server.Client()), namespace: "memql"}
+	got, err := i.Read(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 35_433_480_192.0, got.DataCapacityBytes)
+	require.Equal(t, 27_960_000_000.0, got.DataBytes)
+	require.Equal(t, 34_359_738_368.0, got.WALCapacityBytes)
+	require.Equal(t, []string{"archive-not-progressing"}, got.Issues)
+	require.WithinDuration(t, observed, got.ObservedAt, time.Millisecond)
+
+	_, err = (&Integration{}).Read(context.Background())
+	require.EqualError(t, err, "Storage monitoring is unavailable on this node.")
+}

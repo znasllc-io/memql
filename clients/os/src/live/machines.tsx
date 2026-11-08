@@ -1,30 +1,8 @@
-// The machines feed: ONE LiveCollection over the caller's worker
-// registrations, shared by the Fleet app (the directory, the detail panel,
-// the add-machine growth check) and the desktop's provenance dots (is the
-// producing machine online). Worker-registration graph events already carry
-// broadcast routing rules to browser subscribers (component/node/routing.go),
-// so live here is real, not polled.
-//
-// ===========================================================================
-// WHY THE COLLECTION STAYS IN live/ AND THE PROJECTION LIVES IN THE APP
-// ===========================================================================
-// Epic #4729 asked for the Fleet exemplar's wiring to move INTO the app. Only
-// half of it can: the desktop's provenance dots subscribe to the same
-// population, and a second collection for them would open a second
-// subscription over the same concept and let two views of one machine drift
-// apart. So the COLLECTION -- the subscription, the seed, the presence fold
-// -- stays here where both consumers reach it, and what moved into
-// apps/fleet is the part that is genuinely the app's: how a row is read
-// (rows.ts), what a label means (labels.ts), and every surface over it.
-//
-// ===========================================================================
-// EVENTS ARE FOLDED IN, NOT USED AS A REFETCH TRIGGER
-// ===========================================================================
-// A heartbeat bumps lastSeenAt every 15 seconds PER MACHINE, and every bump
-// is an `updated` event. Re-running the seed on each one turns a ten-machine
-// fleet into a read every second and a half, forever, on an idle desktop. The
-// event payload updates the row in place instead; a full re-read is reserved
-// for an id-only notification, which is what `reread` answers.
+// Full machine inventory is demanded by routing, setup and equipment pickers.
+// The Fleet directory owns its ten-row feed and by-id details. Desktop origin
+// dots demand a separate lightweight identity/presence projection, so opening
+// the desktop does not download every machine's apps, hardware and sharing.
+// Heartbeats fold into retained rows; they never trigger whole-feed refreshes.
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
@@ -38,6 +16,8 @@ import { machineFromRow, machineName, type MachineRow } from "../apps/fleet/rows
 import { useSessionIfPresent } from "../chrome/access";
 import type { LiveListSource } from "./LiveList";
 import { useLiveCollection } from "./useLiveCollection";
+import { useDemandedRead, useReadDemand } from "../kit/readDemand";
+import { LiveReadVisibility } from "./useGraphRevision";
 
 export const WORKER_REGISTRATION_CONCEPT = "v1:worker:registration";
 
@@ -47,6 +27,7 @@ export const WORKER_REGISTRATION_CONCEPT = "v1:worker:registration";
 export type { MachineRow };
 
 interface MachinesValue {
+  retain?: () => () => void;
   /**
    * RAW rows, not projected ones.
    *
@@ -91,16 +72,33 @@ const Ctx = createContext<MachinesValue>({
   reload: () => {},
 });
 
-export function useMachines(): MachinesValue {
-  return useContext(Ctx);
+export function useMachines(enabled = true): MachinesValue {
+  const value = useContext(Ctx);
+  const visible = useContext(LiveReadVisibility);
+  useDemandedRead(enabled && visible ? value.retain : undefined);
+  return value;
+}
+
+const PresenceContext = createContext<{ presence: MachinesValue["presence"]; retain?: () => () => void }>({ presence: () => null });
+
+/** Desktop provenance needs identity and liveness, never a machine's equipment,
+ * installed apps, permissions or sharing detail. Its own small projection also
+ * keeps the directory from silently retaining the full-fleet inventory. */
+export function useMachinePresence() {
+  const value = useContext(PresenceContext);
+  const visible = useContext(LiveReadVisibility);
+  useDemandedRead(visible ? value.retain : undefined);
+  return value;
 }
 
 export function MachinesProvider({ children }: { children: ReactNode }) {
   const session = useSessionIfPresent();
   const userId = session?.access?.userId ?? "";
+  const demand = useReadDemand();
+  const presenceDemand = useReadDemand();
 
   const { source: collection, snapshot, reseed } = useLiveCollection<Row>(
-    userId ? `machines:${userId}` : null,
+    userId && demand.requested ? `machines:${userId}` : null,
     connection => ({
       concept: WORKER_REGISTRATION_CONCEPT,
       seed: async (_cursor, signal) => ({ rows: (await connection.query.myWorkersWithStatus({}, { signal })).rows(), nextCursor: "" }),
@@ -131,6 +129,25 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
     };
   }, [collection, snapshot]);
 
+  const summaries = useLiveCollection<Row>(
+    userId && presenceDemand.requested ? `machine-presence:${userId}` : null,
+    connection => ({
+      concept: WORKER_REGISTRATION_CONCEPT,
+      seed: async (cursor, signal) => {
+        const result = await connection.query.myMachinePresence({}, { signal, ...(cursor ? { cursor } : {}) });
+        return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+      },
+      reread: async (rowId, signal) => await getRowByConceptAndId(connection.query, WORKER_REGISTRATION_CONCEPT, rowId, { signal }) as Row | null,
+      inScope: row => machineFromRow(row).ownerUserId === userId,
+    }),
+  );
+  const presenceOnly = useMemo(() => {
+    const byId = new Map(summaries.snapshot.rows.map(raw => {
+      const row = machineFromRow(raw);
+      return [row.id, { name: machineName(row), online: isWorkerOnline(row) }] as const;
+    }));
+    return (workerId: string): MachinePresence | null => byId.get(workerId) ?? null;
+  }, [summaries.snapshot]);
   const value = useMemo(
     () => ({
       collection,
@@ -139,9 +156,10 @@ export function MachinesProvider({ children }: { children: ReactNode }) {
       feedState,
       settled,
       reload: reseed,
+      retain: demand.retain,
     }),
-    [collection, presence, count, feedState, settled, reseed],
+    [collection, presence, count, feedState, settled, reseed, demand.retain],
   );
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <PresenceContext.Provider value={{ presence: presenceOnly, retain: presenceDemand.retain }}><Ctx.Provider value={value}>{children}</Ctx.Provider></PresenceContext.Provider>;
 }
 

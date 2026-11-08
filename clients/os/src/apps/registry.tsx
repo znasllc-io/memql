@@ -1,4 +1,4 @@
-import { IdentityApp } from "./identity/IdentityApp";
+import { loadApp } from "../system/loadApp";
 import { Fingerprint } from "lucide-react";
 import {
   Boxes,
@@ -22,36 +22,41 @@ import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import { Mark } from "../chrome/Mark";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
-import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
-import { BinApp } from "./bin/BinApp";
 import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
-import { EmailApp } from "./email/EmailApp";
-import { ClusterApp } from "./cluster/ClusterApp";
 import { CLUSTER_SECTIONS } from "./cluster/settings";
-import { ConceptsApp } from "./concepts/ConceptsApp";
 import { CONCEPTS_SECTIONS } from "./concepts/settings";
 import { EMAIL_SECTIONS, EMAIL_REQUIRES, EMAIL_WANTS } from "./email/settings";
-import { PipelinesApp, PIPELINES_SECTIONS } from "./pipelines/PipelinesApp";
-import { DeployablesApp } from "./deployables/DeployablesApp";
+import { PIPELINES_SECTIONS } from "./pipelines/settings";
 import { DEPLOYABLES_SECTIONS, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./deployables/settings";
-import { FilesApp } from "./files/FilesApp";
 import { FILES_SECTIONS, FILES_REQUIRES, FILES_WANTS } from "./files/settings";
-import { FleetApp } from "./fleet/FleetApp";
 import { FLEET_SECTIONS } from "./fleet/settings";
-import { LogsApp } from "./logs/LogsApp";
 import { LOGS_SECTIONS, LOGS_REQUIRES, LOGS_WANTS } from "./logs/settings";
-import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./materializer/settings";
-import { SettingsApp } from "./settings/SettingsApp";
 import { setupWidget } from "./setup/manifest";
-import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS, TRAINING_REQUIRES, TRAINING_WANTS } from "./training/settings";
-import { UsersApp } from "./users/UsersApp";
 import { USERS_SECTIONS } from "./users/settings";
-import { NexusApp } from "./nexus/NexusApp";
 import { NEXUS_SECTIONS } from "./nexus/settings";
 import { useOs } from "../chrome/state";
+
+// Knowing an app's name, icon and capabilities must not download its whole
+// workspace. These stable component wrappers load once when a window opens.
+const IdentityApp = loadApp("Identity", () => import("./identity/IdentityApp").then(module => module.IdentityApp));
+const AccountsApp = loadApp("Accounts", () => import("./accounts/AccountsApp").then(module => module.AccountsApp));
+const BinApp = loadApp("Bin", () => import("./bin/BinApp").then(module => module.BinApp));
+const EmailApp = loadApp("Email", () => import("./email/EmailApp").then(module => module.EmailApp));
+const ClusterApp = loadApp("Cluster", () => import("./cluster/ClusterApp").then(module => module.ClusterApp));
+const ConceptsApp = loadApp("Concepts", () => import("./concepts/ConceptsApp").then(module => module.ConceptsApp));
+const PipelinesApp = loadApp("Pipelines", () => import("./pipelines/PipelinesApp").then(module => module.PipelinesApp));
+const DeployablesApp = loadApp("Deployables", () => import("./deployables/DeployablesApp").then(module => module.DeployablesApp));
+const FilesApp = loadApp("Files", () => import("./files/FilesApp").then(module => module.FilesApp));
+const FleetApp = loadApp("Fleet", () => import("./fleet/FleetApp").then(module => module.FleetApp));
+const LogsApp = loadApp("Logs", () => import("./logs/LogsApp").then(module => module.LogsApp));
+const MaterializerApp = loadApp("Materializer", () => import("./materializer/MaterializerApp").then(module => module.MaterializerApp));
+const SettingsApp = loadApp("Settings", () => import("./settings/SettingsApp").then(module => module.SettingsApp));
+const TrainingApp = loadApp("Training", () => import("./training/TrainingApp").then(module => module.TrainingApp));
+const UsersApp = loadApp("Users", () => import("./users/UsersApp").then(module => module.UsersApp));
+const NexusApp = loadApp("Nexus", () => import("./nexus/NexusApp").then(module => module.NexusApp));
 
 // The installed roster (spec D12). Every app is real now -- Files (epic
 // #4721) replaced the last stub, and the `stub` helper and StubApp went with

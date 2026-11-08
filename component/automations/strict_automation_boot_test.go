@@ -263,7 +263,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 2026-11-05); measured by the strict loader.
 // 195 -> 196: composeEmailRun, the email composition's one-step run on the
 // Apps route (campaigns, 2026-11-05).
-const shippedAutomationCount = 196
+// 196 -> 197: reclaimClosedChunkSpace, the nightly closed-chunk compaction
+// that gives back the space retention deletes leave in closed MemoryNodes
+// chunks (2026-11-06). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 197
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

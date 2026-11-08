@@ -205,10 +205,26 @@ paths, expiry, goal and execution. Related requests retain parent links, which
 carry no additional authority.
 
 The native proposal boundary accepts one immutable set of file replacements
-against an exact base commit. A `propose_change` request authorizes a draft pull
-request only. `deliver_change` additionally authorizes independent review and
+against an exact base commit. A `propose_change` request prepares a branch for
+review, with a draft pull request where the repository enables them. Where
+GitHub explicitly disables pull requests, the receipt instead exposes the exact
+base and proposed commit. **Land change** is a separate interactive command by
+that request's connected maintainer. It presents the person's GitHub App user
+grant, never the App installation token, and GitHub enforces the branch rules.
+Landing cannot rebase, force-push, change files, publish or deploy. A moved base
+requires a new proposal; a lost response is reconciled against the same commit,
+including when that commit is already an ancestor of the current branch.
+Revoked, expired, rerouted and foreign-owner requests cannot initiate landing.
+
+Installed drafting recipes can call `repositoryChangeEditFiles` with exact,
+unique before/after text spans and the original file hashes. Native preparation
+re-reads the approved paths, refuses a moved source, and expands bounded edits
+into complete files for independent review. A version bump no longer requires
+the model to reproduce a large source file in its response.
+
+`deliver_change` additionally authorizes independent review and
 merge-queue admission; it is available only when the installed authority route
-declares both a review prompt and a bounded review-report and queue delivery recipe. An existing
+declares both a review prompt and a bounded review-report and queue delivery recipe, and pull requests are enabled. An existing
 draft request cannot be upgraded by retrying it with a different operation.
 
 The `repositoryChangeReportReview` operation accepts only the native request ID.

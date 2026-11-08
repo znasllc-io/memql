@@ -677,6 +677,19 @@ query observation workSkillSelectionsForOwner {
  shape workObservationFull
 }
 
+/// Ten selection receipts for one skill in this caller's work. Filtering the
+/// nested receipt before the page boundary avoids walking unrelated history.
+@actor
+query observation workSkillSelectionsForSkill {
+ args {
+   skillId string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.?data.skillSelection.schemaVersion == 1 && (row.?data.skillSelection.selected.any(skill => skill.id == args.skillId) || row.?data.skillSelection.rejected.any(skill => skill.id == args.skillId))
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape workObservationFull
+}
+
 /// Durable goal-evaluation results, scoped by the same owner tier as their work.
 /// A missing result is not a successful measurement.
 @actor
@@ -707,7 +720,9 @@ query approval workComputerPermissionsForAgent {
 /// Manual lesson events share the owned work journal. Highest sequence is the head.
 @actor
 query observation workTrainingLessonEvents {
- args { lessonId string! }
+ args {
+   lessonId string!
+ }
  filter row => row.ownerUserId == actor.userId && row.?data.trainingLesson.id == args.lessonId
  sort "row.createdAt", "desc"
  paginate 101
@@ -835,5 +850,82 @@ query observation workResultFeedbackForOwnerRun {
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.resultFeedback.schemaVersion == 1 && row.?data.resultFeedback.accepted == true
  sort "row.createdAt", "asc"
  paginate 17
+ shape workObservationFull
+}
+
+/// Analyses only for the file rows currently displayed in Training.
+@actor
+query run trainingAnalysisRunsForFiles {
+ args {
+   fileIds []string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.automationName == "libraryAnalyzeFile"
+   && (row.?input.fileId in args.fileIds || row.?input.fileId in args.fileIds.select(candidate => shortId(candidate)))
+ sort "row.createdAt", "desc"
+ paginate 50
+ shape trainingAnalysisRow
+}
+
+
+/// Owned lesson revisions used to compute current heads without browser history scans.
+@actor
+query observation workTrainingLessonIndexRows {
+ args {
+   asOf datetime!
+ }
+ filter row => row.ownerUserId == actor.userId && row.createdAt <= args.asOf && row.?data.trainingLesson.schemaVersion == 1
+ sort "row.createdAt", "desc"
+ paginate 500
+ shape workTrainingLessonIndexRow
+}
+
+/// Ten recent evaluation receipts; selected scenario and search filter before paging.
+@actor
+query observation workGoalEvaluationsBrowse {
+ args {
+  scenarioId string
+  search string
+ }
+ filter row => row.ownerUserId == actor.userId && row.?data.goalEvaluation.schemaVersion == 1
+   && (args.scenarioId == nil || row.?data.goalEvaluation.scenarioId == args.scenarioId)
+   && (args.search == nil || trim(args.search) == "" || row.?data.goalEvaluation.scenarioId.includes(trim(args.search), true) || row.?data.goalEvaluation.setup.name.includes(trim(args.search), true))
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape workObservationFull
+}
+
+/// Only selections of the inspected lesson, never all work/model-call history.
+@actor
+query observation workTrainingSelectionsForLesson {
+ args {
+   lessonId string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.?data.trainingSelection.schemaVersion == 1 && row.?data.trainingSelection.selected.any(selection => selection.lessonId == args.lessonId)
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape workObservationFull
+}
+
+/// Delivery receipts for the ten selections already visible in the inspector.
+@actor
+query observation workTrainingDeliveryForSelections {
+ args {
+   observationIds []string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.?data.execution.call.contextReferences.any(ref => ref in args.observationIds)
+ sort "row.createdAt", "desc"
+ paginate 500
+ shape workObservationFull
+}
+
+/// The immutable revision trail is only read after opening a lesson.
+@actor
+query observation workTrainingLessonHistory {
+ args {
+   lessonId string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.?data.trainingLesson.id == args.lessonId
+ sort "row.createdAt", "desc"
+ paginate 10
  shape workObservationFull
 }

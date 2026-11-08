@@ -109,10 +109,34 @@ type SelectionPreparation struct {
 	PreparationID string `json:"preparationId"`
 	State         string `json:"state"`
 	CanResume     bool   `json:"canResume"`
+	CanCancel     bool   `json:"canCancel"`
 }
 
 func selectedPreparation(r preparationRecord, actor string) SelectionPreparation {
-	return SelectionPreparation{PrepareSelection: PrepareSelection{InstallationID: r.Scope.InstallationID, RequestID: r.Scope.RequestID, CandidateID: r.Scope.CandidateID, CatalogDigest: r.Scope.PublicationDigest, OverlayRevision: r.Scope.Intent.Revision, ExpectedCurrentRevision: beforeRevision(r.Scope.Intent.BeforeSpec), Prune: r.Scope.Intent.Prune}, PreparationID: r.ID, State: r.State, CanResume: actor == r.Scope.RequestedBy && r.State == "preparing"}
+	return SelectionPreparation{PrepareSelection: PrepareSelection{InstallationID: r.Scope.InstallationID, RequestID: r.Scope.RequestID, CandidateID: r.Scope.CandidateID, CatalogDigest: r.Scope.PublicationDigest, OverlayRevision: r.Scope.Intent.Revision, ExpectedCurrentRevision: beforeRevision(r.Scope.Intent.BeforeSpec), Prune: r.Scope.Intent.Prune}, PreparationID: r.ID, State: r.State, CanResume: actor == r.Scope.RequestedBy && r.State == "preparing", CanCancel: actor == r.Scope.RequestedBy && (r.State == "preparing" || r.State == "retiring")}
+}
+
+// CancelPreparation runs one pass of the installed cleanup recipe. It can
+// retire an older engine's unfinished preparation, but never resume its source
+// execution or release the installation head before native cleanup completes.
+func (p *Preparer) CancelPreparation(ctx context.Context, installationID, preparationID string) (SelectionPreparation, error) {
+	ctx, err := p.selectionContext(ctx)
+	if err != nil {
+		return SelectionPreparation{}, err
+	}
+	files, ok := p.host.files.(preparationRetirementFiles)
+	if !ok || p.host.retirement == nil {
+		return SelectionPreparation{}, errors.New("installation preparation cleanup is unavailable")
+	}
+	r, err := p.host.retirement.run(ctx, p.host.journal, installationID, preparationID, p.host.executor, files)
+	if err != nil {
+		return SelectionPreparation{}, err
+	}
+	actor, err := installationActor(ctx)
+	if err != nil {
+		return SelectionPreparation{}, err
+	}
+	return selectedPreparation(r, actor), nil
 }
 func selectionResult(ctx context.Context, r revisionRecord) SelectionResult {
 	out := selectedResult(r)

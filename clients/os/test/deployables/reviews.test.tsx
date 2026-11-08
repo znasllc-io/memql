@@ -13,6 +13,8 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
+import { ReviewsSection } from "../../src/apps/deployables/reviews/ReviewsSection";
+import { siteFromRow } from "../../src/apps/deployables/rows";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { click, fakeConnection, siteRow, type as typeInto, withSession, type FakeConnection, type FakeSeed } from "./harness";
@@ -413,5 +415,65 @@ describe("who can moderate", () => {
     expect(await screen.findByText(/Nobody in this store.s organization can moderate its reviews\./)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Who can moderate this store's reviews" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+  });
+});
+
+describe("review directory pages", () => {
+  function fixture() {
+    const rows = Array.from({ length: 25 }, (_, n) => ({ ...REVIEW, id: `v1:reviews:review:page-${n}`, title: `Review ${String(n).padStart(2,"0")}`, createdAt: new Date(NOW - (25-n)*60_000).toISOString() }));
+    const decisions = rows.map((row,n) => ({ id: `decision-${n}`, reviewId: row.id, title: row.title, action:"escalate", note: n < 2 ? "Earlier needle%_" : "Routine", decidedBy:"u-me", at: row.createdAt, revision:2, reviewState:"waiting", productHandle:"floss" })).reverse();
+    const seed = reviewsSeed({ list:{waiting:{reviews:rows,total:25,next:"",counts:{waiting:25,all:25}} as unknown as Row}, log:{decisions,total:25,next:""} as unknown as Row,
+      get:Object.fromEntries(rows.map(row=>[row.id,{review:row,decisions:[],acts:["publish"],moderates:true} as unknown as Row])) });
+    const connection = fakeConnection(seed);h.connection=connection;
+    const mount = () => render(withSession(<ReviewsSection site={siteFromRow(SHOP)} storeId="store-live" name="Shop" nameOf={()=>""} viewerUserId="u-me" trail={[]} back={{label:"Shop",onSelect:()=>{}}} />));
+    return {seed,connection,mount,rows};
+  }
+  const reviews = () => within(screen.getByRole("list",{name:"Waiting reviews"})).getAllByRole("button");
+  it("loads ten incrementally, searches beyond them and retains twenty after reopening", async () => {
+    const {connection,mount}=fixture();let view=mount();
+    await waitFor(()=>expect(reviews()).toHaveLength(10));
+    expect(connection.callsNamed("reviewsList")[0]).toContain("limit: 10");
+    await click(screen.getByRole("button",{name:"Load more"}));
+    await waitFor(()=>expect(reviews()).toHaveLength(20));
+    expect(connection.callsNamed("reviewsList")[1]).toContain('after: "10"');
+    await typeInto(screen.getByLabelText("Search reviews") as HTMLInputElement,"REVIEW 24");
+    await waitFor(()=>expect(reviews().map(row=>row.getAttribute("aria-label"))).toEqual(["Open review Review 24"]));
+    await typeInto(screen.getByLabelText("Search reviews") as HTMLInputElement,"");
+    await waitFor(()=>expect(reviews()).toHaveLength(20));
+    const reads=connection.callsNamed("reviewsList").length;view.unmount();view=mount();
+    await waitFor(()=>expect(reviews()).toHaveLength(20));
+    expect(connection.callsNamed("reviewsList")).toHaveLength(reads);
+    await click(screen.getByRole("button",{name:"Load more"}));
+    await waitFor(()=>expect(reviews()).toHaveLength(25));
+    expect(screen.queryByRole("button",{name:"Load more"})).toBeNull();
+    view.unmount();
+  });
+  it("retains decision-log pages across tabs and searches notes before pagination",async()=>{
+    const {connection,mount}=fixture();mount();await screen.findByRole("list",{name:"Waiting reviews"});
+    await click(tab("Decision log"));
+    const decisions=()=>within(screen.getByRole("list",{name:"Decision log"})).getAllByRole("button");
+    await waitFor(()=>expect(decisions()).toHaveLength(10));
+    await click(screen.getByRole("button",{name:"Load more"}));await waitFor(()=>expect(decisions()).toHaveLength(20));
+    await typeInto(screen.getByLabelText("Search decisions") as HTMLInputElement,"NEEDLE%_");await waitFor(()=>expect(decisions()).toHaveLength(2));
+    await typeInto(screen.getByLabelText("Search decisions") as HTMLInputElement,"");await waitFor(()=>expect(decisions()).toHaveLength(20));
+    const reads=connection.callsNamed("reviewsDecisionLog").length;
+    await click(tab("Waiting"));await click(tab("Decision log"));await waitFor(()=>expect(decisions()).toHaveLength(20));
+    expect(connection.callsNamed("reviewsDecisionLog")).toHaveLength(reads);
+  });
+  it("refreshes retained depth after a detail decision without rereading an inactive directory",async()=>{
+    const {connection,seed,mount,rows}=fixture();mount();await screen.findByRole("list",{name:"Waiting reviews"});
+    await click(screen.getByRole("button",{name:"Load more"}));await waitFor(()=>expect(reviews()).toHaveLength(20));
+    const original=vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    vi.mocked(connection.query.executeNamed).mockImplementation(async(name,call,options)=>{
+      if(name==="reviewsDecide") seed.reviews!.list!.waiting={reviews:rows.slice(1),total:24,next:"",counts:{waiting:24,all:25}} as unknown as Row;
+      return original(name,call,options);
+    });
+    await click(screen.getByRole("button",{name:"Open review Review 00"}));await screen.findByRole("heading",{name:"Review 00"});
+    const reads=connection.callsNamed("reviewsList").length;
+    await readTheBar();await click(within(bar()).getByRole("button",{name:"Publish"}));await waitFor(()=>expect(connection.callsNamed("reviewsDecide")).toHaveLength(1));
+    expect(connection.callsNamed("reviewsList")).toHaveLength(reads);
+    await click(screen.getByRole("button",{name:"Back to Waiting"}));
+    await waitFor(()=>expect(reviews()[0]?.getAttribute("aria-label")).toBe("Open review Review 01"));expect(reviews()).toHaveLength(20);
+    expect(connection.callsNamed("reviewsList").slice(reads)).toHaveLength(2);
   });
 });

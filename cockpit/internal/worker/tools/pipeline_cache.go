@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,8 +21,24 @@ type pipelineCacheHomeKey struct{}
 var pipelineCacheHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Retention budget between builds, not a filesystem quota during a command.
-// The shared build reservation also serializes pruning across enrollments.
+// The host build lock serializes pruning across processes: only the process
+// holding it runs steps, and it holds it while any slot is held
+// (pipeline_capacity_unix.go). Within that process pipelineCaches serializes
+// it and counts each cache directory's users.
 var pipelineCacheRetainedBytes int64 = 10 << 30
+
+// pipelineCaches counts the running steps mounting each cache directory, by
+// path. A machine running several steps (pipelines.max_concurrent_steps) may
+// prune while another step's container writes into its cache: a directory with
+// users is neither measured nor removed, and two steps of the same cache scope
+// share one directory, as cluster pods share theirs under the shared users lock
+// (integrations/pipelinesteps/wrapper.go). The Go and npm caches are built for
+// concurrent writers. This process is the only one running steps while it
+// holds the host build lock, so this count is every user the machine has.
+var pipelineCaches = struct {
+	sync.Mutex
+	users map[string]int
+}{users: map[string]int{}}
 
 var pipelineCacheEnvironment = map[string]map[string]string{
 	"go":  {"GOMODCACHE": "/cache/go/mod", "GOCACHE": "/cache/go/build"},
@@ -91,33 +108,63 @@ func ensurePipelineCacheDirectory(path string) error {
 	return nil
 }
 
-func preparePipelineCache(req *pipelineStepRequest) error {
+// preparePipelineCache selects req's cache directory and counts the step as
+// one of its users until release is called. The directory is counted before
+// pipelineCaches is unlocked, so no prune between here and the container
+// mounting it can remove it.
+func preparePipelineCache(req *pipelineStepRequest) (release func(), err error) {
 	root, err := pipelineCachesRoot()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if strings.ContainsAny(root, ",\n\r") {
-		return errors.New("pipeline cache path contains an unsupported Docker delimiter")
+		return nil, errors.New("pipeline cache path contains an unsupported Docker delimiter")
 	}
+	pipelineCaches.Lock()
+	defer pipelineCaches.Unlock()
 	if err = ensurePipelineCacheDirectory(root); err != nil {
-		return err
+		return nil, err
 	}
-	if err = prunePipelineCaches(); err != nil {
-		return err
+	if err = prunePipelineCachesLocked(); err != nil {
+		return nil, err
 	}
 	dir := filepath.Join(root, pipelineCacheIdentity(*req))
 	if err = ensurePipelineCacheDirectory(dir); err != nil {
-		return err
+		return nil, err
 	}
 	now := time.Now()
 	if err = os.Chtimes(dir, now, now); err != nil {
-		return err
+		return nil, err
 	}
 	req.cacheDir = dir
-	return nil
+	pipelineCaches.users[dir]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			pipelineCaches.Lock()
+			defer pipelineCaches.Unlock()
+			if pipelineCaches.users[dir]--; pipelineCaches.users[dir] <= 0 {
+				delete(pipelineCaches.users, dir)
+			}
+		})
+	}, nil
 }
 
 func prunePipelineCaches() error {
+	pipelineCaches.Lock()
+	defer pipelineCaches.Unlock()
+	return prunePipelineCachesLocked()
+}
+
+// prunePipelineCachesLocked keeps the retained caches within their budget,
+// oldest first, leaving alone every directory a running step mounts. It does
+// not run while a slot holds an interrupted attempt: that attempt's container
+// may still be writing into a cache nobody counts any more. The caller holds
+// pipelineCaches' mutex.
+func prunePipelineCachesLocked() error {
+	if pipelineInterruptedAttempt() {
+		return nil
+	}
 	root, err := pipelineCachesRoot()
 	if err != nil {
 		return err
@@ -144,11 +191,18 @@ func prunePipelineCaches() error {
 		if !pipelineCacheHash.MatchString(entry.Name()) || !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("unexpected entry in pipeline cache root; operator inspection required")
 		}
+		item := cache{path: filepath.Join(root, entry.Name())}
+		if pipelineCaches.users[item.path] > 0 {
+			// A running step mounts it: its size is changing under the walk
+			// and it is not this prune's to remove. A later prune, once it is
+			// idle, counts it against the budget.
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		item := cache{path: filepath.Join(root, entry.Name()), modified: info.ModTime()}
+		item.modified = info.ModTime()
 		err = filepath.WalkDir(item.path, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr

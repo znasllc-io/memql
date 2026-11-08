@@ -2,6 +2,7 @@ import { CostEstimate, estimateText } from "../../../kit/CostEstimate";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh, Refine, Select } from "../../../kit";
+import { LoadMore } from "../../../kit/LoadMore";
 import { PageHelp } from "../../../kit/pageHelp";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import {
@@ -36,7 +37,7 @@ import { engineWords, levelTitle, promptWords, routeTitle, sourceLabel, whenWord
 // carrying a retired word, so a row reads "Route composing". The search
 // matches the id and the words.
 //
-// FILTERED SERVER-SIDE: the query is keyset-paged at 200, so a facet filtered
+// FILTERED SERVER-SIDE: the query is keyset-paged at ten, so a facet filtered
 // in the browser would narrow the page rather than the search.
 
 const SOURCE_WORD: Record<string, string> = {
@@ -59,7 +60,7 @@ export function HistoryTab({
   const [rule, setRule] = useState("");
   const [open, setOpen] = useState("");
   const [search, setSearch] = useState("");
-  const decisions = useDecisions(true, { ...NO_FILTERS, level, door: source, outcome, rule });
+  const decisions = useDecisions(true, { ...NO_FILTERS, level, door: source, outcome, rule, search });
   const byName = useMemo(() => new Map(rules.rules.map((r) => [r.name, r] as const)), [rules.rules]);
   // Rules the decisions name that the cluster no longer has: still a facet.
   const removed = useMemo(
@@ -67,13 +68,8 @@ export function HistoryTab({
     [decisions.rows, byName, rule],
   );
 
-  // THE SEARCH NARROWS WHAT WAS READ; the facets narrow what is read. A
-  // prompt or model name is not an argument the query takes.
-  const q = search.trim().toLowerCase();
-  const rows =
-    q === ""
-      ? decisions.rows
-      : decisions.rows.filter((r) => r.promptName.toLowerCase().includes(q) || promptWords(r.promptName).toLowerCase().includes(q) || r.model.toLowerCase().includes(q));
+  const q = search.trim();
+  const rows = decisions.rows;
 
   const chips = [
     ...(level === "" ? [] : [{ id: "level", label: levelTitle(level), onRemove: () => setLevel("") }]),
@@ -115,9 +111,9 @@ export function HistoryTab({
               </Select>
             </Refine>
           ) : null}
-          <AutoRefresh busy={decisions.loading} onRefresh={decisions.reload} />
+          <AutoRefresh resume={false} busy={decisions.loading} onRefresh={decisions.reload} />
         </>,
-        !decisions.loading && !decisions.error && decisions.supported && decisions.fetchedAt !== null ? rows.length : undefined,
+        !decisions.loading && !decisions.error && decisions.supported && decisions.fetchedAt !== null ? `${rows.length}${decisions.hasMore ? "+" : ""}` : undefined,
       )}
 
       {decisions.error ? <Notice tone="warn" sentence="The history could not be read." detail={decisions.error} /> : null}
@@ -138,6 +134,7 @@ export function HistoryTab({
           })}
         </RecordList>
       )}
+      <LoadMore feed={decisions} />
     </div>
   );
 }

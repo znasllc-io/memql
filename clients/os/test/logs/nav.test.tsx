@@ -39,12 +39,12 @@ describe("the Logs section in a window's nav", () => {
     expect(within(launcher).getByRole("button", { name: /^Files$/ })).toBeTruthy();
   });
 
-  it("opening the section renders it, and it says the shell is not connected", () => {
+  it("opening the section renders it, and it says the shell is not connected", async () => {
     renderShell({ access: OWNER });
     openFromLauncher("Fleet");
     gotoSection("Fleet", "Logs");
     const window = document.querySelector("[data-os-window='fleet']") as HTMLElement;
-    expect(within(window).getByRole("heading", { name: "Logs" })).toBeTruthy();
+    expect(await within(window).findByRole("heading", { name: "Logs" })).toBeTruthy();
     // The harness dials nothing, and the section says so in surface rather
     // than rendering an empty list that reads as "nothing logged".
     expect(within(window).getByText("Not connected to the cluster.")).toBeTruthy();
@@ -52,12 +52,12 @@ describe("the Logs section in a window's nav", () => {
 });
 
 describe("the Logs app in the launcher", () => {
-  it("is offered to an admin and opens on Stream", () => {
+  it("is offered to an admin and opens on Stream", async () => {
     renderShell({ access: ADMIN });
     openFromLauncher("Logs");
     expect(document.querySelector("[data-os-window='logs']")).not.toBeNull();
     expect(navNames("Logs")).toEqual(["Stream", "Search"]);
-    expect(screen.getByRole("heading", { name: "Stream" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Stream" })).toBeTruthy();
   });
 
   it("is absent from a reader's launcher", () => {

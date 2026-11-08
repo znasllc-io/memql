@@ -22,6 +22,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/releasewire"
 )
 
 const ConfigurationVariable = "MEMQL_RELEASE_SOURCES"
@@ -107,8 +108,8 @@ func (s source) trust() (map[string]ed25519.PublicKey, *x509.CertPool, error) {
 		return nil, nil, errors.New("release source requires an identity, credential reference and publisher keys")
 	}
 	u, err := url.Parse(s.Endpoint)
-	if err != nil || len(s.Endpoint) > 2048 || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.RawPath != "" || (u.Path != "" && u.Path != "/") || strings.ContainsAny(s.Endpoint, "\r\n\t ") {
-		return nil, nil, errors.New("release source must name one authenticated HTTPS gRPC endpoint")
+	if err != nil || len(s.Endpoint) > 2048 || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.RawPath != "" || (u.Path != "" && u.Path != "/" && u.Path != releasewire.ReadPath) || strings.ContainsAny(s.Endpoint, "\r\n\t ") {
+		return nil, nil, errors.New("release source must name one HTTPS gRPC origin or the exact Identity installation-read endpoint")
 	}
 	keys := map[string]ed25519.PublicKey{}
 	for id, encoded := range s.PublicKeys {
@@ -134,7 +135,7 @@ func (s source) endpoint() string {
 	if port == "" {
 		port = "443"
 	}
-	return "https://" + net.JoinHostPort(u.Hostname(), port)
+	return "https://" + net.JoinHostPort(u.Hostname(), port) + strings.TrimSuffix(u.Path, "/")
 }
 
 func (r *Reader) Sources(ctx context.Context) ([]SourceSummary, error) {

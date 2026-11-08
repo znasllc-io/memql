@@ -1,31 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { Button, Caption, Fact, Facts, Notice, Subhead } from "../../../kit";
 import { installationCall, type InstallationStatus } from "./InstallationUpdates";
 
 export interface ProposedRelease { candidateId: string; catalogDigest: string; label: string }
 export interface InstallationProposal {
   proposalId: string; installationId: string; candidateId: string; catalogDigest: string;
-  state: "prepared" | "proposed" | "merged"; pullRequestURL: string; overlayRevision: string;
+  state: "prepared" | "proposed" | "merged" | "landed";
+  landingMode?: string; repository?: string; baseBranch?: string; expectedBaseRevision?: string; proposedCommit?: string; pullRequestURL: string; overlayRevision: string;
 }
 export function readInstallationProposal(value: unknown): InstallationProposal {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The update proposal could not be read.");
   const row = value as Record<string, unknown>;
   const required = (key: string) => { if (typeof row[key] !== "string" || !row[key]) throw new Error("The update proposal was not fully reported."); return row[key] as string; };
   const state = required("state");
-  if (state !== "prepared" && state !== "proposed" && state !== "merged") throw new Error("The update proposal has an unrecognized state.");
+  if (state !== "prepared" && state !== "proposed" && state !== "merged" && state !== "landed") throw new Error("The update proposal has an unrecognized state.");
   return { proposalId: required("proposalId"), installationId: required("installationId"), candidateId: required("candidateId"), catalogDigest: required("catalogDigest"), state,
+    landingMode: typeof row.landingMode === "string" ? row.landingMode : "", repository: typeof row.repository === "string" ? row.repository : "", baseBranch: typeof row.baseBranch === "string" ? row.baseBranch : "", expectedBaseRevision: typeof row.expectedBaseRevision === "string" ? row.expectedBaseRevision : "", proposedCommit: typeof row.proposedCommit === "string" ? row.proposedCommit : "",
     pullRequestURL: typeof row.pullRequestURL === "string" ? row.pullRequestURL : "", overlayRevision: typeof row.overlayRevision === "string" ? row.overlayRevision : "" };
 }
 function reviewURL(value: string): string | null {
   try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password ? url.href : null; } catch { return null; }
 }
 
-/** A proposal records the selected immutable release. It never applies or merges it. */
+/** Preparing and landing have separate human commands. Neither applies a plan. */
 export function InstallationProposals({ query, status, fresh, release, clearRelease, refresh }: {
   query: Pick<QueryClient, "executeNamed"> | null; status: InstallationStatus; fresh: boolean;
   release: ProposedRelease | null; clearRelease?: () => void; refresh: () => void;
 }) {
+  const [landing, setLanding] = useState<string | null>(null);
   const [saved, setSaved] = useState<InstallationProposal | null>(null);
   const [busy, setBusy] = useState(""); const [error, setError] = useState("");
   const inFlight = useRef(false), request = useRef<{ key: string; id: string } | null>(null);
@@ -51,16 +55,28 @@ export function InstallationProposals({ query, status, fresh, release, clearRele
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); refresh(); }
     finally { inFlight.current = false; setBusy(""); }
   }
+  async function land(proposal: InstallationProposal) {
+    if (!query || !fresh || inFlight.current || landing !== proposal.proposedCommit || !proposal.proposedCommit || proposal.landingMode !== "owner_push" || proposal.state !== "proposed") return;
+    inFlight.current = true; setBusy(proposal.proposalId); setError("");
+    try { setSaved(readInstallationProposal((await installationCall(query, "releaseLandInstallationProposal", { proposalId: proposal.proposalId, expectedCommit: proposal.proposedCommit })).single())); setLanding(null); refresh(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); refresh(); }
+    finally { inFlight.current = false; setBusy(""); }
+  }
+  const ownerPush = status.proposalLandingMode === "owner_push";
   if (!release && proposals.length === 0) return null;
   return <section className="os-app-stack" aria-label="Installation update proposals">
-    {release ? <><Subhead>{release.label}</Subhead><Caption>This creates a draft pull request for the installation’s saved configuration. Review and merge that proposal before preparing an installation plan.</Caption>
+    {release ? <><Subhead>{release.label}</Subhead><Caption>{ownerPush ? "Prepare the exact release pins for review, then confirm landing them with your connected GitHub identity. Applying the installation plan is a separate step." : "This creates a draft pull request for the installation’s saved configuration. Review and merge that proposal before preparing an installation plan."}</Caption>
       {!status.proposalBaseRevision && !status.proposalWarning ? <Notice sentence="Update proposals are not configured for this installation." /> : null}
-      <div className="os-panel-actions">{!existing && status.proposalBaseRevision ? <Button tone="primary" disabled={!fresh || !!busy || !!error} busy={busy === "prepare"} onClick={() => void perform()}>Prepare update pull request</Button> : null}<Button tone="quiet" disabled={!!busy} onClick={clearRelease}>Clear selection</Button></div>
+      <div className="os-panel-actions">{!existing && status.proposalBaseRevision ? <Button tone="primary" disabled={!fresh || !!busy || !!error} busy={busy === "prepare"} onClick={() => void perform()}>{ownerPush ? "Prepare update proposal" : "Prepare update pull request"}</Button> : null}<Button tone="quiet" disabled={!!busy} onClick={clearRelease}>Clear selection</Button></div>
     </> : <Subhead>Update proposals</Subhead>}
-    {proposals.map(proposal => { const url = reviewURL(proposal.pullRequestURL); return <section className="os-app-stack" key={proposal.proposalId}>
-      <Caption>{proposal.state === "merged" ? "This update proposal was merged and verified. Its release is available for an installation plan." : proposal.state === "proposed" ? "The draft update pull request is ready for review." : "The update proposal is prepared. Check its progress to read the saved pull request."}</Caption>
-      <div className="os-panel-actions">{url ? <a className="os-link" href={url} target="_blank" rel="noreferrer">Review update pull request</a> : null}{proposal.state !== "merged" ? <Button tone="quiet" busy={busy === proposal.proposalId} disabled={!fresh || !!busy} onClick={() => void perform(proposal)}>Check proposal progress</Button> : null}</div>
-      <details className="nexus-technical"><summary>Proposal details</summary><Facts><Fact label="Proposal reference" value={proposal.proposalId} /><Fact label="Release candidate" value={proposal.candidateId} /><Fact label="Catalog digest" value={proposal.catalogDigest} />{proposal.overlayRevision ? <Fact label="Merged configuration revision" value={proposal.overlayRevision} /> : null}</Facts></details>
+    {proposals.map(proposal => { const ownerProposal = proposal.landingMode === "owner_push";
+      const url = ownerProposal && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(proposal.repository ?? "") && /^[a-f0-9]{40}$/.test(proposal.expectedBaseRevision ?? "") && /^[a-f0-9]{40}$/.test(proposal.proposedCommit ?? "") ? `https://github.com/${proposal.repository}/compare/${proposal.expectedBaseRevision}...${proposal.proposedCommit}` : reviewURL(proposal.pullRequestURL);
+      const landed = proposal.state === "merged" || proposal.state === "landed";
+      return <section className="os-app-stack" key={proposal.proposalId}>
+      <Caption>{landed ? "This update proposal landed and was verified. Its release is available for an installation plan." : proposal.state === "proposed" ? ownerProposal ? "The exact installation changes are ready for review." : "The draft update pull request is ready for review." : "The update proposal is prepared. Check its progress to read the saved changes."}</Caption>
+      <div className="os-panel-actions">{url ? <a className="os-link" href={url} target="_blank" rel="noreferrer">{ownerProposal ? "Review installation changes" : "Review update pull request"}</a> : null}{!landed ? <Button tone="quiet" busy={busy === proposal.proposalId} disabled={!fresh || !!busy} onClick={() => void perform(proposal)}>Check proposal progress</Button> : null}</div>
+      {ownerProposal && !landed && proposal.state === "proposed" && url ? landing === proposal.proposedCommit ? <InPlaceAsk key={proposal.proposedCommit}><Notice sentence={`Land these installation pins on ${proposal.baseBranch}?`} detail={`Commit ${proposal.proposedCommit}`} next="This makes the reviewed revision available for an installation plan. Applying that plan remains a separate action."><div className="os-panel-actions"><Button tone="quiet" disabled={!!busy} onClick={() => setLanding(null)}>Keep proposal</Button><Button tone="primary" disabled={!fresh || !!busy} busy={busy === proposal.proposalId} onClick={() => void land(proposal)}>Confirm installation pins</Button></div></Notice></InPlaceAsk> : <Button disabled={!fresh || !!busy} onClick={() => setLanding(proposal.proposedCommit!)}>Land installation pins</Button> : null}
+      <details className="nexus-technical"><summary>Proposal details</summary><Facts><Fact label="Proposal reference" value={proposal.proposalId} /><Fact label="Release candidate" value={proposal.candidateId} /><Fact label="Catalog digest" value={proposal.catalogDigest} />{proposal.overlayRevision ? <Fact label="Reviewed configuration revision" value={proposal.overlayRevision} /> : null}</Facts></details>
     </section>; })}
     {error ? <Notice tone="error" sentence="The proposal operation could not be confirmed." detail={error}><Button disabled={!!busy} onClick={() => { setError(""); refresh(); }}>Read saved proposals</Button></Notice> : null}
   </section>;

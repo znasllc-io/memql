@@ -156,9 +156,9 @@ func logoSource(src string) string {
 	return src
 }
 
-// brandFor reads the organization's brand for a page. ctx carries the token's
-// owner. org is the organization's name, already read by the caller (empty when
-// it did not resolve). contact is where the page's contact comes from, asked only
+// brandFor reads the organization's brand for a page. ctx reads as the system
+// (EmailLinkHandler.organizationRead says why). org is the organization's name,
+// already read by the caller (empty when it did not resolve). contact is where the page's contact comes from, asked only
 // if the page names one; nil names nobody. A read that fails costs the page that
 // part of its brand and is logged at warn; it never fails the page.
 func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, org string, contact contactLookup) pageBrand {
@@ -209,8 +209,8 @@ func (s *Store) brandFor(ctx context.Context, logger *slog.Logger, accountID, or
 }
 
 // pageBrandFor is the brand of the organization a verified token names: its name,
-// kit and contact. A read that fails leaves that part out of the page and is
-// logged; it never fails the page.
+// kit and contact, read with ctx, which reads as the system. A read that fails
+// leaves that part out of the page and is logged; it never fails the page.
 func (s *Store) pageBrandFor(ctx context.Context, logger *slog.Logger, accountID string, contact contactLookup) pageBrand {
 	org, err := s.AccountName(ctx, accountID)
 	if err != nil {

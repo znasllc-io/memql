@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
+import { LiveReadVisibility } from "../../live/useGraphRevision";
+import { EmailCatalogDemand, type EmailCatalog } from "./catalogs";
 import { useEdgeUploadProvider } from "../../items/useEdgeUploadProvider";
 import type { UploadProvider } from "../../items/upload";
 import { AppLogsSection } from "../../logs/AppLogsSection";
@@ -43,26 +45,12 @@ export type { OpenRequest } from "./openRequest";
 // a second app for the same mail would be a second set of grants, a second
 // window and a second place to look for what happened to a message.
 //
-// ===========================================================================
-// SIX FEEDS AT THE ROOT, ONE PER CONCEPT -- AND THREE MORE, COMPOSED
-// ===========================================================================
-// The one-feed rule is per CONCEPT, not per app (the Packages rule): what must
-// never happen is two subscriptions over the SAME concept, free to disagree
-// about what the cluster holds. Six concepts cannot disagree with each other.
-//
-// They are retained HERE rather than per section because every one of them is
-// needed in more than one place -- the campaign editor picks an audience, a
-// template and a sender; the rules builder picks the same three; the template
-// editor lists the campaigns that use it. A per-section feed would open a
-// second subscription over one concept the moment somebody opened two
-// sections, which is exactly the failure the rule names.
-//
-// A series, a testing audience and a signup form are read per id (the series
-// OF this campaign), and used to be one collection per open page. Each is now
-// ONE collection here, composed over the ids the six lists are showing
-// (`useEmailRecordFeeds`), and the account list every picker reads is retained
-// once under `AccountOptionsProvider` -- so with a campaign page, an audience
-// page and Settings all open, no concept has two subscriptions.
+// Directories read ten recent rows with server search. Complete catalogs are
+// retained only while a visible editor, wizard or overview requests them;
+// composed reads are limited to resources actually displayed or opened.
+// Session-scoped directory pages and immutable lookups survive window closes.
+// Legacy per-id composed answers remain component-owned because they carry
+// per-id refusal/refresh state, and must not cache stale React callbacks.
 //
 // SECTIONS ARE RETAINED PANES (Fleet's pattern). A section stays mounted,
 // hidden, once it has been opened, so a wizard's answers and an edit's unsaved
@@ -137,7 +125,18 @@ function EmailSections({
   // resume, retry, progress and verbatim refusals without learning any of them.
   const uploadProvider = useEdgeUploadProvider(uploads);
 
-  const feeds = useEmailFeeds();
+  const windowVisible = useContext(LiveReadVisibility);
+  const [catalogDemands, setCatalogDemands] = useState<ReadonlyMap<string, readonly EmailCatalog[]>>(new Map());
+  const demandCatalogs = useCallback((id: string, catalogs: readonly EmailCatalog[]) => {
+    setCatalogDemands(held => {
+      if ((held.get(id) ?? []).join(",") === catalogs.join(",")) return held;
+      const next = new Map(held);
+      if (catalogs.length) next.set(id, catalogs); else next.delete(id);
+      return next;
+    });
+  }, []);
+  const enabledCatalogs = useMemo(() => [...new Set([...catalogDemands.values()].flat())], [catalogDemands]);
+  const feeds = useEmailFeeds(enabledCatalogs);
   // THE ORGANIZATIONS SETTINGS HAS BEEN ON. The composed feeds read the
   // organizations the lists show; an organization with no campaign or audience
   // is not among them, and Settings asks for the one it is on. They accumulate,
@@ -155,7 +154,9 @@ function EmailSections({
     (campaignId: string) => setPageCampaigns((held) => (campaignId === "" || held.includes(campaignId) ? held : [...held, campaignId])),
     [],
   );
-  const recordFeeds = useEmailRecordFeeds(feeds, settingsOrganizations, pageCampaigns);
+  const [pageAudiences, setPageAudiences] = useState<readonly string[]>([]);
+  const noteAudience = useCallback((id: string) => setPageAudiences(held => !id || held.includes(id) ? held : [...held, id]), []);
+  const recordFeeds = useEmailRecordFeeds(feeds, settingsOrganizations, pageCampaigns, true, pageAudiences);
   const writes = useCampaignWrites();
 
   // THE OPEN INTENT (epic memql#4842, #4845): "show this campaign, this
@@ -251,7 +252,7 @@ function EmailSections({
           />
         );
       case "audiences":
-        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} includeArchived={settings.includeArchived} openRequest={requests.audiences} />;
+        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} includeArchived={settings.includeArchived} openRequest={requests.audiences} onAudience={noteAudience} onOrganization={noteOrganization} />;
       case "templates":
         return <TemplatesSection feeds={feeds} includeArchived={settings.includeArchived} openRequest={requests.templates} />;
       case "automations":
@@ -264,12 +265,14 @@ function EmailSections({
             trackByDefault={settings.trackByDefault}
             openRequest={requests.campaigns}
             onCampaign={noteCampaign}
+            onOrganization={noteOrganization}
           />
         );
     }
   }
 
   return (
+    <EmailCatalogDemand.Provider value={demandCatalogs}>
     <AccountOptionsProvider>
       {panes.map(id => {
         const declared = EMAIL_SECTIONS.find(candidate => candidate.id === id);
@@ -277,8 +280,9 @@ function EmailSections({
         // the moment the person's access to it does.
         if (!declared || !accessAdmits(declared.requires)) return null;
         const active = id === current;
-        return <div className="email-pane" data-email-section={id} key={id} hidden={!active}>{section(id, active)}</div>;
+        return <div className="email-pane" data-email-section={id} key={id} hidden={!active}><LiveReadVisibility.Provider value={windowVisible && active}>{section(id, active)}</LiveReadVisibility.Provider></div>;
       })}
     </AccountOptionsProvider>
+    </EmailCatalogDemand.Provider>
   );
 }

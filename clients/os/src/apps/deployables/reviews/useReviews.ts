@@ -1,6 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { isTransportInterruption, refusalSentence, renderMemQLValue, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { isTransportInterruption, refusalSentence, renderMemQLValue, type Connection, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { usePagedCollection } from "../../../live/useLiveCollection";
+import { LiveReadVisibility } from "../../../live/useGraphRevision";
+import { useDebouncedValue } from "../../../logs/useDebouncedValue";
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
 import { describe } from "../packages/actions";
@@ -12,6 +15,7 @@ import {
   reviewPeopleFrom,
   reviewSettingsFrom,
   type DecisionLogPage,
+  type LogEntry,
   type ReviewAct,
   type ReviewDetail,
   type ReviewFilter,
@@ -66,17 +70,53 @@ export interface ReviewsScope {
   storeId: string;
 }
 
-const PAGE = 50;
+type ReviewRevision = { value: number; listeners: Set<() => void> };
+const reviewRevisions = new WeakMap<Connection, Map<string, ReviewRevision>>();
+function revisionFor(connection: Connection | null, scope: ReviewsScope): ReviewRevision {
+  if (!connection) return { value: 0, listeners: new Set() };
+  let scopes = reviewRevisions.get(connection);
+  if (!scopes) { scopes = new Map(); reviewRevisions.set(connection, scopes); }
+  const key = JSON.stringify([scope.siteId, scope.storeId]);
+  let revision = scopes.get(key);
+  if (!revision) { revision = { value: 0, listeners: new Set() }; scopes.set(key, revision); }
+  return revision;
+}
+function invalidateReviewPages(connection: Connection, scope: ReviewsScope) {
+  const revision = revisionFor(connection, scope);
+  revision.value += 1;
+  for (const notify of revision.listeners) notify();
+}
 
-export function useReviewList(scope: ReviewsScope, filter: ReviewFilter, pages: number, revision: number): Reading<ReviewPage> {
+type DirectoryEntry<T, M> = { id: string; item?: T; metadata?: M; revision?: number };
+function useReviewDirectory<T extends { id: string }, M>(scope: ReviewsScope, name: string, args: Record<string, unknown>, parse: (row: Row | null) => { rows: T[]; next: string; metadata: M }) {
   const connection = useOsConnection();
-  const limit = Math.min(200, PAGE * Math.max(1, pages));
-  const read = useMemo(() => {
-    if (connection === null || scope.storeId === "") return null;
-    return async (signal: AbortSignal) =>
-      reviewPageFrom(await answerOf(connection.query, "reviewsList", { storeId: scope.storeId, siteId: scope.siteId, state: filter, limit }, signal));
-  }, [connection, scope.storeId, scope.siteId, filter, limit]);
-  return useReading(`reviews:${scope.siteId}:${scope.storeId}:${filter}:${limit}`, read, revision);
+  const visible = useContext(LiveReadVisibility);
+  const revision = useMemo(() => revisionFor(connection, scope), [connection, scope.siteId, scope.storeId]);
+  const currentRevision = useSyncExternalStore(useCallback(notify => { revision.listeners.add(notify); return () => { revision.listeners.delete(notify); }; }, [revision]), () => revision.value);
+  const key = JSON.stringify([scope.siteId, scope.storeId, name, args]);
+  const feed = usePagedCollection<DirectoryEntry<T, M>>(scope.storeId ? `reviews:directory:${key}` : null, connection => ({
+    concept: "v1:reviews:review", actions: [],
+    seed: async (cursor, signal) => {
+      const readRevision = revision.value;
+      const page = parse(await answerOf(connection.query, name, { ...args, ...scope, limit: 10, after: cursor || undefined }, signal));
+      return { rows: [{ id: "reviews-directory-metadata", metadata: page.metadata, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))], nextCursor: page.next };
+    },
+  }));
+  const metadata = feed.snapshot.rows.find(row => row.id === "reviews-directory-metadata");
+  // Writes invalidate the scope, including released pages. Reopening replays
+  // only the retained depth; an inactive window does no network work.
+  useEffect(() => { if (visible && metadata && metadata.revision !== currentRevision) feed.reseed(); }, [visible, metadata?.revision, currentRevision, feed.reseed]);
+  return { ...feed, metadata: metadata?.metadata, rows: feed.snapshot.rows.flatMap(row => row.item ? [row.item] : []),
+    state: feed.snapshot.error ? "failed" : feed.snapshot.state === "live" ? "read" : "reading", error: feed.snapshot.error, reread: feed.reseed };
+}
+
+export function useReviewList(scope: ReviewsScope, filter: ReviewFilter, search: string, _revision: number) {
+  const query = useDebouncedValue(search.trim(), 250);
+  const feed = useReviewDirectory<ReviewRow, Omit<ReviewPage, "reviews" | "next">>(scope, "reviewsList", { state: filter, search: query || undefined }, row => {
+    const page = reviewPageFrom(row);
+    return { rows: page.reviews, next: page.next, metadata: { total: page.total, counts: page.counts } };
+  });
+  return { ...feed, value: feed.metadata ? { ...feed.metadata, reviews: feed.rows, next: feed.hasMore ? "more" : "" } : null };
 }
 
 export function useReviewDetail(reviewId: string, revision: number): Reading<ReviewDetail> {
@@ -88,15 +128,13 @@ export function useReviewDetail(reviewId: string, revision: number): Reading<Rev
   return useReading(`review:${reviewId}`, read, revision);
 }
 
-export function useDecisionLog(scope: ReviewsScope, pages: number, revision: number): Reading<DecisionLogPage> {
-  const connection = useOsConnection();
-  const limit = Math.min(200, PAGE * Math.max(1, pages));
-  const read = useMemo(() => {
-    if (connection === null || scope.storeId === "") return null;
-    return async (signal: AbortSignal) =>
-      decisionLogFrom(await answerOf(connection.query, "reviewsDecisionLog", { storeId: scope.storeId, siteId: scope.siteId, limit }, signal));
-  }, [connection, scope.storeId, scope.siteId, limit]);
-  return useReading(`review-log:${scope.siteId}:${scope.storeId}:${limit}`, read, revision);
+export function useDecisionLog(scope: ReviewsScope, search: string, _revision: number) {
+  const query = useDebouncedValue(search.trim(), 250);
+  const feed = useReviewDirectory<LogEntry, Pick<DecisionLogPage, "total">>(scope, "reviewsDecisionLog", { search: query || undefined }, row => {
+    const page = decisionLogFrom(row);
+    return { rows: page.entries, next: page.next, metadata: { total: page.total } };
+  });
+  return { ...feed, value: feed.metadata ? { ...feed.metadata, entries: feed.rows, next: feed.hasMore ? "more" : "" } : null };
 }
 
 export function useReviewSettings(scope: ReviewsScope, revision: number): Reading<ReviewSettings> {
@@ -178,9 +216,10 @@ export function useReviewWrites(scope: ReviewsScope): ReviewWrites {
         inFlight.current = false;
         setBusy(null);
         setRevision((n) => n + 1);
+        invalidateReviewPages(connection, scope);
       }
     },
-    [connection],
+    [connection, scope.siteId, scope.storeId],
   );
 
   const decide = useCallback(

@@ -1130,6 +1130,19 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	if err != nil {
 		return nil, err
 	}
+	if sorter.needsFullScan() && plan.BoundConcept != "" {
+		concept, err := e.concepts.Get(plan.BoundConcept)
+		if err != nil {
+			return nil, err
+		}
+		if err := sorter.enablePayloadKeyset(concept); err != nil {
+			return nil, err
+		}
+	} else if sorter.needsIntrinsicValueKeyset() {
+		if err := sorter.enablePayloadKeyset(nil); err != nil {
+			return nil, err
+		}
+	}
 
 	// Keyset cursor (5.12): lift an opaque inbound cursor from the request
 	// context onto the plan, decode it against the query's sort signature, and
@@ -1145,7 +1158,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	}
 	keysetActive := false
 	if plan.After != nil && strings.TrimSpace(*plan.After) != "" {
-		pos, decErr := decodeCursor(*plan.After, sorter.signatureValue())
+		pos, decErr := decodePageCursor(*plan.After, sorter)
 		if decErr != nil {
 			return nil, decErr
 		}
@@ -1268,7 +1281,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		// must refuse that boundary instead of accepting a truncated set.
 		result.SetHasMore(true)
 		if eligible, _ := keysetEligibleSort(sorter); eligible && (keysetActive || plan.After != nil || len(plan.Sort) > 0 || plan.Limit != nil) {
-			if next, encErr := encodeCursor(page[len(page)-1], sorter.signatureValue()); encErr == nil {
+			if next, encErr := encodePageCursor(page[len(page)-1], sorter); encErr == nil {
 				result.SetCursor(next)
 			}
 		}

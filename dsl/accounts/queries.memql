@@ -30,6 +30,26 @@ query account clientAccountsAll {
   sort    "name", "asc"
 }
 
+/// Ten recent authorized clients; searching is applied before cursor paging.
+@actor
+@cache(0)
+query account clientAccountsBrowse {
+  args {
+    search string
+    includeArchived boolean
+  }
+  filter row => (isNotArchived(row) || args.includeArchived == true)
+             && (args.search == nil || trim(args.search) == ""
+                 || row.name.includes(trim(args.search), true)
+                 || row.domain.includes(trim(args.search), true)
+                 || row.primaryContactName.includes(trim(args.search), true)
+                 || row.primaryContactEmail.includes(trim(args.search), true)
+                 || row.notes.includes(trim(args.search), true))
+  shape clientAccountFull
+  sort "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
+}
+
 /// Resolve one account by its own row id. The detail view's read on open, and
 /// the read every tie surface uses to put a name on an id it holds.
 @unbounded("account by id -- bounded to a single row (id is the row's own primary key)")
@@ -280,9 +300,11 @@ query account accountsForDomainWalk {
 /// ones get memqlReservationReason written instead, so the Accounts rail can say WHY rather than
 /// inferring it from the ownership stop beside it.
 ///
-/// SHARES accountDomainWalk's shape rather than adding one: the sweep reads exactly the three
-/// fields that projection already carries (the id, the name, and whether it is held), and a second
-/// shape over the same three would be a second thing to keep in step.
+/// SHARES accountDomainWalk's shape rather than adding one: the sweep reads four of its fields (the
+/// id, the name, whether it is held, and the reason it last recorded), and a second shape over the
+/// same fields would be a second thing to keep in step. The reason was once missing from the shape,
+/// which made the sweep rewrite it on every pass; TestEveryFieldTheAccountSweepsReadIsProjected
+/// (integrations/customdomain) now holds the shape to what the Go reader takes.
 ///
 /// actor.userId scoping is not the fix and is not available, accountsForDomainWalk's reasoning: the
 /// sweep runs from a scheduled automation under the engine's own actor, where actor.userId names

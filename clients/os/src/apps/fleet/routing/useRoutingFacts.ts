@@ -37,7 +37,7 @@ import { useRoutingPolicy } from "./useRoutingPolicy";
 // and would mark every app idle.
 
 export function useRoutingFacts(routes: readonly RouteLike[], enabled = true, capacity: CapacityFacts | null = null): RoutingFacts {
-  const { collection, settled } = useMachines();
+  const { collection, settled } = useMachines(enabled);
   const view = useLiveView<Row, MachineRow>(collection, "fleet:routing:machines", (rows) =>
     rows.map(machineFromRow).filter((m) => m.id),
   );

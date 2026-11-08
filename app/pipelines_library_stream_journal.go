@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/gatecontext"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/azureblob"
@@ -51,6 +52,11 @@ func (s *pipelinesLibraryStore) reserveStream(ctx context.Context, db *sql.DB, i
 	if err := lockPipelineUploadOwner(ctx, tx, identity.OwnerUserID); err != nil {
 		return x, err
 	}
+	// ReserveStorage takes an object gate before committing quota on the
+	// request pool. Lend this transaction only to synchronous nested gates:
+	// another connection from the same full gate pool would deadlock again.
+	// The outer reservation remains the sole owner of commit/rollback.
+	ctx = gatecontext.WithTransaction(ctx, db, tx)
 	fenced, err := readPipelineScopeFence(ctx, tx, pipelinesteps.RunFileReceiptScope{
 		OwnerUserID: identity.OwnerUserID, WorkRunID: identity.WorkRunID, StepKey: identity.StepKey, Attempt: identity.Attempt,
 	})

@@ -1,0 +1,13 @@
+Visible merged-frontier regression before the fix: 7 passed, 4 failed.
+
+withholds a partial initial merge until both source frontiers are known
+AssertionError: expected [ { kind: 'person', …(2) }, …(9) ] to deeply equal []
+
+holds the reliable prefix during a shared live-removal refill (Load more during repair: false)
+AssertionError: expected [ 'invite-19', 'invite-18', …(8) ] to deeply equal [ 'invite-19', 'invite-18', …(3) ]
+
+holds the reliable prefix during a shared live-removal refill (Load more during repair: true)
+AssertionError: expected [ 'invite-19', 'invite-18', …(8) ] to deeply equal [ 'invite-19', 'invite-18', …(3) ]
+
+keeps the reliable prefix and stops automatic retries after a live-removal refill fails
+AssertionError: expected [ 'invite-19', 'invite-18', …(8) ] to deeply equal [ 'invite-19', 'invite-18', …(3) ]

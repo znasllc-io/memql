@@ -214,7 +214,7 @@ describe("record list counts", () => {
 
   it.each(lists)("does not turn a denied $name read into zero", async ({ section, query }) => {
     const conn = fakeConnection();
-    conn.query[query].mockRejectedValue(new Error("permission denied"));
+    conn.query[`${query}Browse`].mockRejectedValue(new Error("permission denied"));
     const { view } = mount(conn, section);
     await screen.findByText(/permission denied/);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();

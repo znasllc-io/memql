@@ -1,0 +1,148 @@
+use common.traits.{ isNotDeleted, statusIsActive }
+
+// Derived directory inputs stay inside the engine. Every read retains the
+// original caller and the concepts' organization/owner gates.
+
+/// Compact authorized site identities used by the deployables directory reducer.
+@actor
+@cache(0)
+query site deployableDirectorySites {
+ args {
+  asOf datetime!
+ }
+ filter row => row.createdAt <= args.asOf && isNotDeleted(row)
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 500
+ shape deployableDirectorySite
+}
+
+/// Compact authorized source definitions, including undeployed apps.
+@actor
+@cache(0)
+query package deployableDirectoryPackages {
+ args {
+  asOf datetime!
+ }
+ filter row => row.createdAt <= args.asOf
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 500
+ shape deployableDirectoryPackage
+}
+
+/// Active deployment identities and declared apps, without logs/history payloads.
+@actor
+@cache(0)
+query packageDeployment deployableDirectoryPending {
+ args {
+  asOf datetime!
+ }
+ filter row => row.createdAt <= args.asOf && (row.status == "analyzing" || row.status == "awaiting_confirm" || row.status == "building" || row.status == "staging_dsl" || row.status == "rolling" || row.status == "publishing")
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 500
+ shape deployableDirectoryRun
+}
+
+/// Hydrate only the sites named by one directory page, under the caller's gate.
+@actor
+@cache(0)
+query site deployableDirectorySitesByIds {
+ args {
+  ids []string!
+ }
+ filter row => row.id in args.ids && isNotDeleted(row)
+ sort "row.id", "asc"
+ paginate 50
+ shape deployableDirectorySite
+}
+
+@row
+shape site deployableDirectorySite {
+ row.id
+ row.createdAt
+ ownerUserId
+ packageId
+ packageDeployableName
+ title
+ hostname
+ kind
+ status
+ accountId
+ artifactId
+ bundleRef
+ systemOwned
+}
+
+@row
+shape package deployableDirectoryPackage {
+ row.id
+ row.createdAt
+ ownerUserId
+ accountId
+ name
+ sourceKind
+ repoUrl
+ repoRef
+ credentialId
+ sourceConnectionId
+ sourceRemoved
+ artifactId
+ deployedVersion
+ latestKnownVersion
+ updateAvailable
+ autoDeploy
+ declares
+ disabledDeployables
+ status
+}
+
+@row
+shape packageDeployment deployableDirectoryRun {
+ row.id
+ row.createdAt
+ packageId
+ ownerUserId
+ accountId
+ status
+ startedAt
+ requestedBy
+ scopedTo
+ report
+ error
+ builtOn
+ deployables
+ candidates
+ cancelRequested
+}
+
+@sdk
+@executor("integration.packages.directoryPage")
+@description("Ten recent authorized deployables or repository sources. Combines deployed, pending and declared apps before search and pagination; returns exact archived counts and complete source summaries without full catalogs in the browser.")
+builtin deployableDirectoryPage {
+ resource string
+ search string
+ kind string
+ status string
+ accountId string
+ source string
+ archived bool
+ cursor string
+}
+
+/// Authorized credential naming cards for complete repository provenance search.
+@actor
+query sourceCredential deployableDirectoryCredentials {
+ filter row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 500
+ shape sourceCredentialCard
+}
+
+/// Saved personal installation names, paged rather than an unbounded ceiling.
+@actor
+@requiresCapability("read", "app:pipelines")
+query sourceConnection deployableDirectoryConnections {
+ filter row => row.ownerUserId == actor.userId && statusIsActive(row)
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 500
+ shape sourceConnectionCard
+}

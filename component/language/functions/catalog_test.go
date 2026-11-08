@@ -130,7 +130,7 @@ func TestSignatureRendering(t *testing.T) {
 		{func() (Function, bool) { return Method(TypeList, "first") }, "list.first() any"},
 		{func() (Function, bool) { return Method(TypeList, "take") }, "list.take(n number) list"},
 		{func() (Function, bool) { return Method(TypeList, "reduce") }, "list.reduce(seed any, fn lambda) any"},
-		{func() (Function, bool) { return Method(TypeString, "includes") }, "string.includes(sub string) bool"},
+		{func() (Function, bool) { return Method(TypeString, "includes") }, "string.includes(sub string, ignoreCase? bool) bool"},
 		{func() (Function, bool) { return Method(TypeString, "count") }, "string.count() number"},
 	}
 	for _, c := range cases {

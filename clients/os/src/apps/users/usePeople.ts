@@ -55,15 +55,14 @@ export const USER_CONCEPT = "v1:identity:user";
 export function usePeople(enabled = true): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>(enabled ? "users:people" : null, (connection) => ({
     concept: USER_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.searchUsers({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
+    seed: async (cursor, signal) => {
+      const result = await connection.query.searchUsers({}, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, USER_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;
     },
-    paged: false,
   }));
 }
 

@@ -69,6 +69,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			n, e := i.RecoverDeliveries(ctx)
 			return result(map[string]any{"processed": n}, e)
 		}},
+		{Name: "editFiles", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			edits, e := decoded[[]TextEdit](a["edits"])
+			if e != nil {
+				return nil, e
+			}
+			files, e := i.EditFiles(ctx, str(a["requestId"]), str(a["expectedHead"]), edits)
+			return result(map[string]any{"files": files}, e)
+		}},
 		{Name: "context", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			v, e := i.ReadContext(ctx, str(a["requestId"]))
 			return result(v, e)
@@ -91,6 +99,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				return nil, e
 			}
 			v, e := i.Receive(ctx, r)
+			return result(v, e)
+		}},
+		{Name: "land", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			v, e := i.Land(ctx, str(a["requestId"]), str(a["expectedCommit"]))
 			return result(v, e)
 		}},
 		{Name: "status", Handler: func(ctx context.Context, a map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

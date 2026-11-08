@@ -1,0 +1,160 @@
+{
+  "reviewedCommit": "4a7e30ead67a5a81defc56bff88a0aa01753bbaf",
+  "branch": "codex/os-resource-lists-20261107",
+  "scope": "Local synthetic fixtures and independent code review; no PR, deployment or production changes.",
+  "os": {
+    "passed": 6901,
+    "failed": 0,
+    "skipped": 0,
+    "files": 485,
+    "snapshotsMatched": 2,
+    "suiteLog": "memql-second-review-os-full-final.log",
+    "summary": "memql-second-review-os-full-final.json",
+    "typecheck": "passed",
+    "build": "passed",
+    "initialJsBytes": 1363853,
+    "initialJsGzip6Bytes": 350936
+  },
+  "sdk": {
+    "passed": 489,
+    "failed": 0,
+    "skipped": 0,
+    "build": "passed",
+    "log": "memql-second-review-sdk-final.log"
+  },
+  "database": {
+    "required": true,
+    "uncached": true,
+    "runner": "scripts/ci/pipeline-db-tests.py",
+    "cpuLimit": 2,
+    "memoryLimit": "2 GiB",
+    "isolation": "fresh disposable database per test class",
+    "packages": [
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/baseloader",
+        "status": "no_test_files",
+        "result": "[no test files]",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/callgraph",
+        "status": "passed",
+        "result": "0.385s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/dslgate",
+        "status": "passed",
+        "result": "0.381s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/dslimports",
+        "status": "passed",
+        "result": "1.060s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/offline",
+        "status": "passed",
+        "result": "16.368s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/readiness",
+        "status": "passed",
+        "result": "0.370s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/readscale",
+        "status": "passed",
+        "result": "16.197s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/sense",
+        "status": "passed",
+        "result": "2.556s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql/sync",
+        "status": "passed",
+        "result": "0.281s",
+        "sourceLog": "memql-second-review-db-second.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/component/memql",
+        "status": "passed",
+        "result": "297.300s",
+        "sourceLog": "memql-second-review-engine-final.log"
+      },
+      {
+        "package": "github.com/znasllc-io/memql/integrations/knowledge",
+        "status": "passed",
+        "result": "44.918s",
+        "sourceLog": "memql-second-review-knowledge-final.log"
+      }
+    ],
+    "note": "The engine package was rerun completely after isolating the cache fixture. Unchanged subpackages passed in the preceding broad run; knowledge passed its separate complete run. Failed runs are retained as history."
+  },
+  "languageAndGeneration": {
+    "conformance": "passed",
+    "literalDslConformance": "passed",
+    "dslLint": {
+      "files": 375,
+      "diagnostics": 0
+    },
+    "compatibility": "no breaks",
+    "sdkGeneration": "no drift",
+    "logs": [
+      "memql-second-review-go-final.log",
+      "memql-second-review-gates.log"
+    ]
+  },
+  "browser": {
+    "passed": 8,
+    "failed": 0,
+    "widths": [
+      390,
+      1280
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "scope": "Concepts initial/continuation disconnection, retained rows, truthful empty/completion state, overflow and browser errors",
+    "result": "clients/os/qa/evidence/second-review-concepts-disconnected.json",
+    "retainedScreenshots": 4
+  },
+  "independentReview": {
+    "remainingActionableFindings": 0,
+    "areas": [
+      "merged pagination and automatic frontier repair",
+      "session identity and resume caching",
+      "native Training authority and cursor continuation",
+      "live event ordering and deletion tombstones",
+      "named query pagination composition"
+    ]
+  },
+  "history": [
+    {
+      "run": "memql-second-review-db-initial.log",
+      "status": "failed",
+      "findings": [
+        "new unmeasured Training query",
+        "schema-free corpus handler fixture"
+      ]
+    },
+    {
+      "run": "memql-second-review-db-second.log",
+      "status": "failed",
+      "findings": [
+        "shared cache admission made a cache-hit fixture nondeterministic"
+      ]
+    }
+  ],
+  "performanceScope": "Original README benchmarks were not rerun. New assertions prove SQL page bounds, ordering, role boundaries, payload exclusions and request counts; test durations are not app latency claims.",
+  "sourceFingerprints": "source-fingerprints.json"
+}

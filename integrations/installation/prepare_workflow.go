@@ -32,6 +32,7 @@ type preparationHost struct {
 	health                       HealthProbe
 	completion                   *workflowhost.Snapshot
 	rollback                     *workflowhost.Snapshot
+	retirement                   *retirementWorkflow
 	api                          argocd.API
 	journal                      *preparationJournal
 	executor                     sourceCaptureExecutor
@@ -86,6 +87,10 @@ func (h *preparationHost) bindWorkflowNames(engineRevision string, names Workflo
 		return err
 	}
 	h.completion, err = workflowhost.Capture(names.Completion, completionContract, nil, (&completionScope{revision: &revisionWorkflowScope{}}).operations())
+	if err != nil {
+		return err
+	}
+	h.retirement, err = loadRetirementWorkflow(engineRevision)
 	if err != nil {
 		return err
 	}
@@ -318,7 +323,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 				return nil, errors.New("installation capture requires a canonical GitHub repository")
 			}
 			key := applicationCaptureKey(app.key, role)
-			spec := sourceCaptureSpec{OwnerUserID: s.operator, RunID: run, WorkRunID: run, StepKey: "source-" + key, Attempt: 1, RunStartedAt: started, Repository: pipelines.Repository{Owner: parts[0], Name: parts[1], CloneURL: repository}, CloneInstallationID: cfg.Collector.CloneInstallationID, CollectorImage: cfg.Collector.Image, Platform: cfg.Platform, Render: render}
+			spec := sourceCaptureSpec{OwnerUserID: s.operator, RunID: run, WorkRunID: run, StepKey: "source-" + key, Attempt: 1, RunStartedAt: started, Event: pipelines.EventManual, Repository: pipelines.Repository{Owner: parts[0], Name: parts[1], CloneURL: repository}, CloneInstallationID: cfg.Collector.CloneInstallationID, CollectorImage: cfg.Collector.Image, Platform: cfg.Platform, Render: render}
 			if len(cfg.SourceRepositories) != 0 {
 				spec.Fragment = &argocd.SourceFragmentSpec{Render: render, AllowedDependencies: cfg.SourceRepositories}
 			}

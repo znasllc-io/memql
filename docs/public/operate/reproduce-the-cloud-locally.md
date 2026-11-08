@@ -460,8 +460,9 @@ The recovery command takes a fresh exclusive reservation, refuses live recorded
 processes or a changed record, and removes only that acknowledged local marker.
 The confirmation asserts that Docker and image reconciliation is complete; the
 command does not infer it from missing PIDs. Then retry `make dev`. Never delete
-or truncate `pipeline.lock`, and never remove Fleet's interrupted execution
-records to bypass recovery.
+or truncate `pipeline.lock` or a `pipeline-slot-<n>.lock` (a machine running
+several Fleet steps keeps one per extra step), and never remove Fleet's
+interrupted execution records to bypass recovery.
 
 ### Rebuilding a wizard-installed cluster
 

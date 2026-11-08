@@ -69,6 +69,7 @@ export function fakeConnection(
     pages?: { rows: Row[]; cursor: string }[];
     /** Make every walk fail with this sentence. */
     walkError?: string;
+    searchPages?: { rows: Row[]; cursor: string }[];
   } = {},
 ): FakeConnection {
   const followers = new Set<(d: RegistryDelta) => void>();
@@ -87,7 +88,13 @@ export function fakeConnection(
           },
         };
       }),
-      executeNamed: vi.fn(async (_name: string, _call: string) => {
+      executeNamed: vi.fn(async (_name: string, _call: string, _opts?: unknown) => {
+        if (_name === "conceptRowsSearch") {
+          const cursor = /cursor: "([^"]*)"/.exec(_call)?.[1] ?? "";
+          const index = cursor ? Number(cursor) : 0;
+          const page = opts.searchPages?.[index] ?? { rows: [], cursor: "" };
+          return new Result({ data: [{ rows: page.rows, nextCursor: page.cursor }] } as never);
+        }
         if (opts.walkError !== undefined) throw new Error(opts.walkError);
         const page = pages[Math.min(pageIndex, pages.length - 1)] ?? { rows: [], cursor: "" };
         pageIndex += 1;

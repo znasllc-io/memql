@@ -135,6 +135,13 @@ still applies. Live collections with both `rereadEveryEvent` and `reread`
 request this automatically. Their background rereads share a limit of two
 active requests per connection and coalesce repeated updates for a row.
 
+`getRowByConceptAndId` treats the row ID as an opaque string and quotes it
+with the SDK's literal renderer. This matters for numeric and digit-leading
+IDs: an unquoted pipeline run ID can fail to parse and leave a live view at
+its seeded state. The Go helper follows the same rule. The concept-browser
+regressions in both SDKs cover numeric IDs and embedded quotes/operators;
+the Go regression also parses the emitted filter with the engine grammar.
+
 #### `seq` and `gapBefore` — continuity
 
 Every event carries `seq` (its position in **this connection's** delivery
@@ -239,8 +246,27 @@ What it guarantees, and why each one is there:
   row; the reverse can miss one forever.
 - **`seeding | live | degraded | disconnected`.** Render it. `degraded` is
   the state that did not exist before: rows on screen that are known to be
-  behind, with a re-seed in flight. Rows are KEPT on a disconnect — an
+  behind, awaiting or attempting repair. Rows are KEPT on a disconnect — an
   operator wants the last known answer labelled stale, not a blank.
+- **Failed updates remain honest.** A failed re-read of an already displayed
+  row marks it degraded with a generic retry message; a refusal for an unseen
+  row stays silent. A full re-seed clears the error once the list is repaired.
+- **Known versions survive repair.** A repair replaces membership, so absent
+  IDs leave, but a returned older copy cannot roll back a newer observed row
+  or resurrect a known deletion. A deletion also excludes its exact version;
+  only a newer version recreates it. A scope-only removal can admit the same
+  version again when that scope changes. Mixed full and omitted notifications during
+  a row read coalesce into one authoritative follow-up.
+- **Manual pages retain their frontier.** With `manualPages`, a failed next
+  page preserves its cursor and completed page count for retry. A successful
+  final page removes the partial-window boundary before replaying arrivals,
+  so an older row inserted during that read is not stranded. Recovery re-reads
+  the completed depth; one successful append alone cannot repair a gap in
+  the earlier pages. These cases are pinned in `test/liveCollection.test.ts`.
+- **Resume and invalidation are distinct.** `reseed({ ifIdle: true })` is a
+  courtesy repair for pane/browser resume and reuses a read already running.
+  Call plain `reseed()` for a real data invalidation: it schedules one trailing
+  repair when the current read may have taken its snapshot before the change.
 - **Reference counted, keyed by (query + args + connection).** Two callers
   asking for the same key share one subscription and one seed, and the last
   release LINGERS before teardown — which is what makes navigating away and

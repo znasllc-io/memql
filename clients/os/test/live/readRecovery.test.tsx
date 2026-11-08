@@ -11,7 +11,7 @@ import { useLogTail } from "../../src/logs/useLogTail";
 import { useReleaseRead } from "../../src/apps/cluster/releases/useReleaseRead";
 
 const interrupted = () => Object.assign(new Error("stream closed"), { reason: "transport" });
-const rows = (value: Record<string, unknown>[]) => ({ rows: () => value });
+const rows = (value: Record<string, unknown>[]) => ({ rows: () => value, single: () => value[0] });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); h.connection = null; });
 
 describe("recovery of reads outside Ask", () => {
@@ -58,9 +58,11 @@ describe("recovery of reads outside Ask", () => {
   });
 
   it("preserves domain names through interruption and rereads once connected", async () => {
-    const domains = vi.fn().mockResolvedValue(rows([{ id: "chunk", domainId: "birds", validationStatus: "validated" }]));
+    const domains = vi.fn().mockResolvedValue(rows([{ rollups: [{ domainId: "birds", total: 1, validated: 1, rejected: 0, unvalidated: 0 }] }]));
     const catalog = vi.fn().mockResolvedValueOnce(rows([{ id: "birds", name: "Birds" }])).mockRejectedValueOnce(interrupted()).mockResolvedValue(rows([{ id: "birds", name: "Birds updated" }]));
-    h.connection = { query: { allDocumentChunkDomains: domains, knowledgeDomainsAll: catalog } };
+    const cycles = new Set<() => void>();
+    const connection = { status: "connected", query: { knowledgeTrainingDomainRollups: domains, knowledgeDomainsAll: catalog }, onConnectionCycle: (listener: () => void) => { cycles.add(listener); return () => cycles.delete(listener); } };
+    h.connection = connection;
     let status: ShellConnectionStatus = "connected";
     const wrapper = ({ children }: { children: ReactNode }) => <ConnectionRecoveryContext.Provider value={{ managed: true, retry: () => {} }}><ConnectionStatusContext.Provider value={status}>{children}</ConnectionStatusContext.Provider></ConnectionRecoveryContext.Provider>;
     const { result, rerender } = renderHook(() => useDomains(), { wrapper });
@@ -69,10 +71,11 @@ describe("recovery of reads outside Ask", () => {
     await waitFor(() => expect(catalog).toHaveBeenCalledTimes(2));
     expect(result.current.error).toBe("");
     expect(result.current.domains.get("birds")?.name).toBe("Birds");
-    status = "reconnecting"; rerender();
+    status = "reconnecting"; connection.status = status; rerender();
     act(() => window.dispatchEvent(new Event("pageshow")));
     expect(catalog).toHaveBeenCalledTimes(2);
-    status = "connected"; rerender();
+    status = "connected"; connection.status = status; rerender();
+    act(() => { for (const listener of cycles) listener(); });
     await waitFor(() => expect(result.current.domains.get("birds")?.name).toBe("Birds updated"));
     expect(catalog).toHaveBeenCalledTimes(3);
   });

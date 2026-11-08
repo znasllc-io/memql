@@ -15,6 +15,7 @@ export {
 } from "./connection.js";
 export { Dispatcher, isTransportInterruption, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, refusalSentence, type QueryCallOptions, type ConceptRegistryFollow } from "./query.js";
+export { queryPage, type QueryPageOptions } from "./queryPage.js";
 export {
   ModulesClient,
   type Module,
@@ -41,6 +42,7 @@ export {
   liveStoreFor,
   type LiveCollectionSpec,
   type LiveHandle,
+  type LiveReseedOptions,
   type LiveSnapshot,
   type LiveState,
   type LiveStoreHost,

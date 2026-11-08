@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -123,12 +123,13 @@ describe("the workbenches section", () => {
     await click(await screen.findByRole("button", { name: "Replicas" }));
     const idle = await screen.findByText("workbench-7", { selector: ".os-row-name" });
     await click(idle);
-    expect(within(idle.closest("li") as HTMLElement).getByText("None in this view")).toBeTruthy();
+    expect(within(idle.closest("li") as HTMLElement).getByText("Check Workspaces for this replica")).toBeTruthy();
     expect(screen.queryByText("bff-0")).toBeNull();
   });
 
   it("says so when no workbench replica is running at all", async () => {
     mount(fakeConnection({ myWorkspaces: [], clusterNodes: [] }));
+    await click(screen.getByRole("button", {name:"Replicas"}));
     expect(
       await screen.findByText(/No workbench replicas/),
     ).toBeTruthy();
@@ -144,6 +145,7 @@ describe("the workbenches section", () => {
         ],
       }),
     );
+    await click(screen.getByRole("button", {name:"Replicas"}));
     await screen.findByText("healthy");
     // Without the collapse a replica renders once per liveness row it has
     // ever written.
@@ -167,6 +169,7 @@ describe("the workbenches section", () => {
         clusterNodes: readOrder.map((key) => ({ id: "workbench-0", nodeType: "workbench", ...versions[key] })),
       }),
     );
+    await click(screen.getByRole("button", {name:"Replicas"}));
     await screen.findByText("healthy");
     expect(screen.queryByText("starting")).toBeNull();
   });
@@ -182,8 +185,10 @@ describe("the workbenches section", () => {
     // opposite and printed it as operator copy.
     expect(screen.queryByText(/Refresh to see newer calls/)).toBeNull();
     expect(screen.queryByText(/not broadcast to browsers/)).toBeNull();
-    // Both feeds seed exactly once. A polled surface would read again.
-    expect(connection.query.clusterNodes).toHaveBeenCalledTimes(1);
+    // The hidden replicas tab does no read until opened.
+    expect(connection.query.clusterNodes).not.toHaveBeenCalled();
+    await click(screen.getByRole("button", {name:"Replicas"}));
+    await waitFor(() => expect(connection.query.clusterNodes).toHaveBeenCalledTimes(1));
     expect(connection.query.myWorkspaces).toHaveBeenCalledTimes(1);
   });
 
@@ -207,7 +212,7 @@ describe("the workbenches section", () => {
       ],
     });
     h.connection = connection;
-    const { result } = renderHook(() => useWorkbenches(), {
+    const { result } = renderHook(() => useWorkbenches("", true, "replicas"), {
       wrapper: ({ children }) => withSession(children),
     });
 
@@ -239,4 +244,23 @@ describe("the workbenches section", () => {
     expect(feedIsBehind("degraded")).toBe(true);
     expect(feedIsBehind("disconnected")).toBe(true);
   });
+});
+
+
+it("pages workspaces by ten, caches loaded rows, and searches beyond them", async () => {
+ const rows = Array.from({length:25},(_,n)=>({...LIVE_A,id:`workspace-${n}`,runId:`workspace-run-${n}`}));
+ const connection=fakeConnection({myWorkspaces:rows}); let view=mount(connection);
+ await screen.findByRole("button",{name:/^workspace-run-9 /});
+ expect(screen.queryByRole("button",{name:/^workspace-run-10 /})).toBeNull();
+ expect(connection.query.clusterNodes).not.toHaveBeenCalled();
+ await click(screen.getByRole("button",{name:"Load more"}));
+ await screen.findByRole("button",{name:/^workspace-run-19 /});
+ view.unmount(); view=mount(connection);
+ expect(screen.getByRole("button",{name:/^workspace-run-19 /})).toBeTruthy();
+ expect(connection.query.myWorkspaces).toHaveBeenCalledTimes(2);
+ await click(screen.getByRole("button",{name:"Search workspaces"}));
+ fireEvent.change(screen.getByRole("textbox",{name:"Search workspaces"}),{target:{value:"workspace-run-24"}});
+ await screen.findByRole("button",{name:/^workspace-run-24 /});
+ expect(connection.query.myWorkspaces).toHaveBeenLastCalledWith({search:"workspace-run-24",includeReleased:false},expect.anything());
+ view.unmount();
 });

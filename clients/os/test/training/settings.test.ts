@@ -83,7 +83,7 @@ describe("the Training manifest", () => {
   it("is the REAL app, not a stub", () => {
     const app = appById(OS_REGISTRY, "training");
     expect(app).toBeTruthy();
-    expect(app?.component.name).toBe("TrainingApp");
+    expect(app?.component.displayName).toBe("LoadTraining");
   });
 
   it("declares the SAME sections the settings picker offers", () => {

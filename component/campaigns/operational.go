@@ -76,7 +76,7 @@ func (w *Worker) handleStageOperationalEmail(ctx context.Context, args map[strin
 	if recipient.Email == "" {
 		return nil, fmt.Errorf("the recipient is outside this rule's selected cluster roles")
 	}
-	accountName, err := w.store.AccountName(ctx, tmpl.AccountID)
+	accountName, err := w.emailOrganizationName(ctx, tmpl.AccountID)
 	if err != nil {
 		return nil, err
 	}

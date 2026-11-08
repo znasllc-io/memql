@@ -1,3 +1,5 @@
+import { approvalFromRow } from "../../src/apps/nexus/rows";
+import { approvalMatches } from "../../src/apps/nexus/approvalSearch";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -141,6 +143,9 @@ export interface FakeSeed {
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
+  const constructRows = new Map([...(Array.isArray(seed.constructs) ? seed.constructs : []), ...(Array.isArray(seed.learnedProcedures) ? seed.learnedProcedures : [])].map(row => [String(row.id), row]));
+  const goalRows = new Map((seed.goals ?? []).map(row => [String(row.id), row]));
+  const approvalRows = new Map((seed.approvals ?? []).map(row => [String(row.id), row]));
   const runRows = new Map((seed.runs ?? []).map((row) => [String(row.id), row]));
   const read = (rows: Row[] | Error | undefined) =>
     vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => {
@@ -159,8 +164,46 @@ export function fakeConnection(seed: FakeSeed = {}) {
       if (seed.writeError) throw seed.writeError;
       return builtinReply(name, [reply(args)]);
     });
+  const page = (rows: Row[], opts: unknown, ascending = false, size = 10, timeField = "createdAt") => {
+    const ordered = [...rows].sort((a,b) => (ascending ? 1 : -1) * (String(a[timeField] ?? "").localeCompare(String(b[timeField] ?? "")) || String(a.id).localeCompare(String(b.id))));
+    const offset = Number((opts as {cursor?:string})?.cursor ?? 0);
+    return rowsResult(ordered.slice(offset, offset + size), offset + size < ordered.length ? String(offset + size) : undefined);
+  };
+  const textMatches = (search: unknown, values: unknown[]) => !search || values.some(value => typeof value === "string" && value.toLowerCase().includes(String(search).toLowerCase()));
+  const goalSummary = (row: Row) => Object.fromEntries(["id","createdAt","ownerUserId","statement","origin","status","requestedVia","closedAt","closeReason"].map(key => [key,row[key]])) as Row;
+  const runSummary = (row: Row) => { const {variables:_v,input,spine:_s,outcome:_o,...rest}=row; const conversation = (input as {conversation?:unknown})?.conversation; return {...rest,...(conversation ? {conversation}: {})} as Row; };
+  const goalPage = (ascending: boolean) => vi.fn(async (args: Record<string,unknown>, opts?:unknown) => page([...goalRows.values()].filter(row => (args.includePipelines || row.requestedVia !== "pipeline") && textMatches(args.search,[row.statement,row.origin,row.status,row.id])).map(goalSummary), opts, ascending));
+  const automationSummary = (row: Row) => {
+    const {source:_s,compiledForm:_c,procedure,preconditions:_p,...rest}=row;
+    const detail=procedure as {title?:string;recordedFrom?:unknown;freeParameters?:unknown}|undefined;
+    return {...rest,...(detail?{title:detail.title,recordedFrom:detail.recordedFrom,freeParameters:detail.freeParameters}:{})} as Row;
+  };
+  const runPage = (ascending: boolean) => vi.fn(async (args: Record<string,unknown>, opts?:unknown) => page([...runRows.values()].filter(row => (args.showFinished || !["succeeded","failed","cancelled","abandoned"].includes(String(row.status))) && (!args.conversationId || ((row.input as {conversation?:{id?:string}})?.conversation?.id ?? (row.conversation as {id?:string})?.id)===args.conversationId) && textMatches(args.search,[row.title,(row.classification as {workTitle?:string})?.workTitle,row.automationName,row.status,row.mode,row.errorCode,row.id])).map(runSummary),opts,ascending));
   return {
     query: {
+      nexusAutomationsBrowse: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>{
+        if(seed.constructs instanceof Error) throw seed.constructs;
+        if(seed.learnedProcedures instanceof Error) throw seed.learnedProcedures;
+        return page([...constructRows.values()].filter(row=>{
+          const learned=row.targetNamespace==="procedure";
+          const label=(row.reuseOverride as {label?:string})?.label||row.reuse||"";
+          return (learned||(row.catalogued===true&&row.kind==="automation")) && (!args.origin||(args.origin==="learned")===learned) && (!args.reuse||label===(args.reuse==="unlabelled"?"":args.reuse)) && (textMatches(args.search,[row.name,row.targetNamespace,row.status,row.goalSignature,(row.procedure as {title?:string})?.title,row.ladder]) || (args.statusWords as string[]|undefined)?.includes(String(row.status)) || (args.includeLearned&&learned) || (args.offLadder&&learned&&!row.ladder));
+        }).map(automationSummary),opts);
+      }),
+      nexusAutomationSummaryById: vi.fn(async(args:Record<string,unknown>,_opts?:unknown)=>{const row=constructRows.get(String(args.constructId));return rowsResult(row?[automationSummary(row)]:[]);}),
+      workGoalsBrowse: goalPage(false),
+      workGoalsBrowseOldest: goalPage(true),
+      workGoalForOwner: vi.fn(async (args: Record<string,unknown>, _opts?:unknown) => {const row=seed.byId?.[String(args.goalId)]??goalRows.get(String(args.goalId));return rowsResult(row?[row]:[]);}),
+      workGoalSummaryForOwner: vi.fn(async (args: Record<string,unknown>, _opts?:unknown) => {const row=seed.byId?.[String(args.goalId)]??goalRows.get(String(args.goalId));return rowsResult(row?[goalSummary(row)]:[]);}),
+      workGoalRunStatuses: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>page([...runRows.values()].filter(row=>(args.goalIds as string[]).includes(String(row.goalId))).map(row=>Object.fromEntries(["id","goalId","ownerUserId","status","waitingOn","automationName","title","classification","createdAt"].map(key=>[key,row[key]])) as Row),opts,false,200)),
+      workRunsBrowse: runPage(false),
+      workRunsBrowseOldest: runPage(true),
+      workRunSummariesForGoal: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>page([...runRows.values()].filter(row=>row.goalId===args.goalId).map(runSummary),opts,false,50)),
+      workRunSummariesByIds: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>page([...runRows.values()].filter(row=>(args.runIds as string[]).includes(String(row.id))).map(runSummary),opts,false,200)),
+      workApprovalRecoveryRuns: vi.fn(async (_args:Record<string,unknown>,opts?:unknown)=>page([...runRows.values()].filter(row=>!row.cancelRequested && ((row.status==="waiting" && (row.waitingOn as {kind?:string})?.kind==="approval") || (row.status==="abandoned" && row.errorCode==="run_abandoned" && row.humanResumeId))).map(runSummary),opts,false,200)),
+      workApprovalsBrowse: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>page([...approvalRows.values()].filter(row=>!row.decision && approvalMatches(approvalFromRow(row), String(args.search ?? ""))),opts,true,10,"requestedAt")),
+      workApprovalsForRuns: vi.fn(async (args:Record<string,unknown>,opts?:unknown)=>page([...approvalRows.values()].filter(row=>!row.decision&&(args.runIds as string[]).includes(String(row.runId))),opts,false,50)),
+      workApprovalForOwner: vi.fn(async (args: Record<string,unknown>,_opts?:unknown)=>{const row=seed.byId?.[String(args.approvalId)]??approvalRows.get(String(args.approvalId));return rowsResult(row?[row]:[]);}),
       // TYPED ARGS EVEN ON THE NO-ARGUMENT READS. A `vi.fn(async () => ...)`
       // has an empty parameter list, so `.mock.calls[0][0]` is a tuple of
       // length zero and `tsc -b` -- which covers test/ -- refuses the index.
@@ -197,6 +240,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // read -- `v1:authoring:*` broadcasts -- so a test moves a row by emitting
       // on `subscriptions`, and a second call here would be a re-read nobody
       // should need.
+      authoringConstructById: vi.fn(async (args: Record<string,unknown>, _opts?:unknown) => rowsResult([...constructRows.values()].filter(row=>row.id===args.constructId))),
       cataloguedConstructsForOwner: read(seed.constructs),
       learnedProceduresForOwner: read(seed.learnedProcedures),
       ladderPolicyCurrent: read(seed.ladderPolicy),
@@ -261,14 +305,18 @@ export function fakeConnection(seed: FakeSeed = {}) {
       decideApproval: builtinWrite("decideApproval", args => ({ approvalId: args.approvalId, decision: args.decision, runId: "run", runResumed: true })),
       refreshComputerPermission: builtinWrite("refreshComputerPermission", args => ({ approvalId: args.approvalId, permissionState: "review_ready" })),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
-        const match = /id==(\S+)/.exec(filter);
-        const wanted = match?.[1] ?? "";
+        // Decode the SDK's quoted ID so a reread does not retain stale seed data.
+        const match = /id==("(?:[^"\\]|\\.)*")$/.exec(filter);
+        const wanted = match ? JSON.parse(match[1]!) as string : "";
         const row = wanted === "" ? undefined : seed.byId?.[wanted];
         return bundleResult(row ? [row] : []);
       }),
     },
     subscriptions: fakeSubscriptions((concept, row) => {
+      if (concept === "v1:authoring:construct") constructRows.set(String(row.id), row);
       if (concept === "v1:work:run") runRows.set(String(row.id), row);
+      if (concept === "v1:work:goal") goalRows.set(String(row.id), row);
+      if (concept === "v1:work:approval") approvalRows.set(String(row.id), row);
     }),
     dispatcher: { sendAndWait: vi.fn() },
   };

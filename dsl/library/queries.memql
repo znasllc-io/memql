@@ -814,3 +814,134 @@ query file libraryImagesForRevision {
  shape libraryFileFull
  paginate 65
 }
+
+// OS directories: filter before paging, then fetch backing metadata by visible ids.
+
+/// Ten owner-scoped Library entries matching the requested place and facets.
+@actor
+query artifact libraryArtifactsBrowse {
+  args {
+    archived bool
+    folderId string
+    kind string
+    source string
+    accountId string
+    label string
+    search string
+    ids []string
+    folderIds []string
+    sourceRefs []string
+  }
+  filter row => row.ownerUserId == actor.userId && row.lens == "artifact"
+    && ((args.archived == true && row.archived == true) || (args.archived != true && row.archived != true))
+    && (args.folderId == nil || row.folderId == args.folderId)
+    && (args.kind == nil || row.kind == args.kind)
+    && (args.source == nil || row.source == args.source)
+    && (args.accountId == nil || (args.accountId == "" && row.accountIds.count() == 0) || args.accountId in row.accountIds)
+    && (args.label == nil || args.label in row.labels)
+    && (args.ids == nil || row.id in args.ids || row.folderId in args.folderIds)
+    && (args.sourceRefs == nil || row.sourceConceptRef in args.sourceRefs)
+    && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true)
+      || row.summary.includes(trim(args.search), true) || row.producedByWorkerName.includes(trim(args.search), true) || row.id == trim(args.search)
+      || row.labels.any(label => label.includes(trim(args.search), true)))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape artifactFull
+}
+
+/// Ten owner-scoped Library entries matching the requested place and facets.
+@actor
+query artifact libraryArtifactsBrowseOldest {
+  args {
+    archived bool
+    folderId string
+    kind string
+    source string
+    accountId string
+    label string
+    search string
+    ids []string
+    folderIds []string
+    sourceRefs []string
+  }
+  filter row => row.ownerUserId == actor.userId && row.lens == "artifact"
+    && ((args.archived == true && row.archived == true) || (args.archived != true && row.archived != true))
+    && (args.folderId == nil || row.folderId == args.folderId)
+    && (args.kind == nil || row.kind == args.kind)
+    && (args.source == nil || row.source == args.source)
+    && (args.accountId == nil || (args.accountId == "" && row.accountIds.count() == 0) || args.accountId in row.accountIds)
+    && (args.label == nil || args.label in row.labels)
+    && (args.ids == nil || row.id in args.ids || row.folderId in args.folderIds)
+    && (args.sourceRefs == nil || row.sourceConceptRef in args.sourceRefs)
+    && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true)
+      || row.summary.includes(trim(args.search), true) || row.producedByWorkerName.includes(trim(args.search), true) || row.id == trim(args.search)
+      || row.labels.any(label => label.includes(trim(args.search), true)))
+  sort "row.createdAt", "asc", "row.id", "asc"
+  paginate 10
+  shape artifactFull
+}
+
+/// Internal metadata, aggregated before transport by libraryBrowseFacets.
+@actor
+query artifact libraryArtifactFacetRows {
+  args {
+    asOf datetime!
+    archived bool
+    folderId string
+    kind string
+    source string
+    accountId string
+    search string
+    ids []string
+    folderIds []string
+    sourceRefs []string
+  }
+  filter row => row.ownerUserId == actor.userId && row.lens == "artifact" && row.createdAt <= args.asOf
+    && ((args.archived == true && row.archived == true) || (args.archived != true && row.archived != true))
+    && (args.folderId == nil || row.folderId == args.folderId)
+    && (args.kind == nil || row.kind == args.kind)
+    && (args.source == nil || row.source == args.source)
+    && (args.accountId == nil || (args.accountId == "" && row.accountIds.count() == 0) || args.accountId in row.accountIds)
+    && (args.ids == nil || row.id in args.ids || row.folderId in args.folderIds)
+    && (args.sourceRefs == nil || row.sourceConceptRef in args.sourceRefs)
+    && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true)
+      || row.summary.includes(trim(args.search), true) || row.producedByWorkerName.includes(trim(args.search), true) || row.id == trim(args.search)
+      || row.labels.any(label => label.includes(trim(args.search), true)))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 500
+  shape artifactFacet
+}
+
+/// Complete membership of one deliberate archive operation, including archived files.
+@actor
+query artifact libraryArtifactsInFolders {
+  args {
+    folderIds []string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.lens == "artifact" && row.folderId in args.folderIds
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 50
+  shape artifactFull
+}
+
+/// Ten archived folders matching the Bin's server-side search.
+@actor
+query folder libraryArchivedFoldersBrowse {
+  args {
+    search string
+  }
+  filter row => row.ownerUserId == actor.userId && row.archived == true && isNotDeleted(row)
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape libraryFolderFull
+}
+
+/// Complete folder navigation metadata, including archived folders, in bounded pages.
+@actor
+query folder libraryFolderDirectory {
+  filter row => row.ownerUserId == actor.userId && isNotDeleted(row)
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 500
+  shape libraryFolderFull
+}

@@ -1,7 +1,6 @@
 import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Mail, UserRound } from "lucide-react";
 
 import {
@@ -14,9 +13,7 @@ import {
   RecordRow,
   RoleTag,
   Select,
-  SortControl,
   useNow,
-  useTwoFeedView,
   type RefineChip,
 } from "../../kit";
 import { formatFreshness } from "../../kit/format";
@@ -27,7 +24,6 @@ import {
   DEFAULT_ROSTER_FILTER,
   daysLeft,
   filterIsNarrowing,
-  foldRoster,
   rosterEmail,
   rosterFingerprint,
   rosterName,
@@ -35,7 +31,6 @@ import {
   type RosterRow,
 } from "./roster";
 import {
-  invitationFromRow,
   membershipFromRow,
   personFromRow,
   personIsDim,
@@ -45,7 +40,9 @@ import {
 import { useMembersOfGroup } from "./useGroups";
 import type { RoleCatalog } from "./useRoles";
 import type { PeopleView } from "./views";
-import type { LiveCollectionHandle } from "../../live/useLiveCollection";
+import { useRosterDirectory } from "./useRosterDirectory";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 import type { AccountRow } from "../accounts/rows";
 
 // The people of this cluster, and the people on their way to it.
@@ -65,8 +62,9 @@ import type { AccountRow } from "../accounts/rows";
 //                              person's page on success
 
 export function PeopleSection({
-  users,
-  invites,
+  enabled = true,
+  peopleCatalog = [],
+  onCatalogDemand,
   groups,
   accounts,
   catalog,
@@ -81,8 +79,9 @@ export function PeopleSection({
   openId,
   onOpened,
 }: {
-  users: LiveCollectionHandle<Row>;
-  invites: LiveCollectionHandle<Row>;
+  enabled?: boolean;
+  peopleCatalog?: readonly PersonRow[];
+  onCatalogDemand?: (needed: boolean) => void;
   groups: readonly GroupRow[];
   accounts: readonly AccountRow[];
   catalog: RoleCatalog;
@@ -90,7 +89,7 @@ export function PeopleSection({
   viewerUserId: string;
   viewerRole: string;
   showDeactivated: boolean;
-  sort: "name" | "lastSeen";
+  sort: RosterFilter["sort"];
   /** Whether the email module is ready. Only SENDING an invitation needs it. */
   emailReady: boolean;
   /** The gate's own sentence, rendered where Invite would be. */
@@ -107,6 +106,8 @@ export function PeopleSection({
     sort,
   });
   const now = useNow(60_000);
+  const search = useDebouncedValue(filter.search.trim(), TEXT_DEBOUNCE_MS);
+  useEffect(() => { onCatalogDemand?.(view.kind !== "list"); return () => onCatalogDemand?.(false); }, [view.kind, onCatalogDemand]);
 
   // The settings are the DEFAULT and the Refine line is the question being
   // asked right now, so a change in Settings lands here without wiping a
@@ -126,28 +127,16 @@ export function PeopleSection({
   // exactly one `membersOfGroup` -- and picking none costs nothing.
   const members = useMembersOfGroup(filter.group);
   const memberIds = useMemo(() => {
-    if (filter.group === "") return undefined;
+    if (filter.group === "" || listCount(members.snapshot) === undefined) return undefined;
     return new Set(
       members.snapshot.rows.map((row) => membershipFromRow(row).userId).filter((id) => id !== ""),
     );
   }, [filter.group, members.snapshot]);
 
-  const source = useTwoFeedView<Row, Row, RosterRow>(
-    users.source,
-    invites.source,
-    // The view key is what re-baselines the arrival cue when the QUESTION
-    // changes: without it, revealing deactivated rows would make them flash
-    // "new" on the next event, claiming the cluster just sent them.
-    `${filter.search}|${filter.role}|${filter.group}|${filter.state}|${filter.showDeactivated}|${filter.sort}|${memberIds?.size ?? -1}`,
-    (userRows, inviteRows) =>
-      foldRoster(
-        userRows.map(personFromRow),
-        inviteRows.map(invitationFromRow),
-        filter,
-        now,
-        memberIds,
-      ),
-  );
+  const directory = useRosterDirectory({ ...filter, search }, memberIds, enabled);
+  const { users, invites } = directory;
+
+  const source = directory.source;
 
   const people = useMemo(
     () => users.snapshot.rows.map(personFromRow).filter((p) => p.id !== ""),
@@ -175,7 +164,7 @@ export function PeopleSection({
       <PersonPage
         userId={view.userId}
         seed={person}
-        people={people}
+        people={peopleCatalog.length ? peopleCatalog : people}
         groups={groups}
         accounts={accounts}
         catalog={catalog}
@@ -206,7 +195,7 @@ export function PeopleSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="People" meta={count}>
+      <Head title="People" meta={count === undefined || search !== filter.search.trim() ? undefined : `${count} shown`}>
         {emailReady ? (
           <AddButton onClick={() => setView({ kind: "invite" })} label="Invite" />
         ) : (
@@ -217,13 +206,13 @@ export function PeopleSection({
         )}
       </Head>
 
-      {users.snapshot.error ? (
+      {users.snapshot.error || invites.snapshot.error ? (
         <Notice
           tone="error"
           sentence="This cluster did not return its people."
           next="Reading the directory is admin and above; the engine decides that, not this window."
         >
-          <Button onClick={users.reseed}>Try again</Button>
+          <Button onClick={() => { users.reseed(); invites.reseed(); }}>Try again</Button>
         </Notice>
       ) : null}
 
@@ -281,14 +270,11 @@ export function PeopleSection({
       </Refine>
 
       <div className="os-list-scope">
-        <SortControl
-          ascending={filter.sort === "name"}
-          onToggle={() =>
-            setFilter((f) => ({ ...f, sort: f.sort === "name" ? "lastSeen" : "name" }))
-          }
-          ascLabel="By name"
-          descLabel="By last seen"
-        />
+        <Select id="people-order" label="Order" value={filter.sort} onChange={value => setFilter(current => ({ ...current, sort: value as RosterFilter["sort"] }))}>
+          <option value="recent">Recent</option>
+          <option value="name">By name</option>
+          <option value="lastSeen">By last seen</option>
+        </Select>
       </div>
         </>
       )}
@@ -317,6 +303,7 @@ export function PeopleSection({
           />
         )}
       />
+      <LoadMore feed={directory} />
     </div>
   );
 }

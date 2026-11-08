@@ -23,6 +23,18 @@ concept into the shared version-retirement sweep. The required archive uses
 `MEMQL_AZURE_BLOB_CONTAINER`; `archive="none"` explicitly makes the selected
 history disposable. Unmarked concepts keep their current policies.
 
+Two status rows declare `@retention(ttl="1d", keepLatest=true, archive="none")`:
+`v1:pipelines:run` and `v1:worker:appSession`. Their holders rewrite them on a
+heartbeat and after every step, and each write appends a full version (a
+pipeline run's copies its ~14 KB `policySnapshot`); on 2026-11-06 the two
+accounted for 1.9 GB in one week. Nothing reads a superseded version: a pipeline
+run's attempt history is its rows, one per attempt, and a session's record is its
+steps and Library transcript. The newest version of each stays; a day keeps
+recent progress readable to whoever debugs a stuck drive, and keeps most expired
+versions in the chunk still taking inserts, where PostgreSQL reuses their space.
+Pins: `component/memql/status_row_retention_test.go`; behaviour under the real
+admission: `component/retention/status_rows_db_test.go`.
+
 The hourly platform automation invokes `integration.retention.sweep` under
 cluster-owner authority. Each page scans at most 100 versions, has a 20-second
 deadline and a 32 MiB archive budget, and compares downloaded bytes before an
@@ -43,6 +55,43 @@ The existing log sweep reads logLine's retention declaration and verifies each
 archive before dropping a day's chunks. It continues to use
 `MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
 
+## Returning the space: closed-chunk compaction
+
+A retention delete frees space inside its chunk, and `MemoryNodes` /
+`SecretMemoryNodes` only ever insert into the newest chunk. So every sweep in
+this document whose window is longer than a chunk (seven days) -- the declared
+TTLs, this journal's 30 days, pipeline runs -- deletes rows from CLOSED chunks
+and the disk gets nothing back. The log sweep is the exception: it drops whole
+day chunks of its own hypertable. Measured on production before the job
+existed: five closed chunks held about 7.1 GB of free space, one of them a
+7.7 GB chunk with 3.3 GB live.
+
+Those deletes return space only through `reclaimClosedChunkSpace`, nightly at
+04:20 UTC on the cron leader, after this sweep's 03:40 pass. It calls
+`closedChunkCompaction` (`integration.retention.compact`,
+`component/retention/compact.go`), which rewrites at most one closed chunk a
+night with `reorder_chunk` and `VACUUM (ANALYZE)`, chosen as the one giving back
+most, at least 256 MiB and 30% of its size, among those that fit the volume
+twice over. It refuses while WAL awaits archiving, when the engine's role does
+not own the chunk, and without a storage reading it can trust. A sweep's deletes
+move a chunk's change counter, which is what makes the next compaction pass
+measure that chunk again; the measurements and the last attempt per chunk are in
+`chunk_compaction_progress`. The rewrite never changes a row and a failure leaves
+the chunk as it was.
+
+The decision rules, how to read a pass, and how to run or stop it are in the
+operator guide's [Closed-chunk compaction](../../public/operate/database-platform.md#closed-chunk-compaction).
+Tests: `component/retention/compact_decide_test.go` holds every decision;
+`compact_db_test.go` rewrites a real TimescaleDB chunk, proves a reader at the
+swap fails the rewrite cleanly, that an open or just-closed chunk is never
+chosen, that a dry run changes nothing, and that a second replica is refused
+while a pass runs and reuses its measurements. The test database's role is a
+superuser; every statement of a pass was also run by hand (2026-11-06,
+PostgreSQL 16, TimescaleDB 2.27) as a NOSUPERUSER role outside `pg_monitor`
+that owned its hypertable, rewrite and `VACUUM` included. Not verified at all:
+the `database-health` report read on a live cluster, and an archiver with a real
+backlog (the test database does not archive; `judgeWAL` is held by unit tests).
+
 ## Current liveness observations
 
 Worker registration heartbeats, cluster-node health and mesh observations, and
@@ -51,6 +100,25 @@ Repeated observations replace that row instead of appending history. The normal
 engine read path merges this table with `MemoryNodes` before filtering, sorting,
 authorization and pagination. Its `createdAt` remains the observation version,
 so live feeds and reads from another replica order updates consistently.
+
+A worker registration's observation fields are `lastSeenAt`,
+`lastConnectedFromIP`, `connectedNodeId`, `activeCount`, `hardware`, `rttMs`,
+`rttAt`, `clockSkewMs` and `credentialExpiresAt`, plus, since migration
+`20261106150000_worker_registration_observations`, `sharingActivity` (the
+stream holder's model-call counts, republished every 15 s), `capacity` and
+`setup` (both re-asserted on every heartbeat flush with a fresh `reportedAt`).
+Before that migration each of the last three appended a registration version on
+every report. Adding a field to an existing concept's list needs no reader
+handshake: readers already merge `memory_liveness` for every listed concept
+(`HasLiveness` in `component/database/memory-nodes/liveness.go`). Adding a
+concept does. `TestWorkerLiveReportsAreObservationsNotRegistrationVersions`
+(`component/memql`) drives the three reports from two engines and counts both
+tables. A machine's permission snapshot is not an observation: a changed
+decision is history. The heartbeat writes it only when it differs from the
+snapshot the stream last wrote apart from `checked_at`, the baseline being the
+one its own register wrote (`component/worker/server.go`,
+`TestHeartbeatPermissionsAreWrittenOnlyWhenTheEvidenceChanges`). Before that,
+every beat's fresh `checked_at` appended a version.
 
 The first record and changes outside the closed observation-field list still
 append to `MemoryNodes`. A business change clears its preceding observation in
@@ -90,8 +158,20 @@ Reputation flushes acknowledge successfully saved windows and skip unchanged
 ones; failed saves remain eligible for retry. The magic-link sweep excludes
 already consumed requests. Package polling writes only a changed upstream head
 or availability, and seed materialization compares against a fresh read rather
-than a replica's cached result. These guards keep normal idle polling from
-creating business history.
+than a replica's cached result. A source credential's `lastUsedAt` is stamped
+only when the stored value is more than an hour old, read off the row the
+unseal already fetched (`credentialTouchDue`, `component/packages`), so the
+ten-minute poll and pipeline token minting no longer append a credential
+version on every use. A sealed email connection state (`v1:email:connectionState`)
+is re-sealed and written only when its re-serialized plaintext differs from what
+was read: sealing draws a fresh nonce, so every maintenance callback that
+changed nothing used to store a new ciphertext (`connectionStore.change`,
+`integrations/email`). A Shopify reconciliation pass reads each row it maps
+and writes only those that differ from the mirror, apart from its own
+`syncedAt` and a fetch-time `updatedAt` (`heal` and `mirrorHolds`,
+`integrations/shopify/mirror.go`); an hourly re-list of an unchanged price list
+used to append a version of every price and quantity rule. These guards keep
+normal idle polling from creating business history.
 
 ## Shared row schemas
 
@@ -174,6 +254,25 @@ parked the run on a nonexistent approval. Failed periodic maintenance now ends
 as failed, retries on its next schedule, and only proven unowned scheduled waits
 with missing approvals are closed by recovery. User goals and real approvals
 keep their existing lifecycle.
+
+## Event-fired system runs (2026-11-06)
+
+The system-run policy selected `triggeredBy = 'schedule'` alone, so a run the
+scheduler fired on an event (`event:<topic>`, including `system.startup`) was
+never retired: about 5,300 a day on production, each with its steps. The policy
+now selects both spellings, taken from the scheduler's own constants
+(`automations.TriggeredBySchedule`, `automations.TriggeredByEventPrefix`).
+Every other condition is unchanged: terminal, `ownerUserId` present and empty,
+no goal, and kept whole while a pending approval, a model call or observation,
+a recent child or a child that is not the run's own holds it.
+
+The widened predicate has a new progress key, so the first pass after the
+upgrade walks from the oldest stored run version. A backlog larger than the
+policy's share of the pass is retired over several nights from the checkpoints
+it leaves. Regression tests: `TestOperationalRetentionRetiresEventFiredSystemRuns`
+and `TestAChangedSystemRunPredicateWalksFromTheStart`
+(`integrations/work/operational_retention_event_runs_db_test.go`), and
+`TestTheSystemRunPolicySelectsTheSchedulersOwnFirings`.
 
 ## Bounded current-run recovery
 
@@ -286,9 +385,14 @@ system-run policy is fifth of eight, so with nothing to do before it, it may
 spend a quarter of the four minutes, a minute.
 
 Completed pages and day windows are checkpointed in `work_retention_progress`,
-keyed by concept, policy and configured lifetime. A different cron leader resumes
-from that point. A generation fence refuses a stale replica's attempt to rewind
-it, and dry runs neither consume nor alter progress. A complete traversal resets
+keyed by concept, policy and a digest of the configured lifetime and predicate.
+A different cron leader resumes from that point. A changed lifetime or predicate
+gets a new key and walks from the oldest stored version: a checkpoint only
+certifies what its own configuration examined, and resuming a wider predicate
+from it would skip the rows behind it that the old one never selected. The
+superseded row is left unread rather than deleted, so an older cron leader
+mid-rollout keeps its own checkpoint. A generation fence refuses a stale
+replica's attempt to rewind it, and dry runs neither consume nor alter progress. A complete traversal resets
 the checkpoint: dependency-protected records, denied rows and backdated inserts
 must be reconsidered on a later cycle. The `(concept, createdAt, id)` index makes
 these day probes cheap even when years of protected history remain. Empty spans
@@ -317,7 +421,12 @@ independently and returns both errors if they fail.
 ## Safeguards
 
 - No arbitrary-concept TTL. User-owned runs/goals, active work, business rows and
-  unknown concepts are excluded from system-run retirement.
+  unknown concepts are excluded from system-run retirement. A system run is a
+  terminal, unowned, goalless run the core scheduler fired: `triggeredBy` is
+  `schedule` or `event:<topic>`. Authored firings (`authored`), manual and
+  operator runs (`manual`, `run:client`), `sub-automation` and `http-trigger`
+  runs, and driver-owned runs (`pipeline:`, `procedure:`, `journal:`) are not
+  system runs.
 - The archive contains all versions with their intrinsic fields. Content-derived
   object names prevent a later partial batch from overwriting earlier evidence.
 - Upload plus bounded read-back equality precedes deletion. No configured
@@ -344,7 +453,9 @@ owner-only `clusterStorageStatus` builtin on its ordinary stream. The read
 verifies the Event's source and current CloudNativePG cluster UID, so a report
 from a replaced installation cannot describe the new one. The shared base grants
 only `get` on that named Event and cluster. There is no new monitor or stored
-health history in the engine.
+health history in the engine. The closed-chunk compaction reads the same
+verified report natively (`storagehealth.Integration.Read`) for its room check,
+trusting it only when observed within 15 minutes, as the OS does.
 
 The OS uses the monitor's data/WAL capacity warning (over 80%). Owners see one
 notice above the dock, opening Cluster → Readiness for usage and measurement

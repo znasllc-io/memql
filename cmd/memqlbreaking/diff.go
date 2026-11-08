@@ -44,6 +44,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -214,7 +215,8 @@ func diffOneItem(kind string, o, n Item) []Finding {
 				kind, o.Name, strings.Join(gone, ", ")),
 		}}
 	}
-	if o.Form != n.Form && !(kind == "annotation" && keywordFormWidens(o.Form, n.Form)) {
+	widens := kind == "annotation" && keywordFormWidens(o.Form, n.Form) || kind == "function" && functionFormWidens(o.Form, n.Form)
+	if o.Form != n.Form && !widens {
 		return []Finding{{
 			Category: CategoryMeaning,
 			Name:     o.Name,
@@ -226,6 +228,54 @@ func diffOneItem(kind string, o, n Item) []Finding {
 		}}
 	}
 	return nil
+}
+
+// The canonical form comes from functions.Function.Signature plus its tier.
+// Refuse unfamiliar syntax rather than infer compatibility from a loose prefix.
+var functionFormPattern = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\(([^()]*)\)((?: [A-Za-z_][A-Za-z0-9_]*)? \[(?:P|M)\])$`)
+var functionParamPattern = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)(\?)? ([A-Za-z_][A-Za-z0-9_]*)$`)
+
+// functionFormWidens admits only appended optional parameters. Every existing
+// argument retains its exact name, position, type and optionality, and neither
+// the result nor evaluation tier changes. Variadics and optional-before-required
+// overloads need their own compatibility analysis and remain findings here.
+// As with keywordFormWidens, this compares the recorded call contract; tests of
+// the implementation must separately prove unchanged behavior when omitted.
+func functionFormWidens(old, now string) bool {
+	before, after := functionFormPattern.FindStringSubmatch(old), functionFormPattern.FindStringSubmatch(now)
+	if before == nil || after == nil || before[1] != after[1] || before[3] != after[3] {
+		return false
+	}
+	var previous []string
+	if before[2] != "" {
+		previous = strings.Split(before[2], ", ")
+	}
+	current := strings.Split(after[2], ", ")
+	if len(current) <= len(previous) {
+		return false
+	}
+	seen := map[string]bool{}
+	optionalSeen := false
+	for i, text := range current {
+		param := functionParamPattern.FindStringSubmatch(text)
+		if param == nil || seen[param[1]] {
+			return false
+		}
+		seen[param[1]] = true
+		optional := param[2] == "?"
+		if !optional && optionalSeen {
+			return false
+		}
+		optionalSeen = optionalSeen || optional
+		if i < len(previous) {
+			if text != previous[i] {
+				return false
+			}
+		} else if !optional {
+			return false
+		}
+	}
+	return true
 }
 
 // keywordFormWidens recognizes extra accepted keyword names without hiding a

@@ -1,3 +1,4 @@
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useEffect, useRef, useState } from "react";
 import { Code2 } from "lucide-react";
@@ -92,7 +93,9 @@ function ConceptBody({
   const cancelHandoff = useRef<(() => void) | null>(null);
   useEffect(() => () => cancelHandoff.current?.(), []);
 
-  const walk = useConceptRows(concept.id, settings.pageSize);
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search, 200);
+  const walk = useConceptRows(concept.id, settings.pageSize, query);
   const badge = originBadgeFor(concept);
 
   function openInEditor() {
@@ -157,7 +160,7 @@ function ConceptBody({
           />
         </div>
         <div className="os-concept-rows">
-          <RowsPanel concept={concept} walk={walk} />
+          <RowsPanel concept={concept} walk={walk} search={search} onSearch={setSearch} />
         </div>
       </div>
     </div>

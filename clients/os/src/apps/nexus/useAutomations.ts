@@ -321,3 +321,16 @@ export function useSetConstructReuse(): SetConstructReuseState {
 
   return { busy, errors, set };
 }
+
+/** Full authored source or procedure steps are read only for an opened record. */
+export function useConstructRecord(constructId: string): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(constructId ? `authoring:record:${constructId}` : null, connection => ({
+    concept: CONSTRUCT_CONCEPT,
+    eventInScope: id => idTail(id) === idTail(constructId),
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.authoringConstructById({ constructId }, { signal })).rows(), nextCursor: "" }),
+    reread: async (id, signal) => (await connection.query.authoringConstructById({ constructId: id }, { signal })).rows()[0] ?? null,
+    rereadEveryEvent: true,
+    inScope: row => idTail(rowString(row, "id")) === idTail(constructId),
+    paged: false,
+  }));
+}

@@ -98,3 +98,20 @@ builtin repositoryChangeQueue { requestId string! }
 @executor("integration.repositoryauthority.deliveryRecover")
 @args(profile="optionalObject")
 builtin repositoryChangeDeliveryRecover {}
+
+/// Explicitly land this maintainer's exact saved proposal when pull requests are
+/// disabled. Uses the connected person's grant, never the installation identity.
+/// No rebase, force push, release or deployment is implied. Retry the same commit
+/// after an uncertain answer; a changed default branch requires a new proposal.
+@sdk
+@executor("integration.repositoryauthority.land")
+@args(profile="object")
+@requiresCapability("execute", "app:pipelines/requests")
+builtin repositoryChangeLand { requestId string! expectedCommit string! }
+
+/// Expand exact unique text edits against fresh approved source. Models return
+/// small spans; native validation supplies the full files for review and commit.
+/// This pure preparation operation cannot land a change or widen approved paths.
+@executor("integration.repositoryauthority.editFiles")
+@args(profile="object")
+builtin repositoryChangeEditFiles { requestId string! expectedHead string! edits []object! }

@@ -1,0 +1,19 @@
+{"time":"2026-11-07T17:46:29.851773-07:00","level":"INFO","component":"memoryNodesDB","msg":"instance created"}
+{"time":"2026-11-07T17:46:29.851904-07:00","level":"INFO","component":"memoryNodesDB","msg":"starting"}
+{"time":"2026-11-07T17:46:29.860907-07:00","level":"INFO","component":"memoryNodesDB","msg":"write-gate pool opened","size":4}
+{"time":"2026-11-07T17:46:29.887752-07:00","level":"INFO","component":"memoryNodesDB","msg":"MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend cannot be enabled; nothing was changed (memql#5421)","table":"MemoryNodes","triggers":"work_run_head_delete"}
+{"time":"2026-11-07T17:46:29.894273-07:00","level":"INFO","component":"memoryNodesDB","msg":"timescaledb extension enabled","version":"2.29.0","schema":"public","hasCreateHypertable":true,"hypertables":{"MemoryNodes":true,"SecretMemoryNodes":true},"compression":{"MemoryNodes":"blocked: DELETE trigger with a transition table: work_run_head_delete"}}
+{"time":"2026-11-07T17:46:29.896537-07:00","level":"INFO","component":"memoryNodesDB","msg":"startup ping succeeded","dsn":"postgres://memql:********@localhost:55432/memql_review_engine_1107?sslmode=disable"}
+{"time":"2026-11-07T17:46:29.896569-07:00","level":"INFO","component":"memoryNodesDB","msg":"started"}
+{"time":"2026-11-07T17:46:29.896577-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopping"}
+{"time":"2026-11-07T17:46:29.896598-07:00","level":"INFO","component":"memoryNodesDB","msg":"stopped"}
+{"time":"2026-11-07T17:46:30.004234-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+--- FAIL: TestPeopleBrowseSearchesFallbackFullNamesBeforePagingDB (2.54s)
+    identity_directory_scope_db_test.go:185:
+            Error Trace:    /Users/znas/memql-os-lists/component/memql/identity_directory_scope_db_test.go:185
+            Error:          "[]" should have 1 item(s), but has 0
+            Test:           TestPeopleBrowseSearchesFallbackFullNamesBeforePagingDB
+            Messages:       the full name shown by the People view must be searchable even beyond the initial page
+FAIL
+FAIL    github.com/znasllc-io/memql/component/memql 3.449s
+FAIL

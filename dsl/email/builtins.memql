@@ -26,3 +26,19 @@ builtin emailInstallationSender {}
 
 @executor("integration.email.emailInstallationAccount")
 builtin emailInstallationAccount {}
+
+@sdk
+@executor("integration.email.inboxPage")
+@description("Read ten captured test message summaries from the past seven days. Search decrypts at most 100 stored messages per request; nextCursor continues a sparse search. Owner or developer only.")
+builtin emailInboxPage {
+ search string
+ accountId string
+ cursor string
+}
+
+@sdk
+@executor("integration.email.inboxMessage")
+@description("Read one captured test message with its body from the past seven days. Owner or developer only.")
+builtin emailInboxMessage {
+ messageId string!
+}

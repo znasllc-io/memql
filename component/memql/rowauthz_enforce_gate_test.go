@@ -159,13 +159,10 @@ var tierDecidesTheRead = map[string]string{
 	"companyLocationNoteForPropagation": "memql#5757, as productContentForPropagation, over the Shopify-mirrored company location note.",
 	"creditLimitForPropagation":         "memql#5757, as productContentForPropagation, over the Shopify-mirrored credit limit.",
 
-	"clientAccountsAll": "epic memql#5166. @requiresRank(\"admin\") bounds the callers to admin " +
-		"and above, for whom the deleted requiresDeveloperOrAbove arm was always true -- so the " +
-		"disjunction was a pass-through and the concept's tier already decided the row set. " +
-		"Keeping `own || clusterOwner` alone would have hidden every client an admin does not " +
-		"personally own.",
-	"clientAccountById": "epic memql#5166, as clientAccountsAll -- the same filter, the same " +
-		"annotation, the same tier.",
+	"clientAccountsBrowse": "memql#5598: the mandatory organization boundary admits accounts to their authorized members, including peer-authored records, and rejects foreign organizations. TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB proves both sides before pagination.",
+	"groupsBrowse":         "memql#5598: the mandatory organization boundary admits an organization's groups to its members, including peer-authored records, and rejects foreign organizations. TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB proves both sides before pagination.",
+	"clientAccountsAll":    "memql#5598: the mandatory organization boundary admits current account members and global cluster operators; creator ownership and an admin floor would exclude authorized organization members. TestOrganizationPiiBoundariesRemainEnforced and TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB pin the declaration and contact-field access.",
+	"clientAccountById":    "memql#5598, as clientAccountsAll -- the same account binding and actor context, narrowed to one account id.",
 
 	// The five group reads (epic memql#5165), and the argument is STRONGER
 	// here than for the two above rather than merely analogous.
@@ -319,6 +316,12 @@ var tierDecidesTheRead = map[string]string{
 	"packageDeploymentById":             "memql#5303, as packageDeployments -- the confirm gate's read.",
 	"packageDeploymentsInFlight":        "memql#5303, as packageDeployments -- the abandoned sweep's read, under the maintenance actor the clusterOwner arm admits.",
 
+	"deployableDirectorySites":      "memql#5598: mandatory organization/app authorization admits peer-authored directory data and rejects other organizations; TestPlatformDirectorySourcesOrganizationScopeDB executes this query boundary.",
+	"deployableDirectorySitesByIds": "memql#5598: mandatory organization/app authorization admits peer-authored directory data and rejects other organizations; TestPlatformDirectorySourcesOrganizationScopeDB executes this query boundary.",
+	"deployableDirectoryPackages":   "memql#5598: mandatory organization/app authorization admits peer-authored directory data and rejects other organizations; TestPlatformDirectorySourcesOrganizationScopeDB executes this query boundary.",
+	"deployableDirectoryPending":    "memql#5598: mandatory organization/app authorization admits peer-authored directory data and rejects other organizations; TestPlatformDirectorySourcesOrganizationScopeDB executes this query boundary.",
+	"packageNamesByIds":             "memql#5598: mandatory organization/app authorization admits peer-authored directory data and rejects other organizations; TestPlatformDirectorySourcesOrganizationScopeDB executes this query boundary.",
+
 	// The access code reads (deployable access codes, design record
 	// 2026-10-29), siteById's case over another concept.
 	//
@@ -375,6 +378,12 @@ var tierDecidesTheRead = map[string]string{
 	"campaignEngagementCountByKind": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"campaignEngagementRefs":        "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"campaignSkipCountByReason":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignsBrowse":               "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
+	"audienceNamesMatching":         "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
+	"audiencesBrowse":               "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
+	"templatesBrowse":               "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
+	"journeysBrowse":                "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
+	"emailRulesBrowse":              "memql#5598: mandatory organization/app authorization decides the read; TestEmailBrowsePagesSearchAndOrganizationScopeDB preserves authorized peers and rejects foreign organizations before pagination.",
 	"campaigns":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"campaignsForAccount":           "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"consentEventsBySubscriber":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",

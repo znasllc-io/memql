@@ -468,8 +468,8 @@ func entries() []Function {
 		{
 			Name:     "includes",
 			Receiver: TypeString,
-			Doc:      "Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false.",
-			Params:   []Param{{Name: "sub", Type: TypeString}},
+			Doc:      "Reports whether sub occurs in the string. Pass true as ignoreCase for a case-insensitive search; in a pushed-down filter this option must be a literal boolean. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false.",
+			Params:   []Param{{Name: "sub", Type: TypeString}, {Name: "ignoreCase", Type: TypeBool, Optional: true}},
 			Returns:  TypeBool,
 			Tier:     TierP,
 			Retired:  []string{"contains(s, sub)"},

@@ -2,7 +2,9 @@ package install_test
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -17,7 +19,10 @@ func TestInstallerScripts(t *testing.T) {
 		tool string
 		file string
 	}{
+		{"fixture-process", "python3", "fixture_process_test.py"},
 		{"release-discovery", "python3", "release_discovery_test.py"},
+		{"upgrade-linux", "python3", "upgrade_linux_test.py"},
+		{"upgrade-mac", "python3", "upgrade_mac_test.py"},
 		{"presentation", "python3", "ui_test.py"},
 		{"library", "bash", "lib_test.sh"},
 		{"menubar", "bash", "menubar_test.sh"},
@@ -29,12 +34,22 @@ func TestInstallerScripts(t *testing.T) {
 			}
 			ctx, cancel := suiteContext(t)
 			defer cancel()
-			output, err := exec.CommandContext(ctx, tool, suite.file).CombinedOutput()
+			output, err := suiteCommand(ctx, tool, suite.file).CombinedOutput()
 			if err != nil {
 				t.Fatalf("%s failed (%v):\n%s", suite.file, err, output)
 			}
 		})
 	}
+}
+
+// Python fixtures share this deadline rather than imposing a shorter per-child
+// wall-clock limit. That preserves the lane budget on busy native workers.
+func suiteCommand(ctx context.Context, tool, file string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, tool, file)
+	if deadline, ok := ctx.Deadline(); ok {
+		cmd.Env = append(os.Environ(), "MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS="+strconv.FormatInt(deadline.UnixMilli(), 10))
+	}
+	return cmd
 }
 
 // suiteContext stops a suite shortly before the test binary's own deadline,
@@ -73,5 +88,16 @@ func TestASuiteRunsUntilShortlyBeforeTheBinaryDeadline(t *testing.T) {
 	}
 	if margin := deadline.Sub(got); margin > 30*time.Second {
 		t.Fatalf("suite deadline ends %v before the binary's: a healthy suite on a slower machine is killed early", margin)
+	}
+}
+
+func TestPythonFixturesInheritTheSuiteDeadline(t *testing.T) {
+	ctx, cancel := suiteContext(t)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	cmd := suiteCommand(ctx, "python3", "ui_test.py")
+	want := "MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS=" + strconv.FormatInt(deadline.UnixMilli(), 10)
+	if cmd.Env[len(cmd.Env)-1] != want {
+		t.Fatalf("Python fixture must inherit the suite's deadline: got %v, want %s", cmd.Env[len(cmd.Env)-1], want)
 	}
 }

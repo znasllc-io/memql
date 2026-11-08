@@ -1,0 +1,5 @@
+ok      github.com/znasllc-io/memql/test/dslconformance 15.274s
+ok      github.com/znasllc-io/memql/test/conformance    55.077s
+ok      github.com/znasllc-io/memql/sdk/gen 1.764s
+ok      github.com/znasllc-io/memql/sdk/go/client   0.461s
+ok      github.com/znasllc-io/memql/cmd/memqlbreaking   1.475s

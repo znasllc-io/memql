@@ -73,9 +73,12 @@ pipelines:
 | `container_memory_mib` | `2048` | Maximum command-container memory in MiB, from 256 through 32768. A request may use less. Docker memory-plus-swap equals that limit. Each service has a separate 2 GiB limit. Native commands have no hard RAM quota. |
 | `container_cpu_milli` | `2000` | Maximum command-container CPU in milliCPU, from 1 through 256000. Each service has a separate two-CPU limit. Native commands have no hard CPU quota. |
 | `min_free_disk_mib` | `20480` | Available space required on the workspace filesystem before checkout and again before the pipeline command. Set 1024 through 1048576 MiB for this machine; omitted or zero uses the default. The cluster cannot lower it. |
+| `max_concurrent_steps` | `1` | How many steps this machine runs at once, 1 through 8. Each step past the first is admitted only when CPU, memory and disk fit it beside every step already running, each charged at its full limits ([Several steps at once](#several-steps-at-once)). Omitted or zero runs one step at a time, as every machine did before this setting. |
 
 For a test or build that needs more than 2 GiB, set `container_memory_mib: 4096`
-on a machine with enough free Docker memory. This uses existing machine
+on a machine with enough free Docker memory. To run two or more steps at once on
+a machine with room for them, set `max_concurrent_steps`; every limit above stays
+per step. This uses existing machine
 capacity. It creates no cloud resources and the cluster cannot override it.
 Allow headroom for service containers, the local cluster and other work.
 
@@ -121,17 +124,25 @@ here on the old answer in the meantime is refused by the new one.
    request caches cannot populate trusted push/release caches. Only the
    selected cache directory is mounted at `/cache`. The worker retains at
    most 10 GiB between builds by evicting oldest directories; this is a
-   retention budget, not a hard filesystem quota during a command. Caches
-   remain advisory and may disappear before a later build.
+   retention budget, not a hard filesystem quota during a command. A cache a
+   running step mounts is neither measured nor evicted, and nothing is
+   evicted while any slot holds an interrupted attempt, whose container may
+   still be writing. Two running steps with the same cache scope share one
+   directory, as the cluster's pods share theirs. Caches remain advisory and
+   may disappear before a later build.
 
-   A kernel file lock reserves one build slot across all cluster enrollments
-   and worker processes running as the same operating-system user, regardless
-   of `MEMQL_HOME` or checkout location. Occupied capacity returns
-   `pipeline_capacity_busy` before cloning. This bounds pipeline concurrency;
-   it does not reserve resources consumed by agents or other OS users.
+   A kernel file lock reserves the machine's build slots across all cluster
+   enrollments and worker processes running as the same operating-system
+   user, regardless of `MEMQL_HOME` or checkout location. There is one slot
+   unless `max_concurrent_steps` names more. Every slot taken returns
+   `pipeline_capacity_busy` before cloning, and so does a second attempt of a
+   step while an earlier attempt still holds a slot here. This bounds pipeline
+   concurrency; it does not reserve resources consumed by agents or other OS
+   users.
 
    Under that lock, the worker measures available space on the actual
-   workspace filesystem. Low space or an unreadable measurement returns the
+   workspace filesystem: `min_free_disk_mib` for this step and for each step
+   already running here. Low space or an unreadable measurement returns the
    same retryable capacity refusal with an explanation. After checkout it
    measures again; a refusal can be retried only after owned checkout cleanup
    succeeds. Failed cleanup retains the reservation and requires recovery.
@@ -142,9 +153,10 @@ here on the old answer in the meantime is refused by the new one.
    not a disk quota or a guarantee about a separate Docker data volume or
    storage consumed by programs outside the shared reservation.
 
-   Local development builds use the same slot and retain a separate
-   `local-build.json` record when their outcome is uncertain. Its presence
-   blocks pipeline admission even after the process exits. Inspect it with
+   Local development builds take the same lock, and wait for every running
+   step, and retain a separate `local-build.json` record when their outcome is
+   uncertain. Its presence blocks every slot's admission even after the
+   process exits. Inspect it with
    `python3 scripts/lib/host_build_guard.py --inspect` from the local build
    checkout, then reconcile the recorded processes and image operations.
    The worker never removes this record or infers safety from a missing PID.
@@ -212,7 +224,9 @@ here on the old answer in the meantime is refused by the new one.
    A replacement worker reconciles those recorded resources only after the
    original Docker daemon identifies itself. An unavailable or different
    daemon, a corrupt record, or interrupted native work keeps capacity blocked
-   with `pipeline_recovery_required`. Native recovery needs operator inspection
+   with `pipeline_recovery_required`. Each slot has its own record: an
+   interrupted attempt in one slot is reconciled while steps in other slots
+   keep running, and it blocks new steps, not the running ones. Native recovery needs operator inspection
    because this contract cannot prove that a process escaped no group.
    Completed work removes its checkout, including read-only trees, before
    releasing capacity or returning success. Filesystem failures retain a
@@ -248,7 +262,9 @@ provably ran nothing (a failed fetch, an unavailable cache or runtime, a
 capacity refusal), or whose command exited 75, after the installation's delay,
 and it may move the step to another machine. Each attempt is a fresh dispatch
 with a fresh checkout under the same reservation rules, so a machine still
-holding an earlier attempt refuses the next one before cloning. The engine reads
+holding an earlier attempt refuses the next one before cloning: with several
+slots, the dispatch's run and step identify the attempts of one step, and a
+dispatch naming neither runs only alone. The engine reads
 `pipeline_recovery_required` as an outcome it cannot know, because this worker
 answers it after a command as well as before one: it does not send that step
 here again, and only a step its pipeline marks `repeatable` moves on to another
@@ -314,9 +330,80 @@ container, plus persistent caches and their enrollment/trust separation. Set
 require the real service tests: an actual SQL query over localhost, service
 credential/mount boundaries, cancellation and complete resource cleanup.
 Separate process tests verify that cluster-specific workers cannot
-reserve the same build slot and cannot discard an interrupted attempt record.
+reserve the same build slot and cannot discard an interrupted attempt record,
+and that two slots' records survive the process that wrote them.
 No test upgrades the installed worker or enables its pipeline policy.
 
+
+## Several steps at once
+
+`pipelines.max_concurrent_steps` (1 through 8, default 1) lets a machine with
+room for it run several steps at once. Everything else about a step stays per
+step: its limits, its checkout, its record and its cleanup.
+
+```yaml
+pipelines:
+  allow: true
+  container_memory_mib: 8192
+  container_cpu_milli: 4000
+  max_concurrent_steps: 2
+```
+
+- **One lock, one record per slot.** The steps share the host build lock
+  (`~/.memql/worker-capacity/pipeline.lock`): the first takes it, later steps
+  join, and the last to finish releases it, so a workbench or a guarded local
+  build still waits for every step. Slot 0 keeps its record in `pipeline.lock`,
+  as a machine with one slot always did; slot *n* keeps its own in
+  `pipeline-slot-n.lock`. A machine that names no `max_concurrent_steps` writes
+  no other file. Never delete or truncate a slot file by hand.
+- **Steps share one worker process.** The lock is held by the worker process
+  that runs the steps, and the supervisor runs every enrollment in one process.
+  A second worker process on the same account, such as a legacy single-home
+  worker started beside the supervisor, is refused with
+  `pipeline_capacity_busy` while the first runs any step.
+- **Admission charges every running step in full.** The CPU and memory checks
+  add each running step's command and service limits to the new step's, and
+  the disk check asks for `min_free_disk_mib` for each of them as well as for
+  the new step. A step that is still cloning has used almost none of what it
+  will, so this is what keeps two steps admitted on the same free memory from
+  both counting on it. It over-reserves by what the running steps already use.
+  With two 4000-milliCPU steps, a machine needs at least nine CPUs, since one
+  stays outside every step. Lower the per-step limits or the count to fit more.
+- **Two attempts of one step never run at once.** The engine retries a step on
+  the machine it last ran on and counts on that machine to refuse the retry
+  while the earlier attempt still runs. A slot is therefore tied to the run and
+  step the dispatch names, and a second attempt of a running step is refused
+  `pipeline_capacity_busy` even when another slot is free. A dispatch naming
+  neither runs only alone.
+- **An interrupted slot is reconciled beside running ones.** A slot whose
+  record outlived its step is reconciled at the next admission or by the
+  once-a-minute maintenance, while the steps in other slots keep running; their
+  containers, workspaces and records are never read or touched. Until it is
+  reconciled no new step starts, and native work still needs an operator.
+- **Caches are shared, never pulled from under a step.** A cache a running
+  step mounts is neither measured nor evicted, and no eviction runs while any
+  slot holds an interrupted attempt.
+- **Keep it at or below the worker's HEADLESS concurrency** (`concurrency:
+  HEADLESS` in the worker configuration, 8 by default). Each running step
+  holds one of those slots on the engine's side, as do an agent's commands and
+  file reads on this machine, and a step beyond them waits in the engine's
+  queue for this machine instead of being refused and routed elsewhere.
+
+The engine needs no setting of its own: no slot count is advertised. It routes
+a step by the owner's routing strategy (first fit by default) and learns that a
+machine is full only from a `pipeline_capacity_busy` refusal, after which it
+waits and routes again, so a machine with more slots simply refuses less
+often. A changed `allow` or `repos` still reaches the engine at the first
+moment nothing is running, which a busy machine with several slots reaches
+less often; a step routed here on the old answer is refused by the new one.
+
+Known limits. A local build guard (`scripts/lib/host_build_guard.py`) from a
+checkout older than this setting reads only `pipeline.lock`: after a worker dies
+it does not see an interrupted step in another slot, so update the checkout
+before turning slots on for a machine that also runs local builds. An older
+Cockpit on the same account reads only `pipeline.lock` too. Lowering
+`max_concurrent_steps` never stops a running step; new steps wait until fewer
+run than the new count.
 
 ## Shared host admission
 
@@ -332,6 +419,8 @@ stretches, available memory against the reserve decides, and a level the worker
 does not recognize refuses. Docker admission subtracts current container RAM
 usage and keeps at least 2 GiB or one quarter of its pool for runtime overhead;
 this is conservative admission, not a reservation against unrelated applications.
+On a machine running several steps the sums include every step already running
+([Several steps at once](#several-steps-at-once)).
 
 Every enrollment under the same operating-system account shares one host build
 lock with local builds and workbenches. Local model calls take no part in that

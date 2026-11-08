@@ -4,14 +4,16 @@ import { useSession } from "../../chrome/access";
 import { accessAdmits } from "../../system/registry";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { flatten } from "../../kit/rows";
+import { useDemandedRead, useReadDemand } from "../../kit/readDemand";
 
 export interface ExternalConnection { id: string; ownerUserId: string; provider: string; resourceId: string; label: string; status: string }
 const CONCEPT = "v1:platform:externalConnection";
-const Context = createContext<LiveCollectionHandle<Row> | null>(null);
+const Context = createContext<{ feed: LiveCollectionHandle<Row>; retain: () => () => void } | null>(null);
 export function SharedExternalConnectionsProvider({ children }: { children: ReactNode }) {
   useSession();
-  const feed = useFeed(accessAdmits("app:settings/connections"));
-  return <Context.Provider value={feed}>{children}</Context.Provider>;
+  const demand = useReadDemand();
+  const feed = useFeed(demand.requested && accessAdmits("app:settings/connections"));
+  return <Context.Provider value={{ feed, retain: demand.retain }}>{children}</Context.Provider>;
 }
 function useFeed(enabled: boolean) {
   const { access } = useSession();
@@ -28,8 +30,9 @@ function useFeed(enabled: boolean) {
 }
 export function useExternalConnections() {
   const shared = useContext(Context);
+  useDemandedRead(shared?.retain);
   const own = useFeed(shared === null);
-  const feed = shared ?? own;
+  const feed = shared?.feed ?? own;
   const { access } = useSession();
   const rows = feed.snapshot.rows.map(raw => {
     const row = flatten(raw);

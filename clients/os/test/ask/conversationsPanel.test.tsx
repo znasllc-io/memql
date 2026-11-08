@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AskSurface } from "../../src/ask/AskSurface";
 import { ConversationSession, type AskTurn } from "../../src/ask/conversationSession";
@@ -28,7 +28,7 @@ it("opens a searchable full-panel list and returns to the current conversation",
  expect(screen.queryByRole("log")).toBeNull();
  expect(screen.queryByRole("button", { name: /back|close activity/i })).toBeNull();
  fireEvent.change(screen.getByRole("textbox", { name: "Find a conversation" }), { target: { value: " OLDER " } });
- expect(screen.queryByRole("button", { name: "Current thread" })).toBeNull();
+ await waitFor(() => expect(screen.queryByRole("button", { name: "Current thread" })).toBeNull());
  expect(screen.getByRole("button", { name: "Older conversation" })).toBeTruthy();
  expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
  fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
@@ -85,18 +85,15 @@ it("shows loading and a retryable list failure without flashing the empty state"
  expect(screen.getByRole("button", { name: "Older conversation" })).toBeTruthy();
 });
 
-it("keeps existing rows during refresh and distinguishes no results from no conversations", async () => {
+it("restores loaded history without rereading and distinguishes an empty search", async () => {
  const w = await setup(); await openList();
  fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
- const list = deferred<typeof items>(); w.store.list.mockReturnValueOnce(list.promise);
  fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
  expect(screen.getByRole("button", { name: "Older conversation" })).toBeTruthy();
- expect(screen.getByText("Refreshing conversations")).toBeTruthy();
+ expect(w.store.list).toHaveBeenCalledOnce();
  fireEvent.change(screen.getByRole("textbox", { name: "Find a conversation" }), { target: { value: "nothing matches" } });
- expect(screen.getByText("No conversations match.")).toBeTruthy();
- await act(async () => list.resolve([]));
- expect(screen.getByText("No conversations yet.")).toBeTruthy();
- expect(screen.queryByText("No conversations match.")).toBeNull();
+ await waitFor(() => expect(screen.getByText("No conversations match.")).toBeTruthy());
+ expect(screen.queryByText("No conversations yet.")).toBeNull();
 });
 
 it("allows browsing during a reply, but does not switch away from its active conversation", async () => {

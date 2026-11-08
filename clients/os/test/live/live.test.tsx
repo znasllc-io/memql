@@ -58,6 +58,17 @@ describe("arrival reducer", () => {
     expect(s.ticks.size).toBe(0);
   });
 
+  it("retains earned cues through an empty search seed, then prunes settled removals", () => {
+    let s = observeSnapshot(emptyArrivals(), [{ id: "a", fingerprint: "1" }], "live", 0);
+    s = observeSnapshot(s, [{ id: "a", fingerprint: "2" }], "live", 10);
+    s = observeSnapshot(s, [], "seeding", 20);
+    expect(s.ticks.get("a")?.kind).toBe("updated");
+    s = observeSnapshot(s, [{ id: "a", fingerprint: "2" }], "live", 30);
+    expect(s.ticks.get("a")?.kind).toBe("updated");
+    s = observeSnapshot(s, [], "live", 40);
+    expect(s.ticks.size).toBe(0);
+  });
+
   it("does not re-animate a reconnect resync", () => {
     let s = emptyArrivals();
     s = observeSnapshot(s, [{ id: "a", fingerprint: "1" }], "live", 0);
@@ -106,6 +117,21 @@ describe("LiveList", () => {
     expect(screen.getByText("beta (new)")).toBeTruthy();
     const row = document.querySelector('[data-arrival="added"]');
     expect(row).not.toBeNull();
+  });
+
+  it("treats search changes and loaded pages as baselines while keeping real arrival cues", () => {
+    const first = fakeSource({ ...snap([{ id: "a", name: "alpha", v: 1 }], "live", 1), pageCount: 1 });
+    const renderList = (source: LiveListSource<Row>) => <LiveList source={source} rowId={row => row.id} fingerprint={row => String(row.v)} label="Rows" renderRow={(row, tick) => <span>{row.name}{tick ? ` (${tick})` : ""}</span>} />;
+    const view = render(renderList(first));
+    act(() => first.push({ ...snap([{ id: "a", name: "alpha", v: 1 }, { id: "b", name: "beta", v: 1 }], "live", 2), pageCount: 2 }));
+    expect(screen.getByText("beta")).toBeTruthy();
+    expect(document.querySelector("[data-arrival]")).toBeNull();
+    const searched = fakeSource({ ...snap([{ id: "c", name: "charlie", v: 1 }], "live", 2), pageCount: 1 });
+    view.rerender(renderList(searched));
+    expect(screen.getByText("charlie")).toBeTruthy();
+    expect(document.querySelector("[data-arrival]")).toBeNull();
+    act(() => searched.push({ ...snap([{ id: "c", name: "charlie", v: 1 }, { id: "d", name: "delta", v: 1 }], "live", 3), pageCount: 1 }));
+    expect(screen.getByText("delta (added)")).toBeTruthy();
   });
 
   it("renders the disconnected caption for a null source, never a fake empty list", () => {

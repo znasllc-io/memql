@@ -36,25 +36,14 @@ import { useReviewQueue } from "./useReviewQueue";
 import { useTrain } from "./useTrain";
 import { useUploads } from "./useUploads";
 import { useSession } from "../../chrome/access";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../logs/useDebouncedValue";
 
 // Training: teach MemQL from files (epic memql#4737, re-keyed to the Library
 // in epic memql#4970).
 //
-// ===========================================================================
-// THREE FEEDS, HELD HERE, READ BY THREE SECTIONS
-// ===========================================================================
-// The file feed and the run feed are live and the domain feed is not, and all
-// three are retained at this root rather than inside the sections that read
-// them.
-//
-// For the DOMAINS read that is the Deployables lesson applied: the Domains
-// cards, the Review queue's walk and now the Teach picker are three readings
-// of one answer, and a second `useDomains()` inside any of them would be free
-// to disagree with the others about which domains this cluster holds.
-//
-// For the two LIVE feeds it is also what makes switching sections free: the
-// collections stay retained for the life of the window rather than re-seeding
-// every time somebody looks at the queue and comes back.
+// Reads are demand-driven by the active section. The shared session cache keeps
+// loaded pages across navigation and window closure; no hidden section needs
+// to retain an active subscription merely to preserve its data.
 //
 // WHY THE FILE FEED AND THE RUN FEED ARE TWO, rather than one read that joins
 // them: they are written by different things at different times. The upload
@@ -113,8 +102,11 @@ export function TrainingApp({
 
   const uploads = useUploads(provider);
 
-  const { source: fileCollection, reseed } = useLibraryFiles();
-  const { source: runCollection } = useAnalysisRuns();
+  const uploadVisible = !["domains", "review", "skills", "evaluations", "settings", "logs"].includes(sectionId ?? "");
+  const [fileSearch, setFileSearch] = useState("");
+  const searchedFiles = useDebouncedValue(fileSearch.trim(), TEXT_DEBOUNCE_MS);
+  const fileFeed = useLibraryFiles(uploadVisible || uploads.entries.length > 0, searchedFiles);
+  const { source: fileCollection, reseed } = fileFeed;
 
   // PROJECT, THEN NARROW, IN ONE PASS. A collection holds RAW wire rows --
   // its fold upserts an arriving event's payload AS the row type with no
@@ -135,6 +127,7 @@ export function TrainingApp({
   );
   const snapshot = files?.snapshot ?? EMPTY_SNAPSHOT;
 
+  const { source: runCollection } = useAnalysisRuns(uploadVisible ? snapshot.rows.map(file => file.id) : []);
   const runs = useLiveView<Row, AnalysisRun>(runCollection, "runs", (rows) =>
     rows.map(runFromRow).filter(runBelongsHere),
   );
@@ -144,29 +137,8 @@ export function TrainingApp({
   // newest -- which is the first, because the feed is newest-first.
   const runsByFileId = useMemo(() => runsByFile(runRows), [runRows]);
 
-  const domains = useDomains();
-  // Only the domains that actually hold work. This is what the
-  // `validationStatus` key added to `documentChunkDomainLite` buys: without it
-  // the queue would have to page every domain to find out which had any.
-  const domainsWithWork = useMemo(
-    () => domains.rollups.filter((r) => r.unvalidated > 0).map((r) => r.domainId),
-    [domains.rollups],
-  );
-  // HELD AT THE ROOT, WHICH MEANS THE WALK STARTS BEFORE ANYBODY OPENS THE
-  // QUEUE. That is a deliberate trade rather than an oversight.
-  //
-  // The queue holds DECISION state -- which chunks were decided, and the
-  // cards collapsed in place to record it. Mounted inside `ReviewSection`, a
-  // trip to Domains and back would discard the loaded pages and every one of
-  // those collapsed cards, re-walk from page one, and offer the same chunks
-  // again as though nothing had been decided. Losing a record of work
-  // somebody just did is worse than an early read.
-  //
-  // The read it costs is bounded: on a cluster with nothing unvalidated
-  // `domainsWithWork` is empty and this walks nothing at all, and where there
-  // IS work one step reads at most PAGES_PER_STEP pages -- which is the work
-  // the person opened this app to do.
-  const queue = useReviewQueue(domainsWithWork);
+  const domains = useDomains(uploadVisible || sectionId === "domains");
+  const queue = useReviewQueue(sectionId === "review");
   const decisions = useChunkDecisions();
   const train = useTrain();
 
@@ -284,8 +256,6 @@ export function TrainingApp({
         queue={queue}
         decisions={decisions}
         onDecide={(chunkId, status) => void decide(chunkId, status)}
-        domainsError={domains.error}
-        domainsAvailable={domains.state === "ready" && !domains.error}
       />
     );
   }
@@ -297,6 +267,9 @@ export function TrainingApp({
   return (
     <UploadSection
       uploads={uploads}
+      fileFeed={fileFeed}
+      search={fileSearch}
+      onSearch={setFileSearch}
       files={files}
       snapshot={snapshot}
       runsByFileId={runsByFileId}

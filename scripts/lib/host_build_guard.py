@@ -32,6 +32,9 @@ LOCK_FD_ENV = "MEMQL_HOST_BUILD_LOCK_FD"
 TOKEN_ENV = "MEMQL_HOST_BUILD_LOCK_TOKEN"
 DEFAULT_MIN_FREE_MIB = 20480
 MARKER_NAME = "local-build.json"
+# Every Fleet pipeline slot past the first: pipeline-slot-<n>.lock, the lock and
+# attempt record of the step in slot n (slot 0 is pipeline.lock itself).
+PIPELINE_SLOT_GLOB = "pipeline-slot-*.lock"
 CANCEL_GRACE_SECONDS = 5
 # The Cockpit's local model call fence, read by the rule its own readers apply
 # (cockpit/internal/worker/capacity/host_inference.go): a version 2 record names
@@ -173,6 +176,16 @@ def host_build_guard(inherited_fd=None, *, _completed_record=None):
             raise GuardError("This machine is already building or running a Fleet workbench; retry when it finishes") from error
         if os.fstat(fd).st_size:
             raise GuardError("An interrupted Fleet pipeline needs reconciliation before a local build can start")
+        # A machine whose policy allows several pipeline steps
+        # (pipelines.max_concurrent_steps) keeps each extra step's record in a
+        # slot file of its own (the Cockpit's capacity.PipelineSlotFile). A
+        # running step holds pipeline.lock exclusively, so under this lock a
+        # slot record with content, or a slot file that is not a regular file,
+        # is an interrupted step, as one in pipeline.lock is.
+        for path in root.glob(PIPELINE_SLOT_GLOB):
+            info = path.lstat()
+            if not regular_owned(info) or info.st_size:
+                raise GuardError("An interrupted Fleet pipeline needs reconciliation before a local build can start")
         # Inference takes no part in this lock and may outlive its worker process,
         # so its record fences builds until the time it names: the call's own
         # deadline, at which its request is cut off. Before then a PID's

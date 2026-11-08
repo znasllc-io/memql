@@ -51,9 +51,15 @@ query workspace provisionedWorkspaces {
 /// list on /fleet/workbenches for a person who is not a cluster owner.
 @actor
 query workspace myWorkspaces {
-  filter   row => row.ownerUserId == actor.userId
+  args {
+    includeReleased bool
+    search string
+  }
+  filter row => row.ownerUserId == actor.userId
+    && (args.includeReleased != false || row.status != "released")
+    && (args.search == nil || trim(args.search) == "" || row.runId.includes(trim(args.search), true) || row.nodeId.includes(trim(args.search), true) || row.storageRoot.includes(trim(args.search), true) || row.releasedReason.includes(trim(args.search), true))
   sort     "row.createdAt", "desc"
-  paginate 100
+  paginate 10
   shape    workspaceFull
 }
 

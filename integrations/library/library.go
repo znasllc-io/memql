@@ -125,6 +125,8 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "browseFacets", Handler: i.handleBrowseFacets},
+		{Name: "trainingLessonsPage", Handler: i.handleTrainingLessonsPage},
 		{Name: "saveTrainingLesson", Description: "Append one owner-reviewed manual lesson revision or decision.", Handler: i.handleSaveTrainingLesson},
 		{Name: "indexTrainingLesson", Description: "Index an exact enabled manual lesson revision.", Handler: i.handleIndexTrainingLesson},
 		{Name: "workTrainingContext", Description: "Read the current owned work scope for Training retrieval.", Handler: i.handleWorkTrainingContext},

@@ -63,7 +63,11 @@ builtin releasePrepareBuild { profileName string! pipelineId string! expectedCon
 /// Read this owner's saved release journeys, including interrupted attempts.
 @sdk
 @executor("integration.release.builds")
-builtin releaseBuilds { limit integer }
+builtin releaseBuilds {
+ limit integer
+ cursor string
+ search string
+}
 
 /// Read a saved release's current candidate approval and available actions without remote effects.
 @sdk
@@ -119,6 +123,7 @@ builtin releaseCandidateTargets { candidateId string! }
 builtin releaseCandidates {
   cursor string
   limit integer
+  search string
 }
 
 /// Verify an immutable candidate using complete work evidence and operator configuration.
@@ -390,6 +395,7 @@ builtin releaseDiscoverPublishedCandidates {
   sourceId string!
   cursor string
   limit integer
+  search string
 }
 
 /// Reverify an exact discovery selection without approving or starting installation.
@@ -534,6 +540,12 @@ builtin releaseObserveInstallationProposal { proposalId string! }
 @executor("integration.release.resumeInstallation")
 builtin releaseResumeInstallation { installationId string! preparationId string! }
 
+/// Cancel or continue cancelling the original operator's unfinished preparation.
+/// Native cleanup retains its reservation until producer and artifact fences complete.
+@sdk
+@executor("integration.release.cancelInstallationPreparation")
+builtin releaseCancelInstallationPreparation { installationId string! preparationId string! }
+
 /// Cancel the original operator's current plan only before application begins.
 @sdk
 @executor("integration.release.cancelInstallation")
@@ -544,3 +556,10 @@ builtin releaseCancelInstallation { installationId string! planId string! }
 @sdk
 @executor("integration.release.rollbackInstallation")
 builtin releaseRollbackInstallation { installationId string! planId string! }
+
+/// Confirm the exact saved installation pin with its connected GitHub owner.
+/// Only explicitly configured owner-push repositories support this operation.
+/// Landing makes a revision selectable; applying remains a separate action.
+@sdk
+@executor("integration.release.landInstallationProposal")
+builtin releaseLandInstallationProposal { proposalId string! expectedCommit string! }

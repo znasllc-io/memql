@@ -54,6 +54,14 @@ describe("automatic background reads", () => {
     await advance(250);
     expect(read).toHaveBeenCalledOnce();
   });
+  it("keeps polling without adding a second session resume read", async () => {
+    const read = vi.fn();
+    render(<AutoRefresh resume={false} onRefresh={read} />);
+    await act(async () => { fireEvent.focus(window); fireEvent.online(window); });
+    expect(read).not.toHaveBeenCalled();
+    await advance();
+    expect(read).toHaveBeenCalledOnce();
+  });
   it("never overlaps a slow read, retries rejection, and respects disabled terminal records", async () => {
     let reject!: (error: Error) => void;
     const read = vi.fn(() => new Promise<void>((_, fail) => { reject = fail; }));

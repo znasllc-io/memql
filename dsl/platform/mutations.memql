@@ -2913,8 +2913,9 @@ mutation sourceCredential revokeSourceCredential {
   }
 }
 
-/// Stamp the heartbeat. Pipeline writer: the fetcher and the poll call it right after unsealing, so
-/// `lastUsedAt` is the engine's own account of a fetch and never enters an arrival-cue fingerprint.
+/// Stamp the heartbeat. Pipeline writer: the fetcher and the poll call it right after unsealing, when
+/// the stored `lastUsedAt` is more than an hour old, so it is the engine's own account of a fetch to
+/// within an hour and never enters an arrival-cue fingerprint.
 ///
 /// actor.userId scoping is not the fix, for the reason recordPackageDeployedVersion gives: the value
 /// is a claim about what the engine DID, and a caller stamping it on their own credential would be

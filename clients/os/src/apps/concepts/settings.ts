@@ -30,14 +30,8 @@ export interface ConceptsSettings {
   /** The section the app navigates to when its window opens. */
   defaultSection: string;
   /**
-   * How many rows one page of a concept's row window asks for.
-   *
-   * A PREFERENCE rather than a control on the surface, per DESIGN.md rule
-   * 4: page size is a standing choice about how this person likes to read,
-   * not a question the rows pane should ask over and over.
-   *
-   * 100 by default rather than the SDK's own 200: this is an interactive
-   * pane, not a bulk export, and the first page is what somebody waits for.
+   * Ten rows per page. Old saved preferences are normalized to the shared
+   * resource navigation size when read.
    */
   pageSize: number;
   /**
@@ -59,13 +53,13 @@ export const DEFAULT_CONCEPTS_SETTINGS: ConceptsSettings = {
   // corrupt or absent document falls back to, and falling back to a
   // section that does not exist is the failure sanitize repairs.
   defaultSection: "registry",
-  pageSize: 100,
+  pageSize: 10,
   showUndeclaredFields: true,
 };
 
 /** The page sizes the settings section offers. A closed set: an arbitrary
  *  number here is a way to ask the cluster for a page nobody wanted. */
-export const CONCEPTS_PAGE_SIZES = [50, 100, 200] as const;
+export const CONCEPTS_PAGE_SIZES = [10] as const;
 
 /**
  * An unreadable, wrong-version or partially-garbage document comes back as

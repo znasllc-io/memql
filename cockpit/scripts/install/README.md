@@ -58,8 +58,28 @@ offline discovery, renderer, shell-library and menu fixture suites. Missing
 Bash or Python fails that check. Fixtures use temporary homes and inert
 binaries; they never install a published release or enroll this machine.
 
+The Python fixtures inherit the Go suite's deadline through
+`MEMQL_INSTALLER_TEST_DEADLINE_UNIX_MS`. They spend one shared budget, with a
+small reserve to terminate fixture process groups and report captured output
+before Go stops the suite. Standalone Python runs have one ten-minute budget.
+The former 8/10/15/20-second child limits could reject healthy installers on a
+busy native worker even while the enclosing lane still had time: the November
+7 baseline pipeline timed out the Linux current-version presentation fixture
+at ten seconds. This changes fixture scheduling only; production network and
+operation timeouts stay in place. `fixture_process_test.py` verifies inherited
+and expired budgets, the cleanup reserve, retained diagnostics, and termination
+of descendants that keep output pipes open after their parent exits.
+Cleanup operations share the reserve rather than each starting another timeout.
+Terminal fixtures also terminate their process group after EOF: macOS can report
+EOF with a live orphan, and can reject signals to a zombie-only group with
+`EPERM`. Only a successful, bounded inspection showing that exact group is absent
+or contains only zombies permits ignoring that error; live members or a failed
+inspection preserve the denial. The presentation suite covers the live orphan,
+and the process helper tests cover both harmless and genuine permission errors.
+
 ```bash
 python3 scripts/install/render-mark.py --check
+python3 scripts/install/fixture_process_test.py
 python3 scripts/install/ui_test.py
 python3 scripts/install/release_discovery_test.py
 bash scripts/install/lib_test.sh

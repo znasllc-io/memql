@@ -44,6 +44,7 @@ export interface ChecksPartProps {
   runs: readonly RunRow[];
   /** Whether the pipelines and runs feeds have answered: before that nothing is said. */
   settled: boolean;
+  hasMore?: boolean;
   /** Why the feeds could not answer, when they could not. */
   error?: string;
   /** Open one run's page. Without it the rows are read-only lines. */
@@ -52,7 +53,7 @@ export interface ChecksPartProps {
   onOpenRuns?: () => void;
 }
 
-export function ChecksPart({ pipeline, runs, settled, error = "", onOpenRun, onOpenRuns }: ChecksPartProps) {
+export function ChecksPart({ pipeline, runs, settled, error = "", hasMore = false, onOpenRun, onOpenRuns }: ChecksPartProps) {
   const now = useNow();
   const rows = pipeline === null ? [] : lastRunPerBranch(runs, pipeline.defaultBranch);
   return (
@@ -62,7 +63,7 @@ export function ChecksPart({ pipeline, runs, settled, error = "", onOpenRun, onO
           <ListChecks size={12} aria-hidden /> Checks
           {/* The count is every branch with a run, not the rows drawn: a
               count describes the collection, before any windowing. */}
-          {settled && pipeline !== null ? <span className="os-head-meta">{rows.length}</span> : null}
+          {settled && pipeline !== null ? <span className="os-head-meta">{rows.length}{hasMore ? "+" : ""}</span> : null}
         </h4>
         {pipeline !== null && onOpenRuns ? (
           <button type="button" className="pipeline-checks-all" onClick={onOpenRuns}>All runs</button>
@@ -82,6 +83,7 @@ export function ChecksPart({ pipeline, runs, settled, error = "", onOpenRun, onO
           ) : rows.length === 0 ? (
             <Caption>No runs yet. The first run starts with the next push or pull request.</Caption>
           ) : null}
+          {hasMore ? <Caption>Branches in the ten most recent runs. Open All runs for earlier history.</Caption> : null}
           {rows.length > 0 ? (
             <RecordList as="ul">
               {rows.slice(0, CHECKS_ROWS).map((run) => (

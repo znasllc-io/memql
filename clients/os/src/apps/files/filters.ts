@@ -136,6 +136,7 @@ function matchesSearch(row: ArtifactRow, needle: string): boolean {
   if (q === "") return true;
   if (artifactName(row).toLowerCase().includes(q)) return true;
   if (row.summary.toLowerCase().includes(q)) return true;
+  if (row.id.toLowerCase() === q || row.producedByWorkerName.toLowerCase().includes(q)) return true;
   return row.labels.some((label) => label.toLowerCase().includes(q));
 }
 

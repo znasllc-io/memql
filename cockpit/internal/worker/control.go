@@ -42,8 +42,12 @@ type LocalHomeStatus struct {
 }
 
 type LocalStatus struct {
-	Version                  string            `json:"version"`
-	PID                      int               `json:"pid"`
+	Version string `json:"version"`
+	PID     int    `json:"pid"`
+	// Busy is an observation; prepare-update atomically checks it and
+	// reserves admission before replacing the worker.
+	Busy                     bool              `json:"busy"`
+	UpdatePending            bool              `json:"update_pending"`
 	Homes                    []LocalHomeStatus `json:"homes"`
 	Accessibility            string            `json:"accessibility"`
 	ScreenRecording          string            `json:"screen_recording"`
@@ -81,6 +85,15 @@ func (f *Fleet) LocalStatus() LocalStatus {
 	status.Setup = f.setup.Local()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.update.mu.Lock()
+	status.UpdatePending = f.update.finishing || time.Now().Before(f.update.until)
+	f.update.mu.Unlock()
+	for _, h := range f.managed {
+		if h.runner != nil && h.runner.busy() {
+			status.Busy = true
+			break
+		}
+	}
 	for _, home := range f.workers.Homes {
 		h := f.managed[home.ID]
 		enabled, state := home.IsEnabled(), "Starting"
@@ -338,7 +351,26 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 		return
 	}
 	response := controlResponse{OK: true}
+	var shutdown func()
 	switch request.Action {
+	case "finish-update":
+		var err error
+		shutdown, err = fleet.finishUpdate(request.PID)
+		if err != nil {
+			response.OK = false
+			response.Error = err.Error()
+		} else {
+			status := fleet.LocalStatus()
+			response.Status = &status
+		}
+	case "prepare-update", "cancel-update":
+		if err := fleet.controlUpdate(request.Action, request.PID); err != nil {
+			response.OK = false
+			response.Error = err.Error()
+		} else {
+			status := fleet.LocalStatus()
+			response.Status = &status
+		}
 	case "request-permission":
 		if err := localPermissionRequests.request(request.Permission, request.PID, permissionRequestsSupported(), promptForPermission); err != nil {
 			response.OK = false
@@ -382,6 +414,11 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 		response.Error = "unknown control action"
 	}
 	json.NewEncoder(conn).Encode(response)
+	if shutdown != nil {
+		// Flush the bounded response before closing the worker's listener. A
+		// lost reply does not reopen admission or cancel an accepted shutdown.
+		shutdown()
+	}
 }
 
 func callControl(path string, request controlRequest) (controlResponse, error) {
@@ -414,9 +451,9 @@ func callControl(path string, request controlRequest) (controlResponse, error) {
 
 func handleControl(args []string) {
 	fs := flag.NewFlagSet("worker control", flag.ContinueOnError)
-	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), or request-permission (explicit local macOS prompt)")
+	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), request-permission (explicit local macOS prompt), prepare-update, finish-update, or cancel-update")
 	permission := fs.String("permission", "", "accessibility or screen_recording, for request-permission")
-	pid := fs.Int("pid", 0, "expected worker process ID, required for request-permission")
+	pid := fs.Int("pid", 0, "expected worker process ID, required for permission and update actions")
 	home := fs.String("home", "", "configured server ID")
 	enabled := fs.String("enabled", "", "true to allow connecting, false to pause")
 	plan := fs.String("plan", "", "for setup: the stages the installer will run, comma-separated (permissions, runtime, models, workbench)")

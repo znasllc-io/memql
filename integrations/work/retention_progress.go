@@ -27,6 +27,20 @@ func (i *Integration) loadRetentionProgress(ctx context.Context, p operationalPo
 	if err != nil {
 		return nil, err
 	}
+	// THE KEY NAMES THE CONFIGURATION, NOT ONLY THE POLICY: the window's days
+	// and the predicate are hashed into it. A checkpoint says "every candidate
+	// before here was examined under THIS predicate and window". A different
+	// predicate or window can make rows behind that point eligible that were
+	// not when it was written -- event firings joining the system-run policy
+	// (2026-11-06) is the predicate case -- and resuming from the old cursor
+	// would skip them until a whole traversal reset it, nights later. A
+	// changed configuration therefore gets a fresh row and walks from the
+	// oldest stored version; nothing it selects is skipped
+	// (TestAChangedSystemRunPredicateWalksFromTheStart). The superseded row is
+	// left in the table, inert: no configuration reads it again. Deleting it
+	// here was rejected: during a rolling deploy an older cron leader still
+	// runs the old configuration, and removing its row under it fails that
+	// policy's pass.
 	key := fmt.Sprintf("%s/%s/%s", p.concept, p.env, id.NewUntracked().FromString(fmt.Sprintf("%d:%s", p.days, p.predicate)))
 	if _, err := db.ExecContext(ctx, `INSERT INTO work_retention_progress (policy) VALUES (?) ON CONFLICT DO NOTHING`, key); err != nil {
 		return nil, err

@@ -33,6 +33,7 @@ package knowledge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 	"strings"
@@ -170,45 +171,57 @@ func (i *Integration) loadSpecialist(ctx context.Context, specialistId string) m
 	return rows[0]
 }
 
-// loadExistingCorpus pulls the domain's current chunks (capped and
-// text-truncated) for the Trainer's refresh decision. Best-effort: a query
-// failure yields an empty corpus, which the prompt tolerates.
+// loadExistingCorpus walks authorized pages until the existing 40-published-
+// chunk prompt budget is filled or the source ends. A failed continuation never
+// passes a partial corpus to the trainer; callers retain the prior best-effort
+// empty-corpus behavior. The list page size is not a training input budget.
 func (i *Integration) loadExistingCorpus(ctx context.Context, domainId string) []map[string]any {
-	res, err := i.engine.Execute(memql.ContextWithFreshRead(ctx), fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(domainId)))
+	out, err := collectExistingCorpus(memql.ContextWithFreshRead(ctx), i.engine.Execute, fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(domainId)))
 	if err != nil {
-		i.Logger.Warn("trainSpecialist: loadExistingCorpus failed",
-			"component", "knowledge.train", "domainId", domainId, "error", err)
+		i.Logger.Warn("trainSpecialist: loadExistingCorpus failed", "component", "knowledge.train", "domainId", domainId, "error", err)
 		return nil
 	}
-	rows := memql.MaterializeRows(res)
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if !seeddata.Allows(rowStringField(row, "id"), row) {
-			continue
-		}
-		// Review reads may show pending/rejected material. A Trainer prompt may
-		// only consume published knowledge, including after another replica's
-		// review decision.
-		if rowStringField(row, "validationStatus") != "validated" {
-			continue
-		}
-		if b, ok := row["superseded"].(bool); ok && b {
-			continue
-		}
-		entry := map[string]any{
-			"chunkId":   rowStringField(row, "id"),
-			"sourceRef": rowStringField(row, "sourceRef"),
-			"text":      truncateText(rowStringField(row, "text"), existingCorpusTextMaxLen),
-		}
-		if ca := rowStringField(row, "createdAt"); ca != "" {
-			entry["createdAt"] = ca
-		}
-		out = append(out, entry)
-		if len(out) >= maxExistingCorpusChunks {
-			break
-		}
-	}
 	return out
+}
+
+var corpusBudgetFilled = errors.New("training corpus prompt budget filled")
+
+func collectExistingCorpus(ctx context.Context, execute func(context.Context, string) (*memql.ExecuteResult, error), call string) ([]map[string]any, error) {
+	out := make([]map[string]any, 0, maxExistingCorpusChunks)
+	err := memql.WalkQueryPages(ctx, execute, call, 10000, func(result *memql.ExecuteResult) error {
+		rows := memql.MaterializeRows(result.OutputPayload())
+		for _, row := range rows {
+			if !seeddata.Allows(rowStringField(row, "id"), row) {
+				continue
+			}
+			// Review reads may show pending/rejected material. A Trainer prompt may
+			// only consume published knowledge, including after another replica's
+			// review decision.
+			if rowStringField(row, "validationStatus") != "validated" {
+				continue
+			}
+			if b, ok := row["superseded"].(bool); ok && b {
+				continue
+			}
+			entry := map[string]any{
+				"chunkId":   rowStringField(row, "id"),
+				"sourceRef": rowStringField(row, "sourceRef"),
+				"text":      truncateText(rowStringField(row, "text"), existingCorpusTextMaxLen),
+			}
+			if ca := rowStringField(row, "createdAt"); ca != "" {
+				entry["createdAt"] = ca
+			}
+			out = append(out, entry)
+			if len(out) >= maxExistingCorpusChunks {
+				return corpusBudgetFilled
+			}
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, corpusBudgetFilled) {
+		return nil, err
+	}
+	return out, nil
 }
 
 // resetStaleAfterRefresh zeroes staleSignalCount and stamps lastSeededAt after

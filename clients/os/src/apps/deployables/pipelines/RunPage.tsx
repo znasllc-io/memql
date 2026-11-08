@@ -16,11 +16,11 @@ import { copyFor, toneFor } from "../packages/refusals";
 import type { PartsHeld } from "../parts";
 import { runBarFor, type RunActName } from "./acts";
 import { cancelRun, problemFrom, rerunRun, type Problem } from "./calls";
-import { useRunFiles, useRunSteps } from "./feeds";
+import { useRunFiles, useRunSteps, usePipelineRun } from "./feeds";
 import { useExpiredRunFiles } from "./expiry";
 import { runGithubUrl } from "./github";
 import { fetchLogTail, type LogTail } from "./logTail";
-import { artifactDisplayName, isFinished, runFailureOf, type PipelineRow, type RunFileRow, type RunRow, type StepAttempt, type StepRow } from "./rows";
+import { artifactDisplayName, isFinished, runFailureOf, runFromRow, type PipelineRow, type RunFileRow, type RunRow, type StepAttempt, type StepRow } from "./rows";
 import { newerAttemptOf, runById } from "./runs";
 import { Mark } from "./Mark";
 import { StopsAcross } from "./StopsAcross";
@@ -71,9 +71,12 @@ export interface RunPageProps {
 }
 
 export function RunPage(props: RunPageProps) {
-  const run = runById(props.runs, props.runId);
+  const listed = runById(props.runs, props.runId);
+  const detail = usePipelineRun(listed ? "" : props.runId);
+  const raw = detail.snapshot.rows[0];
+  const run = listed ?? (raw ? runFromRow(raw) : null);
   if (run === null) {
-    const reading = props.runsState === "seeding" || props.runsState === "disconnected";
+    const reading = detail.snapshot.state === "seeding" || detail.snapshot.state === "disconnected";
     return (
       <div className="os-deploy-pane pipeline-run-page">
         <div className="os-deploy-scroll">

@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -243,27 +244,43 @@ func TestBuildIsolationTarget(t *testing.T) {
 // counts them; stop closes it, so later attempts are refused. Its address is
 // 127.0.0.1:port.
 type isoListen struct {
-	ln    net.Listener
-	mu    sync.Mutex
-	times []time.Time
+	ln       net.Listener
+	mu       sync.Mutex
+	times    []time.Time
+	recorded chan struct{}
+	stopped  chan struct{}
 }
 
 func isoAccepting(t *testing.T) *isoListen {
+	t.Helper()
+	return isoAcceptingBeforeRecord(t, nil)
+}
+
+func isoAcceptingBeforeRecord(t *testing.T, beforeRecord func(int)) *isoListen {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	l := &isoListen{ln: ln}
+	l := &isoListen{ln: ln, recorded: make(chan struct{}, 1), stopped: make(chan struct{})}
 	go func() {
-		for {
+		defer close(l.stopped)
+		for attempt := 1; ; attempt++ {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
+			at := time.Now()
+			if beforeRecord != nil {
+				beforeRecord(attempt)
+			}
 			l.mu.Lock()
-			l.times = append(l.times, time.Now())
+			l.times = append(l.times, at)
 			l.mu.Unlock()
+			select {
+			case l.recorded <- struct{}{}:
+			default:
+			}
 			_ = c.Close()
 		}
 	}()
@@ -277,6 +294,86 @@ func (l *isoListen) accepted() []time.Time {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return append([]time.Time(nil), l.times...)
+}
+
+// A successful connect is acknowledged by the kernel before Accept and its
+// recording goroutine necessarily run. Wait for the observations, then join
+// that goroutine before taking the final count; it must not change afterward.
+func (l *isoListen) finishObservations(ctx context.Context, count int) ([]time.Time, error) {
+	for len(l.accepted()) < count {
+		select {
+		case <-l.recorded:
+		case <-l.stopped:
+			return nil, fmt.Errorf("listener stopped after %d observations, want %d", len(l.accepted()), count)
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for %d observations (recorded %d): %w", count, len(l.accepted()), ctx.Err())
+		}
+	}
+	_ = l.ln.Close()
+	select {
+	case <-l.stopped:
+		return l.accepted(), nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for listener shutdown: %w", ctx.Err())
+	}
+}
+
+func isoObservationContext(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	if suite, ok := t.Deadline(); ok {
+		suite = suite.Add(-min(time.Until(suite)/10, time.Second))
+		if suite.Before(deadline) {
+			deadline = suite
+		}
+	}
+	return context.WithDeadline(t.Context(), deadline)
+}
+
+func TestIsolationProbeObservationsWaitForDelayedFinalRecord(t *testing.T) {
+	thirdAccepted, releaseRecord := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	l := isoAcceptingBeforeRecord(t, func(attempt int) {
+		if attempt == 3 {
+			close(thirdAccepted)
+			<-releaseRecord
+		}
+	})
+	t.Cleanup(func() { release.Do(func() { close(releaseRecord) }) })
+	ctx, cancel := isoObservationContext(t)
+	defer cancel()
+	for i := 0; i < 3; i++ {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", l.ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = conn.Close()
+	}
+	select {
+	case <-thirdAccepted:
+	case <-ctx.Done():
+		t.Fatal("third connection never reached the recording barrier")
+	}
+	if got := len(l.accepted()); got != 2 {
+		t.Fatalf("barrier should reproduce a successful connect with only two recorded attempts, got %d", got)
+	}
+	// Cancellation proves the observer cannot return that incomplete snapshot.
+	// No scheduling sleep is needed to hold or release the last observation.
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	if _, err := l.finishObservations(canceled, 3); !errors.Is(err, context.Canceled) {
+		t.Fatalf("returned incomplete observations instead of waiting: %v", err)
+	}
+	release.Do(func() { close(releaseRecord) })
+	at, err := l.finishObservations(ctx, 3)
+	if err != nil || len(at) != 3 {
+		t.Fatalf("final observations = %d, %v; want all three", len(at), err)
+	}
+	select {
+	case <-l.stopped:
+	default:
+		t.Fatal("snapshot returned while the listener could still record attempts")
+	}
 }
 
 // isoRefusing is a port nothing listens on: an attempt is refused. The port
@@ -554,12 +651,24 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 	t.Run("it settles first, then tries three times a second apart (R44)", func(t *testing.T) {
 		t.Parallel()
 		dns := isoAccepting(t)
+		listenerPort := isoRefusing(t)
 		start := time.Now()
-		run := isoConnector(t, isoResolv, dns.port(), isoRefusing(t), "2", nil)
+		run := isoConnector(t, isoResolv, dns.port(), listenerPort, "2", nil)
 		if run.code != probeExitIsolated {
 			t.Fatalf("exit %d, want %d\nstdout: %s", run.code, probeExitIsolated, run.stdout)
 		}
-		at := dns.accepted()
+		// The connector must report exactly three rounds too: shutting down
+		// the fixture must not hide an unexpected queued fourth connection.
+		want := fmt.Sprintf("memql: isolation probe: dns 127.0.0.1:%d connected, connected, connected; listener 127.0.0.1:%d refused, refused, refused\n", dns.port(), listenerPort)
+		if run.stdout != want {
+			t.Fatalf("round results = %q, want %q", run.stdout, want)
+		}
+		ctx, cancel := isoObservationContext(t)
+		defer cancel()
+		at, err := dns.finishObservations(ctx, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(at) != 3 {
 			t.Fatalf("DNS was tried %d times, want 3", len(at))
 		}

@@ -1,0 +1,42 @@
+TAP version 13
+# Subtest: equal-version deletion tombstones reject stale events, pages and repairs until a newer version exists
+not ok 1 - equal-version deletion tombstones reject stale events, pages and repairs until a newer version exists
+  ---
+  duration_ms: 8.003291
+  type: 'test'
+  location: '/Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1551:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    an equal-version delayed event must stay deleted
+    + actual - expected
+
+    + [
+    +   {
+    +     createdAt: '2026-10-12T14:47:19.325157Z',
+    +     id: 'deleted'
+    +   }
+    + ]
+    - []
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0:
+      id: 'deleted'
+      createdAt: '2026-10-12T14:47:19.325157Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/znas/memql-os-lists/sdk/ts/dist-test/test/liveCollection.test.js:1564:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 41.268542

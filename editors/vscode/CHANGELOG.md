@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.13
+
+- Support case-insensitive substring matching with `text.includes(search, true)`
+  in edition 2026, grammar `2026.11-case-insensitive-substring-bceec6b9`.
+  Existing calls without the optional flag keep case-sensitive matching.
+
 ## 0.6.12
 
 - Support `@journalOnWrite` for background event handlers in edition 2026,

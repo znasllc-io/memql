@@ -1,0 +1,8 @@
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  12 passed (12)
+      Tests  132 passed (132)
+   Start at  16:02:44
+   Duration  1.50s (tests 39%, environment 24%, import 23%, transform 14%, setup 1%)

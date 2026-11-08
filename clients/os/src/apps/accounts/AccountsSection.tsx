@@ -1,11 +1,11 @@
 import { AddAccountWizard } from "./AddAccountWizard";
 import { DomainSetup } from "./DomainSetup";
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Building2, } from "lucide-react";
 
-import { Button, Chip, Head, LiveList, Notice, RecordRow, listCount } from "../../kit";
+import { Button, Chip, ContentSkeleton, Head, LiveList, Notice, RecordRow, Refine, listCount } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import { AccountDetail } from "./AccountDetail";
 import {
@@ -16,28 +16,22 @@ import {
   accountName,
   type AccountRow,
 } from "./rows";
-import { useAccounts } from "./useAccounts";
+import { useAccounts, useAccountRecord } from "./useAccounts";
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../logs/useDebouncedValue";
 import type { ArchiveAccountState, CreateAccountState, UpdateAccountState } from "./actions";
 
-// The registry: every client, live.
-//
-// The seed asks for EVERYTHING (`includeArchived: true`) and the archived
-// filter is a fold over rows already here -- see settings.ts. Seeding
-// filtered would make flipping the toggle re-run the read and re-baseline
-// every arrival cue, so revealing rows the browser already had would announce
-// them as new. Revealing rows is not the cluster sending them.
-
 export function AccountsSection({
-  feed,
+  initialOpenId = "",
+  onOpened,
   showArchived,
   create,
   update,
   archive,
   onOpenGroup,
 }: {
-  /** The app root's ONE feed. Not retained here -- see AccountsApp for why a
-   *  second collection over this concept is the failure to avoid. */
-  feed: ReturnType<typeof useAccounts>;
+  initialOpenId?: string;
+  onOpened?: () => void;
   showArchived: boolean;
   create: CreateAccountState;
   update: UpdateAccountState;
@@ -45,31 +39,29 @@ export function AccountsSection({
   /** Opens the Users app on one of this client's groups, by intent. */
   onOpenGroup?: (groupId: string) => void;
 }) {
+  const [searchText, setSearchText] = useState("");
+  const search = useDebouncedValue(searchText.trim(), TEXT_DEBOUNCE_MS);
+  const feed = useAccounts(search, showArchived);
   const { source: collection, snapshot, reseed } = feed;
-  const [openId, setOpenId] = useState("");
+  const [openId, setOpenId] = useState(initialOpenId);
+  const record = useAccountRecord(openId);
+  useEffect(() => { if (initialOpenId) { setOpenId(initialOpenId); onOpened?.(); } }, [initialOpenId, onOpened]);
   const [adding, setAdding] = useState(false);
   const [domains, setDomains] = useState(false);
 
-  // PROJECT, then narrow, in one pass -- the collection holds RAW wire rows
-  // (the fold upserts an event payload with no projection hook), so every
-  // predicate below runs on an accountFromRow result.
-  const source = useLiveView<Row, AccountRow>(collection, `archived:${showArchived}`, (rows) => {
-    const accounts = rows.map(accountFromRow).filter((a) => a.id !== "");
-    return showArchived ? accounts : accounts.filter((a) => !accountIsArchived(a));
-  });
-
-  const open = useMemo(
-    () => source?.snapshot.rows.find((a) => a.id === openId) ?? null,
-    [source, source?.snapshot, openId],
-  );
+  const source = useLiveView<Row, AccountRow>(collection, `accounts:${showArchived}:${search}`, rows => rows.map(accountFromRow).filter(account => account.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id)));
+  const open = record.snapshot.rows[0] ? accountFromRow(record.snapshot.rows[0]) : source?.snapshot.rows.find(account => account.id === openId);
 
   if (adding) return <AddAccountWizard create={create} onBack={() => setAdding(false)} onDone={id => { setAdding(false); setOpenId(id); reseed(); }} />;
   if (open && domains) return <DomainSetup account={open} onBack={() => setDomains(false)} onSaved={() => { setDomains(false); reseed(); }} />;
   if (open) return <div className="os-app-stack"><Head navigationKey={`account:${open.id}`} title={accountName(open)} back={{ label: "Accounts", onSelect: () => setOpenId("") }} /><AccountDetail account={open} update={update} archive={archive} onArchived={() => setOpenId("")} onOpenGroup={onOpenGroup} onConfigureDomains={() => setDomains(true)} /></div>;
 
+  if (openId && record.snapshot.state === "seeding") return <ContentSkeleton label="Opening account" />;
+
   return (
     <div className="os-app-stack">
-      <Head title="Accounts" meta={listCount(source?.snapshot)}>
+      <Head title="Accounts" meta={listCount(source?.snapshot) === undefined || search !== searchText.trim() ? undefined : `${source?.snapshot.rows.length ?? 0} shown`}>
+        {!searchText ? <span className="os-caption">Recent</span> : null}
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a client" />
       </Head>
 
@@ -83,12 +75,11 @@ export function AccountsSection({
         </Notice>
       ) : null}
 
-      {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
-          Without it, revealing archived rows makes them flash "new" on the
-          next event -- claiming the cluster just sent them, when all that
-          happened is that this browser started showing rows it already had. */}
+      <Refine search={searchText} onSearch={setSearchText} label="Find accounts" placeholder="Search accounts" />
+
+      {/* Each question owns its session pages and arrival baseline. */}
       <LiveList<AccountRow>
-        key={`accounts:${showArchived}`}
+        key={`accounts:${showArchived}:${search}`}
         source={source}
         rowId={(a) => a.id}
         // EVERY RENDERED FIELD, honestly. `v1:accounts:account` carries no
@@ -113,6 +104,7 @@ export function AccountsSection({
           />
         )}
       />
+      <LoadMore feed={feed} />
 
     </div>
   );

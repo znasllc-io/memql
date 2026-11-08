@@ -66,6 +66,33 @@ class HostBuildGuardTests(unittest.TestCase):
         self.assertEqual(original, path.read_bytes())
         self.assertEqual(inode, path.stat().st_ino)
 
+    def test_an_interrupted_pipeline_slot_is_never_cleared(self):
+        # A Cockpit running several steps records slot n's step in
+        # pipeline-slot-n.lock; one left with content is an interrupted step.
+        path = self.root / "pipeline-slot-2.lock"
+        original = b'{"execution":"container","workspace":"/retained","container":"memql-step-x"}'
+        path.write_bytes(original)
+        inode = path.stat().st_ino
+        with self.assertRaisesRegex(guard.GuardError, "interrupted Fleet pipeline"):
+            with guard.host_build_guard():
+                pass
+        self.assertEqual(original, path.read_bytes())
+        self.assertEqual(inode, path.stat().st_ino)
+        # An empty slot file is a slot whose step ended cleanly.
+        path.write_bytes(b"")
+        with guard.host_build_guard():
+            pass
+        self.assertEqual(inode, path.stat().st_ino)
+
+    def test_a_symlinked_pipeline_slot_is_refused(self):
+        target = self.root / "unrelated"
+        target.write_text("")
+        (self.root / "pipeline-slot-1.lock").symlink_to(target)
+        with self.assertRaises(guard.GuardError):
+            with guard.host_build_guard():
+                pass
+        self.assertEqual("", target.read_text())
+
     def test_symlink_lock_is_refused(self):
         target = self.root / "unrelated"
         target.write_text("keep")

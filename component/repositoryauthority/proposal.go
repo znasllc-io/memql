@@ -127,7 +127,7 @@ func (i *Integration) Propose(ctx context.Context, p Proposal) (ProposalReceipt,
 		if e != nil {
 			return e
 		}
-		if result.State != "complete" || result.Branch == "" || !commit.MatchString(result.Commit) || result.PullRequestURL == "" {
+		if result.State != "complete" || result.Branch == "" || !commit.MatchString(result.Commit) || (result.PullRequestURL == "" && (result.LandingMode != "owner_push" || result.ExpectedHead != p.ExpectedHead || result.BaseBranch != p.BaseBranch)) {
 			return errors.New("proposal adapter returned no complete immutable receipt")
 		}
 		current.ProposalState = "complete"

@@ -19,7 +19,7 @@ import type { DeskSurface, DesktopItem, GridPos } from "../system/desktop";
 import type { Desk } from "../system/desks";
 import { DeskNumeral, FoldWallpaper } from "../wallpaper/FoldWallpaper";
 import { WidgetHost } from "../widgets/WidgetFrame";
-import { useMachines } from "../live/machines";
+import { useMachinePresence } from "../live/machines";
 import { useOsConnection } from "../live/connection";
 import { useSession } from "./access";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
@@ -727,7 +727,7 @@ function SurfaceItem({
   onMenu: (x: number, y: number) => void;
 }) {
   const { actions, registry } = useOs();
-  const { presence } = useMachines();
+  const { presence } = useMachinePresence();
   // The drag carries what the Bin needs to name and archive this, because the
   // dock holds neither the Library feed nor the desktop document (memql#4784).
   const draggable = useDraggable({

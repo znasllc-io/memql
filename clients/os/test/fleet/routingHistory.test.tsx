@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -401,9 +401,42 @@ describe("History: the rule facet names rules by what they match", () => {
     expect(rowFor("qwen3.8:27b").textContent).not.toContain("composeRoutingPolicy");
     fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
     fireEvent.change(screen.getByLabelText("Prompt or model"), { target: { value: "route composing" } });
-    expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1);
+    await waitFor(() => expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1));
     fireEvent.change(screen.getByLabelText("Prompt or model"), { target: { value: "composeRoutingPolicy" } });
-    expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1);
+    await waitFor(() => expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1));
   });
 });
 
+
+
+describe("History: bounded retained pages", () => {
+  it("reads ten, appends ten, retains the window after reopening, and searches older calls", async () => {
+    use(Array.from({ length: 25 }, (_, n) => wireDecision({ id: `call-${String(n).padStart(2, "0")}`,
+      createdAt: `2026-09-${String(n + 1).padStart(2, "0")}T10:00:00Z`,
+      promptName: n === 0 ? "composeRoutingPolicy" : "agentReply", model: n === 0 ? "Ancient needle" : `model-${n}` })));
+    const view = await renderHistory();
+    const rowCount = () => document.querySelectorAll(".os-decision-item").length;
+    expect(rowCount()).toBe(10);
+    expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(rowCount()).toBe(20));
+    expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(2);
+    expect(calls.routerDecisionsRecent.mock.calls[1]?.[1]).toMatchObject({ cursor: "10" });
+    view.unmount();
+    await renderHistory();
+    expect(rowCount()).toBe(20);
+    expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    const input = screen.getByLabelText("Prompt or model");
+    fireEvent.change(input, { target: { value: "route composing" } });
+    await waitFor(() => expect(rowCount()).toBe(1));
+    expect(rowFor("Ancient needle")).toBeTruthy();
+    expect(lastArgs()).toMatchObject({ search: "route composing", promptNames: ["composeRoutingPolicy"] });
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() => expect(rowCount()).toBe(20));
+    expect(calls.routerDecisionsRecent).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(rowCount()).toBe(25));
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+});

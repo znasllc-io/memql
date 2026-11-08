@@ -310,7 +310,7 @@ describe("draft release lifecycle", () => {
     const f = fileReleaseFixture("ready");
     render(<ReleaseBrowser query={f.query} connected />);
     await open();
-    expect(screen.getByText("MemQL 0.25.0")).toBeTruthy();
+    expect(await screen.findByText("MemQL 0.25.0")).toBeTruthy();
     expect(screen.getByText(/Verified desktop release/)).toBeTruthy();
     expect(screen.getByText("Select as latest")).toBeTruthy();
     await twice("Approve release");
@@ -406,4 +406,29 @@ describe("draft release lifecycle", () => {
     await screen.findByText(/history does not match this approval/);
     expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
   });
+});
+
+it("retains loaded candidate pages and searches beyond recent results", async () => {
+  const f = releaseFixture();
+  const candidates = Array.from({ length: 23 }, (_, n) => ({ candidateId: `sha256:${n.toString(16).padStart(64, "0")}`, state: "ready", createdAt: "2026-10-01T00:00:00Z", evidenceCount: 1, components: [{ name: `Component${n}`, version: "1.0.0", repository: "acme/engine", commit: "b".repeat(40) }] }));
+  const read = vi.fn(async ({ cursor, search }: { cursor?: string; search?: string }) => {
+    const matching = search ? candidates.filter(row => row.components[0]!.name.includes(search)) : candidates;
+    const offset = Number(cursor || 0);
+    return releaseResult({ candidates: matching.slice(offset, offset + 10), ...(offset + 10 < matching.length ? { nextCursor: String(offset + 10) } : {}) });
+  });
+  f.query.releaseCandidates = read;
+  const view = render(<ReleaseBrowser query={f.query} connected />);
+  await screen.findByRole("button", { name: "Review Component9 1.0.0" });
+  expect(screen.queryByRole("button", { name: "Review Component10 1.0.0" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByRole("button", { name: "Review Component19 1.0.0" });
+  view.unmount();
+  const reopened = render(<ReleaseBrowser query={f.query} connected />);
+  await screen.findByRole("button", { name: "Review Component19 1.0.0" });
+  expect(read).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Search releases" }));
+  fireEvent.change(screen.getByPlaceholderText("Search releases"), { target: { value: "Component22" } });
+  await screen.findByRole("button", { name: "Review Component22 1.0.0" });
+  expect(read).toHaveBeenCalledTimes(3);
+  reopened.unmount();
 });

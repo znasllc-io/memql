@@ -100,19 +100,31 @@ When none of the commits it looked at passed, **Check source** is refused with
 1 failed, 17 untested". Nothing is saved, so there is no request to look for:
 check the source again once a commit's checks pass.
 
-### Prepare the version through a pull request
+### Prepare and land the version change
 
 If the version's tag already names another commit, the request explains that a
-version-preparation pull request is needed. Update the profile's version file
-and any required version stamps through the normal reviewed PR path, let its
-required checks pass, and merge it before preparing the new release. The release
+version change is needed. Open the repository's change-request form, select
+**Prepare a proposal**, and scope the request to the version file and required
+version stamps. Review the resulting change before landing it. When GitHub
+reports pull requests disabled, **Land change** separately confirms the exact
+commit using the connected repository owner's GitHub grant. Otherwise use the
+repository's pull-request review path. Landing rechecks the credential's owner
+and current repository permissions; a different or missing owner is refused.
+Wait for the default-branch checks to
+pass before preparing the new release. The release
 flow never writes directly to `main`, increments a version silently or moves an
 existing tag.
+
+Approval authorizes the requested scope; it does not mean proposal preparation
+finished. A stopped draft or independent review appears in the request panel with
+its recorded reason. **Revise request** restores the statement and allowed paths
+to the form, preserving the old attempt. Submitting that form creates a new
+request; opening or refreshing the saved result never retries the failed work.
 
 The current native run identity includes repository, commit, mode and event; it
 does not distinguish two release tags on the same commit. Therefore two
 component releases that require separate full release runs need separate
-verified commits. For example, release the engine changes first, then merge a
+verified commits. For example, release the engine changes first, then land a
 Cockpit-only version preparation before starting its release. A conflicting tag
 on an already released commit is refused rather than silently reusing a
 mismatched run.
@@ -354,3 +366,13 @@ never reached GitHub.
 | `not_owner` | The call has no resolved cluster-owner identity. Use the authorized owner account; the native gate refuses before provider calls. A UI control cannot grant this role. |
 | `version_not_cut` | This installation has no legacy cut record for the requested version. Inspect the correct installation or the candidate's publication history. Do not recut it or infer missing images merely to create a local history row. |
 | `registry_check_failed` | The registry availability check failed. The response retains the previous status with `checkError`; it does not establish that images are present or absent. Resolve the reported registry access problem, then explicitly check again. |
+
+
+### Opening a published release after an upgrade
+
+A sealed release is history: reading it does not require the currently installed
+publisher profile to match the profile that created it. New approval and
+publication still require fresh matching authority. **Review installation
+choices** carries the exact candidate and catalog digest into Cluster > Updates;
+it never applies a release. The receiving installation independently validates
+that selection and its configuration.

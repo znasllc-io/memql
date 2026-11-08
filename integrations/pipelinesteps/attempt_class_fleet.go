@@ -71,8 +71,10 @@ func machineRefusal(code string) (nothingRan, notRetriedHere bool) {
 		// checkout and before the container is created.
 		return true, false
 	case machineCapacityBusy, machineCapacityFenced:
-		// The machine's one-command-per-OS-user reservation, its disk or memory
-		// headroom, or a retained local build refused. The capacity wait normally
+		// The machine's build reservation (one command per OS user, or the
+		// slots its owner's pipelines.max_concurrent_steps allows, each refusing
+		// a second attempt of a step still running in another), its disk or
+		// memory headroom, or a retained local build refused. The capacity wait normally
 		// absorbs these (dispatchWhenCapacityAvailable); one that reaches the
 		// result is still a refusal before the command ("a capacity refusal that
 		// reached the result", spec section 4), and a busy machine frees up.

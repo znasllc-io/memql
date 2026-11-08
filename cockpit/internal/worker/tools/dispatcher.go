@@ -197,7 +197,11 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 
 	switch tool {
 	case "workerHost":
-		success, failure = d.dispatchHost(ctx, action, args, dispatch.GetAgentId(), d.streamTo(callId, send), func(data []byte) error {
+		// The run and step the engine names travel with the call: a machine
+		// running several pipeline steps refuses a second attempt of one step
+		// while the first holds a slot (pipeline_capacity_unix.go).
+		hostCtx := withPipelineStep(ctx, dispatch.GetRunId(), dispatch.GetStepId())
+		success, failure = d.dispatchHost(hostCtx, action, args, dispatch.GetAgentId(), d.streamTo(callId, send), func(data []byte) error {
 			if send == nil {
 				return fmt.Errorf("artifact streaming is unavailable")
 			}

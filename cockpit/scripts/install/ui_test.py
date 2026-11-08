@@ -15,6 +15,9 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
+
+from fixture_process import FixtureProcesses, SUITE_PROCESSES
 
 HERE = Path(__file__).resolve().parent
 
@@ -39,7 +42,7 @@ function install_ui_log_directory() { printf '%s/logs\\n' "$TEST_ROOT"; }
         return ["bash", "-c", preamble + body, "fixture", str(HERE), str(self.root)]
 
     def run_ui(self, body):
-        return subprocess.run(self.command(body), env=self.env, capture_output=True, text=True, timeout=10)
+        return SUITE_PROCESSES.run(self.command(body), env=self.env)
 
     def log(self):
         files = list((self.root / "logs").glob("install-*"))
@@ -179,8 +182,7 @@ print(json.dumps({'removed':len(blocks)-len(remaining),'remaining':len(remaining
         return private, env
 
     def uninstall(self, driver, env, *args):
-        return subprocess.run(['bash', str(HERE/driver), '--user-local', *args], env=env,
-                              capture_output=True, text=True, timeout=10)
+        return SUITE_PROCESSES.run(['bash', str(HERE/driver), '--user-local', *args], env=env)
 
     def test_scoped_uninstall_keeps_cockpit_and_sibling_with_quiet_summary(self):
         for driver in ('uninstall-mac.sh', 'uninstall-linux.sh'):
@@ -270,10 +272,10 @@ install_ui_stage 'Checking' work
     def test_real_drivers_preflight_stays_quiet_and_changes_no_worker_state(self):
         for driver in ("install-mac.sh", "install-linux.sh"):
             with self.subTest(driver=driver):
-                result = subprocess.run(
+                result = SUITE_PROCESSES.run(
                     ["bash", str(HERE / driver), "--token", "mql_wkr_fixture", "--cluster", "https://fixture.example",
                      "--download-base", "file:///nonexistent-memql-assets", "--user-local", "--no-service", "--plain"],
-                    env=self.env, capture_output=True, text=True, timeout=10)
+                    env=self.env)
                 self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
                 self.assertIn("Could not finish: Checking the release", result.stdout)
                 self.assertNotIn("curl:", result.stdout + result.stderr)
@@ -319,7 +321,7 @@ exit 3
                            "--inference", "--download-base", f"http://127.0.0.1:{server.server_port}"]
                 for attempt in ("fresh", "current"):
                     with self.subTest(driver=driver, attempt=attempt):
-                        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+                        result = SUITE_PROCESSES.run(command, env=env)
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                         self.assertIn("Cockpit v0.16.0 is installed", result.stdout)
                         self.assertIn("Worker not started", result.stdout)
@@ -441,7 +443,7 @@ printf '%s\\n' "$@" > "$HOME/apps-args"
             for failed in (True, False):
                 with self.subTest(driver=driver, failed=failed):
                     env["FIXTURE_FAIL"] = "yes" if failed else "no"
-                    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15)
+                    result = SUITE_PROCESSES.run(command, env=env)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertEqual((fixture_home / "apps-args").read_text().splitlines(),
                                      ["worker", "apps", "--allow", "claude-code", "--allow", "codex", "--home", "https://fixture.example"])
@@ -452,24 +454,25 @@ printf '%s\\n' "$@" > "$HOME/apps-args"
                     else:
                         self.assertIn("Claude Code, Codex allowed for this cluster", result.stdout)
             (fixture_home / "apps-args").unlink()
-            result = subprocess.run(command + ["--no-apps"], env=env, capture_output=True, text=True, timeout=15)
+            result = SUITE_PROCESSES.run(command + ["--no-apps"], env=env)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse((fixture_home / "apps-args").exists())
 
     def run_pty(self, body, interrupt=False):
+        SUITE_PROCESSES.remaining()
         master, slave = pty.openpty()
         proc = subprocess.Popen(self.command(body), env=self.env, stdin=slave, stdout=slave,
                                 stderr=slave, start_new_session=True)
         os.close(slave)
         output = b""
-        deadline = time.monotonic() + 8
         sent = False
         try:
-            while time.monotonic() < deadline:
+            while True:
+                remaining = SUITE_PROCESSES.remaining()
                 if interrupt and b"\x1b[?25l" in output and not sent:
                     os.killpg(proc.pid, signal.SIGTERM)
                     sent = True
-                ready, _, _ = select.select([master], [], [], .1)
+                ready, _, _ = select.select([master], [], [], min(.1, remaining))
                 if ready:
                     try:
                         data = os.read(master, 65536)
@@ -480,15 +483,82 @@ printf '%s\\n' "$@" > "$HOME/apps-args"
                         if exc.errno != errno.EIO:
                             raise
                         break
-                elif proc.poll() is not None:
-                    break
-            proc.wait(timeout=2)
+                # Wait for terminal completion rather than just the leader.
+                # EOF/EIO still requires group cleanup below on macOS.
+            proc.wait(timeout=SUITE_PROCESSES.remaining())
+        except (AssertionError, subprocess.TimeoutExpired) as exc:
+            raise AssertionError(f"Installer terminal fixture exceeded shared suite deadline\n{output.decode()}") from exc
         finally:
-            if proc.poll() is None:
-                os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
-            os.close(master)
+            # macOS may report EOF while an orphan still holds the terminal.
+            # Cleanup therefore covers success too; zombie-only groups are
+            # distinguished from a real permission denial by kill_group.
+            cleanup = SUITE_PROCESSES.cleanup_limit()
+            try:
+                SUITE_PROCESSES.kill_group(proc, deadline=cleanup)
+                proc.wait(timeout=SUITE_PROCESSES.cleanup_remaining(cleanup))
+            finally:
+                os.close(master)
         return proc.returncode, output.decode()
+
+    def test_completed_terminal_fixture_returns_cleanly(self):
+        rc, output = self.run_pty("printf 'completed\\n'\n")
+        self.assertEqual(rc, 0, output)
+        self.assertIn("completed", output)
+
+    def test_terminal_terminates_silent_orphan_writer_after_leader_exit(self):
+        ready = self.root / "terminal-child"
+        original_remaining = SUITE_PROCESSES.remaining
+        shortened = None
+        calls = 0
+
+        def remaining():
+            nonlocal calls, shortened
+            calls += 1
+            if calls == 1:
+                return original_remaining()
+            if shortened is None:
+                # Give the child time to start before injecting expiration;
+                # scheduling speed is not the property this test exercises.
+                while not ready.exists():
+                    original_remaining()
+                    time.sleep(.01)
+                shortened = FixtureProcesses(time.monotonic() + .02)
+            return shortened.remaining()
+
+        try:
+            with patch.object(SUITE_PROCESSES, "remaining", side_effect=remaining):
+                try:
+                    rc, output = self.run_pty('''
+python3 -c 'import os,signal,sys,time; from pathlib import Path; signal.signal(signal.SIGHUP,signal.SIG_IGN); p=Path(sys.argv[1]+".tmp"); p.write_text(str(os.getpid())); p.rename(sys.argv[1]); time.sleep(600)' "$TEST_ROOT/terminal-child" &
+while [[ ! -f "$TEST_ROOT/terminal-child" ]]; do sleep .01; done
+''')
+                    self.assertEqual(rc, 0, output)
+                except AssertionError as exc:
+                    # Linux keeps the PTY open until timeout; macOS can deliver
+                    # EOF as soon as the leader exits. Both must reap the child.
+                    self.assertIn("terminal fixture exceeded", str(exc))
+            pid = ready.read_text()
+            self.assertTrue(pid.isdigit(), pid)
+            # Signal delivery can precede the child's transition to zombie.
+            # Allow that transition within the existing cleanup reserve.
+            deadline = min(SUITE_PROCESSES.deadline, SUITE_PROCESSES.cleanup_limit())
+            state = "running"
+            while time.monotonic() < deadline:
+                state = subprocess.run(["ps", "-p", pid, "-o", "stat="],
+                                       capture_output=True, text=True,
+                                       timeout=deadline - time.monotonic()).stdout.strip()
+                if not state or state.startswith("Z"):
+                    break
+                time.sleep(min(.01, max(0, deadline - time.monotonic())))
+            self.assertTrue(not state or state.startswith("Z"), state)
+        finally:
+            # Also clean up when the regression returns early instead of timing
+            # out, so a failed assertion cannot leak the deliberate orphan.
+            if ready.exists():
+                try:
+                    os.kill(int(ready.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_tty_animation_and_interrupt_restore_cursor(self):
         rc, output = self.run_pty('''

@@ -143,7 +143,7 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	}
 
 	recipient := w.syntheticRecipient(ctx, campaign, to)
-	accountName, err := w.store.AccountName(ctx, campaign.AccountID)
+	accountName, err := w.emailOrganizationName(ctx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns.testSend: could not resolve the account name", "campaign", campaign.ID, "error", err)
 	}

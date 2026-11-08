@@ -1,0 +1,2 @@
+go run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
+sdk-gen: no drift

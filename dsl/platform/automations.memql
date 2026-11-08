@@ -187,3 +187,12 @@ automation accountDoorReconcileWorkflow {
 automation retireDeclaredConceptVersions {
   sweep := builtin conceptRetentionSweep(dryRun: false)
 }
+
+/// Nightly 04:20 UTC, after the 03:20 log and 03:40 work-journal retention: give
+/// back the space their deletes left inside closed chunks. At most one chunk a
+/// night, chosen for the most space returned among those worth at least 256 MiB
+/// and 30% of the chunk; the handler owns the room, WAL and ownership guards.
+@trigger(schedule="0 20 4 * * *")
+automation reclaimClosedChunkSpace {
+  compact := builtin closedChunkCompaction(dryRun: false, minReclaimBytes: 268435456, minReclaimPercent: 30, measureChunks: 4)
+}

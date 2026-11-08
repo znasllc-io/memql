@@ -34,8 +34,11 @@ type sourceCaptureSpec struct {
 	CloneInstallationID                    int64
 	CollectorImage, Platform               string
 	ImagePullSecret                        string
-	Render                                 argocd.RenderSpec
-	Fragment                               *argocd.SourceFragmentSpec `json:"fragment,omitempty"`
+	// Absent on legacy captures: keep their request/receipt identity intact
+	// for retirement. New native reservations bind operator maintenance.
+	Event    pl.Event `json:"event,omitempty"`
+	Render   argocd.RenderSpec
+	Fragment *argocd.SourceFragmentSpec `json:"fragment,omitempty"`
 }
 
 type sourceCapture struct {
@@ -98,6 +101,9 @@ var captureStepKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	var empty sourceCapture
+	if spec.Event != "" && spec.Event != pl.EventManual {
+		return empty, errors.New("source capture requires the native maintenance event")
+	}
 	for _, value := range []string{spec.OwnerUserID, spec.RunID, spec.WorkRunID} {
 		if !identifier.MatchString(value) {
 			return empty, errors.New("source capture requires persisted owner and run identities")
@@ -176,6 +182,10 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	request := pl.StepRequest{
 		RunID: spec.RunID, WorkRunID: spec.WorkRunID, StepKey: spec.StepKey, Attempt: spec.Attempt,
 		RunAttempt: 1, RunStartedAt: spec.RunStartedAt, OwnerUserID: spec.OwnerUserID,
+		// Source collection is native operator maintenance. Bind its trusted
+		// event before hashing so every replica uses the installed manual-job
+		// admission policy, without accepting a caller-selected priority.
+		Event:      spec.Event,
 		Repository: spec.Repository, SHA: source.TargetRevision, InstallationID: spec.CloneInstallationID, Compute: pl.ComputeCluster,
 		Step: pl.Step{Key: spec.StepKey, Kind: pl.StepCommand, Run: command, Image: spec.CollectorImage,
 			ImagePullSecret: spec.ImagePullSecret, Placement: pl.PlacementCluster, Execution: pl.ExecutionContainer,

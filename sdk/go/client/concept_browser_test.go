@@ -6,6 +6,8 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -158,7 +160,7 @@ func TestGetRowByConceptAndId_UsesCanonicalAndConnective(t *testing.T) {
 	if q == nil {
 		t.Fatalf("expected ExecuteQueryMsg payload, got %+v", sent.GetPayload())
 	}
-	wantQuery := "concept==v1:agents:agent && id==a1"
+	wantQuery := `concept==v1:agents:agent && id=="a1"`
 	if q.GetQuery() != wantQuery {
 		t.Errorf("query: want %q, got %q (the retired `;`-AND form must not come back)", wantQuery, q.GetQuery())
 	}
@@ -180,5 +182,50 @@ func TestGetRowByConceptAndId_RequiresBothIds(t *testing.T) {
 	}
 	if _, err := qc.GetRowByConceptAndId(context.Background(), "v1:agents:agent", ""); err == nil {
 		t.Error("GetRowByConceptAndId(concept, \"\"): want error")
+	}
+}
+
+// Live rereads must accept opaque row IDs without turning digits into numbers
+// or ID punctuation into query operators. Exercise the actual server grammar.
+func TestGetRowByConceptAndId_OpaqueID(t *testing.T) {
+	for _, rowID := range []string{"097e5b08773cee93e2ea5fe2940e53d3", "123", `a" || id=="other`, `a\b`} {
+		t.Run(rowID, func(t *testing.T) {
+			stream := newMockStream()
+			d := NewDispatcher(stream, nil)
+			go d.Run()
+			defer d.Stop()
+			qc := NewQueryClient(d)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			go func() { _, _ = qc.GetRowByConceptAndId(ctx, "v1:pipelines:run", rowID) }()
+			var sent *memqlv1.MemqlClientMessage
+			select {
+			case sent = <-stream.sendCh:
+			case <-ctx.Done():
+				t.Fatal("row lookup was not sent")
+			}
+			q := sent.GetExecuteQuery()
+			if q == nil {
+				t.Fatal("expected query")
+			}
+			expr, err := parser.ParseExpression(q.GetQuery())
+			if err != nil {
+				t.Fatalf("row lookup does not parse: %v", err)
+			}
+			and, ok := expr.(*ast.LogicalExpr)
+			if !ok || and.Op != ast.LogicalAnd {
+				t.Fatalf("expected one concept-and-id filter, got %#v", expr)
+			}
+			comparison, ok := and.Right.(*ast.ComparisonExpr)
+			if !ok || comparison.Value != rowID {
+				t.Fatalf("row ID did not survive as a single string literal: %#v", and.Right)
+			}
+			stream.recvCh <- &memqlv1.MemqlServerMessage{
+				CorrelateTo: sent.GetMessageId(),
+				Payload: &memqlv1.MemqlServerMessage_QueryResult{
+					QueryResult: &memqlv1.QueryResultChunk{Result: &memqlv1.Result{}},
+				},
+			}
+		})
 	}
 }

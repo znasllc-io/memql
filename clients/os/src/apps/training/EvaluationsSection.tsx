@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AutoRefresh, Caption, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../kit";
+import { useEffect, useState } from "react";
+import { AutoRefresh, Caption, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Refine, Subhead } from "../../kit";
 import { useOsConnection } from "../../live/connection";
-import { catalog, evaluation, evaluationOutcome, fingerprint, measurement, readHistory, type Evaluation, type Scenario } from "./evaluations";
+import { usePagedCollection } from "../../live/useLiveCollection";
+import { LoadMore } from "../../kit/LoadMore";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../logs/useDebouncedValue";
+import { catalog, evaluation, evaluationOutcome, fingerprint, measurement, type Evaluation, type Scenario } from "./evaluations";
 import matrix from "../../../../../test/proving/goals/matrix.json";
 import "./inspection.css";
 
@@ -13,39 +16,31 @@ const setupKey = (r: Evaluation) => `${r.engineCommit}/${r.harnessCommit}/${r.se
 
 export function EvaluationsSection() {
   const connection = useOsConnection();
-  const [results, setResults] = useState<Evaluation[]>([]);
   const [selected, select] = useState<Scenario | null>(null);
   const [runId, selectRun] = useState("");
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
   const [fingerprints, setFingerprints] = useState<Record<string, string>>({});
-  const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const current = useRef<AbortController | null>(null);
-  const reload = useCallback(async () => {
-    if (!connection || current.current) return;
-    const controller = new AbortController(); current.current = controller; setBusy(true);
-    try {
-      const rows = await readHistory((cursor) => connection.query.workGoalEvaluationsForOwner({}, { signal: controller.signal, cursor }));
-      const hashes = Object.fromEntries(await Promise.all(catalog.scenarios.map(async (s) => [s.id, await fingerprint(s)])));
-      if (controller.signal.aborted) return;
-      const next: Evaluation[] = [];
-      for (const row of rows) {
-        const data = row.data as Record<string, unknown> | undefined;
-        const value = data?.goalEvaluation;
-        const parsed = await evaluation(value);
+  useEffect(() => { let active = true; void Promise.all(catalog.scenarios.map(async s => [s.id, await fingerprint(s)])).then(entries => { if (active) setFingerprints(Object.fromEntries(entries)); }); return () => { active = false; }; }, []);
+  useEffect(() => { select(null); selectRun(""); }, [connection]);
+  const feed = usePagedCollection<Evaluation>(`training:evaluations:${selected?.id ?? ""}:${selected ? "" : query}`, conn => ({
+    concept: "v1:work:observation", actions: [],
+    comparePageRows: (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt) || a.id.localeCompare(b.id),
+    seed: async (cursor, signal) => {
+      const page = await conn.query.workGoalEvaluationsBrowse({ scenarioId: selected?.id, search: selected ? undefined : query }, { cursor, signal });
+      const rows = await Promise.all(page.rows().map(async row => {
+        const parsed = await evaluation((row.data as Record<string, unknown> | undefined)?.goalEvaluation);
         if (!parsed) throw new Error("An evaluation record is incomplete or its evidence does not match its outcome.");
-        next.push(parsed);
-      }
-      if (controller.signal.aborted) return;
-      setFingerprints(hashes); setResults(next.sort((a,b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt))); setReady(true); setError("");
-    } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }
-    finally { if (current.current === controller) { current.current = null; setBusy(false); } }
-  }, [connection]);
-  useEffect(() => {
-    setResults([]); setReady(false); setError("");
-    void reload();
-    return () => { current.current?.abort(); current.current = null; };
-  }, [reload]);
+        return parsed;
+      }));
+      return { rows, nextCursor: page.meta()?.cursor ?? "" };
+    },
+  }));
+  const results = feed.snapshot.rows;
+  const ready = feed.snapshot.state !== "seeding" && feed.snapshot.state !== "disconnected" && Object.keys(fingerprints).length > 0;
+  const error = feed.snapshot.error;
+  const busy = feed.snapshot.state === "seeding";
+  const reload = feed.reseed;
   const compatible = results.filter((r) => { const s = scenarioById.get(r.scenarioId); return s && r.scenarioVersion === s.version && r.fixtureVersion === s.fixture.version && r.scenarioFingerprint === fingerprints[s.id]; });
   const matching = (s: Scenario) => compatible.filter((r) => r.scenarioId === s.id);
   const history = selected ? matching(selected) : [];
@@ -55,7 +50,7 @@ export function EvaluationsSection() {
   const setups = Array.from(groups.values(), (group) => group[0]!);
   const roles = setups.length ? Array.from(new Set(setups.flatMap((r) => r.setup.routes.map((route) => route.role)))) : ["reasoning"];
   return <div className="os-app-stack">
-    <AutoRefresh onRefresh={reload} busy={busy} enabled={connection !== null} />
+    <AutoRefresh resume={false} onRefresh={reload} busy={busy} enabled={connection !== null} />
     <Head navigationKey={`evaluation:${selected?.id ?? "list"}`} title={selected?.title ?? "Evaluations"} meta={selected ? `Version ${selected.version}` : `Catalog ${catalog.version}`}
       back={selected ? { label: "Evaluations", onSelect: () => select(null) } : undefined} />
     {error ? <Notice tone="error" sentence="Evaluation results could not be read." next={ready ? "Showing the last available reading; retrying automatically." : "No results have been read; retrying automatically."} detail={error} /> : null}
@@ -106,25 +101,28 @@ export function EvaluationsSection() {
       {selected.injections.length ? <Panel><Subhead>Controlled interruptions</Subhead><RecordList as="ul" label="Controlled interruptions">{selected.injections.map((i) => <RecordRow key={i.id} name={i.content} secondary={i.boundary} />)}</RecordList></Panel> : null}
       <Panel><Subhead>Constraints</Subhead><ul>{selected.constraints.map((c) => <li key={c}>{c}</li>)}</ul></Panel>
     </> : <>
-      <Subhead>MemQL setups</Subhead>
+      <Refine label="Search evaluation runs" search={search} onSearch={setSearch} placeholder="Search scenario or setup" />
+      <Subhead>Recent results by setup</Subhead>
+      <Caption>Counts describe the {results.length} loaded results. Load more to include earlier runs.</Caption>
       <table className="os-grid os-training-setups" aria-label="MemQL evaluation setups" tabIndex={0}>
         <thead><tr><th scope="col">Setup</th>{roles.map((role) => <th scope="col" key={role}>{role[0]?.toUpperCase()}{role.slice(1)}</th>)}{!setups.length ? <th scope="col">Other roles</th> : null}<th scope="col">Software development</th></tr></thead>
         <tbody>{setups.length ? setups.map((r) => {
           const runs = groups.get(setupKey(r))!;
           const describe = (role: string) => r.setup.routes.filter((route) => route.role === role).map((route) => route.doors.map((d) => `${d.source}:${d.model}`).join(" → ")).join("; ") || "Not configured";
           return <tr key={`${r.engineCommit}/${r.harnessCommit}/${r.setup.routingDigest}`}><th scope="row">MemQL · {r.setup.name}<Caption>Engine {r.engineCommit.slice(0, 12)} · Harness {r.harnessCommit.slice(0, 12)}</Caption></th>{roles.map((role) => <td key={role}>{describe(role)}</td>)}<td>{runs.filter((r) => r.outcome === "autonomous").length} autonomous; {runs.filter((r) => r.outcome === "assisted").length} assisted{["failed", "blocked", "cancelled"].map((outcome) => { const n = runs.filter((r) => r.outcome === outcome).length; return n ? `; ${n} ${outcome}` : ""; })}<Caption>{runs.length} {runs.length === 1 ? "run" : "runs"} · {new Set(runs.map((r) => r.scenarioId)).size}/{catalog.scenarios.length} scenarios</Caption></td></tr>;
-        }) : <tr><th scope="row">MemQL · {matrix.setups[0]!.name}</th><td>{matrix.setups[0]!.reasoningModel}</td><td>Routing snapshot pending</td><td>{ready ? "Not run" : "Not read"}</td></tr>}</tbody>
+        }) : <tr><th scope="row">MemQL · {matrix.setups[0]!.name}</th><td>{matrix.setups[0]!.reasoningModel}</td><td>Routing snapshot pending</td><td>{ready ? (query ? "No matching results" : "No loaded results") : "Not read"}</td></tr>}</tbody>
       </table>
       <Caption>Each setup includes the harness and its routing configuration. Open a goal to inspect actual model calls and evidence. Monthly runs are off.</Caption>
       <Caption>The manual runner supports five local cases. Conflict, feedback, tool interruption, checkpoint and GitHub cases need their declared execution adapters before they can be measured.</Caption>
       <Subhead>Software development</Subhead>
       <RecordList as="ul" label="Goal scenarios">{catalog.scenarios.map((s) => <RecordRow key={s.id} name={s.title}
-        secondary={matching(s)[0]?.setup?.name ?? `Scenario ${s.version}`} state={!ready ? "Not read" : evaluationOutcome(matching(s)[0])} onOpen={() => { select(s); selectRun(""); }} />)}</RecordList>
+        secondary={matching(s)[0]?.setup?.name ?? `Scenario ${s.version}`} state={!ready ? "Not read" : matching(s)[0] ? evaluationOutcome(matching(s)[0]) : feed.hasMore || query ? "No loaded result" : "Not run"} onOpen={() => { select(s); selectRun(""); }} />)}</RecordList>
       <Subhead>More skill areas</Subhead>
       <RecordList as="ul" label="Planned skill areas">
         <RecordRow name="Document creation" state="Coming soon" />
         <RecordRow name="Research" state="Coming soon" />
       </RecordList>
     </>}
+    <LoadMore feed={feed} />
   </div>;
 }

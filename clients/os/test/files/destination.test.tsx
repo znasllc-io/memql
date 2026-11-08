@@ -35,7 +35,7 @@ describe("explicit file destinations", () => {
     expect(within(screen.getByRole("region", { name: "File details" })).getByRole("heading", { name: "build.log" })).toBeTruthy();
     expect(lookup.mock.calls.some(([name, call]) => name === "libraryArtifactById" && call === 'query libraryArtifactById(artifactId: "log-index")')).toBe(true);
     expect(consumed).toHaveBeenCalledExactlyOnceWith("open-log");
-    expect(connection.subscriptions.activeCount("v1:library:artifact")).toBe(1);
+    expect(connection.subscriptions.activeCount("v1:library:artifact", false)).toBe(1);
     await act(async () => view.setIntent(undefined));
     expect(within(screen.getByRole("region", { name: "File details" })).getByRole("heading", { name: "build.log" })).toBeTruthy();
     await click(screen.getByRole("button", { name: "Back to Library" }));

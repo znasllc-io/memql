@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -66,13 +65,11 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 	if limit > maxListLimit {
 		limit = maxListLimit
 	}
-	offset := 0
-	if after := strings.TrimSpace(asString(args["after"])); after != "" {
-		n, err := strconv.Atoi(after)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("reviews: %q is not a cursor this list issued", after)
-		}
-		offset = n
+	search := strings.ToLower(strings.TrimSpace(asString(args["search"])))
+	key := reviewDirectoryKey("reviews", storeID, asString(args["siteId"]), want, search)
+	cursor, offset, err := readDirectoryCursor(strings.TrimSpace(asString(args["after"])), key)
+	if err != nil {
+		return nil, err
 	}
 
 	rows, err := p.rowsFor(ctx, "reviewsInStore", map[string]string{"storeId": storeID})
@@ -112,6 +109,10 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 		if want != "all" && string(state) != want {
 			continue
 		}
+		if !reviewSearchMatches(search, asString(row["title"]), asString(row["body"]), asString(row["productHandle"]), asString(row["authorName"]), asString(row["authorEmail"])) {
+			continue
+		}
+
 		out := map[string]any{}
 		for k, v := range row {
 			out[k] = v
@@ -141,20 +142,31 @@ func (p *Provider) list(ctx context.Context, args map[string]any, _ int) ([]memo
 	})
 
 	total := len(matched)
-	if offset > total {
-		offset = total
+	if cursor != nil {
+		remaining := matched[:0]
+		for _, entry := range matched {
+			if afterDirectoryCursor(entry.at, asString(entry.row["id"]), cursor, oldestFirst, false) {
+				remaining = append(remaining, entry)
+			}
+		}
+		matched = remaining
+	}
+	available := len(matched)
+	if offset > available {
+		offset = available
 	}
 	end := offset + limit
-	if end > total {
-		end = total
+	if end > available {
+		end = available
 	}
 	page := make([]map[string]any, 0, end-offset)
 	for _, e := range matched[offset:end] {
 		page = append(page, e.row)
 	}
 	next := ""
-	if end < total {
-		next = strconv.Itoa(end)
+	if end < available {
+		last := matched[end-1]
+		next = writeDirectoryCursor(key, last.at, asString(last.row["id"]))
 	}
 	payload, err := json.Marshal(map[string]any{
 		"storeId": storeID,

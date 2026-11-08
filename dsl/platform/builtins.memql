@@ -863,6 +863,23 @@ builtin conceptRetentionSweep {
   dryRun bool
 }
 
+/// Give back the space retention deletes leave inside CLOSED MemoryNodes and
+/// SecretMemoryNodes chunks, where new rows never land: measure the chunks that
+/// changed, then rewrite at most one with TimescaleDB reorder_chunk. Cluster
+/// owner only. The handler refuses a rewrite without room for the chunk's live
+/// data and indexes twice over, while WAL awaits archiving, or when the engine's
+/// role does not own the chunk; a lock or statement timeout leaves the chunk as
+/// it was. A dry run measures and reports without rewriting or recording progress.
+/// Answers { outcome, reason, detail, chunk, measured, eligible, room, wal }.
+@executor("integration.retention.compact")
+@args(profile="object")
+builtin closedChunkCompaction {
+  dryRun            bool
+  minReclaimBytes   integer
+  minReclaimPercent integer
+  measureChunks     integer
+}
+
 /// Read the current installation's database storage report. Cluster owner only.
 /// The monitor owns its alert thresholds; consumers must show the report age.
 @executor("integration.storageHealth.read")

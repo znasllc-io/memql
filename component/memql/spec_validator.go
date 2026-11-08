@@ -257,6 +257,14 @@ func (u *specUsage) collect(expr ExpressionNode) {
 }
 
 func (u *specUsage) observeComparison(expr *ComparisonExpression) {
+	if expr != nil && expr.TextConcat != nil {
+		for _, part := range expr.TextConcat.parts {
+			if part.field != nil {
+				u.observeComparison(&ComparisonExpression{Field: *part.field})
+			}
+		}
+		return
+	}
 	if expr == nil || len(expr.Field.Parts) == 0 {
 		return
 	}

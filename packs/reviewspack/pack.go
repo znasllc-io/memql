@@ -167,6 +167,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"state":   "string (optional) - waiting|published|declined|removed|erased|all",
 				"limit":   "integer (optional) - default 50",
 				"after":   "string (optional) - cursor",
+				"search":  "string (optional) - literal case-insensitive directory search",
 			},
 		},
 		{
@@ -243,6 +244,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 				"siteId":  "string (required) - the store's site, judged by the organization gate",
 				"limit":   "integer (optional) - default 50",
 				"after":   "string (optional) - cursor",
+				"search":  "string (optional) - literal case-insensitive directory search",
 			},
 		},
 		{

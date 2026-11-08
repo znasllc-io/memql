@@ -1589,6 +1589,18 @@ func exprListMethod(f func(ev *exprEvaluator, e *ast.CallExpr, coll []any, scope
 //     must be a string, as for startsWith.
 //   - An absent sub is false; a sub that is not a string is refused.
 func (ev *exprEvaluator) includes(e *ast.CallExpr, recv any, scope ExprScope) (any, error) {
+	ignoreCase := false
+	if len(e.Args) == 2 {
+		raw, err := ev.eval(e.Args[1], scope)
+		if err != nil {
+			return nil, err
+		}
+		var ok bool
+		ignoreCase, ok = raw.(bool)
+		if !ok {
+			return nil, exprErr(e.Args[1], "invalid_argument", "includes(): ignoreCase must be a boolean")
+		}
+	}
 	if _, isList := recv.([]any); isList {
 		return nil, exprErr(e, "operand_type", "includes() tests a substring and `%s` is a list; for list membership write `v in list`", ast.FormatExpr(e.Receiver))
 	}
@@ -1615,6 +1627,9 @@ func (ev *exprEvaluator) includes(e *ast.CallExpr, recv any, scope ExprScope) (a
 	s, ok := recv.(string)
 	if !ok {
 		return false, nil
+	}
+	if ignoreCase {
+		return strings.Contains(strings.ToLower(s), strings.ToLower(sub)), nil
 	}
 	return strings.Contains(s, sub), nil
 }

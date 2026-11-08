@@ -5,7 +5,7 @@ import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpd
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
 import { LocalUsersSettingsStore } from "../src/apps/users/settings";
-import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup, groupAccessRow as usersGroupAccess, subjectGrantRow as usersSubjectGrant } from "../test/users/harness";
+import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup, groupAccessRow as usersGroupAccess, subjectGrantRow as usersSubjectGrant, userRow as usersPerson, invitationRow as usersInvitation } from "../test/users/harness";
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
@@ -14,6 +14,9 @@ import { setupWizardScenes } from "./setupWizardScenes";
 import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
+import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
+import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
+import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
@@ -95,6 +98,7 @@ import {
   previewReadinessRow,
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
+import { FleetApp } from "../src/apps/fleet/FleetApp";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
 import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
@@ -413,7 +417,7 @@ function settingsStore() {
  * the wrong height, and a wizard judged outside a bounded body has no floor --
  * its action bar is only at the bottom of something that has a bottom.
  */
-function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
+function WindowBody({ fallback, children, width = new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
     <div className="os-window" role="dialog" aria-label={fallback} data-os-window={fallback === "Fleet" ? "fleet" : undefined} style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
@@ -927,7 +931,7 @@ function readableNexus(state: "running" | "waiting" | "failed" | "long" = "runni
   return nexusConnection({ ...seed, approvals: state === "waiting" ? [nexusApproval({id:"approval-readable",runId:"run-readable",goalId:"goal-readable",stepKey:"step-4",question:"Send the 18 prepared invoices to your clients?",reason:"Your review is required before the invoices are sent."})] : [] });
 }
 
-function installationPreview(initial: "prepared" | "preparing" | "applying" | "complete" | "restoring" | "rolled_back" | "empty" | "unavailable", repositoryUnavailable = false) {
+function installationPreview(initial: "prepared" | "preparing" | "retiring" | "applying" | "complete" | "restoring" | "rolled_back" | "empty" | "unavailable", repositoryUnavailable = false) {
   function InstallationPreview() {
     const query = useMemo(() => {
       let state = initial;
@@ -947,10 +951,11 @@ function installationPreview(initial: "prepared" | "preparing" | "applying" | "c
         if(name === "releaseObserveInstallation") { if(state === "restoring") state="rolled_back"; return answer(plan()); }
         if(name === "releaseApplyInstallation") { state="applying"; return answer(plan()); }
         if(name === "releaseResumeInstallation") { state="prepared"; return answer(plan()); }
+        if(name === "releaseCancelInstallationPreparation") { state=state === "preparing"?"retiring":"empty"; return answer({...plan(),state:state === "retiring"?"retiring":"cancelled"}); }
         if(name === "releaseCancelInstallation") { state="empty"; return answer({...plan(),state:"cancelled"}); }
         if(name !== "releaseInstallationStatus") throw new Error("This fixture does not publish changes.");
         const mixed = ["applying", "restoring"].includes(state);
-        return answer({preparation:state === "preparing"?{...selected,installationId:"qa-installation",preparationId:"qa-preparation",requestId:"original-request",expectedCurrentRevision:"d".repeat(40),state:"preparing",canResume:true}:null,installationId:"qa-installation",currentRevision:mixed?"":state === "complete"?selected.overlayRevision:"d".repeat(40),applications:mixed?[
+        return answer({preparation:["preparing","retiring"].includes(state)?{...selected,installationId:"qa-installation",preparationId:"qa-preparation",requestId:"original-request",expectedCurrentRevision:"d".repeat(40),state,canResume:state === "preparing",canCancel:true}:null,installationId:"qa-installation",currentRevision:mixed?"":state === "complete"?selected.overlayRevision:"d".repeat(40),applications:mixed?[
           {key:"engine",name:"Engine",namespace:"argocd",currentRevision:"c".repeat(40)},
           {key:"product",name:"Client workspace",namespace:"argocd",currentRevision:"d".repeat(40)},
         ]:[],choices:state === "empty"?[]:[selected],active:["prepared","applying","restoring"].includes(state)?plan():null,latest:["complete","rolled_back"].includes(state)?plan():null,proposalBaseRevision:repositoryUnavailable?"":"e".repeat(40),proposalWarning:repositoryUnavailable?"The installation repository connection is unavailable.":undefined,proposals:[]});
@@ -960,6 +965,35 @@ function installationPreview(initial: "prepared" | "preparing" | "applying" | "c
     return <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected proposedRelease={initial === "empty"?selected:null} /></WindowBody>;
   }
   return () => <InstallationPreview />;
+}
+
+function repositoryOwnerView(state: "ready" | "landed" | "failure" | "empty" | "preparation-failed" | "preparation-running" | "preparation-waiting-error" | "preparation-waiting" | "preparation-unavailable") {
+  const preparing = state.startsWith("preparation-");
+  return {
+    seed: {
+      repositoryAuthority: { sourceId:"source-one",repository:"znasllc-io/memql",repositoryId:42,canWrite:true,canRequest:true,route:"own",landingMode:"owner_push",operations:["propose_change"] },
+      repositoryChangeError: state === "failure" ? "The default branch moved since review. Prepare a new proposal." : undefined,
+      workRunSummaries: preparing ? [{id:"draft-run",goalId:"draft-goal",status:state.startsWith("preparation-waiting") ? "waiting" : state === "preparation-running" ? "running" : "failed",errorMessage:state === "preparation-waiting" ? "" : "Independent review refused removal of the existing parent address. Add the Workbench setting while preserving that address."}] : [],
+      workRunSummaryError: state === "preparation-unavailable" ? "The saved execution could not be read." : undefined,
+      changeRequests: state === "empty" ? [] : [{id:"version-request",operation:"propose_change",state:"approved",statement:preparing ? "Enable the product Workbench route" : "Bump engine to 0.31.19",repository:"znasllc-io/memql",paths:preparing ? ["deploy/k8s/overlays/cloud/kustomization.yaml"] : ["VERSION"],goalId:preparing ? "draft-goal" : "",runId:preparing ? "draft-run" : "",expiresAt:"2026-12-01T12:00:00Z",proposal:preparing ? undefined :{state:"complete",landingMode:"owner_push",branch:"memql/change-version",commit:"a".repeat(40),expectedHead:"b".repeat(40),baseBranch:"main",landedCommit:state === "landed" ? "a".repeat(40) : ""}}],
+    },
+    framed:true,
+    render: () => <WindowBody fallback="Pipelines"><RepositoryChange sourceId="source-one" /></WindowBody>,
+  };
+}
+function OwnerInstallationPreview() {
+  const query=useMemo(() => {
+    let landed=false;
+    const answer=(payload:object)=>new Result({bundle:{nodes:[{id:"installation",payload}]}} as never);
+    const proposal=()=>({proposalId:"proposal-one",installationId:"qa-installation",candidateId:"sha256:"+"a".repeat(64),catalogDigest:"sha256:"+"b".repeat(64),state:landed?"landed":"proposed",landingMode:"owner_push",repository:"znasllc-io/memql-znas",baseBranch:"main",expectedBaseRevision:"b".repeat(40),proposedCommit:"c".repeat(40),overlayRevision:landed?"c".repeat(40):""});
+    return {executeNamed:async(name:string)=>{
+      if(name === "releaseLandInstallationProposal") {landed=true;return answer(proposal());}
+      if(name === "releaseObserveInstallationProposal") return answer(proposal());
+      if(name !== "releaseInstallationStatus") throw new Error("No installation plan was requested in this fixture.");
+      return answer({installationId:"qa-installation",currentRevision:"b".repeat(40),choices:[],active:null,proposalLandingMode:"owner_push",proposals:[proposal()]});
+    }};
+  },[]);
+  return <WindowBody fallback="Cluster"><InstallationUpdates query={query} connected /></WindowBody>;
 }
 
 function repositoryDeliveryView(state: "compose" | "waiting" | "attention" | "queued" | "merged") {
@@ -987,6 +1021,9 @@ const VIEWS: Record<
 > = {
   "feedback": { render: () => <WindowBody fallback="Notices"><FeedbackPreview /></WindowBody> },
   ...MATERIALIZER_VIEWS,
+  ...RESOURCE_PAGE_VIEWS,
+  ...NEXUS_PAGED_VIEWS,
+  ...CONCEPT_PAGED_VIEWS,
   ...mapScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
@@ -1091,6 +1128,25 @@ const VIEWS: Record<
     wrap: (el, role) => nexusSession(el, { role }),
     render: () => <NexusPane section="overview" />,
   },
+  "accounts-paged": {
+    connect: () => accountConnection({ clientAccountsAll: Array.from({ length: 25 }, (_, n) => accountRow({ id: `client-${n}`, name: `Client ${String(n).padStart(2, "0")}`, domain: `client-${n}.example.com`, primaryContactName: `Contact ${n}`, createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T00:00:00Z` })) }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
+  "users-paged": {
+    ...usersWizardView("people"),
+    connect: () => usersConnection({
+      activeRoles: [usersRole({ slug: "owner", name: "Owner", rank: 400 }), usersRole({ slug: "user", name: "Member", rank: 100 })],
+      activeCapabilities: [usersGrant("owner", "read", "principal"), usersGrant("owner", "create", "admission")],
+      searchUsers: Array.from({ length: 25 }, (_, n) => usersPerson({ id: `person-${n}`, displayName: `Colleague ${String(n).padStart(2, "0")}`, primaryEmail: `colleague-${n}@example.com`, createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T10:00:00Z` })),
+      pendingUserInvitations: Array.from({ length: 25 }, (_, n) => usersInvitation({ id: `invite-${n}`, inviteeName: `Invitee ${String(n).padStart(2, "0")}`, inviteeEmail: `invitee-${n}@example.com`, expiresAt: "2099-01-01T00:00:00Z", createdAt: `2026-10-${String(n + 1).padStart(2, "0")}T11:00:00Z` })),
+    }),
+  },
+  "fleet-paged": {
+    connect: () => fleetConnection({ myWorkersWithStatus: Array.from({ length: 25 }, (_, n) => fleetMachineRow({ id: `machine-${n}`, displayName: `Studio ${String(n).padStart(2, "0")}`, registeredAt: `2026-10-${String(n + 1).padStart(2, "0")}T00:00:00Z` })) }),
+    wrap: (el, role) => fleetSession(el, { role }),
+    render: () => <WindowBody fallback="Fleet"><MachinesProvider><FleetApp sectionId="machines" navigate={() => {}} askContext={() => {}} store={{ load: () => ({ version: 1, defaultSection: "machines", showRevoked: false }), save: () => {} }} /></MachinesProvider></WindowBody>,
+  },
   accounts: {
     connect: () => accountConnection({ clientAccountsAll: [
       accountRow({ id: "v1:accounts:account:self", name: "Our Studio", domain: "studio.example.com", primaryContactName: "Dana" }),
@@ -1145,6 +1201,7 @@ const VIEWS: Record<
   "delivery-add-repository": { seed:SOURCE_CHOOSER, framed:true, render:()=> <DeployablesWindow section="repositories" fallback="Pipelines" /> },
   "installation-prepared": { render:installationPreview("prepared") },
   "installation-preparing": { render:installationPreview("preparing") },
+  "installation-cancelling": { render:installationPreview("retiring") },
   "installation-repository-outage": { render:installationPreview("prepared", true) },
   "installation-applying": { render:installationPreview("applying") },
   "installation-complete": { render:installationPreview("complete") },
@@ -1159,6 +1216,16 @@ const VIEWS: Record<
   "nexus-readable-waiting": { connect: () => readableNexus("waiting"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-failed": { connect: () => readableNexus("failed"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
   "nexus-readable-long": { connect: () => readableNexus("long"), wrap:(el,role)=>nexusSession(el,{role}), render:()=> <NexusPane section="goals" intent={{id:"readable",payload:{goalId:"goal-readable"}}} /> },
+  "repository-owner-ready": repositoryOwnerView("ready"),
+  "repository-owner-landed": repositoryOwnerView("landed"),
+  "repository-owner-failure": repositoryOwnerView("failure"),
+  "repository-owner-empty": repositoryOwnerView("empty"),
+  "repository-preparation-waiting-error": repositoryOwnerView("preparation-waiting-error"),
+  "repository-preparation-waiting": repositoryOwnerView("preparation-waiting"),
+  "repository-preparation-failed": repositoryOwnerView("preparation-failed"),
+  "repository-preparation-running": repositoryOwnerView("preparation-running"),
+  "repository-preparation-unavailable": repositoryOwnerView("preparation-unavailable"),
+  "installation-owner-proposal": { render: () => <OwnerInstallationPreview /> },
   "repository-delivery-compose": repositoryDeliveryView("compose"),
   "repository-delivery-waiting": repositoryDeliveryView("waiting"),
   "repository-delivery-attention": repositoryDeliveryView("attention"),

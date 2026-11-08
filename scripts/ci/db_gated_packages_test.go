@@ -6,13 +6,93 @@ package ci
 // shard through a second literal package list (memql#3160, memql#5485).
 
 import (
+	"bytes"
 	"go/build"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// Adding one reviewed module must not turn the inventory guard into a broad
+// subtree exemption. Exercise both public modes, including the substitution
+// boundary in --complement-cacheable where a lost exit code once failed open.
+func TestComplementRecognizesCockpitAndStillRefusesUnknownModules(t *testing.T) {
+	script, err := os.ReadFile("db-gated-packages.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unknown := range []bool{false, true} {
+		for _, mode := range []string{"--complement", "--complement-cacheable"} {
+			t.Run(mode+map[bool]string{false: "/known-cockpit", true: "/unknown-child"}[unknown], func(t *testing.T) {
+				root := t.TempDir()
+				write := func(name, body string, permissions os.FileMode) {
+					t.Helper()
+					file := filepath.Join(root, name)
+					if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(file, []byte(body), permissions); err != nil {
+						t.Fatal(err)
+					}
+				}
+				write("scripts/ci/db-gated-packages.sh", string(script), 0755)
+				write("go.mod", "module github.com/znasllc-io/memql\n", 0644)
+				write("cockpit/go.mod", "module github.com/znasllc-io/memql/cockpit\n", 0644)
+				if unknown {
+					write("cockpit/unreviewed/go.mod", "module example.test/unreviewed\n", 0644)
+				}
+				write("bin/go", `#!/bin/bash
+function main() {
+    if [[ "$1:$2" == list:-m ]]; then
+        if [[ "${3:-}" == -f ]]; then printf '%s\n' "$PWD";
+        else printf '%s\n' github.com/znasllc-io/memql github.com/znasllc-io/memql/cockpit; fi
+        return
+    fi
+    if [[ "$1:$2" != list:github.com/znasllc-io/memql/... ]]; then return 2; fi
+    printf '%s\n' github.com/znasllc-io/memql github.com/znasllc-io/memql/cockpit/cmd/cockpit github.com/znasllc-io/memql/component/memql
+    local n
+    for ((n=0; n<160; n++)); do printf 'github.com/znasllc-io/memql/unit/%s\n' "$n"; done
+}
+main "$@"
+`, 0755)
+				cmd := exec.Command("bash", "scripts/ci/db-gated-packages.sh", mode)
+				cmd.Dir = root
+				cmd.Env = append(os.Environ(), "PATH="+filepath.Join(root, "bin")+":"+os.Getenv("PATH"))
+				var out, stderr bytes.Buffer
+				cmd.Stdout, cmd.Stderr = &out, &stderr
+				err := cmd.Run()
+				if unknown {
+					if err == nil || out.Len() != 0 || !strings.Contains(stderr.String(), "cockpit/unreviewed/go.mod") {
+						t.Fatalf("unknown module did not fail closed: err=%v stdout=%q stderr=%q", err, out.String(), stderr.String())
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("known Cockpit module refused: %v\n%s", err, stderr.String())
+				}
+				packages := strings.Fields(out.String())
+				if !slices.Contains(packages, "github.com/znasllc-io/memql/cockpit/cmd/cockpit") || slices.Contains(packages, "github.com/znasllc-io/memql/component/memql") {
+					t.Fatalf("Cockpit unit coverage or DB partition changed: %v", packages)
+				}
+			})
+		}
+	}
+}
+
+func TestCockpitKeepsItsAdditionalNativeValidation(t *testing.T) {
+	for _, tc := range []struct{ name, need, command string }{
+		{"docker-integration", "docker", "go test -race -count=1 -timeout=600s $MEMQL_PACKAGES\n"},
+		{"computeruse", "macos_tooling", "go test -race -tags computeruse -count=1 -timeout=600s $MEMQL_PACKAGES\n"},
+	} {
+		step := nativeRequiredStep(t, tc.name)
+		if step.Packages != "affected" || !slices.Equal(step.PackageRoots, []string{"cockpit"}) || !step.Needs[tc.need] || !strings.Contains(step.Run, tc.command) {
+			t.Errorf("%s lost its additional Cockpit validation: %+v", tc.name, step)
+		}
+	}
+}
 
 func TestDBTestsLaneTakesItsSetFromThePlanner(t *testing.T) {
 	spec := nativePipeline(t)

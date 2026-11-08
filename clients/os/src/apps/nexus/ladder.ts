@@ -365,14 +365,14 @@ export function procedureFromRow(row: Row): ProcedureRow {
     goalSignature: rowString(flat, "goalSignature"),
     procedureHash: rowString(flat, "procedureHash"),
     createdAt: rowString(flat, "createdAt"),
-    title: str(procedure, "title"),
+    title: str(procedure, "title") || rowString(flat, "title"),
     steps: rawSteps
       .map((s) => objectOf(s))
       .filter((s): s is Record<string, unknown> => s !== null)
       .map((s) => ({ tool: str(s, "tool"), args: argNodeOf(s["args"]) })),
     holes: rawHoles.map(holeOf).filter((h): h is ProcedureHole => h !== null),
     inputMap: stringMap(procedure?.["inputMap"]),
-    freeParameters: strings(procedure?.["freeParameters"]),
+    freeParameters: strings(procedure?.["freeParameters"] ?? flat["freeParameters"]),
     footprint: {
       files: footprint?.["files"] === true,
       machine: footprint?.["machine"] === true,
@@ -381,7 +381,7 @@ export function procedureFromRow(row: Row): ProcedureRow {
       concepts: strings(footprint?.["concepts"]),
     },
     target: str(procedure, "target"),
-    recordedFrom: recordedFromOf(procedure?.["recordedFrom"]),
+    recordedFrom: recordedFromOf(procedure?.["recordedFrom"] ?? flat["recordedFrom"]),
     preconditions: preconditionsOf(flat["preconditions"]),
     reuse: reuseFactsFromRow(flat),
   };

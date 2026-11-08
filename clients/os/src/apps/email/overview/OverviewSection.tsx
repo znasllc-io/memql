@@ -1,3 +1,4 @@
+import { useEmailCatalogs } from "../catalogs";
 import { journeyFromRow } from "../rows";
 import { useMemo } from "react";
 import { Send } from "lucide-react";
@@ -65,6 +66,7 @@ export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
   // One clock for the 30-day window. A minute is the finest it can matter at.
   const now = useNow(60_000);
 
+  useEmailCatalogs(["campaigns", "audiences", "rules", "journeys"]);
   const campaignRows = feeds.campaigns.snapshot.rows;
   const campaigns = useMemo(() => campaignRows.map(campaignFromRow).filter((campaign) => campaign.id !== ""), [campaignRows]);
   const audienceRows = feeds.audiences.snapshot.rows;

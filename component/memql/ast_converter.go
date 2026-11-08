@@ -1234,6 +1234,14 @@ func walkSpecRefs(expr ExpressionNode, visit func(FieldReference)) {
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		if node.TextConcat != nil {
+			for _, part := range node.TextConcat.parts {
+				if part.field != nil {
+					visit(*part.field)
+				}
+			}
+			return
+		}
 		visit(node.Field)
 	case *LogicalExpression:
 		walkSpecRefs(node.Left, visit)

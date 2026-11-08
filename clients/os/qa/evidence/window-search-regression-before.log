@@ -1,0 +1,292 @@
+
+> @znasllc-io/memql-os@0.1.0 test
+> vitest run --run test/chrome/windowSearch.test.tsx
+
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+ ❯ test/chrome/windowSearch.test.tsx (4 tests | 4 failed) 319ms
+   ❯ search requested while an app downloads (4)
+     × waits for the current section's search even without a default search section 104ms
+     × offers destination search only after a loaded section has no resource search 74ms
+     × cancels the queued search when the window changes: hide 70ms
+     × cancels the queued search when the window changes: navigate 70ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/chrome/windowSearch.test.tsx > search requested while an app downloads > waits for the current section's search even without a default search section
+AssertionError: expected <dialog …(3)>…(3)</dialog> to be null
+
+- Expected:
+null
+
++ Received:
+<dialog
+  aria-label="Search Demo destinations"
+  class="os-window-search"
+  open=""
+>
+  <header>
+    <strong>
+      Demo
+       destinations
+    </strong>
+    <button
+      aria-label="Close destination search"
+      class="os-icon-button"
+      type="button"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-x"
+        fill="none"
+        height="14"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="14"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M18 6 6 18"
+        />
+        <path
+          d="m6 6 12 12"
+        />
+      </svg>
+    </button>
+  </header>
+  <input
+    aria-label="Find a destination"
+    class="os-input"
+    placeholder="Find a destination…"
+    value=""
+  />
+  <nav
+    aria-label="Matching destinations"
+  >
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Records
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Other
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Settings
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Logs
+    </button>
+  </nav>
+</dialog>
+
+ ❯ test/chrome/windowSearch.test.tsx:68:63
+     66|     await waitFor(() => expect(app.load).toHaveBeenCalledTimes(1));
+     67|     fireEvent.click(screen.getByRole("button", { name: "Search Demo" }…
+     68|     expect(document.querySelector(".os-window-search[open]")).toBeNull…
+       |                                                               ^
+     69|     await act(async () => app.finish(Directory));
+     70|     expect(await screen.findByPlaceholderText("Search records")).toBe(…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/chrome/windowSearch.test.tsx > search requested while an app downloads > offers destination search only after a loaded section has no resource search
+AssertionError: expected <dialog …(3)>…(3)</dialog> to be null
+
+- Expected:
+null
+
++ Received:
+<dialog
+  aria-label="Search Demo destinations"
+  class="os-window-search"
+  open=""
+>
+  <header>
+    <strong>
+      Demo
+       destinations
+    </strong>
+    <button
+      aria-label="Close destination search"
+      class="os-icon-button"
+      type="button"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-x"
+        fill="none"
+        height="14"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="14"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M18 6 6 18"
+        />
+        <path
+          d="m6 6 12 12"
+        />
+      </svg>
+    </button>
+  </header>
+  <input
+    aria-label="Find a destination"
+    class="os-input"
+    placeholder="Find a destination…"
+    value=""
+  />
+  <nav
+    aria-label="Matching destinations"
+  >
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Records
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Other
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Settings
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Logs
+    </button>
+  </nav>
+</dialog>
+
+ ❯ test/chrome/windowSearch.test.tsx:78:63
+     76|     await waitFor(() => expect(app.load).toHaveBeenCalledTimes(1));
+     77|     fireEvent.click(screen.getByRole("button", { name: "Search Demo" }…
+     78|     expect(document.querySelector(".os-window-search[open]")).toBeNull…
+       |                                                               ^
+     79|     await act(async () => app.finish(() => <p>Loaded content</p>));
+     80|     await waitFor(() => expect(document.querySelector(".os-window-sear…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/chrome/windowSearch.test.tsx > search requested while an app downloads > cancels the queued search when the window changes: hide
+ FAIL  test/chrome/windowSearch.test.tsx > search requested while an app downloads > cancels the queued search when the window changes: navigate
+AssertionError: expected <dialog …(3)>…(3)</dialog> to be null
+
+- Expected:
+null
+
++ Received:
+<dialog
+  aria-label="Search Demo destinations"
+  class="os-window-search"
+  open=""
+>
+  <header>
+    <strong>
+      Demo
+       destinations
+    </strong>
+    <button
+      aria-label="Close destination search"
+      class="os-icon-button"
+      type="button"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-x"
+        fill="none"
+        height="14"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="14"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M18 6 6 18"
+        />
+        <path
+          d="m6 6 12 12"
+        />
+      </svg>
+    </button>
+  </header>
+  <input
+    aria-label="Find a destination"
+    class="os-input"
+    placeholder="Find a destination…"
+    value=""
+  />
+  <nav
+    aria-label="Matching destinations"
+  >
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Records
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Other
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Settings
+    </button>
+    <button
+      class="os-window-nav-item"
+      type="button"
+    >
+      Logs
+    </button>
+  </nav>
+</dialog>
+
+ ❯ test/chrome/windowSearch.test.tsx:88:63
+     86|     await waitFor(() => expect(app.load).toHaveBeenCalledTimes(1));
+     87|     fireEvent.click(screen.getByRole("button", { name: "Search Demo" }…
+     88|     expect(document.querySelector(".os-window-search[open]")).toBeNull…
+       |                                                               ^
+     89|     app.rerender(change === "hide", change === "navigate" ? "other" : …
+     90|     await act(async () => app.finish(Directory));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  16:41:17
+   Duration  753ms (tests 46%, import 22%, environment 21%, transform 11%, setup 1%)

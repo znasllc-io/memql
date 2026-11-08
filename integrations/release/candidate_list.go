@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -13,6 +14,7 @@ import (
 type candidateCursor struct {
 	CreatedAt time.Time `json:"createdAt"`
 	ID        string    `json:"id"`
+	Search    string    `json:"search,omitempty"`
 }
 
 type candidateComponentSummary struct {
@@ -38,7 +40,14 @@ type candidatePage struct {
 // List is an owner-scoped journal read, including interrupted preparations.
 // Cursor order uses immutable creation time and identity, not a mutable status.
 // The page omits large manifests; get revalidates one exact manifest for review.
-func (l *candidateLedger) list(ctx context.Context, cursor string, limit int) (candidatePage, error) {
+func (l *candidateLedger) list(ctx context.Context, cursor string, limit int, searches ...string) (candidatePage, error) {
+	search := ""
+	if len(searches) > 0 {
+		search = strings.ToLower(strings.TrimSpace(searches[0]))
+	}
+	if len(search) > 512 {
+		return candidatePage{}, errors.New("candidate search is too long")
+	}
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return candidatePage{}, err
@@ -47,10 +56,10 @@ func (l *candidateLedger) list(ctx context.Context, cursor string, limit int) (c
 		return candidatePage{}, errors.New("candidate list requires a limit from 1 to 50 and a bounded cursor")
 	}
 	var before any
-	var position candidateCursor
+	position := candidateCursor{Search: search}
 	if cursor != "" {
 		body, err := base64.RawURLEncoding.DecodeString(cursor)
-		if err != nil || decodeCandidateObject(body, &position) != nil || position.CreatedAt.IsZero() || len(position.ID) != 71 || position.ID[:7] != "sha256:" || !candidateArtifactDigest(position.ID[7:]) {
+		if err != nil || decodeCandidateObject(body, &position) != nil || position.CreatedAt.IsZero() || position.Search != search || len(position.ID) != 71 || position.ID[:7] != "sha256:" || !candidateArtifactDigest(position.ID[7:]) {
 			return candidatePage{}, errors.New("invalid candidate cursor")
 		}
 		before = position.CreatedAt
@@ -61,13 +70,14 @@ func (l *candidateLedger) list(ctx context.Context, cursor string, limit int) (c
 	}
 	rows, err := db.QueryContext(ctx, `SELECT candidate_id,created_at FROM release_candidates
 WHERE owner_user_id=$1 AND ($2::timestamptz IS NULL OR (created_at,candidate_id)<($2::timestamptz,$3))
-ORDER BY created_at DESC,candidate_id DESC LIMIT $4`, owner, before, position.ID, limit+1)
+AND ($5 = '' OR strpos(lower(candidate_id || ' ' || state || ' ' || (manifest->'components')::text), $5)>0)
+ORDER BY created_at DESC,candidate_id DESC LIMIT $4`, owner, before, position.ID, limit+1, search)
 	if err != nil {
 		return candidatePage{}, err
 	}
 	positions := []candidateCursor{}
 	for rows.Next() {
-		var item candidateCursor
+		item := candidateCursor{Search: search}
 		if err := rows.Scan(&item.ID, &item.CreatedAt); err != nil {
 			rows.Close()
 			return candidatePage{}, err
@@ -122,9 +132,25 @@ func (i *Integration) handleCandidateList(ctx context.Context, args map[string]a
 			return nil, errors.New("candidate list cursor must be a string")
 		}
 	}
-	page, err := p.ledger.list(ctx, cursor, limit)
+	search, err := browseText(args, "search")
+	if err != nil {
+		return nil, err
+	}
+	page, err := p.ledger.list(ctx, cursor, limit, search)
 	if err != nil {
 		return nil, err
 	}
 	return resultNode("candidates", "", page)
+}
+
+func browseText(args map[string]any, key string) (string, error) {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", errors.New("release " + key + " must be a string")
+	}
+	return value, nil
 }

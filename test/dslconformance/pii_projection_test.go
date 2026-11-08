@@ -131,10 +131,14 @@ var piiProjectionExemptions = map[string]string{}
 // and the projection must be the minimum that serves it. A construct returning
 // contact details, credentials, preferences or role does not qualify however
 // narrow its filter.
+// Organization reads are a separate accepted case: their mandatory engine
+// boundary scopes contact fields independently of the authored filter. The
+// declaration gate below and real database parity tests pin that boundary.
 var piiProjectionAccepted = map[string]string{
 	"campaigns/queries.memql newsletterSignupById":          "signup organization membership plus Campaigns app permission enforced by the engine; the raw/named private write guard prevents forged attribution. TestNewsletterEnrollmentAndWelcomeAcrossReplicas checks outsider reads.",
 	"campaigns/queries.memql newsletterWelcomesForAudience": "same enforced organization boundary as newsletterSignupById, applied before the recent-outcome limit; TestOrganizationPiiBoundariesRemainEnforced pins it.",
 	"accounts/queries.memql clientAccountsAll":              "engine-enforced organization boundary; only current account members or global cluster operators see account contact fields. TestOrganizationPiiBoundariesRemainEnforced pins the policy and declaration.",
+	"accounts/queries.memql clientAccountsBrowse":           "same mandatory organization boundary and caller contract as clientAccountsAll, before search and pagination. TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB compares contact fields for below-admin members and denies foreign, outsider and anonymous reads; TestOrganizationPiiBoundariesRemainEnforced pins the account binding and actor declaration.",
 	"accounts/queries.memql clientAccountById":              "same engine-enforced organization boundary as the account picker.",
 	"campaigns/queries.memql audienceRosterForSend":         "recipient organization membership plus app permission enforced before pagination and again on each row; worker borrowed authority resolves current user role and grants.",
 	"campaigns/queries.memql deliveriesForCampaign":         "delivery organization membership plus app permission enforced by the engine.",
@@ -431,6 +435,18 @@ func TestOrganizationPiiBoundariesRemainEnforced(t *testing.T) {
 		}
 		if name != "v1:accounts:account" && c.RowAuthz.Account != "accountId" {
 			t.Fatalf("%s lost organization field declaration", name)
+		}
+	}
+	// The accepted names cannot move to another concept or lose their actor
+	// context while continuing to borrow the account boundary's justification.
+	src := readDslFile(t, "accounts/queries.memql")
+	bindings := map[string]string{}
+	for _, declaration := range piiQueryDeclRe.FindAllStringSubmatch(blankComments(src), -1) {
+		bindings[declaration[2]] = declaration[1]
+	}
+	for _, name := range []string{"clientAccountsAll", "clientAccountsBrowse", "clientAccountById"} {
+		if bindings[name] != "account" || !strings.Contains(headBefore(t, src, name, "accounts/queries.memql"), "@actor") {
+			t.Fatalf("%s lost the account binding or actor context required by its PII boundary acceptance", name)
 		}
 	}
 }

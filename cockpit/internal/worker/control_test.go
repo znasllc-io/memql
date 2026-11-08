@@ -55,6 +55,39 @@ func eventuallyControl(t *testing.T, predicate func() bool) {
 	t.Fatal("condition did not become true")
 }
 
+func TestLocalStatusBusyAcrossHomesIncludingPausing(t *testing.T) {
+	fleet, _ := controlFixture(t)
+	a, b := &Runner{}, &Runner{}
+	fleet.managed["a"] = &managedHome{home: fleet.workers.Homes[0], enabled: true, runner: a}
+	fleet.managed["b"] = &managedHome{home: fleet.workers.Homes[1], enabled: false, runner: b}
+	if fleet.LocalStatus().Busy {
+		t.Fatal("idle homes reported busy")
+	}
+	b.activeCalls.Add(1)
+	status := fleet.LocalStatus()
+	if !status.Busy || status.Homes[1].State != "Pausing" {
+		t.Fatal("work stopping on a paused sibling must prevent an update")
+	}
+	a.activeCalls.Add(1)
+	b.activeCalls.Add(-1)
+	if !fleet.LocalStatus().Busy {
+		t.Fatal("another home's active call must keep the machine busy")
+	}
+	a.activeCalls.Add(-1)
+	b.pulls = &modelPuller{live: map[string]*modelPull{"pull": {}}}
+	if !fleet.LocalStatus().Busy {
+		t.Fatal("an active model download must count as busy")
+	}
+	delete(b.pulls.live, "pull")
+	if fleet.LocalStatus().Busy {
+		t.Fatal("completed work must release the busy indication")
+	}
+	body, err := json.Marshal(fleet.LocalStatus())
+	if err != nil || !strings.Contains(string(body), `"busy":false`) {
+		t.Fatalf("idle must be explicit on the wire: %s, %v", body, err)
+	}
+}
+
 func TestLocalPausePersistsAndIsolatesOtherHomes(t *testing.T) {
 	fleet, path := controlFixture(t)
 	var mu sync.Mutex

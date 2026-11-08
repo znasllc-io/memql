@@ -1,0 +1,3 @@
+
+> @znasllc-io/memql-os@0.1.0 typecheck
+> tsc -b && tsc -p tsconfig.test.json --noEmit

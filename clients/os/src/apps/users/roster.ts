@@ -41,8 +41,8 @@ export interface RosterFilter {
   state: RosterState | "";
   /** The setting: deactivated people are hidden unless this is on. */
   showDeactivated: boolean;
-  /** Name, or last seen. */
-  sort: "name" | "lastSeen";
+  /** Recent by row version, computed name, or last seen. */
+  sort: "recent" | "name" | "lastSeen";
 }
 
 export const DEFAULT_ROSTER_FILTER: RosterFilter = {
@@ -51,7 +51,7 @@ export const DEFAULT_ROSTER_FILTER: RosterFilter = {
   group: "",
   state: "",
   showDeactivated: false,
-  sort: "name",
+  sort: "recent",
 };
 
 /** Whether the filter is narrowing anything, for the Refine chips. */
@@ -150,6 +150,11 @@ export function foldRoster(
   });
 
   return narrowed.sort((a, b) => {
+    if (filter.sort === "recent") {
+      const at = a.kind === "person" ? a.person.createdAt : a.invite.createdAt;
+      const bt = b.kind === "person" ? b.person.createdAt : b.invite.createdAt;
+      return bt.localeCompare(at) || a.id.localeCompare(b.id);
+    }
     if (filter.sort === "lastSeen") {
       // AN INVITED PERSON HAS NEVER BEEN SEEN, so they sort to the end rather
       // than to the top: "" parses as NaN and would otherwise land wherever

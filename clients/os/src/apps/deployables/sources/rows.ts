@@ -70,7 +70,11 @@ export interface CredentialRow {
   login: string;
   /** The installations a grant reaches. Empty for a pasted token. */
   installationIds: readonly string[];
-  /** A heartbeat: written by every fetch under this credential. Displayed, never fingerprinted. */
+  /**
+   * A heartbeat: written by a fetch under this credential when the stored
+   * value is over an hour old, so it is accurate to within an hour.
+   * Displayed, never fingerprinted.
+   */
   lastUsedAt: string;
   revokedAt: string;
   createdAt: string;
@@ -114,12 +118,13 @@ export function credentialFromRow(raw: Row): CredentialRow {
  * What counts as NEWS on a credential, for the arrival cue.
  *
  * A HEARTBEAT IS NOT NEWS (clients/os/README.md, the arrival-cue rule).
- * `lastUsedAt` is written by every fetch of every source that uses this
- * credential -- the ten-minute poll feed included -- so naming it here would
- * ring the card on a timer for as long as anything tracks a repository under
- * it: the standing badge the cue exists not to be. `revokedAt` is left out
- * for the same reason `status` is in: the flip to `revoked` is the change a
- * person would name, and the timestamp beside it only says when.
+ * `lastUsedAt` is written by the fetches of every source that uses this
+ * credential -- the ten-minute poll feed included -- once an hour while any of
+ * them runs, so naming it here would ring the card on a timer for as long as
+ * anything tracks a repository under it: the standing badge the cue exists not
+ * to be. `revokedAt` is left out for the same reason `status` is in: the flip
+ * to `revoked` is the change a person would name, and the timestamp beside it
+ * only says when.
  *
  * A rename, a revocation, a different host and a rotated value are what a
  * person would call a change on a credential. Those four -- and, since epic

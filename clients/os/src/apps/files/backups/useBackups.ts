@@ -22,8 +22,8 @@ import { WATCHED_FOLDER_CONCEPT, type NewBackup } from "./rows";
 // this list is correct on load and frozen after. A backup that has stopped
 // reporting would then look exactly like one that is fine.
 
-export function useBackupsFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("files:watchedFolders", (connection) => ({
+export function useBackupsFeed(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "files:watchedFolders" : null, (connection) => ({
     concept: WATCHED_FOLDER_CONCEPT,
     seed: async (cursor, signal) => {
       // No `workerId` argument: the app wants every backup the person has.

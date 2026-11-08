@@ -33,32 +33,10 @@ import { useRoleCatalog } from "./useRoles";
 // Users: the people of this cluster, the groups they belong to, and the roles
 // they hold (epic memql#5167).
 //
-// ===========================================================================
-// FOUR FEEDS AT THE ROOT, AND NO MEMBERSHIP FEED
-// ===========================================================================
-// `searchUsers`, `pendingUserInvitations`, `groupsAll` and the accounts list
-// are retained for the life of the window and passed down, because three of
-// the five sections read all four: a group's page names the client it grants,
-// a person's page names the groups they are in, the roster joins users and
-// invitations, and the Invite rail matches an address against the clients'
-// verified domains.
-//
-// MEMBERSHIPS ARE NOT AMONG THEM. `v1:identity:groupMembership` is one row per
-// person per group in the cluster, forever, and a feed over it would seed all
-// of them to render one page -- the Deployables timeline argument. They are
-// read per opened page (`membersOfGroup`, `groupsForUser`) and are still live,
-// because the concept broadcasts and `inScope` keeps every other group's
-// events out. useGroups.ts carries the whole reasoning.
-//
-// The role catalog is the fifth read and is not a feed either: two small
-// registries consumed whole, joined into one grid, re-read when either
-// broadcasts.
-//
-// All of it is PRESENTATION. `searchUsers` and `pendingUserInvitations` carry
-// their own gates, `groupsAll` is filtered to authorized organizations,
-// integrations/groups checks the caller's capability and rank in Go, and row
-// admission gates the subscriptions. Hiding a control here is a courtesy to
-// the person reading, never the boundary.
+// Recent People and Groups use bounded, searched directory feeds. Full people
+// and invitation catalogs are demanded only by membership/authority surfaces;
+// memberships remain scoped to one opened group or person. Role definitions
+// are a bounded catalog, not a resource browser.
 
 /** The concepts this app owns, for its Logs section. */
 const USERS_LOG_CONCEPTS = [
@@ -98,10 +76,11 @@ export function UsersApp({
   // A scoped group manager reads people through groupPeople on the opened
   // group, never through the cluster directory or invitation roster.
   const operator = access?.everyAccount === true;
-  const users = usePeople(operator);
-  const invites = useInvites(operator);
-  const groups = useGroups();
-  const accounts = useAccountOptions();
+  const [catalogDemand, setCatalogDemand] = useState(false);
+  const users = usePeople(operator && (sectionId === "roles" || catalogDemand));
+  const invites = useInvites(operator && catalogDemand);
+  const groups = useGroups(sectionId === "people");
+  const accounts = useAccountOptions(catalogDemand || sectionId === "roles");
   const catalog = useRoleCatalog();
 
   const people = useMemo(
@@ -193,7 +172,7 @@ export function UsersApp({
   if (sectionId === "groups") {
     return (
       <GroupsSection
-        groups={groups}
+        onCatalogDemand={setCatalogDemand}
         people={people}
         peopleAvailable={listCount(users.snapshot) !== undefined}
         invitations={invitations}
@@ -230,8 +209,9 @@ export function UsersApp({
   }
   return (
     <PeopleSection
-      users={users}
-      invites={invites}
+      enabled={operator}
+      peopleCatalog={people}
+      onCatalogDemand={setCatalogDemand}
       groups={groupRows}
       accounts={accounts}
       catalog={catalog}
@@ -325,6 +305,7 @@ function UsersSettingsSection({
           <div className="os-choice-row" role="radiogroup" aria-label="Default order">
             {(
               [
+                { id: "recent", name: "Recent" },
                 { id: "name", name: "Name" },
                 { id: "lastSeen", name: "Last seen" },
               ] as const

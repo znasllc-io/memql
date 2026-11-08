@@ -1,0 +1,102 @@
+{
+  "scope": "Local mounted synthetic fixture; disconnected initial and continuation reads",
+  "checks": [
+    {
+      "width": 1280,
+      "mode": "light",
+      "transport": "initial",
+      "rowCount": 0,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": "second-review-concepts-disconnected-initial-light-1280.png"
+    },
+    {
+      "width": 1280,
+      "mode": "light",
+      "transport": "page",
+      "rowCount": 10,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": null
+    },
+    {
+      "width": 1280,
+      "mode": "dark",
+      "transport": "initial",
+      "rowCount": 0,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": null
+    },
+    {
+      "width": 1280,
+      "mode": "dark",
+      "transport": "page",
+      "rowCount": 10,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": "second-review-concepts-disconnected-page-dark-1280.png"
+    },
+    {
+      "width": 390,
+      "mode": "light",
+      "transport": "initial",
+      "rowCount": 0,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": null
+    },
+    {
+      "width": 390,
+      "mode": "light",
+      "transport": "page",
+      "rowCount": 10,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": "second-review-concepts-disconnected-page-light-390.png"
+    },
+    {
+      "width": 390,
+      "mode": "dark",
+      "transport": "initial",
+      "rowCount": 0,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": "second-review-concepts-disconnected-initial-dark-390.png"
+    },
+    {
+      "width": 390,
+      "mode": "dark",
+      "transport": "page",
+      "rowCount": 10,
+      "noticeVisible": true,
+      "falselyEmpty": false,
+      "falselyComplete": false,
+      "horizontalOverflow": false,
+      "browserErrors": [],
+      "screenshot": null
+    }
+  ],
+  "screenshots": "Four representative screenshots retained and visually inspected; all eight flows have recorded browser assertions."
+}

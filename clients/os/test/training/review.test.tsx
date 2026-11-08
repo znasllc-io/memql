@@ -72,7 +72,7 @@ describe("the queue", () => {
             chunkRow({ id: "c-old", text: "Retired content.", superseded: true }),
           ],
         ],
-        "domain-quiet": [[chunkRow({ id: "c-quiet", text: "Nothing to do here." })]],
+        "domain-quiet": [[chunkRow({ id: "c-quiet", text: "Nothing to do here.", validationStatus: "validated" })]],
       },
     });
     mount(connection);
@@ -83,12 +83,8 @@ describe("the queue", () => {
     expect(screen.queryByText("Already approved.")).toBeNull();
     expect(screen.queryByText("Retired content.")).toBeNull();
 
-    // THE PAYOFF OF THE SHAPE CHANGE: a domain the rollup says has no
-    // unvalidated chunks is never paged at all.
-    expect(connection.calls).toContain('query documentChunksForDomain(domainId: "domain-sales")');
-    expect(connection.calls).not.toContain(
-      'query documentChunksForDomain(domainId: "domain-quiet")',
-    );
+    expect(connection.callsNamed("trainingChunksBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("knowledgeTrainingDomainRollups")).toHaveLength(0);
   });
 
   it("groups by documentId, with the seeded corpus LAST", async () => {
@@ -161,7 +157,7 @@ describe("the queue", () => {
     });
     mount(connection);
     await settle(6);
-    expect(screen.getByText(/30 awaiting review in 1 page read/)).toBeTruthy();
+    expect(screen.getByText(/10 awaiting review in 1 page read/)).toBeTruthy();
   });
 
   it("gathers a BATCH per step, not one card", async () => {
@@ -190,7 +186,7 @@ describe("the queue", () => {
     const connection = fakeConnection({
       domainRows: [domainLiteRow("domain-sales", "unvalidated")],
       chunkPages: {
-        "domain-sales": [pageOf(0, 30), [chunkRow({ id: "c-last", text: "Page two chunk." })]],
+        "domain-sales": [pageOf(0, 10), [chunkRow({ id: "c-last", text: "Page two chunk." })]],
       },
     });
     mount(connection);
@@ -202,7 +198,7 @@ describe("the queue", () => {
     await settle(6);
 
     expect(screen.getByText("Page two chunk.")).toBeTruthy();
-    expect(screen.getByText(/31 awaiting review in 2 pages read/)).toBeTruthy();
+    expect(screen.getByText(/11 awaiting review in 2 pages read/)).toBeTruthy();
     // Every page walked: the control goes away rather than offering a read
     // that would return nothing.
     expect(screen.queryByText("Load more")).toBeNull();
@@ -224,7 +220,7 @@ describe("the queue", () => {
     mount(connection);
     await settle(8);
     expect(screen.getByText("Buried, but found.")).toBeTruthy();
-    expect(screen.getByText(/in 3 pages read/)).toBeTruthy();
+    expect(screen.getByText(/in 1 page read/)).toBeTruthy();
   });
 });
 
@@ -268,7 +264,7 @@ describe("a decision", () => {
       domainRows: [domainLiteRow("domain-sales", "unvalidated")],
       chunkPages: { "domain-sales": [[chunkRow({ id: "c-1", text: "Net 30 terms apply." })]] },
     });
-    mount(connection);
+    const view = mount(connection);
     await settle(6);
     expect(screen.getByLabelText("Approve chunk c-1")).toBeTruthy();
 
@@ -282,6 +278,12 @@ describe("a decision", () => {
     expect(card?.getAttribute("data-decided")).toBe("validated");
     expect(within(card as HTMLElement).getByText("validated")).toBeTruthy();
     expect(screen.queryByLabelText("Approve chunk c-1")).toBeNull();
+    const reads = connection.callsNamed("trainingChunksBrowse").length;
+    view.unmount();
+    mount(connection);
+    await settle();
+    expect(document.querySelector('.os-train-card[data-decided="validated"]')).toBeTruthy();
+    expect(connection.callsNamed("trainingChunksBrowse")).toHaveLength(reads);
   });
 
   it("renders a refusal ON THE CARD and does NOT collapse it", async () => {
@@ -309,7 +311,7 @@ describe("when the domain read fails", () => {
     const connection = fakeConnection({ domainsError: "domains unavailable" });
     mount(connection);
     await settle(6);
-    expect(screen.getByText(/did not return its knowledge domains/)).toBeTruthy();
+    expect(screen.getByText(/Reading the queue failed/)).toBeTruthy();
     expect(screen.getByText("domains unavailable")).toBeTruthy();
   });
 });
@@ -326,7 +328,7 @@ describe("review count availability", () => {
   it("labels the measured queue as loaded rather than a total", async () => {
     const view = mount(fakeConnection({ domainRows: [domainLiteRow("sales", "unvalidated")], chunkPages: { sales: [pageOf(0, 30), pageOf(30, 10)] } }));
     await settle(6);
-    expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("30 loaded");
+    expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("10 loaded");
     expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy();
   });
 });

@@ -43,15 +43,15 @@ describe("the agents list", () => {
     const connection = fakeConnection({ activeAgents: [ASSISTANT] });
     mount(connection);
     expect(await screen.findByText("General Assistant")).toBeTruthy();
-    expect(connection.query.activeAgents).toHaveBeenCalled();
-    expect(connection.query.allAgents).not.toHaveBeenCalled();
+    expect(connection.query.allAgents).toHaveBeenCalledWith({ includeInactive: false, search: "" }, expect.anything());
+    expect(connection.query.activeAgents).not.toHaveBeenCalled();
   });
 
   it("reads a different query when inactive agents are shown", async () => {
     const connection = fakeConnection({ allAgents: [ASSISTANT] });
     mount(connection, true);
     await screen.findByText("General Assistant");
-    expect(connection.query.allAgents).toHaveBeenCalled();
+    expect(connection.query.allAgents).toHaveBeenCalledWith({ includeInactive: true, search: "" }, expect.anything());
     expect(connection.query.activeAgents).not.toHaveBeenCalled();
   });
 

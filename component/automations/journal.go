@@ -26,10 +26,12 @@ package automations
 // journal boundaries instead: a failed write stops advancement and cancels
 // in-flight calls. It does not assert exactly-once external effects.
 //
-// TWO THINGS ARE DELIBERATELY NOT RECORDED. Resolved step arguments, which
-// may carry resolved secrets (epic A2 decides redaction), and a step's
-// children (forEach and parallel branches), which ride inside the parent's
-// trimmed result exactly as they ride inside AutomationExecution.Steps.
+// THREE THINGS ARE DELIBERATELY NOT RECORDED. Resolved step arguments, which
+// may carry resolved secrets (epic A2 decides redaction); a step's children
+// (forEach and parallel branches), which ride inside the parent's trimmed
+// result exactly as they ride inside AutomationExecution.Steps; and, of an
+// engine result's rows, each node's concept schema, and the rows themselves
+// when the step's recorded value already holds them (journal_step_result.go).
 //
 // A SANDBOXED DRY-RUN WRITES NOTHING, for the reason it minted no
 // checkpoint (memql#2932): nothing resumes a preview, and the write would

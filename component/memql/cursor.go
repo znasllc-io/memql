@@ -19,7 +19,7 @@ import (
 // Authors keep declaring `sort` + `paginate <pageSize>`; the engine emits a
 // `nextCursor` on a full page and accepts an inbound cursor to continue. The
 // cursor is opaque to clients: a base64url-encoded JSON envelope carrying the
-// keyset position `(createdAt, id)` of the last row on the previous page plus
+// keyset position of the last row on the previous page plus
 // a short hash of the query's sort signature. A cursor minted under one `sort`
 // replayed against a different ordering is rejected with a typed error
 // (ErrCursorSortMismatch) rather than silently returning a wrong page.
@@ -38,7 +38,8 @@ var ErrCursorMalformed = errors.New("pagination cursor is malformed")
 // continuing would silently skip or duplicate rows; we reject instead.
 var ErrCursorSortMismatch = errors.New("pagination cursor does not match the query sort order")
 
-// cursorVersion tags the encoded envelope so the codec can evolve.
+// cursorVersion tags the intrinsic envelope. Schema-bound text payload sorts
+// use the value-key codec in payload_cursor.go (version 2).
 const cursorVersion = 1
 
 // cursorPayload is the decoded shape of an opaque pagination cursor. It carries
@@ -57,6 +58,7 @@ type cursorPayload struct {
 type keysetPosition struct {
 	createdAt time.Time
 	id        string
+	values    []*string
 }
 
 // sortSignatureHash returns the short guard hash stored in a cursor for the
@@ -177,9 +179,8 @@ func keysetFromContext(ctx context.Context) (keysetPosition, bool) {
 //	(createdAt < ?) OR (createdAt = ? AND id > ?)
 //
 // for the default/desc ordering. When the leading declared sort is `createdAt
-// asc`, the comparison flips to `>` / `<`. Anything with a leading payload sort
-// (requiresFullScan) is NOT eligible for the SQL keyset push-down; the caller
-// gates on keysetEligibleSort before reaching here.
+// asc`, the comparison flips to `>`. Schema-bound text payload sorts use
+// payloadKeysetWhere instead; unsupported full-scan sorts emit no cursor.
 func keysetWhere(pos keysetPosition, createdAtDesc bool) (string, []any) {
 	if createdAtDesc {
 		return `("createdAt" < ? OR ("createdAt" = ? AND id > ?))`,
@@ -190,11 +191,9 @@ func keysetWhere(pos keysetPosition, createdAtDesc bool) (string, []any) {
 }
 
 // keysetEligibleSort reports whether the compiled sort can use the SQL keyset
-// push-down. Eligible iff the ordering reduces to the intrinsic (createdAt, id)
-// keyset — i.e. no leading payload-path sort (which forces a full in-memory
-// scan and cannot be expressed as a stable (createdAt, id) predicate). The
-// hot time-series surface this primitive targets (chat / utterance / token
-// streams, ordered by createdAt) is always eligible.
+// push-down: either the intrinsic (createdAt, id) codec or a schema-bound
+// text payload codec. Unbound and unsupported payload sorts retain the
+// existing full in-memory scan and cannot emit a continuation.
 //
 // It also returns whether the leading createdAt ordering is descending, which
 // keysetWhere needs to pick the comparison direction.
@@ -203,8 +202,19 @@ func keysetEligibleSort(sorter *compiledSort) (eligible bool, createdAtDesc bool
 		// nil sorter => default createdAt DESC, id ASC.
 		return true, true
 	}
+	if sorter.payloadKeyset {
+		return true, false
+	}
 	if sorter.needsFullScan() {
 		return false, false
+	}
+	// The legacy codec has only timestamp and id values. Any other key must
+	// have enabled the value-key codec above; accepting it just because a
+	// timestamp leads the order would silently skip equal-timestamp rows.
+	for _, field := range sorter.fields {
+		if field.kind != sortFieldCreatedAt && field.kind != sortFieldId {
+			return false, false
+		}
 	}
 	// Find the effective leading createdAt direction. The compiled fields end
 	// with the appended createdAt-desc / id-asc fallbacks; an author-declared

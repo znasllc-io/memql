@@ -111,23 +111,25 @@ describe("Materialized", () => {
     ).toBeTruthy();
     expect(document.querySelector("select")).toBeNull();
   });
-  it("reads every page once without an archive filter and hides archived records", async () => {
-    const conn = fakeConnection({
-      compositions: [
-        ...Array.from({ length: 51 }, (_, i) =>
-          c({ id: `c${i}`, name: `Report ${i}` }),
-        ),
-        c({ id: "hidden", name: "Filed away", archived: true }),
-      ],
-    });
+  it("reads ten recent records, filters archived rows on the server, and loads ten more", async () => {
+    const conn = fakeConnection({ compositions: [
+      ...Array.from({ length: 25 }, (_, i) => c({ id: `c${String(i).padStart(2, "0")}`, name: `Report ${i}` })),
+      c({ id: "hidden", name: "Filed away", archived: true }),
+    ] });
     const { container } = mount(conn);
-    await screen.findByText("Report 50");
-    expect(conn.query.compositions).toHaveBeenCalledTimes(2);
-    expect(conn.query.compositions.mock.calls[0]?.[0]).toEqual({});
+    await screen.findByText("Report 9");
+    expect(screen.queryByText("Report 10")).toBeNull();
+    expect(conn.query.compositionsBrowse).toHaveBeenCalledTimes(1);
+    expect(conn.query.compositionsBrowse.mock.calls[0]?.[0]).toMatchObject({ includeArchived: false });
+    expect(conn.query.compositions).not.toHaveBeenCalled();
+    expect(conn.query.composeTemplates).not.toHaveBeenCalled();
+    expect(conn.query.composeRecipes).not.toHaveBeenCalled();
+    expect(conn.query.libraryFilesForOwner).not.toHaveBeenCalled();
     expect(screen.queryByText("Filed away")).toBeNull();
-    expect(container.querySelector(".os-head-meta")?.textContent).toContain(
-      "51",
-    );
+    expect(container.querySelector(".os-head-meta")?.textContent).toContain("10+");
+    await press("Load more");
+    await screen.findByText("Report 19");
+    expect(conn.query.compositionsBrowse).toHaveBeenCalledTimes(2);
   });
   it("reveals archived rows from preferences and explains an empty hidden set", async () => {
     const { go } = mount(
@@ -141,7 +143,7 @@ describe("Materialized", () => {
   });
   it("says when a read failed and retries without claiming emptiness", async () => {
     const conn = fakeConnection();
-    conn.query.compositions.mockRejectedValueOnce(
+    conn.query.compositionsBrowse.mockRejectedValueOnce(
       refused("compositions", "Read denied"),
     );
     mount(conn);
@@ -731,8 +733,8 @@ describe("a composition whose executing node stopped", () => {
           screen.getAllByText(/The node stopped before the file was written/)
             .length,
         ).toBeGreaterThan(0);
-      expect(conn.query.workRunForOwner).toHaveBeenCalledWith(
-        { runId: "r-interrupted" },
+      expect(conn.query.workRunSummariesByIds).toHaveBeenCalledWith(
+        { runIds: ["r-interrupted"] },
         expect.anything(),
       );
     },

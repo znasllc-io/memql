@@ -1,7 +1,17 @@
+import { parseCall } from "../callArgs";
+import { DEFAULT_LIST_FILTER, flatDeployables, foldDeployables, foldSources, sourceSummary, sourceStateWord } from "../../src/apps/deployables/list";
+import { siteFromRow } from "../../src/apps/deployables/rows";
+import { packageFromRow, deploymentFromRow } from "../../src/apps/deployables/packages/rows";
+import { credentialFromRow } from "../../src/apps/deployables/sources/rows";
+import { sourceRecord } from "../../src/apps/deployables/sources/sourceRecord";
+import { sourceConnectionFromRow } from "../../src/modules/connections/connections";
 import type { ReactNode } from "react";
+import { filterRuns, type RunFilter } from "../../src/apps/deployables/pipelines/runs";
+import { runFromRow } from "../../src/apps/deployables/pipelines/rows";
 import { act, fireEvent } from "@testing-library/react";
-import { vi } from "vitest";
-import { QueryClient, Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { afterEach, vi } from "vitest";
+import { QueryClient, Result, type Connection, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { disposeSessionCollections } from "../../src/live/sessionCollections";
 
 import { SessionProvider } from "../../src/chrome/access";
 import { OsProvider, useOs } from "../../src/chrome/state";
@@ -11,6 +21,9 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { PipelinesApp } from "../../src/apps/pipelines/PipelinesApp";
 import { installSeededAccess } from "../seededAccess";
 import { holdsForOrganization, setEffectiveCapabilities, type EffectiveCapability } from "../../src/system/roles";
+
+const sessions = new Set<Connection>();
+afterEach(() => { for (const connection of sessions) disposeSessionCollections(connection); sessions.clear(); });
 
 // The Deployables app's test harness.
 //
@@ -152,6 +165,8 @@ export interface FakeSeed {
   repositoryAuthorityError?: string;
   changeRequests?: Row[];
   repositoryChangeError?: string;
+  workRunSummaries?: Row[];
+  workRunSummaryError?: string;
   accounts?: Row[];
   sites?: Row[];
   sitesError?: string;
@@ -408,6 +423,7 @@ export interface FakeSeed {
 }
 
 export interface FakeConnection {
+  status: "connected";
   query: QueryClient;
   /** Every call string that reached the wire, in order. */
   calls: string[];
@@ -488,14 +504,41 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       accountType: installation["accountType"], status: "active",
     }) as Row));
 
+  const changes = new Map<string, Map<string, Row>>();
+  const latest = (concept: string, rows: readonly Row[]) => [...new Map([...rows.map(row => [String(row.id), row] as const), ...[...(changes.get(concept) ?? new Map())]]).values()].filter(row => row.status !== "deleted");
+  const subscriptions = fakeSubscriptions();
+  const originalEmit = subscriptions.emit;
+  subscriptions.emit = (concept, row, kind) => { const held = changes.get(concept) ?? new Map<string, Row>(); held.set(String(row.id), kind === "NODE_DELETED" ? { ...row, status: "deleted" } : row); changes.set(concept, held); originalEmit(concept, row, kind); };
   const stub = {
     executeNamed: vi.fn(async (_name: string, call: string, opts?: { cursor?: string }) => {
       calls.push(call);
 
+      if (_name === "deployableDirectoryPage") {
+        if (seed.sitesError) throw new Error(seed.sitesError);
+        const args = parseCall(call).args;
+        const siteRows = latest("v1:platform:site", sites).map(siteFromRow);
+        const packageRows = latest("v1:platform:package", [...(seed.packages ?? []), ...registeredPackages]).map(packageFromRow);
+        const pending = latest("v1:platform:packageDeployment", seed.awaitingConfirm ?? []).map(deploymentFromRow);
+        const filter = { ...DEFAULT_LIST_FILTER, search: String(args.search ?? ""), kind: String(args.kind ?? ""), status: String(args.status ?? ""), accountId: String(args.accountId ?? "all"), source: String(args.source ?? "") };
+        const archived = args.archived === true;
+        const provenance = (pkg: ReturnType<typeof packageFromRow>) => sourceRecord(pkg, latest("v1:platform:sourceCredential", seed.credentials ?? []).map(credentialFromRow), latest("v1:platform:sourceConnection", sourceConnections).map(sourceConnectionFromRow)).provenance;
+        const sources = (search: string, archived: boolean) => foldSources(siteRows, packageRows.filter(pkg => pkg.sourceKind === "repo" && pkg.repoUrl), pending, search, archived, provenance);
+        const sourcesMode = args.resource === "sources";
+        const entries = sourcesMode ? sources(filter.search, archived).map(group => ({ id: group.id, createdAt: group.pkg?.createdAt ?? "", group: { ...group, pkg: { ...group.pkg!, declares: [], disabledDeployables: [] }, summary: sourceSummary(group), state: sourceStateWord(group), provenance: provenance(group.pkg!), rows: [] } })) : flatDeployables(foldDeployables(siteRows, packageRows, pending, filter, archived)).map(row => ({ id: row.key, createdAt: row.site?.createdAt || row.parked?.createdAt || row.pkg?.createdAt || "", row }));
+        entries.sort((a,b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+        const offset = Number(args.cursor ?? 0);
+        const archivedCount = sourcesMode ? sources("", true).length : flatDeployables(foldDeployables(siteRows, packageRows, pending, DEFAULT_LIST_FILTER, true)).length;
+        return builtinReply("deployableDirectoryPage", [{ entries: entries.slice(offset, offset+10), nextCursor: offset+10 < entries.length ? String(offset+10) : "", total: entries.length, archivedCount, provenanceError: seed.sourceConnectionsError ? "Some GitHub provenance could not be refreshed." : "" }]);
+      }
       // ---- reviews (packs/reviewspack) ----
       if (call.startsWith("builtin reviewsList(")) {
-        const state = /state: "([^"]*)"/.exec(call)?.[1] ?? "waiting";
-        return builtinReply("reviewsList", [seed.reviews?.list?.[state] ?? ({ reviews: [], total: 0, next: "", counts: {} } as unknown as Row)]);
+        const args = parseCall(call).args;
+        const state = String(args.state ?? "waiting");
+        const held = seed.reviews?.list?.[state] ?? { reviews: [], total: 0, counts: {} };
+        const query = String(args.search ?? "").toLowerCase();
+        const rows = ((held.reviews ?? []) as Record<string, unknown>[]).filter(row => !query || [row.title, row.body, row.productHandle, row.authorName, row.authorEmail].join(" ").toLowerCase().includes(query));
+        const offset = Number(args.after ?? 0), limit = Number(args.limit ?? 50);
+        return builtinReply("reviewsList", [{ ...held, reviews: rows.slice(offset, offset + limit), total: rows.length, next: offset + limit < rows.length ? String(offset + limit) : "" }]);
       }
       if (call.startsWith("builtin reviewsGet(")) {
         const id = /reviewId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -503,7 +546,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         if (answer === undefined) throw new Error(`reviews: review "${id}" is not readable by this caller`);
         return builtinReply("reviewsGet", [answer]);
       }
-      if (call.startsWith("builtin reviewsDecisionLog(")) return builtinReply("reviewsDecisionLog", [seed.reviews?.log ?? ({ decisions: [], total: 0, next: "" } as unknown as Row)]);
+      if (call.startsWith("builtin reviewsDecisionLog(")) {
+        const args = parseCall(call).args;
+        const held = seed.reviews?.log ?? { decisions: [], total: 0 };
+        const query = String(args.search ?? "").toLowerCase();
+        const rows = ((held.decisions ?? []) as Record<string, unknown>[]).filter(row => !query || [row.title, row.productHandle, row.action, row.reason, row.note, row.decidedBy].join(" ").toLowerCase().includes(query));
+        const offset = Number(args.after ?? 0), limit = Number(args.limit ?? 50);
+        return builtinReply("reviewsDecisionLog", [{ ...held, decisions: rows.slice(offset, offset + limit), total: rows.length, next: offset + limit < rows.length ? String(offset + limit) : "" }]);
+      }
       if (call.startsWith("builtin reviewsSettings(")) {
         return builtinReply("reviewsSettings", [seed.reviews?.settings ?? ({ exists: false, settings: {}, may: { edit: false, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row)]);
       }
@@ -528,11 +578,30 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const at = opts?.cursor?.startsWith("runs-page-") ? Number(opts.cursor.slice("runs-page-".length)) : 0;
         return rowsResultWithCursor(pages[at] ?? [], at + 1 < pages.length ? `runs-page-${at + 1}` : "");
       }
+      if (call.startsWith("query pipelineRunsBrowse(")) {
+        const value = (name: string) => new RegExp(name + ': "([^\"]*)"').exec(call)?.[1] ?? "";
+        const filter: RunFilter = { changesOnly: call.includes("changesOnly: true"), search: value("search"), pipelineId: value("pipelineId"), branch: value("branch"), outcome: value("outcome") as RunFilter["outcome"] };
+        const pages = seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], ...(seed.olderPipelineRuns ? [seed.olderPipelineRuns] : [])];
+        const matched = filterRuns(pages.flat().map(runFromRow), filter);
+        const byId = new Map(pages.flat().map(row => [String(row.id), row]));
+        const at = opts?.cursor?.startsWith("browse-") ? Number(opts.cursor.slice(7)) : 0;
+        return rowsResultWithCursor(matched.slice(at, at + 10).map(row => byId.get(row.id)!), at + 10 < matched.length ? `browse-${at + 10}` : "");
+      }
+      if (call.startsWith("query pipelineRunForOwner(")) {
+        const id = /runId: "([^\"]*)"/.exec(call)?.[1] ?? "";
+        const rows = (seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], seed.olderPipelineRuns ?? []]).flat();
+        return rowsResult(rows.filter(row => row.id === id));
+      }
       if (call === "query pipelineChannelsForOwner()") return rowsResult(seed.pipelineChannels ?? []);
-      if (call === "query pipelinesForOwner()") return rowsResult(seed.pipelines ?? []);
+      if (call === "query pipelinesForOwner()" || call === "query pipelineDirectory()") return rowsResult(seed.pipelines ?? []);
       if (call.startsWith("query workStepsForOwnerRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return rowsResult(seed.workSteps?.[id] ?? []);
+      }
+      if (call.startsWith("query workRunSummaryForOwner(")) {
+        if (seed.workRunSummaryError) throw new Error(seed.workRunSummaryError);
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult((seed.workRunSummaries ?? []).filter(row => row.id === id));
       }
       if (call.startsWith("query artifactsForRun(")) {
         const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -553,6 +622,14 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin repositoryChangeRequests(")) return builtinReply("repositoryChangeRequests", [{requests:seed.changeRequests ?? []} as Row]);
       if (call.startsWith("builtin repositoryChangeStatus(")) return builtinReply("repositoryChangeStatus", seed.changeRequests?.slice(0,1) ?? []);
+      if (call.startsWith("builtin repositoryChangeLand(")) {
+        if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
+        const receipt = seed.changeRequests?.[0];
+        if (!receipt) throw new Error("Missing proposal");
+        const proposal = receipt.proposal as Record<string, unknown>;
+        receipt.proposal = { ...proposal, landedCommit: proposal.commit };
+        return builtinReply("repositoryChangeLand", [receipt]);
+      }
       if (call.startsWith("builtin repositoryChangeRequest(")) {
         if (seed.repositoryChangeError) throw new Error(seed.repositoryChangeError);
         const receipt = {id:"request-one", operation: /operation: "([^"]*)"/.exec(call)?.[1] ?? "", repository:"acme/shop", repositoryId:42, state:seed.repositoryAuthority?.canWrite ? "approved" : "pending", statement:"Improve the requested component", paths:["clients/os/"], goalId:"goal-request", reason:"", expiresAt:"2026-12-01T00:00:00Z"} as Row;
@@ -591,7 +668,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call.startsWith("query clientAccountsAll(")) return rowsResult(seed.accounts ?? [{ id: "self", name: "Operator organization", status: "active" }]);
-      if (call === "query sitesAll()") { if (seed.sitesError) throw new Error(seed.sitesError); return rowsResult(sites); }
+      if (call === "query sitesAll()") { if (seed.sitesError) throw new Error(seed.sitesError); return rowsResult(latest("v1:platform:site", sites)); }
       if (call.startsWith("query searchUsers(")) {
         if (seed.peopleError !== undefined) throw new Error(seed.peopleError);
         return rowsResult(seed.people ?? []);
@@ -614,8 +691,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
-      if (call === "query packagesAll()") return rowsResult([...(seed.packages ?? []), ...registeredPackages]);
-      if (call === "query packageDeploymentsPending()") return rowsResult(seed.awaitingConfirm ?? []);
+      if (call.startsWith("query packageNamesByIds(")) {
+        const { args } = parseCall(call);
+        return rowsResult(latest("v1:platform:package", [...(seed.packages ?? []), ...registeredPackages]).filter(row => (args.ids as string[]).some(id => id.split(":").at(-1) === String(row.id).split(":").at(-1))).map(({ id, createdAt, name, sourceKind, repoUrl, repoRef }) => ({ id, createdAt, name, sourceKind, repoUrl, repoRef })));
+      }
+      if (call === "query packagesAll()") return rowsResult(latest("v1:platform:package", [...(seed.packages ?? []), ...registeredPackages]));
+      if (call === "query packageDeploymentsPending()") return rowsResult(latest("v1:platform:packageDeployment", seed.awaitingConfirm ?? []));
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
@@ -1029,21 +1110,26 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("sitePublishFromArtifact", [PUBLISH_RESULT as unknown as Row]);
       }
 
-      // `getRowByConceptAndId` composes `concept==<c> && id==<id>`.
-      const match = /id==(\S+)/.exec(call);
-      const wanted = match?.[1] ?? "";
+      // `getRowByConceptAndId` composes `concept==<c> && id=="<id>"`.
+      // Decode the literal: quotes, spaces and escapes belong to the opaque
+      // ID, and a missed lookup would silently retain the stale seeded row.
+      const match = /id==("(?:[^"\\]|\\.)*")$/.exec(call);
+      const wanted = match ? JSON.parse(match[1]!) as string : "";
       const row = wanted === "" ? undefined : seed.byId?.[wanted] ?? sourceConnections.find(row => row["id"] === wanted);
       return bundleResult(row ? [row] : []);
     }),
   };
 
-  return {
+  const connection: FakeConnection = {
+    status: "connected",
     query: Object.setPrototypeOf(stub, QueryClient.prototype) as QueryClient,
     calls,
     callsNamed: (construct: string) => calls.filter((c) => c.includes(`${construct}(`)),
-    subscriptions: fakeSubscriptions(),
+    subscriptions,
     dispatcher: { sendAndWait: vi.fn() },
   };
+  sessions.add(connection as unknown as Connection);
+  return connection;
 }
 
 export function withSession(
