@@ -93,14 +93,14 @@ automation routingEvidenceProposal {
   builtin routingRenderEvidenceProposal(
    form: {description: "Generated from " + args.week + " evidence: " + args.failuresText + " of " + args.callsText + " structured calls to " + args.model + " at level " + args.level + " failed.",
     policy: "localFirst", precedence: 50, onUnavailable: "degrade", excludes: ["fleet:" + args.model]},
-   reason: args.failuresText + " of " + args.callsText + " structured calls to " + args.model + " at level " + args.level + " failed in " + args.week + " (" + args.percent + "%), over the 20-call floor and above the 30% threshold. Approving adds a rule excluding it at that level; declining records the decision so this week's evidence does not ask again."
+   reason: args.failuresText + " of " + args.callsText + " structured calls to " + args.model + " at level " + args.level + " failed in " + args.week + " (" + args.percent + "%), over the 20-call floor and above the 30% threshold. Approving records that you agree to exclude it at that level but does not change routing yet: add the rule in Fleet > Routing > Rules to apply it. Declining records the decision so this week's evidence does not ask again."
   )
  } else {
   if !args.measured || args.validity < 0.9 { return false }
   builtin routingRenderEvidenceProposal(
    form: {description: "Generated from a probe: " + args.model + " measured well enough at level " + args.level + " to be routed again.",
     policy: "localFirst", precedence: 50, onUnavailable: "degrade", excludes: []},
-   reason: args.model + " is excluded at level " + args.level + ", and a probe since then measured " + args.validityPercent + "% structured validity -- at or above the 90% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again."
+   reason: args.model + " is excluded at level " + args.level + ", and a probe since then measured " + args.validityPercent + "% structured validity -- at or above the 90% bar. Approving records that you agree to route it again but does not change routing yet: remove the rule excluding it in Fleet > Routing > Rules to apply it. Declining records the decision so this week's evidence does not ask again."
   )
  }
  return true

@@ -256,25 +256,62 @@ Three things, and all three are enforced:
    quietly become these.
 2. Locked definitions are **re-read from the embedded tree on every boot**, so
    nothing done to one at runtime survives a restart.
-3. A runtime-authored rule may not **carry `@locked`** and may not **take a
-   shipped name**.
+3. A custom rule, whether saved at runtime or declared in a product bundle,
+   cannot **carry `@locked`** and may not **take a shipped name**.
 
 ---
 
 ## Adding your own rule
 
-Two ways, and both produce the same thing.
+Two ways, and in both the router reads the rule on every call.
 
 **In the DSL**, in a product bundle mounted at `MEMQL_DSL_PATH`: write a `rule`
-construct with a precedence above the shipped one you want to win against.
+construct in your product's own domain, with a precedence above the shipped one
+you want to win against. It loads at boot with the rest of the bundle, and the
+load refuses it if it takes a name another rule has, carries `@locked`, or ties
+on precedence with another unlocked rule.
 
-**At runtime**, through `routingRuleActivate`, which takes the structured form
-(conditions, policy, precedence, on-unavailable, excludes), renders the construct
-deterministically -- no model is involved -- runs the same gates the DSL path
-runs, and activates it live. Owner or developer.
+**At runtime**, in Fleet > Routing > Rules, or through the builtins behind it.
+Anyone signed in can read the list; every other call is owner or developer.
 
-Either way the rule is refused if it names a shipped rule or policy, carries
-`@locked`, or collides on precedence with another unlocked rule.
+| Builtin | What it does |
+|---|---|
+| `routingRules()` | Every rule in evaluation order, shipped and custom, with the configuration's current `revision`. |
+| `routingRuleValidate(...)` | Checks a definition against the current rules and policies. Saves nothing. |
+| `routingRuleSave(...)` | Saves a custom rule, or replaces the custom rule of that name. |
+| `routingRuleRemove(name, expectedRevision)` | Removes a custom rule. |
+| `routingRuleDescribe(sentence)` | Compiles a draft from a sentence using local inference. Saves nothing. |
+
+`routingRuleSave` takes `name`, `policy`, `precedence` (0 to 1,000,000) and
+`expectedRevision`, and optionally `conditions`, `level`, `onUnavailable`,
+`excludes` and `description`. `conditions` is an object of the `@when` keys: a
+key you leave out is no condition, and a key present with an empty value
+matches only an empty value.
+
+A saved rule lives in the cluster's **routing configuration**: one revisioned
+document that every replica reads on every call, so the rule decides the next
+matching call wherever it lands. A save or a removal names the revision it was
+read at, and one made after somebody else changed the configuration is refused:
+read the rules again and retry. A save is refused if the rule takes a shipped
+rule's name, names a policy this cluster does not have (policies you saved
+count), uses a condition key outside the closed set, or ties on precedence with
+another unlocked rule. There is no `@locked` to ask for. A shipped rule cannot
+be removed: out-rank it with a custom rule at a higher precedence.
+
+A `rule` inside an authored bundle, from an authoring session or a promoted
+construct, is refused at validation with a message naming `routingRuleSave`.
+Authored constructs are not part of the rule set the router reads.
+
+### Rules the nightly review proposes
+
+Each night MemQL folds the week's calls per model and level. Where a model's
+structured-failure rate at a level is above 30% over at least twenty calls, it
+opens a **Routing rule** approval in Nexus carrying the exact text of a rule
+that would exclude the model there. A later probe that measures the model well
+again proposes retiring the exclusion the same way. Approving records your
+decision and **does not change routing**: to apply it, make the change in
+Fleet > Routing > Rules. Declining is recorded, so the same week's evidence
+does not ask again.
 
 ### "I want a paid model for everything"
 

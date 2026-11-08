@@ -92,9 +92,9 @@ type Warning struct {
 // ShippedNames answers "is this name the embedded tree's", so the compiler can
 // refuse a rule the loader would refuse.
 //
-// It is the SHARED contract rather than a local one: `component/routingrules`
-// -- the form door onto the same pipeline -- passes the same view, and the
-// live implementation on both sides is the engine's own registries.
+// It is the SHARED contract rather than a local one: the form door,
+// routingRuleSave in component/memql, passes the same view, and the live
+// implementation on both sides is the engine's own registries.
 type ShippedNames = memql.ShippedNames
 
 // Proposal is the compiled rule in the shape the shared validator takes, so

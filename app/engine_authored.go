@@ -140,37 +140,26 @@ func (a *App) wireAuthoredRuntime() {
 	// subscriber runs as soon as it starts, and again every few minutes after.
 	a.engine.SetAuthoredRuntimeDeps(a.AuthoredRuntimeDeps)
 
-	// Routing rules (epic memql#5127, design D7) bind through the same seam and
-	// for the same reason: a rule an owner adds is a `rule` construct, the
-	// authored runtime is what compiles and arms one, and both halves of the
-	// handoff -- ActivateApprovedBundle on the concrete engine, and the deps
-	// assembled from this App -- are outside PluginContext.
+	// A custom routing rule is NOT an authored construct (2026-11-08). It is
+	// cluster routing configuration: routingRuleSave writes it into the one
+	// revisioned routing document every replica reads on every call
+	// (component/memql/routing_configuration_rules.go). The authored path that
+	// used to bind here -- routingRuleActivate arming a `rule` construct into
+	// the owner-scoped authored runtime -- was retired because nothing routing
+	// reads that runtime, so an armed rule never decided a call. Gate 1 now
+	// refuses a `rule` construct in any bundle and names routingRuleSave.
 	//
-	// The shipped-name check reads the LIVE registries rather than a list, so
-	// adding a shipped rule never requires editing anything here.
-	routingrules.Bind(
-		routingRuleEngine{engine: a.engine},
-		a.AuthoredRuntimeDeps,
-		routingrules.EngineShippedNames{Engine: a.engine},
-	)
-
-	// And the other half of that handoff: the router integration serves the
-	// two builtins and cannot import component/routingrules (its module
+	// What remains is the evidence fold's renderer (epic memql#5146, D5). The
+	// router integration cannot import component/routingrules (its module
 	// requires the root module at a PUBLISHED version, and the package is
-	// newer than any of them), so app/ installs the adapter on it here.
+	// newer than any of them), so app/ installs it here. The fold hashes the
+	// source it renders and a person approves that hash, so the tree must have
+	// exactly ONE renderer of this grammar: a second would drift, and the drift
+	// is silent because the approval would then carry to text nobody read.
 	//
 	// A node where the integration did not materialize installs nothing and
-	// the capability refuses by name, which is the visible failure rather than
-	// the silent one.
+	// the fold refuses to propose rather than rendering text of its own.
 	if ri := integrationsrouter.Materialized(); ri != nil {
-		ri.SetRuleActivator(routingRuleActivatorAdapter{})
-		// The SAME handoff for the same reason, for the evidence fold's
-		// renderer (epic memql#5146, D5). The fold hashes the source it
-		// renders and a person approves that hash, so the tree must have
-		// exactly ONE renderer of this grammar: a second would drift, and the
-		// drift is silent because the approval would then carry to text
-		// nobody read.
-		//
 		// The two Form types are field-identical by construction --
 		// component/router mirrors component/routingrules.Form because the
 		// leaf module cannot import the root one -- and
@@ -188,7 +177,7 @@ func (a *App) wireAuthoredRuntime() {
 				Excludes:      f.Excludes,
 			})
 		})
-		a.Logger.Info("routing-rule authoring wired: an owner or developer can add a rule at runtime and it survives a restart",
+		a.Logger.Info("routing-rule renderer wired: the nightly evidence review can propose a rule",
 			"component", "router")
 	}
 
@@ -407,23 +396,4 @@ func (a *App) authoredAuditLogger() identity.AuditLogger {
 		Logger: a.Logger,
 		DB:     &identity.EngineAuditSink{Engine: a.engine, Logger: a.Logger},
 	}
-}
-
-// routingRuleEngine adapts the concrete engine to component/routingrules'
-// narrow Engine. It exists for the reason emailrules.EngineAdapter does: the
-// package declares the three operations it needs so its dependency reads as
-// three named calls rather than as the whole engine, and the adapter is where
-// the concrete method set meets that declaration.
-type routingRuleEngine struct{ engine *memql.MemQLEngine }
-
-func (r routingRuleEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
-	return r.engine.Execute(ctx, query)
-}
-
-func (r routingRuleEngine) ActivateApprovedBundle(ctx context.Context, owner, bundleId string, deps memql.AuthoredRuntimeDeps) (memql.ActivationResult, error) {
-	return r.engine.ActivateApprovedBundle(ctx, owner, bundleId, deps)
-}
-
-func (r routingRuleEngine) RetireActiveBundle(ctx context.Context, owner, bundleId string, deps memql.AuthoredRuntimeDeps) error {
-	return r.engine.RetireActiveBundle(ctx, owner, bundleId, deps)
 }

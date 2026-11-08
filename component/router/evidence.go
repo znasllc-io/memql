@@ -25,7 +25,7 @@ package router
 // The approval's guarantee is that an approved decision cannot carry to a
 // different rule, and it rests on hashing the rendered SOURCE. Two renderers of
 // one grammar drift, and with a hash the drift is silent: a person approves
-// text A and text B is armed.
+// text A and text B is what gets applied.
 //
 // So the renderer is INJECTED. This package produces a Form and hashes whatever
 // the renderer returns; the tree's one renderer fills it in at the call site.
@@ -91,10 +91,11 @@ func validEvidenceLevel(level string) bool {
 
 // Form mirrors component/routingrules.Form field for field.
 //
-// It is a MIRROR rather than an import because that package is epic
-// memql#5127's and is not on this branch's base; the rebase deletes this type
-// and imports the real one. Until then TestEvidenceFormMatchesTheRuleGrammar
-// pins the field list, so the swap is a deletion rather than a redesign.
+// It is a MIRROR rather than an import because this is a leaf module and that
+// package lives in the root module, which depends on this one: the import
+// would be a cycle. app/'s TestEvidenceFormMirrorsTheRoutingRulesForm, the one
+// place both types are visible, fails the build if the two field lists
+// diverge.
 type Form struct {
 	Name        string
 	Description string
@@ -112,7 +113,7 @@ type Form struct {
 	Excludes      []string
 }
 
-// Renderer turns a Form into the rule source that will be armed.
+// Renderer turns a Form into the rule source a person is asked to approve.
 //
 // Injected; see the file header. The tree's one renderer is
 // component/routingrules.GenerateRule, which is stable across map iteration
@@ -135,7 +136,7 @@ type Proposal struct {
 	Week      string
 	Direction string
 	RuleName  string
-	// RuleSource is what will actually be armed.
+	// RuleSource is the exact text a person is asked to approve.
 	RuleSource string
 	// Hash is over RuleSource, not over the Form. An approval is a decision
 	// about one specific rule TEXT, and hashing the inputs would let a renderer
@@ -149,7 +150,7 @@ type Proposal struct {
 
 // ProposalHash is the artifact hash an approval carries.
 //
-// OVER THE RENDERED SOURCE, so it covers what will actually be armed. Hashing
+// OVER THE RENDERED SOURCE, so it covers the exact text approved. Hashing
 // the Form would let a renderer change move the text under an approval that
 // still verified -- which is the one failure the hash exists to prevent, and
 // the one nobody would notice.

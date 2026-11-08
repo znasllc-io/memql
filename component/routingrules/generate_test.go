@@ -7,16 +7,6 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-type fakeShipped struct{ rules, policies map[string]bool }
-
-func (f fakeShipped) HasRule(n string) bool   { return f.rules[n] }
-func (f fakeShipped) HasPolicy(n string) bool { return f.policies[n] }
-
-var shipped = fakeShipped{
-	rules:    map[string]bool{"default": true, "reasoningParks": true},
-	policies: map[string]bool{"localFirst": true, "localOnly": true},
-}
-
 func validForm() Form {
 	return Form{
 		Name:          "myOperatorRule",
@@ -66,7 +56,7 @@ func TestGeneratedRuleParses(t *testing.T) {
 }
 
 // TestGeneratedRuleNeverCarriesLocked. @locked places a rule ahead of every
-// shipped one, which is the single authority runtime authoring withholds. It is
+// shipped one, an authority that belongs to the embedded tree alone. It is
 // checked on the OUTPUT rather than trusted from the absence of a field,
 // because a later Form gaining a Locked bool is exactly how it would arrive.
 func TestGeneratedRuleNeverCarriesLocked(t *testing.T) {
@@ -81,8 +71,8 @@ func TestGeneratedRuleNeverCarriesLocked(t *testing.T) {
 
 // TestRenderingIsStable. Regenerating an unchanged form must produce
 // byte-identical source, or every regeneration looks like an edit to whatever
-// reads the construct's source hash -- which in this tree is the editor's
-// drifted/undrifted indicator.
+// hashes it -- which in this tree is the evidence review's approval hash: a
+// re-render that moved one byte would orphan a decision somebody already made.
 func TestRenderingIsStable(t *testing.T) {
 	f := validForm()
 	f.When = map[string]string{"tag": "background", "role": "operator", "prompt": "agentReply"}
@@ -116,52 +106,6 @@ func TestAnEmptyConditionSetRenders(t *testing.T) {
 	}
 	if _, err := langparser.ParseRuleDecl(src); err != nil {
 		t.Fatalf("the conditionless rule does not parse: %v\n%s", err, src)
-	}
-}
-
-func TestValidateRefusals(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		mut   func(*Form)
-		wants string
-	}{
-		{"no name", func(f *Form) { f.Name = "" }, "needs a name"},
-		{"not an identifier", func(f *Form) { f.Name = "my rule" }, "bare identifier"},
-		{"a shipped rule's name", func(f *Form) { f.Name = "reasoningParks" }, "shipped rule"},
-		{"no policy", func(f *Form) { f.Policy = "" }, "names no policy"},
-		{"a policy: reference", func(f *Form) { f.Policy = "policy:localFirst" }, "policy NAME"},
-		// A policy nobody registered. ValidatePolicyEntry passes it -- any
-		// identifier is a well-formed chain entry -- so without the existence
-		// check the rule renders, loads, and refuses every call it matches at
-		// REQUEST time, where the person who wrote it is not looking.
-		{"an unregistered policy", func(f *Form) { f.Policy = "cheapEverything" }, "not registered on this cluster"},
-		{"an unknown level", func(f *Form) { f.Level = "smart" }, "not one of fast"},
-		{"an unknown onUnavailable", func(f *Form) { f.OnUnavailable = "retry" }, "onUnavailable"},
-		{"an unknown condition key", func(f *Form) { f.When = map[string]string{"model": "gpt"} }, "not a condition key"},
-		{"an unknown when level", func(f *Form) { f.When = map[string]string{"level": "smart"} }, "never be true"},
-		{"a quote in a value", func(f *Form) { f.When = map[string]string{"prompt": `a"b`} }, "cannot carry"},
-		{"a bad exclude", func(f *Form) { f.Excludes = []string{"cloud:cheapest"} }, "exclude"},
-		{"the retired fleet wildcard", func(f *Form) { f.Excludes = []string{"fleet:*"} }, "fleet:strongest"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := validForm()
-			tc.mut(&f)
-			err := Validate(f, shipped)
-			if err == nil {
-				t.Fatalf("the form was accepted; it should be refused for %s", tc.name)
-			}
-			if !strings.Contains(err.Error(), tc.wants) {
-				t.Fatalf("the refusal %q does not contain %q -- an operator reads this, so it has to name the field", err, tc.wants)
-			}
-		})
-	}
-}
-
-// TestValidateAcceptsAGoodForm is the mirror of the table above. Without it a
-// Validate that refused everything would satisfy every case there.
-func TestValidateAcceptsAGoodForm(t *testing.T) {
-	if err := Validate(validForm(), shipped); err != nil {
-		t.Fatalf("a valid form was refused: %v", err)
 	}
 }
 

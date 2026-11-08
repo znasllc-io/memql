@@ -144,11 +144,10 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	//
 	// It compares PEOPLE, not spellings, as the owner checks across this package
 	// do (BareShortId on both sides). The row stores ownerUserId canonical,
-	// stamped from actor.userId; a builtin hands over the caller's BARE id
-	// (integrations/router actingOwner). Compared as strings, the owner was
-	// refused their own bundle and no routing rule was ever armed (memql#6022
-	// follow-up). Anybody else is refused in either spelling, and an empty
-	// owner never reaches here.
+	// stamped from actor.userId; a caller at a wire seam hands over the BARE
+	// id, as every seam does. Compared as strings, the owner was refused their
+	// own bundle (memql#6022 follow-up). Anybody else is refused in either
+	// spelling, and an empty owner never reaches here.
 	if BareShortId(bundle.OwnerUserId) != BareShortId(owner) {
 		return ActivationResult{}, fmt.Errorf("authoring: actor %q cannot activate bundle owned by %q", owner, bundle.OwnerUserId)
 	}

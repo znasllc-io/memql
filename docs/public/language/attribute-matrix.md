@@ -519,8 +519,8 @@ On an update mutation: append the named array-typed payload fields' elements to 
 | `profile` | string | The argument profile: none, object, optionalObject, stringOrObject, optionalString or optionalStringOrObject. Inferred from the body when absent. |
 | `stringKey` | string | The key a bare string argument binds to, for the profiles that accept one. |
 | `additionalProperties` | string | Whether an object argument may carry keys the body does not declare (default false). |
-| `when` | string | An inert note naming the type of routingRuleActivate's `when` argument, which its body cannot declare (`when` is a keyword). No loader reads it. |
-| `excludes` | string | An inert note naming the type of routingRuleActivate's `excludes` argument. No loader reads it. |
+| `when` | string | Inert, and written by no builtin. Accepted so the frozen @args form does not narrow; no loader reads it. |
+| `excludes` | string | Inert, and written by no builtin. Accepted so the frozen @args form does not narrow; no loader reads it. |
 
 Parse-time argument contract for builtin functions.
 

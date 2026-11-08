@@ -580,7 +580,13 @@ export function approvalDecidedNext(kind: string, decision: string): string {
         ? "It moves to canary: it runs for real, with the app standing by to take over."
         : "It stays in shadow and has to earn a new proposal.";
     case "routingReview":
-      return decision === "approved" ? "The rule was added." : "Routing was left as it is.";
+      // NOTHING APPLIES AN APPROVED ROUTING REVIEW YET. The decision is
+      // recorded and routing is untouched, so the notice says where the
+      // change is made rather than claiming it was. A proposal can add an
+      // exclusion or retire one, hence "the change" rather than "the rule".
+      return decision === "approved"
+        ? "Your decision was recorded. Routing has not changed: make the change in Fleet > Routing > Rules to apply it."
+        : "Routing was left as it is.";
     default:
       return "Your response was recorded.";
   }
@@ -613,7 +619,9 @@ export function approvalKindMeaning(kind: string): string {
     case "routingReview":
       // RAISED BY A SWEEP, NOT BY A RUN (epic memql#5146, D5): the nightly
       // fold read a model failing at a level and proposes the exact rule text.
-      return "The nightly review of routing found a model failing at a level and proposes a rule. Approving adds exactly this rule; nothing is parked on it.";
+      // Approving does not apply it (see approvalDecidedNext), and the person
+      // has to hear that before deciding, not after.
+      return "The nightly review of routing found a model failing at a level and proposes a rule. Approving records your decision but does not change routing: make the change in Fleet > Routing > Rules to apply it. Nothing is parked on it.";
     case "procedurePromotion":
       return "A learned procedure matched the app often enough to run for real, with the app standing by.";
     default:

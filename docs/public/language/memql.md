@@ -1654,7 +1654,7 @@ The remaining annotations:
 - **`@precedence(N)`** — highest first. **A tie between two rules of the same locked-ness is a load error**, naming both: a tie is resolved by nothing, so the rule that wins would differ between replicas.
 - **`@onUnavailable("degrade" | "park")`** — what happens when the chain is exhausted at the level. Unset means degrade. `degrade` walks the chain again one level down (`reasoning` → `strong` → `fast`) and records that it did; `park` returns the refusal with the door report. `fast` is the floor, and **`embeddings` never degrades** — a degraded embedder answers in a different vector space, so the vector does not belong in the index it is about to be written to.
 - **`@exclude("fleet:<modelId>")`** — repeatable; removes one concrete model from this rule's resolution.
-- **`@locked`** — accepted **only in the embedded tree**. A locked rule evaluates before every unlocked one regardless of precedence, is re-read from the embedded tree on every boot so nothing done to it at runtime survives a restart, and its name cannot be taken by a runtime-authored rule.
+- **`@locked`** — accepted **only in the embedded tree**. A locked rule evaluates before every unlocked one regardless of precedence, is re-read from the embedded tree on every boot so nothing done to it at runtime survives a restart, and its name cannot be taken by a custom rule.
 
 The first matching rule wins. **A call that matches no rule is impossible**: the shipped `default` rule states no conditions and cannot be removed, which is why nothing downstream has to handle that case.
 

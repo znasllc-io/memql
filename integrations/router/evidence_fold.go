@@ -105,11 +105,11 @@ func isStructuredFailure(row map[string]any, categories []string) bool {
 
 // renderRule is the one renderer, injected into the pure layer.
 //
-// On this branch it is not reachable: the tree's renderer
-// (component/routingrules.GenerateRule) arrives with epic memql#5127, and until
-// then this REFUSES rather than rendering a rule of its own. A second renderer
-// of one grammar drifts, and with the approval's hash over the output the drift
-// is silent -- a person approves text A and text B is armed.
+// The tree's renderer is component/routingrules.GenerateRule, installed from
+// app/ (SetRuleRenderer). A node where nothing installed it REFUSES rather than
+// rendering a rule of its own: a second renderer of one grammar drifts, and
+// with the approval's hash over the output the drift is silent -- a person
+// approves text A and text B is what gets applied.
 func (i *Integration) renderRule(f routerlib.Form) (string, error) {
 	if i.ruleRenderer == nil {
 		return "", fmt.Errorf(

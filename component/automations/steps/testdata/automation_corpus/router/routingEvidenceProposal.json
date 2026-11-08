@@ -36,7 +36,7 @@
                 "policy": "localFirst",
                 "precedence": 50
               },
-              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again."
+              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving records that you agree to route it again but does not change routing yet: remove the rule excluding it in Fleet > Routing > Rules to apply it. Declining records the decision so this week's evidence does not ask again."
             },
             "kind": "builtin",
             "name": "routingRenderEvidenceProposal"
@@ -83,7 +83,7 @@
                 "policy": "localFirst",
                 "precedence": 50
               },
-              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again."
+              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving records that you agree to route it again but does not change routing yet: remove the rule excluding it in Fleet > Routing > Rules to apply it. Declining records the decision so this week's evidence does not ask again."
             },
             "kind": "builtin",
             "name": "routingRenderEvidenceProposal"

@@ -296,8 +296,8 @@ describe("what a simulation is allowed to claim", () => {
     // A refusal means nothing was compared. Rendering "0 of 0" over it would
     // turn a failure into a reassuring number.
     expect(
-      simulationSentence({ considered: 0, changed: 0, refusal: "routingRuleSimulate is owner-only" }),
-    ).toBe("routingRuleSimulate is owner-only");
+      simulationSentence({ considered: 0, changed: 0, refusal: "routingRuleValidate is owner-only" }),
+    ).toBe("routingRuleValidate is owner-only");
   });
 });
 

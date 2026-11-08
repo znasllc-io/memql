@@ -1,14 +1,14 @@
 package memql_test
 
-// authoring_bundle_rule_test.go -- a `rule` is an authorable construct kind:
-// the bundle splitter slices it, and Gate 1 compiles it the way the embedded
-// tree's rule loader does (memql#6022 follow-up).
+// authoring_bundle_rule_test.go -- a `rule` is NOT an authorable construct
+// kind: the bundle splitter classifies it so Gate 1 can refuse it by name and
+// say where a routing rule goes (2026-11-08).
 //
-// The sandbox, the core-first resolver and the activation have all known the
-// kind since epic memql#5127, but the splitter in front of them classified no
-// `rule` region: every generated routing rule reached the sandbox as an
-// "unrecognized construct" and was refused, so none was ever armed. The
-// DB-backed path through the builtin is app/routing_rule_arming_db_test.go.
+// The router reads the shipped rules plus the routing configuration document
+// and never the authored runtime, so a rule armed from a bundle read active
+// everywhere activation writes and decided no call. routingRuleActivate, the
+// one door that armed them, was retired for that reason; a custom rule is
+// saved with routingRuleSave (routing_configuration_rules.go).
 
 import (
 	"strings"
@@ -17,9 +17,9 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// generatedRuleSource is a rule as component/routingrules renders one: a doc
-// comment, one annotation per form field, and an empty body.
-const generatedRuleSource = `/// Route my own agent replies.
+// ruleSource is a rule as it would arrive in a bundle: a doc comment, one
+// annotation per field, and an empty body.
+const ruleSource = `/// Route my own agent replies.
 @when(prompt="agentReply", role="operator")
 @level("reasoning")
 @policy("localOnly")
@@ -29,41 +29,71 @@ rule myAgentReplies { }
 `
 
 // TestTheBundleSplitterSlicesARule: a rule region is one construct of kind
-// rule, carrying the annotations that make it one -- a slice that dropped them
-// would hand Gate 1 a rule with no policy.
+// rule, named for the rule. Without the slice, Gate 1 could only call it an
+// unrecognized region, which names neither the rule nor where it belongs.
 func TestTheBundleSplitterSlicesARule(t *testing.T) {
-	got := memql.SplitBundleSource(generatedRuleSource)
+	got := memql.SplitBundleSource(ruleSource)
 	if len(got) != 1 || got[0].Kind != "rule" || got[0].Name != "myAgentReplies" {
 		t.Fatalf("SplitBundleSource = %+v, want exactly one rule named myAgentReplies", got)
 	}
-	if !strings.Contains(got[0].Source, `@policy("localOnly")`) {
-		t.Fatalf("the rule's slice lost its annotations:\n%s", got[0].Source)
+}
+
+// TestGateOneRefusesARuleAndNamesRoutingRuleSave: Gate 1 refuses a rule in a
+// bundle, locked or not, for being a rule, and the refusal names the path that
+// routes. Accepting it would arm a construct the router never consults.
+func TestGateOneRefusesARuleAndNamesRoutingRuleSave(t *testing.T) {
+	for name, src := range map[string]string{
+		"an ordinary rule": ruleSource,
+		"a locked rule":    strings.Replace(ruleSource, "rule myAgentReplies", "@locked\nrule myAgentReplies", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rep := memql.ValidateBundle(src, "rules/rules.memql")
+			if rep.OK {
+				t.Fatalf("Gate 1 accepted %s; the router would never read it", name)
+			}
+			for _, d := range rep.Diagnostics {
+				if d.OK || d.Kind != "rule" {
+					continue
+				}
+				if d.Skipped {
+					t.Fatalf("Gate 1 skipped %s rather than refusing it; a skipped construct does not fail the bundle: %+v", name, d)
+				}
+				if !strings.Contains(d.Error, `rule "myAgentReplies"`) ||
+					!strings.Contains(d.Error, "authoring is not supported in a bundle") ||
+					!strings.Contains(d.Error, "routingRuleSave") {
+					t.Fatalf("Gate 1 refused %s without naming the rule and routingRuleSave: %q", name, d.Error)
+				}
+				return
+			}
+			t.Fatalf("Gate 1 refused %s, but no diagnostic is the rule's: %+v", name, rep.Diagnostics)
+		})
 	}
 }
 
-// TestGateOneCompilesARule: the generated rule passes Gate 1.
-func TestGateOneCompilesARule(t *testing.T) {
-	if rep := memql.ValidateBundle(generatedRuleSource, "rules/rules.memql"); !rep.OK {
-		t.Fatalf("Gate 1 refused a generated rule: %+v", rep.Diagnostics)
-	}
+// TestARuleBesideAValidConstructFailsTheWholeBundle: a rule cannot ride along
+// in an otherwise valid bundle. Gate 1's verdict is per bundle, so one refused
+// construct keeps every construct in it from being armed.
+func TestARuleBesideAValidConstructFailsTheWholeBundle(t *testing.T) {
+	bundle := ruleSource + `
+/// A concept that compiles on its own.
+concept ruleNeighbour {
+  label  string
 }
-
-// TestGateOneRefusesALockedRuleForBeingLocked: @locked is the embedded tree's
-// alone (it evaluates a rule before every shipped one), and Gate 1 refuses it
-// in an authored bundle. That refusal was unreachable while the splitter
-// classified no rule -- a locked rule was refused as unrecognized, for the
-// wrong reason -- so this holds the refusal to its own reason now that a rule
-// reaches it.
-func TestGateOneRefusesALockedRuleForBeingLocked(t *testing.T) {
-	locked := strings.Replace(generatedRuleSource, "rule myAgentReplies", "@locked\nrule myAgentReplies", 1)
-	rep := memql.ValidateBundle(locked, "rules/rules.memql")
+`
+	rep := memql.ValidateBundle(bundle, "rules/rules.memql")
 	if rep.OK {
-		t.Fatal("Gate 1 accepted a rule carrying @locked")
+		t.Fatalf("a bundle carrying a rule validated: %+v", rep.Diagnostics)
 	}
+	sawNeighbour := false
 	for _, d := range rep.Diagnostics {
-		if !d.OK && strings.Contains(d.Error, "carries @locked") {
-			return
+		if d.Kind == "concept" && d.Name == "ruleNeighbour" {
+			sawNeighbour = true
+			if !d.OK {
+				t.Fatalf("the concept beside the rule was refused too, so this test proves nothing about the rule: %+v", d)
+			}
 		}
 	}
-	t.Fatalf("Gate 1 refused the locked rule, but not for being locked: %+v", rep.Diagnostics)
+	if !sawNeighbour {
+		t.Fatalf("the concept beside the rule was not compiled at all: %+v", rep.Diagnostics)
+	}
 }

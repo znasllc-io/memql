@@ -8,8 +8,9 @@ import (
 	"testing"
 )
 
-// fakeRender stands in for component/routingrules.GenerateRule, which is epic
-// memql#5127's and not on this base. It renders DETERMINISTICALLY -- keys
+// fakeRender stands in for component/routingrules.GenerateRule, which this
+// module cannot import (it requires the root module at a published version,
+// and the renderer is newer than any). It renders DETERMINISTICALLY -- keys
 // sorted -- because the real one does, and because the hash is only safe if a
 // re-render of an unchanged rule is byte-identical.
 func fakeRender(f routerlib.Form) (string, error) {

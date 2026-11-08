@@ -161,7 +161,6 @@ describe("the rules, as sentences", () => {
   it("says the cluster does not route by rules, which is not 'no rules', and offers no Add", async () => {
     state.missing.add("routingRules");
     state.missing.add("routingRuleSave");
-    state.missing.add("routingRuleActivate");
     await renderRouting("owner", { intent: { id: "r", payload: { routingTab: "rules" } } });
     expect(screen.getByText(/does not route by rules yet/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add a rule" })).toBeNull();

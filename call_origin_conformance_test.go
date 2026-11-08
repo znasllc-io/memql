@@ -208,30 +208,6 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// `selection.go` beside it holds no engine at all.
 		"component/skills":     "the capability graph's three @serverOnly writers -- server-initiated evidence and executable lists, refused without the stamp (memql#4970)",
 		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the authoring writes it stamps for -- the rule's bundle, its construct and their two gate verdicts -- are @serverOnly, as are the rule's own records (memql#4829, memql#6022)",
-		// Routing-rule activation (epic memql#5127). Same shape as
-		// component/emailrules one line up, and the reasoning is the same
-		// three sentences: the package is SMALL, it exists for ONE operation
-		// family -- arm a routing rule, retire one -- and every call site in
-		// it is downstream of a single gate a test can enumerate
-		// (`auth.CanAuthor`, asserted by
-		// component/routingrules/gate_test.go, which drives Activate and
-		// Retire with every role against an engine that refuses everything
-		// and counts the attempts).
-		//
-		// The four writes it stamps for are all @serverOnly since memql#6022:
-		// the rule's bundle and construct (createAuthoringBundle,
-		// createAuthoringConstruct) and their two gate verdicts
-		// (recordBundleValidation, recordBundleDryRun). What internal origin
-		// buys is the ability to make them AT ALL -- origin defaults to CLIENT
-		// and the function validator refuses -- so without it a rule would be
-		// rendered, compile, and then have nothing to arm. A rule's bundle id
-		// is derived -- from its owner and its name -- so it is known before it
-		// is written; an active bundle arms every construct it holds; and a
-		// verdict is the claim that a gate ran. All four still run under the
-		// ARMING CALLER's actor, so the bundle is stamped theirs and the
-		// construct write guard admits the construct only into their own draft
-		// bundle.
-		"component/routingrules": "routing-rule activation and retirement -- server-initiated behind one auth.CanAuthor gate; the four writes it stamps for -- the rule's bundle, its construct and their two gate verdicts -- are @serverOnly (epic memql#5127, memql#6022)",
 		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
 		// INITIATED, and not one of the request-derived exceptions: the caller
 		// is a scheduled automation, not an HTTP handler, and the six writes it

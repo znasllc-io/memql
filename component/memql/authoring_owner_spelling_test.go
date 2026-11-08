@@ -4,15 +4,18 @@ package memql
 // compare PEOPLE, not spellings (memql#6022 follow-up).
 //
 // A bundle's ownerUserId is stamped from actor.userId and stored canonical
-// ("v1:identity:user:<id>"), while a builtin hands the gates the caller's BARE
-// id, as every wire seam does (integrations/router actingOwner). Compared as
-// strings the two never matched, so a person was refused their own bundle and
-// no routing rule was ever armed. The other half of the gate must not move: a
-// different person is refused in either spelling.
+// ("v1:identity:user:<id>"), while a caller at a wire seam hands the gates the
+// BARE id, as every seam does. Compared as strings the two never matched, so a
+// person was refused their own bundle. The other half of the gate must not
+// move: a different person is refused in either spelling.
+//
+// The gate does not care what the bundle holds, so the fixture carries one
+// logic. (It carried a routing rule until 2026-11-08, when Gate 1 started
+// refusing a `rule` construct in any bundle: the router never reads an armed
+// one.)
 //
 // Internal (package memql) for the store seams and the arm test store
-// (authoring_arm_propagate_test.go); the Postgres path through the builtin is
-// app/routing_rule_arming_db_test.go.
+// (authoring_arm_propagate_test.go).
 
 import (
 	"context"
@@ -21,7 +24,7 @@ import (
 
 func spellingTestBundle(store *armTestStore) string {
 	return store.addBundle("v1:authoring:bundle:spelling", 1, "", BundleDryRunPassed,
-		[2]string{"rule", "spellingRule"})
+		[2]string{"logic", "spellingLogic"})
 }
 
 // TestTheOwnerActivatesAndRetiresTheirBundleInEitherSpelling: the owner, named
@@ -42,8 +45,8 @@ func TestTheOwnerActivatesAndRetiresTheirBundleInEitherSpelling(t *testing.T) {
 			if got := store.bundleStatus(bundleId); got != BundleActive {
 				t.Fatalf("after the owner's activation the bundle reads %q, want active", got)
 			}
-			if _, ok := registry.Resolve(armTestOwner, "rule", "spellingRule"); !ok {
-				t.Fatalf("after the owner's activation the rule is not armed: %+v", registry.ListAll())
+			if _, ok := registry.Resolve(armTestOwner, "logic", "spellingLogic"); !ok {
+				t.Fatalf("after the owner's activation the logic is not armed: %+v", registry.ListAll())
 			}
 
 			if err := eng.retireActiveBundleWithStore(ctx, store, spelling, bundleId, deps); err != nil {
@@ -52,8 +55,8 @@ func TestTheOwnerActivatesAndRetiresTheirBundleInEitherSpelling(t *testing.T) {
 			if got := store.bundleStatus(bundleId); got != BundleRetired {
 				t.Fatalf("after the owner's retire the bundle reads %q, want retired", got)
 			}
-			if _, ok := registry.Resolve(armTestOwner, "rule", "spellingRule"); ok {
-				t.Fatal("after the owner's retire the rule is still armed")
+			if _, ok := registry.Resolve(armTestOwner, "logic", "spellingLogic"); ok {
+				t.Fatal("after the owner's retire the logic is still armed")
 			}
 		})
 	}
@@ -91,8 +94,8 @@ func TestSomebodyElseCannotActivateOrRetireTheBundleInEitherSpelling(t *testing.
 			if got := store.bundleStatus(bundleId); got != BundleActive {
 				t.Fatalf("a refused retire left the bundle %q, want active", got)
 			}
-			if _, ok := registry.Resolve(armTestOwner, "rule", "spellingRule"); !ok {
-				t.Fatal("a refused retire took the owner's rule out of the runtime")
+			if _, ok := registry.Resolve(armTestOwner, "logic", "spellingLogic"); !ok {
+				t.Fatal("a refused retire took the owner's logic out of the runtime")
 			}
 		})
 	}

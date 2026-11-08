@@ -75,7 +75,7 @@ func RoutingReviewApproval(p RoutingProposal, now time.Time, ttl time.Duration) 
 	// exists to avoid: a decline is RECORDED, and recording it is what makes it
 	// final for that week's evidence.
 	a.Options = []map[string]any{
-		{"label": "Add the rule", "value": "approved"},
+		{"label": "Approve the rule", "value": "approved"},
 		{"label": "Leave routing as it is", "value": "rejected"},
 	}
 	return a

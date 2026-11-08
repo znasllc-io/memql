@@ -460,7 +460,12 @@ export function useRuleActions(onChanged: () => void): RuleActions {
     },
     [onChanged],
   );
-  const supported = builtinOn(connection, "routingRuleSave") !== null || builtinOn(connection, "routingRuleActivate") !== null;
+  // ONE WRITE PATH. A custom rule is saved into the cluster's routing
+  // configuration (routingRuleSave), the document every replica reads on every
+  // call. routingRuleActivate, which armed a rule the router never read, was
+  // retired on 2026-11-08 and was never reachable from here: it had no SDK
+  // method for builtinOn to find.
+  const supported = builtinOn(connection, "routingRuleSave") !== null;
 
   const clear = useCallback(() => setState(IDLE_RULE_ACTION), []);
 
@@ -490,14 +495,15 @@ export function useRuleActions(onChanged: () => void): RuleActions {
   const simulate = useCallback(
     async (rule: RuleRow): Promise<Simulation> => {
       const validate = builtinOn(connection, "routingRuleValidate");
-      const run = validate ?? builtinOn(connection, "routingRuleSimulate");
-      if (run === null) {
+      if (validate === null) {
         return { considered: 0, changed: 0, refusal: "This cluster cannot simulate a rule yet." };
       }
       try {
-        const result = await run({
+        const result = await validate({
           name: rule.name,
-          ...(validate ? { conditions: rule.when, expectedRevision: rule.revision } : { when: rule.when }),
+          // The object, not six fields. See this file's header.
+          conditions: rule.when,
+          expectedRevision: rule.revision,
           excludes: rule.excludes,
           level: rule.level,
           policy: rule.policy,
@@ -524,17 +530,17 @@ export function useRuleActions(onChanged: () => void): RuleActions {
   const activate = useCallback(
     async (rule: RuleRow): Promise<boolean> => {
       const save = builtinOn(connection, "routingRuleSave");
-      const write = save ?? builtinOn(connection, "routingRuleActivate");
-      if (write === null) {
+      if (save === null) {
         setState({ busy: false, failed: true, message: "This cluster does not take custom rules yet." });
         return false;
       }
       setState({ busy: true, failed: false, message: "" });
       try {
-        await write({
+        await save({
           name: rule.name,
           // The object, not six fields. See this file's header.
-          ...(save ? { conditions: rule.when, expectedRevision: rule.revision } : { when: rule.when }),
+          conditions: rule.when,
+          expectedRevision: rule.revision,
           excludes: rule.excludes,
           level: rule.level,
           policy: rule.policy,
@@ -556,15 +562,14 @@ export function useRuleActions(onChanged: () => void): RuleActions {
   const retire = useCallback(
     async (name: string, revision?: number): Promise<boolean> => {
       const remove = builtinOn(connection, "routingRuleRemove");
-      const write = remove ?? builtinOn(connection, "routingRuleRetire");
-      if (write === null) {
+      if (remove === null) {
         setState({ busy: false, failed: true, message: "This cluster does not take custom rules yet." });
         return false;
       }
       setState({ busy: true, failed: false, message: "" });
       try {
-        if (remove && revision === undefined) throw new Error("Refresh the rules before removing one.");
-        await write({ name, ...(remove ? { expectedRevision: revision } : {}) });
+        if (revision === undefined) throw new Error("Refresh the rules before removing one.");
+        await remove({ name, expectedRevision: revision });
         setState({ busy: false, failed: false, message: `${name} is retired.` });
         onChanged();
         return true;

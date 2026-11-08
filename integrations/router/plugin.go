@@ -7,7 +7,7 @@ import (
 )
 
 // lastRouterIntegration is how app/ reaches the instance the plug-in factory
-// built, to install the rule activator on it.
+// built, to install the evidence fold's rule renderer on it.
 //
 // It is a package-level handle rather than a lookup because the plug-in system
 // hands the instance to the ENGINE and gives the caller no way back to it, and
@@ -22,10 +22,10 @@ func Materialized() *Integration { return lastRouterIntegration.Load() }
 func init() {
 	memql.RegisterPlugin("router", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		i := New(pctx.Engine, pctx.Providers, pctx.Policies, pctx.Logger)
-		// The rule activator is installed from app/ AFTER the authored runtime
-		// exists (SetRuleActivator). It cannot come through PluginContext: this
-		// module requires the root module at a published version, and the
-		// activator lives in the root module. See routing_rules.go's header.
+		// The rule renderer is installed from app/ (SetRuleRenderer). It cannot
+		// come through PluginContext: this module requires the root module at a
+		// published version, and the renderer (component/routingrules) lives in
+		// the root module and is newer than any published version of it.
 		lastRouterIntegration.Store(i)
 		return i, nil
 	})

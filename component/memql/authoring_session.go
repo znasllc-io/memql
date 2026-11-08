@@ -137,13 +137,14 @@ func SplitBundleSource(source string) []SandboxConstruct {
 			add(kind, s.Name, src)
 		}
 	}
-	// Rules (epic memql#5127): annotations and an empty body, sliced by the
-	// keyword slicer the embedded tree's rule loader uses
-	// (unified_rule_loader.go), so Gate 1 compiles the text that loader would.
-	// Until this was here no rule region was classified, so Gate 1 refused
-	// every runtime-authored routing rule as unrecognized and none was ever
-	// armed (memql#6022 follow-up). A rule names its policy as a string and
-	// imports nothing, so like a shape it takes no import preamble.
+	// Rules: annotations and an empty body, sliced by the keyword slicer the
+	// embedded tree's rule loader uses (unified_rule_loader.go). They are
+	// sliced so Gate 1 can REFUSE one by name and say where a routing rule goes
+	// (routingRuleSave): a rule is cluster routing configuration, the router
+	// never reads an armed construct, and an unsliced rule would be refused as
+	// an unrecognized region, which names neither the rule nor the way out.
+	// A rule names its policy as a string and imports nothing, so like a shape
+	// it takes no import preamble.
 	for _, s := range ExtractKeywordSlices(source, "rule") {
 		add("rule", s.Name, s.Source)
 	}

@@ -216,8 +216,14 @@ var (
 		{Name: "profile", Type: "string", Doc: "The argument profile: none, object, optionalObject, stringOrObject, optionalString or optionalStringOrObject. Inferred from the body when absent."},
 		{Name: "stringKey", Type: "string", Doc: "The key a bare string argument binds to, for the profiles that accept one."},
 		{Name: "additionalProperties", Type: "string", Doc: "Whether an object argument may carry keys the body does not declare (default false)."},
-		{Name: "when", Type: "string", Doc: "An inert note naming the type of routingRuleActivate's `when` argument, which its body cannot declare (`when` is a keyword). No loader reads it."},
-		{Name: "excludes", Type: "string", Doc: "An inert note naming the type of routingRuleActivate's `excludes` argument. No loader reads it."},
+		// `when` and `excludes` described the arguments of routingRuleActivate,
+		// retired on 2026-11-08. They stay ACCEPTED because the language
+		// surface is frozen: dropping a key narrows @args' recorded form, which
+		// memqlbreaking reports as a meaning break the reservation ledger
+		// cannot clear (it reserves whole names, not keys). No builtin writes
+		// them and nothing reads them.
+		{Name: "when", Type: "string", Doc: "Inert, and written by no builtin. Accepted so the frozen @args form does not narrow; no loader reads it."},
+		{Name: "excludes", Type: "string", Doc: "Inert, and written by no builtin. Accepted so the frozen @args form does not narrow; no loader reads it."},
 	}
 	relationshipKeys = []ArgSpec{
 		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, references."},

@@ -939,6 +939,9 @@ describe("the routing review", () => {
     expect(within(attached).queryByText("Step")).toBeNull();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).getByRole("button", { name: /^Reject this: routing is left as it is/ })).toBeTruthy();
+    // Nothing applies an approved review yet, so the person must hear before
+    // deciding that approving leaves routing as it is.
+    expect(screen.getAllByText(/Approving records your decision but does not change routing/).length).toBeGreaterThan(0);
   });
 });
 

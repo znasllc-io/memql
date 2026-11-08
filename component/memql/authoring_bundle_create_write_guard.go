@@ -10,12 +10,12 @@ import (
 // validateBundleCreateServerOnly refuses a write that creates a
 // v1:authoring:bundle without internal origin (memql#6022).
 //
-// An email or routing rule's bundle id is derived from its owner and the rule,
+// An email rule's bundle id is derived from its owner and the rule,
 // so the id a person's next activation writes is known before it is written.
 // While anyone could create a bundle, a second person could create one at that
 // id first: the row was theirs from then on, and the owner's activation --
 // writing to a row it did not own -- was refused. So a bundle comes to exist
-// only as a server pipeline's write: the rule activations, the planner's
+// only as a server pipeline's write: the email-rule activation, the planner's
 // capture and work compile, the procedure learner and the durable promote,
 // each of which derives the id for its own owner or mints a fresh one.
 // createAuthoringBundle is @serverOnly, but a raw insert(...) never consults
