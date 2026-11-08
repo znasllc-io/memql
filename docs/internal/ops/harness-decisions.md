@@ -4705,6 +4705,49 @@ tag).
 hops. Live fleet-to-cloud failover and a production maintenance window for the
 contract-5 switch are not verified.
 
+## A pipeline's work run is not beaten (2026-11-08)
+
+The pipelines driver's lease is a pipeline run's liveness, and the `v1:work:run`
+it compiled into is no longer beaten beside it (`guardJournal` and `reopened`,
+`component/pipelinerun/lease.go` and `driver.go`; `WithRunnerOwnedLiveness` and
+`Run.RecordDriver`, `component/workjournal/journal.go`).
+
+- **Trigger:** every work run the pipelines driver opens or takes over.
+- **Evidence:** a work run's `heartbeatAt` has one reader, the work sweep, and it
+  reads a pipeline's run past in every shape (`runnerOwnsRecovery`,
+  `integrations/work/dispatch.go`). The claim judges `driverHeartbeatAt` on the
+  `v1:pipelines:run` row, and the OS keeps the field out of every fingerprint and
+  shows it nowhere. Yet the journal's goroutine beat the work run every 20 s and
+  the lease renewal every 30 s, each a whole version of the row: 6,912 versions
+  of 25 runs in a day on production on 2026-11-06, 356 MB in the week of October
+  29, each kept the 30 days its run is.
+- **Chosen path:** the driver's journal carries `WithRunnerOwnedLiveness`, so the
+  work run opens with no `heartbeatAt` and no heartbeat goroutine, and the lease
+  renewal no longer writes it. The one field the beat also kept current, `nodeId`,
+  changes only when the driver does: a takeover records it once at reopen, and
+  the renewal retries a record that did not land.
+- **Alternatives:** moving the beat into `memory_liveness`, as the worker status
+  fields were on 2026-11-06, keeps a value nobody reads and needs a third reader
+  handshake; a slower beat keeps the cost.
+- **Fallback and stop conditions:** a failed node record never stops a drive; it
+  is a record, not authority. A lost lease stops it as before, at the renewal's
+  fresh read.
+- **Invariant:** a takeover reads only the pipelines run's lease and the work
+  run's step rows, so nothing it decides changed; the work sweep still never
+  judges a pipeline's run. The Library pass and an app session's recording keep
+  their heartbeat, because the sweep judges them by it.
+- **Survives a retry or a replica change:** a run opened before the change keeps
+  the last `heartbeatAt` it was given, which nothing reads, and is taken over the
+  same way.
+- **Tests:** the Postgres-backed `TestLeaseRenewalsWriteNoWorkRunVersionsOverRealRows`
+  (ten renewals, a takeover and ten more leave the work run at 3 versions while
+  the lease row still takes one per renewal), `TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten`,
+  `TestRecordDriverWritesTheNodeOnceAfterATakeover`,
+  `TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt` and
+  `TestTheHeartbeatRenewsTheLeaseAndReadsACancel`.
+- **Unverified:** no production run has been observed with the change; the
+  saving is the 2026-11-06 measurement projected.
+
 ## The timing table learns from the steps it balances (2026-11-02)
 
 The pipeline's timing table has one row per package and one reader:
@@ -4908,6 +4951,47 @@ back (`component/automations/journal_step_result.go`).
   `TestJournaledResultLeavesEveryOtherResultAlone` and the Postgres-backed
   `TestResumeV1_DB_AMutationReceiptHoldsItsRowOnceAndNoSchema`, which resumes
   over a real mutation's stored receipt.
+
+## An event firing records only the trigger it can read (2026-11-08)
+
+A run's `triggerEvent` is written on its first version and copied by every
+later one (each receipt's run write, the close), because the row is
+append-only with a read-merge write. A graph event's payload is the whole row
+that fired it, so a run fired by a staged inbound delivery copied the delivery's
+headers and body, about 24 KB raw, into each of its versions. What it records
+now is in `component/automations/journal_trigger.go`.
+
+- **Trigger:** an event firing (triggeredBy `event:<topic>`) of an automation the
+  loader could analyse (`computeJournalTriggerReads`, beside `computeReads`).
+- **Chosen path:** the recorded payload keeps the keys its declared args bind,
+  the `event.payload.<key>` paths its statements name, the dedup key's keys
+  (`Automation.Reads`) and `id` / `nodeId`; a root run records the correlation
+  its first attempt derived from the whole payload as its cause.
+- **Evidence it is enough:** resume rebinds args from the recorded payload and
+  continues the recorded cause; adoption (a run with no steps) re-executes from
+  it and recomputes a chain head from the dedup key's keys; the per-row budget
+  reads `id` / `nodeId`; a body can no longer read `event.<field>` at all
+  (refused at compile), only its args or the whole event.
+- **What keeps the whole payload:** a body that hands `event` on or reads
+  `event.payload` whole, a logic it reaches whose body names `event`, a call the
+  function registry cannot resolve, any precondition, and every trigger that is
+  not an event firing (a sub-automation's call, which child continuation compares
+  whole; an http trigger; an operator's run). Of the shipped tree, 35 of 39 event
+  automations are projected; the four that are not hand `event` to a logic.
+- **Alternatives:** a separate write-once trigger row needs its own concept,
+  reads and retention for every run; a storage-level reference for large
+  subtrees is a storage format change. Both keep bytes nothing reads.
+- **Survives a retry or a replica change:** the recorded trigger is the row's;
+  a run recorded before the change keeps its whole payload and resumes as before.
+- **Tests:** `TestJournalTriggerReadsAreWhatTheRunCanRead`,
+  `TestARecordedTriggerResumesAsTheFirstAttemptRan` (through stored JSON, at the
+  root and in a chain), `TestShippedEventAutomationsRecordWhatTheyRead`, and the
+  Postgres-backed `TestResumeV1_DB_AProjectedTriggerResumesWithWhatItReads`: a
+  firing with 38 KB of unread payload stores 4 versions in 3,652 payload bytes
+  against 119,400 recorded whole, and resumes with the same args and cause.
+- **Unverified:** no production run has been observed with the change; the share
+  of production's event runs it shrinks is not measured, and the October sample
+  predates the inbound handlers journaling only on write.
 
 ## Current-step operation completion and retained partial effects
 

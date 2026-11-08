@@ -15,6 +15,9 @@ package automations
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -22,8 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // resumeDBProbe is the probe, with a logic call run through the engine the
@@ -260,5 +266,109 @@ automation callsALogic%d {
 	}
 	if v := probe.argsOf(t, "after", 0)["v"]; v != "X" {
 		t.Fatalf("after(v: %v), want X", v)
+	}
+}
+
+// TestResumeV1_DB_AProjectedTriggerResumesWithWhatItReads: an event firing
+// records on its run only the payload keys the run can read
+// (journal_trigger.go), and a resume from that stored row binds the same args
+// and continues the same cause as the attempt that failed. The trigger here carries 30 KB the run never reads, as
+// a staged inbound delivery's headers and body did on production.
+func TestResumeV1_DB_AProjectedTriggerResumesWithWhatItReads(t *testing.T) {
+	engine := sharedJournalEngine(t)
+	ctx := context.Background()
+	stamp := time.Now().UnixNano()
+	a := statementAutomation(t, fmt.Sprintf(`@trigger(event="probe.fired")
+automation projectedTrigger%d {
+  args {
+    id any
+    title any
+    label any
+  }
+  first := builtin one(id: args.id)
+  builtin record(title: args.title, label: args.label)
+}`, stamp))
+	a.JournalTriggerReads = computeJournalTriggerReads(a, registrySource{reg: work.Registry{
+		"one": {ConstructKind: work.ConstructBuiltin}, "record": {ConstructKind: work.ConstructBuiltin},
+	}})
+	if want := []string{"id", "label", "nodeId", "title"}; !reflect.DeepEqual(a.JournalTriggerReads, want) {
+		t.Fatalf("the run can read %v of its trigger, want %v", a.JournalTriggerReads, want)
+	}
+	probe := newStmtProbe()
+	probe.answers["one"] = memql.NewResultWithOutput("first")
+	probe.fails["record"] = 1
+	e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: resumeDBProbe{stmtProbe: probe, engine: engine}})
+	defer e.Close()
+	// Hex compresses about as poorly as a webhook's JSON body, so the stored
+	// sizes below are near what such a trigger costs.
+	var unread strings.Builder
+	for i := 0; unread.Len() < 30<<10; i++ {
+		sum := sha256.Sum256([]byte(fmt.Sprint(stamp, i)))
+		unread.WriteString(hex.EncodeToString(sum[:]))
+	}
+	ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{
+		"id": fmt.Sprintf("row-%d", stamp), "title": "Title", "label": "Label", "bodyText": unread.String(), "headersJson": unread.String()[:8<<10],
+	})
+	first, _ := e.ExecuteWithEvent(ctx, a, TriggeredByEventPrefix+ev.Topic, &ev)
+	if first == nil || first.Status != "failed" {
+		t.Fatalf("the first run did not fail: %+v", first)
+	}
+
+	// The run row as Postgres holds it.
+	rows, err := engine.Execute(journalContext(ctx), "query workRunById(runId: "+jsonString(first.ID)+")")
+	if err != nil || len(memql.MaterializeRows(rows)) != 1 {
+		t.Fatalf("workRunById: %v", err)
+	}
+	trigger, _ := memql.MaterializeRows(rows)[0]["triggerEvent"].(map[string]any)
+	payload, _ := trigger["payload"].(map[string]any)
+	if len(payload) != 3 || payload["label"] != "Label" || payload["bodyText"] != nil {
+		t.Fatalf("the stored trigger payload is %d keys: %v", len(payload), payload)
+	}
+	cause, _ := trigger["cause"].(map[string]any)
+	if cause["correlationId"] != rootCorrelation(&ev) {
+		t.Fatalf("the stored cause %v does not carry the root's correlation %s", cause, rootCorrelation(&ev))
+	}
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
+	defer db.Close()
+	stored := func(runID string) (versions, bytes int) {
+		t.Helper()
+		if err := db.QueryRowContext(ctx, `SELECT count(*), COALESCE(sum(pg_column_size(payload)),0) FROM "MemoryNodes" WHERE id = $1`, "v1:work:run:"+memql.BareShortId(runID)).Scan(&versions, &bytes); err != nil {
+			t.Fatal(err)
+		}
+		return versions, bytes
+	}
+	versions, bytes := stored(first.ID)
+	// The same firing recorded whole, as every run was before 2026-11-08.
+	whole := statementAutomation(t, strings.Replace(fmt.Sprintf(`@trigger(event="probe.fired")
+automation projectedTrigger%d {
+  args {
+    id any
+    title any
+    label any
+  }
+  first := builtin one(id: args.id)
+  builtin record(title: args.title, label: args.label)
+}`, stamp), "projectedTrigger", "wholeTrigger", 1))
+	unprojected, _ := e.ExecuteWithEvent(ctx, whole, TriggeredByEventPrefix+ev.Topic, &ev)
+	wholeVersions, wholeBytes := stored(unprojected.ID)
+	t.Logf("the failed run's row stored: %d versions in %d payload bytes; recorded whole, %d versions in %d bytes", versions, bytes, wholeVersions, wholeBytes)
+	if versions != wholeVersions || bytes*5 > wholeBytes {
+		t.Fatalf("the projected run stored %d bytes in %d versions, the whole one %d in %d", bytes, versions, wholeBytes, wholeVersions)
+	}
+
+	journal, err := LoadRunJournal(ctx, engine, first.ID)
+	if err != nil {
+		t.Fatalf("LoadRunJournal: %v", err)
+	}
+	_, firstCause := runCause(ctx, a, first.ID, &ev)
+	if got := journalRunCause(ctx, a, first.ID, journal.TriggerEvent); !reflect.DeepEqual(got, firstCause) {
+		t.Fatalf("a resume continues cause %+v; the first attempt ran under %+v", got, firstCause)
+	}
+	resumed, err := e.ResumeFrom(ctx, journal, a, &ResumeOptions{AllowSideEffects: true})
+	if err != nil || resumed.Status != "completed" {
+		t.Fatalf("resume: %v %+v", err, resumed)
+	}
+	if failed, again := jsonShape(t, probe.argsOf(t, "record", 0)), jsonShape(t, probe.argsOf(t, "record", 1)); !reflect.DeepEqual(failed, again) {
+		t.Fatalf("the resumed statement read %v; the failed attempt read %v", again, failed)
 	}
 }

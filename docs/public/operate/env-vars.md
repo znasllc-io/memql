@@ -1177,14 +1177,18 @@ read.
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned, goalless runs the scheduler fired on a schedule or on an event, their steps and closed approvals |
 | `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs and their work journals, steps and closed approvals, then the pipeline's goal once no run remains. Native artifact receipts keep their authorizing journals until byte and Library cleanup completes, and a live release candidate keeps every run it names, the runs it reused a step from and every attempt of its release. Generated files use [separate retention](pipelines-substrate.md#retention) |
-| `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
+| `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history; also when the daily soft delete hides a row |
+| `MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS` | `1` | Soft-deleted worker invocations of any outcome, counted from the soft delete |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
 | `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS` | `365` | Identity audit evidence |
 | `MEMQL_WORK_MODELCALL_RETENTION_DAYS` | `90` | Model-call detail; the run retains its summary |
 | `MEMQL_WORK_OBSERVATION_RETENTION_DAYS` | `180` | Observation detail; the run retains its summary |
 
-Ages use the latest stored version. Runs with retained model-call or
+Ages use the latest stored version. A worker invocation's soft delete is such a
+version, so a soft-deleted invocation has its own window, counted from the soft
+delete: a row hidden at 90 days is archived and deleted a day later, not 90 days
+later. Runs with retained model-call or
 observation detail, pending approvals, recent children, or a child that is not
 the run's own -- an owned child of a system run, another person's child of a
 pipeline's run -- stay until those constraints clear. A batch whose versions

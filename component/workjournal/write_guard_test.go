@@ -42,7 +42,7 @@ func TestWriteGuardCoversEveryWriteAndLeavesSharedJournalUnchanged(t *testing.T)
 	if err := step.Finish(ctx, Receipt{Status: "done"}); !errors.Is(err, refused) {
 		t.Fatalf("stale receipt: %v", err)
 	}
-	run.Heartbeat(ctx)
+	guarded.Reopen("user-1", run.GoalID(), run.RunID(), nil, clockStart).RecordDriver(ctx)
 	if err := guarded.StampBinding(ctx, "user-1", "step", map[string]any{"nodeId": "old"}); !errors.Is(err, refused) {
 		t.Fatalf("stale binding: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestWriteGuardCoversEveryWriteAndLeavesSharedJournalUnchanged(t *testing.T)
 	}
 	// The per-run guard must never mutate the shared journal used by other work.
 	unguarded := base.Reopen("user-1", run.GoalID(), run.RunID(), nil, clockStart)
-	unguarded.Heartbeat(ctx)
+	unguarded.RecordDriver(ctx)
 	if len(engine.calls) != before+1 {
 		t.Fatal("shared journal inherited run guard")
 	}

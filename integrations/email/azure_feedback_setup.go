@@ -190,7 +190,7 @@ func (i *Integration) PollFeedbackConnections(ctx context.Context) error {
 		return err
 	}
 	for _, row := range old {
-		if err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), false); err != nil && i.logger != nil {
+		if _, err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), false); err != nil && i.logger != nil {
 			i.logger.Warn("A sealed email connection could not be classified; it will retry")
 		}
 	}
@@ -202,10 +202,15 @@ func (i *Integration) PollFeedbackConnections(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), true); err != nil {
+		claimed, err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), true)
+		if err != nil {
 			if i.logger != nil {
 				i.logger.Warn("A sealed email connection could not be scheduled; it will retry")
 			}
+			continue
+		}
+		if !claimed {
+			// Another replica took this check since the list was read.
 			continue
 		}
 		account, _ := row["accountId"].(string)
@@ -219,24 +224,57 @@ func (i *Integration) PollFeedbackConnections(ctx context.Context) error {
 	return nil
 }
 
+// The intervals the feedback indexer schedules a sealed row's next look at.
+// Each scheduling is a new version of the row (indexEmailConnectionState), so
+// the interval is what the row costs: at five minutes, 288 versions a day for
+// every ready organization, re-checking a subscription Azure already confirmed
+// (about 451 a day on production on 2026-11-06).
+const (
+	// feedbackSetupRetry is how soon an organization whose delivery feedback is
+	// not yet confirmed -- never configured, provisioning, or a confirmation
+	// that did not land -- is looked at again: the pace setup completes at.
+	feedbackSetupRetry = 5 * time.Minute
+	// feedbackRecheck is how soon a CONFIRMED subscription (status ready, its
+	// credential applied) is checked again. The check only re-reads it and
+	// re-creates it if it was deleted from Azure, which this bounds to an hour
+	// without delivery feedback.
+	feedbackRecheck = time.Hour
+	// unreadableRetry is how soon a row that would not decrypt is tried again.
+	// It stays unreadable until an operator restores the key it was sealed
+	// under, so trying every five minutes only added versions.
+	unreadableRetry = time.Hour
+)
+
 // Classifying or scheduling a sealed row holds its same connection gate and
 // re-reads it. It updates metadata alone: a concurrent disconnect cannot be
 // replaced with the older credential that the scan observed.
-func (a *azureSetup) indexFeedbackConnection(ctx context.Context, rowID string, attempt bool) error {
+//
+// It answers whether THIS call took the row's due look. A row already
+// classified whose look is no longer due under the gate was rescheduled by
+// another replica since the list was read; it is left as it stands, nothing is
+// written, and the caller does not provision it a second time. Every replica's
+// poller lists due rows every 30 seconds, so without this check two replicas
+// listing one row each wrote it and each called Azure.
+func (a *azureSetup) indexFeedbackConnection(ctx context.Context, rowID string, attempt bool) (bool, error) {
 	db, err := a.store.gates()
 	if err != nil {
-		return err
+		return false, err
 	}
 	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, "email-connection:"+rowID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer hold.Release()
 	rows, err := (&storedACSOperations{connection: a.store}).rows(ctx, "emailConnectionStateById", map[string]any{"stateId": rowID})
 	if err != nil || len(rows) == 0 {
-		return err
+		return false, err
 	}
 	row := rows[0]
+	if purpose, _ := row["purpose"].(string); purpose != "" {
+		if next, ok := rowInstant(row["nextAttemptAt"]); ok && next.After(a.clock()) {
+			return false, nil
+		}
+	}
 	plain, decryptErr := secret.Decrypt(fmt.Sprint(row["encryptedValue"]))
 	var connection azureConnection
 	if decryptErr == nil {
@@ -246,26 +284,51 @@ func (a *azureSetup) indexFeedbackConnection(ctx context.Context, rowID string, 
 	due := a.clock()
 	if decryptErr != nil {
 		purpose = "unreadable"
-		due = due.Add(5 * time.Minute)
+		due = due.Add(unreadableRetry)
 	} else if connection.Plan.ClusterID != "" && connection.AccountID != "" {
 		purpose, account = "azure-organization-"+connection.Status, connection.AccountID
 		if attempt {
-			due = due.Add(5 * time.Minute)
+			due = due.Add(a.feedbackInterval(ctx, connection.AccountID))
 		}
 	}
-	prior, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(row["createdAt"]))
-	if at, ok := row["createdAt"].(time.Time); ok {
-		prior = at
-	}
+	prior, _ := rowInstant(row["createdAt"])
 	values := map[string]string{"id": rowID, "purpose": purpose, "accountId": account, "nextAttemptAt": due.Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(prior, a.clock()).Format(time.RFC3339Nano)}
 	if err := hold.Verify(ctx); err != nil {
-		return err
+		return false, err
 	}
 	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	_, err = a.store.engine.Execute(emailStateContext(write), renderConfigCall("indexEmailConnectionState", values))
 	if err == nil && decryptErr != nil {
-		return fmt.Errorf("could not classify a sealed email connection")
+		return false, fmt.Errorf("could not classify a sealed email connection")
 	}
-	return err
+	return err == nil, err
+}
+
+// feedbackInterval is how soon an organization's delivery feedback is looked
+// at again after this look: an hour once Azure has confirmed its subscription
+// and the credential is applied, five minutes otherwise. Read before this
+// look runs, so the look that confirms a subscription is followed by one more
+// at five minutes before the hourly pace begins; a state that cannot be read
+// is not a confirmed one.
+func (a *azureSetup) feedbackInterval(ctx context.Context, account string) time.Duration {
+	var configured azureFeedbackConnection
+	found, _, err := a.store.read(ctx, "azure-feedback:"+account, &configured)
+	if err == nil && found && configured.Status == "ready" && configured.Applied {
+		return feedbackRecheck
+	}
+	return feedbackSetupRetry
+}
+
+// rowInstant reads a stored time the engine hands back as a time.Time or as
+// RFC 3339 text.
+func rowInstant(v any) (time.Time, bool) {
+	switch t := v.(type) {
+	case time.Time:
+		return t, !t.IsZero()
+	case string:
+		at, err := time.Parse(time.RFC3339Nano, t)
+		return at, err == nil && !at.IsZero()
+	}
+	return time.Time{}, false
 }

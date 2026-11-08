@@ -363,8 +363,19 @@ func (dr *runDriver) owns(r *Run) bool {
 // the run row moved under it while this replica still held the run.
 const journalFenceAttempts = 3
 
-// guardJournal puts each individual receipt, intent and heartbeat under the
-// same gate as a claim. No external call or heartbeat shutdown holds the gate.
+// guardJournal puts each individual receipt, intent and driver record under
+// the same gate as a claim. No external call or heartbeat shutdown holds the
+// gate.
+//
+// IT ALSO SAYS WHOSE THE RUN'S LIVENESS IS: this lease's. The work run is
+// opened without a heartbeat and never beaten (workjournal's
+// WithRunnerOwnedLiveness), because nothing judges a pipeline's work run by
+// one -- integrations/work's sweep reads it past (runnerOwnsRecovery) and the
+// claim below judges driverHeartbeatAt on the pipelines run. Before
+// 2026-11-08 the journal's goroutine beat it every 20 s and renew every 30 s,
+// each a whole version of the row (6,912 versions of 25 runs in a day on
+// production). Takeover is unchanged: it reads this row's lease and the work
+// run's step rows, never the work run's beat.
 //
 // A WITNESS THAT MOVED IS NOT YET ANOTHER HOLDER. The fence refuses a write
 // whose run row changed after the read that authorized it, and two things
@@ -377,7 +388,7 @@ const journalFenceAttempts = 3
 // the row as it stands, a bounded number of times; a row that cannot be read
 // proves neither, and the write simply did not land.
 func (dr *runDriver) guardJournal() {
-	dr.d.Journal = dr.d.Journal.WithWriteGuard(func(ctx context.Context, write func(context.Context) error) error {
+	dr.d.Journal = dr.d.Journal.WithRunnerOwnedLiveness().WithWriteGuard(func(ctx context.Context, write func(context.Context) error) error {
 		var err error
 		for range journalFenceAttempts {
 			err = dr.underLease(ctx, func(gctx context.Context, _ Run) error { return write(gctx) })
@@ -461,9 +472,10 @@ func (dr *runDriver) heartbeat(ctx context.Context) {
 }
 
 // renew is one heartbeat: the gated read-modify-write of driverHeartbeatAt,
-// the cancel request read off the same row, and the work run's own beat. It
-// answers false when there is nothing left to renew: the lease is lost, or the
-// run concluded.
+// the cancel request read off the same row, and -- once, after a takeover --
+// the work run's driving node (RecordDriver). The work run is not beaten: the
+// lease written here is its liveness (guardJournal). It answers false when
+// there is nothing left to renew: the lease is lost, or the run concluded.
 func (dr *runDriver) renew(ctx context.Context) bool {
 	cancelAsked := false
 	err := dr.underLease(ctx, func(gctx context.Context, current Run) error {
@@ -484,6 +496,9 @@ func (dr *runDriver) renew(ctx context.Context) bool {
 	if cancelAsked {
 		dr.lease.cancel()
 	}
-	dr.work().Heartbeat(ctx)
+	// The work run's node is a record, not the lease: a failed write is
+	// logged by the journal and tried again at the next renewal, and a lost
+	// lease is found by the next renewal's own fresh read.
+	_ = dr.work().RecordDriver(ctx)
 	return true
 }

@@ -26,6 +26,9 @@ type confirmationFixture struct {
 	ctx             context.Context
 	deps            [2]*Deps
 	pkg, run, owner string
+	// suffix is in every id the fixture creates, which is what its cleanup
+	// deletes by; account is the organization its package belongs to.
+	suffix, account string
 	audit           analysisAudit
 }
 
@@ -85,7 +88,7 @@ func newConfirmationFixtureSource(t *testing.T, source fs.FS) *confirmationFixtu
 	h.deps.Auditor = audit
 	other := *h.deps
 	other.Store = &store{engine: second, directDB: func() *sql.DB { return db.DB }}
-	return &confirmationFixture{h: h, ctx: ctx, deps: [2]*Deps{h.deps, &other}, pkg: pkg, run: parked.DeploymentId, owner: owner, audit: audit}
+	return &confirmationFixture{h: h, ctx: ctx, deps: [2]*Deps{h.deps, &other}, pkg: pkg, run: parked.DeploymentId, owner: owner, suffix: suffix, account: account, audit: audit}
 }
 
 func (f *confirmationFixture) integration(n int) *Integration {
@@ -224,6 +227,86 @@ func TestBackgroundConfirmationSurvivesClientAndHonorsReplicaCancel(t *testing.T
 	}
 }
 
+// openStrangerRun opens a run of ANOTHER package that stopped reporting an hour
+// ago, which is what a database this package's tests have already run against
+// holds (the source registration test leaves one). Planting it makes a fresh
+// database show what only a reused one did. Its ids carry the fixture's suffix,
+// so the fixture's cleanup removes them.
+func (f *confirmationFixture) openStrangerRun(t *testing.T) {
+	t.Helper()
+	q := langparser.QuoteString
+	pkg := "v1:platform:package:stranger-" + f.suffix
+	create := fmt.Sprintf(`mutation createPackage(packageId: %s, name: "stranger", sourceKind: "repo", accountId: %s, repoUrl: %s)`, q(pkg), q(f.account), q("https://github.com/test/stranger-"+f.suffix))
+	if _, err := f.deps[0].Store.engine.Execute(f.ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	err := f.deps[0].Store.openDeployment(f.ctx, deploymentSeed{
+		DeploymentId: "stranger-" + f.suffix, PackageId: pkg,
+		OwnerUserId: f.owner, AccountId: f.account, RequestedBy: f.owner,
+		SourceVersion: "stranger", StartedAt: time.Now().Add(-time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// inFlightOfPackage narrows the abandoned sweep's candidate list to one
+// package's runs. The query still runs against real rows and its own filter
+// still decides what is in flight; only the runs of other packages are dropped
+// from what it returns.
+//
+// WHY THESE TESTS NEED IT. SweepAbandoned judges every in-flight run the actor
+// may see, and in a database other tests share that is more than this test's.
+// A run another test left in flight (the source registration test opens one and
+// never closes it) is stale to the sweep, which closes it, as it should. Counting
+// that against this test failed it on a database the package had already run
+// against and on no fresh one, as {Checked:2 Abandoned:1} (measured 2026-11-06),
+// and since the close removed its own cause the next subtest passed. It was worse
+// than a miscount. The test that sets the clock two thresholds ahead makes every
+// in-flight run stale, so it closes whatever another test or session has in
+// flight at that moment, live runs included, and takes each package's opening
+// gate on the way. Narrowing the list, rather than the assertion, means the sweep
+// never reads, closes or audits a run that is not this test's.
+//
+// If the query is ever renamed this stops matching and the sweep is unscoped
+// again; the planted stranger (openStrangerRun) turns that into a failure instead
+// of a flake that waits for a reused database.
+//
+// KNOWN LIMIT: the query returns one page, the 500 oldest runs. A database
+// holding that many stale in-flight runs lists none of this package's, and
+// Checked is then 0, so the assertions fail rather than pass without the run
+// having been judged.
+type inFlightOfPackage struct {
+	Engine
+	packageId string
+}
+
+func (e inFlightOfPackage) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	res, err := e.Engine.Execute(ctx, q)
+	if err != nil || !strings.HasPrefix(q, "query packageDeploymentsInFlight(") {
+		return res, err
+	}
+	own := []map[string]any{}
+	for _, row := range memqlRows(res) {
+		if sameShortId(rowString(row, "packageId"), e.packageId) {
+			own = append(own, row)
+		}
+	}
+	return memql.NewResultWithOutput(own), nil
+}
+
+// sweepOwnRuns runs the abandoned sweep as the other replica, over this
+// fixture's package only (see inFlightOfPackage): Checked is the runs of the
+// package the sweep judged and Abandoned the ones it closed. It sweeps a copy of
+// the replica, so the replica's store is untouched, and on the clock the test
+// has set on it.
+func (f *confirmationFixture) sweepOwnRuns() (SweepResult, error) {
+	replica, scoped := *f.deps[1], *f.deps[1].Store
+	scoped.engine = inFlightOfPackage{Engine: scoped.engine, packageId: f.pkg}
+	replica.Store = &scoped
+	return SweepAbandoned(f.ctx, &replica)
+}
+
 // awaitHeartbeatAfter waits for the row to show a beat later than `after`.
 func awaitHeartbeatAfter(t *testing.T, f *confirmationFixture, after time.Time) {
 	t.Helper()
@@ -286,10 +369,13 @@ func TestSynchronousConfirmationSurvivesItsCallerAndTheSweep(t *testing.T) {
 			}
 
 			awaitHeartbeatAfter(t, f, leftAt.Add(time.Second))
+			// A run of another package, long silent, as a reused database holds:
+			// the sweep must neither count it nor close it.
+			f.openStrangerRun(t)
 			f.deps[1].Now = func() time.Time { return leftAt.Add(AbandonedAfter()) }
-			res, err := SweepAbandoned(f.ctx, f.deps[1])
-			if err != nil || res.Abandoned != 0 {
-				t.Fatalf("the sweep closed a run that was still reporting: %+v %v", res, err)
+			res, err := f.sweepOwnRuns()
+			if err != nil || res.Checked != 1 || res.Abandoned != 0 {
+				t.Fatalf("the sweep must judge this run, and only it, and leave a run that is still reporting open: %+v %v", res, err)
 			}
 			row, err := f.deps[1].Store.deploymentById(memql.ContextWithFreshRead(f.ctx), f.run)
 			if err != nil || rowString(row, "status") != StatusBuilding {
@@ -355,10 +441,13 @@ func TestConfirmedRunThatFailsAfterItsCallerLeftClosesWithTheRealError(t *testin
 	if message, _ := problem["message"].(string); !strings.Contains(message, "npm ci exited 1") || strings.Contains(message, "context canceled") {
 		t.Fatalf("the row must carry the build's own error: %+v", row["error"])
 	}
-	// Past the threshold on the sweep's clock, the row is terminal and not a candidate.
+	// Past the threshold on the sweep's clock, the row is terminal and not a
+	// candidate. That clock makes every in-flight run in the database stale, a
+	// stranger's among them, so the sweep is held to this test's package.
+	f.openStrangerRun(t)
 	f.deps[1].Now = func() time.Time { return time.Now().Add(2 * AbandonedAfter()) }
-	if res, err := SweepAbandoned(f.ctx, f.deps[1]); err != nil || res.Abandoned != 0 {
-		t.Fatalf("the sweep touched a run that closed itself: %+v %v", res, err)
+	if res, err := f.sweepOwnRuns(); err != nil || res.Checked != 0 || res.Abandoned != 0 {
+		t.Fatalf("the sweep took a run that closed itself for a candidate: %+v %v", res, err)
 	}
 }
 

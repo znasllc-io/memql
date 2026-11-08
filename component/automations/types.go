@@ -164,6 +164,13 @@ type Automation struct {
 	// reads nothing else. Nil keeps the whole payload but its version clock.
 	Reads []string `json:"-"`
 
+	// JournalTriggerReads are the payload keys an event firing of this
+	// automation records on its run's triggerEvent (journal_trigger.go): what
+	// its statements and the readers of a recorded trigger can read. Nil
+	// records the whole payload, which is also the answer for an automation
+	// built in Go rather than loaded.
+	JournalTriggerReads []string `json:"-"`
+
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
 

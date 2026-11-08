@@ -13,8 +13,17 @@ owner: znas
 compiled maintenance principal. It performs verified archival and physical
 retirement for the policies documented in [environment variables](../../public/operate/env-vars.md#operational-record-retention).
 The earlier audit/safety jobs remain count observations; this central job is now
-the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
-physical retention measures from the latest version, including that tombstone.
+the actual archive/delete path. Worker soft deletion remains a UI lifecycle step:
+`workerInvocationRetentionSweep` (02:30 UTC) hides an invocation past
+`MEMQL_WORKER_INVOCATION_RETENTION_DAYS` by appending a `deleted: true` version.
+Physical retention measures a record from its latest version, which is then that
+tombstone, so a soft-deleted invocation has its own policy, counted from the
+tombstone: `MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS` (default 1), for any
+outcome. Before 2026-11-08 the 90-day policy was the only one, the tombstone
+restarted it, and a row hidden at day 90 was deleted at about day 180; a row that
+never reached a terminal outcome, which that policy does not select, was never
+deleted. Test: `TestOperationalRetentionDBRetiresASoftDeletedInvocationADayAfterItsTombstone`
+(`integrations/work/operational_retention_invocation_db_test.go`).
 
 ## Declared concept retention
 
@@ -34,6 +43,22 @@ recent progress readable to whoever debugs a stuck drive, and keeps most expired
 versions in the chunk still taking inserts, where PostgreSQL reuses their space.
 Pins: `component/memql/status_row_retention_test.go`; behaviour under the real
 admission: `component/retention/status_rows_db_test.go`.
+
+**A pipeline run's versions keep their `policySnapshot` (decided 2026-11-08).**
+Each version copies the snapshot because the row is read-merged whole, and it is
+most of each version's bytes. Since the day's retention, what that costs is write
+volume (about 70 MB a day at the 2026-11-06 rate) and the last day of versions in
+each chunk that closes, not lasting growth: the rest are deleted inside the chunk
+still taking inserts. Taking it off the versions needs a second store for it,
+content-addressed by the snapshot's own `version` digest, and a lookup on every
+fresh run read the driver makes (each guarded journal write makes one), plus
+retention and archive coverage for that store. The larger lever on this row is
+the 30-second lease renewal, about three quarters of its versions, and moving
+`driverHeartbeatAt` into `memory_liveness` needs a third reader handshake that
+would activate only where liveness storage is enabled (production), on the lease
+every pipeline run depends on. Both are left for a change scheduled on purpose.
+The pipeline's `v1:work:run` is no longer beaten at all (the lease is its
+liveness, `docs/internal/ops/harness-decisions.md`).
 
 The hourly platform automation invokes `integration.retention.sweep` under
 cluster-owner authority. Each page scans at most 100 versions, has a 20-second

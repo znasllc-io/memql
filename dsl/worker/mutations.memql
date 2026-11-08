@@ -314,9 +314,11 @@ mutation registration revokeWorker {
 //
 // Soft-deletes a worker invocation row by stamping `deleted=true`
 // in the payload. The isNotDeleted trait, applied at the query layer
-// (see dsl/worker/queries.memql), hides deleted rows from queries;
-// the underlying time-series row survives for forensic recovery if
-// needed.
+// (see dsl/worker/queries.memql), hides deleted rows from queries.
+// The stamp is a new version of the row, and the nightly work
+// retention sweep archives and deletes the whole row a day after it
+// (MEMQL_WORKER_INVOCATION_DELETED_RETENTION_DAYS, integrations/work);
+// forensic recovery reads that archive.
 //
 // Called by the workerInvocationRetentionSweep cron once a row
 // passes the WORKER_INVOCATION_RETENTION_DAYS window.

@@ -83,12 +83,14 @@ func TestAClaimTokenFencesAPausedReceiptFromTheSameNode(t *testing.T) {
 	if len(dh.work.recorded()) != before || !old.lease.isLost() {
 		t.Fatal("old process wrote after takeover")
 	}
-	wr.Heartbeat(context.Background())
+	if err := wr.RecordDriver(context.Background()); !errors.Is(err, errLeaseLost) {
+		t.Fatalf("stale driver record: %v", err)
+	}
 	if err := wr.Succeeded(context.Background(), nil); !errors.Is(err, errLeaseLost) {
 		t.Fatalf("stale terminal: %v", err)
 	}
 	if len(dh.work.recorded()) != before {
-		t.Fatal("old heartbeat or terminal wrote after takeover")
+		t.Fatal("old driver record or terminal wrote after takeover")
 	}
 }
 
