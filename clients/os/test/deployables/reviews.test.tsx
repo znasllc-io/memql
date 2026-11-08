@@ -387,11 +387,17 @@ describe("who can moderate", () => {
       { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
     ],
   } as unknown as Row;
+  /**
+   * The settings as an operator reads them, with Avery named: they may name
+   * the approver and the sender, and approve nothing themselves -- the engine
+   * answers `approvesRemovals` only to the person named, and never to an
+   * operator (packs/reviewspack/reads.go, readSettings).
+   */
   const APPROVER_SETTINGS = {
     exists: true,
     settings: { linkLifetimeDays: 14, requestDelayDays: 14, notifyEmail: "support@example.com", removalApproverUserId: "u-owner" },
-    may: { edit: true, nameApprover: true },
-    viewer: { moderates: true, approvesRemovals: true },
+    may: { edit: true, nameApprover: true, nameSender: true },
+    viewer: { moderates: false, approvesRemovals: false },
   } as unknown as Row;
   /** The first 100 people who can moderate, by what each is called: the list the engine cuts at. */
   const FIRST_HUNDRED = Array.from({ length: 100 }, (_, n) => {
