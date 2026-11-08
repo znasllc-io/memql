@@ -73,6 +73,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/engine_build_args.sh
 source "${SCRIPT_DIR}/../lib/engine_build_args.sh"
+# shellcheck source=../lib/bool_flag.sh
+source "${SCRIPT_DIR}/../lib/bool_flag.sh"
 
 #=============================================================================
 # CONFIGURATION
@@ -127,6 +129,10 @@ Options:
     --dry-run           Print the full plan; build/push nothing.
     --help              Show this help.
 
+    --push, --allow-overwrite and --dry-run also take a value,
+    --flag=true|false (or 1|0, yes|no, on|off), which is how make release
+    forwards PUSH=, ALLOW_OVERWRITE= and DRY_RUN=. Any other value is refused.
+
 Push is break-glass, not the release path:
     Deployable images are built by the MemQL native build server
     (memql-package.yaml, a release run pinned to its source commit,
@@ -158,15 +164,23 @@ function parse_arguments() {
     ALLOW_OVERWRITE=false
     DRY_RUN=false
 
+    # Each boolean takes a value as well as the bare form, read by bool_flag
+    # (scripts/lib/bool_flag.sh, cap_bool's vocabulary): `make release`
+    # forwards ALLOW_OVERWRITE=0 as --allow-overwrite="0", and a bare
+    # --allow-overwrite there would have permitted the overwrite. A value
+    # that is not a boolean exits 1, this script's bad-input code.
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --version=*)         VERSION="${1#*=}" ;;
             --registry=*)        REGISTRY="${1#*=}" ;;
             --acr=*)             ACR_NAME="${1#*=}" ;;
             --push)              PUSH=true ;;
+            --push=*)            PUSH="$(bool_flag --push "${1#*=}")" || exit 1 ;;
             --confirm=*)         CONFIRM="${1#*=}" ;;
             --allow-overwrite)   ALLOW_OVERWRITE=true ;;
+            --allow-overwrite=*) ALLOW_OVERWRITE="$(bool_flag --allow-overwrite "${1#*=}")" || exit 1 ;;
             --dry-run)           DRY_RUN=true ;;
+            --dry-run=*)         DRY_RUN="$(bool_flag --dry-run "${1#*=}")" || exit 1 ;;
             --help)              show_help; exit 0 ;;
             *)
                 echo "ERROR: unknown option: $1" >&2
