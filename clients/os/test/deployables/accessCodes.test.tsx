@@ -1487,3 +1487,129 @@ describe("the expiry word", () => {
     expect(expiryWord(expiresAt, NOW)).toBe(want);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Guest access (design record 2026-11-08-deployable-guest-access, section 5)
+// ---------------------------------------------------------------------------
+
+function guestPass(over: Partial<Row> = {}): Row {
+  return accessCodeRow({ id: "pass-guests", label: "Guests", gate: "dashboard", guest: true, codeHint: "", expiresAt: inDays(12), issuedAt: inDays(-1), ...over });
+}
+
+const guestPart = () => screen.findByRole("region", { name: "Guest access" });
+
+describe("guest access", () => {
+  it("guest access reads off, and Allow guests is absent without gates", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
+    const part = await guestPart();
+    expect(within(part).getByText("Off. Only someone with a code can open it.")).toBeTruthy();
+    expect(within(part).getByRole("button", { name: "Allow guests" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Guest access" })).toBeTruthy();
+  });
+
+  it("offers no Allow guests when the deployable declares no gate", async () => {
+    mountPanel({ accessGates: [], accessCodes: [reviewers()] });
+    const part = await guestPart();
+    expect(within(part).getByText("Off. Only someone with a code can open it.")).toBeTruthy();
+    expect(within(part).queryByRole("button", { name: "Allow guests" })).toBeNull();
+  });
+
+  it("allowing guests sends the name, the gate and the end, and shows no code", async () => {
+    const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Guests");
+    expect(selectedLabel(screen.getByLabelText("Opens"))).toBe("dashboard");
+    expect(screen.queryByLabelText("Subject")).toBeNull();
+    chooseOption(screen.getByLabelText("Ends"), "7 days");
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    expect(connection.callsNamed("siteAccessGuestPassCreate")).toEqual([
+      'builtin siteAccessGuestPassCreate(siteId: "site-desk", label: "Guests", gate: "dashboard", expiresAt: "2026-11-06T12:00:00.000Z")',
+    ]);
+    const part = await guestPart();
+    expect(await within(part).findByText("Ends in 7 days")).toBeTruthy();
+    expect(within(part).getByText("Not opened yet")).toBeTruthy();
+    expect(screen.queryByText(/only time it is shown/)).toBeNull();
+    for (const code of FIXTURE_ACCESS_CODES) expect(document.body.textContent).not.toContain(code);
+  });
+
+  it("asks for a subject only when the chosen gate reads one, and sends it", async () => {
+    const { connection } = mountPanel({ accessGates: [DASHBOARD, ENGAGEMENT], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    expect(screen.queryByLabelText("Subject")).toBeNull();
+    chooseOption(screen.getByLabelText("Opens"), "engagement");
+    await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    expect(connection.callsNamed("siteAccessGuestPassCreate")[0]).toContain('gate: "engagement", subject: "acme"');
+  });
+
+  it("shows the engine's refusal in the form and keeps the draft", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [], accessGuestError: refusedByEngine("siteAccessGuestPassCreate", "This deployable already lets guests in. Change when guest access ends, or turn it off first.") });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    await typeInto(screen.getByLabelText("Name") as HTMLInputElement, "Visitors");
+    await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
+    expect(await screen.findByText(/already lets guests in/)).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Visitors");
+  });
+
+  it("guest access on shows what it opens, when it ends and when a guest last came in", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass({ lastOpenedAt: inMinutes(-2) })] });
+    const part = await guestPart();
+    expect(await within(part).findByText("Ends in 12 days")).toBeTruthy();
+    expect(within(part).getByText(/Opens dashboard/)).toBeTruthy();
+    expect(within(part).getByText("Last opened 2 minutes ago")).toBeTruthy();
+    expect(within(part).queryByText(/Off\./)).toBeNull();
+    expect(within(part).queryByRole("button", { name: "Allow guests" })).toBeNull();
+    expect(within(part).getByRole("button", { name: "Change end date" })).toBeTruthy();
+    expect(within(part).getByRole("button", { name: "Turn off" })).toBeTruthy();
+    expect(screen.getByTitle(formatMoment(inDays(12)))).toBeTruthy();
+  });
+
+  it("reads Ended once past, and Not opened yet with no opening", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass({ expiresAt: inMinutes(-5) })] });
+    const part = await guestPart();
+    expect(await within(part).findByText("Ended")).toBeTruthy();
+    expect(within(part).getByText("Not opened yet")).toBeTruthy();
+  });
+
+  it("Change end date asks for a new end and sends it through the expiry call", async () => {
+    const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass()] });
+    const part = await guestPart();
+    await click(within(part).getByRole("button", { name: "Change end date" }));
+    await readTheBar();
+    chooseOption(within(part).getByLabelText("Ends"), "1 hour");
+    await readTheBar();
+    await click(within(part).getByRole("button", { name: "Set end date" }));
+    // An hour from the press, and the question took two readings to get there.
+    expect(connection.callsNamed("siteAccessCodeSetExpiry")).toEqual(['builtin siteAccessCodeSetExpiry(codeId: "pass-guests", expiresAt: "2026-10-30T13:00:00.800Z")']);
+    await waitFor(() => expect(part.textContent).toContain("Ends in 1 hour"));
+  });
+
+  it("Turn off asks in place, then removes the pass", async () => {
+    const { connection } = mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass()] });
+    const part = await guestPart();
+    await click(within(part).getByRole("button", { name: "Turn off" }));
+    expect(within(part).getByText("Everyone in as a guest is taken out now.")).toBeTruthy();
+    expect(connection.callsNamed("siteAccessCodeRemove")).toHaveLength(0);
+    await readTheBar();
+    await click(within(part).getByRole("button", { name: "Keep it" }));
+    expect(connection.callsNamed("siteAccessCodeRemove")).toHaveLength(0);
+    await click(within(part).getByRole("button", { name: "Turn off" }));
+    await readTheBar();
+    await click(within(part).getByRole("button", { name: "Turn off guest access" }));
+    expect(connection.callsNamed("siteAccessCodeRemove")).toEqual(['builtin siteAccessCodeRemove(codeId: "pass-guests")']);
+    expect(await within(part).findByText("Off. Only someone with a code can open it.")).toBeTruthy();
+  });
+
+  it("the guest pass is never a row in the code list", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [reviewers(), guestPass()] });
+    const list = await screen.findByRole("list", { name: "Access codes" });
+    expect(within(list).getByText("Client reviewers")).toBeTruthy();
+    expect(within(list).queryByText("Guests")).toBeNull();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("a pass alone leaves the code list to its own empty words", async () => {
+    mountPanel({ accessGates: [DASHBOARD], accessCodes: [guestPass()] });
+    expect(await screen.findByText("No access codes yet")).toBeTruthy();
+  });
+});

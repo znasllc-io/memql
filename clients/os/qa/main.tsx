@@ -764,10 +764,22 @@ const ACCESS_REFUSED: FakeSeed = {
   accessGatesError: "siteAccessGates: MemQL engine failed to execute query. Details: No deployable you can read has that id. Reload the list of deployables and choose one you can see.",
 };
 
+/** The same dialog with guest access on: a pass in the engine's own row, no code anywhere on it. */
+const ACCESS_GUEST_SEED: FakeSeed = {
+  accessGates: ACCESS_GATES,
+  accessCodes: [
+    ...(ACCESS_SEED.accessCodes ?? []).slice(0, 2),
+    accessCodeRow({ id: "pass-guests", label: "Guests", gate: "engagement", subject: "acme", guest: true, codeHint: "", issuedAt: accessAt(-ACCESS_DAY), expiresAt: accessAt(12 * ACCESS_DAY), lastOpenedAt: accessAt(-2) }),
+  ],
+};
+
 /** `?click=` for the view that can only be reached by pressing: the code exists once. */
 const ACCESS_CLICKS: Record<string, string> = {
   "access-minted": "Regenerate Client reviewers|Regenerate",
   "access-unanswered": "Regenerate Client reviewers|Regenerate",
+  "access-guest-form": "Allow guests",
+  "access-guest-ask": "Turn off",
+  "access-guest-date": "Change end date",
 };
 
 /** A regenerate that lands with its reply lost on the way back. */
@@ -1498,6 +1510,11 @@ const VIEWS: Record<
   access: { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
   "access-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-form": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-ask": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-date": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-no-gates": { seed: { accessGates: [], accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-refused": { seed: ACCESS_REFUSED, framed: true, render: () => <AccessPage /> },
   "access-unanswered": { connect: accessUnanswered, framed: true, render: () => <AccessPage /> },

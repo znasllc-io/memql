@@ -73,10 +73,11 @@
    of a double-click on Add landed on Close. Pinned, what is above a change stays put. */
 .deployable-dialog:has(.access-codes) { --access-top: min(10dvh, 88px); margin-block: var(--access-top) auto; max-height: calc(100dvh - var(--access-top) - 24px); }
 @media (max-width: 600px) { .deployable-dialog:has(.access-codes) { --access-top: 18px; } }
-.access-codes > .os-head { min-height: 36px; margin: 0; }
+.access-guest { display: grid; gap: 8px; min-width: 0; }
+.access-codes > .os-head, .access-guest > .os-head { min-height: 36px; margin: 0; }
 /* The page's narrow rule lets a head's acts wrap under its title. This heading has
    one short word and one icon, and the plus stays over the trash at every width. */
-.access-codes > .os-head > .os-head-actions { margin-left: auto; }
+.access-codes > .os-head > .os-head-actions, .access-guest > .os-head > .os-head-actions { margin-left: auto; }
 .access-codes .os-form-field { max-width: none; }
 .access-codes .os-record-summary:empty, .access-codes .os-record-chevron { display: none; }
 .access-codes .os-row.os-record-row[data-no-icon] { grid-template-columns: minmax(0, 1fr) auto; }
