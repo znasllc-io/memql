@@ -20,7 +20,7 @@ import {
   type ReviewDetail,
   type ReviewFilter,
   type ReviewPage,
-  type ReviewPerson,
+  type ReviewPeople,
   type ReviewRow,
   type ReviewSettings,
   type ReviewSettingsValues,
@@ -34,10 +34,14 @@ import {
 // (`revision`). The section moves on what the engine answered, never on what
 // it assumed a write did.
 
-/** `builtin name(key: value, ...)`, leaving out what is not given. */
-export function builtinCall(name: string, args: Record<string, unknown>): string {
+/**
+ * `builtin name(key: value, ...)`, leaving out what is not given. An empty
+ * string is not given, except under the keys named in `given`: there it is
+ * the value, and leaving it out would change nothing.
+ */
+export function builtinCall(name: string, args: Record<string, unknown>, given: readonly string[] = []): string {
   const parts = Object.entries(args)
-    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .filter(([k, v]) => v !== undefined && v !== null && (v !== "" || given.includes(k)))
     .map(([k, v]) => `${k}: ${renderMemQLValue(v)}`);
   return `builtin ${name}(${parts.join(", ")})`;
 }
@@ -149,10 +153,10 @@ export function useReviewSettings(scope: ReviewsScope, revision: number): Readin
 
 /**
  * Who can moderate the store (reviewsPeople): the people its removal approver
- * is chosen from. Read again with every write, as the settings are, so who
- * approves removals follows a save.
+ * is chosen from, and whether the engine listed them all. Read again with
+ * every write, as the settings are, so who approves removals follows a save.
  */
-export function useReviewPeople(scope: ReviewsScope, revision: number): Reading<ReviewPerson[]> {
+export function useReviewPeople(scope: ReviewsScope, revision: number): Reading<ReviewPeople> {
   const connection = useOsConnection();
   const read = useMemo(() => {
     if (connection === null || scope.storeId === "") return null;
@@ -245,7 +249,10 @@ export function useReviewWrites(scope: ReviewsScope): ReviewWrites {
   const saveSettings = useCallback(
     (changes: Partial<ReviewSettingsValues>) =>
       run("settings", "reviewsUpdateSettings", async (query) => {
-        await query.executeNamed("reviewsUpdateSettings", builtinCall("reviewsUpdateSettings", { storeId: scope.storeId, siteId: scope.siteId, ...changes }));
+        // EVERY CHANGE IS SENT, an emptied one as "": the engine changes only
+        // the settings a call names, so a cleared approver or address left out
+        // would stand as it was.
+        await query.executeNamed("reviewsUpdateSettings", builtinCall("reviewsUpdateSettings", { storeId: scope.storeId, siteId: scope.siteId, ...changes }, Object.keys(changes)));
       }),
     [run, scope.storeId, scope.siteId],
   );

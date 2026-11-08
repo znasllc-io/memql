@@ -5,7 +5,7 @@ import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { SearchPicker } from "../../../kit/SearchPicker";
 import type { Reading } from "../../../cluster/reading";
 import { bare, deployedByLabel, type NameOf } from "../people";
-import { personCalled, type ReviewPerson, type ReviewSettings, type ReviewSettingsValues } from "./model";
+import { personCalled, type ReviewPeople, type ReviewSettings, type ReviewSettingsValues } from "./model";
 import { ReviewsPane } from "./ReviewsPane";
 import { useReviewPeople, type ReviewsScope, type ReviewWrites } from "./useReviews";
 
@@ -23,8 +23,12 @@ import { useReviewPeople, type ReviewsScope, type ReviewWrites } from "./useRevi
 //
 // THE REMOVAL APPROVER IS ONE OF THE STORE'S PEOPLE WHO CAN MODERATE IT
 // (reviewsPeople), so they are chosen from those people by name, never typed
-// as an id, and the engine refuses anybody else. The same read is the "Who can
-// moderate" list, which says in words which of them approves removals.
+// as an id, and the engine refuses anybody else. Whoever may name one may also
+// name nobody (Clear the approver, sent as ""). The same read is the "Who can
+// moderate" list, which says in words which of them approves removals -- and
+// says when the engine listed only the first of them by name (`truncated`).
+// An approver past that cut is on no row, so who approves is said from the
+// settings, never from the list.
 
 type Draft = {
   publicDisplay: boolean;
@@ -115,14 +119,16 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   const saving = writes.busy === "settings";
   const exporting = writes.busy === "export";
   const set = <K extends keyof Draft>(key: K) => (next: Draft[K]) => setDraft((d) => (d === null ? d : { ...d, [key]: next }));
-  const moderators = people.value ?? [];
+  const moderators = people.value?.people ?? [];
   // Named from the store's people first: they are who an approver is chosen from.
   const nameOfPerson: NameOf = (userId) => {
     const person = moderators.find((p) => bare(p.userId) === bare(userId));
     return person === undefined ? nameOf(userId) : personCalled(person);
   };
-  const approverName = draft.removalApproverUserId.trim() === "" ? "" : deployedByLabel(draft.removalApproverUserId.trim(), viewerUserId, nameOfPerson);
-  const choosesApprover = canEdit && value.may.nameApprover && moderators.length > 0;
+  const approverId = draft.removalApproverUserId.trim();
+  const approverName = approverId === "" ? "" : deployedByLabel(approverId, viewerUserId, nameOfPerson);
+  const namesApprover = canEdit && value.may.nameApprover;
+  const choosesApprover = namesApprover && moderators.length > 0;
 
   async function save() {
     if (problem !== "" || Object.keys(changes).length === 0) return;
@@ -192,11 +198,22 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
                   emptyText="Nobody who can moderate this store by that name."
                   onChoose={(choice) => set("removalApproverUserId")(choice.id)}
                 />
+              ) : namesApprover && people.state === "failed" ? (
+                // THE ABSENT PICKER IS EXPLAINED WHERE IT WOULD STAND: the
+                // people it chooses from could not be read. Who can moderate
+                // carries the notice and its Try again.
+                <Caption>Nobody can be chosen, because who can moderate this store could not be read.</Caption>
               ) : null}
               <Caption>
-                {approverName !== "" ? `${approverName === "you" ? "You are" : `${approverName} is`} the one person who can remove a published review or erase a writer's data.` : "Nobody can remove a published review until an owner is named."}
+                {approverWords(approverId, approverName)}
                 {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
               </Caption>
+              {/* NAMING NOBODY: the draft's approver set to "", which Save sends
+                  as "" and the engine takes as nobody. Offered to whoever may
+                  name one, only while someone is named. */}
+              {namesApprover && approverId !== "" ? (
+                <Button tone="quiet" onClick={() => set("removalApproverUserId")("")}>Clear the approver</Button>
+              ) : null}
             </SettingRow>
             <SettingRow label="Who can moderate">
               <Moderators people={people} />
@@ -215,23 +232,42 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
 }
 
 /**
+ * Who approves removals, in words, drawn from the settings: nobody only when
+ * the settings name nobody. Somebody this page cannot name -- past the people
+ * the engine listed, or with the list unread -- is still somebody, so a list
+ * never decides that nobody approves.
+ */
+function approverWords(approverId: string, approverName: string): string {
+  const role = "the one person who can remove a published review or erase a writer's data.";
+  if (approverId === "") return "Nobody can remove a published review until an owner is named.";
+  if (approverName === "") return `Someone not among the people listed is ${role}`;
+  return approverName === "you" ? `You are ${role}` : `${approverName} is ${role}`;
+}
+
+/**
  * Everybody who can moderate the store, by name, and in words which of them
  * approves removals: no chip, no badge.
  */
-function Moderators({ people }: { people: Reading<ReviewPerson[]> }) {
+function Moderators({ people }: { people: Reading<ReviewPeople> }) {
   if (people.state === "failed") {
     return <Notice tone="warn" sentence="Who can moderate this store could not be read." detail={people.error}><Button onClick={people.reread}>Try again</Button></Notice>;
   }
   if (people.value === null) return <RecordListSkeleton label="Reading who can moderate this store" rows={2} />;
-  if (people.value.length === 0) return <Caption>Nobody in this store&rsquo;s organization can moderate its reviews.</Caption>;
+  const { people: listed, truncated } = people.value;
+  if (listed.length === 0) return <Caption>Nobody in this store&rsquo;s organization can moderate its reviews.</Caption>;
   return (
-    <RecordList as="ul" density="compact" label="Who can moderate this store's reviews">
-      {people.value.map((person) => (
-        <RecordRow key={person.userId} name={personCalled(person)} secondary={person.displayName === "" ? undefined : person.email}>
-          {person.mayRemove ? <span>Approves removals</span> : null}
-        </RecordRow>
-      ))}
-    </RecordList>
+    <>
+      <RecordList as="ul" density="compact" label="Who can moderate this store's reviews">
+        {listed.map((person) => (
+          <RecordRow key={person.userId} name={personCalled(person)} secondary={person.displayName === "" ? undefined : person.email}>
+            {person.mayRemove ? <span>Approves removals</span> : null}
+          </RecordRow>
+        ))}
+      </RecordList>
+      {/* THE ENGINE CUT THE LIST, and says so: these are the first by what
+          each is called, and more can moderate the store. */}
+      {truncated ? <Caption>{`Only the first ${listed.length} people, by name, are listed.`}</Caption> : null}
+    </>
   );
 }
 

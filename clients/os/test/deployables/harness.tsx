@@ -237,6 +237,8 @@ export interface FakeSeed {
     settings?: Row;
     /** What `reviewsPeople` answers: the people who can moderate the store. */
     people?: Row;
+    /** Fails every `reviewsPeople` read with this server message. */
+    peopleError?: string;
     /** Fails the next decision or erasure with this server message. */
     decideError?: string;
     /** Fails the next settings save with this server message. */
@@ -558,6 +560,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("reviewsSettings", [seed.reviews?.settings ?? ({ exists: false, settings: {}, may: { edit: false, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsPeople(")) {
+        if (seed.reviews?.peopleError !== undefined) throw new Error(seed.reviews.peopleError);
         return builtinReply("reviewsPeople", [seed.reviews?.people ?? ({ storeId: "", people: [] } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsDecide(") || call.startsWith("builtin reviewsEraseReviewer(")) {

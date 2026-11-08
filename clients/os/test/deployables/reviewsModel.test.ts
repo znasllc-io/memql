@@ -80,12 +80,21 @@ describe("who can moderate", () => {
       { userId: "", displayName: "Nobody", email: "", mayRemove: false },
     ];
     for (const answer of [{ storeId: "store-live", people }, { storeId: "store-live", people: JSON.stringify(people) }]) {
-      expect(reviewPeopleFrom(answer)).toEqual([
+      expect(reviewPeopleFrom(answer).people).toEqual([
         { userId: "u-owner", displayName: "Avery Owner", email: "avery@example.com", mayRemove: true },
         { userId: "u-mod", displayName: "", email: "robin@example.com", mayRemove: false },
       ]);
     }
-    expect(reviewPeopleFrom(null)).toEqual([]);
+    expect(reviewPeopleFrom(null)).toEqual({ people: [], truncated: false });
+  });
+
+  it("says when the engine listed only some of the people who can moderate", () => {
+    expect(reviewPeopleFrom({ storeId: "store-live", people: [], truncated: true }).truncated).toBe(true);
+    // A boolean may cross a builtin's reply as its word.
+    expect(reviewPeopleFrom({ storeId: "store-live", people: [], truncated: "true" }).truncated).toBe(true);
+    expect(reviewPeopleFrom({ storeId: "store-live", people: [], truncated: false }).truncated).toBe(false);
+    // An answer that does not say it cut has not.
+    expect(reviewPeopleFrom({ storeId: "store-live", people: [] }).truncated).toBe(false);
   });
 });
 
