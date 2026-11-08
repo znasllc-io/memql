@@ -242,7 +242,7 @@ describe("Pipelines > Settings", () => {
     const cluster = mount(null);
     render(withSession(<PipelinesApp sectionId="settings" navigate={() => {}} askContext={() => {}} />));
     const tabs = screen.getByRole("navigation", { name: "Pipeline settings" });
-    expect(within(tabs).getAllByRole("button").map((tab) => tab.textContent)).toEqual(["Infrastructure", "Connections", "AI"]);
+    expect(within(tabs).getAllByRole("button").map((tab) => tab.textContent)).toEqual(["Infrastructure", "Connections", "AI", "Security"]);
     expect(screen.getByRole("region", { name: "Pipelines" })).toBeTruthy();
     expect(cluster.reads()).toEqual([]);
 

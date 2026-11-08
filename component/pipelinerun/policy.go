@@ -45,6 +45,7 @@ func pipelinePolicyOperations() map[string]workflowhost.Operation {
 	out := map[string]workflowhost.Operation{}
 	for _, name := range []string{
 		"pipelineReviewPullRequest", "pipelineReportMergeGroupReview", "pipelineWorkflowFacts", "pipelineSkipStep", "pipelineReportPublish", "pipelineReportObserve",
+		"pipelineSecurityRead", "pipelineSecurityOpenGoal",
 		"pipelineRetentionSweepPage", "integration.pipelines.executeStep", "integration.pipelines.reportProgress",
 	} {
 		out[name] = func(context.Context, map[string]any) (any, error) {
@@ -84,7 +85,7 @@ func capturePipelinePolicy(ctx context.Context, d Deps, p Pipeline, o Opening) (
 		}
 		resolver = strings.TrimSpace(resolver)
 	}
-	entries := []string{"pipelineSARIFDelivery"}
+	entries := []string{"pipelineSARIFDelivery", "pipelineSecurityRemediation"}
 	if resolver != "" {
 		selection, err := workflowhost.Capture(resolver, pipelinePolicyContract, d.WorkflowSource, nil)
 		if err != nil {

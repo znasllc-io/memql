@@ -208,6 +208,20 @@ func validateSelect(sel *Select) *Refusal {
 }
 
 func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[string]bool) *Refusal {
+	if stage.Security {
+		cadence := stage.Schedule
+		if cadence == "" {
+			cadence = spec.Schedule
+		}
+		if cadence != "weekly" || spec.Schedule == "" || !slices.Contains(stage.On, string(EventSchedule)) {
+			return Refuse(CodeStageInvalid, stage.Name, "A security stage requires a weekly cadence and explicit schedule admission.")
+		}
+		for _, event := range stage.On {
+			if event != string(EventSchedule) && event != string(EventManual) {
+				return Refuse(CodeStageInvalid, stage.Name, "A security stage may run only on schedule or manual; required per-change checks cannot depend on the security switch.")
+			}
+		}
+	}
 	if stage.Schedule != "" {
 		if (stage.Schedule != "daily" && stage.Schedule != "weekly") || spec.Schedule == "" || !slices.Contains(stage.On, string(EventSchedule)) {
 			return Refuse(CodeStageInvalid, stage.Name, "A stage schedule must be daily or weekly, with a pipeline schedule and on: [schedule].")

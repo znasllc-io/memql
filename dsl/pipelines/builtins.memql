@@ -135,6 +135,15 @@ builtin pipelineReportPublish { }
 @args(profile="object")
 builtin pipelineReportObserve { waitSeconds integer! }
 
+/// Private operations available only inside a claimed native security report.
+/// The compiled producer and retained bytes supply all finding/source evidence.
+@executor("integration.pipelines.securityRead")
+builtin pipelineSecurityRead { }
+
+@executor("integration.pipelines.securityOpenGoal")
+@args(profile="object")
+builtin pipelineSecurityOpenGoal { fingerprint string! statement string! }
+
 /// Read only this claimed run's compiled step states. Unavailable outside a pipeline workflow.
 @executor("integration.pipelines.workflowFacts")
 builtin pipelineWorkflowFacts { }

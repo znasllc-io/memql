@@ -1068,6 +1068,18 @@ Deployables their navigation owner. Deployables exposes contextual source
 facts and links, while Cluster Updates selects this installation’s release.
 Legacy saved routes and GitHub callbacks resolve to Pipelines.
 
+Settings > Security contains the installation-wide **Weekly security scans**
+switch. It is off unless `MEMQL_PIPELINES_SECURITY` explicitly enables it.
+The repository manifest defines the scheduled security stages; ordinary checks
+keep their existing schedule. New findings create remediation goals under the
+pipeline owner's account. Turning the switch off prevents future scan runs
+and new remediation goals; runs and goals already in progress may finish.
+The switch moves only after reading the saved configuration, keeps
+its last value on failure, and follows configuration changes from other windows.
+`test/pipelines/securitySettings.test.tsx` covers enable/disable, refused and
+unconfirmed saves, read recovery, external updates and keyboard focus. Browser
+fixtures are documented in `qa/README.md`; they change no installation state.
+
 Repository read access is distinct from write authority. `RepositoryChange`
 reads the backend’s fresh repository authority, creates an immutable bounded
 request, and opens its saved Nexus goal or approval. Installed roles never

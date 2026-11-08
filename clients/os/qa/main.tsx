@@ -1,6 +1,8 @@
 import liveQuickReply from "../test/nexus/fixtures/liveQuickReply.json";
 import { flatten as flattenLiveCapture } from "../src/kit/rows";
 import { RepositoryChange } from "../src/apps/pipelines/RepositoryChange";
+import { PipelinesApp } from "../src/apps/pipelines/PipelinesApp";
+import { pipelineSecurityConnection } from "./pipelineSecurityConnection";
 import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpdates";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
@@ -464,6 +466,12 @@ function DeployablesWindow({ section, fallback, intent }: { section: string; fal
 
 function RunsWindow({ runId }: { runId?: string }) {
   return <DeployablesWindow section="runs" fallback="Runs" intent={runId ? { runId } : undefined} />;
+}
+
+function PipelineSecurityWindow() {
+  const { actions } = useOs();
+  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+  return <WindowBody fallback="Pipelines"><PipelinesApp sectionId="settings" navigate={() => {}} askContext={() => {}} /></WindowBody>;
 }
 
 /** The Deployables fake, also answering the machines feed. */
@@ -1283,6 +1291,10 @@ const VIEWS: Record<
     render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
   },
   "pipeline-map": { connect: () => pipelinesConnection({ ...LISTS, ...mapPipelines() }), wrap: pipelinesWrap, render: () => <DeployablesWindow section="map" fallback="Overview" /> },
+  "pipeline-security-off": { connect: () => pipelineSecurityConnection("off"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-on": { connect: () => pipelineSecurityConnection("on"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-unavailable": { connect: () => pipelineSecurityConnection("unavailable"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-refused": { connect: () => pipelineSecurityConnection("refused"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
   // Settings -> Pipelines, the optional readiness item, in each reading.
   "settings-pipelines-unset": {
     connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),

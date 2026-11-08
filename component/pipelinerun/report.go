@@ -57,6 +57,22 @@ func (dr *runDriver) runSARIFReport(ctx context.Context, t *stepTrack) {
 		}
 		return nil
 	}
+	if t.step.SARIF.Destination == "goals" {
+		result, err := dr.securityReport(callCtx, t, check)
+		if dr.lease.isLost() {
+			return
+		}
+		if dr.lease.isCancelled() {
+			finish(cancelReceipt())
+			return
+		}
+		if err != nil {
+			finish(failReceipt(pipelines.CodeSARIFDeliveryFailed, "Security findings could not be recorded: "+dr.mask(err.Error())))
+			return
+		}
+		finish(receipt{status: WorkStepDone, report: StepSucceeded, result: result})
+		return
+	}
 	var observed SARIFPublication
 	result := func() map[string]any { return map[string]any{"state": observed.State, "publicationId": observed.ID} }
 	_, err = dr.runPinnedWorkflowWithOptions(callCtx, "pipelineSARIFDelivery", nil, workflowhost.Options{

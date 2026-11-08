@@ -91,7 +91,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 			switch step.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
-				if step.Function == nil || (step.Function.Name != "pipelineReviewPullRequest" && step.Function.Name != "pipelineReportMergeGroupReview" && step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve") {
+				if step.Function == nil || (step.Function.Name != "pipelineReviewPullRequest" && step.Function.Name != "pipelineReportMergeGroupReview" && step.Function.Name != "pipelineWorkflowFacts" && step.Function.Name != "pipelineSkipStep" && step.Function.Name != "pipelineReportPublish" && step.Function.Name != "pipelineReportObserve" && step.Function.Name != "pipelineSecurityRead" && step.Function.Name != "pipelineSecurityOpenGoal") {
 					return fmt.Errorf("pipeline workflow step %q calls a function outside its run-scoped contract", step.ID)
 				}
 			case automations.StepTypeAction:
@@ -194,7 +194,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	// recipes are part of the immutable execution contract as well.
 	for _, helper := range []string{
 		"pipelineStageIncluded", "pipelinePackageSelection", "pipelinePackageStepSelection", "pipelineBucketIncluded",
-		"pipelineNotificationCopy", "pipelineNotificationOutcome", "pipelineSARIFDelivery",
+		"pipelineNotificationCopy", "pipelineNotificationOutcome", "pipelineSARIFDelivery", "pipelineSecurityRemediation",
 	} {
 		if err := visit(helper); err != nil {
 			return err
@@ -230,7 +230,13 @@ func (dr *runDriver) selectStages(ctx context.Context, spec *pipelines.Spec, eve
 		}
 	}
 	selection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
+	securityEnabled := dr.d.securitySettings(ctx).Enabled
 	for _, stage := range spec.Stages {
+		// Re-read at execution, rather than trusting the scheduler's earlier
+		// answer. This also gates manual runs and custom installed policies.
+		if stage.Security && (!securityEnabled || (event != pipelines.EventSchedule && event != pipelines.EventManual) || (event == pipelines.EventSchedule && runCadence != "weekly")) {
+			continue
+		}
 		stageCadence := stage.Schedule
 		if stageCadence == "" {
 			stageCadence = spec.Schedule

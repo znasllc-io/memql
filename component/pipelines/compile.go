@@ -208,6 +208,9 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		if selected != nil && !selected[stage.Name] {
 			continue
 		}
+		if stage.Security && in.Event != EventSchedule && in.Event != EventManual {
+			return Plan{}, Refuse(CodeStageInvalid, stage.Name, "Optional security work cannot be selected for a required per-change or release run.")
+		}
 		planned := PlanStage{Name: stage.Name, Needs: compiledCopy(stage.Needs)}
 		if stage.Channel != "" {
 			planned.Steps = []Step{{

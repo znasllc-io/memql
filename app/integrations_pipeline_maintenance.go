@@ -13,6 +13,16 @@ func (a *App) wirePipelineMaintenance(pipeline *pipelinerun.Integration) {
 		return
 	}
 	pipeline.Configure(func(d *pipelinerun.Deps) {
+		d.OpenSecurityGoal = func(ctx context.Context, r pipelinerun.SecurityGoalRequest) (string, error) {
+			work, ok := a.engine.IntegrationByName("work").(*workspine.Integration)
+			if !ok || work == nil {
+				return "", fmt.Errorf("pipeline security goal service is unavailable")
+			}
+			goal := workspine.DirectGoal{OwnerUserId: r.OwnerUserID, Statement: r.Statement, Input: r.Input, AccountIds: r.AccountIDs,
+				BeforeRun: func(c context.Context, _, _ string) error { return r.Check(c) }}
+			receipt, err := work.OpenPipelineSecurityGoal(ctx, r.Key, goal)
+			return receipt.GoalID, err
+		}
 		d.OpenMaintenanceGoal = func(ctx context.Context, r pipelinerun.MaintenanceRequest) (string, error) {
 			work, ok := a.engine.IntegrationByName("work").(*workspine.Integration)
 			if !ok || work == nil {

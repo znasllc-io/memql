@@ -10,6 +10,13 @@ description: How long-running work retains evidence, compacts active context, an
 
 # Work context and recovery
 
+When optional [pipeline security scans](../operate/pipelines.md#remediation-goals-from-retained-security-reports)
+are enabled, a new finding creates a remediation goal with its repository,
+scan commit and retained evidence. Repeated scans reuse that goal and preserve
+its original context and your decisions. They do not restart finished work,
+reopen a closed goal or accept its results. Turning security scans off prevents
+new finding goals; existing goals remain available for you to continue or close.
+
 A goal can outlive a model call, a context window, a client connection, or an
 execution replica. Progress belongs in the durable work journal. A model's
 active context is a bounded working set, not the sole record of the goal.

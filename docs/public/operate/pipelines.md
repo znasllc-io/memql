@@ -1054,6 +1054,21 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 
 ### Scheduled scans
 
+**Pipelines > Settings > Security > Weekly security scans** enables optional
+deep security analysis and remediation goals across connected pipelines. It is
+off by default. A repository opts stages into that switch with `security: true`,
+a weekly cadence and `on: [schedule, manual]`. Required checks on source changes
+cannot carry this marker. Dependency checks, introduced-change secret checks
+and unrelated scheduled work keep their own behavior.
+
+The switch is stored as `MEMQL_PIPELINES_SECURITY`, with value
+`{"enabled":true}` or `{"enabled":false}`. Missing, malformed or unreadable
+settings mean off. Turning it off prevents newly selected security stages and
+new finding goals. Already running scanners and existing goals are not
+cancelled. A manual run also respects the switch. Enabling does not add steps
+to a weekly run already opened that week; start a manual run or wait for the
+next weekly period.
+
 Set `pipeline.schedule` to `daily` or `weekly` and opt each audit stage in with
 `on: [schedule]`. A stage may override the pipeline cadence with its own
 `schedule`. Other declared events remain independent: a weekly audit can also
@@ -1083,6 +1098,7 @@ cannot satisfy the required PR or merge-queue check.
 | `name` | The stage's name | Missing, breaking the rule, or used twice: `pipeline_stage_invalid` |
 | `needs` | Earlier stages this one depends on. Recorded rather than scheduled on: stages run in the order written whatever it says | A stage that comes later, the stage itself, or no stage at all: `pipeline_stage_invalid` |
 | `schedule` | Override the pipeline cadence with `daily` or `weekly` | Requires a pipeline schedule and `on: [schedule]`; otherwise `pipeline_stage_invalid` |
+| `security` | Optional deep scanning or finding reports controlled by the Security setting | Requires a weekly cadence and only `schedule`/`manual` events; required per-change checks cannot be switched off this way |
 | `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every non-scheduled run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
 | `runAfterFailure` | Boolean, default `false`. Run this stage even when an earlier stage failed; useful for independent security analysis. Does not erase failures or bypass cancellation | Non-boolean values fail manifest parsing |
 | `steps` | The stage's steps, which run at once | Both `steps` and `channel`, or neither: `pipeline_stage_invalid` |
@@ -1455,7 +1471,60 @@ what to do. Fix the block and push: the next run reads the fixed manifest.
 
 ---
 
+## Remediation goals from retained security reports
+
+A `sarif` step with `destination: goals` consumes the scanner's retained report
+inside MemQL. It does not upload to GitHub or read GitHub alerts. Declare it
+after a scanner that retains SARIF, with both stages marked `security: true`:
+
+```yaml
+- name: analysis
+  security: true
+  schedule: weekly
+  on: [schedule, manual]
+  runAfterFailure: true
+  steps:
+    - name: scan
+      run: scan-source --sarif=.reports/results.sarif
+      artifacts: [.reports]
+- name: security-reports
+  security: true
+  schedule: weekly
+  on: [schedule, manual]
+  runAfterFailure: true
+  steps:
+    - name: findings
+      sarif:
+        destination: goals
+        step: analysis.scan
+        path: .reports/results.sarif
+```
+
+The source must have a successful scanner receipt. The consumer verifies the
+owner, current source binding, artifact version, size and digest before reading
+findings. A failed scanner, missing artifact, malformed report or incomplete
+goal delivery fails the report step; it cannot be represented as a clean scan.
+A report with no actionable findings creates no goals. Suppressed and absent
+findings do not create work.
+
+Each finding maps to one durable owner/repository/scanner/rule/location
+identity. Scanner fingerprints preserve identity where available. Repeated
+scans, lost replies and another driver reuse the same goal, preserving its
+original evidence and human decisions. A later scan does not automatically
+close a goal or accept its results. Source text and scanner messages are
+untrusted evidence for the remediation task, not instructions or permission.
+
+The installed `pipelineSecurityRemediation` recipe chooses goal statements and
+composition. Creating a goal grants no extra repository, publication or
+deployment authority. Existing Work permissions, budgets and review gates
+continue to apply. The report step retains the linked goal IDs and the source
+report digest. The source provider and ordinary pipeline reporting may still
+use GitHub even when findings stay entirely in MemQL.
+
 ## Publishing retained security reports
+
+`sarif.destination: github` selects the optional external publication path;
+omitting `destination` preserves that behavior for existing declarations.
 
 `pipelinesPublishSARIF(runId: ..., stepKey: ..., path: ...)` publishes one
 retained `.sarif` file from a successful scanner in a native pipeline. The caller

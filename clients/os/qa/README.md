@@ -22,6 +22,12 @@ palette with `mode=light` or `mode=dark`. The harness uses the production theme
 registry; Graphite is the default. `view=routing-routes` includes the shared
 local tabs used by Fleet machine views and other app pages.
 
+`view=pipeline-security-off`, `-on`, `-unavailable`, and `-refused` exercise
+Pipelines' security setting. Add `click=Security` to open its tab; the switch
+changes only the fixture's in-memory configuration. Verify an enable followed
+by a disable, plus the failed-read and refused-save states. These fixtures do
+not run scanners or create real goals.
+
 `view=repository-owner-ready`, `repository-owner-landed`,
 `repository-owner-failure`, and `repository-owner-empty` exercise the owner
 landing flow when pull requests are disabled. `installation-owner-proposal`

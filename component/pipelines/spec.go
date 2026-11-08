@@ -64,6 +64,10 @@ type Select struct {
 // StageSpec is one stage. Stages run one after another in the order written;
 // the steps inside a stage run at once (D7).
 type StageSpec struct {
+	// Security marks optional deep scanning and its local findings reports.
+	// The installation's security switch must admit these stages; required
+	// per-change checks cannot carry this marker.
+	Security bool `yaml:"security,omitempty" json:"security,omitempty"`
 	// Schedule overrides the pipeline cadence for this scheduled stage.
 	// It affects schedule events only; declared PR/release/manual triggers remain.
 	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
@@ -90,8 +94,11 @@ type StageSpec struct {
 // SARIFReport selects one retained scanner artifact from an earlier step.
 // The source repository/ref and publication authority come from the run.
 type SARIFReport struct {
-	Step string `yaml:"step" json:"step"`
-	Path string `yaml:"path" json:"path"`
+	// Destination selects local remediation goals or optional GitHub delivery.
+	// Empty preserves the existing GitHub publication contract.
+	Destination string `yaml:"destination,omitempty" json:"destination,omitempty"`
+	Step        string `yaml:"step" json:"step"`
+	Path        string `yaml:"path" json:"path"`
 }
 
 // StepSpec declares a command, isolated image build or driver-owned report.

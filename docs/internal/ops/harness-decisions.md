@@ -17,6 +17,40 @@ and update this map when a covered path changes. User-facing behavior belongs in
 These paths are shared across goals and projects; repository names, user-specific
 paths and one task's acceptance criteria must not become routing rules.
 
+## Pipeline security findings
+
+The optional weekly security workflow consumes retained SARIF inside the
+pipeline driver. `pipelineSecurityRemediation` owns goal statements and order;
+native report operations own the current settings/source/lease gates and exact
+artifact verification. A successful scanner may contain findings, so this path
+does not use the failed-run maintenance trigger or its separate AI diagnosis
+switch. `destination: goals` performs no GitHub report upload.
+
+The native goal admission hashes the owner and stable source/finding identity.
+Its shared database gate serializes replica retries. Existing goals retain
+their first evidence, account scope and human decisions. A partial bootstrap
+can create its missing run; an existing run is never restarted by another scan,
+and a closed goal stays closed. New runs enter the ordinary goal compiler and
+Work permission/budget/review path. Scanner text remains untrusted input and
+cannot grant repository write or deployment authority. Goal completion still
+requires the owner's acceptance.
+
+Security settings are read again before selecting stages and before each new
+goal write. Off prevents new security work without changing other pipeline
+checks or cancelling existing goals. A scan failure, invalid SARIF or missing
+receipt stops report delivery rather than claiming there were no findings.
+Deduplication is durable across weeks; fallback identities without native
+scanner fingerprints can change when indistinguishable sites are inserted or
+removed. The report receipt links the goals and source digest, while the goal
+keeps normalized evidence after ordinary artifact retention.
+
+Regression coverage: `component/pipelinerun/security_schedule_test.go`,
+`component/pipelines/security_findings_test.go`,
+`integrations/work/pipeline_security_goal_db_test.go` and the Security settings
+UI tests. Fixture and isolated-database coverage do not establish a completed
+production scan. See [native security checks](native-security-checks.md) and
+[pipeline operations](../../public/operate/pipelines.md#remediation-goals-from-retained-security-reports).
+
 ## Delegation and return
 
 A delegated App can finish its operations but return an invalid terminal

@@ -59,9 +59,12 @@ type Deps struct {
 	// OpenMaintenanceGoal creates only an owner-bound, idempotent analysis goal.
 	// It grants no repository write, merge or installation authority.
 	OpenMaintenanceGoal func(context.Context, MaintenanceRequest) (string, error)
-	Store               Store
-	GitHub              GitHub
-	Gate                Gate
+	// OpenSecurityGoal persists one owner/source/finding identity. Re-observation
+	// must preserve its original evidence and must not reopen a closed goal.
+	OpenSecurityGoal func(context.Context, SecurityGoalRequest) (string, error)
+	Store            Store
+	GitHub           GitHub
+	Gate             Gate
 	// SARIF holds native publication storage and owner-scoped journal reads.
 	// It never gives a command step the GitHub installation bearer.
 	SARIF *SARIFDependencies
