@@ -501,10 +501,13 @@ function main() {
     key="$(cap_param key-file  "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
     caroot_override="$(cap_param caroot "")"
     mkcert_bin="$(cap_param mkcert "mkcert")"
-    force="$(cap_flag force)"
+    # Both "" or "1", read with cap_bool. As emptiness tests, --force=false
+    # reissued an existing certificate and --allow-missing-certutil=false
+    # waived browser trust.
+    if cap_bool force; then force=1; else force=""; fi
     confirm="$(cap_param confirm "")"
     certutil_bin="$(cap_param certutil "certutil")"
-    allow_missing_certutil="$(cap_flag allow-missing-certutil)"
+    if cap_bool allow-missing-certutil; then allow_missing_certutil=1; else allow_missing_certutil=""; fi
 
     parse_hostnames "$hostnames_raw"
     cap_require cert-file "$cert"

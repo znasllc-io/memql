@@ -240,10 +240,10 @@ up:
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
-		$${NO_BUILD_NODE:+--no-build-node} \
+		$${NO_BUILD_NODE:+--no-build-node="$${NO_BUILD_NODE}"} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
-		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum="$${ALLOW_BELOW_MINIMUM}"} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -254,8 +254,8 @@ up:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${NO_SECRETS:+--no-secrets} \
-		$${SWITCH:+--switch}
+		$${NO_SECRETS:+--no-secrets="$${NO_SECRETS}"} \
+		$${SWITCH:+--switch="$${SWITCH}"}
 
 ## Clean-slate local environment: nuke + repave. Tears down the cluster
 ## (wiping the in-cluster DB by construction), then runs the same bring-up
@@ -270,10 +270,10 @@ up-refresh:
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
-		$${NO_BUILD_NODE:+--no-build-node} \
+		$${NO_BUILD_NODE:+--no-build-node="$${NO_BUILD_NODE}"} \
 		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
 		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
-		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum} \
+		$${ALLOW_BELOW_MINIMUM:+--allow-below-minimum="$${ALLOW_BELOW_MINIMUM}"} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -284,14 +284,18 @@ up-refresh:
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${SWITCH:+--switch}
+		$${SWITCH:+--switch="$${SWITCH}"}
+
+# A boolean variable forwards its VALUE (--purge="$${PURGE}"), never a bare
+# --purge: the script reads it with cap_bool, and only the value can say false,
+# so PURGE=0 keeps the context. scripts/make/boolean_forwarding_test.go.
 
 ## Tear down the local k3d cluster (PURGE=1 also removes the kubeconfig context)
 ## Pass PURGE=1 to also remove the kubeconfig context.
 down:
 	@bash scripts/k3d/down.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
-		$${PURGE:+--purge}
+		$${PURGE:+--purge="$${PURGE}"}
 
 ## (Re-)seed the k8s Secrets in a running k3d cluster. Safe to re-run.
 ## Required after 'make up NO_SECRETS=1' or if secrets drift.
@@ -314,13 +318,13 @@ secrets:
 dev:
 	@bash scripts/k3d/dev.sh \
 		$${NODE:+--node=$${NODE}} \
-		$${PULL_INFRA:+--pull-infra} \
+		$${PULL_INFRA:+--pull-infra="$${PULL_INFRA}"} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${CARRIER_REPO:+--carrier-repo="$${CARRIER_REPO}"} \
 		$${CARRIER_NODES:+--carrier-nodes="$${CARRIER_NODES}"} \
 		$${CARRIER_CONTEXT:+--carrier-context="$${CARRIER_CONTEXT}"} \
-		$${NO_WAIT:+--no-wait}
+		$${NO_WAIT:+--no-wait="$${NO_WAIT}"}
 
 ## Print k3d cluster status + mesh litmus (unique MEMQL_NODE_ID per pod).
 ## Use after scaling to verify cross-node mesh formation.

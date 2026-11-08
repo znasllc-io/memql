@@ -1134,8 +1134,10 @@ function main() {
     NAMESPACE="$(cap_param namespace "${MEMQL_K3D_NAMESPACE:-memql}")"
     local nodes_arg pull_infra wait_flag carrier_nodes_arg
     nodes_arg="$(cap_param node "")"
-    pull_infra="$(cap_flag pull-infra)"
-    wait_flag="$(cap_flag no-wait)"
+    # Both "" or "1", read with cap_bool: as emptiness tests of cap_flag,
+    # --pull-infra=false pulled and --no-wait=false skipped the rollout wait.
+    if cap_bool pull-infra; then pull_infra=1; else pull_infra=""; fi
+    if cap_bool no-wait; then wait_flag=1; else wait_flag=""; fi
     CARRIER_REPO="$(cap_param carrier-repo "${MEMQL_CARRIER_REPO:-}")"
     carrier_nodes_arg="$(cap_param carrier-nodes "${MEMQL_CARRIER_NODES:-}")"
     CARRIER_CONTEXT="$(cap_param carrier-context "${MEMQL_CARRIER_CONTEXT:-}")"

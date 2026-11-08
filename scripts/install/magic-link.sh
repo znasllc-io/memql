@@ -78,10 +78,12 @@ MAGIC_LINK_RE='https?://[^[:space:]"\\]+/auth/complete\?[^[:space:]"\\]+'
 # THE GATE
 #=============================================================================
 
-# require_local_affirmation -- refuses (3) unless --local was passed. Runs
+# require_local_affirmation -- refuses (3) unless --local is true. Runs
 # before any cluster contact, so a refusal is guaranteed side-effect-free.
+# Read with cap_bool: an emptiness test let --local=false through, which is the
+# argv the install graph renders for `local: false`.
 function require_local_affirmation() {
-    if [[ -z "$(cap_flag local)" ]]; then
+    if ! cap_bool local; then
         cap_fail 3 "refusing to scrape an auth credential from pod logs without --local: \
 kubectl points at whatever context was last used, so this must be an explicit local decision"
     fi

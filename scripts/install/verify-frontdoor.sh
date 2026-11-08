@@ -708,7 +708,9 @@ function main() {
     port="$(cap_param port 443)"
     expect="$(cap_param expect-addr 127.0.0.1)"
     timeout="$(cap_param timeout 8)"
-    report_only="$(cap_flag report-only)"
+    # "" or "1", read with cap_bool: an emptiness test made --report-only=false,
+    # the argv the DSL action renders for `reportOnly: false`, waive strictness.
+    if cap_bool report-only; then report_only=1; else report_only=""; fi
     cap_require hosts "$hosts"
 
     local -a host_list=()

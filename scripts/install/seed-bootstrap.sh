@@ -614,7 +614,9 @@ function main() {
     ns="$(cap_param namespace "$DEFAULT_NAMESPACE")"
     ctx="$(cap_param context "")"
     name="$(cap_param secret "$DEFAULT_SECRET")"
-    dry_run="$(cap_flag dry-run)"
+    # "" or "1", read with cap_bool: an emptiness test made --dry-run=false,
+    # the argv the DSL action renders for `dryRun: false`, a dry run.
+    if cap_bool dry-run; then dry_run=1; else dry_run=""; fi
 
     local domain owner_email owner_first owner_last mode
     domain="$(cap_param domain "")"

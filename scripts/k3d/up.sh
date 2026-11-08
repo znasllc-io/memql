@@ -1954,8 +1954,10 @@ function main() {
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}")"
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
-    SKIP_BUILD_NODE="$(cap_flag no-build-node)"
-    SWITCH="$(cap_flag switch)"
+    # Booleans are "" or "1", read with cap_bool, because the functions test
+    # them with -n: read with cap_flag, --switch=false stopped another stack.
+    if cap_bool no-build-node; then SKIP_BUILD_NODE=1; else SKIP_BUILD_NODE=""; fi
+    if cap_bool switch; then SWITCH=1; else SWITCH=""; fi
     ALLOW_BELOW_MINIMUM="$(cap_bool_str allow-below-minimum "${MEMQL_ALLOW_BELOW_MINIMUM:-false}")"
     BUILD_NODE_CPUS="$(cap_param build-node-cpus "")"
     BUILD_NODE_MEMORY="$(cap_param build-node-memory "")"
@@ -2014,7 +2016,7 @@ function main() {
     TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(resolve_target_revision "${REPO_ROOT}")}"
     TARGET_REVISION="$(cap_param revision "${TARGET_REVISION}")"
     local skip_secrets
-    skip_secrets="$(cap_flag no-secrets)"
+    if cap_bool no-secrets; then skip_secrets=1; else skip_secrets=""; fi
 
     cap_require cluster "$CLUSTER_NAME"
     cap_require namespace "$NAMESPACE"
