@@ -1,0 +1,62 @@
+Initial full required-database run: FAILED. This is retained as history, not relabeled green.
+Full source log fingerprint retained in source-fingerprints.json.
+
+--- FAIL: TestUndeclaredRowAuthzPopulationOnlyShrinks (0.21s)
+    rowauthz_undeclared_gate_test.go:1163: 1 query construct(s) read a concept that declares no @rowAuthz tier and are not on the list:
+
+          documentChunksBrowseIndex (v1:knowledge:documentChunk)
+
+        This list only shrinks. A construct here is a new read over an unmeasured concept -- the
+        population memql#2920's tier was introduced to close, on the surface where the credential
+        concepts live.
+
+        Two fixes, and they are different decisions:
+          - Declare a tier on the concept (@rowAuthz(...)) -- the one that actually pays the debt,
+            and the reason this gate exists.
+          - Add the construct here WITH ITS OWN FILED ISSUE as the reason, if a declaration is
+            genuinely blocked. The seed entries share a grandfather marker precisely so a new
+            entry carrying an issue number stands out from them.
+{"time":"2026-11-07T17:57:25.248556-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.703527-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.725001-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.748452-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.769929-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.791814-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:57:25.812394-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+
+--- FAIL: TestCorpusToolsLoadAndEveryHandlerResolves (0.15s)
+    tool_declaration_validation_3625_test.go:364: 1 tool handler target(s) do not resolve:
+          tool "searchUsers" (unified:memql/tools.memql:searchUsers): @handler names "searchUsers", which is not a registered function, query, mutation or builtin -- the tool registers and is advertised to the model anyway, and fails only when a model calls it
+{"time":"2026-11-07T17:58:40.110676-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.127668-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.127753-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268224-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268354-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268427-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268524-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268584-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268662-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:40.268723-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:41.074927-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:41.150916-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:41.311076-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:41.54898-07:00","level":"INFO","component":"eventBus","msg":"event bus closed"}
+{"time":"2026-11-07T17:58:47.053915-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:47.144066-07:00","level":"INFO","component":"eventBus","msg":"event bus closed"}
+{"time":"2026-11-07T17:58:47.16702-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:47.245665-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+{"time":"2026-11-07T17:58:47.579677-07:00","level":"INFO","component":"MemQLEngine","msg":"component instance created"}
+
+{"time":"2026-11-07T17:59:45.917274-07:00","level":"INFO","component":"MemQLEngine","msg":"DSL load report: healthy","registered":3105,"skipped":0,"duplicates":0,"quarantined":0,"warnings":0}
+FAIL
+FAIL    github.com/znasllc-io/memql/component/memql 297.767s
+?       github.com/znasllc-io/memql/component/memql/baseloader  [no test files]
+ok      github.com/znasllc-io/memql/component/memql/callgraph   0.454s
+ok      github.com/znasllc-io/memql/component/memql/dslgate 0.393s
+ok      github.com/znasllc-io/memql/component/memql/dslimports  1.077s
+ok      github.com/znasllc-io/memql/component/memql/offline 16.558s
+ok      github.com/znasllc-io/memql/component/memql/readiness   0.363s
+ok      github.com/znasllc-io/memql/component/memql/readscale   17.163s
+ok      github.com/znasllc-io/memql/component/memql/sense   2.520s
+ok      github.com/znasllc-io/memql/component/memql/sync    0.275s
+FAIL

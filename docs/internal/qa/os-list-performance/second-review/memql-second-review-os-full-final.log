@@ -1,0 +1,30 @@
+Error: Not implemented: window.open
+    at module.exports (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at /Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/browser/Window.js:960:7
+    at Object.reserve (/Users/znas/memql-os-lists/clients/os/src/items/vscode.ts:42:24)
+    at reserveEditor (/Users/znas/memql-os-lists/clients/os/src/apps/materializer/editorOpening.ts:29:33)
+    at Object.make [as onAct] (/Users/znas/memql-os-lists/clients/os/src/apps/materializer/MaterializerApp.tsx:404:22)
+    at Object.onAct (/Users/znas/memql-os-lists/clients/os/src/kit/Wizard.tsx:351:95)
+    at onClick (/Users/znas/memql-os-lists/clients/os/src/kit/ActionBar.tsx:216:34)
+    at executeDispatch (/Users/znas/memql-os-lists/clients/os/node_modules/react-dom/cjs/react-dom-client.development.js:19116:9)
+    at runWithFiberInDEV (/Users/znas/memql-os-lists/clients/os/node_modules/react-dom/cjs/react-dom-client.development.js:874:13)
+    at processDispatchQueue (/Users/znas/memql-os-lists/clients/os/node_modules/react-dom/cjs/react-dom-client.development.js:19166:19) undefined
+Error: Not implemented: navigation (except hash changes)
+    at module.exports (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at navigateFetch (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/navigation.js:77:3)
+    at exports.navigate (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/navigation.js:55:3)
+    at LocationImpl._locationObjectNavigate (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/Location-impl.js:30:5)
+    at LocationImpl.assign (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/Location-impl.js:206:10)
+    at Location.assign (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/generated/Location.js:72:36)
+    at /Users/znas/memql-os-lists/clients/os/src/auth/IdentityScreen.tsx:104:23
+    at run (/Users/znas/memql-os-lists/clients/os/src/auth/IdentityScreen.tsx:92:11) undefined
+Error: Not implemented: navigation (except hash changes)
+    at module.exports (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/browser/not-implemented.js:9:17)
+    at navigateFetch (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/navigation.js:77:3)
+    at exports.navigate (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/navigation.js:55:3)
+    at LocationImpl._locationObjectNavigate (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/Location-impl.js:30:5)
+    at LocationImpl.assign (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/window/Location-impl.js:206:10)
+    at Location.assign (/Users/znas/memql-os-lists/clients/os/node_modules/jsdom/lib/jsdom/living/generated/Location.js:72:36)
+    at /Users/znas/memql-os-lists/clients/os/src/auth/IdentityScreen.tsx:104:23
+    at run (/Users/znas/memql-os-lists/clients/os/src/auth/IdentityScreen.tsx:92:11) undefined
+JSON report written to /tmp/memql-second-review-os-full-final.json

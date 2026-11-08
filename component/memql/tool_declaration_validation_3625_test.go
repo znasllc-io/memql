@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -338,9 +339,20 @@ func TestNonRegistryHandlersResolveTrivially(t *testing.T) {
 // clean today" claim becomes, so a dead handler cannot be added quietly.
 func TestCorpusToolsLoadAndEveryHandlerResolves(t *testing.T) {
 	logger := discardLogger()
+	// Match bootstrap's schema-aware lowering. A nil concept registry can
+	// inspect declarations but cannot prove typed receivers such as the
+	// fallback full-name search; treating that partial load as the complete
+	// corpus would report a valid tool handler as missing. Build privately so
+	// this offline sweep neither depends on nor mutates the live registry.
+	concepts, skips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
+	if err != nil || len(skips) != 0 {
+		t.Fatalf("load corpus concepts: err=%v, skipped=%v", err, skips)
+	}
+	conceptRegistry := memoryNodes.NewRegistry(concepts)
+	report := newLoadReport()
 
 	tools := newToolRegistry()
-	n, err := LoadUnifiedTools(logger, tools)
+	n, err := LoadUnifiedTools(logger, tools, report)
 	if err != nil {
 		t.Fatalf("the tool tree must load clean under the memql#3625 gates: %v", err)
 	}
@@ -349,11 +361,14 @@ func TestCorpusToolsLoadAndEveryHandlerResolves(t *testing.T) {
 	}
 
 	functions := newFunctionRegistry()
-	if _, _, ferr := LoadUnifiedFunctions(logger, functions, nil); ferr != nil {
+	if _, _, ferr := LoadUnifiedFunctions(logger, functions, conceptRegistry, report); ferr != nil {
 		t.Fatalf("load functions: %v", ferr)
 	}
-	if _, berr := LoadUnifiedBuiltins(logger, functions); berr != nil {
+	if _, berr := LoadUnifiedBuiltins(logger, functions, report); berr != nil {
 		t.Fatalf("load builtins: %v", berr)
+	}
+	if report.HasProblems() {
+		t.Fatalf("the complete corpus must load without skipped declarations: %s", report.Detail())
 	}
 
 	if errs := validateToolHandlerTargets(tools, functions); len(errs) > 0 {

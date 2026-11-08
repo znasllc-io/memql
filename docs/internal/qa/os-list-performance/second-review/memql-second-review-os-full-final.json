@@ -1,0 +1,2457 @@
+{
+  "numTotalTestSuites": 1858,
+  "numPassedTestSuites": 1858,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 6901,
+  "numPassedTests": 6901,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 2,
+    "total": 2,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1794099836088,
+  "success": true,
+  "files": 485,
+  "fileStatuses": [
+    {
+      "file": "clients/os/test/chrome.test.tsx",
+      "status": "passed",
+      "tests": 30
+    },
+    {
+      "file": "clients/os/test/copyField.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/copyValue.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/costEstimate.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/editorProduct.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/identityClient.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/layout.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/onePathCreate.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/pageHelp.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/pageNavigation.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/pageScroll.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/pending.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/profile.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/theme.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/accounts/app.test.tsx",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/accounts/credentials.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/accounts/credentialsSection.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/accounts/defaults.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/accounts/directory.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/accounts/domain.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/accounts/domainSetup.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/accounts/frontDoor.test.ts",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/accounts/organization.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/accounts/people.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/accounts/rows.test.ts",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/accounts/tieFallback.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/accounts/tieShared.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/accounts/ties.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/accounts/writability.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/ask/activityPanel.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/ask/approvalDiscussion.test.tsx",
+      "status": "passed",
+      "tests": 30
+    },
+    {
+      "file": "clients/os/test/ask/approvalTransport.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/ask/askSettings.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/ask/askSurfaceVoice.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/ask/backgroundWork.test.tsx",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/ask/conversationRoute.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/ask/conversationSession.test.ts",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/ask/conversationsPanel.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/ask/drivingCue.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/ask/failure.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/ask/gate.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/ask/historyPaging.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/ask/liveVoiceSession.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/ask/message.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/ask/messageField.test.tsx",
+      "status": "passed",
+      "tests": 33
+    },
+    {
+      "file": "clients/os/test/ask/messageInteractions.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/ask/messageTimestamps.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/ask/navigationContract.test.ts",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/ask/pcm16.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/ask/phone.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/ask/policyTransport.test.ts",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/ask/progressFeedback.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/ask/questions.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/ask/readiness.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/ask/recovery.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/ask/reopen.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/ask/routing.test.tsx",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/ask/snapshotError.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/ask/transportRecovery.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/ask/voiceSession.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/ask/wait.test.tsx",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/ask/worklet.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/auth/IdentityAccountRecords.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/auth/IdentityScreen.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/auth/entryTransitions.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/auth/identityPages.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/auth/internalDomains.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/auth/nativeIdentity.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/auth/passkeyPlace.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/auth/passkeyWindow.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/auth/roleTest.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/auth/signIn.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/auth/signInEntry.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/bin/binApp.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/bin/dock.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/bin/dockBinDrop.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/bin/drop.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/bin/pagination.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/bin/restore.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/bin/rows.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/chrome/browserMenu.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/chrome/contextMenu.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/chrome/coreGate.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/chrome/phoneConnection.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/chrome/windowAsk.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/chrome/windowReadiness.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/chrome/windowSearch.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/cluster/agents.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/cluster/audit.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/cluster/automations-layout.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/cluster/automations-section.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/cluster/capacity.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/cluster/directories.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/cluster/installationUpdates.test.tsx",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/cluster/mesh.test.tsx",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/cluster/meshRows.test.ts",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/cluster/modules.test.tsx",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/cluster/origins.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/cluster/readinessAcross.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/cluster/readinessCatalog.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/cluster/releaseAssembly.test.tsx",
+      "status": "passed",
+      "tests": 20
+    },
+    {
+      "file": "clients/os/test/cluster/releaseHandoff.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/cluster/releaseJourney.test.tsx",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/cluster/releases.test.tsx",
+      "status": "passed",
+      "tests": 32
+    },
+    {
+      "file": "clients/os/test/cluster/storage.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/cluster/updates.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/concepts/paging.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/concepts/reading.test.ts",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/concepts/section.test.tsx",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/deployables/accessCodes.test.tsx",
+      "status": "passed",
+      "tests": 130
+    },
+    {
+      "file": "clients/os/test/deployables/accountDefault.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/deployables/accountSetup.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/acts.test.ts",
+      "status": "passed",
+      "tests": 35
+    },
+    {
+      "file": "clients/os/test/deployables/attribution.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/backgroundConfirmation.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/deployables/build.test.tsx",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/deployables/candidateDeploy.test.tsx",
+      "status": "passed",
+      "tests": 31
+    },
+    {
+      "file": "clients/os/test/deployables/compose.test.tsx",
+      "status": "passed",
+      "tests": 67
+    },
+    {
+      "file": "clients/os/test/deployables/composeState.test.ts",
+      "status": "passed",
+      "tests": 64
+    },
+    {
+      "file": "clients/os/test/deployables/connect.test.tsx",
+      "status": "passed",
+      "tests": 65
+    },
+    {
+      "file": "clients/os/test/deployables/connectBoot.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/deployables/deployables.test.tsx",
+      "status": "passed",
+      "tests": 90
+    },
+    {
+      "file": "clients/os/test/deployables/disconnectIcon.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/deployables/domains.test.ts",
+      "status": "passed",
+      "tests": 33
+    },
+    {
+      "file": "clients/os/test/deployables/domainsPanel.test.tsx",
+      "status": "passed",
+      "tests": 40
+    },
+    {
+      "file": "clients/os/test/deployables/githubHookBoundaries.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/deployables/guidedSourceStates.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/health.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/deployables/hostname.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/deployables/layout.test.ts",
+      "status": "passed",
+      "tests": 41
+    },
+    {
+      "file": "clients/os/test/deployables/list.test.tsx",
+      "status": "passed",
+      "tests": 48
+    },
+    {
+      "file": "clients/os/test/deployables/listFold.test.ts",
+      "status": "passed",
+      "tests": 41
+    },
+    {
+      "file": "clients/os/test/deployables/logsScope.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/deployables/manifest.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/map.test.tsx",
+      "status": "passed",
+      "tests": 40
+    },
+    {
+      "file": "clients/os/test/deployables/navigation.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/nickname.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/noticeOverflow.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/deployables/parts.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/deployables/preview.test.tsx",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/deployables/rail.test.ts",
+      "status": "passed",
+      "tests": 45
+    },
+    {
+      "file": "clients/os/test/deployables/railView.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/refusals.test.ts",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/deployables/reportFleetWorkflows.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/deployables/reportView.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/deployables/repositoryCanonical.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/reviews.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/deployables/reviewsModel.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/deployables/rows.test.ts",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/deployables/runBoot.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/deployables/runScope.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/deployables/savedSourceFlow.test.tsx",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/deployables/settings.test.ts",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/deployables/shopifyConnect.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/deployables/sourceCatalog.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/deployables/sourceCatalogReview.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/deployables/sourceConnections.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/deployables/sourcesGroup.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/store.test.tsx",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/deployables/storeToken.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/deployables/storeValues.test.ts",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/deployables/storeValuesPanel.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/deployables/targets.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/traffic.test.tsx",
+      "status": "passed",
+      "tests": 31
+    },
+    {
+      "file": "clients/os/test/deployables/useSiteHealth.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/deployables/viewport.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/deployables/visit.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/deployables/whereItLives.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/email/acts.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/automaticReads.test.tsx",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/email/corrections.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/feeds.test.tsx",
+      "status": "passed",
+      "tests": 46
+    },
+    {
+      "file": "clients/os/test/email/imports.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/email/intents.test.tsx",
+      "status": "passed",
+      "tests": 38
+    },
+    {
+      "file": "clients/os/test/email/manifest.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/email/organizations.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/email/preview.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/email/rows.test.ts",
+      "status": "passed",
+      "tests": 60
+    },
+    {
+      "file": "clients/os/test/email/ruleWrites.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/email/settings.test.tsx",
+      "status": "passed",
+      "tests": 52
+    },
+    {
+      "file": "clients/os/test/email/shell.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/when.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/words.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/live/authSource.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/live/computedRecovery.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/live/graphRevision.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/live/live.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/live/readEffect.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/live/readRecovery.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/live/readinessRows.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/live/readinessStability.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/live/resume.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/live/signIn.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/live/siteTraffic.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/live/transports.test.ts",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/live/useLiveCollection.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/kit/actionBar.test.tsx",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/kit/addButton.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/kit/autoRefresh.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/kit/browserHistory.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/kit/choiceStack.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/kit/dateTimeInput.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/kit/headNote.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/kit/inPlaceAsk.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/kit/liveListStates.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/kit/mapCanvas.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/kit/measure.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/kit/pageContext.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/kit/preventScroll.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/kit/readinessStates.test.tsx",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/kit/recordList.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/kit/recordRow.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/kit/refine.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/kit/select.test.tsx",
+      "status": "passed",
+      "tests": 51
+    },
+    {
+      "file": "clients/os/test/kit/subhead.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/kit/textArea.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/kit/trailRowHistory.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/kit/wizard.test.tsx",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/files/actions.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/files/backupTransfers.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/backups.test.ts",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/files/backupsSurface.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/files/binPlace.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/files/browse.test.tsx",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/files/desk.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/files/destination.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/directory.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/files/downloadMetadata.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/files/downloadWorker.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/downloadWorkerOrigin.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/files/editor-appearance.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/files/editor-handoff.test.ts",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/files/filters.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/files/fold.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/files/folderDrop.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/files/folderSelect.test.tsx",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/files/inspector.test.tsx",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/files/labels.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/files/links.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/files/materializerPlace.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/files/newMarkdown.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/files/onePath.test.ts",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/files/pipelineSource.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/files/places.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/rail.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/rowArchive.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/files/rows.test.ts",
+      "status": "passed",
+      "tests": 32
+    },
+    {
+      "file": "clients/os/test/files/uploadPromotion.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/files/uploadTree.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/files/uploadV2.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/files/uploadVersion.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/files/versionLifecycle.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/files/versionPanel.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/files/versions.test.ts",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/logs/appSection.test.tsx",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/logs/boundary.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/logs/capture.test.ts",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/logs/captureImporters.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/logs/deepLink.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/logs/filters.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/logs/logsApp.test.tsx",
+      "status": "passed",
+      "tests": 20
+    },
+    {
+      "file": "clients/os/test/logs/logsContract.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/logs/nav.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/logs/rowLayout.test.tsx",
+      "status": "passed",
+      "tests": 27
+    },
+    {
+      "file": "clients/os/test/logs/rows.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/logs/tail.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/logs/windowedList.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/materializer/acts.test.ts",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/materializer/corrections.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/materializer/feeds.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/materializer/intent.test.tsx",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/materializer/make.test.ts",
+      "status": "passed",
+      "tests": 150
+    },
+    {
+      "file": "clients/os/test/materializer/making.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/materializer/rows.test.ts",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/materializer/startingSetup.test.tsx",
+      "status": "passed",
+      "tests": 66
+    },
+    {
+      "file": "clients/os/test/materializer/surfaces.test.tsx",
+      "status": "passed",
+      "tests": 39
+    },
+    {
+      "file": "clients/os/test/fleet/activity.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/fleet/acts.test.tsx",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/fleet/addMachine.test.tsx",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/fleet/addMachineFlow.test.ts",
+      "status": "passed",
+      "tests": 46
+    },
+    {
+      "file": "clients/os/test/fleet/addMachineInstall.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/fleet/addMachineIntent.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/fleet/addMachineRecovery.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/fleet/addMachineSetupProgress.test.ts",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/fleet/app.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/fleet/appPermissionHelp.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/fleet/appRouting.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/fleet/apps.test.tsx",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/fleet/broadcasts.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/fleet/catalog.test.ts",
+      "status": "passed",
+      "tests": 32
+    },
+    {
+      "file": "clients/os/test/fleet/credentialHealth.test.tsx",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/fleet/device.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/fleet/directory.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/fleet/electricity.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/fleet/embeddingStatus.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/fleet/feature-controls.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/fleet/feature-readiness.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/fleet/graphRevision.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/fleet/labelCards.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/fleet/liveView.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/fleet/localInstall.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/fleet/localInstallUI.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/fleet/machineActivity.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/fleet/machineApps.test.tsx",
+      "status": "passed",
+      "tests": 24
+    },
+    {
+      "file": "clients/os/test/fleet/machineFactsCopy.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/fleet/machineModels.test.tsx",
+      "status": "passed",
+      "tests": 52
+    },
+    {
+      "file": "clients/os/test/fleet/machineScanner.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/fleet/machines.test.tsx",
+      "status": "passed",
+      "tests": 29
+    },
+    {
+      "file": "clients/os/test/fleet/modelAssignmentBoard.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/fleet/modelResponse.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/fleet/modelSetup.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/fleet/models.test.ts",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/fleet/ordering.test.ts",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/fleet/permissions.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/fleet/pipelineSteps.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/fleet/refreshPressure.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/fleet/routeModes.test.ts",
+      "status": "passed",
+      "tests": 33
+    },
+    {
+      "file": "clients/os/test/fleet/routes.test.tsx",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/fleet/routing.test.tsx",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/fleet/routingComposer.test.tsx",
+      "status": "passed",
+      "tests": 42
+    },
+    {
+      "file": "clients/os/test/fleet/routingHistory.test.tsx",
+      "status": "passed",
+      "tests": 24
+    },
+    {
+      "file": "clients/os/test/fleet/routingModel.test.ts",
+      "status": "passed",
+      "tests": 46
+    },
+    {
+      "file": "clients/os/test/fleet/routingRevision.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/fleet/routingRules.test.tsx",
+      "status": "passed",
+      "tests": 30
+    },
+    {
+      "file": "clients/os/test/fleet/routingVocabulary.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/fleet/rows.test.ts",
+      "status": "passed",
+      "tests": 42
+    },
+    {
+      "file": "clients/os/test/fleet/settings.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/fleet/setupHealth.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/fleet/sharing.test.tsx",
+      "status": "passed",
+      "tests": 29
+    },
+    {
+      "file": "clients/os/test/fleet/titleSpacing.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/fleet/trail.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/fleet/workbenches.test.tsx",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/fleet/workspace.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/nexus/app.test.tsx",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/nexus/approvals.test.tsx",
+      "status": "passed",
+      "tests": 76
+    },
+    {
+      "file": "clients/os/test/nexus/askWorkRecord.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/nexus/automations.test.tsx",
+      "status": "passed",
+      "tests": 24
+    },
+    {
+      "file": "clients/os/test/nexus/beaconMap.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/nexus/directory.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/nexus/events.test.ts",
+      "status": "passed",
+      "tests": 13
+    },
+    {
+      "file": "clients/os/test/nexus/goalJourney.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/nexus/goalView.test.tsx",
+      "status": "passed",
+      "tests": 38
+    },
+    {
+      "file": "clients/os/test/nexus/interventions.test.tsx",
+      "status": "passed",
+      "tests": 36
+    },
+    {
+      "file": "clients/os/test/nexus/ladder.test.ts",
+      "status": "passed",
+      "tests": 29
+    },
+    {
+      "file": "clients/os/test/nexus/layout.test.ts",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/nexus/liveQuickReply.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/nexus/modelUsage.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/nexus/overview.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/nexus/presentation.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/nexus/procedures.test.tsx",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/nexus/progressResume.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/nexus/receipt.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/nexus/replayScene.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/nexus/rerunWords.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/nexus/reuse.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/nexus/rows.test.ts",
+      "status": "passed",
+      "tests": 46
+    },
+    {
+      "file": "clients/os/test/nexus/runFeed.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/nexus/runPage.test.tsx",
+      "status": "passed",
+      "tests": 41
+    },
+    {
+      "file": "clients/os/test/nexus/settings.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/nexus/versions.test.ts",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/nexus/world.test.ts",
+      "status": "passed",
+      "tests": 19
+    },
+    {
+      "file": "clients/os/test/pipelines/addRepository.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/pipelines/aiSettings.test.tsx",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/pipelines/repositoryChange.test.tsx",
+      "status": "passed",
+      "tests": 41
+    },
+    {
+      "file": "clients/os/test/profile/avatarImage.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/profile/myProfile.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/profile/profileSection.test.tsx",
+      "status": "passed",
+      "tests": 20
+    },
+    {
+      "file": "clients/os/test/profile/roleIdentity.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/setup/embeddingModelMissing.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/setup/inferenceStop.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/setup/presence.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/setup/returns.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/setup/stops.test.ts",
+      "status": "passed",
+      "tests": 27
+    },
+    {
+      "file": "clients/os/test/setup/widget.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/settings/access.test.tsx",
+      "status": "passed",
+      "tests": 19
+    },
+    {
+      "file": "clients/os/test/settings/appearance.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/settings/appsIndex.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/settings/azureEmail.test.tsx",
+      "status": "passed",
+      "tests": 37
+    },
+    {
+      "file": "clients/os/test/settings/benchmarks.test.ts",
+      "status": "passed",
+      "tests": 19
+    },
+    {
+      "file": "clients/os/test/settings/benchmarksSection.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/settings/campaignPackage.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/settings/cluster.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/settings/clusterRows.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/settings/connectionHistory.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/settings/diagnostics.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/settings/hiddenSurfaces.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/settings/inferenceStreaming.test.ts",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/settings/integrations.test.tsx",
+      "status": "passed",
+      "tests": 43
+    },
+    {
+      "file": "clients/os/test/settings/joiningPolicy.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/settings/keys.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/settings/language.test.tsx",
+      "status": "passed",
+      "tests": 41
+    },
+    {
+      "file": "clients/os/test/settings/levelBindings.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/settings/pipelineRunners.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/settings/pipelinesSection.test.tsx",
+      "status": "passed",
+      "tests": 24
+    },
+    {
+      "file": "clients/os/test/settings/procedures.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/settings/readDemand.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/settings/report.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/settings/routingFacts.test.ts",
+      "status": "passed",
+      "tests": 32
+    },
+    {
+      "file": "clients/os/test/settings/rulesFacts.test.ts",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/settings/runnerReadiness.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/settings/settingsContract.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/settings/sharedConnections.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/settings/shopifyInstallation.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/settings/tokens.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/settings/vendors.test.tsx",
+      "status": "passed",
+      "tests": 53
+    },
+    {
+      "file": "clients/os/test/settings/vendorsIntent.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/themes/builtins.test.ts",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/themes/contrast.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/themes/marketplace.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/themes/pack.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/system/accessReactivity.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/system/desks.test.ts",
+      "status": "passed",
+      "tests": 30
+    },
+    {
+      "file": "clients/os/test/system/desktop.test.ts",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/system/dock_roles_store.test.ts",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/system/loadApp.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/system/organizationAccess.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/system/placement.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/system/rankLadder.test.tsx",
+      "status": "passed",
+      "tests": 24
+    },
+    {
+      "file": "clients/os/test/system/readinessContract.test.ts",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/system/readinessFold.test.ts",
+      "status": "passed",
+      "tests": 23
+    },
+    {
+      "file": "clients/os/test/system/readinessMapping.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/system/readinessReactivity.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/system/roaming.test.ts",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/system/roamingShell.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/system/roleReachesTheRoster.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/system/roles_any.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/system/storeMigration.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/training/domains.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/training/evaluations.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/training/lessons.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/training/review.test.tsx",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/training/rows.test.ts",
+      "status": "passed",
+      "tests": 36
+    },
+    {
+      "file": "clients/os/test/training/settings.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/training/skills.test.tsx",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/training/startup.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/training/upload.test.tsx",
+      "status": "passed",
+      "tests": 37
+    },
+    {
+      "file": "clients/os/test/users/accessRequests.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/users/assign.test.ts",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/users/contract.test.ts",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/users/directory.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/users/groupPeople.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/users/groups.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/users/invite.test.tsx",
+      "status": "passed",
+      "tests": 12
+    },
+    {
+      "file": "clients/os/test/users/layout.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/users/people.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/users/person.test.tsx",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/users/refusals.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/users/roles.test.tsx",
+      "status": "passed",
+      "tests": 19
+    },
+    {
+      "file": "clients/os/test/users/sessionAccess.test.tsx",
+      "status": "passed",
+      "tests": 2
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/channelsSettings.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/connectFlow.test.ts",
+      "status": "passed",
+      "tests": 47
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/connectPage.test.tsx",
+      "status": "passed",
+      "tests": 20
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/pipelinePage.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/readings.test.ts",
+      "status": "passed",
+      "tests": 18
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/rows.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/runPage.test.tsx",
+      "status": "passed",
+      "tests": 28
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/runsSection.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/sourceChecks.test.tsx",
+      "status": "passed",
+      "tests": 19
+    },
+    {
+      "file": "clients/os/test/deployables/pipelines/words.test.ts",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/email/audiences/addressDigest.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/audiences/audiences.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/email/audiences/signupForms.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/email/automations/automations.test.tsx",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/email/automations/flow.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/email/campaigns/addCampaign.test.tsx",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/email/campaigns/campaignActs.test.ts",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/email/campaigns/campaignPage.test.tsx",
+      "status": "passed",
+      "tests": 64
+    },
+    {
+      "file": "clients/os/test/email/campaigns/editPage.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/email/campaigns/list.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/email/campaigns/openedByTheWizard.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/email/campaigns/repeat.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/campaigns/sendBar.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/campaigns/wizardModel.test.ts",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/email/overview/figures.test.ts",
+      "status": "passed",
+      "tests": 29
+    },
+    {
+      "file": "clients/os/test/email/overview/overview.test.tsx",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/email/settings/brand.test.tsx",
+      "status": "passed",
+      "tests": 27
+    },
+    {
+      "file": "clients/os/test/email/settings/brandKit.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/email/inbox/inbox.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/email/templates/composition.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/email/templates/createTemplate.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/email/templates/list.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/templates/newTemplate.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/email/templates/previewFrame.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/email/templates/templateCreation.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/email/templates/templatePage.test.tsx",
+      "status": "passed",
+      "tests": 20
+    }
+  ]
+}

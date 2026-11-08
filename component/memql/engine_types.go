@@ -419,6 +419,7 @@ const (
 
 // ComparisonExpression compares a field to a literal value or collection.
 type ComparisonExpression struct {
+	TextConcat       *textConcatOperand
 	Field            FieldReference
 	Operator         ComparisonOperator
 	Value            any

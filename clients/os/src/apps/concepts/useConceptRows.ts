@@ -9,7 +9,7 @@ import { useOsConnection } from "../../live/connection";
 // remains a view of the same snapshot until the person asks to reload it.
 // Id-only events are authorized by rereading before they are counted.
 
-export type WalkStatus = "loading" | "more" | "exhausted" | "failed";
+export type WalkStatus = "loading" | "more" | "exhausted" | "failed" | "disconnected";
 
 export interface ConceptRowsWalk {
   rows: Row[];
@@ -63,7 +63,7 @@ export function useConceptRows(conceptId: string, pageSize: number, search = "")
     feed.reseed();
   }, [feed.reseed]);
   const error = feed.loadMoreError || feed.snapshot.error;
-  const status: WalkStatus = error ? "failed" : feed.snapshot.state === "seeding" || feed.loadingMore ? "loading" : feed.hasMore ? "more" : "exhausted";
+  const status: WalkStatus = feed.snapshot.state === "disconnected" ? "disconnected" : error ? "failed" : feed.snapshot.state === "seeding" || feed.loadingMore ? "loading" : feed.hasMore ? "more" : "exhausted";
   const loadMore = () => { void feed.loadMore(); };
   const retry = feed.loadMoreError ? loadMore : reload;
 

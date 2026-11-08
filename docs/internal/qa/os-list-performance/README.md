@@ -3,6 +3,11 @@
 Measured locally on 2026-11-07, comparing baseline `8b7b3a483` with this branch.
 This is reproducible development evidence, not a production measurement.
 
+The subsequent [branch review](second-review.md) records additional pagination,
+session, authorization and live-update regressions, their failing-before
+evidence and validation after the fixes. The measurements below remain the
+original performance comparison; they were not rerun during that review.
+
 The same disposable PostgreSQL/Timescale database held 2,000 pipeline runs,
 each with a deterministic 14 KiB policy snapshot. The container used the CI
 Timescale image, 2 CPUs and 2 GiB memory. Both runs used fresh engine reads

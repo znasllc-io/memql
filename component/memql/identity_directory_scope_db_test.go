@@ -159,3 +159,32 @@ func TestExistingIdentityQueriesPageSearchAndKeepTheirRankFloorDB(t *testing.T) 
 		require.Equal(t, unset, rows[0]["id"])
 	}
 }
+
+func TestPeopleBrowseSearchesFallbackFullNamesBeforePagingDB(t *testing.T) {
+	engine, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: engine, db: db, prefix: uniqueSuffix("people-full-name")}
+	caller := f.person("operator", true)
+	plain := f.id(conceptIdentityUser, "full-name")
+	literal := f.id(conceptIdentityUser, "literal-name")
+	for _, person := range []struct{ id, first, last string }{
+		{plain, "Jane", "Doe"}, {literal, "Jane%_", "D'oe"},
+	} {
+		f.insert(conceptIdentityUser, person.id, map[string]any{"displayName": "", "firstName": person.first, "lastName": person.last, "active": true, "role": "viewer"})
+	}
+	for i := 0; i < 25; i++ {
+		f.person(fmt.Sprintf("newer-%02d", i), true)
+	}
+	ctx := rankActorCtx(caller, auth.RoleDeveloper)
+	for _, tc := range []struct{ search, want string }{
+		{"jAnE dOe", plain}, {"ne%_ d'O", literal},
+	} {
+		call := fmt.Sprintf(`paginate(query searchUsers(search:%q,showDeactivated:false),10)`, tc.search)
+		result, err := engine.Execute(ctx, call)
+		require.NoError(t, err)
+		rows := MaterializeRows(result.OutputPayload())
+		require.Len(t, rows, 1, "the full name shown by the People view must be searchable even beyond the initial page")
+		require.Equal(t, tc.want, rows[0]["id"])
+		_, err = engine.Execute(rankActorCtx(caller, auth.RoleWriter), call)
+		require.Error(t, err, "full-name search must retain the existing developer floor")
+	}
+}

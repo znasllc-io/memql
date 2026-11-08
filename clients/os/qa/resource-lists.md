@@ -95,15 +95,17 @@ The remaining exceptions below are outside resource-directory migrations:
 | Identity token management | `identity/IdentityAccount.tsx` uses its existing identity-route Show more navigation, replacing the page. |
 | Release wizard pickers | `StartRelease.tsx` and `PrepareRelease.tsx` keep explicit-flow 50-row Older/Newer pickers; these do not run when the directory opens. |
 
-Training's native pending page narrows the existing compact domain index before
-its 500-row page, selects ten matching IDs, then reads full text only for those ten
-IDs grouped by required domain (at most ten scoped reads). Its opaque cursor
-binds the search and a fixed timestamp. The direct full-text query still requires
-one domain; neither the UI nor the wrapper adds an all-domains escape. Existing
-reader admission to a named domain stays unchanged; the native Review surface
-requires writer rank. Current source metadata carries IDs/times in addition to
-the old count fields, so counts and review share the authorized source without
-adding a new unmeasured read or authorization-gate exception.
+Training's native pending page uses a ten-row metadata keyset query, then reads
+full text only for those ten IDs grouped by required domain (at most ten scoped
+reads). Its opaque cursor binds the search, pending filter and fixed timestamp.
+Approving an already displayed row cannot shift this frontier past an unread
+row; the cross-replica regression proves a complete 10/10/5 traversal after a
+concurrent approval. The direct full-text query still requires one domain;
+neither the UI nor the wrapper adds an all-domains escape. Existing reader
+admission to a named domain stays unchanged; the native Review surface requires
+writer rank. It narrows the established metadata query with the existing
+`paginate(...,10)` operator. Complete domain count reducers retain that query's
+default 500-row metadata pages, with no new authorization surface.
 
 The trainer keeps its intentional 40 accepted chunks, 600 characters each plus
 truncation marker. It now follows ten-row source cursors until that budget is

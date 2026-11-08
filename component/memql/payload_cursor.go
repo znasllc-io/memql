@@ -10,7 +10,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// enablePayloadKeyset admits only schema-declared text scalars. Open objects,
+// enablePayloadKeyset admits text intrinsics and schema-declared text scalars. Open objects,
 // unions and unbound runtime sorts retain their existing in-memory ordering;
 // guessing a type from the first page would make later pages incorrect.
 // Datetimes retain the existing string ordering. SQL and Go both use bytewise
@@ -22,7 +22,7 @@ func (c *compiledSort) enablePayloadKeyset(concept *memorynodes.Concept) error {
 	}
 	for _, field := range c.fields {
 		switch field.kind {
-		case sortFieldCreatedAt, sortFieldId:
+		case sortFieldCreatedAt, sortFieldId, sortFieldCreatedBy, sortFieldConcept, sortFieldType:
 		case sortFieldPayload:
 			typ := fields[strings.Join(field.payloadPath, ".")].Type
 			if typ != "string" && typ != "datetime" && typ != "enum" {
@@ -43,7 +43,7 @@ func (c *compiledSort) enablePayloadKeyset(concept *memorynodes.Concept) error {
 }
 
 // The legacy intrinsic codec assumes createdAt then id ASC. Explicit id DESC
-// and id-leading orderings need the same value-key codec as text payloads;
+// and text intrinsic keys need the same value-key codec as text payloads;
 // reusing the legacy predicate would skip or duplicate timestamp ties.
 func (c *compiledSort) needsIntrinsicValueKeyset() bool {
 	if c == nil || c.requiresFullScan || len(c.fields) == 0 {
@@ -53,8 +53,13 @@ func (c *compiledSort) needsIntrinsicValueKeyset() bool {
 		return true
 	}
 	for _, field := range c.fields {
-		if field.kind == sortFieldId {
-			return field.direction == SortDirectionDesc
+		switch field.kind {
+		case sortFieldCreatedBy, sortFieldConcept, sortFieldType:
+			return true
+		case sortFieldId:
+			if field.direction == SortDirectionDesc {
+				return true
+			}
 		}
 	}
 	return false
@@ -71,6 +76,21 @@ func (f compiledSortField) keysetExpression() string {
 	}
 	if f.kind == sortFieldId {
 		return `(id COLLATE "C")`
+	}
+	// Text intrinsics are trimmed by extractComparable; unlike payload text,
+	// their surrounding whitespace is not part of the comparison. Normalize
+	// identically in ORDER BY and continuation, with blanks sorting last.
+	column := ""
+	switch f.kind {
+	case sortFieldCreatedBy:
+		column = `"createdBy"`
+	case sortFieldConcept:
+		column = "concept"
+	case sortFieldType:
+		column = "type"
+	}
+	if column != "" {
+		return fmt.Sprintf(`(NULLIF(btrim(%s, '%s'), '') COLLATE "C")`, column, trimSpaceCharacters)
 	}
 	text, _ := buildJSONPathExpression(f.payloadPath) // validated at compilation
 	value, _ := buildJSONBPathExpression(f.payloadPath)

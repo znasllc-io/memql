@@ -1,0 +1,260 @@
+{
+  "sdk-second-review-before.log": {
+    "originalBytes": 1920,
+    "originalSha256": "eb23952a570d6190207b8e11f9774bd92ee27a8c543fa0c008b9a72a8198fdba",
+    "retainedBytes": 1904,
+    "retainedSha256": "4b7eb2513df11894f84e5d4918d35422983a6d02f51f57328b93f53218116e6d",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "sdk-second-review-mixed-before.log": {
+    "originalBytes": 989,
+    "originalSha256": "2926b86db04a394d5f64b9de3776783850e8e3ea0dc28601eb62b710d96e26d6",
+    "retainedBytes": 981,
+    "retainedSha256": "f74a50f38b7a3b2d65da6a8ccf0d7324c4f9d32951aad9bf0e82330276a2f9e1",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "sdk-second-review-repair-before.log": {
+    "originalBytes": 1640,
+    "originalSha256": "aa36ddc13429931bf227414a7de7fe444d34117698bec50d1873eb9c6dfd319b",
+    "retainedBytes": 1632,
+    "retainedSha256": "64b7087669c47f932f4e71c2eefea689ac2094bef4db50e9e61839cf3b1b9b11",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "sdk-second-review-resume-before.log": {
+    "originalBytes": 954,
+    "originalSha256": "38a7537e7cd02ef04ccfa902323f36e8cf21cf20344cbdc460dd7c2739df492c",
+    "retainedBytes": 946,
+    "retainedSha256": "471eea365e39038742b6ec355c2f7a1dccec20de3b451053c169be8ee81f74c4",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "sdk-second-review-equal-delete-before.log": {
+    "originalBytes": 1183,
+    "originalSha256": "7a5879aee4bc6a83197aba39565aac0f333370bad453688ea204c9d89dbd88e9",
+    "retainedBytes": 1175,
+    "retainedSha256": "67bda451b4601a5b76bd742a66f63970a933cec446de7a928fda78135d7ff4f1",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-pii-before.log": {
+    "originalBytes": 9922,
+    "originalSha256": "56ee47fd31d60a316e1d3f6b8d2f45f63a980c98d09bd611bb45c9099c9eb138",
+    "retainedBytes": 9948,
+    "retainedSha256": "d257fa879db6bcaa57102de34af81db74d68d565507196e369e54fca84c402d4",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-intrinsic-before.log": {
+    "originalBytes": 3100,
+    "originalSha256": "9ac47a734d49516ae2fb219c45ab90c5ce67ff9e7037158879f68b555551fae0",
+    "retainedBytes": 3126,
+    "retainedSha256": "0df778cdde8b1ee55aac7fbe688311c148cabb8b467cd99478b8e2f8ed3e8131",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-fullname-before.log": {
+    "originalBytes": 2252,
+    "originalSha256": "75c50f814a5382d2c30efaddaf07c2da700156e88276af785a261e428f393a80",
+    "retainedBytes": 2278,
+    "retainedSha256": "ece453406b419a89124ff2c25967f1781c3f72d65a7d927265fe32f04fa211d5",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-training-before.log": {
+    "originalBytes": 8280,
+    "originalSha256": "f212e65881988433346bd2b514663517ce96855cf6d933329bd480d5aca2992f",
+    "retainedBytes": 8307,
+    "retainedSha256": "88068968a4e2fdbe657e7d8e59dcb66783c498ce8453dfb53147669b0aaaea12",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "merged-review-before.json": {
+    "originalBytes": 3168,
+    "originalSha256": "5d8b25dc3fd53d24da548e06b6ab97bcb0dd4d54fedf1befd8894375163a90cd",
+    "retainedBytes": 4181,
+    "retainedSha256": "a0a9a47ee24f4482311ade24ca179355c14330aa4a1e5c841ee29d93fdf6626a"
+  },
+  "merged-holes-review-before.json": {
+    "originalBytes": 3656,
+    "originalSha256": "cd9cd630a32472202044e8a81c82db3ab5c8f3319a2e7b3af3bcaf17b9316539",
+    "retainedBytes": 4903,
+    "retainedSha256": "11701cb17b5aeb4ceb98c1b163536a68167d28da792f3500e0865a3f33ab4e60"
+  },
+  "app-recovery-review-before.json": {
+    "originalBytes": 4071,
+    "originalSha256": "cd39294ca5145090672582205752a00134cf64979f71f05f49d47e50939e96c7",
+    "retainedBytes": 5371,
+    "retainedSha256": "580d424b20165417ba7c5abcd15ef49b0a817996d15ee4f99cb9f40696519dd9"
+  },
+  "memql-review-engine-final.log": {
+    "originalBytes": 56,
+    "originalSha256": "11282d6beeee0692e99bfb5a696699815bfbbdad0f5d6aa639de912d3479fbbc",
+    "retainedBytes": 59,
+    "retainedSha256": "346b81ba910b56d76225fd337effcc3b87ea25e6116852d1bdb873c9ebc64e2a",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-concat-walkers.log": {
+    "originalBytes": 56,
+    "originalSha256": "b570b4389c09a7da5195359c02e52dd46a09b7d413946f7945aa4db407f217f4",
+    "retainedBytes": 59,
+    "retainedSha256": "f6a4bd0f580b97cb134e6753bc7b7b23a8bdac21cb583c7662073c3b83eecf4d",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-gates.log": {
+    "originalBytes": 1137,
+    "originalSha256": "34b6eb71f6b5a5b559fee352b98fbd6d2a3564ed352e99e8379afa0f412194c4",
+    "retainedBytes": 1137,
+    "retainedSha256": "34b6eb71f6b5a5b559fee352b98fbd6d2a3564ed352e99e8379afa0f412194c4",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-go-final.log": {
+    "originalBytes": 279,
+    "originalSha256": "037e3870dade724eff0cac77a53226eb959f494a259b178f06a5a4c3ac055e27",
+    "retainedBytes": 301,
+    "retainedSha256": "3ac1dfbca0fb8d62d0d7f8d422286de5cb531305df69d8e0d8a46109be89d479",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-sdk-final.log": {
+    "originalBytes": 101363,
+    "originalSha256": "78e6fdad1953d87ead5dc25873f0dcaa8437d846ddabd1ea329ffe52e45b351b",
+    "retainedBytes": 154,
+    "retainedSha256": "2166c67d6ac4a8b5b31d17e636457d16e017ef71908e2d9ba10e25f74fdfab9e",
+    "retention": "suite footer only",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-db-initial.log": {
+    "originalBytes": 296756,
+    "originalSha256": "f7100cf763a48410cd7cf0a5808c89207d90684e84b6a709f9066834f7fa8917",
+    "retainedBytes": 5500,
+    "retainedSha256": "a11f6f0accdeaaf3f4a1a1338bd3e23ad1bc706ba21da0388d5e5c39440fb2ea",
+    "retention": "failure excerpts and final package statuses",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "merged-visible-frontier-before.txt": {
+    "originalBytes": 852,
+    "originalSha256": "100cee2d12f95970071cf83c4f2d944b9d027b97675f6613e9fdde3ed54569ed",
+    "retainedBytes": 852,
+    "retainedSha256": "100cee2d12f95970071cf83c4f2d944b9d027b97675f6613e9fdde3ed54569ed"
+  },
+  "merged-cached-advance-before.json": {
+    "originalBytes": 5897,
+    "originalSha256": "448eec300fa00c8bd0dedf5393e15191f7f0e03b17590c0c5c70ea95fb2e30c1",
+    "retainedBytes": 8002,
+    "retainedSha256": "a475dfe727d5684d9019dd0af4498177664808b4c58d10867befef94f2669e60"
+  },
+  "memql-review-corpus-before.log": {
+    "originalBytes": 479,
+    "originalSha256": "1170f0a1ab626b986f0a746c6f6f0388f35cb1b2a3ef83b2f2bd6271d367d2cf",
+    "retainedBytes": 482,
+    "retainedSha256": "4b5a8b413517189fa7080a7a041d92c93e144afae1eabbf4d80226076d58243f",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-corpus-after.log": {
+    "originalBytes": 56,
+    "originalSha256": "adcd8f3d91f6487c32dc178c0b33e139fc875529be852828a9f29ce5e044814c",
+    "retainedBytes": 59,
+    "retainedSha256": "c51d2ff6d1ef59b07aefe52969fbfa8e06881c404b978e3ed926dd0de35667c4",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-os-full-final.log": {
+    "originalBytes": 3242,
+    "originalSha256": "ea284cf571cfd2a2f0d180a2b9375b829bbb9da9879ba9b0f9cdec78411f4916",
+    "retainedBytes": 3242,
+    "retainedSha256": "ea284cf571cfd2a2f0d180a2b9375b829bbb9da9879ba9b0f9cdec78411f4916",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-os-typecheck-final.log": {
+    "originalBytes": 88,
+    "originalSha256": "067a62e531eabe230b1c1e7619be476719e8542528c188936d9e7165ab395653",
+    "retainedBytes": 87,
+    "retainedSha256": "4091f7c86a3c9103cc911aa678ed2faa056405c22e0608389a4051fb6d658c5d",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-os-build-final.log": {
+    "originalBytes": 9522,
+    "originalSha256": "ca84b80e5a6ef24493f8ab26b032c67a346fdd4ba4fb45e910654157c09871a8",
+    "retainedBytes": 9522,
+    "retainedSha256": "ca84b80e5a6ef24493f8ab26b032c67a346fdd4ba4fb45e910654157c09871a8",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-os-full-final.json": {
+    "originalBytes": 2337446,
+    "originalSha256": "9f5268e782b463d28c9d83358937688140fbe0318d1707e7175196cfa174e5e1",
+    "retainedBytes": 57473,
+    "retainedSha256": "f68cd2f8b98338954320dbf7742b4f9c96f5fb2527268d3c9695a13ddc4d6747",
+    "retention": "suite totals and file statuses; individual assertion messages omitted"
+  },
+  "merged-visible-frontier-after.json": {
+    "originalBytes": 247807,
+    "originalSha256": "9b30b43120cb9f10355fed8f17e94af43e5b93b4d72b731764d9f57d65d691d9",
+    "retainedBytes": 5806,
+    "retainedSha256": "c610435311f59d35c856ec85d39cca937d27282762a6cbd5a2465a2af84091c2",
+    "retention": "suite totals and file statuses; individual assertion messages omitted"
+  },
+  "memql-review-training-final.log": {
+    "originalBytes": 7296,
+    "originalSha256": "2985d5df6ee8e56e80f71472f51b98d7dea9bcdc56abbd30d2c1b510eac56876",
+    "retainedBytes": 7300,
+    "retainedSha256": "9615babc3bf247e89e1eb33e37d62316de4452e71dcdc83cb36c337fb0759af4",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-pagination-compose-final.log": {
+    "originalBytes": 56,
+    "originalSha256": "0f6b022510f0c0e3e3df3247d941f44ec6b097b3e0df6ec31ee8da8381a420cc",
+    "retainedBytes": 59,
+    "retainedSha256": "d492ff3a25040770034f410fd70afb2af25817505ac8fccc64b594d18dc26e96",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-pagination-compose-nested.log": {
+    "originalBytes": 56,
+    "originalSha256": "eb27faba26f9f9abfae6a99c018a471d33099e0232a45699389727bd90e723d9",
+    "retainedBytes": 59,
+    "retainedSha256": "713d0e1d54850ded659ebf237453ed4539d77923fbc93f97cd31e0b63cb6010a",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-sdk-build-final.log": {
+    "originalBytes": 49,
+    "originalSha256": "d462dba2300ff77f2788216e98bb52f53f3b31a10b6c6cc225d76c008aee427e",
+    "retainedBytes": 48,
+    "retainedSha256": "385c8e2f718dd2a97c59c581d49f62304ceb3c446a5e02512501356483f58288",
+    "retention": "full log; whitespace normalized",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-db-second.log": {
+    "originalBytes": 296803,
+    "originalSha256": "e4a6d94f08d1f3f66d71b30b5d317793b86e567a45d4d8e95b35aa7ecd78e993",
+    "retainedBytes": 2617,
+    "retainedSha256": "3353c8e377f3aadcca1ba355a9d267ac197b80616987cd81c4a95630a6fb10ed",
+    "retention": "failure excerpt and package statuses",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-cache-admission-proof.log": {
+    "originalBytes": 661,
+    "originalSha256": "a890e24c2900a8671165b0d1866c6a1ac684a7a31307baefc2ae2dad0de1ae6b",
+    "retainedBytes": 661,
+    "retainedSha256": "a890e24c2900a8671165b0d1866c6a1ac684a7a31307baefc2ae2dad0de1ae6b",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-review-pagination-cache-after.log": {
+    "originalBytes": 56,
+    "originalSha256": "5341ee2ca8f0fe951b9d832b1b950316028ad8509ddc1ce6e7f38d24727f8814",
+    "retainedBytes": 59,
+    "retainedSha256": "42c1bd66182f92d3bc56e37c92a7ceb12ff997213cb90ba42685794765cf43d8",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-knowledge-final.log": {
+    "originalBytes": 250,
+    "originalSha256": "b142c362b74b54bd0c9e09ed72e22c2309088b4fc2432857a02272fb0632df69",
+    "retainedBytes": 254,
+    "retainedSha256": "94a4b5b74ee7cd8a86bb9874e3941a65cce31a0a7c167dbeaea46b8ed195ded6",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  },
+  "memql-second-review-engine-final.log": {
+    "originalBytes": 236,
+    "originalSha256": "254dd20394b25b3ef77ce8f533bf3d077cf7e393f3a2c92c2ca4ae2a8885fed8",
+    "retainedBytes": 239,
+    "retainedSha256": "d4291694f41b32ee5b2ffa420416574f259f2cb4e8428dc7c1a53c16b1def8eb",
+    "normalization": "ANSI removed, trailing whitespace and empty EOF lines removed, tabs expanded to spaces"
+  }
+}

@@ -1683,24 +1683,36 @@ func (l *lowerer) includes(e *ast.CallExpr) (ExpressionNode, error) {
 			op = OpIncludesFold
 		}
 	}
-	recv, err := l.operand(e.Receiver)
-	if err != nil {
-		return nil, err
-	}
-	if recv.kind != operandField {
-		return nil, l.inProcessMethodRefusal(e, nil, nil)
-	}
-	if recv.intrinsic != "" {
-		return nil, l.refuse(e, fmt.Sprintf("`%s` is a row column, and a substring test runs on a payload string", ast.FormatExpr(e.Receiver)),
-			"Compare the column with `==` or `in`")
-	}
-	if recv.typ == "list" {
-		return nil, l.refuse(e, fmt.Sprintf("`%s` is a list, and `.includes()` tests a substring", ast.FormatExpr(e.Receiver)),
-			"For list membership write `"+ast.FormatExpr(e.Args[0])+" in "+ast.FormatExpr(e.Receiver)+"`")
-	}
-	if recv.typ != "" && recv.typ != "string" && recv.typ != "datetime" {
-		return nil, l.refuse(e, fmt.Sprintf("`%s` is a %s, and `.includes()` tests a string", ast.FormatExpr(e.Receiver), recv.typ),
-			"Compare it with `==` instead")
+	var textConcat *textConcatOperand
+	var recv lowOperand
+	if binary, ok := ast.Unparen(e.Receiver).(*ast.BinaryExpr); ok && binary.Op == "+" {
+		var err error
+		textConcat, err = l.textConcatReceiver(binary)
+		if err != nil {
+			return nil, err
+		}
+		recv.field = FieldReference{Raw: "$textConcat", Parts: []string{"$textConcat"}}
+	} else {
+		var err error
+		recv, err = l.operand(e.Receiver)
+		if err != nil {
+			return nil, err
+		}
+		if recv.kind != operandField {
+			return nil, l.inProcessMethodRefusal(e, nil, nil)
+		}
+		if recv.intrinsic != "" {
+			return nil, l.refuse(e, fmt.Sprintf("`%s` is a row column, and a substring test runs on a payload string", ast.FormatExpr(e.Receiver)),
+				"Compare the column with `==` or `in`")
+		}
+		if recv.typ == "list" {
+			return nil, l.refuse(e, fmt.Sprintf("`%s` is a list, and `.includes()` tests a substring", ast.FormatExpr(e.Receiver)),
+				"For list membership write `"+ast.FormatExpr(e.Args[0])+" in "+ast.FormatExpr(e.Receiver)+"`")
+		}
+		if recv.typ != "" && recv.typ != "string" && recv.typ != "datetime" {
+			return nil, l.refuse(e, fmt.Sprintf("`%s` is a %s, and `.includes()` tests a string", ast.FormatExpr(e.Receiver), recv.typ),
+				"Compare it with `==` instead")
+		}
 	}
 	arg, err := l.operand(e.Args[0])
 	if err != nil {
@@ -1720,7 +1732,7 @@ func (l *lowerer) includes(e *ast.CallExpr) (ExpressionNode, error) {
 	if lit, ok := arg.value.(string); ok && strings.TrimSpace(lit) == "" {
 		return &constantBoolExpression{value: false, planConstant: true}, nil
 	}
-	return &ComparisonExpression{Field: recv.field, Operator: op, Value: arg.value}, nil
+	return &ComparisonExpression{Field: recv.field, TextConcat: textConcat, Operator: op, Value: arg.value}, nil
 }
 
 // ---------------------------------------------------------------------------

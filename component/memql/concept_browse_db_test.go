@@ -74,3 +74,61 @@ func TestConceptSearchFieldsExcludeSecretsAndNonText(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"description", "name"}, fields)
 }
+
+// The inspector returns full raw rows, so its search must retain the generic
+// browse PII boundary. A request-local binding is a planner optimization, not
+// an authored projection that may disclose other users' contact fields.
+func TestConceptRowsSearchPreservesGenericPIIBoundaryBeforePagingDB(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("concept-search-pii")}
+	caller := f.person("caller", true)
+	for n := 0; n < 25; n++ {
+		f.person(fmt.Sprintf("foreign-%02d", n), true)
+	}
+	read := func(ctx context.Context, cursor string) ([]map[string]any, string) {
+		t.Helper()
+		result, err := eng.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId:"v1:identity:user",search:%q,cursor:%q)`, f.prefix, cursor))
+		require.NoError(t, err)
+		envelope := MaterializeRows(result.OutputPayload())
+		require.Len(t, envelope, 1)
+		wire, err := json.Marshal(envelope[0])
+		require.NoError(t, err)
+		var page struct {
+			Rows       []map[string]any `json:"rows"`
+			NextCursor string           `json:"nextCursor"`
+		}
+		require.NoError(t, json.Unmarshal(wire, &page))
+		return page.Rows, page.NextCursor
+	}
+	// Prime the same search as an operator; the narrower callers must never
+	// reuse that answer. The operator still gets every row in bounded pages.
+	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleOwner} {
+		ctx := shareDirActor(context.Background(), caller, role)
+		cursor := ""
+		seen := map[string]bool{}
+		for _, size := range []int{10, 10, 6} {
+			rows, next := read(ctx, cursor)
+			require.Len(t, rows, size)
+			for _, row := range rows {
+				id := fmt.Sprint(row["id"])
+				require.False(t, seen[id])
+				seen[id] = true
+			}
+			cursor = next
+		}
+		require.Empty(t, cursor)
+		require.Len(t, seen, 26)
+	}
+	// The caller's own row is older than more than a full page of foreign
+	// matches. Filtering after LIMIT would silently hide it as exhaustion.
+	for _, role := range []auth.Role{auth.RoleReader, auth.RoleWriter, auth.RoleDeveloper} {
+		for _, identity := range []string{caller, BareShortId(caller)} {
+			rows, cursor := read(shareDirActor(context.Background(), identity, role), "")
+			require.Len(t, rows, 1, "role %s, caller %s", role, identity)
+			require.Equal(t, caller, rows[0]["id"])
+			payload := rows[0]["payload"].(map[string]any)
+			require.Contains(t, payload["primaryEmail"], "caller-")
+			require.Empty(t, cursor)
+		}
+	}
+}

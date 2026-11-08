@@ -362,7 +362,7 @@ query user searchUsers {
     && (args.role == nil || args.role == "" || row.role == args.role)
     && (args.showDeactivated == nil || args.showDeactivated == true || ((row.active == nil || isActiveRecord(row)) && (row.suspendedAt == nil || row.suspendedAt == "")))
     && (args.state == nil || args.state == "" || (args.state == "active" && (row.active == nil || isActiveRecord(row)) && (row.suspendedAt == nil || row.suspendedAt == "")) || (args.state == "deactivated" && (row.active == false || (row.suspendedAt != nil && row.suspendedAt != ""))))
-    && (args.search == nil || trim(args.search) == "" || row.displayName.includes(trim(args.search), true) || row.firstName.includes(trim(args.search), true) || row.lastName.includes(trim(args.search), true) || row.primaryEmail.includes(trim(args.search), true))
+    && (args.search == nil || trim(args.search) == "" || row.displayName.includes(trim(args.search), true) || row.firstName.includes(trim(args.search), true) || row.lastName.includes(trim(args.search), true) || row.primaryEmail.includes(trim(args.search), true) || (row.firstName + " " + row.lastName).includes(trim(args.search), true))
   sort    "row.createdAt", "desc"
   shape   userFull
 }

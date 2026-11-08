@@ -425,14 +425,10 @@ func resolveActorComparisonsToConstants(ctx context.Context, expr ExpressionNode
 }
 
 // combinedFilterOrderExprs returns the SQL ORDER BY expressions for the
-// combined-filter scan. The result MUST end with `id ASC`: the keyset cursor
-// predicate's tie-breaker is `id > ?`, which is only correct when rows sharing
-// an identical createdAt are ordered by `id ASC` — otherwise two equal-timestamp
-// rows straddling a page boundary can be skipped or duplicated. A compiled
-// sorter always appends the `createdAt DESC, id ASC` fallback (compileSortFields),
-// so its orderExpressions() are airtight; the nil-sorter fallback below must
-// match that same contract, not just `createdAt DESC`. Centralizing the order
-// list here keeps the keyset predicate and the SQL row order from drifting apart.
+// combined-filter scan. The legacy cursor follows createdAt plus id ASC; the
+// value-key cursor follows every normalized expression, including declared
+// text keys and an explicit id DESC. The nil-sorter fallback must retain the
+// legacy id tie-breaker so equal timestamps cannot skip or duplicate rows.
 func combinedFilterOrderExprs(sorter *compiledSort) []string {
 	if sorter != nil {
 		return sorter.orderExpressions()
@@ -774,6 +770,9 @@ func compileComparisonIn(concepts memorynodes.Registry, expr *ComparisonExpressi
 		return compiledExpression{}, fmt.Errorf("comparison expression is nil")
 	}
 
+	if expr.TextConcat != nil {
+		return compileTextConcatIncludes(expr)
+	}
 	if len(expr.Field.Parts) == 0 {
 		return compiledExpression{}, fmt.Errorf("comparison field is missing")
 	}
@@ -2396,6 +2395,9 @@ func normalizeCollectionValues(value any) (*normalizedCollection, error) {
 func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpression, payloadCache map[string]map[string]any) (bool, error) {
 	if cmp == nil {
 		return true, nil
+	}
+	if cmp.TextConcat != nil {
+		return matchTextConcatIncludes(node, cmp, payloadCache)
 	}
 	if len(cmp.Field.Parts) == 0 {
 		return false, fmt.Errorf("comparison field is missing")

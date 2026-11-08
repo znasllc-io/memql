@@ -1,0 +1,6 @@
+--- FAIL: TestCorpusToolsLoadAndEveryHandlerResolves (0.72s)
+    tool_declaration_validation_3625_test.go:364: 1 tool handler target(s) do not resolve:
+          tool "searchUsers" (unified:memql/tools.memql:searchUsers): @handler names "searchUsers", which is not a registered function, query, mutation or builtin -- the tool registers and is advertised to the model anyway, and fails only when a model calls it
+FAIL
+FAIL    github.com/znasllc-io/memql/component/memql 1.621s
+FAIL

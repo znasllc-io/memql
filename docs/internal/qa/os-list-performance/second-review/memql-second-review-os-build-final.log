@@ -1,0 +1,98 @@
+
+> @znasllc-io/memql-os@0.1.0 build
+> tsc -b && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 2992 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                 0.71 kB │ gzip:   0.38 kB
+dist/assets/squada-one-latin-400-normal-D3va-NvZ.woff2          5.63 kB
+dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2     21.17 kB
+dist/assets/jetbrains-mono-latin-500-normal-BWZEU5yA.woff2     21.83 kB
+dist/assets/jetbrains-mono-latin-700-normal-BYuf6tUa.woff2     21.91 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2             48.26 kB
+dist/assets/TrainingApp-BNDUrTHd.css                            0.27 kB │ gzip:   0.17 kB
+dist/assets/AzureEmailConnections-DRJSOGvD.css                  0.29 kB │ gzip:   0.17 kB
+dist/assets/MaterializerApp-WCmmObg2.css                        1.60 kB │ gzip:   0.67 kB
+dist/assets/IdentityApp-IyxBbpC_.css                            1.80 kB │ gzip:   0.60 kB
+dist/assets/ClusterApp-BwljabPQ.css                             3.67 kB │ gzip:   1.03 kB
+dist/assets/EmailApp-1PhwHkCt.css                               6.92 kB │ gzip:   1.87 kB
+dist/assets/FleetApp-B8x5Et26.css                              23.85 kB │ gzip:   4.65 kB
+dist/assets/DeployablesApp-TbmTDF7q.css                        26.88 kB │ gzip:   5.18 kB
+dist/assets/index-SbKrFc3Q.css                                279.43 kB │ gzip:  45.60 kB
+dist/assets/arrow-right-Dt4Gzeo-.js                             0.22 kB │ gzip:   0.20 kB │ map:     0.92 kB
+dist/assets/user-round-Bu1X1fyC.js                              0.23 kB │ gzip:   0.21 kB │ map:     0.95 kB
+dist/assets/rotate-ccw-Cb7jwQyD.js                              0.25 kB │ gzip:   0.22 kB │ map:     0.95 kB
+dist/assets/pause-Bs_a0aax.js                                   0.26 kB │ gzip:   0.20 kB │ map:     1.04 kB
+dist/assets/upload-4TfnHNv6.js                                  0.28 kB │ gzip:   0.23 kB │ map:     1.02 kB
+dist/assets/globe-Dp2HXZBa.js                                   0.29 kB │ gzip:   0.23 kB │ map:     1.05 kB
+dist/assets/archive-Bq26moGN.js                                 0.30 kB │ gzip:   0.25 kB │ map:     1.10 kB
+dist/assets/useEdgeUploadProvider-B3glSkJn.js                   0.30 kB │ gzip:   0.25 kB │ map:     1.57 kB
+dist/assets/rotate-ccw-clock-BF4BvA6Q.js                        0.30 kB │ gzip:   0.24 kB │ map:     1.09 kB
+dist/assets/workflow-Dh_lXkfB.js                                0.31 kB │ gzip:   0.24 kB │ map:     1.18 kB
+dist/assets/image-DuBWkBb-.js                                   0.31 kB │ gzip:   0.26 kB │ map:     1.14 kB
+dist/assets/zap-Cn3gy7e9.js                                     0.32 kB │ gzip:   0.25 kB │ map:     0.95 kB
+dist/assets/braces-X2z3Ecwf.js                                  0.32 kB │ gzip:   0.25 kB │ map:     1.05 kB
+dist/assets/box-shMo2J7q.js                                     0.35 kB │ gzip:   0.26 kB │ map:     1.11 kB
+dist/assets/user-plus-mC3HswMW.js                               0.36 kB │ gzip:   0.27 kB │ map:     1.28 kB
+dist/assets/liveView-B0ML_XTe.js                                0.36 kB │ gzip:   0.27 kB │ map:     4.32 kB
+dist/assets/server-DNQPZYIn.js                                  0.38 kB │ gzip:   0.25 kB │ map:     1.40 kB
+dist/assets/key-round-lqMLBqT6.js                               0.40 kB │ gzip:   0.30 kB │ map:     1.17 kB
+dist/assets/Switch-DJ8V111b.js                                  0.41 kB │ gzip:   0.28 kB │ map:     1.07 kB
+dist/assets/Dialog-D2Un3zzG.js                                  0.45 kB │ gzip:   0.34 kB │ map:     2.09 kB
+dist/assets/organization-LovpioWO.js                            0.48 kB │ gzip:   0.34 kB │ map:     2.17 kB
+dist/assets/file-archive-ByRb0bQ2.js                            0.48 kB │ gzip:   0.32 kB │ map:     1.50 kB
+dist/assets/MeasureView-CLKVKq2C.js                             0.49 kB │ gzip:   0.31 kB │ map:     2.71 kB
+dist/assets/LocalTabs-D6o48mGH.js                               0.52 kB │ gzip:   0.34 kB │ map:     1.45 kB
+dist/assets/circle-dashed-BsCpPJU7.js                           0.63 kB │ gzip:   0.33 kB │ map:     1.73 kB
+dist/assets/mergedView-C3rbrlOd.js                              0.77 kB │ gzip:   0.47 kB │ map:     7.10 kB
+dist/assets/transfers-DsraeMkc.js                               0.98 kB │ gzip:   0.57 kB │ map:     3.44 kB
+dist/assets/PipelinesApp-DuNVW10Z.js                            1.31 kB │ gzip:   0.68 kB │ map:     0.58 kB
+dist/assets/Overview-D1l_6Tis.js                                1.42 kB │ gzip:   0.67 kB │ map:     5.01 kB
+dist/assets/rows-DjOkg9Tv.js                                    1.50 kB │ gzip:   0.69 kB │ map:    10.25 kB
+dist/assets/rows-B1lR9uRN.js                                    1.72 kB │ gzip:   0.73 kB │ map:    14.49 kB
+dist/assets/useReleasePages-CPJBGhue.js                         2.03 kB │ gzip:   1.00 kB │ map:     8.34 kB
+dist/assets/StorageAllowance-YfSriZcj.js                        2.39 kB │ gzip:   1.23 kB │ map:     6.88 kB
+dist/assets/LiveList-C98gXxH2.js                                2.49 kB │ gzip:   1.21 kB │ map:    14.60 kB
+dist/assets/useMergedPagedCollections-tygxP3Xh.js               2.65 kB │ gzip:   1.17 kB │ map:    11.81 kB
+dist/assets/when-DX_2R5Am.js                                    2.65 kB │ gzip:   1.27 kB │ map:    17.52 kB
+dist/assets/rows-BFb2yCxu.js                                    2.75 kB │ gzip:   1.07 kB │ map:    16.01 kB
+dist/assets/AccountPicker-CY78Ppam.js                           3.06 kB │ gzip:   1.47 kB │ map:    18.00 kB
+dist/assets/AppLogsSection-io2-HY2K.js                          3.09 kB │ gzip:   1.62 kB │ map:    12.59 kB
+dist/assets/useAccounts-BEQJnjxL.js                             3.21 kB │ gzip:   1.34 kB │ map:    18.03 kB
+dist/assets/materialize-7miDlpFo.js                             3.53 kB │ gzip:   1.64 kB │ map:    32.46 kB
+dist/assets/MapHeading-CVyzy8yL.js                              4.10 kB │ gzip:   1.88 kB │ map:    20.27 kB
+dist/assets/MapCanvas-CvHQwXna.js                               4.47 kB │ gzip:   2.01 kB │ map:    27.21 kB
+dist/assets/actions-CPxNSb57.js                                11.95 kB │ gzip:   4.25 kB │ map:    56.87 kB
+dist/assets/useLogTail-C9UKdYTl.js                             12.22 kB │ gzip:   4.70 kB │ map:    64.59 kB
+dist/assets/BinApp-DXS-4Euu.js                                 12.32 kB │ gzip:   4.67 kB │ map:    47.02 kB
+dist/assets/IdentityApp-DBBD85yd.js                            14.49 kB │ gzip:   5.23 kB │ map:    52.64 kB
+dist/assets/rows-DTMJtbh-.js                                   15.67 kB │ gzip:   5.00 kB │ map:    83.50 kB
+dist/assets/useAutomations-BekUbENv.js                         17.51 kB │ gzip:   6.07 kB │ map:    87.74 kB
+dist/assets/LogsApp-ClOYzHWG.js                                18.43 kB │ gzip:   6.35 kB │ map:    72.70 kB
+dist/assets/ConceptsApp-5lOpC85o.js                            18.58 kB │ gzip:   6.49 kB │ map:    88.90 kB
+dist/assets/useEmail-CfrjJaGn.js                               21.54 kB │ gzip:   7.37 kB │ map:   122.74 kB
+dist/assets/rows-BsmUp31Q.js                                   26.80 kB │ gzip:   8.80 kB │ map:   130.75 kB
+dist/assets/AzureEmailConnections-PGkE9mx4.js                  45.83 kB │ gzip:  15.59 kB │ map:   160.10 kB
+dist/assets/AccountsApp-CDHbSCmr.js                            52.95 kB │ gzip:  15.66 kB │ map:   229.06 kB
+dist/assets/TrainingApp-CNWlO2or.js                            58.91 kB │ gzip:  19.31 kB │ map:   230.90 kB
+dist/assets/MaterializerApp-CrYogQqk.js                        67.56 kB │ gzip:  22.31 kB │ map:   341.04 kB
+dist/assets/integrationsReport-CUs737CE.js                     68.54 kB │ gzip:  21.60 kB │ map:   288.87 kB
+dist/assets/UsersApp-DZyGOZIu.js                               70.10 kB │ gzip:  21.95 kB │ map:   290.03 kB
+dist/assets/FilesApp-B9ukRwAF.js                               79.11 kB │ gzip:  25.62 kB │ map:   341.91 kB
+dist/assets/SettingsApp-CWUrysBI.js                           109.50 kB │ gzip:  33.84 kB │ map:   486.76 kB
+dist/assets/ClusterApp-B5nHjJJj.js                            111.10 kB │ gzip:  33.77 kB │ map:   386.98 kB
+dist/assets/NexusApp-D97jWTon.js                              183.69 kB │ gzip:  58.33 kB │ map:   776.83 kB
+dist/assets/EmailApp-CdtHavvX.js                              211.85 kB │ gzip:  64.59 kB │ map:   867.61 kB
+dist/assets/FleetApp-ZQP3lw8O.js                              336.97 kB │ gzip: 105.40 kB │ map: 1,290.26 kB
+dist/assets/DeployablesApp-C8Fj06vO.js                        451.66 kB │ gzip: 139.49 kB │ map: 1,899.04 kB
+dist/assets/livekit-client.esm-YFZ4iydz.js                    583.09 kB │ gzip: 153.21 kB │ map: 2,107.50 kB
+dist/assets/index-C8DLmWaL.js                               1,363.85 kB │ gzip: 351.56 kB │ map: 5,905.86 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.20s

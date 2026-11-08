@@ -1,10 +1,11 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 const h=vi.hoisted(()=>({connection:null as unknown}));
 vi.mock("../../src/live/connection",()=>({useOsConnection:()=>h.connection}));
 import { useConceptRows } from "../../src/apps/concepts/useConceptRows";
 import { DEFAULT_CONCEPTS_SETTINGS, sanitizeConceptsSettings } from "../../src/apps/concepts/settings";
-import { fakeConnection, nodeOf } from "./harness";
+import { fakeConnection, nodeOf, conceptOf } from "./harness";
+import { RowsPanel } from "../../src/apps/concepts/RowsPanel";
 const concept="v1:work:goal";
 const page=(offset:number)=>Array.from({length:10},(_,n)=>nodeOf(`row-${offset+n}`,{statement:`Goal ${offset+n}`},concept));
 describe("generic concept row navigation",()=>{
@@ -34,4 +35,30 @@ describe("generic concept row navigation",()=>{
   hook.rerender({search:""});expect(hook.result.current.rows).toHaveLength(10);
   expect(connection.query.executeNamed).toHaveBeenCalledTimes(2);
  });
+});
+
+
+it("does not report an unread concept as empty when its initial read loses the connection", async () => {
+ const connection=fakeConnection(); h.connection=connection;
+ connection.query.executeNamed.mockRejectedValueOnce(Object.assign(new Error("stream closed"), {reason:"transport"}));
+ const hook=renderHook(()=>useConceptRows(concept,10));
+ await act(async()=>{});
+ expect(hook.result.current.status).toBe("disconnected");
+ render(<RowsPanel concept={conceptOf({id:concept})} walk={hook.result.current}/>);
+ expect(screen.getByText("Reconnecting to the cluster.")).toBeTruthy();
+ expect(screen.queryByText("No rows of this concept are readable by this account.")).toBeNull();
+});
+
+it("retains the inspected rows without claiming exhaustion after an interrupted next page", async () => {
+ const connection=fakeConnection({pages:[{rows:page(0),cursor:"next"}]}); h.connection=connection;
+ const hook=renderHook(()=>useConceptRows(concept,10));
+ await waitFor(()=>expect(hook.result.current.rows).toHaveLength(10));
+ connection.query.executeNamed.mockRejectedValueOnce(Object.assign(new Error("stream closed"), {reason:"transport"}));
+ await act(async()=>hook.result.current.loadMore());
+ expect(hook.result.current.status).toBe("disconnected");
+ expect(hook.result.current.rows).toHaveLength(10);
+ render(<RowsPanel concept={conceptOf({id:concept})} walk={hook.result.current}/>);
+ expect(screen.getByText("Reconnecting to the cluster.")).toBeTruthy();
+ expect(screen.queryByText(/All 10 readable/)).toBeNull();
+ expect(screen.queryByRole("button", {name:"Load more"})).toBeNull();
 });

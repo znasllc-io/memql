@@ -642,7 +642,9 @@ Neither are the reserved roots, spec and trait applications, or construct calls
   so it lives in a query filter or spec body.
 - *Pushed down on a row field* entries compile to SQL when their input is a
   field of the row (`row.title.includes(args.q)`, `row.tags.any(t => ...)`)
-  and run in process on any other value.
+  and run in process on other values. `string.includes` also pushes down the
+  [declared text-field join](memql.md#the-refine-clause)
+  `(row.firstName + " " + row.lastName).includes(args.q, true)`.
 - *In process* entries run in the engine. In a filter or spec body they take
   only values that do not read the row, which are computed once before the query
   ([plan constants](memql.md#plan-constants)): `row.expiresAt < addDuration(now, "P1D")`

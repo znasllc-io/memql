@@ -1,0 +1,247 @@
+{
+  "numTotalTestSuites": 171,
+  "numPassedTestSuites": 171,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 736,
+  "numPassedTests": 736,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1794099794663,
+  "success": true,
+  "files": 43,
+  "fileStatuses": [
+    {
+      "file": "clients/os/test/bin/pagination.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/email/acts.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/automaticReads.test.tsx",
+      "status": "passed",
+      "tests": 17
+    },
+    {
+      "file": "clients/os/test/email/corrections.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/feeds.test.tsx",
+      "status": "passed",
+      "tests": 46
+    },
+    {
+      "file": "clients/os/test/email/imports.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/email/intents.test.tsx",
+      "status": "passed",
+      "tests": 38
+    },
+    {
+      "file": "clients/os/test/email/manifest.test.ts",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/email/organizations.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/email/preview.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/email/rows.test.ts",
+      "status": "passed",
+      "tests": 60
+    },
+    {
+      "file": "clients/os/test/email/ruleWrites.test.tsx",
+      "status": "passed",
+      "tests": 21
+    },
+    {
+      "file": "clients/os/test/email/settings.test.tsx",
+      "status": "passed",
+      "tests": 52
+    },
+    {
+      "file": "clients/os/test/email/shell.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/when.test.ts",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/words.test.ts",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/users/directory.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/email/audiences/addressDigest.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/audiences/audiences.test.tsx",
+      "status": "passed",
+      "tests": 16
+    },
+    {
+      "file": "clients/os/test/email/audiences/signupForms.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/email/automations/automations.test.tsx",
+      "status": "passed",
+      "tests": 34
+    },
+    {
+      "file": "clients/os/test/email/automations/flow.test.tsx",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/email/inbox/inbox.test.tsx",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "file": "clients/os/test/email/campaigns/addCampaign.test.tsx",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/email/campaigns/campaignActs.test.ts",
+      "status": "passed",
+      "tests": 25
+    },
+    {
+      "file": "clients/os/test/email/campaigns/campaignPage.test.tsx",
+      "status": "passed",
+      "tests": 64
+    },
+    {
+      "file": "clients/os/test/email/campaigns/editPage.test.tsx",
+      "status": "passed",
+      "tests": 14
+    },
+    {
+      "file": "clients/os/test/email/campaigns/list.test.tsx",
+      "status": "passed",
+      "tests": 7
+    },
+    {
+      "file": "clients/os/test/email/campaigns/openedByTheWizard.test.tsx",
+      "status": "passed",
+      "tests": 1
+    },
+    {
+      "file": "clients/os/test/email/campaigns/repeat.test.tsx",
+      "status": "passed",
+      "tests": 9
+    },
+    {
+      "file": "clients/os/test/email/campaigns/sendBar.test.ts",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/campaigns/wizardModel.test.ts",
+      "status": "passed",
+      "tests": 22
+    },
+    {
+      "file": "clients/os/test/email/overview/figures.test.ts",
+      "status": "passed",
+      "tests": 29
+    },
+    {
+      "file": "clients/os/test/email/overview/overview.test.tsx",
+      "status": "passed",
+      "tests": 26
+    },
+    {
+      "file": "clients/os/test/email/settings/brand.test.tsx",
+      "status": "passed",
+      "tests": 27
+    },
+    {
+      "file": "clients/os/test/email/settings/brandKit.test.ts",
+      "status": "passed",
+      "tests": 8
+    },
+    {
+      "file": "clients/os/test/email/templates/composition.test.tsx",
+      "status": "passed",
+      "tests": 11
+    },
+    {
+      "file": "clients/os/test/email/templates/createTemplate.test.tsx",
+      "status": "passed",
+      "tests": 4
+    },
+    {
+      "file": "clients/os/test/email/templates/list.test.tsx",
+      "status": "passed",
+      "tests": 10
+    },
+    {
+      "file": "clients/os/test/email/templates/newTemplate.test.ts",
+      "status": "passed",
+      "tests": 15
+    },
+    {
+      "file": "clients/os/test/email/templates/previewFrame.test.tsx",
+      "status": "passed",
+      "tests": 5
+    },
+    {
+      "file": "clients/os/test/email/templates/templateCreation.test.ts",
+      "status": "passed",
+      "tests": 3
+    },
+    {
+      "file": "clients/os/test/email/templates/templatePage.test.tsx",
+      "status": "passed",
+      "tests": 20
+    }
+  ]
+}

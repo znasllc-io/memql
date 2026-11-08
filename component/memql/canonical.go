@@ -114,6 +114,9 @@ func canonicalComparisonExpression(expr *ComparisonExpression) string {
 	}
 
 	field := canonicalField(expr.Field)
+	if expr.TextConcat != nil {
+		field = expr.TextConcat.canonical()
+	}
 	if expr.CacheHintSeconds != nil && strings.EqualFold(field, "concept") {
 		field = fmt.Sprintf("%s@cache(%d)", field, *expr.CacheHintSeconds)
 	}

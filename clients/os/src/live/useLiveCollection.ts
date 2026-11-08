@@ -6,6 +6,7 @@ import {
   type LiveCollectionSpec,
   type LiveSnapshot,
   type LiveState,
+  type LiveReseedOptions,
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "./connection";
@@ -62,7 +63,8 @@ export interface LiveCollectionHandle<T> {
   snapshot: LiveSnapshot<T>;
   /** Re-run the read. The honest answer to "this looks stale", and the same
    *  mechanism a gap and a reconnect already use. */
-  reseed: () => void;
+  reseed(): void;
+  reseed(options: LiveReseedOptions): void;
 }
 
 export interface LiveCollectionOptions {
@@ -130,7 +132,7 @@ export function useLiveCollection<T>(
     () => (collection ? collection.snapshot : (EMPTY as LiveSnapshot<T>)),
   );
 
-  const reseed = useCallback(() => collection?.reseed(), [collection]);
+  const reseed = useCallback((options?: LiveReseedOptions) => collection?.reseed(options), [collection]);
   return {
     source: collection,
     snapshot,

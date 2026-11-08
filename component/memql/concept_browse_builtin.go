@@ -50,6 +50,18 @@ func (e *MemQLEngine) conceptRowsSearchBuiltin(ctx context.Context, args map[str
 		}
 	}
 	root := &LogicalExpression{Op: LogicalAnd, Left: &ComparisonExpression{Field: FieldReference{Raw: "concept", Parts: []string{"concept"}}, Operator: OpEq, Value: concept.Name}, Right: matching}
+	// This raw inspector has no authored projection. Giving its temporary
+	// query a binding below enables ordinary row-tier pushdown, but cannot
+	// grant the PII exemption trusted named projections receive. Reuse the
+	// generic-browse policy before LIMIT: if only the subject may read an
+	// undeclared PII concept, narrow to that subject's canonical row id. A
+	// post-page redaction would hide an older own row behind foreign matches.
+	if rowAuthzDeclFor(concept.Name) == nil && rowAuthzPIIUnboundDenies(contextWithRowAuthzBinding(ctx, ""), concept.Name, "") {
+		subject := concept.Name + ":" + BareShortId(rowAuthzActorUserId(ctx))
+		root = &LogicalExpression{Op: LogicalAnd, Left: root, Right: &ComparisonExpression{
+			Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: OpEq, Value: subject,
+		}}
+	}
 	signature := sha256.Sum256([]byte(concept.Name + "\x00" + needle + "\x00" + strings.Join(fields, "\x00")))
 	queryHash := hex.EncodeToString(signature[:])
 	name := "conceptBrowse" + queryHash

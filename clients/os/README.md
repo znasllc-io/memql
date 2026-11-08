@@ -398,6 +398,17 @@ A selected record has an independently authorized by-id read, so an older link
 never requires walking the directory. A displayed partial count is marked with
 `+` or `shown`; exact folder/facet counts come from separate authorized reducers.
 Complete finite choice catalogs remain explicit, demand-driven editor reads.
+When two paged feeds form one ordered list, `useMergedPagedCollections` exposes
+another ten only after both current frontiers cover that window with enough
+projected rows, or are exhausted. While an initial source is unresolved or live
+removals leave holes, the view exposes only a provably ordered prefix. It fills
+holes up to the already-requested limit, without growing that limit or reading
+when every consumer is hidden/closed. Failed repairs stop and expose the normal
+retry/reconnection state; an unknown empty prefix is never claimed as empty.
+Page counts alone cannot prove the merged records are the most recent.
+Overlapping repairs/advances share one promise across windows; a Load more click
+during repair still requests the next ten. A transport interruption, abort or
+busy no-op is not page completion; a successful sibling is retained for retry.
 
 `live/sessionCollections.ts` owns one store per authenticated connection.
 Collection keys include every query argument; committed visible consumers retain
@@ -412,7 +423,12 @@ The SDK subscribes before seeding and reconciles buffered events by version.
 Identical graph filters share one wire subscription, and individual consumers
 release independently. Computed views request compact ID-only notifications and
 coalesce bursts before refreshing. Session-backed reads own resume recovery;
-periodic refresh controls disable their separate resume trigger. Scoped detail readers reject unrelated event IDs before
+periodic refresh controls disable their separate resume trigger. Computed
+views pass `onPaneResume` to `useGraphRevision` and request
+`reseed({ ifIdle: true })` for that courtesy repair: reopening after the grace
+period must not queue a second copy of the repair started by session retention.
+Actual graph invalidations still use ordinary `reseed()` so a change during an
+in-flight read queues a following read instead of getting lost. Scoped detail readers reject unrelated event IDs before
 rereading. Unseen id-only directory events trigger a coalesced bounded refresh;
 older full-payload events cannot grow a partially loaded recent directory with
 unrequested historical rows. Reconnect, load-more failures and late responses
@@ -2507,7 +2523,9 @@ Four things about it are new rules rather than repetitions.
   and field selection. Events do not insert rows into the inspected page:
   changes appear in a band and Reload refreshes the retained page window.
   Id-only events are reread through the authorized by-id path before counting,
-  so the band never claims a new row the person cannot read.
+  so the band never claims a new row the person cannot read. A disconnected
+  walk retains inspected rows and says it is reconnecting; it cannot claim an
+  unread concept is empty or a partial sample is exhaustive.
 
 - **A CONCEPT WITH NO `@displayCard` GETS ITS ID, NOT A GUESS.** The
   tempting fallback -- `name`, then `title`, then `label` -- is a guess that

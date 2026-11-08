@@ -102,7 +102,7 @@ export function useLibraryFeeds(filter: FilesFilter, desk: DeskMembership, enabl
       return { rows: [{ ...row, id: "facets" }], nextCursor: "" };
     },
   }));
-  const revision = useGraphRevision(FACET_INPUTS, ready, { externalRecovery: true });
+  const revision = useGraphRevision(FACET_INPUTS, ready, { externalRecovery: true, onPaneResume: () => facets.reseed({ ifIdle: true }) });
   useEffect(() => { if (revision) facets.reseed(); }, [revision, facets.reseed]);
   const index = facets.snapshot.rows[0];
   const counts = index ? new Map((index.folders as {folderId: string; count: number}[]).map(row => [row.folderId, row.count])) : null;

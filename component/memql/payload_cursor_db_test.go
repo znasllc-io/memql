@@ -142,3 +142,59 @@ func TestIntrinsicValueKeysetHonorsAuthoredIDOrder(t *testing.T) {
 		require.Equal(t, want, got, clause)
 	}
 }
+
+// A secondary intrinsic key is part of the ordering even when timestamps are
+// equal. Continuing only by (createdAt,id) repeats or skips rows whose author
+// order differs from id order. Text intrinsics keep Go's trimmed/absent rules.
+func TestIntrinsicTextKeysetKeepsSecondaryOrderAndBlankValuesDB(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	ctx := clusterOwnerCtx("intrinsic-text-owner")
+	prefix := uniqueSuffix("intrinsic-text")
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	authors := []string{"Zulu", "Alpha", " Omega ", "Éclair", "", "\t\u2003", "alpha", "Beta", "beta", "Ωmega", "Gamma", "Delta", "Eta"}
+	var fixture []memorynodes.MemoryNode
+	var ids []string
+	for i, author := range authors {
+		id := fmt.Sprintf("%s:%s-%02d", keysetConcept, prefix, i)
+		seedKeysetRow(t, ctx, db, id, at, author)
+		ids = append(ids, id)
+		fixture = append(fixture, memorynodes.MemoryNode{ID: id, CreatedAt: at, CreatedBy: author})
+	}
+	encodedIDs, err := json.Marshal(ids)
+	require.NoError(t, err)
+	for _, spec := range [][]SortField{
+		{{Field: "createdAt", Direction: SortDirectionDesc}, {Field: "createdBy", Direction: SortDirectionDesc}},
+		{{Field: "createdAt", Direction: SortDirectionDesc}, {Field: "createdBy", Direction: SortDirectionAsc}},
+		{{Field: "createdBy", Direction: SortDirectionDesc}},
+		{{Field: "createdBy", Direction: SortDirectionAsc}, {Field: "row.id", Direction: SortDirectionDesc}},
+	} {
+		sorter, err := compileSortFields(spec)
+		require.NoError(t, err)
+		wantRows := append([]memorynodes.MemoryNode(nil), fixture...)
+		require.NoError(t, sorter.sortNodes(wantRows))
+		var want, terms []string
+		for _, row := range wantRows {
+			want = append(want, row.ID)
+		}
+		for _, field := range spec {
+			terms = append(terms, fmt.Sprintf("%q,%q", field.Field, field.Direction))
+		}
+		call := fmt.Sprintf(`sort(paginate(concept==%s&&id in %s,5),%s)`, keysetConcept, encodedIDs, strings.Join(terms, ","))
+		cursor := ""
+		var got []string
+		for page, size := range []int{5, 5, 3} {
+			result, err := eng.Execute(ContextWithCursor(ctx, cursor), call)
+			require.NoError(t, err)
+			rows := pageIDs(t, result)
+			require.Len(t, rows, size, "page %d of %s", page, call)
+			got = append(got, rows...)
+			cursor = result.GetMeta().Cursor
+			if page < 2 {
+				require.NotEmpty(t, cursor, call)
+			} else {
+				require.Empty(t, cursor, call)
+			}
+		}
+		require.Equal(t, want, got, call)
+	}
+}

@@ -1125,6 +1125,20 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if err != nil {
 			return nil, err
 		}
+		// A caller may request a smaller page from a declared query. Fold
+		// only across that named-query boundary: duplicate paginate clauses
+		// authored in the same expression still reach the ordinary rejection.
+		if call, ok := node.Target.(*FunctionCallExpression); ok {
+			if fn, found := v.function(strings.TrimSpace(call.Name)); found && fn != nil && strings.EqualFold(fn.FunctionKind, "query") {
+				folded, err := narrowExpandedQueryPage(target, node.Limit)
+				if err != nil {
+					return nil, err
+				}
+				if folded {
+					return target, nil
+				}
+			}
+		}
 		return &PaginateExpression{
 			Target: target,
 			Limit:  node.Limit,
@@ -1564,6 +1578,19 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 	resolved, err := validator.expandExpression(plan.Root)
 	if err != nil {
 		return err
+	}
+	// The parser peels the caller's outer directives before expansion. A
+	// named query can contribute its own page cap when it is inlined; compose
+	// those two caps exactly as the nested expansion path above does. Raw
+	// duplicate directives were already rejected by the first peeling pass.
+	if plan.Limit != nil && plan.SourceFunction != "" {
+		folded, err := narrowExpandedQueryPage(resolved, plan.Limit)
+		if err != nil {
+			return err
+		}
+		if folded {
+			plan.Limit = nil // the second pass extracts the composed inner cap
+		}
 	}
 	plan.Root = resolved
 	return nil

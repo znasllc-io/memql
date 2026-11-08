@@ -55,6 +55,11 @@ export function RowsPanel({ concept, walk, search = "", onSearch }: { concept: C
         </div>
       ) : null}
 
+      {walk.status === "disconnected" ? (
+        <Notice tone="info" sentence="Reconnecting to the cluster."
+          detail={walk.rows.length ? "Showing the rows already loaded." : "Waiting for the rows to load."} />
+      ) : null}
+
       {walk.status === "failed" ? (
         <Notice
           tone="error"
@@ -88,7 +93,7 @@ export function RowsPanel({ concept, walk, search = "", onSearch }: { concept: C
         </RecordList>
       )}
 
-      {/* FOUR STATES, EACH SAYING SOMETHING DIFFERENT. "Loaded N" with no
+      {/* EACH STATE SAYS SOMETHING DIFFERENT. "Loaded N" with no
           more to come and "loaded N, more available" are the two a reader
           most needs told apart: the first means the number below is the
           whole answer. */}

@@ -35,7 +35,7 @@ export function useDeployableDirectory(resource: "sources" | "deployables", filt
       return { rows: [{ id: META, total: Number(row.total ?? 0), archivedCount: Number(row.archivedCount ?? 0), provenanceError: typeof row.provenanceError === "string" ? row.provenanceError : "" }, ...(Array.isArray(row.entries) ? row.entries as Entry[] : [])], nextCursor: typeof row.nextCursor === "string" ? row.nextCursor : "" };
     },
   }));
-  const revision = useGraphRevision(["v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:platform:sourceCredential", "v1:platform:sourceConnection"], enabled, { externalRecovery: true });
+  const revision = useGraphRevision(["v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:platform:sourceCredential", "v1:platform:sourceConnection"], enabled, { externalRecovery: true, onPaneResume: () => feed.reseed({ ifIdle: true }) });
   const previous = useRef({ key, revision });
   useEffect(() => { const before = previous.current; previous.current = { key, revision }; if (enabled && before.key === key && before.revision !== revision) feed.reseed(); }, [key, revision, enabled, feed.reseed]);
   const flat = useLiveView<Entry, DeployableListRow>(feed.source, key, rows => rows.map(deployable).filter((row): row is DeployableListRow => row !== null));

@@ -988,6 +988,15 @@ defaults to false and must be a literal boolean in a filter. Both modes treat
 older records the client has not loaded. `refine` is not a substitute for this
 search because it only examines the page already read.
 
+To search a combined name, `filter` also accepts
+`(row.firstName + " " + row.lastName).includes(args.q, true)`. This receiver
+joins schema-declared string or datetime fields and string literals; a missing
+or null field contributes empty text. Each `+` subexpression must have a
+string literal or an already joined string on one side. Two fields alone,
+untyped values and numeric, object or list operands are refused. This narrow
+form keeps the complete-name search before pagination; it does not admit
+general row arithmetic into filters.
+
 ### Retired spellings
 
 Edition 2026 retires the spellings below. The parser refuses each one wherever
@@ -1293,6 +1302,12 @@ sort(
   predicate over the declared sort keys and continues from the encoded
   position. The first page is bounded by a plain SQL `LIMIT`.
 
+Wrapping a named query, as in `paginate(query recentItems(), 10)`, may narrow
+its declared page size. The effective size is the smaller of the caller's
+limit and the query's own cap, applied in SQL before materialization. A larger
+caller limit cannot widen that cap. Repeating `paginate` in the same authored
+expression or declaration remains an error.
+
 A full bounded page reports `hasMore: true` because it cannot prove
 exhaustion. Named queries bound to a concept support cursor continuation over
 schema-declared `string`, `datetime` and string-enum payload fields, with
@@ -1300,6 +1315,11 @@ schema-declared `string`, `datetime` and string-enum payload fields, with
 `datetime` retains its string ordering. Missing, null and blank fields sort
 last in either direction. Use an explicit stable `row.id` tie-breaker when
 updates should not move rows with equal resource timestamps.
+
+Text row intrinsics (`createdBy`, `concept`, `type`) also support continuation,
+as leading or secondary keys. Their whitespace and blank-value handling
+matches the in-process comparator; the cursor includes every declared key,
+including an explicit descending `id` tie-breaker.
 
 Unbound payload sorts and unsupported types (including objects and numeric
 fields) still use the bounded in-memory sort and emit no cursor. A consumer

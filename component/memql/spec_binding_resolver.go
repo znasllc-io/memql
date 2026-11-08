@@ -396,6 +396,14 @@ func rewriteSpecFields(expr ExpressionNode, mapper func(FieldReference) (FieldRe
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		if node.TextConcat != nil {
+			mapped, err := node.TextConcat.mapFields(mapper)
+			if err != nil {
+				return err
+			}
+			node.TextConcat = mapped
+			return nil
+		}
 		// A comparison on a collection ELEMENT reads the element, not the
 		// bound surface: `$elem.qty` is not a field of the bound concept or
 		// shape, and mapping it would either refuse a valid body or prefix it

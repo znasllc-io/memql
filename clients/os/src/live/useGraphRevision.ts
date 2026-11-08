@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useConnectionStatus } from "../chrome/connection";
 import { useOsConnection } from "./connection";
 import { onAppResume } from "./resume";
@@ -9,8 +9,10 @@ export const LiveReadVisibility = createContext(true);
 
 /** Virtual reads subscribe to their persisted inputs, never to a synthetic
  * concept that cannot emit. Batch a burst into one invalidation. */
-export function useGraphRevision(concepts: readonly string[], enabled = true, { externalRecovery = false }: { externalRecovery?: boolean } = {}) {
+export function useGraphRevision(concepts: readonly string[], enabled = true, { externalRecovery = false, onPaneResume }: { externalRecovery?: boolean; onPaneResume?: () => void } = {}) {
   const connection = useOsConnection();
+  const resume = useRef(onPaneResume);
+  useLayoutEffect(() => { resume.current = onPaneResume; }, [onPaneResume]);
   const windowVisible = useContext(LiveReadVisibility);
   const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
   useEffect(() => {
@@ -35,7 +37,11 @@ export function useGraphRevision(concepts: readonly string[], enabled = true, { 
     const needsRecovery = externalRecovery ? !before.paneActive : !before.active || before.status !== "connected";
     if (active && status === "connected" && needsRecovery) {
       lastRecovery.current = Date.now();
-      setRevision(value => value + 1);
+      // A session starts its own repair after a paused collection is retained.
+      // Callers can coalesce this same pane-resume signal with that read, while
+      // actual graph changes below still request a trailing invalidation.
+      if (externalRecovery && resume.current) resume.current();
+      else setRevision(value => value + 1);
     }
   }, [active, paneActive, status, externalRecovery]);
   useEffect(() => {

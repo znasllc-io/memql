@@ -208,6 +208,14 @@ func keysetEligibleSort(sorter *compiledSort) (eligible bool, createdAtDesc bool
 	if sorter.needsFullScan() {
 		return false, false
 	}
+	// The legacy codec has only timestamp and id values. Any other key must
+	// have enabled the value-key codec above; accepting it just because a
+	// timestamp leads the order would silently skip equal-timestamp rows.
+	for _, field := range sorter.fields {
+		if field.kind != sortFieldCreatedAt && field.kind != sortFieldId {
+			return false, false
+		}
+	}
 	// Find the effective leading createdAt direction. The compiled fields end
 	// with the appended createdAt-desc / id-asc fallbacks; an author-declared
 	// `sort createdAt asc` lands ahead of them.

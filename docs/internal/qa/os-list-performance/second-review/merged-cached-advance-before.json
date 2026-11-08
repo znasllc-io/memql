@@ -1,0 +1,206 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 0,
+  "numFailedTestSuites": 1,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 16,
+  "numPassedTests": 0,
+  "numFailedTests": 2,
+  "numPendingTests": 14,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1794099785585,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [],
+          "fullName": "uses two ten-row queries to show the newest ten combined records and retains the loaded window on reopen",
+          "status": "skipped",
+          "title": "uses two ten-row queries to show the newest ten combined records and retains the loaded window on reopen",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "searches and filters the server population before paging, including records beyond the initial page",
+          "status": "skipped",
+          "title": "searches and filters the server population before paging, including records beyond the initial page",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "holds the merged window until both page frontiers succeed and retries only the failed side",
+          "status": "skipped",
+          "title": "holds the merged window until both page frontiers succeed and retries only the failed side",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "waits for group membership before asking the directory and suppresses unrelated catalogs",
+          "status": "skipped",
+          "title": "waits for group membership before asking the directory and suppresses unrelated catalogs",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the merged window behind an interrupted frontier and retries only that side",
+          "status": "skipped",
+          "title": "keeps the merged window behind an interrupted frontier and retries only that side",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "does not reveal a merged page when a second Load more overlaps its pending frontier",
+          "status": "skipped",
+          "title": "does not reveal a merged page when a second Load more overlaps its pending frontier",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "shares a completed merged window across consumers while a new authenticated connection starts at ten",
+          "status": "skipped",
+          "title": "shares a completed merged window across consumers while a new authenticated connection starts at ten",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "withholds a partial initial merge until both source frontiers are known",
+          "status": "skipped",
+          "title": "withholds a partial initial merge until both source frontiers are known",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "holds the reliable prefix during a shared live-removal refill (Load more during repair: false)",
+          "status": "skipped",
+          "title": "holds the reliable prefix during a shared live-removal refill (Load more during repair: false)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "holds the reliable prefix during a shared live-removal refill (Load more during repair: true)",
+          "status": "skipped",
+          "title": "holds the reliable prefix during a shared live-removal refill (Load more during repair: true)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the reliable prefix and stops automatic retries after 5 live removals and a failed refill",
+          "status": "skipped",
+          "title": "keeps the reliable prefix and stops automatic retries after 5 live removals and a failed refill",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "keeps the reliable prefix and stops automatic retries after 10 live removals and a failed refill",
+          "status": "skipped",
+          "title": "keeps the reliable prefix and stops automatic retries after 10 live removals and a failed refill",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stops a shared refill when its last visible consumer leaves (hide)",
+          "status": "skipped",
+          "title": "stops a shared refill when its last visible consumer leaves (hide)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "stops a shared refill when its last visible consumer leaves (unmount)",
+          "status": "skipped",
+          "title": "stops a shared refill when its last visible consumer leaves (unmount)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "coalesces overlapping cached-window advances for recent order",
+          "status": "failed",
+          "title": "coalesces overlapping cached-window advances for recent order",
+          "duration": 70.20529200000004,
+          "failureMessages": [
+            "AssertionError: expected 30 to be 20 // Object.is equality\n    at /Users/znas/memql-os-lists/clients/os/test/users/directory.test.tsx:245:39\n    at file:///Users/znas/memql-os-lists/clients/os/node_modules/vitest/dist/chunks/run.BPv-BBRv.js:2801:20"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        },
+        {
+          "ancestorTitles": [],
+          "fullName": "coalesces overlapping cached-window advances for name order",
+          "status": "failed",
+          "title": "coalesces overlapping cached-window advances for name order",
+          "duration": 55.368499999999926,
+          "failureMessages": [
+            "AssertionError: expected 30 to be 20 // Object.is equality\n    at /Users/znas/memql-os-lists/clients/os/test/users/directory.test.tsx:245:39\n    at file:///Users/znas/memql-os-lists/clients/os/node_modules/vitest/dist/chunks/run.BPv-BBRv.js:2801:20"
+          ],
+          "meta": {},
+          "tags": [],
+          "benchmarks": []
+        }
+      ],
+      "startTime": 1794099786059,
+      "endTime": 1794099786184.3684,
+      "status": "failed",
+      "message": "",
+      "name": "/Users/znas/memql-os-lists/clients/os/test/users/directory.test.tsx"
+    }
+  ]
+}

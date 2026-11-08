@@ -42,6 +42,7 @@ export {
   liveStoreFor,
   type LiveCollectionSpec,
   type LiveHandle,
+  type LiveReseedOptions,
   type LiveSnapshot,
   type LiveState,
   type LiveStoreHost,
