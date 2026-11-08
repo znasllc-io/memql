@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { Head, Panel, Select } from "../../kit";
+import { Head, Panel } from "../../kit";
 import { RegistrySection } from "./RegistrySection";
 import {
-  CONCEPTS_PAGE_SIZES,
   CONCEPTS_SECTIONS,
   DEFAULT_CONCEPTS_SETTINGS,
   LocalConceptsSettingsStore,
@@ -116,26 +115,6 @@ function ConceptsSettingsSection({
           <p className="os-caption">
             Applies the next time a Concepts window opens. It does not move the window you are
             looking at.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Rows per page</legend>
-          <Select
-            id="concepts-page-size"
-            label="Rows per page"
-            value={String(settings.pageSize)}
-            onChange={(next) => update({ pageSize: Number(next) })}
-          >
-            {CONCEPTS_PAGE_SIZES.map((size) => (
-              <option key={size} value={String(size)}>
-                {size}
-              </option>
-            ))}
-          </Select>
-          <p className="os-caption">
-            How many rows one page of a concept's row window asks the cluster for. Changing it
-            starts the walk again from the first page.
           </p>
         </fieldset>
 

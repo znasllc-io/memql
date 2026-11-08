@@ -50,6 +50,8 @@ func (i *Integration) IntegrationName() string { return "email" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(workflowhost.ScopedCapabilities((&installationScope{}).operations()), []memql.IntegrationCapability{
 		{Name: "azureSetup", Description: "Connect an organization to Azure email with delegated Microsoft sign-in.", Handler: i.handleAzureSetup},
+		{Name: "inboxPage", Description: "Read a bounded page of restricted captured message summaries.", Handler: i.handleInboxPage},
+		{Name: "inboxMessage", Description: "Read one restricted captured message.", Handler: i.handleInboxMessage},
 		{Name: "inbox", Description: "Read the restricted captured test inbox.", Handler: i.handleInbox, ArgsSchema: map[string]string{}},
 		{
 			Name:        "sendEmail",

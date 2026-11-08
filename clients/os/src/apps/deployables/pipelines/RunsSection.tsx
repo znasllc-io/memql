@@ -1,10 +1,16 @@
+import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useLiveCollection } from "../../../live/useLiveCollection";
+import { packageFromRow, PACKAGE_CONCEPT } from "../packages/rows";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ListChecks } from "lucide-react";
 
 import { Button, EmptyState, Head, Notice, Refine, Select, useNow, type RefineChip } from "../../../kit";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { RecordRow } from "../../../kit/RecordRow";
-import { useOsConnection } from "../../../live/connection";
+import { LoadMore } from "../../../kit/LoadMore";
+import { useLiveView } from "../../../live/liveView";
+import { usePipelineRun, usePipelineRuns, type RunsFeed } from "./feeds";
+import { useDebouncedValue, TEXT_DEBOUNCE_MS } from "../../../logs/useDebouncedValue";
 import type { LiveView } from "../../../live/liveView";
 import { useArrivals } from "../../../live/useArrivals";
 import type { OsAppProps } from "../../../system/registry";
@@ -15,7 +21,7 @@ import { Mark } from "./Mark";
 import { Phrases } from "./Phrases";
 import { isFinished, runFromRow, runRingFingerprint, sameId, type PipelineRow, type RunRow } from "./rows";
 import {
-  branchesOf, filterIsNarrowing, filterRuns, groupByDay, NO_RUN_FILTER, OUTCOME_FACETS, type OutcomeKey, type RunFilter,
+  branchesOf, filterIsNarrowing, groupByDay, NO_RUN_FILTER, OUTCOME_FACETS, type OutcomeKey, type RunFilter,
 } from "./runs";
 import { RunPage } from "./RunPage";
 import { branchWords, runOutcome, runTitle, shortSha, timeOfDay, triggerWords } from "./words";
@@ -41,10 +47,9 @@ import "./pipelines.css";
 // here because they are grouped under day headings, which LiveList does not
 // draw.
 //
-// THE LIVE WINDOW AND THE PAST. The root retains the newest runs (the first
-// pages of `pipelineRunsForOwner`) live; "Show older runs" reads the next
-// page once, on request, and appends it. Older runs are finished runs and do
-// not move, and a re-run of one arrives at the top of the live window.
+// THE LIVE WINDOW AND THE PAST. Ten recent summaries load first; Load more
+// appends ten through the server cursor. Selected runs and visible source names
+// have scoped reads, independent of the retained directory depth.
 
 type RunsView = { kind: "list" } | { kind: "run"; runId: string };
 
@@ -53,7 +58,7 @@ export interface RunsSectionProps {
   navigation?: OsAppProps["navigation"];
   runs: LiveView<RunRow> | null;
   /** The live window's cursor, and its re-read. */
-  feed: { olderCursor: () => string; reseed: () => void };
+  feed: RunsFeed;
   pipelines: readonly PipelineRow[];
   packages: readonly PackageRow[];
   openRequest?: { runId: string; revision: number };
@@ -65,7 +70,7 @@ export interface RunsSectionProps {
 }
 
 export function RunsSection(props: RunsSectionProps) {
-  const { active, navigation, runs, pipelines, packages, openRequest, filterRequest } = props;
+  const { active, navigation, pipelines, packages, openRequest, filterRequest } = props;
   const [view, setView] = useState<RunsView>({ kind: "list" });
   const [filter, setFilter] = useState<RunFilter>(NO_RUN_FILTER);
   const lastNavigation = useRef<number | undefined>(undefined);
@@ -94,18 +99,30 @@ export function RunsSection(props: RunsSectionProps) {
     }
   }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, filterRequest?.revision]);
 
+  const search = useDebouncedValue(filter.search, TEXT_DEBOUNCE_MS);
+  const criteria = { ...filter, search };
+  const feed = usePipelineRuns(active, criteria);
+  const runs = useLiveView(feed.source, "runs", rows => rows.map(runFromRow).filter(row => row.id !== ""));
   const snapshot = runs?.snapshot ?? null;
-  const live = snapshot?.rows ?? [];
-  const [older, setOlder] = useState<RunRow[]>([]);
-  const all = useMemo(() => {
-    if (older.length === 0) return live;
-    const held = new Set(live.map((r) => r.id));
-    return [...live, ...older.filter((r) => !held.has(r.id))];
-  }, [live, older]);
+  const listed = snapshot?.rows ?? [];
+  const selected = usePipelineRun(view.kind === "run" && !listed.some(row => sameId(row.id, view.runId)) ? view.runId : "");
+  const all = selected.snapshot.rows.length ? [...listed, ...selected.snapshot.rows.map(runFromRow)] : listed;
+  const packageIds = [...new Set(pipelines.filter(pipeline => all.some(run => sameId(run.pipelineId, pipeline.id)) || sameId(filter.pipelineId, pipeline.id)).map(pipeline => pipeline.packageId).filter(Boolean))].sort();
+  const names = useLiveCollection<Row>(active && packageIds.length ? `pipelines:package-names:${JSON.stringify(packageIds)}` : null, connection => ({
+    concept: PACKAGE_CONCEPT,
+    eventInScope: id => packageIds.some(candidate => sameId(candidate, id)),
+    inScope: row => packageIds.some(candidate => sameId(candidate, rowString(row, "id"))),
+    seed: async (cursor, signal) => {
+      const result = await connection.query.packageNamesByIds({ ids: packageIds }, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: (id, signal) => getRowByConceptAndId(connection.query, PACKAGE_CONCEPT, id, { signal }),
+  }));
+  const namedPackages = [...packages, ...names.snapshot.rows.map(packageFromRow)];
 
   // A run's source is its pipeline's package: one pipeline per source (D12).
   const pipelineName = (pipeline: PipelineRow): string => {
-    const pkg = packages.find((p) => sameId(p.id, pipeline.packageId));
+    const pkg = namedPackages.find((p) => sameId(p.id, pipeline.packageId));
     return pkg ? sourceName(pkg) : pipeline.repository;
   };
   const sourceOf = (run: RunRow): { name: string; packageId: string } => {
@@ -138,21 +155,18 @@ export function RunsSection(props: RunsSectionProps) {
     );
   }
 
-  return <RunsList {...props} all={all} older={older} setOlder={setOlder} filter={filter} setFilter={setFilter} sourceOf={sourceOf}
+  return <RunsList {...props} runs={runs} feed={feed} all={all} filter={filter} setFilter={setFilter} sourceOf={sourceOf}
     pipelineName={pipelineName} onOpen={(runId) => setView({ kind: "run", runId })} />;
 }
 
-function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilter, sourceOf, pipelineName, onOpen, onOpenSources }: RunsSectionProps & {
+function RunsList({ runs, feed, pipelines, all, filter, setFilter, sourceOf, pipelineName, onOpen, onOpenSources }: RunsSectionProps & {
   all: readonly RunRow[];
-  older: readonly RunRow[];
-  setOlder: (rows: RunRow[]) => void;
   filter: RunFilter;
   setFilter: (f: RunFilter) => void;
   sourceOf: (run: RunRow) => { name: string; packageId: string };
   pipelineName: (pipeline: PipelineRow) => string;
   onOpen: (runId: string) => void;
 }) {
-  const connection = useOsConnection();
   const now = useNow(60_000);
   const snapshot = runs?.snapshot ?? null;
   const state = snapshot?.state ?? "disconnected";
@@ -165,30 +179,9 @@ function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilt
   const seen = useRef<Set<string>>(new Set());
   useEffect(() => { for (const r of all) seen.current.add(r.id); });
 
-  const filtered = filterRuns(all, filter);
+  const filtered = all;
   const days = groupByDay(filtered, now);
   const narrowing = filterIsNarrowing(filter);
-
-  // OLDER RUNS, one page per request, after the live window or the last page read.
-  const [olderCursor, setOlderCursor] = useState<string | null>(null);
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const [olderError, setOlderError] = useState("");
-  const cursor = olderCursor ?? feed.olderCursor();
-  async function loadOlder() {
-    if (!connection || cursor === "") return;
-    setLoadingOlder(true);
-    setOlderError("");
-    try {
-      const result = await connection.query.pipelineRunsForOwner({}, { cursor });
-      const page = result.rows().map(runFromRow).filter((r) => r.id !== "");
-      setOlder([...older, ...page]);
-      setOlderCursor(result.meta()?.cursor ?? "");
-    } catch (err) {
-      setOlderError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoadingOlder(false);
-    }
-  }
 
   const chips: RefineChip[] = [];
   if (filter.pipelineId !== "") {
@@ -203,7 +196,7 @@ function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilt
 
   return (
     <div className="os-app-stack pipeline-runs" data-os-page-context={JSON.stringify({ page: "Runs" })}>
-      <Head title="Runs" meta={settled ? filtered.length : undefined}>
+      <Head title="Runs" meta={settled ? `${filtered.length}${feed.hasMore ? "+" : ""} recent` : undefined}>
         <Refine iconOnly search={filter.search} onSearch={(search) => setFilter({ ...filter, search })} chips={chips} label="Refine runs">
           <Select id="runs-source" label="Source" value={filter.pipelineId} onChange={(pipelineId) => setFilter({ ...filter, pipelineId })}>
             <option value="">Any source</option>
@@ -263,14 +256,7 @@ function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilt
         </div>
       )}
 
-      {settled && cursor !== "" && filtered.length > 0 ? (
-        <div className="pipeline-runs-more">
-          <button type="button" className="os-sort" onClick={() => void loadOlder()} disabled={loadingOlder} aria-busy={loadingOlder || undefined}>
-            Show older runs
-          </button>
-          {olderError !== "" ? <span className="os-caption" role="status">{olderError}</span> : null}
-        </div>
-      ) : null}
+      <LoadMore feed={feed} />
     </div>
   );
 }

@@ -1666,8 +1666,22 @@ func (l *lowerer) arrayPredicate(e *ast.CallExpr) (ExpressionNode, error) {
 
 // includes lowers `<field>.includes(<sub>)`.
 func (l *lowerer) includes(e *ast.CallExpr) (ExpressionNode, error) {
-	if len(e.Args) != 1 || len(e.Named) > 0 {
-		return nil, l.refuse(e, ".includes() takes one string", "Write `"+ast.FormatExpr(e.Receiver)+".includes(\"...\")`")
+	if len(e.Args) < 1 || len(e.Args) > 2 || len(e.Named) > 0 {
+		return nil, l.refuse(e, ".includes() takes a string and an optional ignoreCase boolean", "Write `"+ast.FormatExpr(e.Receiver)+".includes(\"...\", true)`")
+	}
+	op := OpIncludes
+	if len(e.Args) == 2 {
+		flag, literal := ast.Unparen(e.Args[1]).(*ast.LiteralExpr)
+		if !literal {
+			return nil, l.refuse(e, "the ignoreCase option in a filter must be a literal boolean", "Write `.includes(args.search, true)` or `.includes(args.search, false)`")
+		}
+		ignoreCase, boolean := flag.Value.(bool)
+		if !boolean {
+			return nil, l.refuse(e, "the ignoreCase option must be a boolean", "Write `.includes(args.search, true)` or `.includes(args.search, false)`")
+		}
+		if ignoreCase {
+			op = OpIncludesFold
+		}
 	}
 	recv, err := l.operand(e.Receiver)
 	if err != nil {
@@ -1706,7 +1720,7 @@ func (l *lowerer) includes(e *ast.CallExpr) (ExpressionNode, error) {
 	if lit, ok := arg.value.(string); ok && strings.TrimSpace(lit) == "" {
 		return &constantBoolExpression{value: false, planConstant: true}, nil
 	}
-	return &ComparisonExpression{Field: recv.field, Operator: OpIncludes, Value: arg.value}, nil
+	return &ComparisonExpression{Field: recv.field, Operator: op, Value: arg.value}, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,11 @@ export interface LiveSnapshot<T> {
   version: number;
   /** A paged seed stopped at its safety limit with a cursor still outstanding. */
   truncated?: boolean;
+  /** Present for explicitly paged collections. Older pages are read on demand. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  loadMoreError?: string;
+  pageCount?: number;
 }
 
 export interface SeedPage<T> {
@@ -100,6 +105,11 @@ export interface LiveCollectionSpec<T = Row> {
   // read's meaning belongs -- including a narrowing no query declares. Use
   // this to say the same thing about events.
   inScope?: (row: T) => boolean;
+  /** Reject unrelated identities before performing an authorized event re-read. */
+  eventInScope?: (rowId: string) => boolean;
+  /** Same order as the server page (negative means earlier). Prevents events
+   * for older, unloaded records from gradually expanding a manual directory. */
+  comparePageRows?: (left: T, right: T) => number;
   // Re-read EVERY event through `reread`, not only the id-only ones.
   //
   // The default trusts a full payload, which is right for a list whose event
@@ -155,6 +165,8 @@ export interface LiveCollectionSpec<T = Row> {
   // Runaway-cursor guard for the paged walk (default 50 pages). A server that
   // keeps minting a cursor would otherwise spin forever.
   maxPages?: number;
+  /** Read one page initially, then one per loadMore(). Recovery keeps the loaded depth. */
+  manualPages?: boolean;
 }
 
 const DEFAULT_MAX_PAGES = 50;
@@ -250,6 +262,13 @@ export class LiveCollection<T = Row> {
   private state: LiveState = "seeding";
   private errorText = "";
   private truncated = false;
+  private nextCursor = "";
+  private loadedPages = 1;
+  private loadingMore = false;
+  private loadMoreError = "";
+  private started = false;
+  private eventRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastEventRefresh = -Infinity;
   private versionValue = 0;
   private readonly listeners = new Set<() => void>();
   private cachedSnapshot: LiveSnapshot<T> | null = null;
@@ -285,6 +304,7 @@ export class LiveCollection<T = Row> {
     private readonly subscriptions: SubscriptionManager | null,
     private readonly lingerMs: number,
     private readonly rereadQueue = new RereadQueue(),
+    private readonly cacheReleased = false,
   ) {}
 
   get snapshot(): LiveSnapshot<T> {
@@ -298,6 +318,10 @@ export class LiveCollection<T = Row> {
         error: this.errorText,
         version: this.versionValue,
         truncated: this.truncated,
+        ...(this.spec.manualPages ? {
+          hasMore: this.nextCursor !== "", loadingMore: this.loadingMore, loadMoreError: this.loadMoreError,
+          pageCount: this.loadedPages,
+        } : {}),
       };
     }
     return this.cachedSnapshot;
@@ -323,7 +347,7 @@ export class LiveCollection<T = Row> {
       clearTimeout(this.lingerTimer);
       this.lingerTimer = null;
     }
-    if (this.unsubscribe === null && !this.closed) this.start();
+    if (!this.started && !this.closed) this.start();
   }
 
   release(onExpire: () => void): void {
@@ -332,8 +356,8 @@ export class LiveCollection<T = Row> {
     this.lingerTimer = setTimeout(() => {
       this.lingerTimer = null;
       if (this.refs === 0) {
-        this.close();
-        onExpire();
+        if (this.cacheReleased) this.pause();
+        else { this.close(); onExpire(); }
       }
     }, this.lingerMs);
   }
@@ -342,7 +366,7 @@ export class LiveCollection<T = Row> {
   // explicit refresh -- one mechanism, so there is one thing to get right.
   // Coalesced: a burst produces exactly one seed.
   reseed(): void {
-    if (this.closed) return;
+    if (this.closed || (this.cacheReleased && !this.started)) return;
     if (this.seedRunning) {
       this.seedPending = true;
       // Rows on screen are known to be behind now, and saying so is the whole
@@ -351,6 +375,52 @@ export class LiveCollection<T = Row> {
       return;
     }
     void this.runSeed();
+  }
+
+  /** Append exactly one server page. Repeated clicks share the same read. */
+  async loadMore(): Promise<void> {
+    if (!this.spec.manualPages || this.closed || !this.started || this.seedRunning || this.nextCursor === "") return;
+    this.seedRunning = true;
+    this.loadingMore = true;
+    this.loadMoreError = "";
+    const cursor = this.nextCursor;
+    const abort = new AbortController();
+    this.seedAbort = abort;
+    const arrivals = new Map<string, T | null>();
+    this.arrivals = arrivals;
+    this.bump();
+    try {
+      const page = await this.spec.seed(cursor, abort.signal);
+      if (abort.signal.aborted || this.closed) return;
+      if (page.nextCursor === cursor) throw new Error("The next page did not advance. Try again.");
+      const idOf = this.spec.rowId ?? (defaultRowId as (row: T) => string);
+      // The read authorizes membership; the version judge prevents an older
+      // page from overwriting a newer event already on screen.
+      for (const row of page.rows) {
+        const id = idOf(row);
+        if (!id || this.entombed(id, row) || !this.supersedes(row, this.rowsById.get(id))) continue;
+        if (!this.rowsById.has(id)) this.order.push(id);
+        this.rowsById.set(id, row);
+      }
+      // A deletion without a version must also win over an in-flight page.
+      for (const [id, row] of arrivals) {
+        if (row === null) this.drop(id);
+        else this.place(id, row);
+      }
+      this.nextCursor = page.nextCursor;
+      this.loadedPages++;
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        if (isTransportInterruption(err)) this.setState("disconnected");
+        else this.loadMoreError = err instanceof Error ? err.message : String(err);
+      }
+    } finally {
+      if (this.arrivals === arrivals) this.arrivals = null;
+      this.loadingMore = false;
+      this.seedRunning = false;
+      this.bump();
+      if (this.seedPending && !this.closed && this.started) void this.runSeed();
+    }
   }
 
   // markDisconnected is called by the store when the stream is down. Rows are
@@ -377,13 +447,26 @@ export class LiveCollection<T = Row> {
     this.listeners.clear();
   }
 
+  private pause(): void {
+    // Keep the authorized answer and cursor for this session, but stop work
+    // for a closed app. A later retain shows that answer immediately while
+    // subscribe-then-seed repairs changes missed during the pause.
+    this.started = false;
+    this.seedPending = false;
+    this.seedAbort?.abort();
+    this.clearRereads();
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
+
   // ---- internals ---------------------------------------------------------
 
   private start(): void {
+    this.started = true;
     // SUBSCRIBE FIRST. See the module comment: registration is synchronous
     // server-side, so a row written during the seed arrives as an event and
     // folds by id. Reading first can miss it forever.
-    if (this.subscriptions && typeof this.subscriptions.subscribeGraph === "function") {
+    if (this.spec.actions?.length !== 0 && this.subscriptions && typeof this.subscriptions.subscribeGraph === "function") {
       try {
         this.unsubscribe = this.subscriptions.subscribeGraph((event) => this.fold(event), {
           concept: this.spec.concept,
@@ -395,11 +478,12 @@ export class LiveCollection<T = Row> {
         // still work on the same connection. It breaks the PROMISE that it is
         // live, which has to be said out loud rather than inferred from rows
         // that never appear.
-        this.errorText = err instanceof Error ? err.message : String(err);
-        this.setState("degraded");
+        this.setState("degraded", err instanceof Error ? err.message : String(err));
       }
     }
-    void this.runSeed();
+    // An aborted transport is allowed to settle late; never overlap it.
+    if (this.seedRunning) this.seedPending = true;
+    else void this.runSeed();
   }
 
   private async runSeed(): Promise<void> {
@@ -426,8 +510,8 @@ export class LiveCollection<T = Row> {
     const collected = new Map<string, T>();
     const seenOrder: string[] = [];
     const idOf = this.spec.rowId ?? (defaultRowId as (row: T) => string);
-    const maxPages = this.spec.maxPages ?? DEFAULT_MAX_PAGES;
-    const paged = this.spec.paged !== false;
+    const maxPages = this.spec.manualPages ? this.loadedPages : this.spec.maxPages ?? DEFAULT_MAX_PAGES;
+    const paged = this.spec.manualPages || this.spec.paged !== false;
 
     try {
       let cursor = "";
@@ -447,7 +531,9 @@ export class LiveCollection<T = Row> {
       // REPLACE, not merge. The read is the authority on membership: a row
       // the seed no longer returns is a row that left the set, and merging
       // would keep it on screen forever.
-      this.truncated = paged && cursor !== "";
+      this.truncated = !this.spec.manualPages && paged && cursor !== "";
+      this.nextCursor = cursor;
+      this.loadMoreError = "";
       this.rowsById = collected;
       this.order = seenOrder;
       // ...THEN REPLAY what arrived while it read, through the same rules a
@@ -465,20 +551,18 @@ export class LiveCollection<T = Row> {
     } catch (err) {
       if (abort.signal.aborted) return;
       if (isTransportInterruption(err)) {
-        this.errorText = "";
-        this.setState("disconnected");
+        this.setState("disconnected", "");
         return;
       }
-      this.errorText = err instanceof Error ? err.message : String(err);
       // Rows already on screen stay, marked degraded; with nothing to show,
       // "seeding" would be a lie about work in progress.
-      this.setState(this.rowsById.size > 0 ? "degraded" : "live");
+      this.setState(this.rowsById.size > 0 ? "degraded" : "live", err instanceof Error ? err.message : String(err));
     } finally {
       // A seed that failed or was abandoned has nothing to replay onto: what
       // arrived during it already folded onto the rows on screen.
       if (this.arrivals === arrivals) this.arrivals = null;
       this.seedRunning = false;
-      if (this.seedPending && !this.closed) {
+      if (this.seedPending && !this.closed && this.started) {
         this.seedPending = false;
         void this.runSeed();
       }
@@ -488,7 +572,7 @@ export class LiveCollection<T = Row> {
   private fold(event: Event): void {
     if (this.closed) return;
     const id = eventRowId(event);
-    if (id === "") return;
+    if (id === "" || this.spec.eventInScope?.(id) === false) return;
 
     if (isDeleteKind(event.kind)) {
       this.cancelReread(id);
@@ -506,6 +590,12 @@ export class LiveCollection<T = Row> {
       // arrives the same way. A REFUSED read drops the event silently: the
       // caller was not entitled to the row, and announcing that one changed
       // would leak exactly what the gate withheld.
+      if (this.spec.manualPages && !this.rowsById.has(id)) {
+        // A stream burst over unloaded rows must not cause one read per row.
+        // Refresh the bounded directory once; the query decides membership.
+        this.queuePageRefresh();
+        return;
+      }
       if (!reread) return;
       this.requestReread(id);
       return;
@@ -514,6 +604,15 @@ export class LiveCollection<T = Row> {
     const payload = event.payload;
     if (!payload) return;
     this.arrive(id, payload as unknown as T);
+  }
+
+  private queuePageRefresh(): void {
+    if (this.eventRefreshTimer !== null || !this.started || this.closed) return;
+    this.eventRefreshTimer = setTimeout(() => {
+      this.eventRefreshTimer = null;
+      this.lastEventRefresh = Date.now();
+      this.reseed();
+    }, Math.max(100, 1_000 - (Date.now() - this.lastEventRefresh)));
   }
 
   private requestReread(id: string): void {
@@ -559,6 +658,8 @@ export class LiveCollection<T = Row> {
   }
 
   private clearRereads(): void {
+    if (this.eventRefreshTimer !== null) clearTimeout(this.eventRefreshTimer);
+    this.eventRefreshTimer = null;
     const pending = [...this.rereads.values()];
     this.rereads.clear();
     for (const read of pending) {
@@ -606,6 +707,14 @@ export class LiveCollection<T = Row> {
       this.entomb(id, versionTimeOf(row));
       return this.drop(id);
     }
+    if (held === undefined && this.spec.manualPages && this.nextCursor && this.spec.comparePageRows && this.rowsById.size) {
+      const compare = this.spec.comparePageRows;
+      let boundary: T | undefined;
+      for (const candidate of this.rowsById.values()) {
+        if (boundary === undefined || compare(candidate, boundary) > 0) boundary = candidate;
+      }
+      if (boundary !== undefined && compare(row, boundary) > 0) return false;
+    }
     if (held === undefined) this.order.push(id);
     this.rowsById.set(id, row);
     this.gone.delete(id);
@@ -651,9 +760,13 @@ export class LiveCollection<T = Row> {
     return true;
   }
 
-  private setState(next: LiveState): void {
-    if (this.state === next) return;
+  private setState(next: LiveState, error = this.errorText): void {
+    // A coalesced reseed can already be degraded before its read fails. The
+    // refusal must still replace the cached snapshot even without a state
+    // transition; otherwise consumers mistake it for lost connectivity.
+    if (this.state === next && this.errorText === error) return;
     this.state = next;
+    this.errorText = error;
     this.bump();
   }
 
@@ -794,6 +907,8 @@ export interface LiveStoreOptions {
   // This is what makes A -> B -> A navigation free; it is also the only
   // memory the store holds after nothing is watching.
   lingerMs?: number;
+  /** Retain rows/cursors until dispose(), pausing subscriptions after lingerMs. */
+  cacheReleased?: boolean;
 }
 
 const DEFAULT_LINGER_MS = 20_000;
@@ -812,6 +927,7 @@ export class LiveStore {
   private readonly collections = new Map<string, LiveCollection<never>>();
   private readonly values = new Map<string, LiveValue<never>>();
   private readonly lingerMs: number;
+  private readonly cacheReleased: boolean;
   private readonly teardown: Array<() => void> = [];
   private readonly gapListeners = new Set<() => void>();
   private lastSeq = 0;
@@ -823,6 +939,7 @@ export class LiveStore {
     opts: LiveStoreOptions = {},
   ) {
     this.lingerMs = opts.lingerMs ?? DEFAULT_LINGER_MS;
+    this.cacheReleased = opts.cacheReleased ?? false;
 
     const subs = host.subscriptions;
     // `typeof === "function"` rather than a bare call, for the reason
@@ -861,16 +978,7 @@ export class LiveStore {
   // use. RETAINED for the caller -- the returned release() is the caller's
   // only obligation.
   collection<T>(key: string, spec: LiveCollectionSpec<T>): LiveHandle<LiveCollection<T>> {
-    let existing = this.collections.get(key) as LiveCollection<T> | undefined;
-    if (!existing) {
-      // `?? null` because the host may be a Connection-SHAPED object rather
-      // than a Connection -- an older SDK, or a test double narrowed to the
-      // methods its subject uses. The declared type says "a manager or null";
-      // an absent field is neither, and the collection's own guard is what
-      // turns that into "no liveness" rather than a call on undefined.
-      existing = new LiveCollection<T>(spec, this.host.subscriptions ?? null, this.lingerMs, this.rereadQueue);
-      this.collections.set(key, existing as unknown as LiveCollection<never>);
-    }
+    const existing = this.prepareCollection(key, spec);
     existing.retain();
     let released = false;
     return {
@@ -881,6 +989,21 @@ export class LiveStore {
         existing.release(() => this.collections.delete(key));
       },
     };
+  }
+
+  /** Allocate without starting work. React retains only after committing. */
+  prepareCollection<T>(key: string, spec: LiveCollectionSpec<T>): LiveCollection<T> {
+    let existing = this.collections.get(key) as LiveCollection<T> | undefined;
+    if (!existing) {
+      // `?? null` because the host may be a Connection-SHAPED object rather
+      // than a Connection -- an older SDK, or a test double narrowed to the
+      // methods its subject uses. The declared type says "a manager or null";
+      // an absent field is neither, and the collection's own guard is what
+      // turns that into "no liveness" rather than a call on undefined.
+      existing = new LiveCollection<T>(spec, this.host.subscriptions ?? null, this.lingerMs, this.rereadQueue, this.cacheReleased);
+      this.collections.set(key, existing as unknown as LiveCollection<never>);
+    }
+    return existing;
   }
 
   // value returns the shared single-read for `key`. Same refcount contract.

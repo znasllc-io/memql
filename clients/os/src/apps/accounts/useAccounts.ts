@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import { useLiveCollection, usePagedCollection } from "../../live/useLiveCollection";
 import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 
 // The client registry's one feed, and the four rollups a detail view reads.
@@ -23,31 +23,32 @@ import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
 // Without the broadcast, the first-run card would keep asking for a company
 // name on a cluster that already had a row waiting.
 
-/**
- * Every account this caller may see, live.
- *
- * NO ARGUMENTS, and `clientAccountsAll`'s `includeArchived` is deliberately
- * not passed: the show-archived toggle is a view over rows already here (see
- * settings.ts). Seeding filtered would make the toggle re-run the read and
- * re-baseline every arrival cue, so flipping it would announce the whole list
- * as new.
- *
- * The gate is the query's own -- the concept's composite tier is ANDed into
- * the read whatever this code asks for -- so a caller sees exactly their own
- * accounts, or every one if they are a cluster owner. Nothing here decides
- * that.
- */
-export function useAccounts(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("accounts:registry", (connection) => ({
+/** Recent/search pages are retained for the authenticated browser session. */
+export function useAccounts(search = "", includeArchived = false) {
+  const needle = search.trim();
+  return usePagedCollection<Row>(`accounts:registry:${JSON.stringify([needle, includeArchived])}`, connection => ({
     concept: ACCOUNT_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.clientAccountsAll({ includeArchived: true }, { signal });
-      return { rows: result.rows(), nextCursor: "" };
+    seed: async (cursor, signal) => {
+      const result = await connection.query.clientAccountsBrowse({ search: needle || undefined, includeArchived }, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, ACCOUNT_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
+    reread: async (accountId, signal) => (await connection.query.clientAccountById({ accountId }, { signal })).rows()[0] ?? null,
+    comparePageRows: (a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(a["id"]).localeCompare(String(b["id"])),
+    inScope: raw => {
+      const account = accountFromRow(raw);
+      return (includeArchived || account.status !== "archived") && (!needle || [account.name, account.domain, account.primaryContactName, account.primaryContactEmail, account.notes].some(value => value.toLowerCase().includes(needle.toLowerCase())));
     },
+  }));
+}
+
+/** The first-run gate and deep links must not depend on the loaded list page. */
+export function useAccountRecord(accountId: string) {
+  return useLiveCollection<Row>(accountId ? `accounts:record:${accountId}` : null, connection => ({
+    concept: ACCOUNT_CONCEPT,
+    eventInScope: id => id === accountId,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.clientAccountById({ accountId }, { signal })).rows(), nextCursor: "" }),
+    reread: async (id, signal) => (await connection.query.clientAccountById({ accountId: id }, { signal })).rows()[0] ?? null,
+    inScope: row => accountFromRow(row).id === accountId,
     paged: false,
   }));
 }

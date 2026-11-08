@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -152,14 +151,13 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 	if limit > maxListLimit {
 		limit = maxListLimit
 	}
-	offset := 0
-	if after := strings.TrimSpace(asString(args["after"])); after != "" {
-		n, err := strconv.Atoi(after)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("reviews: %q is not a cursor this log issued", after)
-		}
-		offset = n
+	search := strings.ToLower(strings.TrimSpace(asString(args["search"])))
+	key := reviewDirectoryKey("decisions", storeID, asString(args["siteId"]), "", search)
+	cursor, offset, err := readDirectoryCursor(strings.TrimSpace(asString(args["after"])), key)
+	if err != nil {
+		return nil, err
 	}
+
 	rows, err := p.rowsFor(ctx, "reviewsInStore", map[string]string{"storeId": storeID})
 	if err != nil {
 		return nil, err
@@ -189,11 +187,29 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 		all = append(all, ds...)
 	}
 	all = newestFirst(all)
-	total := len(all)
-	if offset > total {
-		offset = total
+	matched := all[:0]
+	for _, d := range all {
+		row := byID[canonicalReviewID(d.ReviewID)]
+		if reviewSearchMatches(search, string(d.Action), d.Reason, d.Note, d.DecidedBy, asString(row["title"]), asString(row["productHandle"])) {
+			matched = append(matched, d)
+		}
 	}
-	end := min(offset+limit, total)
+	all = matched
+	total := len(all)
+	if cursor != nil {
+		remaining := all[:0]
+		for _, d := range all {
+			if afterDirectoryCursor(d.At, d.ID, cursor, false, true) {
+				remaining = append(remaining, d)
+			}
+		}
+		all = remaining
+	}
+	available := len(all)
+	if offset > available {
+		offset = available
+	}
+	end := min(offset+limit, available)
 	entries := make([]map[string]any, 0, end-offset)
 	for _, d := range all[offset:end] {
 		row := byID[canonicalReviewID(d.ReviewID)]
@@ -208,8 +224,9 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 		entries = append(entries, entry)
 	}
 	next := ""
-	if end < total {
-		next = strconv.Itoa(end)
+	if end < available {
+		last := all[end-1]
+		next = writeDirectoryCursor(key, last.At, last.ID)
 	}
 	return receipt("v1:reviews:decisionLog", fmt.Sprintf("log-%s-%d", slugOf(storeID), offset), map[string]any{
 		"storeId":   storeID,

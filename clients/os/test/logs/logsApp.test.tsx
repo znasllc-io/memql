@@ -30,7 +30,7 @@ beforeEach(() => {
 describe("the manifest and its settings", () => {
   it("is a real app on the roster, admin-floored, Stream first", () => {
     const logs = appById(OS_REGISTRY, "logs");
-    expect(logs?.component.name).toBe("LogsApp");
+    expect(logs?.component.displayName).toBe("LoadLogs");
     expect(logs?.sections).toBe(LOGS_SECTIONS);
     expect(LOGS_SECTIONS[0]?.id).toBe("stream");
     expect(DEFAULT_LOGS_SETTINGS.defaultSection).toBe("stream");

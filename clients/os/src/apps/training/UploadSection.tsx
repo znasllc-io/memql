@@ -2,13 +2,16 @@ import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 import { FileUp, ScrollText, Upload } from "lucide-react";
 
-import { Button, Caption, Chip, Field, Head, Input, Notice, RecordRow, listCount, Select } from "../../kit";
+import { Button, Caption, Chip, Field, Head, Input, Notice, RecordRow, Refine, listCount, Select } from "../../kit";
 import { formatBytes, formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { LiveList } from "../../live/LiveList";
 import type { LiveView } from "../../live/liveView";
 import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT_ATTRIBUTE, type FileStage } from "./concepts";
 import { stageOf, type AnalysisRun, type TrainingFile } from "./rows";
+import { LoadMore } from "../../kit/LoadMore";
+import type { PagedCollectionHandle } from "../../live/useLiveCollection";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import type { DomainsFeed } from "./useDomains";
 import type { TrainAct } from "./useTrain";
 import type { UploadsState } from "./useUploads";
@@ -47,6 +50,7 @@ import type { UploadsState } from "./useUploads";
 
 export function UploadSection({
   uploads,
+  fileFeed, search, onSearch,
   files,
   snapshot,
   runsByFileId,
@@ -58,6 +62,9 @@ export function UploadSection({
   onAsk,
 }: {
   uploads: UploadsState;
+  fileFeed: PagedCollectionHandle<Row>;
+  search: string;
+  onSearch: (search: string) => void;
   files: LiveView<TrainingFile> | null;
   snapshot: LiveSnapshot<TrainingFile>;
   runsByFileId: Map<string, AnalysisRun>;
@@ -112,6 +119,7 @@ export function UploadSection({
         title="Teach from a file"
         meta={listCount(snapshot)}
       >
+        <Refine label="Search files" search={search} onSearch={onSearch} placeholder="Search files" />
         <Button
           tone="primary"
           onClick={() => picker.current?.click()}
@@ -237,7 +245,7 @@ export function UploadSection({
         rowId={(file) => file.id}
         fingerprint={(file) => fileLineFingerprint(file, runsByFileId.get(file.id))}
         label="Your recent files"
-        emptyText="Nothing here yet. Drop a file above and it appears as the cluster reads it."
+        emptyText={search.trim() ? "No files match this search." : "Nothing here yet. Drop a file above and it appears as the cluster reads it."}
         renderRow={(file, tick) => (
           <FileLine
             file={file}
@@ -251,15 +259,10 @@ export function UploadSection({
           />
         )}
         />
+        <LoadMore feed={fileFeed} />
       </div>
 
-      {/* The scope note, and only over content. An empty list has no "most
-          recent" to be showing part of, and the empty state above already
-          says what to do -- a second sentence under it would be answering a
-          question nobody has yet. */}
-      {snapshot.rows.length > 0 ? (
-        <Caption>Your most recent files. Older ones are in the Files app.</Caption>
-      ) : null}
+
     </div>
   );
 }

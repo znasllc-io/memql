@@ -79,15 +79,6 @@ var (
 	// Args block inside a construct body: `args { ... }`. Single match
 	// per construct (the parser rejects multiple args blocks).
 	argsBlockRe = regexp.MustCompile(`(?s)\bargs[ \t]*\{(.*?)\}`)
-	// Single args field declaration:
-	//   <name>  <type>  [@required] [@enum("a","b")] [@default("...")]
-	//   (an args-field @description is REJECTED by the parser -- memql#3336
-	//   -- so the corpus cannot carry one; field docs come from the ///
-	//   doc comment above the field, #2634)
-	// Multiple lines per block.
-	argsFieldRe = regexp.MustCompile(
-		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)(!?)([ \t]+@[^\n]*)?[ \t]*$`,
-	)
 	// Description annotation above a construct -- spread over lines or not
 	// (memql#5426): the string may sit on a line of its own.
 	descRe = regexp.MustCompile(`(?m)^@description\(\s*"(.*?)"\s*\)`)
@@ -401,7 +392,10 @@ func CollectConstructs(root string) ([]Construct, error) {
 					return fmt.Errorf("parse SDK builtin %s in %s: %w", name, path, err)
 				}
 			} else {
-				args = parseArgsBlock(body)
+				args, err = parseArgsBlock(body)
+				if err != nil {
+					return fmt.Errorf("parse SDK %s %s in %s: %w", kind, name, path, err)
+				}
 			}
 
 			c := Construct{
@@ -533,10 +527,10 @@ func docContextStart(preambles *langparser.PreambleWalker, src string, headerSta
 // doesn't terminate the block early (the regex-based extractor
 // otherwise grabs the `}` from inside the regex and truncates the
 // captured args). See memql#147 for the @pattern annotation surface.
-func parseArgsBlock(body string) []ArgField {
+func parseArgsBlock(body string) ([]ArgField, error) {
 	inner, ok := extractArgsBlockBody(body)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	return parseFields(inner)
 }
@@ -579,72 +573,28 @@ func parseBuiltinFields(name, body string) ([]ArgField, error) {
 	return out, nil
 }
 
-// parseFields parses `<name> <type> [@annotations]` declarations out of
-// the inner text of an `args { }` block in source order.
-func parseFields(inner string) []ArgField {
-	var out []ArgField
-	matches := argsFieldRe.FindAllStringSubmatchIndex(inner, -1)
-	for mi, idx := range matches {
-		fm := make([]string, 0, 5)
-		for g := 0; g < len(idx)/2; g++ {
-			if idx[2*g] < 0 {
-				fm = append(fm, "")
-			} else {
-				fm = append(fm, inner[idx[2*g]:idx[2*g+1]])
-			}
-		}
-		// /// lines immediately above the field are its doc comment
-		// (memql#2634) -- parser adjacency semantics: contiguous /// lines,
-		// ordinary comments transparent, a blank line breaks.
-		prevEnd := 0
-		if mi > 0 {
-			prevEnd = matches[mi-1][1]
-		}
-		fieldDoc := docLinesAbove(inner[prevEnd:idx[0]])
-		name := fm[1]
-		typ := fm[2]
-		sigil := fm[3]
-		annotations := ""
-		if len(fm) > 4 {
-			annotations = fm[4]
-		}
-		af := ArgField{Name: name, Type: typ}
-		// The required sigil and the first-class enum type (#2618) --
-		// same representation the engine parsers produce: sigil means
-		// required, enum("a","b") means string + the value set.
-		if sigil == "!" {
-			af.Required = true
-		}
-		if strings.HasPrefix(typ, "enum(") && strings.HasSuffix(typ, ")") {
-			af.Type = "string"
-			for _, raw := range strings.Split(typ[len("enum("):len(typ)-1], ",") {
-				if v := strings.Trim(strings.TrimSpace(raw), `"`); v != "" {
-					af.Enum = append(af.Enum, v)
-				}
-			}
-		}
-		if strings.Contains(annotations, "@required") {
-			af.Required = true
-		}
-		if fieldDoc != "" {
-			af.Description = fieldDoc
-		} else if dm := regexp.MustCompile(`@description\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
-			af.Description = dm[1]
-		}
-		if dm := regexp.MustCompile(`@default\("([^"]*)"\)`).FindStringSubmatch(annotations); len(dm) > 1 {
-			af.Default = dm[1]
-		}
-		if em := regexp.MustCompile(`@enum\(([^)]*)\)`).FindStringSubmatch(annotations); len(em) > 1 {
-			for _, raw := range strings.Split(em[1], ",") {
-				af.Enum = append(af.Enum, strings.Trim(strings.TrimSpace(raw), `"`))
-			}
-		}
-		if pm := patternAnnotationRe.FindStringSubmatch(annotations); len(pm) > 1 {
-			af.Pattern = pm[1]
-		}
-		out = append(out, af)
+// Use the engine's argument grammar: whitespace does not divide fields.
+// Malformed declarations must not produce silently incomplete client calls.
+func parseFields(inner string) ([]ArgField, error) {
+	schema, err := langparser.ParseArgsSchema("args {" + inner + "}")
+	if err != nil {
+		return nil, err
 	}
-	return out
+	var out []ArgField
+	for _, field := range schema.Fields {
+		typ := field.Type
+		if typ == "array" && field.Items != nil {
+			typ = "[]" + field.Items.Type
+		}
+		arg := ArgField{Name: field.Name, Type: typ, Required: !field.Optional, Description: field.DocComment, Pattern: field.Pattern}
+		for _, value := range field.Enum {
+			if text, ok := value.(string); ok {
+				arg.Enum = append(arg.Enum, text)
+			}
+		}
+		out = append(out, arg)
+	}
+	return out, nil
 }
 
 // extractArgsBlockBody finds the `args { ... }` opening brace inside

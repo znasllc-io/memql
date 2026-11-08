@@ -1,3 +1,4 @@
+import { EMAIL_CATALOGS, type EmailCatalog } from "./catalogs";
 import { countQueries, RUN_STATUSES, type FlowStep } from "./automations/flowModel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -81,8 +82,9 @@ function useListFeed(
   concept: string,
   list: (connection: Connection, cursor: string, signal: AbortSignal) => Promise<Result>,
   inScope?: (row: Row) => boolean,
+  enabled = true,
 ): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>(key, (connection) => ({
+  return useLiveCollection<Row>(enabled ? key : null, (connection) => ({
     concept,
     inScope,
     seed: async (cursor, signal) => {
@@ -96,7 +98,7 @@ function useListFeed(
   }));
 }
 
-export function useCampaignFeed(): LiveCollectionHandle<Row> {
+export function useCampaignFeed(enabled = true): LiveCollectionHandle<Row> {
   return useListFeed(
     "campaigns:campaigns",
     CAMPAIGN_CONCEPT,
@@ -106,31 +108,32 @@ export function useCampaignFeed(): LiveCollectionHandle<Row> {
     // rows the browser already had would announce them as new.
     (connection, cursor, signal) => connection.query.campaigns({}, pageOf(cursor, signal)),
     (row) => !flatten(row).testSourceCampaignId,
+    enabled,
   );
 }
 
-export function useAudienceFeed(): LiveCollectionHandle<Row> {
+export function useAudienceFeed(enabled = true): LiveCollectionHandle<Row> {
   return useListFeed("campaigns:audiences", AUDIENCE_CONCEPT, (connection, cursor, signal) =>
-    connection.query.audiences({}, pageOf(cursor, signal)));
+    connection.query.audiences({}, pageOf(cursor, signal)), undefined, enabled);
 }
 
-export function useTemplateFeed(): LiveCollectionHandle<Row> {
+export function useTemplateFeed(enabled = true): LiveCollectionHandle<Row> {
   return useListFeed("campaigns:templates", TEMPLATE_CONCEPT, (connection, cursor, signal) =>
-    connection.query.templates({}, pageOf(cursor, signal)));
+    connection.query.templates({}, pageOf(cursor, signal)), undefined, enabled);
 }
 
-export function useSenderFeed(): LiveCollectionHandle<Row> {
+export function useSenderFeed(enabled = true): LiveCollectionHandle<Row> {
   return useListFeed("campaigns:senders", SENDER_IDENTITY_CONCEPT, (connection, cursor, signal) =>
-    connection.query.senderIdentities({}, pageOf(cursor, signal)));
+    connection.query.senderIdentities({}, pageOf(cursor, signal)), undefined, enabled);
 }
 
-export function useRuleFeed(): LiveCollectionHandle<Row> {
+export function useRuleFeed(enabled = true): LiveCollectionHandle<Row> {
   return useListFeed("campaigns:rules", EMAIL_RULE_CONCEPT, (connection, cursor, signal) =>
-    connection.query.emailRules({}, pageOf(cursor, signal)));
+    connection.query.emailRules({}, pageOf(cursor, signal)), undefined, enabled);
 }
 
-export function useJourneyFeed(): LiveCollectionHandle<Row> {
-  return useListFeed("campaigns:journeys", "v1:campaigns:journey", (connection, cursor, signal) => connection.query.journeys({}, pageOf(cursor, signal)));
+export function useJourneyFeed(enabled = true): LiveCollectionHandle<Row> {
+  return useListFeed("campaigns:journeys", "v1:campaigns:journey", (connection, cursor, signal) => connection.query.journeys({}, pageOf(cursor, signal)), undefined, enabled);
 }
 
 export interface EmailFeeds {
@@ -142,16 +145,15 @@ export interface EmailFeeds {
   rules: LiveCollectionHandle<Row>;
 }
 
-/** The app root's five, retained together so every section is a reading of
- *  the same snapshots. */
-export function useEmailFeeds(): EmailFeeds {
+/** Complete catalogs are demanded by visible editors, pickers and overviews. */
+export function useEmailFeeds(enabled: readonly EmailCatalog[] = EMAIL_CATALOGS): EmailFeeds {
   return {
-    campaigns: useCampaignFeed(),
-    audiences: useAudienceFeed(),
-    templates: useTemplateFeed(),
-    senders: useSenderFeed(),
-    rules: useRuleFeed(),
-    journeys: useJourneyFeed(),
+    campaigns: useCampaignFeed(enabled.includes("campaigns")),
+    audiences: useAudienceFeed(enabled.includes("audiences")),
+    templates: useTemplateFeed(enabled.includes("templates")),
+    senders: useSenderFeed(enabled.includes("senders")),
+    rules: useRuleFeed(enabled.includes("rules")),
+    journeys: useJourneyFeed(enabled.includes("journeys")),
   };
 }
 
@@ -251,8 +253,11 @@ export interface ComposedFeed extends LiveCollectionHandle<Row> {
 const NO_ANSWERS: ReadonlyMap<string, string> = new Map();
 
 function useComposedFeed(name: string, composition: Composition, ids: readonly string[]): ComposedFeed {
+  // An action may create a record before its directory page has arrived.
+  // Explicit refresh requests admit that id without expanding every catalog.
+  const [requestedIds, setRequestedIds] = useState<readonly string[]>([]);
   // The SET, not the array: callers hand a new array every render.
-  const signature = [...new Set(ids)].filter((id) => id !== "").sort().join("\n");
+  const signature = [...new Set([...ids, ...requestedIds])].filter((id) => id !== "").sort().join("\n");
   const wanted = useMemo(() => new Set(signature === "" ? [] : signature.split("\n")), [signature]);
   const latest = useRef({ wanted, signature });
   latest.current = { wanted, signature };
@@ -325,7 +330,7 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
       return (row as Row) ?? null;
     },
     paged: false,
-  }));
+  }), { cacheReleased: false });
   handle.current = feed;
 
   const reseed = feed.reseed;
@@ -336,6 +341,7 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
   }, [signature]);
 
   const refresh = useCallback((id: string) => {
+    if (id && !latest.current.wanted.has(id)) setRequestedIds(held => held.includes(id) ? held : [...held, id]);
     only.current = new Set([id]);
     // A seed that is not already running starts INSIDE this call and takes
     // `only`; one that is running makes this a no-op that queues a follow-up,
@@ -420,18 +426,20 @@ export function useEmailRecordFeeds(
   feeds: EmailFeeds,
   alsoOrganizations: readonly string[] = NO_IDS,
   alsoCampaigns: readonly string[] = NO_IDS,
+  onlyRequested = false,
+  alsoAudiences: readonly string[] = NO_IDS,
 ): EmailRecordFeeds {
-  const campaignRows = feeds.campaigns.snapshot.rows;
-  const audienceRows = feeds.audiences.snapshot.rows;
+  const campaignRows = onlyRequested ? NO_ROWS : feeds.campaigns.snapshot.rows;
+  const audienceRows = onlyRequested ? NO_ROWS : feeds.audiences.snapshot.rows;
   const drafts = useMemo(
     () => [...campaignRows.map(campaignFromRow).filter((c) => c.id !== "" && c.status === "draft").map((c) => c.id), ...alsoCampaigns],
     [campaignRows, alsoCampaigns],
   );
   const organizations = useMemo(() => {
-    const accounts = [...campaignRows.map(campaignFromRow), ...audienceRows.map(audienceFromRow)].map((r) => r.accountId);
+    const accounts = [...feeds.campaigns.snapshot.rows.map(campaignFromRow), ...feeds.audiences.snapshot.rows.map(audienceFromRow)].map((r) => r.accountId);
     return [...new Set([...accounts, ...alsoOrganizations].filter((id) => id !== ""))];
-  }, [campaignRows, audienceRows, alsoOrganizations]);
-  const audiences = useMemo(() => audienceRows.map(audienceFromRow).map((a) => a.id).filter((id) => id !== ""), [audienceRows]);
+  }, [feeds.campaigns.snapshot.rows, feeds.audiences.snapshot.rows, alsoOrganizations]);
+  const audiences = useMemo(() => [...new Set([...audienceRows.map(audienceFromRow).map((a) => a.id), ...alsoAudiences].filter(Boolean))], [audienceRows, alsoAudiences]);
   return {
     series: useSeriesFeed(drafts),
     testSettings: useTestSettingsFeed(organizations),

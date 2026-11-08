@@ -701,7 +701,7 @@ argument does what each entry says.
 | `list.take(n number) list` | In process | Returns the first n elements of the list, or all of them when there are fewer; a negative n takes none. An absent list yields an empty list. |  |
 | `list.where(pred lambda) list` | In process | Returns the elements of the list that pred holds for, in order. An absent list yields an empty list. |  |
 | `string.count() number` | In process | Returns the number of characters in the string, counting Unicode code points rather than bytes. An absent string counts as zero. |  |
-| `string.includes(sub string) bool` | Pushed down on a row field, in process otherwise | Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. | `contains(s, sub)` |
+| `string.includes(sub string, ignoreCase? bool) bool` | Pushed down on a row field, in process otherwise | Reports whether sub occurs in the string. Pass true as ignoreCase for a case-insensitive search; in a pushed-down filter this option must be a literal boolean. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. | `contains(s, sub)` |
 
 <!-- END GENERATED: function catalog -->
 

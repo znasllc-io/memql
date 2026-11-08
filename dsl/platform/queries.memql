@@ -1523,3 +1523,17 @@ query externalConnection externalConnectionsMine {
   filter row => row.ownerUserId == actor.userId
   shape externalConnectionCard
 }
+
+/// A connector's dead letters, searched before paging and never drained implicitly.
+@actor
+query outboxEntry outboxDeadLettersBrowse {
+ args {
+  target string!
+  search string
+ }
+ filter row => row.target == args.target && row.status == "dead" && actor.isClusterOwner == true
+   && (args.search == nil || trim(args.search) == "" || row.conceptId.includes(trim(args.search), true) || row.rowRef.includes(trim(args.search), true) || row.action.includes(trim(args.search), true) || row.lastError.includes(trim(args.search), true))
+ sort "row.createdAt", "desc"
+ paginate 10
+ shape outboxEntryFull
+}

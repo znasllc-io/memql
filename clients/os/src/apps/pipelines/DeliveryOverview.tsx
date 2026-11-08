@@ -1,3 +1,10 @@
+import { useState } from "react";
+import { usePipelineRuns } from "../deployables/pipelines/feeds";
+import { NO_RUN_FILTER } from "../deployables/pipelines/runs";
+import { runFromRow } from "../deployables/pipelines/rows";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { LoadMore } from "../../kit/LoadMore";
+import { Refine } from "../../kit";
 import { Overview } from "../../kit/Overview";
 import { Caption, Head, Notice, RecordList, RecordRow, Subhead } from "../../kit";
 import { absent, figureOf } from "../../kit/measure";
@@ -37,10 +44,19 @@ export function DeliveryOverview({ pipelines, runs, ready, error, onOpenRun, onR
 }
 
 export function ChangesSection({ runs, ready, error, onOpenRun }: { runs: readonly RunRow[]; ready: boolean; error: string; onOpenRun: (id: string) => void }) {
-  const changes = latestChanges(runs);
-  return <div className="os-app-stack"><Head title="Changes" meta={ready ? `${changes.length} in recent activity` : undefined} />
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search, 250);
+  const feed = usePipelineRuns(true, { ...NO_RUN_FILTER, changesOnly: true, search: query });
+  const scoped = feed.source !== null;
+  const changes = latestChanges(scoped ? feed.snapshot.rows.map(runFromRow) : runs);
+  ready = scoped ? feed.snapshot.state === "live" && !feed.snapshot.error : ready;
+  error = scoped ? feed.snapshot.error : error;
+  return <div className="os-app-stack"><Head title="Changes" meta={ready ? `${changes.length}${feed.hasMore ? "+" : ""} recent` : undefined}>
+    <Refine search={search} onSearch={setSearch} label="Search changes" placeholder="Title, repository or branch" />
+  </Head>
     {error ? <Notice tone="warn" sentence="Changes could not be refreshed." detail={error} /> : null}
     <RecordList as="ul" label="Repository changes">{changes.map(run => <RecordRow key={run.id} name={runTitle(run)} secondary={`${run.repository}${run.pullRequest ? ` · #${run.pullRequest}` : ""}`} state={runOutcome(run).word} onOpen={() => onOpenRun(run.id)}><span>{triggerWords(run)}</span></RecordRow>)}</RecordList>
+    <LoadMore feed={feed} />
     {ready && !changes.length ? <Caption>No pull requests or merge-queue attempts in recent activity.</Caption> : null}
   </div>;
 }

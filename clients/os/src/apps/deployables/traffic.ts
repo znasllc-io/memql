@@ -270,6 +270,7 @@ export async function fetchTrafficSummaries(
   siteIds: readonly string[],
   window: TrafficWindow,
   now: Date,
+  signal?: AbortSignal,
 ): Promise<Map<string, TrafficSummary>> {
   const out = new Map<string, TrafficSummary>();
   if (siteIds.length === 0) return out;
@@ -289,7 +290,7 @@ export async function fetchTrafficSummaries(
       windowStart: bounds.start,
       windowEnd: bounds.end,
       summary: true,
-    });
+    }, { signal });
     for (const row of result.rows()) {
       const siteId = rowString(row, "siteId");
       if (siteId === "") continue;

@@ -1,5 +1,5 @@
 import { idTail, sameId, type PipelineRow, type RunRow } from "./rows";
-import { dayKey, dayLabel, runTitle } from "./words";
+import { dayKey, dayLabel } from "./words";
 
 // Readings over a set of runs, pure and DOM-free (epic memql#5479): the Runs
 // list's filter and its days, the newest attempt of a key, the source page's
@@ -33,6 +33,7 @@ export function outcomeKey(run: RunRow): OutcomeKey {
 }
 
 export interface RunFilter {
+  changesOnly?: boolean;
   /** A case-insensitive substring of the commit message, or the start of its SHA. */
   search: string;
   /** A pipeline's id: the source the Refine facet names. "" is every source. */
@@ -60,10 +61,11 @@ export function newestFirst(a: RunRow, b: RunRow): number {
 export function filterRuns(runs: readonly RunRow[], f: RunFilter): RunRow[] {
   const q = f.search.trim().toLowerCase();
   return runs
+    .filter(r => !f.changesOnly || r.event === "pull_request" || r.event === "merge_group")
     .filter((r) => f.pipelineId === "" || sameId(r.pipelineId, f.pipelineId))
     .filter((r) => f.branch === "" || r.headBranch === f.branch)
     .filter((r) => f.outcome === "" || outcomeKey(r) === f.outcome)
-    .filter((r) => q === "" || runTitle(r).toLowerCase().includes(q) || r.sha.toLowerCase().startsWith(q))
+    .filter((r) => q === "" || [r.title, r.repository, r.headBranch, r.sha, r.failureMessage, r.refusalMessage].some(value => value.toLowerCase().includes(q)))
     .sort(newestFirst);
 }
 

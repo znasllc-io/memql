@@ -80,13 +80,13 @@ describe("the domain cards", () => {
     // domain and counting the first 50 -- a number that looks like a total and
     // is not one.
     //
-    // Every domain here is fully validated, which makes the assertion clean:
+    // A domain with work must not trigger a queue walk before Review opens:
     // the app's review queue is held at the root and walks domains that have
     // work, so a fixture with work in it would read pages for a reason that
     // has nothing to do with this rollup.
     const connection = fakeConnection({
       domainRows: [
-        domainLiteRow("domain-sales", "validated"),
+        domainLiteRow("domain-sales", "unvalidated"),
         domainLiteRow("domain-hr", "validated"),
       ],
     });
@@ -95,7 +95,7 @@ describe("the domain cards", () => {
 
     const sales = (await screen.findByText("domain-sales")).closest(".os-row") as HTMLElement;
     expect(within(sales).getByText("1 chunks")).toBeTruthy();
-    expect(connection.callsNamed("allDocumentChunkDomains")).toHaveLength(1);
+    expect(connection.callsNamed("knowledgeTrainingDomainRollups")).toHaveLength(1);
     expect(connection.callsNamed("documentChunksForDomain")).toHaveLength(0);
   });
 
@@ -138,6 +138,7 @@ describe("a domain's detail", () => {
           [
             chunkRow({ id: "c-1", documentId: "doc-terms", text: "From the terms." }),
             chunkRow({ id: "c-2", documentId: "", source: "llmSeeded", text: "From the corpus." }),
+            ...Array.from({ length: 8 }, (_, n) => chunkRow({ id: `extra-${n}`, text: `Other ${n}` })),
           ],
           [chunkRow({ id: "c-3", documentId: "", source: "llmSeeded", text: "Page two." })],
         ],
@@ -151,11 +152,11 @@ describe("a domain's detail", () => {
 
     expect(screen.getByText("doc-terms")).toBeTruthy();
     expect(screen.getByText("Seeded corpus")).toBeTruthy();
-    expect(screen.getByText("2 chunks loaded.")).toBeTruthy();
+    expect(screen.getByText("10 chunks loaded.")).toBeTruthy();
 
     await click(screen.getByText("Load more"));
     await settle();
-    expect(screen.getByText(/3 chunks loaded -- that is all of them/)).toBeTruthy();
+    expect(screen.getByText(/11 chunks loaded -- that is all of them/)).toBeTruthy();
   });
 
   it("keeps an uploaded artifact distinct from seeded content after review", async () => {

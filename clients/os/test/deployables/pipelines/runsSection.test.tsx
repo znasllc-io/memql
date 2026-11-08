@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -62,7 +62,8 @@ describe("the Runs tab", () => {
   afterEach(() => vi.useRealTimers());
 
   it("lists every run newest first under its day, one line each", async () => {
-    mount(fakeConnection(seed()));
+    const connection = fakeConnection(seed());
+    mount(connection);
     await screen.findByText("Show the cart");
     const days = [...document.querySelectorAll(".pipeline-runs-day-label")].map((el) => el.textContent);
     expect(days[0]).toBe("Today");
@@ -71,7 +72,9 @@ describe("the Runs tab", () => {
     expect(names).toEqual(["Show the cart", "Fix shard balance", "Bump toolchain"]);
 
     const failed = rowFor("Show the cart");
-    expect(within(failed).getByText("shop")).toBeTruthy();
+    expect(await within(failed).findByText("shop")).toBeTruthy();
+    expect(connection.callsNamed("packageNamesByIds")).toHaveLength(1);
+    expect(connection.callsNamed("packagesAll")).toHaveLength(0);
     expect(within(failed).getByText("cart")).toBeTruthy();
     expect(within(failed).getByText("3f9c2ab")).toBeTruthy();
     expect(within(failed).getByText("Pull request #42")).toBeTruthy();
@@ -135,15 +138,44 @@ describe("the Runs tab", () => {
     expect(await screen.findByText("Fix shard balance")).toBeTruthy();
   });
 
-  it("reads older runs on request, after the live window", async () => {
-    // The live window walks four pages; the fifth is the past, read on request.
-    const page = (n: number) => [runRow({ id: `r-p${n}`, ownerUserId: VIEWER, queuedAt: minutesAgo(60 * 24 * n), title: `Change ${n}` })];
-    mount(fakeConnection(seed({ pipelineRunPages: [seed().pipelineRuns!, page(2), page(3), page(4),
-      [runRow({ id: "r-older", ownerUserId: VIEWER, queuedAt: minutesAgo(60 * 24 * 40), title: "Ancient change" })]] })));
-    await screen.findByText("Change 4");
-    expect(screen.queryByText("Ancient change")).toBeNull();
-    await click(screen.getByRole("button", { name: "Show older runs" }));
-    expect(await screen.findByText("Ancient change")).toBeTruthy();
+  it("reads ten recent runs, then ten more, and retains them when the app reopens", async () => {
+    const rows = Array.from({ length: 25 }, (_, n) => runRow({ id: `r-page-${n}`, ownerUserId: VIEWER, queuedAt: minutesAgo(n + 1), title: `Paged change ${n}` }));
+    const connection = fakeConnection(seed({ pipelineRuns: rows }));
+    const first = mount(connection);
+    await screen.findByText("Paged change 9");
+    expect(screen.queryByText("Paged change 10")).toBeNull();
+    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowse("))).toHaveLength(1);
+    await click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Paged change 19")).toBeTruthy();
+    expect(screen.queryByText("Paged change 20")).toBeNull();
+    first.unmount();
+    mount(connection);
+    expect(await screen.findByText("Paged change 19")).toBeTruthy();
+    expect(connection.calls.filter(call => call.startsWith("query pipelineRunsBrowse("))).toHaveLength(2);
+  });
+
+  it("searches runs beyond the loaded page on the server", async () => {
+    const rows = Array.from({ length: 25 }, (_, n) => runRow({ id: `r-page-${n}`, ownerUserId: VIEWER, queuedAt: minutesAgo(n + 1), title: n === 24 ? "Older requested result" : `Paged change ${n}` }));
+    const connection = fakeConnection(seed({ pipelineRuns: rows }));
+    mount(connection);
+    await screen.findByText("Paged change 9");
+    expect(screen.queryByText("Older requested result")).toBeNull();
+    await click(screen.getByRole("button", { name: /Refine runs/i }));
+    fireEvent.change(screen.getByPlaceholderText("Search"), { target: { value: "requested" } });
+    expect(await screen.findByText("Older requested result")).toBeTruthy();
+    expect(connection.calls.filter(call => call.includes('search: "requested"'))).toHaveLength(1);
+    expect(screen.queryByText("Paged change 0")).toBeNull();
+  });
+
+  it("opens an older run by identity with its source and controls without walking history", async () => {
+    const rows = Array.from({ length: 25 }, (_, n) => runRow({ id: `r-page-${n}`, ownerUserId: VIEWER, queuedAt: minutesAgo(n + 1), title: `Paged change ${n}` }));
+    const connection = fakeConnection(seed({ pipelineRuns: rows }));
+    mount(connection, { intent: { id: "open-old", payload: { runId: "r-page-24" } } });
+    expect(await screen.findByRole("heading", { name: "Paged change 24" })).toBeTruthy();
+    expect(await screen.findByText("shop")).toBeTruthy();
+    expect(connection.callsNamed("pipelineRunForOwner")).toHaveLength(1);
+    expect(connection.callsNamed("pipelineRunsBrowse")).toHaveLength(1);
+    expect(connection.callsNamed("packagesAll")).toHaveLength(0);
   });
 
   it("opens the run a check run's details link names", async () => {

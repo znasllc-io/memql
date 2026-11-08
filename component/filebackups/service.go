@@ -619,6 +619,15 @@ func (s *Service) Control(ctx context.Context, id, action string) (Transfer, err
 }
 
 func (s *Service) List(ctx context.Context, workerID, after, scope string) ([]Transfer, error) {
+	return s.ListPage(ctx, workerID, after, scope, "", 100)
+}
+
+// ListPage searches the caller's journal before applying a stable recent cursor.
+// It returns one lookahead row so the public list door can expose continuation.
+func (s *Service) ListPage(ctx context.Context, workerID, after, scope, search string, limit int) ([]Transfer, error) {
+	if limit < 1 || limit > 100 {
+		return nil, errors.New("backup page size must be between 1 and 100")
+	}
 	owner, err := principal(ctx, false)
 	if err != nil {
 		return nil, err
@@ -627,7 +636,7 @@ func (s *Service) List(ctx context.Context, workerID, after, scope string) ([]Tr
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT "+columns+` FROM file_backup_transfers WHERE owner_id=$1 AND ($2='' OR worker_id=$2) AND ($3='' OR (created_at,transfer_id)<(SELECT created_at,transfer_id FROM file_backup_transfers WHERE transfer_id=$3 AND owner_id=$1)) AND state NOT IN ('deleted','cancelled') AND ($4!='archives' OR source_kind!='sync_file') AND ($4!='active' OR state NOT IN ('complete','bin')) ORDER BY created_at DESC, transfer_id DESC LIMIT 101`, owner, workerID, after, scope)
+	rows, err := db.QueryContext(ctx, "SELECT "+columns+` FROM file_backup_transfers WHERE owner_id=$1 AND ($2='' OR worker_id=$2) AND ($3='' OR (created_at,transfer_id)<(SELECT created_at,transfer_id FROM file_backup_transfers WHERE transfer_id=$3 AND owner_id=$1)) AND state NOT IN ('deleted','cancelled') AND ($4!='archives' OR source_kind!='sync_file') AND ($4!='active' OR state NOT IN ('complete','bin')) AND ($5='' OR strpos(lower(concat_ws(' ',name,source_path,worker_id,source_kind,failure,metadata->>'workerName')),lower($5))>0) ORDER BY created_at DESC, transfer_id DESC LIMIT $6`, owner, workerID, after, scope, strings.TrimSpace(search), limit+1)
 	if err != nil {
 		return nil, err
 	}

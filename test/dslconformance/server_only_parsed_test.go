@@ -233,6 +233,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// checks a signed-in owner/developer before borrowing that service actor.
 		{Path: "email/mutations.memql", Name: "recordCapturedEmail"}: true,
 		{Path: "email/queries.memql", Name: "capturedEmails"}:        true,
+		// These bounded page/detail sources have the same installation-wide
+		// custody as capturedEmails, including mail for recipients without an
+		// account. Caller-scoping cannot authorize shared sealed test messages:
+		// the native Inbox capability first admits a real owner/developer,
+		// then borrows email-capture authority and enforces the seven-day window.
+		// Ordinary client-origin calls (even owner/developer) remain forbidden.
+		// Proof: integrations/email TestInboxPagesAuthorizeBeforeStorage and
+		// TestInboxPagesExecuteAgainstEncryptedStorage exercise both boundaries.
+		{Path: "email/queries.memql", Name: "capturedEmailsPage"}: true,
+		{Path: "email/queries.memql", Name: "capturedEmailById"}:  true,
 		// Azure sessions and transport credentials are sealed after explicit
 		// operator/organization authorization. Per-user row scoping cannot
 		// model one organization's connection consumed by multiple workers.

@@ -112,11 +112,11 @@ export function useAddMachineFlow(): AddMachineFlow {
   const connection = useOsConnection();
   const { config } = useSession();
   const localTest = localCockpitInstall(config.domain) !== null;
-  const { collection } = useMachines();
   const writes = useMachineWrites();
   const now = useNow(15_000);
 
   const [active, setActive] = useState(false);
+  const { collection } = useMachines(active);
   const [draft, setDraftState] = useState<Draft>(EMPTY_DRAFT);
   const [minting, setMinting] = useState(false);
   const [mintError, setMintError] = useState("");

@@ -2,7 +2,7 @@ import { getRowByConceptAndId, versionOrder, type LiveState, type Row } from "@z
 
 import type { LiveListSource } from "../../../live/LiveList";
 import { useOsConnection } from "../../../live/connection";
-import { useLiveCollection } from "../../../live/useLiveCollection";
+import { useLiveCollection, usePagedCollection, type PagedCollectionHandle } from "../../../live/useLiveCollection";
 import { useSessionIfPresent } from "../../../chrome/access";
 import { workspaceFromRow, nodeFromRow, WORKBENCH_NODE_TYPE } from "../rows";
 
@@ -65,6 +65,7 @@ export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
 // on a screen whose job is saying where a workspace's files went.
 
 export interface WorkbenchesState {
+  page: PagedCollectionHandle<Row>;
   /**
    * The workspaces feed, carrying RAW wire rows. Null until the connection
    * exists, which LiveList renders as the disconnected caption rather than as
@@ -87,20 +88,18 @@ export interface WorkbenchesState {
   reseedNodes: () => void;
 }
 
-export function useWorkbenches(): WorkbenchesState {
+export function useWorkbenches(search = "", includeReleased = true, tab: "workspaces" | "replicas" = "workspaces"): WorkbenchesState {
   const connection = useOsConnection();
   const userId = useSessionIfPresent()?.access?.userId ?? "";
 
-  const workspaces = useLiveCollection<Row>(
-    userId ? `fleet:workspaces:${userId}` : null,
+  const workspaces = usePagedCollection<Row>(
+    userId && tab === "workspaces" ? `fleet:workspaces:${JSON.stringify([userId,search,includeReleased])}` : null,
     (conn) => ({
       concept: WORKBENCH_WORKSPACE_CONCEPT,
-      // myWorkspaces is scoped server-side on actor.userId and returns live
-      // AND released rows, which is what lets the released toggle be a view
-      // over these rows rather than a second read.
-      seed: async (_cursor, signal) => {
-        const result = await conn.query.myWorkspaces({}, { signal });
-        return { rows: result.rows(), nextCursor: "" };
+      // Filter released status and search before the ten-row boundary.
+      seed: async (cursor, signal) => {
+        const result = await conn.query.myWorkspaces({ search: search || undefined, includeReleased }, { cursor, signal });
+        return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
       },
       reread: async (rowId, signal) => {
         const row = await getRowByConceptAndId(conn.query, WORKBENCH_WORKSPACE_CONCEPT, rowId, {
@@ -108,13 +107,15 @@ export function useWorkbenches(): WorkbenchesState {
         });
         return (row as Row) ?? null;
       },
-      inScope: row => workspaceFromRow(row).ownerUserId === userId,
-      paged: false,
+      inScope: row => {
+        const item = workspaceFromRow(row);
+        return item.ownerUserId === userId && (includeReleased || item.status !== "released") && (!search || [item.runId,item.nodeId,item.storageRoot,item.releasedReason].some(value => value.toLocaleLowerCase().includes(search.toLocaleLowerCase())));
+      },
     }),
   );
 
   const nodes = useLiveCollection<Row>(
-    connection === null ? null : "fleet:workbench:nodes",
+    connection === null || tab !== "replicas" ? null : "fleet:workbench:nodes",
     (conn) => ({
       concept: CLUSTER_NODE_CONCEPT,
       seed: async (_cursor, signal) => {
@@ -149,6 +150,7 @@ export function useWorkbenches(): WorkbenchesState {
   );
 
   return {
+    page: workspaces,
     source: workspaces.source,
     workspaceState: workspaces.snapshot.state,
     workspaceError: workspaces.snapshot.error,

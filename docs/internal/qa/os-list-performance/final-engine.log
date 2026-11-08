@@ -1,0 +1,12 @@
+{"class": "memql", "command": ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=1200s", "./component/memql", "./component/memql/baseloader", "./component/memql/callgraph", "./component/memql/dslgate", "./component/memql/dslimports", "./component/memql/offline", "./component/memql/readiness", "./component/memql/readscale", "./component/memql/sense", "./component/memql/sync"]}
+NOTICE:  extension "timescaledb" already exists, skipping
+ok  	github.com/znasllc-io/memql/component/memql	325.075s
+?   	github.com/znasllc-io/memql/component/memql/baseloader	[no test files]
+ok  	github.com/znasllc-io/memql/component/memql/callgraph	0.796s
+ok  	github.com/znasllc-io/memql/component/memql/dslgate	0.505s
+ok  	github.com/znasllc-io/memql/component/memql/dslimports	1.525s
+ok  	github.com/znasllc-io/memql/component/memql/offline	17.055s
+ok  	github.com/znasllc-io/memql/component/memql/readiness	0.491s
+ok  	github.com/znasllc-io/memql/component/memql/readscale	22.248s
+ok  	github.com/znasllc-io/memql/component/memql/sense	2.715s
+ok  	github.com/znasllc-io/memql/component/memql/sync	0.335s

@@ -1,0 +1,12 @@
+
+> @znasllc-io/memql-os@0.1.0 test
+> vitest run --run test/chrome/windowSearch.test.tsx test/chrome.test.tsx test/system/loadApp.test.tsx test/live/useLiveCollection.test.tsx
+
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  4 passed (4)
+      Tests  45 passed (45)
+   Start at  16:43:28
+   Duration  5.89s (tests 48%, transform 19%, environment 19%, import 14%, setup 1%)

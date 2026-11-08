@@ -90,6 +90,7 @@ export function compositionRunSource(
             ? "seeding"
             : "live";
       cached = {
+        ...c,
         rows: c.rows.map((row) =>
           compositionWithRunState(row, byId.get(rowString(row, "runId"))),
         ),

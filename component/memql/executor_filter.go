@@ -559,6 +559,9 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		if keyset, hasKeyset := keysetFromContext(ctx); hasKeyset {
 			if eligible, createdAtDesc := keysetEligibleSort(sorter); eligible {
 				predicate, args := keysetWhere(keyset, createdAtDesc)
+				if sorter != nil && sorter.payloadKeyset {
+					predicate, args = payloadKeysetWhere(keyset, sorter)
+				}
 				q = q.Where(predicate, args...)
 			}
 			// A non-keyset-eligible ordering reaching the SQL path with a cursor
@@ -1898,7 +1901,7 @@ func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperato
 			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND (%s) ^@ ANY(?::text[]))", jsonbExpr, textExpr),
 			args: []any{pq.Array(prefixes)},
 		}, nil
-	case OpIncludes:
+	case OpIncludes, OpIncludesFold:
 		// `<field>.includes(<sub>)` (memql#5366): the substring test. strpos
 		// is a plain substring search with no pattern language, so a `%` or
 		// `_` in the needle is literal and nothing here needs escaping, and it
@@ -1917,6 +1920,12 @@ func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperato
 		}
 		if !ok {
 			return compiledExpression{sql: "FALSE"}, nil
+		}
+		if op == OpIncludesFold {
+			return compiledExpression{
+				sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND strpos(lower(%s), lower(?)) > 0)", jsonbExpr, textExpr),
+				args: []any{needle},
+			}, nil
 		}
 		return compiledExpression{
 			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND strpos(%s, ?) > 0)", jsonbExpr, textExpr),
@@ -2673,7 +2682,7 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 			return false, nil
 		}
 		return startsWithAny(actualStr, prefixes), nil
-	case OpIncludes:
+	case OpIncludes, OpIncludesFold:
 		// The in-process mirror of the typed strpos SQL: a substring test is a
 		// question about a STRING, a blank or absent needle matches nothing,
 		// and a subject that is not a string (absent included) is not a match.
@@ -2684,6 +2693,9 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		actualStr, isString := actual.(string)
 		if !ok || !isString {
 			return false, nil
+		}
+		if op == OpIncludesFold {
+			return strings.Contains(strings.ToLower(actualStr), strings.ToLower(needle)), nil
 		}
 		return strings.Contains(actualStr, needle), nil
 	case OpHas:

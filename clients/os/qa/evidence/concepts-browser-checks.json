@@ -1,0 +1,54 @@
+[
+  {
+    "view": "concepts-paged",
+    "width": 1280,
+    "mode": "light",
+    "initial": 10,
+    "loaded": 20,
+    "searched": 1,
+    "restored": 20,
+    "overflow": false,
+    "dividers": false,
+    "boxedTags": false,
+    "errors": []
+  },
+  {
+    "view": "concepts-paged",
+    "width": 1280,
+    "mode": "dark",
+    "initial": 10,
+    "loaded": 20,
+    "searched": 1,
+    "restored": 20,
+    "overflow": false,
+    "dividers": false,
+    "boxedTags": false,
+    "errors": []
+  },
+  {
+    "view": "concepts-paged",
+    "width": 390,
+    "mode": "light",
+    "initial": 10,
+    "loaded": 20,
+    "searched": 1,
+    "restored": 20,
+    "overflow": false,
+    "dividers": false,
+    "boxedTags": false,
+    "errors": []
+  },
+  {
+    "view": "concepts-paged",
+    "width": 390,
+    "mode": "dark",
+    "initial": 10,
+    "loaded": 20,
+    "searched": 1,
+    "restored": 20,
+    "overflow": false,
+    "dividers": false,
+    "boxedTags": false,
+    "errors": []
+  }
+]

@@ -96,13 +96,13 @@ export function AskProvider({
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
   const conversation = useMemo(() => new ConversationSession(transport), [transport]);
   const connection = useOsConnection();
-  useEffect(() => { conversation.activate(); void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
+  useEffect(() => { conversation.activate(); return () => conversation.dispose(); }, [conversation]);
   const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
-  useEffect(() => { if (availability.state === "ready") { void conversation.refresh(); void conversation.reload(false); } }, [availability.state, conversation]);
+  useEffect(() => { if (availability.state === "ready") { conversation.refreshHistory(); void conversation.reload(false); } }, [availability.state, conversation]);
   useEffect(() => {
     let recoveredAt = -Infinity;
-    const recover = () => { recoveredAt = Date.now(); void conversation.refresh(); void conversation.reload(false); };
+    const recover = () => { recoveredAt = Date.now(); conversation.refreshHistory(); void conversation.reload(false); };
     const stopCycle = connection?.onConnectionCycle?.(recover);
     const stopResume = onAppResume(() => { if ((!connection || connection.status === "connected") && Date.now() - recoveredAt >= 1_000) recover(); });
     return () => { stopCycle?.(); stopResume(); };

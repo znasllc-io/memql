@@ -1,3 +1,4 @@
+import { useGoalRuns, useRunApprovals, useWorkRecord } from "./useNexusDirectory";
 import { useModelUsage } from "./useModelUsage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
@@ -14,7 +15,6 @@ import { EMPTY_RUN_MEMORY, RunPage, type RunPageMemory } from "./RunPage";
 import { RunsSection } from "./RunsSection";
 import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
-import { PROCEDURE_PROMOTION } from "./ladder";
 import { useAutomationFeeds } from "./useAutomations";
 import {
   useCancelGoal,
@@ -52,37 +52,11 @@ import {
 import { useSession } from "../../chrome/access";
 import { useDiscussApproval, useOpenAskWork } from "../../ask/AskProvider";
 
-// WORK: what you asked the system to do, what it did about it, and the places
-// it had to stop and ask you.
-//
-// ===========================================================================
-// THREE FEEDS AT THE ROOT, ONE PER CONCEPT; STEPS BELONG TO THE OPEN RUN
-// ===========================================================================
-// Goals, runs and approvals are retained here and passed down, so the Goals
-// surface and the Runs surface cannot disagree about what the cluster holds.
-// The rule is per CONCEPT rather than per app, so three feeds is not three
-// copies of one thing.
-//
-// The steps feed is deliberately NOT here. A per-run timeline retained by the
-// app root would subscribe a window to every step of every run this person
-// owns in order to draw one of them -- which is exactly the rule the
-// Deployables app wrote down about deployment timelines. It is held by
-// `RunView`, which exists only while a run is open, so the subscription's life
-// is the page's life and nothing else's.
-//
-// ===========================================================================
-// THE SELECTION IS THE APP'S, NOT A SECTION'S
-// ===========================================================================
-// Following a goal to its run and a run to its approval crosses sections, and
-// a selection held inside a section would be lost on the way. So the ids live
-// here and each section is told what is open -- which also means going to
-// Approvals to answer something and coming back lands somebody exactly where
-// they were. A learned procedure's page is the fourth (epic memql#5408): its
-// promotion is decided in Approvals, and its approval card links back to it.
-//
-// THE CATALOG'S FEEDS ARE HELD HERE TOO, for the same reason: the Automations
-// list and a promotion's approval card both follow them, and two collections
-// over one catalog would be free to disagree about where a procedure stands.
+// Nexus keeps selection identities at the app root, so links between goals,
+// runs, approvals and procedures survive section changes. Each list owns its
+// search and cursor; detail reads resolve the selected identity independently.
+// Only the Overview asks for complete summary catalogs. Run timelines and
+// goal maps read the selected goal/run's related records rather than history.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
 const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
@@ -100,9 +74,6 @@ export function NexusApp({
   const settingsStore = useMemo(() => store ?? new LocalNexusSettingsStore(), [store]);
   const [settings, setSettings] = useState<NexusSettings>(() => settingsStore.load());
 
-  const goals = useGoals();
-  const runs = useRuns();
-  const approvals = useApprovals();
 
   const create = useCreateGoal();
   const cancel = useCancelGoal();
@@ -132,9 +103,22 @@ export function NexusApp({
   const [mapRunId, setMapRunId] = useState("");
   const [openAt, setOpenAt] = useState("");
 
-  // The two feeds every surface reads as PLAIN ROWS rather than as a live
-  // source: the goal a run is for, and the approvals a run is parked on. They
-  // are joins over feeds already retained, not second reads.
+  const overview = sectionId === "overview";
+  const allGoals = useGoals(overview);
+  const allRuns = useRuns(overview || sectionId === "approvals", sectionId === "approvals");
+  const allApprovals = useApprovals(overview);
+  const selectedRun = useWorkRecord("run", sectionId === "runs" ? openRunId : "");
+  const selectedRunGoal = selectedRun.snapshot.rows[0] ? runFromRow(selectedRun.snapshot.rows[0]).goalId : "";
+  const detailGoalId = sectionId === "goals" ? openGoalId : sectionId === "runs" ? selectedRunGoal : "";
+  const selectedGoal = useWorkRecord("goal", detailGoalId);
+  const goalRuns = useGoalRuns(detailGoalId);
+  const runRaw = useMemo(() => mergeRows(allRuns.snapshot.rows, goalRuns.snapshot.rows, selectedRun.snapshot.rows), [allRuns.snapshot, goalRuns.snapshot, selectedRun.snapshot]);
+  const scopedApprovals = useRunApprovals(overview ? [] : runRaw.map(row => String(row.id ?? "")));
+  const goals = { ...allGoals, snapshot: { ...selectedGoal.snapshot, ...(overview ? allGoals.snapshot : {}), rows: mergeRows(allGoals.snapshot.rows, selectedGoal.snapshot.rows) } };
+  const runs = { ...allRuns, snapshot: { ...allRuns.snapshot, rows: runRaw } };
+  const approvals = { ...allApprovals, snapshot: overview ? allApprovals.snapshot : scopedApprovals.snapshot };
+
+  // Project the retained overview or selected-detail records for joins.
   const goalRows: GoalRow[] = useMemo(
     () => goals.snapshot.rows.map(goalFromRow).filter((goal) => goal.id !== ""),
     [goals.snapshot],
@@ -153,15 +137,9 @@ export function NexusApp({
     return byId;
   }, [goalRows]);
 
-  // THE CATALOG, FOLLOWED WHILE A VISIBLE SURFACE NEEDS IT (see
-  // useAutomations). Automations always does, and so does the Overview, whose
-  // reuse figures count the same two lists; Approvals does only while a
-  // promotion waits in it, because only that card names a procedure it has to
-  // find.
+  // Aggregate overview cards keep their explicit catalog demand.
   const feeds = useAutomationFeeds(
-    sectionId === "automations" ||
-      sectionId === "overview" ||
-      (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
+    sectionId === "overview",
   );
   // Which procedure's page is open. A link naming one the feed does not hold
   // yet is kept until the feed has answered; the section then opens it or says
@@ -306,7 +284,6 @@ export function NexusApp({
   if (sectionId === "automations") {
     return (
       <AutomationsSection
-        feeds={feeds}
         selectedId={selectedAutomationId}
         onSelect={setSelectedAutomationId}
         openProcedureId={openProcedureId}
@@ -323,7 +300,6 @@ export function NexusApp({
   if (sectionId === "approvals") {
     return (
       <ApprovalsSection
-        approvals={approvals.source}
         runs={runRows}
         decide={decide}
         selectedApprovalId={selectedApprovalId}
@@ -372,7 +348,7 @@ export function NexusApp({
     // and falling back to the list in that moment would be the page moving
     // somewhere nobody asked to go. So the page it will be stands in its
     // shape, with Back to where the person was.
-    if (openRunId !== "" && runTrail.length > 0) {
+    if (openRunId !== "" && (runTrail.length > 0 || selectedRun.snapshot.state === "seeding")) {
       return (
         <ArrivingRun
           onBack={backFromRun}
@@ -385,7 +361,6 @@ export function NexusApp({
     }
     return (
       <RunsSection
-        runs={runs.source}
         conversationId={conversationId}
         onClearConversation={() => setConversationId("")}
         showFinished={settings.showFinishedRuns}
@@ -424,16 +399,22 @@ export function NexusApp({
     );
   }
 
+  if (openGoalId && selectedGoal.snapshot.state === "seeding") return <ContentSkeleton kind="detail" label="Opening this goal" />;
+
   return (
     <GoalsSection
-      goals={goals.source}
-      runs={runRows}
       create={create}
       cancel={cancel}
       onOpenGoal={openGoal}
       selectedGoalId={selectedGoalId}
     />
   );
+}
+
+function mergeRows(...groups: readonly (readonly Row[])[]): Row[] {
+  const rows = new Map<string, Row>();
+  for (const group of groups) for (const row of group) rows.set(String(row.id ?? ""), row);
+  return [...rows.values()];
 }
 
 /** The row id, read the way `idTail` expects it. */

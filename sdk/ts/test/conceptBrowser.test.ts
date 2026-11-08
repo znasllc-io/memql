@@ -224,3 +224,19 @@ test("a bundle without root ids cannot make graph neighbors into concept rows", 
   const page = await browseConceptPage(client(d), "v1:test:thing");
   assert.deepEqual(page.rows, []);
 });
+
+test("server search preserves raw nodes and carries only its query-bound continuation", async () => {
+  const d = new MockDispatcher();
+  const row = { id: "old", concept: "v1:work:goal", payload: { statement: "Earlier Needle%_" }, createdAt: "2026-01-01T00:00:00Z" };
+  d.setReply({ queryResult: { requestId: "r", result: { data: [{ rows: [row], nextCursor: "opaque-next" }] } } });
+  const page = await browseConceptPage(client(d), "v1:work:goal", { search: 'needle%_" || true', pageSize: 10, cursor: "opaque-before" });
+  assert.deepEqual(page, { rows: [row], nextCursor: "opaque-next" });
+  assert.equal(d.lastQuery(), 'builtin conceptRowsSearch(conceptId: "v1:work:goal", search: "needle%_\\" || true", cursor: "opaque-before")');
+  assert.equal(d.lastCursor(), undefined);
+});
+
+test("server search refuses malformed page envelopes instead of showing false emptiness", async () => {
+  const d = new MockDispatcher();
+  d.setReply({ queryResult: { requestId: "r", result: { data: [] } } });
+  await assert.rejects(browseConceptPage(client(d), "v1:work:goal", { search: "invoice" }), /invalid page/);
+});

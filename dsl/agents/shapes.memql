@@ -125,3 +125,18 @@ shape skillChangeEvent skillChangeEventFull {
   runId
   row.createdAt
 }
+
+@row
+shape agent agentBrowseRow {
+ row.id
+ row.createdAt
+ name
+ description
+ kind
+ role
+ roleSlug
+ ownerUserId
+ active
+ capabilities
+ groupIds
+}

@@ -1,39 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { browseConceptPage, getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { usePagedCollection } from "../../live/useLiveCollection";
 import { useOsConnection } from "../../live/connection";
 
-// A concept's rows: a keyset walk, and a band saying what arrived while you
-// were reading.
-//
-// ===========================================================================
-// WHY THE ARRIVALS ARE A BAND AND NOT SPLICED IN
-// ===========================================================================
-// `browseConceptPage` walks `sort(paginate(concept==X, N), "createdAt",
-// "asc")` -- oldest first, with a cursor bound to that ordering. So a row
-// created while somebody is reading belongs at the END of the total order,
-// after pages this walk has very likely not reached yet. Splicing it into
-// what is on screen would draw it among rows it does not belong between,
-// and the next `loadMore` would fetch it again.
-//
-// So new rows are COUNTED, not inserted, and the person is offered a
-// reload. That is the portal's decision and it holds for the same reason.
-//
-// It is also why this is not `kit/LiveList`. `LiveList` takes a
-// `LiveListSource` -- a `LiveCollection`, whose whole model is one
-// authoritative fold that new events are applied INTO. A paged walk is not
-// one, and dressing it as one would put the ring on a row whose position is
-// wrong.
-//
-// ===========================================================================
-// AN ID-ONLY EVENT IS RE-READ, AND A REFUSAL IS SILENCE
-// ===========================================================================
-// A concept on the `granted` tier fans out id-only (`payloadOmitted`),
-// because the predicate needs a join the fan-out cannot do against one row.
-// Counting those blind would tell somebody "4 new rows" about rows they may
-// not read. So each one is re-read through the ordinary authorized path, and
-// a refusal drops it -- the SDK's own instruction, and the only reading that
-// keeps the number honest.
+// A retained, newest-first snapshot of the selected concept, loaded on demand.
+// Generic inspection keeps a separate change band so opening a raw record
+// remains a view of the same snapshot until the person asks to reload it.
+// Id-only events are authorized by rereading before they are counted.
 
 export type WalkStatus = "loading" | "more" | "exhausted" | "failed";
 
@@ -47,119 +21,51 @@ export interface ConceptRowsWalk {
   /** Loaded rows the cluster has changed or removed since. */
   changedCount: number;
   loadMore: () => void;
-  /** Start the walk again from the first page, clearing the band. */
+  /** Refresh the loaded page depth from the first page, clearing the band. */
   reload: () => void;
+  retry?: () => void;
 }
 
-export function useConceptRows(conceptId: string, pageSize: number): ConceptRowsWalk {
+export function useConceptRows(conceptId: string, pageSize: number, search = ""): ConceptRowsWalk {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const subscriptions = connection?.subscriptions ?? null;
-
-  const [rows, setRows] = useState<Row[]>([]);
-  const [status, setStatus] = useState<WalkStatus>("loading");
-  const [error, setError] = useState("");
-  const [cursor, setCursor] = useState("");
   const [arrivedCount, setArrivedCount] = useState(0);
   const [changedCount, setChangedCount] = useState(0);
   const [attempt, setAttempt] = useState(0);
-  // What the walk holds, readable from the subscription handler without
-  // making the handler depend on -- and therefore re-register on -- every
-  // page that lands. A registration effect that keys on live values
-  // re-registers constantly and loses events between teardown and setup.
   const loadedIds = useRef<Set<string>>(new Set());
   const arrivedIds = useRef<Set<string>>(new Set());
-
-  const reload = useCallback(() => {
-    loadedIds.current = new Set();
-    arrivedIds.current = new Set();
-    setRows([]);
-    setCursor("");
+  const feed = usePagedCollection<Row>(conceptId ? `concept:rows:${JSON.stringify([conceptId, pageSize, search.trim()])}:recent` : null, connection => ({
+    concept: conceptId,
+    // The generic inspector deliberately keeps its explicit change band.
+    // Rows are a retained snapshot; reload is the single refresh point.
+    actions: [],
+    seed: (cursor, signal) => browseConceptPage(connection.query, conceptId, { pageSize, order: "desc", search, signal, ...(cursor ? { cursor } : {}) }),
+    reread: (id, signal) => getRowByConceptAndId(connection.query, conceptId, id, { signal }),
+  }));
+  const rows = feed.snapshot.rows;
+  loadedIds.current = new Set(rows.map(rowIdOf));
+  const identity = `${conceptId}:${pageSize}:${search.trim()}`;
+  useEffect(() => {
+    arrivedIds.current.clear();
     setArrivedCount(0);
     setChangedCount(0);
-    setError("");
-    setStatus("loading");
-    setAttempt((n) => n + 1);
-  }, []);
-
-  // Restart when the concept or the page size CHANGES -- both change what the
-  // walk is, and continuing a cursor across either would page one concept
-  // with another's continuation.
-  //
-  // NOT ON MOUNT, and the ref is what makes that true. A browser found this
-  // (epic memql#5009): on the first render this effect and the walk effect
-  // below both ran, the reload bumped `attempt`, and the walk ran a SECOND
-  // time and APPENDED its page to the first one's -- three rows rendered as
-  // six, under a footer confidently reporting "All 6 readable rows loaded".
-  //
-  // The suite could not see it. Every test renders without StrictMode, where
-  // the two effects settle in an order that happens to hide it; the shell
-  // mounts under StrictMode, where it does not. So the guard is a ref rather
-  // than a dependency-list change: what has to be expressed is "the walk this
-  // hook already started IS the walk for these arguments", and only state
-  // that survives a re-render can say so.
-  const walking = useRef("");
+  }, [identity]);
   useEffect(() => {
-    const key = `${conceptId}\u0000${pageSize}`;
-    if (walking.current === key) return;
-    // The first run adopts the walk the mount already started rather than
-    // restarting it -- reloading here would be the duplication above.
-    const first = walking.current === "";
-    walking.current = key;
-    if (!first) reload();
-  }, [conceptId, pageSize, reload]);
-
-  // ---- the walk --------------------------------------------------------
-
-  const [pageRequest, setPageRequest] = useState(0);
-  const loadMore = useCallback(() => {
-    setStatus((current) => (current === "loading" ? current : "loading"));
-    setPageRequest((n) => n + 1);
-  }, []);
-
-  useEffect(() => {
-    if (query === null || conceptId === "") return;
-    const controller = new AbortController();
-    let live = true;
-    setStatus("loading");
-    browseConceptPage(query, conceptId, {
-      pageSize,
-      ...(cursor === "" ? {} : { cursor }),
-      signal: controller.signal,
-    })
-      .then((page) => {
-        if (!live) return;
-        for (const row of page.rows) {
-          const id = rowIdOf(row);
-          if (id !== "") {
-            loadedIds.current.add(id);
-            // A row the band was counting has now been walked to. It is no
-            // longer news, and leaving it counted would keep offering a
-            // reload that changes nothing.
-            if (arrivedIds.current.delete(id)) {
-              setArrivedCount(arrivedIds.current.size);
-            }
-          }
-        }
-        setRows((current) => [...current, ...page.rows]);
-        setCursor(page.nextCursor);
-        setStatus(page.nextCursor === "" ? "exhausted" : "more");
-      })
-      .catch((err: unknown) => {
-        if (!live) return;
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("failed");
-      });
-    return () => {
-      live = false;
-      controller.abort();
-    };
-    // `cursor` is deliberately NOT a dependency: it is set BY this effect,
-    // and depending on it would run the next page the moment one lands,
-    // walking the whole concept in one go. `pageRequest` is the ask.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, conceptId, pageSize, attempt, pageRequest]);
+    for (const id of loadedIds.current) arrivedIds.current.delete(id);
+    setArrivedCount(arrivedIds.current.size);
+  }, [feed.snapshot]);
+  const reload = useCallback(() => {
+    arrivedIds.current.clear();
+    setArrivedCount(0);
+    setChangedCount(0);
+    setAttempt(n => n + 1);
+    feed.reseed();
+  }, [feed.reseed]);
+  const error = feed.loadMoreError || feed.snapshot.error;
+  const status: WalkStatus = error ? "failed" : feed.snapshot.state === "seeding" || feed.loadingMore ? "loading" : feed.hasMore ? "more" : "exhausted";
+  const loadMore = () => { void feed.loadMore(); };
+  const retry = feed.loadMoreError ? loadMore : reload;
 
   // ---- the band --------------------------------------------------------
 
@@ -213,7 +119,7 @@ export function useConceptRows(conceptId: string, pageSize: number): ConceptRows
     // on every page and lose whatever arrived in between.
   }, [subscriptions, query, conceptId, attempt]);
 
-  return { rows, status, error, arrivedCount, changedCount, loadMore, reload };
+  return { rows: [...rows], status, error, arrivedCount, changedCount, loadMore, reload, retry };
 }
 
 /**

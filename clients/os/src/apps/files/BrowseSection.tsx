@@ -1,5 +1,7 @@
+import { LoadMore } from "../../kit/LoadMore";
+import type { LibraryArtifactsFeed } from "./useLibrary";
 import { usePageScroll } from "../../kit/pageNavigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FilePlus, FolderPlus, Upload } from "lucide-react";
 import {
   newShortId,
@@ -20,7 +22,7 @@ import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { FolderSelect, folderOptions } from "../../items/FolderSelect";
-import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
+import { planArchive, readArchiveMembers, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
 import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import { kindGlyph } from "./glyphs";
@@ -44,9 +46,8 @@ import {
   type RefineChip,
 } from "../../kit";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
-import { useMachines } from "../../live/machines";
+import { useMachinePresence } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
-import type { LiveCollectionHandle } from "../../live/useLiveCollection";
 import { useDraggable } from "@dnd-kit/core";
 import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
@@ -64,7 +65,7 @@ import {
 } from "./rows";
 import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
-import { ACCOUNT_ANY, ACCOUNT_NONE, applyFilters, labelsOf, LABEL_ANY } from "./filters";
+import { ACCOUNT_ANY, ACCOUNT_NONE, LABEL_ANY } from "./filters";
 import { Inspector } from "./Inspector";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
@@ -98,6 +99,9 @@ const PLACE_TITLE: Record<FilesPlace, string> = {
 export function BrowseSection({
   list,
   artifacts,
+  counts,
+  labelOptions,
+  facetsError,
   files,
   foldersState,
   tree,
@@ -106,7 +110,6 @@ export function BrowseSection({
   materialized,
   materializedRail,
   deskFolders,
-  deskFileArtifactIds,
   deskIndexByArtifactId,
   desksWithItems,
   filter,
@@ -121,7 +124,10 @@ export function BrowseSection({
   uploadTree,
 }: {
   list: LiveView<ArtifactRow> | null;
-  artifacts: LiveCollectionHandle<Row>;
+  artifacts: LibraryArtifactsFeed;
+  counts: ReadonlyMap<string, number> | null;
+  labelOptions: readonly string[];
+  facetsError: string;
   files: readonly Row[];
   foldersState: LiveState;
   tree: FolderTree;
@@ -155,7 +161,7 @@ export function BrowseSection({
   uploadFiles: UploadTasksApi["uploadFiles"];
   uploadTree: UploadTasksApi["uploadTree"];
 }) {
-  const { presence } = useMachines();
+  const { presence } = useMachinePresence();
   const { actions, registry } = useOs();
   const { config } = useSession();
   const authSource = useAuthSource();
@@ -331,6 +337,19 @@ export function BrowseSection({
   const [archiveProgress, setArchiveProgress] = useState<{ done: number; total: number } | null>(null);
   const [archiveError, setArchiveError] = useState("");
   const [railNote, setRailNote] = useState("");
+  const [folderCheck, setFolderCheck] = useState<{ id: string; rows: ArtifactRow[]; error: string } | null>(null);
+  const checkingFolderId = folderMenu?.node.folder.id ?? pendingArchive;
+  useEffect(() => {
+    if (!checkingFolderId || !connection) { setFolderCheck(null); return; }
+    const abort = new AbortController();
+    setFolderCheck(null);
+    void readArchiveMembers(connection.query, tree, checkingFolderId, abort.signal).then(rows => {
+      if (!abort.signal.aborted) setFolderCheck({ id: checkingFolderId, rows, error: "" });
+    }, error => {
+      if (!abort.signal.aborted) setFolderCheck({ id: checkingFolderId, rows: [], error: String(error) });
+    });
+    return () => abort.abort();
+  }, [connection, checkingFolderId, tree]);
 
   const runFolderArchive = async (folderId: string) => {
     const query = connection?.query ?? null;
@@ -343,9 +362,10 @@ export function BrowseSection({
     // The plan recomputes from LIVE rows at the moment of running -- which
     // is what makes an interrupted walk idempotent: whatever already landed
     // is simply absent from the next plan.
-    const plan = planArchive(tree, content, folderId);
-    setArchiveProgress({ done: 0, total: plan.artifactIds.length + plan.folderIds.length });
     try {
+      const members = await readArchiveMembers(query, tree, folderId);
+      const plan = planArchive(tree, members, folderId);
+      setArchiveProgress({ done: 0, total: plan.artifactIds.length + plan.folderIds.length });
       await runArchiveWalk(plan, {
         archiveArtifact: async (artifactId) => {
           await query.archiveArtifact({ artifactId });
@@ -522,14 +542,6 @@ export function BrowseSection({
   const searching = filter.search.trim() !== "";
   const accountOptions = useAccountOptions();
 
-  // Direct, non-archived counts by folder -- what a person would count.
-  const counts = new Map<string, number>();
-  const archivedFiles: ArtifactRow[] = [];
-  for (const row of content) {
-    if (row.archived) archivedFiles.push(row);
-    if (row.archived !== (filter.place === "bin")) continue;
-    counts.set(row.folderId, (counts.get(row.folderId) ?? 0) + 1);
-  }
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
     return (
@@ -625,29 +637,6 @@ export function BrowseSection({
     });
   }
 
-  // THE LABELS ON OFFER, folded from the rows every OTHER facet already keeps
-  // (filters.ts `labelsOf`): so a label listed always has at least one row
-  // behind it in the view being looked at, and the one currently chosen stays
-  // listed -- clearing the label facet is exactly what produces that
-  // population. Client-side over the seeded snapshot like every other facet
-  // here; see the label field's own note in filters.ts for why the engine's
-  // `libraryArtifactsByLabel` is the wrong read for this control.
-  const labelOptions = useMemo(
-    () =>
-      labelsOf(
-        applyFilters(
-          content,
-          { ...filter, label: LABEL_ANY },
-          {
-            fileArtifactIds: deskFileArtifactIds,
-            folderIds: new Set(deskFolders.map((f) => f.folderId)),
-          },
-          materialized,
-        ),
-      ),
-    [content, filter, deskFileArtifactIds, deskFolders, materialized],
-  );
-
   /** Back to the place, with every facet and the search dropped. */
   const visibleFolders = searching ? [] : filter.folderId
     ? (tree.byId.get(filter.folderId)?.children.map(node => node.folder) ?? [])
@@ -680,7 +669,7 @@ export function BrowseSection({
       onDrop={onDrop}
     >
       <div hidden={selected !== null}>
-      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
+      <Head navigationKey={`browse:${filter.place}:${filter.folderId ?? ""}`} title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount) === undefined ? undefined : `${listedCount}${artifacts.hasMore ? "+" : ""}`}>
         {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
             action). Uploading a file and making a folder are the same
             question -- "put something here" -- and they were answered in two
@@ -833,9 +822,13 @@ export function BrowseSection({
               Restore. */}
           {pendingArchive !== "" ? (
             (() => {
-              const plan = planArchive(tree, content, pendingArchive);
+              if (!folderCheck || folderCheck.id !== pendingArchive) return <Caption>Checking folder contents…</Caption>;
+              if (folderCheck.error) return <Notice tone="error" sentence="The folder could not be checked." detail={folderCheck.error}>
+                <Button onClick={() => setPendingArchive("")}>Cancel</Button>
+              </Notice>;
+              const plan = planArchive(tree, folderCheck.rows, pendingArchive);
               const name = folderNameOf(pendingArchive);
-              const keeping = subtreeHoldsArtifact(tree, content, pendingArchive);
+              const keeping = subtreeHoldsArtifact(tree, folderCheck.rows, pendingArchive);
               const emptied = plan.deleteFolderIds.length;
               // THE WHOLE NOTICE IS THE ASK, question and all: another folder
               // chosen while this one is open changes the question under the
@@ -912,6 +905,8 @@ export function BrowseSection({
               />
             )}
           />
+          <LoadMore feed={artifacts} />
+          {facetsError ? <Caption>Folder counts and label options could not be updated. {facetsError}</Caption> : null}
           {/* THE EMPTY STATE OFFERS THE WAY OUT (DESIGN.md rule 4's shape:
               an empty list that does not explain itself is the failure).
               `emptyText` says a filter is why; this is the act that undoes
@@ -1067,10 +1062,10 @@ export function BrowseSection({
               // empty folder is deleted, and calling that "Archive" here and
               // "Delete" in the confirm one click later would teach somebody
               // that the two words mean the same thing in this app.
-              label: subtreeHoldsArtifact(tree, content, folderMenu.node.folder.id)
-                ? "Archive"
-                : "Delete",
-              disabled: connection === null,
+              label: !folderCheck || folderCheck.id !== folderMenu.node.folder.id ? "Checking contents…"
+                : folderCheck.error ? "Folder check failed"
+                : subtreeHoldsArtifact(tree, folderCheck.rows, folderMenu.node.folder.id) ? "Archive" : "Delete",
+              disabled: connection === null || !folderCheck || folderCheck.id !== folderMenu.node.folder.id || !!folderCheck.error,
               onSelect: () =>
                 confirmBeforeArchive
                   ? setPendingArchive(folderMenu.node.folder.id)

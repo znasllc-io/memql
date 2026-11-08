@@ -1,3 +1,4 @@
+import { parseCall } from "../callArgs";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -91,6 +92,11 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeQuery {
   searchUsers: ReturnType<typeof vi.fn>;
+  peopleBrowse: ReturnType<typeof vi.fn<(args: Record<string, unknown>, options?: { cursor?: string }) => Promise<Result>>>;
+  pendingUserInvitationsBrowse: ReturnType<typeof vi.fn<(args: Record<string, unknown>, options?: { cursor?: string }) => Promise<Result>>>;
+  groupsBrowse: ReturnType<typeof vi.fn>;
+  groupById: ReturnType<typeof vi.fn>;
+  clientAccountById: ReturnType<typeof vi.fn>;
   pendingUserInvitations: ReturnType<typeof vi.fn>;
   sessionsForSubjectAdmin: ReturnType<typeof vi.fn>;
   activeRoles: ReturnType<typeof vi.fn>;
@@ -167,9 +173,27 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       return rowsResult([(seeded ?? reply) as Row]);
     });
 
-  return {
+  const browse = (kind: "people" | "invites" | "groups") => vi.fn(async (args: Record<string, unknown>, options?: { cursor?: string }) => {
+    const search = String(args["search"] ?? "").trim().toLowerCase();
+    let rows = kind === "people" ? seed.searchUsers ?? [] : kind === "invites" ? seed.pendingUserInvitations ?? [] : seed.groupsAll ?? [];
+    rows = rows.filter(row => {
+      if (kind === "groups") return (args["includeArchived"] || row["status"] === "active") && (!search || ["name", "description"].some(field => String(row[field] ?? "").toLowerCase().includes(search)));
+      if (kind === "invites") return row["kind"] === "user" && row["status"] === "pending" && (!row["expiresAt"] || Date.parse(String(row["expiresAt"])) > Date.now()) && (!args["role"] || row["inviteeRole"] === args["role"]) && (!args["state"] || args["state"] === "invited") && (!args["groupId"] || (row["groupIds"] as string[] ?? []).includes(String(args["groupId"]))) && (!search || ["inviteeName", "inviteeEmail"].some(field => String(row[field] ?? "").toLowerCase().includes(search)));
+      const active = row["active"] !== false && !row["suspendedAt"];
+      return (!Array.isArray(args["memberIds"]) || args["memberIds"].includes(row["id"])) && (!args["role"] || row["role"] === args["role"]) && (args["showDeactivated"] || active) && (!args["state"] || args["state"] === (active ? "active" : "deactivated")) && (!search || ["displayName", "firstName", "lastName", "primaryEmail"].some(field => String(row[field] ?? "").toLowerCase().includes(search)));
+    }).sort((a, b) => String(b["createdAt"] ?? "").localeCompare(String(a["createdAt"] ?? "")) || String(a["id"]).localeCompare(String(b["id"])));
+    const offset = Number(options?.cursor ?? 0);
+    return new Result({ data: rows.slice(offset, offset + 10), meta: { cursor: offset + 10 < rows.length ? String(offset + 10) : "" } } as never);
+  });
+
+  const connection: FakeConnection = {
     query: {
       searchUsers: read("searchUsers"),
+      peopleBrowse: browse("people"),
+      pendingUserInvitationsBrowse: browse("invites"),
+      groupsBrowse: browse("groups"),
+      groupById: vi.fn(async ({ groupId }: { groupId: string }) => rowsResult([seed.byId?.[groupId] ?? seed.groupsAll?.find(row => row["id"] === groupId)].filter((row): row is Row => !!row))),
+      clientAccountById: vi.fn(async ({ accountId }: { accountId: string }) => rowsResult([seed.byId?.[accountId] ?? seed.clientAccountsAll?.find(row => row["id"] === accountId)].filter((row): row is Row => !!row))),
       pendingUserInvitations: read("pendingUserInvitations"),
       sessionsForSubjectAdmin: read("sessionsForSubjectAdmin"),
       activeRoles: read("activeRoles"),
@@ -200,7 +224,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       groupArchive: builtin("groupArchive", { ok: "true" }),
       groupMemberAdd: builtin("groupMemberAdd", { ok: "true" }),
       groupMemberRemove: builtin("groupMemberRemove", { ok: "true" }),
-      executeNamed: vi.fn(async (name: string, call: string) => {
+      executeNamed: vi.fn(async (name: string, call: string, options?: { cursor?: string }) => {
+        if (call.startsWith("paginate(query ") && (name === "searchUsers" || name === "pendingUserInvitations")) {
+          const args = parseCall(call.slice(call.indexOf("query "))).args;
+          return name === "searchUsers" ? connection.query.peopleBrowse(args, options) : connection.query.pendingUserInvitationsBrowse(args, options);
+        }
         if (name === "groupsAll") return rowsResult(seed.groupsAll ?? []);
         if (name === "membersOfGroup") {
           return rowsResult(seed.membersOfGroup?.[argOf(call, "groupId")] ?? []);
@@ -225,6 +253,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
   };
+  return connection;
 }
 
 /** A group row with sane defaults. */

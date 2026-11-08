@@ -1,0 +1,12 @@
+
+> @znasllc-io/memql-os@0.1.0 test
+> vitest run --run test/users test/accounts test/concepts test/kit/recordList.test.tsx
+
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  32 passed (32)
+      Tests  314 passed (314)
+   Start at  16:35:16
+   Duration  8.01s (tests 58%, environment 17%, import 14%, transform 11%)

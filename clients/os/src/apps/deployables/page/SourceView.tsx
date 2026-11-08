@@ -25,6 +25,9 @@ import { deploymentStateWord, siteStateWord, stateChip } from "../words";
 import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
 import { ChecksPart, pipelineFact } from "../pipelines/ChecksPart";
 import type { PipelineRow, RunRow } from "../pipelines/rows";
+import { usePipelineRuns } from "../pipelines/feeds";
+import { runFromRow } from "../pipelines/rows";
+import { NO_RUN_FILTER } from "../pipelines/runs";
 import { runsOfPipeline, upstreamChecks } from "../pipelines/runs";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
@@ -179,8 +182,10 @@ export function SourceView({
   // and a page that took that for "none" would offer Connect pipeline to a
   // source that has one.
   const checked = pkg.sourceKind === "repo" && mine;
-  const settled = pipelinesSettled && pipelinesError === "";
-  const runs = pipeline === null ? [] : runsOfPipeline(pipelineRuns, pipeline.id);
+  const recent = usePipelineRuns(pipeline !== null && checked, { ...NO_RUN_FILTER, pipelineId: pipeline?.id ?? "" });
+  const scoped = recent.source !== null;
+  const settled = pipelinesSettled && pipelinesError === "" && (!scoped || recent.snapshot.state === "live" && !recent.snapshot.error);
+  const runs = pipeline === null ? [] : runsOfPipeline(scoped ? recent.snapshot.rows.map(runFromRow) : pipelineRuns, pipeline.id);
   const checksOn = checked && settled && pipeline?.status === "active";
   const latest = pkg.latestKnownVersion === "" ? "" : shortVersion(pkg.latestKnownVersion);
   const upstream = checked && settled ? upstreamChecks(runs, pipeline, pkg.latestKnownVersion, pkg.deployedVersion) : "";
@@ -276,7 +281,7 @@ export function SourceView({
           <div hidden={repositoryWorkspace && section !== "checks"}>
 
           {checked ? (
-            <ChecksPart pipeline={pipeline} runs={runs} settled={settled} error={pipelinesError} onOpenRun={onOpenRun} onOpenRuns={onOpenRuns} />
+            <ChecksPart pipeline={pipeline} runs={runs} settled={settled} error={recent.snapshot.error || pipelinesError} hasMore={recent.hasMore} onOpenRun={onOpenRun} onOpenRuns={onOpenRuns} />
           ) : null}
 
           </div>

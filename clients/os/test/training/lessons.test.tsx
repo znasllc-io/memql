@@ -7,7 +7,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 import { LessonsReview } from "../../src/apps/training/LessonsReview";
 import { ProposeLesson } from "../../src/apps/training/ProposeLesson";
-import { lessonUsage } from "../../src/apps/training/LessonUsage";
+import { LessonUsage, lessonUsage } from "../../src/apps/training/LessonUsage";
 import {
   emptyLesson,
   guidanceReceiptLabel,
@@ -76,9 +76,9 @@ describe("manual lesson review", () => {
     const save = vi.fn().mockRejectedValue(new Error("lesson changed"));
     h.connection = {
       query: {
-        workTrainingUsageForOwner: async () => new Result({ data: [] }),
-        workTrainingLessonsForOwner: async () =>
-          new Result({ data: [{ data: { trainingLesson: candidate } }] }),
+        workTrainingSelectionsForLesson: async () => new Result({ data: [] }),
+        workTrainingLessonHistory: async () => new Result({ data: [{ data: { trainingLesson: candidate } }] }),
+        libraryTrainingLessonsPage: async () => new Result({ data: [{ lessons: [candidate], nextCursor: "" }] }),
         librarySaveTrainingLesson: save,
       },
     };
@@ -150,4 +150,56 @@ it("reports failed attempts separately from successful fallback delivery", () =>
     "requested",
     "fallback",
   ]);
+});
+
+it("loads ten lesson heads at a time, preserves pages on reopen and searches on the server", async () => {
+  const lessons = Array.from({ length: 23 }, (_, n) => ({ ...candidate, id: `lesson-${n}`, receipt: `event-${n}`, draft: { ...candidate.draft, title: `Lesson ${n}` } }));
+  const read = vi.fn(async ({ cursor, search }: { cursor?: string; search?: string }) => {
+    const matched = search ? lessons.filter(l => l.draft.title.toLowerCase().includes(search.toLowerCase())) : lessons;
+    const offset = Number(cursor || 0);
+    return new Result({ data: [{ lessons: matched.slice(offset, offset + 10), nextCursor: offset + 10 < matched.length ? String(offset + 10) : "" }] });
+  });
+  h.connection = { query: { libraryTrainingLessonsPage: read } };
+  const view = render(<LessonsReview />);
+  await screen.findByText("Lesson 9");
+  expect(screen.queryByText("Lesson 10")).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByText("Lesson 19");
+  view.unmount();
+  const reopened = render(<LessonsReview />);
+  await screen.findByText("Lesson 19");
+  expect(read).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Search lessons" }));
+  fireEvent.change(screen.getByPlaceholderText("Search lessons"), { target: { value: "Lesson 22" } });
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+  expect(await screen.findByRole("button", { name: /Lesson 22 Version/ })).toBeTruthy();
+  expect(screen.queryByText("Lesson 0")).toBeNull();
+  reopened.unmount();
+});
+
+
+it("reads delivery evidence only for the visible lesson selections, with cached continuation", async () => {
+  const selections = Array.from({ length: 13 }, (_, n) => ({ id: `selection-${n}`, runId: `run-${n}`, data: { trainingSelection: { selected: [{ lessonId: candidate.id, lessonVersion: n + 1 }] } } }));
+  const read = vi.fn(async (_args, { cursor }: { cursor?: string } = {}) => {
+    const offset = Number(cursor || 0);
+    return new Result({ data: selections.slice(offset, offset + 10), meta: { cursor: offset === 0 ? "10" : "", hasMore: offset === 0 } });
+  });
+  const deliveries = vi.fn(async ({ observationIds }: { observationIds: string[] }) => new Result({ data: observationIds.map(id => ({ data: { execution: { call: { id: `call-${id}`, phase: "completed", provider: "fleet", model: "local", contextReferences: [id] } } } })) }));
+  h.connection = { query: { workTrainingSelectionsForLesson: read, workTrainingDeliveryForSelections: deliveries } };
+  const view = render(<LessonUsage lessonId={candidate.id} />);
+  await screen.findByText("run-9");
+  expect(screen.queryByText("run-10")).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(deliveries).toHaveBeenCalledTimes(1);
+  expect(deliveries.mock.calls[0]![0].observationIds).toEqual(selections.slice(0, 10).map(row => row.id));
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByText("run-12");
+  expect(deliveries.mock.calls[1]![0].observationIds).toEqual(selections.slice(10).map(row => row.id));
+  view.unmount();
+  const reopened = render(<LessonUsage lessonId={candidate.id} />);
+  await screen.findByText("run-12");
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(deliveries).toHaveBeenCalledTimes(2);
+  reopened.unmount();
 });

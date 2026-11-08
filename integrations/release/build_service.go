@@ -173,7 +173,15 @@ func (i *Integration) handleBuildList(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	records, err := p.ledger.builds(ctx, limit)
+	cursor, err := browseText(args, "cursor")
+	if err != nil {
+		return nil, err
+	}
+	search, err := browseText(args, "search")
+	if err != nil {
+		return nil, err
+	}
+	records, nextCursor, err := p.ledger.buildsPage(ctx, cursor, search, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +193,7 @@ func (i *Integration) handleBuildList(ctx context.Context, args map[string]any, 
 		}
 		out = append(out, v)
 	}
-	return resultNode("builds", "", map[string]any{"intents": out})
+	return resultNode("builds", "", map[string]any{"intents": out, "nextCursor": nextCursor})
 }
 func (i *Integration) handleBuildStart(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	return i.executeBuild(ctx, args, "start")

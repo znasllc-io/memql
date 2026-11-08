@@ -69,7 +69,7 @@ describe("the inbox", () => {
         "Nothing needs your input.",
       ),
     ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Approvals" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe("0");
+    expect(screen.getByRole("heading", { name: "Approvals" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe("0 shown");
   });
 
   it("leads a row with WHAT is being asked, not with the kind", async () => {

@@ -35,6 +35,7 @@ type compiledSort struct {
 	fields           []compiledSortField
 	signature        string
 	requiresFullScan bool
+	payloadKeyset    bool
 }
 
 type compiledSortField struct {
@@ -42,6 +43,7 @@ type compiledSortField struct {
 	direction   SortDirection
 	payloadPath []string
 	name        string
+	keysetText  bool
 }
 
 type sortComparable struct {
@@ -257,6 +259,10 @@ func (f compiledSortField) sqlOrderExpr() string {
 		direction = "DESC"
 	}
 
+	if f.keysetText {
+		return f.keysetExpression() + " " + direction + " NULLS LAST"
+	}
+
 	switch f.kind {
 	case sortFieldCreatedAt:
 		return `"createdAt" ` + direction
@@ -379,6 +385,11 @@ func (f compiledSortField) extractComparable(node memorynodes.MemoryNode) (sortC
 		value, ok := valueAtPath(payload, f.payloadPath)
 		if !ok || value == nil {
 			return comp, nil
+		}
+		if f.keysetText {
+			if _, ok := value.(string); !ok {
+				return comp, nil
+			}
 		}
 		switch v := value.(type) {
 		case string:

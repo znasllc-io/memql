@@ -1,5 +1,5 @@
 import type { Mock } from "vitest";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { builtinReply, fakeConnection, machineRow, type Answer, type Answers } from "./harness";
 
@@ -264,7 +264,16 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
       return builtinReply("routingRuleRemove", [{ id: "removed", name: args.name as string, status: "removed" }]);
     },
     routingRuleDescribe: async () => builtinReply("routingRuleDescribe", [ruleRow({ name: "planningIsLocal", when: { tag: "planning" }, policy: "localOnly", precedence: 20, problem: "" })]),
-    routerDecisionsRecent: async () => builtinReply("routerDecisionsRecent", state.decisions),
+    routerDecisionsRecent: async (args, opts) => {
+      const text = String(args.search ?? "").trim().toLowerCase();
+      const rows = state.decisions.filter(row => ["level", "door", "rule", "outcome"].every(key => !args[key] || row[key] === args[key]))
+        .filter(row => !text || [row.promptName, row.model, row.providerName, row.vendor, row.rule].some(value => String(value ?? "").toLowerCase().includes(text))
+          || (args.compactSearch && String(row.promptName ?? "").toLowerCase().includes(String(args.compactSearch).toLowerCase()))
+          || (Array.isArray(args.promptNames) && args.promptNames.includes(row.promptName)))
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || String(a.id).localeCompare(String(b.id)));
+      const start = Number(opts?.cursor || 0);
+      return new Result({ data: rows.slice(start, start + 10), meta: { cursor: start + 10 < rows.length ? String(start + 10) : "" } } as never);
+    },
     // ROUTES (design record 2026-10-18-routes-design.md): one object per read,
     // sharing the routing document's revision with chains and rules.
     routesForActor: async () => builtinReply("routesForActor", [{ id: "routesForActor", routes: state.modes, revision: state.revision }]),

@@ -176,7 +176,7 @@ type ApplyResponsibilityIntakeArgs struct {
 	NotifyHow        string
 	// Enum: draft | active | paused | archived
 	Status string
-	// Enum: pending | awaitingAnswers | clear | applied
+	// Enum:  | pending | awaitingAnswers | clear | applied
 	IntakeStatus  string
 	IntakeRequest map[string]any
 }
@@ -4229,6 +4229,13 @@ func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string
 //
 // Bound concept: v1:worker:activity (machine-readable: BoundConcepts["createMachineActivity"] in generated_concepts.go).
 type CreateMachineActivityArgs struct {
+	ActivityId    string
+	WorkerId      string
+	Kind          string
+	Label         string
+	CorrelationId string
+	StartedAt     string
+	ExpiresAt     string
 }
 
 // CreateMachineActivity calls the engine mutation createMachineActivity.
@@ -4238,8 +4245,44 @@ func (qc *QueryClient) CreateMachineActivity(ctx context.Context, args CreateMac
 }
 
 func CreateMachineActivityBuild(args CreateMachineActivityArgs) string {
-	_ = args
-	return "mutation createMachineActivity()"
+	var b strings.Builder
+	b.WriteString("mutation createMachineActivity(")
+	b.WriteString("activityId: ")
+	b.WriteString(quoteMemQL(args.ActivityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("workerId: ")
+	b.WriteString(quoteMemQL(args.WorkerId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("kind: ")
+	b.WriteString(quoteMemQL(args.Kind))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if args.CorrelationId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("correlationId: ")
+		b.WriteString(quoteMemQL(args.CorrelationId))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("startedAt: ")
+	b.WriteString(quoteMemQL(args.StartedAt))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
 }
 
 // CreateMagicLinkRequest -- Create a magic-link request row at issuance time.
@@ -13482,6 +13525,10 @@ func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string
 //
 // Bound concept: v1:worker:activity (machine-readable: BoundConcepts["updateMachineActivity"] in generated_concepts.go).
 type UpdateMachineActivityArgs struct {
+	ActivityId string
+	Status     string
+	EndedAt    string
+	Detail     string
 }
 
 // UpdateMachineActivity calls the engine mutation updateMachineActivity.
@@ -13491,8 +13538,31 @@ func (qc *QueryClient) UpdateMachineActivity(ctx context.Context, args UpdateMac
 }
 
 func UpdateMachineActivityBuild(args UpdateMachineActivityArgs) string {
-	_ = args
-	return "mutation updateMachineActivity()"
+	var b strings.Builder
+	b.WriteString("mutation updateMachineActivity(")
+	b.WriteString("activityId: ")
+	b.WriteString(quoteMemQL(args.ActivityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	if args.EndedAt != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("endedAt: ")
+		b.WriteString(quoteMemQL(args.EndedAt))
+	}
+	if args.Detail != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("detail: ")
+		b.WriteString(quoteMemQL(args.Detail))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // UpdateMissingCapabilityStatus -- Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.

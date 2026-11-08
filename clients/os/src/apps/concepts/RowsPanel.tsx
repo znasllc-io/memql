@@ -3,7 +3,7 @@ import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Notice, RecordList, RecordRow, Panel, Subhead } from "../../kit";
+import { Button, Caption, Refine, Notice, RecordList, RecordRow, Panel, Subhead } from "../../kit";
 import { cardFor, fieldText } from "./displayCard";
 import { rowIdOf, type ConceptRowsWalk } from "./useConceptRows";
 
@@ -20,7 +20,7 @@ import { rowIdOf, type ConceptRowsWalk } from "./useConceptRows";
 // ask for the newer answer -- one refresh point rather than two that
 // disagree.
 
-export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRowsWalk }) {
+export function RowsPanel({ concept, walk, search = "", onSearch }: { concept: Concept; walk: ConceptRowsWalk; search?: string; onSearch?: (value: string) => void }) {
   const [openId, setOpenId] = useState("");
 
   if (openId !== "") {
@@ -34,7 +34,8 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
 
   return (
     <Panel label="Rows">
-      <Subhead meta={walk.status === "more" || walk.status === "exhausted" ? walk.rows.length : undefined}>Rows</Subhead>
+      <Subhead meta={walk.status === "more" || walk.status === "exhausted" ? `${walk.rows.length} shown · Recent` : undefined}>Rows</Subhead>
+      {onSearch ? <Refine search={search} onSearch={onSearch} label="Search concept rows" placeholder="Name, description or text" /> : null}
 
       {/* THE BAND. New rows are counted, never spliced -- see
           useConceptRows' header for why a keyset walk cannot absorb them. */}
@@ -72,7 +73,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
         // this browser, so an empty answer means "none that you may read",
         // and the stronger sentence would be this window inventing a fact
         // about the cluster.
-        <Caption>No rows of this concept are readable by this account.</Caption>
+        <Caption>{search.trim() ? "No readable rows match this search." : "No rows of this concept are readable by this account."}</Caption>
       ) : null}
 
       {walk.rows.length === 0 ? null : (
@@ -80,8 +81,8 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
           {walk.rows.map((row) => {
             const card = cardFor(concept, row);
             return (
-              <RecordRow key={card.id} name={card.primary} secondary={card.secondary}
-                state={card.status} onOpen={() => setOpenId(card.id)}>{card.tertiary}</RecordRow>
+              <li key={card.id}><RecordRow name={card.primary} secondary={card.secondary}
+                state={card.status} onOpen={() => setOpenId(card.id)}>{card.tertiary}</RecordRow></li>
             );
           })}
         </RecordList>
@@ -105,12 +106,11 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
         ) : null}
         {walk.status === "exhausted" && walk.rows.length > 0 ? (
           <Caption>
-            All {walk.rows.length} readable rows loaded. That is the whole concept as far as
-            this account can see it.
+            All {walk.rows.length} readable {search.trim() ? "matching " : ""}rows loaded.{search.trim() ? "" : " That is the whole concept as far as this account can see it."}
           </Caption>
         ) : null}
         {walk.status === "failed" ? (
-          <Button tone="quiet" onClick={walk.reload}>
+          <Button tone="quiet" onClick={walk.retry ?? walk.reload}>
             Try again
           </Button>
         ) : null}

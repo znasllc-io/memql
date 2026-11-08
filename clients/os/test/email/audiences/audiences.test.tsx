@@ -26,12 +26,12 @@ describe("Email audiences", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refine audiences" }));
     chooseOption(screen.getByLabelText("Confirmation"), "Asks to confirm");
     expect(screen.queryByRole("button", { name: /Club/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Newsletter/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Newsletter/ })).toBeTruthy();
   });
   it("asks before archiving, holds a double click, keeps the page and restores", async () => {
     const row = audienceRow({ id: "a" });
     const conn = fakeConnection({ audiences: [row] });
-    conn.query.archiveAudience.mockImplementation(async () => { conn.query.audiences.mockResolvedValue(rowsResult([{ ...row, status: "archived" }])); return rowsResult([]); });
+    conn.query.archiveAudience.mockImplementation(async () => { conn.subscriptions.emit("v1:campaigns:audience", { ...row, status: "archived" }); return rowsResult([]); });
     mount(conn);
     fireEvent.click(await screen.findByText("Newsletter"));
     await press("Archive");
@@ -146,7 +146,7 @@ describe("Email audiences", () => {
     const conn = fakeConnection({ audiences: [audienceRow({ id: "a", confirmation: "required" })], journeys: [{ id: "j1", accountId: "self", name: "Welcome series", description: "", status: "active", trigger: { kind: "joined", audienceId: "a" }, steps: [{ id: "c1", kind: "confirm", templateId: "t1", senderIdentityId: "s1", timeoutDays: 7 }], createdAt: "2026-10-11T00:00:00Z", activatedAt: "2026-10-11T01:00:00Z" }] }); mount(conn);
     fireEvent.click(await screen.findByText("Newsletter")); fireEvent.click(screen.getByRole("button", { name: "Add people" })); fireEvent.click(screen.getByRole("radio", { name: "Add one address" }));
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@acme.test" } });
-    expect(screen.getByText(/confirmation email goes out/)).toBeTruthy();
+    expect(await screen.findByText(/confirmation email goes out/)).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Ask them to confirm" }));
     await waitFor(() => expect(conn.query.recipientInAudienceByDigest).toHaveBeenCalled()); await readTheBar();
     expect(screen.queryByRole("button", { name: "Add" })).toBeNull();

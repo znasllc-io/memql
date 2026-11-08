@@ -1,0 +1,10 @@
+--- FAIL: TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist (0.00s)
+    --- FAIL: TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=true (0.00s)
+        work_capabilities_test.go:97:
+                Error Trace:    /Users/znas/memql-os-lists/component/memql/work_capabilities_test.go:97
+                Error:          []string{"os.askConversationById", "os.myAskConversations", "os.myAskConversationsBrowse"} does not contain "work.workSearchConversations"
+                Test:           TestConversationDiscoveryKeepsRecallWhenBrowseReadsFillShortlist/recallAvailable=true
+                Messages:       title-only browse must not crowd out message recall
+FAIL
+FAIL    github.com/znasllc-io/memql/component/memql 1.528s
+FAIL

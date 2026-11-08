@@ -9,7 +9,7 @@ export const LiveReadVisibility = createContext(true);
 
 /** Virtual reads subscribe to their persisted inputs, never to a synthetic
  * concept that cannot emit. Batch a burst into one invalidation. */
-export function useGraphRevision(concepts: readonly string[], enabled = true) {
+export function useGraphRevision(concepts: readonly string[], enabled = true, { externalRecovery = false }: { externalRecovery?: boolean } = {}) {
   const connection = useOsConnection();
   const windowVisible = useContext(LiveReadVisibility);
   const [tabVisible, setTabVisible] = useState(() => document.visibilityState !== "hidden");
@@ -18,21 +18,26 @@ export function useGraphRevision(concepts: readonly string[], enabled = true) {
     document.addEventListener("visibilitychange", changed);
     return () => document.removeEventListener("visibilitychange", changed);
   }, []);
-  const active = enabled && windowVisible && tabVisible;
+  const paneActive = enabled && windowVisible;
+  const active = paneActive && tabVisible;
   const [revision, setRevision] = useState(0);
   const key = concepts.join(",");
   const status = useConnectionStatus();
-  const previous = useRef({ active, status });
+  const previous = useRef({ active, paneActive, status });
   const lastRecovery = useRef(-Infinity);
   useEffect(() => {
     const before = previous.current;
-    previous.current = { active, status };
+    previous.current = { active, paneActive, status };
     // Mount already starts its read. Only recovery needs another snapshot.
-    if (active && status === "connected" && (!before.active || before.status !== "connected")) {
+    // Session collections already recover browser visibility and connection
+    // changes. Their computed inputs still need a fresh read when a parked
+    // pane is opened, since its input subscriptions were paused.
+    const needsRecovery = externalRecovery ? !before.paneActive : !before.active || before.status !== "connected";
+    if (active && status === "connected" && needsRecovery) {
       lastRecovery.current = Date.now();
       setRevision(value => value + 1);
     }
-  }, [active, status]);
+  }, [active, paneActive, status, externalRecovery]);
   useEffect(() => {
     if (!active || !connection?.subscriptions) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -48,15 +53,17 @@ export function useGraphRevision(concepts: readonly string[], enabled = true) {
         setRevision(value => value + 1);
       }, delay);
     };
-    const remove = key.split(",").filter(Boolean).map(concept => connection.subscriptions.subscribeGraph(changed, { concept }));
+    // Computed readers only need invalidation, never the potentially large
+    // record body. Share compact notifications with other invalidators.
+    const remove = key.split(",").filter(Boolean).map(concept => connection.subscriptions.subscribeGraph(changed, { concept, idOnly: true }));
     // Resubscriptions recover delivery; a focused/reconnected surface also
     // rereads inputs to cover events missed while its stream was down.
-    const stopResume = onAppResume(() => {
+    const stopResume = externalRecovery ? () => {} : onAppResume(() => {
       if (Date.now() - lastRecovery.current < 1_000) return;
       lastRecovery.current = Date.now();
       changed();
     });
     return () => { remove.forEach(stop => stop()); clearTimeout(timer); stopResume(); };
-  }, [connection, key, active]);
+  }, [connection, key, active, externalRecovery]);
   return revision;
 }

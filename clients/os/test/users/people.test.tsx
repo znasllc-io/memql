@@ -166,7 +166,7 @@ describe("the roster", () => {
     // Not a toast, and not an empty list: somebody who reached this surface
     // out-of-band has to read WHY rather than conclude the cluster is empty.
     const connection = seed();
-    connection.query.searchUsers = vi.fn(async () => {
+    connection.query.peopleBrowse = vi.fn(async () => {
       throw new Error("searchUsers: reading the directory is admin and above");
     });
     mount(connection);
@@ -267,14 +267,14 @@ describe("authorized roster counts", () => {
     });
     const view = mount(connection);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
-    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("2"));
+    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("2 shown"));
     expect(view.container.querySelectorAll(".os-record-list .os-record-row")).toHaveLength(2);
     expect(screen.queryByText("Inactive colleague")).toBeNull();
   });
 
   it("does not count a partial roster when the invitations read is denied", async () => {
     const connection = seed({ searchUsers: [userRow({ id: "active", displayName: "Active colleague" })] });
-    connection.query.pendingUserInvitations.mockRejectedValue(new Error("invitation read denied"));
+    connection.query.pendingUserInvitationsBrowse.mockRejectedValue(new Error("invitation read denied"));
     const view = mount(connection);
     await screen.findByText(/invitation read denied/);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();

@@ -1,0 +1,6 @@
+ok  	github.com/znasllc-io/memql/cmd/memql-lsp	32.799s
+ok  	github.com/znasllc-io/memql/cmd/memql-lsp/internal/grammar	0.265s
+ok  	github.com/znasllc-io/memql/cmd/memql-lsp/internal/position	0.979s
+ok  	github.com/znasllc-io/memql/integrations	0.299s
+ok  	github.com/znasllc-io/memql/scripts/ci	43.214s
+ok  	github.com/znasllc-io/memql/cmd/memqlbreaking	0.469s

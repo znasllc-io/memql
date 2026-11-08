@@ -1,3 +1,4 @@
+import { ConversationHistory, emptyConversationHistory, type ConversationHistoryState } from "./conversationHistory";
 import type { AskHandle, AskTransport } from "./askController";
 import { AUTO_ROUTING, routeIdFromSource, routeSource, routeSupportsDestination, type AskRouting } from "./askRoute";
 import { isTransportInterruption } from "@znasllc-io/memql-sdk-core/client";
@@ -115,10 +116,11 @@ export interface ApprovalDiscussion {
 }
 export interface AskConversationStore {
   list(): Promise<ConversationSummary[]>;
+  page?(options: { search?: string; cursor?: string; signal?: AbortSignal }): Promise<{ rows: ConversationSummary[]; cursor?: string }>;
   create(): Promise<ConversationSummary>;
   read(id: string): Promise<AskTurn[]>;
 }
-export interface ConversationState {
+export interface ConversationState extends ConversationHistoryState {
   destination?: ExecutionDestination;
   /** The message field's route: "" is Auto, otherwise a route id. */
   route?: string;
@@ -135,10 +137,7 @@ export interface ConversationState {
   guidanceNotice?: string;
   guidanceRetry?: { approvalId: string; feedback: string } | null;
   focusQuestionId?: string | null;
-  conversations: ConversationSummary[];
   dictationActivity: AskActivity[];
-  historyLoading: boolean;
-  historyError: string;
   selectionError: string;
   openingId: string | null;
   selectedId: string | null;
@@ -157,7 +156,7 @@ export interface ConversationState {
  * The message field's route and Where ride each turn (Auto sends nothing), and
  * an open conversation keeps the choice its own last message ran with. */
 export class ConversationSession {
-  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", snapshotError: "", activity: null, voiceActive: false };
+  private state: ConversationState = { ...emptyConversationHistory, dictationActivity: [], selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", snapshotError: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -169,7 +168,7 @@ export class ConversationSession {
   private interruptedRequests = new Map<string, number>();
   private epoch = 0;
   private selection = 0;
-  private historyEpoch = 0;
+  private history: ConversationHistory;
   private discussionEpoch = 0;
   private guidanceRevision = 0;
   private uncertainGuidance = new Map<string, string>();
@@ -186,7 +185,7 @@ export class ConversationSession {
   private routingDefault: AskRoutingChoice = { route: "", destination: "auto" };
   private routingListener: ((choice: AskRoutingChoice) => void) | null = null;
   private uploads = new Map<string, UploadHandle>();
-  constructor(private transport: AskTransport) {}
+  constructor(private transport: AskTransport) { this.history = new ConversationHistory(transport.conversations, state => this.patch(state)); }
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
@@ -441,15 +440,11 @@ export class ConversationSession {
     const expectedMs = previous?.expectedMs ?? (completed.length ? completed[Math.ceil(completed.length * .75) - 1] : activity.provider?.toLowerCase().includes("fleet") ? 60000 : 15000);
     this.patch({ dictationActivity: [...this.state.dictationActivity.slice(-199), { ...activity, expectedMs, estimateSource: previous?.estimateSource ?? (completed.length ? "Recent dictation on this route" : "Route baseline") }] });
   };
-  refresh = async () => {
-    if (!this.transport.conversations) return;
-    const epoch = ++this.historyEpoch;
-    this.patch({ historyLoading: true, historyError: "" });
-    try {
-      const conversations = await this.transport.conversations.list();
-      if (epoch === this.historyEpoch) this.patch({ conversations, historyLoading: false });
-    } catch (error) { if (epoch === this.historyEpoch) this.patch({ historyLoading: false, historyError: isTransportInterruption(error) ? "" : message(error) }); }
-  };
+  retainHistory = () => this.history.retain();
+  setHistorySearch = (search: string) => this.history.setSearch(search);
+  refresh = () => this.history.refresh();
+  refreshHistory = () => this.history.invalidate();
+  loadMoreHistory = () => this.history.loadMore();
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
     this.interruptedRequests.clear();
@@ -467,9 +462,9 @@ export class ConversationSession {
       if (!this.transport.conversations) throw new Error("Conversations are unavailable.");
       const item = await this.transport.conversations.create();
       if (selection !== this.selection || this.disposed) return;
-      this.historyEpoch++;
       this.newConversation();
-      this.patch({ selectedId: item.id, conversations: [item, ...this.state.conversations.filter(row => row.id !== item.id)], historyLoading: false });
+      this.history.add(item);
+      this.patch({ selectedId: item.id });
     } catch (error) {
       if (selection === this.selection && !this.disposed) this.patch({ loading: false, error: message(error) });
     }
@@ -538,7 +533,7 @@ export class ConversationSession {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
-    this.selection++; this.historyEpoch++; this.voiceEpoch++; this.discussionEpoch++;
+    this.selection++; this.history.dispose(); this.voiceEpoch++; this.discussionEpoch++;
     this.listeners.clear();
   };
   beginVoice = async (): Promise<string> => {
@@ -632,7 +627,7 @@ export class ConversationSession {
         }
       } }
       catch (error) { if (current()) this.patch({ snapshotError: isTransportInterruption(error) ? "" : message(error) }); }
-      if (request.refreshHistory && current()) void this.refresh();
+      if (request.refreshHistory && current()) this.refreshHistory();
       this.scheduleRefresh();
     })().finally(() => { if (this.reloadRequest === request) this.reloadRequest = null; });
     return request.promise;
@@ -697,7 +692,7 @@ export class ConversationSession {
       this.active = null;
       this.patch({ busy: false });
       this.scheduleRefresh();
-      void this.refresh();
+      this.refreshHistory();
       // A message that went only to work already running opens no run of its
       // own. The cluster saved where it went before it said done, so read it
       // now: its labels and any stop question arrive with the reply, not a

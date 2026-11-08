@@ -777,6 +777,9 @@ func AgentsForRunBuild(args AgentsForRunArgs) string {
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["allAgents"] in generated_concepts.go).
 type AllAgentsArgs struct {
+	IncludeInactive    bool
+	IncludeInactiveSet bool // set true to send includeInactive; required because zero-value bool is ambiguous
+	Search             string
 }
 
 // AllAgents calls the engine query allAgents.
@@ -786,14 +789,31 @@ func (qc *QueryClient) AllAgents(ctx context.Context, args AllAgentsArgs) (*Resu
 }
 
 func AllAgentsBuild(args AllAgentsArgs) string {
-	_ = args
-	return "query allAgents()"
+	var b strings.Builder
+	b.WriteString("query allAgents(")
+	if args.IncludeInactiveSet {
+		b.WriteString("includeInactive: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeInactive))
+	}
+	if args.Search != "" {
+		if b.Len() > 16 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
-// AllDocumentChunkDomains -- Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to render per-domain chunk counts in the Knowledge panel.
+// AllDocumentChunkDomains -- Cursor-paged shared chunk metadata for complete counts and bounded review joins. Optional filters only narrow this existing index; full text stays domain-scoped.
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["allDocumentChunkDomains"] in generated_concepts.go).
 type AllDocumentChunkDomainsArgs struct {
+	AsOf       string
+	Pending    bool
+	PendingSet bool // set true to send pending; required because zero-value bool is ambiguous
+	Search     string
 }
 
 // AllDocumentChunkDomains calls the engine query allDocumentChunkDomains.
@@ -803,8 +823,26 @@ func (qc *QueryClient) AllDocumentChunkDomains(ctx context.Context, args AllDocu
 }
 
 func AllDocumentChunkDomainsBuild(args AllDocumentChunkDomainsArgs) string {
-	_ = args
-	return "query allDocumentChunkDomains()"
+	var b strings.Builder
+	b.WriteString("query allDocumentChunkDomains(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	if args.PendingSet {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pending: ")
+		b.WriteString(fmt.Sprintf("%v", args.Pending))
+	}
+	if args.Search != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // AllOutputScreenings -- Returns every v1:safety:outputScreening row. Used by the retention sweep (mirrors allSafetyClassifications); future cockpit prompt-injection dashboard will layer more targeted queries on top.
@@ -1253,6 +1291,28 @@ func AudienceByIdBuild(args AudienceByIdArgs) string {
 	return b.String()
 }
 
+// AudienceNamesMatching -- Authorized audience identities matching a campaign-search phrase.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audienceNamesMatching"] in generated_concepts.go).
+type AudienceNamesMatchingArgs struct {
+	Search string
+}
+
+// AudienceNamesMatching calls the engine query audienceNamesMatching.
+func (qc *QueryClient) AudienceNamesMatching(ctx context.Context, args AudienceNamesMatchingArgs) (*Result, error) {
+	call := AudienceNamesMatchingBuild(args)
+	return qc.executeNamed(ctx, "audienceNamesMatching", call)
+}
+
+func AudienceNamesMatchingBuild(args AudienceNamesMatchingArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceNamesMatching(")
+	b.WriteString("search: ")
+	b.WriteString(quoteMemQL(args.Search))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AudienceRosterForSend -- ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first -- including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
 // THE 500 IS A PAGE, NOT A CEILING (memql#3460). It used to be 5000 and it used to be the largest audience this engine could send to: the worker read the roster WHOLE on every batch and diffed it against the ledger, so anything past the bound would have been silently truncated and campaignStartSend refused the send rather than mail a prefix. The worker now walks this query with the engine's keyset cursor, so the roster is unbounded and the number here only decides how much of it is in memory at once.
 // The ascending `row.createdAt` ordering is load-bearing under concurrent roster edits, which is the question a cursor over versioned rows has to answer. Reads collapse to the latest version per id (DISTINCT ON), so editing a recipient mid-send moves it FORWARD in this enumeration -- never backward past the cursor. A row can therefore be seen twice in one pass and can never be MISSED, and the worker de-duplicates within a batch. That asymmetry is the whole safety argument: a duplicate costs a wasted comparison, a skip costs somebody their mail.
@@ -1340,6 +1400,79 @@ func AudiencesBuild(args AudiencesArgs) string {
 	if args.Status != "" {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AudiencesBrowse -- Recent audiences with name, description, archive and confirmation search.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiencesBrowse"] in generated_concepts.go).
+type AudiencesBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	Confirmation       string
+}
+
+// AudiencesBrowse calls the engine query audiencesBrowse.
+func (qc *QueryClient) AudiencesBrowse(ctx context.Context, args AudiencesBrowseArgs) (*Result, error) {
+	call := AudiencesBrowseBuild(args)
+	return qc.executeNamed(ctx, "audiencesBrowse", call)
+}
+
+func AudiencesBrowseBuild(args AudiencesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query audiencesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.Confirmation != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("confirmation: ")
+		b.WriteString(quoteMemQL(args.Confirmation))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// AuditEventsBrowse -- Search the authorized audit trail before its ten-row page boundary.
+//
+// Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["auditEventsBrowse"] in generated_concepts.go).
+type AuditEventsBrowseArgs struct {
+	Category string
+	Search   string
+}
+
+// AuditEventsBrowse calls the engine query auditEventsBrowse.
+func (qc *QueryClient) AuditEventsBrowse(ctx context.Context, args AuditEventsBrowseArgs) (*Result, error) {
+	call := AuditEventsBrowseBuild(args)
+	return qc.executeNamed(ctx, "auditEventsBrowse", call)
+}
+
+func AuditEventsBrowseBuild(args AuditEventsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query auditEventsBrowse(")
+	if args.Category != "" {
+		b.WriteString("category: ")
+		b.WriteString(quoteMemQL(args.Category))
+	}
+	if args.Search != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -2164,6 +2297,46 @@ func CampaignsBuild(args CampaignsArgs) string {
 	return b.String()
 }
 
+// CampaignsBrowse -- Recent campaigns, narrowed before pagination. audienceIds comes from the authorized audience-name search so campaign search retains that relation.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignsBrowse"] in generated_concepts.go).
+type CampaignsBrowseArgs struct {
+	Search      string
+	Status      string
+	AudienceIds []string
+}
+
+// CampaignsBrowse calls the engine query campaignsBrowse.
+func (qc *QueryClient) CampaignsBrowse(ctx context.Context, args CampaignsBrowseArgs) (*Result, error) {
+	call := CampaignsBrowseBuild(args)
+	return qc.executeNamed(ctx, "campaignsBrowse", call)
+}
+
+func CampaignsBrowseBuild(args CampaignsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Status != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.AudienceIds != nil {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("audienceIds: ")
+		b.WriteString(renderMemQLValue(args.AudienceIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignsForAccount -- The email campaigns run for one account.
 // The composite-tier term is `campaigns`' own conjunct, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field. `sitesForAccount` above dropped its copy under memql#5303 (D4) because v1:platform:site declares the account argument; campaigns keep theirs, because a rollup that dropped the tier predicate would be the shortest path in the product to reading every operator's campaigns.
 // It counts CAMPAIGNS and not sends. A band that said "4,182" would be counting delivery rows, which is a number about one busy week rather than about the client -- and the delivery ledger is deliberately not readable in bulk from here at all (memql#4823). Cancelled and failed campaigns are included: a rollup is what is filed for this client, and a send that failed is still work that happened.
@@ -2345,6 +2518,39 @@ func ClientAccountsAllBuild(args ClientAccountsAllArgs) string {
 	var b strings.Builder
 	b.WriteString("query clientAccountsAll(")
 	if args.IncludeArchivedSet {
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ClientAccountsBrowse -- Ten recent authorized clients; searching is applied before cursor paging.
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountsBrowse"] in generated_concepts.go).
+type ClientAccountsBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// ClientAccountsBrowse calls the engine query clientAccountsBrowse.
+func (qc *QueryClient) ClientAccountsBrowse(ctx context.Context, args ClientAccountsBrowseArgs) (*Result, error) {
+	call := ClientAccountsBrowseBuild(args)
+	return qc.executeNamed(ctx, "clientAccountsBrowse", call)
+}
+
+func ClientAccountsBrowseBuild(args ClientAccountsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query clientAccountsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
 		b.WriteString("includeArchived: ")
 		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
 	}
@@ -2619,6 +2825,47 @@ func ComposeRecipesBuild(args ComposeRecipesArgs) string {
 	return "query composeRecipes()"
 }
 
+// ComposeRecipesBrowse -- Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records.
+//
+// Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["composeRecipesBrowse"] in generated_concepts.go).
+type ComposeRecipesBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	Format             string
+}
+
+// ComposeRecipesBrowse calls the engine query composeRecipesBrowse.
+func (qc *QueryClient) ComposeRecipesBrowse(ctx context.Context, args ComposeRecipesBrowseArgs) (*Result, error) {
+	call := ComposeRecipesBrowseBuild(args)
+	return qc.executeNamed(ctx, "composeRecipesBrowse", call)
+}
+
+func ComposeRecipesBrowseBuild(args ComposeRecipesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query composeRecipesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.Format != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ComposeTemplateById -- One template by id, gated to its owner. Backs the template editor and the render step's own resolution -- which runs under the caller's actor, so a composition naming somebody else's template resolves zero rows and is refused rather than rendering through it.
 //
 // Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplateById"] in generated_concepts.go).
@@ -2658,6 +2905,47 @@ func ComposeTemplatesBuild(args ComposeTemplatesArgs) string {
 	var b strings.Builder
 	b.WriteString("query composeTemplates(")
 	if args.Format != "" {
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ComposeTemplatesBrowse -- Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records.
+//
+// Bound concept: v1:compose:composeTemplate (machine-readable: BoundConcepts["composeTemplatesBrowse"] in generated_concepts.go).
+type ComposeTemplatesBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	Format             string
+}
+
+// ComposeTemplatesBrowse calls the engine query composeTemplatesBrowse.
+func (qc *QueryClient) ComposeTemplatesBrowse(ctx context.Context, args ComposeTemplatesBrowseArgs) (*Result, error) {
+	call := ComposeTemplatesBrowseBuild(args)
+	return qc.executeNamed(ctx, "composeTemplatesBrowse", call)
+}
+
+func ComposeTemplatesBrowseBuild(args ComposeTemplatesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query composeTemplatesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.Format != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
 		b.WriteString("format: ")
 		b.WriteString(quoteMemQL(args.Format))
 	}
@@ -2753,6 +3041,30 @@ func CompositionInputByIdBuild(args CompositionInputByIdArgs) string {
 	return b.String()
 }
 
+// CompositionOutputIndex -- Output-to-composition directory. Ordinary Files browsing supplies visible ids; the Materializer place requests compact output membership explicitly.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionOutputIndex"] in generated_concepts.go).
+type CompositionOutputIndexArgs struct {
+	FileIds []string
+}
+
+// CompositionOutputIndex calls the engine query compositionOutputIndex.
+func (qc *QueryClient) CompositionOutputIndex(ctx context.Context, args CompositionOutputIndexArgs) (*Result, error) {
+	call := CompositionOutputIndexBuild(args)
+	return qc.executeNamed(ctx, "compositionOutputIndex", call)
+}
+
+func CompositionOutputIndexBuild(args CompositionOutputIndexArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionOutputIndex(")
+	if args.FileIds != nil {
+		b.WriteString("fileIds: ")
+		b.WriteString(renderMemQLValue(args.FileIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // Compositions -- Everything materialized, newest first: the Materialized view's one read and the Files app's Materializer place. Owned, with the cluster-owner escape -- which is what makes "everything materialized in THIS INSTANCE" (the epic's words) a claim this read can honestly make. A plain owner tier has no bypass on the read path, so an operator would silently see one person's subset.
 //
 // Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositions"] in generated_concepts.go).
@@ -2776,6 +3088,47 @@ func CompositionsBuild(args CompositionsArgs) string {
 	}
 	if args.Format != "" {
 		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("format: ")
+		b.WriteString(quoteMemQL(args.Format))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CompositionsBrowse -- Recent directory page. Search and archive selection precede the cursor; by-id reads remain available for links outside these ten records.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsBrowse"] in generated_concepts.go).
+type CompositionsBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	Format             string
+}
+
+// CompositionsBrowse calls the engine query compositionsBrowse.
+func (qc *QueryClient) CompositionsBrowse(ctx context.Context, args CompositionsBrowseArgs) (*Result, error) {
+	call := CompositionsBrowseBuild(args)
+	return qc.executeNamed(ctx, "compositionsBrowse", call)
+}
+
+func CompositionsBrowseBuild(args CompositionsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.Format != "" {
+		if b.Len() > 25 {
 			b.WriteString(", ")
 		}
 		b.WriteString("format: ")
@@ -3259,6 +3612,128 @@ func DependentsOfConstructBuild(args DependentsOfConstructArgs) string {
 	return b.String()
 }
 
+// DeployableDirectoryConnections -- Saved personal installation names, paged rather than an unbounded ceiling.
+//
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["deployableDirectoryConnections"] in generated_concepts.go).
+type DeployableDirectoryConnectionsArgs struct {
+}
+
+// DeployableDirectoryConnections calls the engine query deployableDirectoryConnections.
+func (qc *QueryClient) DeployableDirectoryConnections(ctx context.Context, args DeployableDirectoryConnectionsArgs) (*Result, error) {
+	call := DeployableDirectoryConnectionsBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectoryConnections", call)
+}
+
+func DeployableDirectoryConnectionsBuild(args DeployableDirectoryConnectionsArgs) string {
+	_ = args
+	return "query deployableDirectoryConnections()"
+}
+
+// DeployableDirectoryCredentials -- Authorized credential naming cards for complete repository provenance search.
+//
+// Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["deployableDirectoryCredentials"] in generated_concepts.go).
+type DeployableDirectoryCredentialsArgs struct {
+}
+
+// DeployableDirectoryCredentials calls the engine query deployableDirectoryCredentials.
+func (qc *QueryClient) DeployableDirectoryCredentials(ctx context.Context, args DeployableDirectoryCredentialsArgs) (*Result, error) {
+	call := DeployableDirectoryCredentialsBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectoryCredentials", call)
+}
+
+func DeployableDirectoryCredentialsBuild(args DeployableDirectoryCredentialsArgs) string {
+	_ = args
+	return "query deployableDirectoryCredentials()"
+}
+
+// DeployableDirectoryPackages -- Compact authorized source definitions, including undeployed apps.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["deployableDirectoryPackages"] in generated_concepts.go).
+type DeployableDirectoryPackagesArgs struct {
+	AsOf string
+}
+
+// DeployableDirectoryPackages calls the engine query deployableDirectoryPackages.
+func (qc *QueryClient) DeployableDirectoryPackages(ctx context.Context, args DeployableDirectoryPackagesArgs) (*Result, error) {
+	call := DeployableDirectoryPackagesBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectoryPackages", call)
+}
+
+func DeployableDirectoryPackagesBuild(args DeployableDirectoryPackagesArgs) string {
+	var b strings.Builder
+	b.WriteString("query deployableDirectoryPackages(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeployableDirectoryPending -- Active deployment identities and declared apps, without logs/history payloads.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["deployableDirectoryPending"] in generated_concepts.go).
+type DeployableDirectoryPendingArgs struct {
+	AsOf string
+}
+
+// DeployableDirectoryPending calls the engine query deployableDirectoryPending.
+func (qc *QueryClient) DeployableDirectoryPending(ctx context.Context, args DeployableDirectoryPendingArgs) (*Result, error) {
+	call := DeployableDirectoryPendingBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectoryPending", call)
+}
+
+func DeployableDirectoryPendingBuild(args DeployableDirectoryPendingArgs) string {
+	var b strings.Builder
+	b.WriteString("query deployableDirectoryPending(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeployableDirectorySites -- Compact authorized site identities used by the deployables directory reducer.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deployableDirectorySites"] in generated_concepts.go).
+type DeployableDirectorySitesArgs struct {
+	AsOf string
+}
+
+// DeployableDirectorySites calls the engine query deployableDirectorySites.
+func (qc *QueryClient) DeployableDirectorySites(ctx context.Context, args DeployableDirectorySitesArgs) (*Result, error) {
+	call := DeployableDirectorySitesBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectorySites", call)
+}
+
+func DeployableDirectorySitesBuild(args DeployableDirectorySitesArgs) string {
+	var b strings.Builder
+	b.WriteString("query deployableDirectorySites(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeployableDirectorySitesByIds -- Hydrate only the sites named by one directory page, under the caller's gate.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deployableDirectorySitesByIds"] in generated_concepts.go).
+type DeployableDirectorySitesByIdsArgs struct {
+	Ids []string
+}
+
+// DeployableDirectorySitesByIds calls the engine query deployableDirectorySitesByIds.
+func (qc *QueryClient) DeployableDirectorySitesByIds(ctx context.Context, args DeployableDirectorySitesByIdsArgs) (*Result, error) {
+	call := DeployableDirectorySitesByIdsBuild(args)
+	return qc.executeNamed(ctx, "deployableDirectorySitesByIds", call)
+}
+
+func DeployableDirectorySitesByIdsBuild(args DeployableDirectorySitesByIdsArgs) string {
+	var b strings.Builder
+	b.WriteString("query deployableDirectorySitesByIds(")
+	b.WriteString("ids: ")
+	b.WriteString(renderMemQLValue(args.Ids))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeploymentById -- The CURRENT state of one deployment, by deploymentId. Returns at most one row -- the latest version. Status transitions append under the same id and a result collapses to one row per id, so this is not a timeline read; for the state at an earlier instant, wrap it in `asOf(deploymentById(...), "<rfc3339>")`. A one-query all-versions mode does not exist (#2880).
 //
 // Bound concept: v1:cluster:deployment (machine-readable: BoundConcepts["deploymentById"] in generated_concepts.go).
@@ -3414,7 +3889,12 @@ func DeviceCodeByUserCodeHashBuild(args DeviceCodeByUserCodeHashArgs) string {
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["documentChunksForDomain"] in generated_concepts.go).
 type DocumentChunksForDomainArgs struct {
-	DomainId string
+	DomainId   string
+	Ids        []string
+	AsOf       string
+	Pending    bool
+	PendingSet bool // set true to send pending; required because zero-value bool is ambiguous
+	Search     string
 }
 
 // DocumentChunksForDomain calls the engine query documentChunksForDomain.
@@ -3428,6 +3908,32 @@ func DocumentChunksForDomainBuild(args DocumentChunksForDomainArgs) string {
 	b.WriteString("query documentChunksForDomain(")
 	b.WriteString("domainId: ")
 	b.WriteString(quoteMemQL(args.DomainId))
+	if args.Ids != nil {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	if args.PendingSet {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pending: ")
+		b.WriteString(fmt.Sprintf("%v", args.Pending))
+	}
+	if args.Search != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -3664,6 +4170,38 @@ func EmailRulesBuild(args EmailRulesArgs) string {
 	if args.Status != "" {
 		b.WriteString("status: ")
 		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRulesBrowse -- Recent event rules, the other ordered automation-directory input.
+//
+// Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRulesBrowse"] in generated_concepts.go).
+type EmailRulesBrowseArgs struct {
+	Search  string
+	Trigger string
+}
+
+// EmailRulesBrowse calls the engine query emailRulesBrowse.
+func (qc *QueryClient) EmailRulesBrowse(ctx context.Context, args EmailRulesBrowseArgs) (*Result, error) {
+	call := EmailRulesBrowseBuild(args)
+	return qc.executeNamed(ctx, "emailRulesBrowse", call)
+}
+
+func EmailRulesBrowseBuild(args EmailRulesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailRulesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Trigger != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("trigger: ")
+		b.WriteString(quoteMemQL(args.Trigger))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -4156,6 +4694,39 @@ func GroupsAllBuild(args GroupsAllArgs) string {
 	return b.String()
 }
 
+// GroupsBrowse -- Ten recent authorized groups, with name and description search before paging.
+//
+// Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupsBrowse"] in generated_concepts.go).
+type GroupsBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// GroupsBrowse calls the engine query groupsBrowse.
+func (qc *QueryClient) GroupsBrowse(ctx context.Context, args GroupsBrowseArgs) (*Result, error) {
+	call := GroupsBrowseBuild(args)
+	return qc.executeNamed(ctx, "groupsBrowse", call)
+}
+
+func GroupsBrowseBuild(args GroupsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query groupsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // GroupsForAccount -- The groups tied to one account -- the Accounts ledger's People band.
 //
 // Bound concept: v1:identity:group (machine-readable: BoundConcepts["groupsForAccount"] in generated_concepts.go).
@@ -4547,6 +5118,47 @@ func JourneysBuild(args JourneysArgs) string {
 	return b.String()
 }
 
+// JourneysBrowse -- Recent journeys, one ordered input to the Email automation directory.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeysBrowse"] in generated_concepts.go).
+type JourneysBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	Trigger            string
+}
+
+// JourneysBrowse calls the engine query journeysBrowse.
+func (qc *QueryClient) JourneysBrowse(ctx context.Context, args JourneysBrowseArgs) (*Result, error) {
+	call := JourneysBrowseBuild(args)
+	return qc.executeNamed(ctx, "journeysBrowse", call)
+}
+
+func JourneysBrowseBuild(args JourneysBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeysBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.Trigger != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("trigger: ")
+		b.WriteString(quoteMemQL(args.Trigger))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // KnowledgeDomainsAll -- Every knowledge domain this cluster holds.
 // The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
 // NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.
@@ -4657,6 +5269,30 @@ func LibraryArchivedFoldersBuild(args LibraryArchivedFoldersArgs) string {
 	return "query libraryArchivedFolders()"
 }
 
+// LibraryArchivedFoldersBrowse -- Ten archived folders matching the Bin's server-side search.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryArchivedFoldersBrowse"] in generated_concepts.go).
+type LibraryArchivedFoldersBrowseArgs struct {
+	Search string
+}
+
+// LibraryArchivedFoldersBrowse calls the engine query libraryArchivedFoldersBrowse.
+func (qc *QueryClient) LibraryArchivedFoldersBrowse(ctx context.Context, args LibraryArchivedFoldersBrowseArgs) (*Result, error) {
+	call := LibraryArchivedFoldersBrowseBuild(args)
+	return qc.executeNamed(ctx, "libraryArchivedFoldersBrowse", call)
+}
+
+func LibraryArchivedFoldersBrowseBuild(args LibraryArchivedFoldersBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArchivedFoldersBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifactById -- Fetch a single Library artifact index row by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.go).
@@ -4701,6 +5337,101 @@ func LibraryArtifactBySourceConceptRefBuild(args LibraryArtifactBySourceConceptR
 	return b.String()
 }
 
+// LibraryArtifactFacetRows -- Internal metadata, aggregated before transport by libraryBrowseFacets.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactFacetRows"] in generated_concepts.go).
+type LibraryArtifactFacetRowsArgs struct {
+	AsOf        string
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId    string
+	Kind        string
+	Source      string
+	AccountId   string
+	Search      string
+	Ids         []string
+	FolderIds   []string
+	SourceRefs  []string
+}
+
+// LibraryArtifactFacetRows calls the engine query libraryArtifactFacetRows.
+func (qc *QueryClient) LibraryArtifactFacetRows(ctx context.Context, args LibraryArtifactFacetRowsArgs) (*Result, error) {
+	call := LibraryArtifactFacetRowsBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactFacetRows", call)
+}
+
+func LibraryArtifactFacetRowsBuild(args LibraryArtifactFacetRowsArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactFacetRows(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	if args.ArchivedSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.Kind != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Source != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Search != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Ids != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if args.FolderIds != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderIds: ")
+		b.WriteString(renderMemQLValue(args.FolderIds))
+	}
+	if args.SourceRefs != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceRefs: ")
+		b.WriteString(renderMemQLValue(args.SourceRefs))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifactForFile -- Resolve a newly uploaded file's artifact using the bare file ID from its receipt. The polymorphic sourceConceptRef query is for canonical internal references; clients cannot infer a concept from a bare ID.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactForFile"] in generated_concepts.go).
@@ -4738,6 +5469,200 @@ func (qc *QueryClient) LibraryArtifacts(ctx context.Context, args LibraryArtifac
 func LibraryArtifactsBuild(args LibraryArtifactsArgs) string {
 	_ = args
 	return "query libraryArtifacts()"
+}
+
+// LibraryArtifactsBrowse -- Ten owner-scoped Library entries matching the requested place and facets.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowse"] in generated_concepts.go).
+type LibraryArtifactsBrowseArgs struct {
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId    string
+	Kind        string
+	Source      string
+	AccountId   string
+	Label       string
+	Search      string
+	Ids         []string
+	FolderIds   []string
+	SourceRefs  []string
+}
+
+// LibraryArtifactsBrowse calls the engine query libraryArtifactsBrowse.
+func (qc *QueryClient) LibraryArtifactsBrowse(ctx context.Context, args LibraryArtifactsBrowseArgs) (*Result, error) {
+	call := LibraryArtifactsBrowseBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsBrowse", call)
+}
+
+func LibraryArtifactsBrowseBuild(args LibraryArtifactsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactsBrowse(")
+	if args.ArchivedSet {
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.Kind != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Source != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Label != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	if args.Search != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Ids != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if args.FolderIds != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderIds: ")
+		b.WriteString(renderMemQLValue(args.FolderIds))
+	}
+	if args.SourceRefs != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceRefs: ")
+		b.WriteString(renderMemQLValue(args.SourceRefs))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryArtifactsBrowseOldest -- Ten owner-scoped Library entries matching the requested place and facets.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsBrowseOldest"] in generated_concepts.go).
+type LibraryArtifactsBrowseOldestArgs struct {
+	Archived    bool
+	ArchivedSet bool // set true to send archived; required because zero-value bool is ambiguous
+	FolderId    string
+	Kind        string
+	Source      string
+	AccountId   string
+	Label       string
+	Search      string
+	Ids         []string
+	FolderIds   []string
+	SourceRefs  []string
+}
+
+// LibraryArtifactsBrowseOldest calls the engine query libraryArtifactsBrowseOldest.
+func (qc *QueryClient) LibraryArtifactsBrowseOldest(ctx context.Context, args LibraryArtifactsBrowseOldestArgs) (*Result, error) {
+	call := LibraryArtifactsBrowseOldestBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsBrowseOldest", call)
+}
+
+func LibraryArtifactsBrowseOldestBuild(args LibraryArtifactsBrowseOldestArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactsBrowseOldest(")
+	if args.ArchivedSet {
+		b.WriteString("archived: ")
+		b.WriteString(fmt.Sprintf("%v", args.Archived))
+	}
+	if args.FolderId != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderId: ")
+		b.WriteString(quoteMemQL(args.FolderId))
+	}
+	if args.Kind != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.Source != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Label != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	if args.Search != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Ids != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ids: ")
+		b.WriteString(renderMemQLValue(args.Ids))
+	}
+	if args.FolderIds != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("folderIds: ")
+		b.WriteString(renderMemQLValue(args.FolderIds))
+	}
+	if args.SourceRefs != nil {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceRefs: ")
+		b.WriteString(renderMemQLValue(args.SourceRefs))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryArtifactsByKind -- List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: `row.ownerUserId == actor.userId` gates the row set; `row.kind` narrows to the selected kind.
@@ -4806,6 +5731,28 @@ func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	return b.String()
 }
 
+// LibraryArtifactsInFolders -- Complete membership of one deliberate archive operation, including archived files.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsInFolders"] in generated_concepts.go).
+type LibraryArtifactsInFoldersArgs struct {
+	FolderIds []string
+}
+
+// LibraryArtifactsInFolders calls the engine query libraryArtifactsInFolders.
+func (qc *QueryClient) LibraryArtifactsInFolders(ctx context.Context, args LibraryArtifactsInFoldersArgs) (*Result, error) {
+	call := LibraryArtifactsInFoldersBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactsInFolders", call)
+}
+
+func LibraryArtifactsInFoldersBuild(args LibraryArtifactsInFoldersArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactsInFolders(")
+	b.WriteString("folderIds: ")
+	b.WriteString(renderMemQLValue(args.FolderIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryDocumentBranches -- Branch roots retain their exact parent link even after their document changes.
 //
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentBranches"] in generated_concepts.go).
@@ -4832,6 +5779,9 @@ func LibraryDocumentBranchesBuild(args LibraryDocumentBranchesArgs) string {
 //
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentHistoryPage"] in generated_concepts.go).
 type LibraryDocumentHistoryPageArgs struct {
+	DocumentId      string
+	DocumentIdAlias string
+	BeforeVersion   int
 }
 
 // LibraryDocumentHistoryPage calls the engine query libraryDocumentHistoryPage.
@@ -4841,14 +5791,33 @@ func (qc *QueryClient) LibraryDocumentHistoryPage(ctx context.Context, args Libr
 }
 
 func LibraryDocumentHistoryPageBuild(args LibraryDocumentHistoryPageArgs) string {
-	_ = args
-	return "query libraryDocumentHistoryPage()"
+	var b strings.Builder
+	b.WriteString("query libraryDocumentHistoryPage(")
+	b.WriteString("documentId: ")
+	b.WriteString(quoteMemQL(args.DocumentId))
+	if args.DocumentIdAlias != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("documentIdAlias: ")
+		b.WriteString(quoteMemQL(args.DocumentIdAlias))
+	}
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("beforeVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.BeforeVersion))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryDocumentVersionByNumber -- One owned immutable snapshot, including the initial version zero.
 //
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentVersionByNumber"] in generated_concepts.go).
 type LibraryDocumentVersionByNumberArgs struct {
+	DocumentId      string
+	DocumentIdAlias string
+	VersionNumber   int
 }
 
 // LibraryDocumentVersionByNumber calls the engine query libraryDocumentVersionByNumber.
@@ -4858,8 +5827,24 @@ func (qc *QueryClient) LibraryDocumentVersionByNumber(ctx context.Context, args 
 }
 
 func LibraryDocumentVersionByNumberBuild(args LibraryDocumentVersionByNumberArgs) string {
-	_ = args
-	return "query libraryDocumentVersionByNumber()"
+	var b strings.Builder
+	b.WriteString("query libraryDocumentVersionByNumber(")
+	b.WriteString("documentId: ")
+	b.WriteString(quoteMemQL(args.DocumentId))
+	if args.DocumentIdAlias != "" {
+		if b.Len() > 37 {
+			b.WriteString(", ")
+		}
+		b.WriteString("documentIdAlias: ")
+		b.WriteString(quoteMemQL(args.DocumentIdAlias))
+	}
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionNumber: ")
+	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryFileById -- Fetch one Library file by id, gated to the caller: `row.ownerUserId == actor.userId`, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers.
@@ -4967,6 +5952,8 @@ func LibraryFileChunksForFileBuild(args LibraryFileChunksForFileArgs) string {
 //
 // Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileHistoryPage"] in generated_concepts.go).
 type LibraryFileHistoryPageArgs struct {
+	FileId        string
+	BeforeVersion int
 }
 
 // LibraryFileHistoryPage calls the engine query libraryFileHistoryPage.
@@ -4976,8 +5963,17 @@ func (qc *QueryClient) LibraryFileHistoryPage(ctx context.Context, args LibraryF
 }
 
 func LibraryFileHistoryPageBuild(args LibraryFileHistoryPageArgs) string {
-	_ = args
-	return "query libraryFileHistoryPage()"
+	var b strings.Builder
+	b.WriteString("query libraryFileHistoryPage(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("beforeVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.BeforeVersion))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryFileSizesForOwner -- The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row.
@@ -5127,6 +6123,23 @@ func LibraryFolderByIdBuild(args LibraryFolderByIdArgs) string {
 	b.WriteString(quoteMemQL(args.FolderId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibraryFolderDirectory -- Complete folder navigation metadata, including archived folders, in bounded pages.
+//
+// Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderDirectory"] in generated_concepts.go).
+type LibraryFolderDirectoryArgs struct {
+}
+
+// LibraryFolderDirectory calls the engine query libraryFolderDirectory.
+func (qc *QueryClient) LibraryFolderDirectory(ctx context.Context, args LibraryFolderDirectoryArgs) (*Result, error) {
+	call := LibraryFolderDirectoryBuild(args)
+	return qc.executeNamed(ctx, "libraryFolderDirectory", call)
+}
+
+func LibraryFolderDirectoryBuild(args LibraryFolderDirectoryArgs) string {
+	_ = args
+	return "query libraryFolderDirectory()"
 }
 
 // LibraryFolders -- The caller's whole folder tree, live (memql#4781, design B1). Owned: `row.ownerUserId == actor.userId` gates the row set; `row.archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held no file at all and is meant to be gone from every surface at once. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume.
@@ -5768,6 +6781,30 @@ func MyAskConversationsBuild(args MyAskConversationsArgs) string {
 	return "query myAskConversations()"
 }
 
+// MyAskConversationsBrowse -- Search private conversation titles before taking the next ten summaries.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["myAskConversationsBrowse"] in generated_concepts.go).
+type MyAskConversationsBrowseArgs struct {
+	Search string
+}
+
+// MyAskConversationsBrowse calls the engine query myAskConversationsBrowse.
+func (qc *QueryClient) MyAskConversationsBrowse(ctx context.Context, args MyAskConversationsBrowseArgs) (*Result, error) {
+	call := MyAskConversationsBrowseBuild(args)
+	return qc.executeNamed(ctx, "myAskConversationsBrowse", call)
+}
+
+func MyAskConversationsBrowseBuild(args MyAskConversationsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query myAskConversationsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // MyAttentionReceipts -- The caller's seen UI revisions, shared across their OS windows and machines.
 //
 // Bound concept: v1:os:attentionReceipt (machine-readable: BoundConcepts["myAttentionReceipts"] in generated_concepts.go).
@@ -5802,6 +6839,78 @@ func (qc *QueryClient) MyDesktop(ctx context.Context, args MyDesktopArgs) (*Resu
 func MyDesktopBuild(args MyDesktopArgs) string {
 	_ = args
 	return "query myDesktop()"
+}
+
+// MyMachineById -- Open one owned machine independently of the directory's loaded page or search.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachineById"] in generated_concepts.go).
+type MyMachineByIdArgs struct {
+	RegistrationId string
+}
+
+// MyMachineById calls the engine query myMachineById.
+func (qc *QueryClient) MyMachineById(ctx context.Context, args MyMachineByIdArgs) (*Result, error) {
+	call := MyMachineByIdBuild(args)
+	return qc.executeNamed(ctx, "myMachineById", call)
+}
+
+func MyMachineByIdBuild(args MyMachineByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query myMachineById(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// MyMachinePresence -- Lightweight machine identities and heartbeat presence for desktop file provenance. Equipment, apps and routing settings are loaded only by the Fleet surfaces that use them. Consumers must follow the cursor if present.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachinePresence"] in generated_concepts.go).
+type MyMachinePresenceArgs struct {
+}
+
+// MyMachinePresence calls the engine query myMachinePresence.
+func (qc *QueryClient) MyMachinePresence(ctx context.Context, args MyMachinePresenceArgs) (*Result, error) {
+	call := MyMachinePresenceBuild(args)
+	return qc.executeNamed(ctx, "myMachinePresence", call)
+}
+
+func MyMachinePresenceBuild(args MyMachinePresenceArgs) string {
+	_ = args
+	return "query myMachinePresence()"
+}
+
+// MyMachinesBrowse -- The caller's machine directory, ten recent registrations at a time. This is separate from myWorkersWithStatus because routing needs the full fleet in stable first-registration order, while a directory needs recent/search.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["myMachinesBrowse"] in generated_concepts.go).
+type MyMachinesBrowseArgs struct {
+	Search            string
+	IncludeRevoked    bool
+	IncludeRevokedSet bool // set true to send includeRevoked; required because zero-value bool is ambiguous
+}
+
+// MyMachinesBrowse calls the engine query myMachinesBrowse.
+func (qc *QueryClient) MyMachinesBrowse(ctx context.Context, args MyMachinesBrowseArgs) (*Result, error) {
+	call := MyMachinesBrowseBuild(args)
+	return qc.executeNamed(ctx, "myMachinesBrowse", call)
+}
+
+func MyMachinesBrowseBuild(args MyMachinesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query myMachinesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeRevokedSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeRevoked: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeRevoked))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // MyModelCallsOnMachine -- The caller's own earlier model calls on a selected machine. This does not expose other people's prompts or identities on a shared machine.
@@ -5882,6 +6991,9 @@ func MyWorkersWithStatusBuild(args MyWorkersWithStatusArgs) string {
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["myWorkspaces"] in generated_concepts.go).
 type MyWorkspacesArgs struct {
+	IncludeReleased    bool
+	IncludeReleasedSet bool // set true to send includeReleased; required because zero-value bool is ambiguous
+	Search             string
 }
 
 // MyWorkspaces calls the engine query myWorkspaces.
@@ -5891,8 +7003,21 @@ func (qc *QueryClient) MyWorkspaces(ctx context.Context, args MyWorkspacesArgs) 
 }
 
 func MyWorkspacesBuild(args MyWorkspacesArgs) string {
-	_ = args
-	return "query myWorkspaces()"
+	var b strings.Builder
+	b.WriteString("query myWorkspaces(")
+	if args.IncludeReleasedSet {
+		b.WriteString("includeReleased: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeReleased))
+	}
+	if args.Search != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // NeverSold -- Every live variant in the store. `neverSold` is the SET DIFFERENCE the tool computes -- these minus the variants that appear on an order in the window -- because MemQL has no anti-join and inventing one here would mean answering the question wrong rather than not answering it.
@@ -6023,6 +7148,94 @@ func NewslettersForAudienceBuild(args NewslettersForAudienceArgs) string {
 	b.WriteString("query newslettersForAudience(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NexusAutomationSummaryById wraps the query named "nexusAutomationSummaryById".
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["nexusAutomationSummaryById"] in generated_concepts.go).
+type NexusAutomationSummaryByIdArgs struct {
+	ConstructId string
+}
+
+// NexusAutomationSummaryById calls the engine query nexusAutomationSummaryById.
+func (qc *QueryClient) NexusAutomationSummaryById(ctx context.Context, args NexusAutomationSummaryByIdArgs) (*Result, error) {
+	call := NexusAutomationSummaryByIdBuild(args)
+	return qc.executeNamed(ctx, "nexusAutomationSummaryById", call)
+}
+
+func NexusAutomationSummaryByIdBuild(args NexusAutomationSummaryByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query nexusAutomationSummaryById(")
+	b.WriteString("constructId: ")
+	b.WriteString(quoteMemQL(args.ConstructId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NexusAutomationsBrowse wraps the query named "nexusAutomationsBrowse".
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["nexusAutomationsBrowse"] in generated_concepts.go).
+type NexusAutomationsBrowseArgs struct {
+	Search            string
+	Origin            string
+	Reuse             string
+	StatusWords       []string
+	IncludeLearned    bool
+	IncludeLearnedSet bool // set true to send includeLearned; required because zero-value bool is ambiguous
+	OffLadder         bool
+	OffLadderSet      bool // set true to send offLadder; required because zero-value bool is ambiguous
+}
+
+// NexusAutomationsBrowse calls the engine query nexusAutomationsBrowse.
+func (qc *QueryClient) NexusAutomationsBrowse(ctx context.Context, args NexusAutomationsBrowseArgs) (*Result, error) {
+	call := NexusAutomationsBrowseBuild(args)
+	return qc.executeNamed(ctx, "nexusAutomationsBrowse", call)
+}
+
+func NexusAutomationsBrowseBuild(args NexusAutomationsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query nexusAutomationsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Origin != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("origin: ")
+		b.WriteString(quoteMemQL(args.Origin))
+	}
+	if args.Reuse != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reuse: ")
+		b.WriteString(quoteMemQL(args.Reuse))
+	}
+	if args.StatusWords != nil {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("statusWords: ")
+		b.WriteString(renderMemQLValue(args.StatusWords))
+	}
+	if args.IncludeLearnedSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeLearned: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeLearned))
+	}
+	if args.OffLadderSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("offLadder: ")
+		b.WriteString(fmt.Sprintf("%v", args.OffLadder))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -6474,6 +7687,36 @@ func OutboxDeadLettersBuild(args OutboxDeadLettersArgs) string {
 	return b.String()
 }
 
+// OutboxDeadLettersBrowse -- A connector's dead letters, searched before paging and never drained implicitly.
+//
+// Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxDeadLettersBrowse"] in generated_concepts.go).
+type OutboxDeadLettersBrowseArgs struct {
+	Target string
+	Search string
+}
+
+// OutboxDeadLettersBrowse calls the engine query outboxDeadLettersBrowse.
+func (qc *QueryClient) OutboxDeadLettersBrowse(ctx context.Context, args OutboxDeadLettersBrowseArgs) (*Result, error) {
+	call := OutboxDeadLettersBrowseBuild(args)
+	return qc.executeNamed(ctx, "outboxDeadLettersBrowse", call)
+}
+
+func OutboxDeadLettersBrowseBuild(args OutboxDeadLettersBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query outboxDeadLettersBrowse(")
+	b.WriteString("target: ")
+	b.WriteString(quoteMemQL(args.Target))
+	if args.Search != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // OutboxEntryById -- One entry by its own row id -- the seam the retry and discard mutations resolve through.
 //
 // Bound concept: v1:platform:outboxEntry (machine-readable: BoundConcepts["outboxEntryById"] in generated_concepts.go).
@@ -6683,6 +7926,28 @@ func (qc *QueryClient) PackageDeploymentsPending(ctx context.Context, args Packa
 func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
 	_ = args
 	return "query packageDeploymentsPending()"
+}
+
+// PackageNamesByIds -- Names for linked visible resources; declarations, manifests and deployment configuration are deliberately absent. Ordinary package authorization applies.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packageNamesByIds"] in generated_concepts.go).
+type PackageNamesByIdsArgs struct {
+	Ids []string
+}
+
+// PackageNamesByIds calls the engine query packageNamesByIds.
+func (qc *QueryClient) PackageNamesByIds(ctx context.Context, args PackageNamesByIdsArgs) (*Result, error) {
+	call := PackageNamesByIdsBuild(args)
+	return qc.executeNamed(ctx, "packageNamesByIds", call)
+}
+
+func PackageNamesByIdsBuild(args PackageNamesByIdsArgs) string {
+	var b strings.Builder
+	b.WriteString("query packageNamesByIds(")
+	b.WriteString("ids: ")
+	b.WriteString(renderMemQLValue(args.Ids))
+	b.WriteString(")")
+	return b.String()
 }
 
 // PackagesAll -- Read connected repositories and application sources, with repository URLs, refs and declared applications. Includes sources without pipelines; returns only active records this caller may read.
@@ -6924,6 +8189,7 @@ func PaymentTermsOutstandingBuild(args PaymentTermsOutstandingArgs) string {
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["pendingAccessRequests"] in generated_concepts.go).
 type PendingAccessRequestsArgs struct {
+	Search string
 }
 
 // PendingAccessRequests calls the engine query pendingAccessRequests.
@@ -6933,8 +8199,14 @@ func (qc *QueryClient) PendingAccessRequests(ctx context.Context, args PendingAc
 }
 
 func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
-	_ = args
-	return "query pendingAccessRequests()"
+	var b strings.Builder
+	b.WriteString("query pendingAccessRequests(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // PendingUserInvitations -- Every pending user invitation on this cluster -- who was invited, by whom, and until when.
@@ -6943,6 +8215,12 @@ func PendingAccessRequestsBuild(args PendingAccessRequestsArgs) string {
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.go).
 type PendingUserInvitationsArgs struct {
+	Search       string
+	Role         string
+	GroupId      string
+	State        string
+	Unexpired    bool
+	UnexpiredSet bool // set true to send unexpired; required because zero-value bool is ambiguous
 }
 
 // PendingUserInvitations calls the engine query pendingUserInvitations.
@@ -6952,8 +8230,42 @@ func (qc *QueryClient) PendingUserInvitations(ctx context.Context, args PendingU
 }
 
 func PendingUserInvitationsBuild(args PendingUserInvitationsArgs) string {
-	_ = args
-	return "query pendingUserInvitations()"
+	var b strings.Builder
+	b.WriteString("query pendingUserInvitations(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Role != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("role: ")
+		b.WriteString(quoteMemQL(args.Role))
+	}
+	if args.GroupId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupId: ")
+		b.WriteString(quoteMemQL(args.GroupId))
+	}
+	if args.State != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("state: ")
+		b.WriteString(quoteMemQL(args.State))
+	}
+	if args.UnexpiredSet {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("unexpired: ")
+		b.WriteString(fmt.Sprintf("%v", args.Unexpired))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // PipelineChannelForOwnerByName -- The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is unique among a person's channels (the channel builtin checks it before it writes), so this answers at most one row; the sort and page of one say so. The driver that reads it has no person on the line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct and nothing wider: it finds the owner's own channel, never another person's of the same name.
@@ -6993,6 +8305,23 @@ func (qc *QueryClient) PipelineChannelsForOwner(ctx context.Context, args Pipeli
 func PipelineChannelsForOwnerBuild(args PipelineChannelsForOwnerArgs) string {
 	_ = args
 	return "query pipelineChannelsForOwner()"
+}
+
+// PipelineDirectory -- Complete compact pipeline choices and source links for OS navigation. Detailed polling heads and timing histories remain behind pipelineForOwner.
+//
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineDirectory"] in generated_concepts.go).
+type PipelineDirectoryArgs struct {
+}
+
+// PipelineDirectory calls the engine query pipelineDirectory.
+func (qc *QueryClient) PipelineDirectory(ctx context.Context, args PipelineDirectoryArgs) (*Result, error) {
+	call := PipelineDirectoryBuild(args)
+	return qc.executeNamed(ctx, "pipelineDirectory", call)
+}
+
+func PipelineDirectoryBuild(args PipelineDirectoryArgs) string {
+	_ = args
+	return "query pipelineDirectory()"
 }
 
 // PipelineForOwner -- One of the caller's pipelines by id.
@@ -7061,6 +8390,63 @@ func PipelineRunForOwnerBuild(args PipelineRunForOwnerArgs) string {
 	return b.String()
 }
 
+// PipelineRunsBrowse -- Browse runs without downloading execution policy and driver bookkeeping. Every search and facet narrows the authorized set before the ten-row page. Internal recovery and release readers retain their existing queries.
+//
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsBrowse"] in generated_concepts.go).
+type PipelineRunsBrowseArgs struct {
+	ChangesOnly    bool
+	ChangesOnlySet bool // set true to send changesOnly; required because zero-value bool is ambiguous
+	Search         string
+	PipelineId     string
+	Branch         string
+	Outcome        string
+}
+
+// PipelineRunsBrowse calls the engine query pipelineRunsBrowse.
+func (qc *QueryClient) PipelineRunsBrowse(ctx context.Context, args PipelineRunsBrowseArgs) (*Result, error) {
+	call := PipelineRunsBrowseBuild(args)
+	return qc.executeNamed(ctx, "pipelineRunsBrowse", call)
+}
+
+func PipelineRunsBrowseBuild(args PipelineRunsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineRunsBrowse(")
+	if args.ChangesOnlySet {
+		b.WriteString("changesOnly: ")
+		b.WriteString(fmt.Sprintf("%v", args.ChangesOnly))
+	}
+	if args.Search != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.PipelineId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	if args.Branch != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("branch: ")
+		b.WriteString(quoteMemQL(args.Branch))
+	}
+	if args.Outcome != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outcome: ")
+		b.WriteString(quoteMemQL(args.Outcome))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelineRunsForOwner -- The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs list across every source, or one source's runs.
 //
 // Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsForOwner"] in generated_concepts.go).
@@ -7081,6 +8467,30 @@ func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
 	if args.PipelineId != "" {
 		b.WriteString("pipelineId: ")
 		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesBrowse -- Browse the caller's pipelines ten at a time, newest first. Search is applied by the database before the cursor window, including records not loaded yet.
+//
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesBrowse"] in generated_concepts.go).
+type PipelinesBrowseArgs struct {
+	Search string
+}
+
+// PipelinesBrowse calls the engine query pipelinesBrowse.
+func (qc *QueryClient) PipelinesBrowse(ctx context.Context, args PipelinesBrowseArgs) (*Result, error) {
+	call := PipelinesBrowseBuild(args)
+	return qc.executeNamed(ctx, "pipelinesBrowse", call)
+}
+
+func PipelinesBrowseBuild(args PipelinesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelinesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8141,6 +9551,12 @@ type RouterDecisionsRecentArgs struct {
 	Outcome string
 	// Only decisions made under this route a person chose: local, apps or one of their own.
 	Route string
+	// Search visible call metadata before selecting the next page.
+	Search string
+	// Compact words match camel-cased custom prompt names.
+	CompactSearch string
+	// Shipped display names resolved by the client, such as Route composing.
+	PromptNames []string
 }
 
 // RouterDecisionsRecent calls the engine query routerDecisionsRecent.
@@ -8190,6 +9606,27 @@ func RouterDecisionsRecentBuild(args RouterDecisionsRecentArgs) string {
 		}
 		b.WriteString("route: ")
 		b.WriteString(quoteMemQL(args.Route))
+	}
+	if args.Search != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.CompactSearch != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("compactSearch: ")
+		b.WriteString(quoteMemQL(args.CompactSearch))
+	}
+	if args.PromptNames != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("promptNames: ")
+		b.WriteString(renderMemQLValue(args.PromptNames))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -8281,8 +9718,14 @@ func ScheduledSendJobsBuild(args ScheduledSendJobsArgs) string {
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.go).
 type SearchUsersArgs struct {
-	Active    bool
-	ActiveSet bool // set true to send active; required because zero-value bool is ambiguous
+	Active             bool
+	ActiveSet          bool // set true to send active; required because zero-value bool is ambiguous
+	Search             string
+	Role               string
+	State              string
+	ShowDeactivated    bool
+	ShowDeactivatedSet bool // set true to send showDeactivated; required because zero-value bool is ambiguous
+	MemberIds          []string
 }
 
 // SearchUsers calls the engine query searchUsers.
@@ -8297,6 +9740,41 @@ func SearchUsersBuild(args SearchUsersArgs) string {
 	if args.ActiveSet {
 		b.WriteString("active: ")
 		b.WriteString(fmt.Sprintf("%v", args.Active))
+	}
+	if args.Search != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.Role != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("role: ")
+		b.WriteString(quoteMemQL(args.Role))
+	}
+	if args.State != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("state: ")
+		b.WriteString(quoteMemQL(args.State))
+	}
+	if args.ShowDeactivatedSet {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("showDeactivated: ")
+		b.WriteString(fmt.Sprintf("%v", args.ShowDeactivated))
+	}
+	if args.MemberIds != nil {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("memberIds: ")
+		b.WriteString(renderMemQLValue(args.MemberIds))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -12509,6 +13987,30 @@ func SkillsForTrainingBuild(args SkillsForTrainingArgs) string {
 	return "query skillsForTraining()"
 }
 
+// SkillsForTrainingPage -- One recent page for Training. Full rows remain inside the baseline verifier; the browser receives compact catalog summaries, then reads detail on open.
+//
+// Bound concept: v1:skills:skill (machine-readable: BoundConcepts["skillsForTrainingPage"] in generated_concepts.go).
+type SkillsForTrainingPageArgs struct {
+	Search string
+}
+
+// SkillsForTrainingPage calls the engine query skillsForTrainingPage.
+func (qc *QueryClient) SkillsForTrainingPage(ctx context.Context, args SkillsForTrainingPageArgs) (*Result, error) {
+	call := SkillsForTrainingPageBuild(args)
+	return qc.executeNamed(ctx, "skillsForTrainingPage", call)
+}
+
+func SkillsForTrainingPageBuild(args SkillsForTrainingPageArgs) string {
+	var b strings.Builder
+	b.WriteString("query skillsForTrainingPage(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SoldByProduct -- Every mirrored line item that names one product -- what soldByProduct groups. Unwindowed by construction: the date is the order's, so the tool intersects this with ordersInWindow rather than filtering here.
 //
 // Bound concept: v1:shopify:orderLineItem (machine-readable: BoundConcepts["soldByProduct"] in generated_concepts.go).
@@ -13025,6 +14527,55 @@ func TemplatesBuild(args TemplatesArgs) string {
 	return b.String()
 }
 
+// TemplatesBrowse -- Recent template summaries; bodies and documents are still read by id.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templatesBrowse"] in generated_concepts.go).
+type TemplatesBrowseArgs struct {
+	Search             string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+	AccountId          string
+	Status             string
+}
+
+// TemplatesBrowse calls the engine query templatesBrowse.
+func (qc *QueryClient) TemplatesBrowse(ctx context.Context, args TemplatesBrowseArgs) (*Result, error) {
+	call := TemplatesBrowseBuild(args)
+	return qc.executeNamed(ctx, "templatesBrowse", call)
+}
+
+func TemplatesBrowseBuild(args TemplatesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query templatesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludeArchivedSet {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Status != "" {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // TerritoriesForStore -- Territories for a store.
 //
 // Bound concept: v1:commerce:territory (machine-readable: BoundConcepts["territoriesForStore"] in generated_concepts.go).
@@ -13089,6 +14640,52 @@ func TodosBuild(args TodosArgs) string {
 	if args.DoneSet {
 		b.WriteString("done: ")
 		b.WriteString(fmt.Sprintf("%v", args.Done))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// TrainingAnalysisRunsForFiles -- Analyses only for the file rows currently displayed in Training.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["trainingAnalysisRunsForFiles"] in generated_concepts.go).
+type TrainingAnalysisRunsForFilesArgs struct {
+	FileIds []string
+}
+
+// TrainingAnalysisRunsForFiles calls the engine query trainingAnalysisRunsForFiles.
+func (qc *QueryClient) TrainingAnalysisRunsForFiles(ctx context.Context, args TrainingAnalysisRunsForFilesArgs) (*Result, error) {
+	call := TrainingAnalysisRunsForFilesBuild(args)
+	return qc.executeNamed(ctx, "trainingAnalysisRunsForFiles", call)
+}
+
+func TrainingAnalysisRunsForFilesBuild(args TrainingAnalysisRunsForFilesArgs) string {
+	var b strings.Builder
+	b.WriteString("query trainingAnalysisRunsForFiles(")
+	b.WriteString("fileIds: ")
+	b.WriteString(renderMemQLValue(args.FileIds))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TrainingFilesBrowse -- Training's recent file worklist, searched before the ten-row page boundary.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["trainingFilesBrowse"] in generated_concepts.go).
+type TrainingFilesBrowseArgs struct {
+	Search string
+}
+
+// TrainingFilesBrowse calls the engine query trainingFilesBrowse.
+func (qc *QueryClient) TrainingFilesBrowse(ctx context.Context, args TrainingFilesBrowseArgs) (*Result, error) {
+	call := TrainingFilesBrowseBuild(args)
+	return qc.executeNamed(ctx, "trainingFilesBrowse", call)
+}
+
+func TrainingFilesBrowseBuild(args TrainingFilesBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query trainingFilesBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -13425,6 +15022,73 @@ func WorkApprovalGuidanceForOwnerRunBuild(args WorkApprovalGuidanceForOwnerRunAr
 	return b.String()
 }
 
+// WorkApprovalRecoveryRuns -- Recovery must discover released decisions even after they leave the queue. This reads only unresolved recovery candidates, never completed run history.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workApprovalRecoveryRuns"] in generated_concepts.go).
+type WorkApprovalRecoveryRunsArgs struct {
+}
+
+// WorkApprovalRecoveryRuns calls the engine query workApprovalRecoveryRuns.
+func (qc *QueryClient) WorkApprovalRecoveryRuns(ctx context.Context, args WorkApprovalRecoveryRunsArgs) (*Result, error) {
+	call := WorkApprovalRecoveryRunsBuild(args)
+	return qc.executeNamed(ctx, "workApprovalRecoveryRuns", call)
+}
+
+func WorkApprovalRecoveryRunsBuild(args WorkApprovalRecoveryRunsArgs) string {
+	_ = args
+	return "query workApprovalRecoveryRuns()"
+}
+
+// WorkApprovalsBrowse -- The actionable queue keeps its oldest-first meaning while paging.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsBrowse"] in generated_concepts.go).
+type WorkApprovalsBrowseArgs struct {
+	Search             string
+	KindLabels         []string
+	RepositoryLabel    bool
+	RepositoryLabelSet bool // set true to send repositoryLabel; required because zero-value bool is ambiguous
+	FailureLabel       bool
+	FailureLabelSet    bool // set true to send failureLabel; required because zero-value bool is ambiguous
+}
+
+// WorkApprovalsBrowse calls the engine query workApprovalsBrowse.
+func (qc *QueryClient) WorkApprovalsBrowse(ctx context.Context, args WorkApprovalsBrowseArgs) (*Result, error) {
+	call := WorkApprovalsBrowseBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsBrowse", call)
+}
+
+func WorkApprovalsBrowseBuild(args WorkApprovalsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.KindLabels != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kindLabels: ")
+		b.WriteString(renderMemQLValue(args.KindLabels))
+	}
+	if args.RepositoryLabelSet {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repositoryLabel: ")
+		b.WriteString(fmt.Sprintf("%v", args.RepositoryLabel))
+	}
+	if args.FailureLabelSet {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failureLabel: ")
+		b.WriteString(fmt.Sprintf("%v", args.FailureLabel))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalsForOwnedRun -- Durable decisions for one of the caller's runs, including decided reviews.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.go).
@@ -13462,6 +15126,28 @@ func (qc *QueryClient) WorkApprovalsForOwner(ctx context.Context, args WorkAppro
 func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
 	_ = args
 	return "query workApprovalsForOwner()"
+}
+
+// WorkApprovalsForRuns -- Pending requests for the runs shown by one opened goal or run page.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForRuns"] in generated_concepts.go).
+type WorkApprovalsForRunsArgs struct {
+	RunIds []string
+}
+
+// WorkApprovalsForRuns calls the engine query workApprovalsForRuns.
+func (qc *QueryClient) WorkApprovalsForRuns(ctx context.Context, args WorkApprovalsForRunsArgs) (*Result, error) {
+	call := WorkApprovalsForRunsBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsForRuns", call)
+}
+
+func WorkApprovalsForRunsBuild(args WorkApprovalsForRunsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalsForRuns(")
+	b.WriteString("runIds: ")
+	b.WriteString(renderMemQLValue(args.RunIds))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkAutomationStepsForOwner -- The caller's steps that invoked an AUTOMATION, newest first -- the other half of the reuse evidence (epic memql#5414, D24): a section a decomposed goal served from the catalog is an automation step of the goal's run, so a construct used that way counts for the goal it served. Owned, for the reason workSignedRunsForOwner gives. Bounded at 2000, the most recent.
@@ -13507,6 +15193,8 @@ func WorkCheckpointForOwnerBuild(args WorkCheckpointForOwnerArgs) string {
 //
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workCompletedStepsForOwnerRuns"] in generated_concepts.go).
 type WorkCompletedStepsForOwnerRunsArgs struct {
+	RunIds  []string
+	StepKey string
 }
 
 // WorkCompletedStepsForOwnerRuns calls the engine query workCompletedStepsForOwnerRuns.
@@ -13516,8 +15204,17 @@ func (qc *QueryClient) WorkCompletedStepsForOwnerRuns(ctx context.Context, args 
 }
 
 func WorkCompletedStepsForOwnerRunsBuild(args WorkCompletedStepsForOwnerRunsArgs) string {
-	_ = args
-	return "query workCompletedStepsForOwnerRuns()"
+	var b strings.Builder
+	b.WriteString("query workCompletedStepsForOwnerRuns(")
+	b.WriteString("runIds: ")
+	b.WriteString(renderMemQLValue(args.RunIds))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkComputerPermissions -- This owner's approved typed computer permissions. Native dispatch additionally checks the receipt hash, agent, machine, mode and revocation before each use.
@@ -13641,6 +15338,8 @@ func WorkContinuationConflictsForOwnerGoalBuild(args WorkContinuationConflictsFo
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.go).
 type WorkContinuationForOwnerRunArgs struct {
+	RunId   string
+	StepKey string
 }
 
 // WorkContinuationForOwnerRun calls the engine query workContinuationForOwnerRun.
@@ -13650,8 +15349,17 @@ func (qc *QueryClient) WorkContinuationForOwnerRun(ctx context.Context, args Wor
 }
 
 func WorkContinuationForOwnerRunBuild(args WorkContinuationForOwnerRunArgs) string {
-	_ = args
-	return "query workContinuationForOwnerRun()"
+	var b strings.Builder
+	b.WriteString("query workContinuationForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkDelegatedSourcesForOwnerRun -- Executed app/MCP receipts are source evidence, never resumable agent state.
@@ -13786,6 +15494,38 @@ func WorkDraftsForOwnerRunBuild(args WorkDraftsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkGoalEvaluationsBrowse -- Ten recent evaluation receipts; selected scenario and search filter before paging.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsBrowse"] in generated_concepts.go).
+type WorkGoalEvaluationsBrowseArgs struct {
+	ScenarioId string
+	Search     string
+}
+
+// WorkGoalEvaluationsBrowse calls the engine query workGoalEvaluationsBrowse.
+func (qc *QueryClient) WorkGoalEvaluationsBrowse(ctx context.Context, args WorkGoalEvaluationsBrowseArgs) (*Result, error) {
+	call := WorkGoalEvaluationsBrowseBuild(args)
+	return qc.executeNamed(ctx, "workGoalEvaluationsBrowse", call)
+}
+
+func WorkGoalEvaluationsBrowseBuild(args WorkGoalEvaluationsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalEvaluationsBrowse(")
+	if args.ScenarioId != "" {
+		b.WriteString("scenarioId: ")
+		b.WriteString(quoteMemQL(args.ScenarioId))
+	}
+	if args.Search != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkGoalEvaluationsForOwner -- Durable goal-evaluation results, scoped by the same owner tier as their work. A missing result is not a successful measurement.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workGoalEvaluationsForOwner"] in generated_concepts.go).
@@ -13821,6 +15561,116 @@ func WorkGoalForOwnerBuild(args WorkGoalForOwnerArgs) string {
 	b.WriteString("query workGoalForOwner(")
 	b.WriteString("goalId: ")
 	b.WriteString(quoteMemQL(args.GoalId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkGoalRunStatuses wraps the query named "workGoalRunStatuses".
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workGoalRunStatuses"] in generated_concepts.go).
+type WorkGoalRunStatusesArgs struct {
+	GoalIds []string
+}
+
+// WorkGoalRunStatuses calls the engine query workGoalRunStatuses.
+func (qc *QueryClient) WorkGoalRunStatuses(ctx context.Context, args WorkGoalRunStatusesArgs) (*Result, error) {
+	call := WorkGoalRunStatusesBuild(args)
+	return qc.executeNamed(ctx, "workGoalRunStatuses", call)
+}
+
+func WorkGoalRunStatusesBuild(args WorkGoalRunStatusesArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalRunStatuses(")
+	b.WriteString("goalIds: ")
+	b.WriteString(renderMemQLValue(args.GoalIds))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkGoalSummaryForOwner wraps the query named "workGoalSummaryForOwner".
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalSummaryForOwner"] in generated_concepts.go).
+type WorkGoalSummaryForOwnerArgs struct {
+	GoalId string
+}
+
+// WorkGoalSummaryForOwner calls the engine query workGoalSummaryForOwner.
+func (qc *QueryClient) WorkGoalSummaryForOwner(ctx context.Context, args WorkGoalSummaryForOwnerArgs) (*Result, error) {
+	call := WorkGoalSummaryForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workGoalSummaryForOwner", call)
+}
+
+func WorkGoalSummaryForOwnerBuild(args WorkGoalSummaryForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalSummaryForOwner(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkGoalsBrowse -- Ten owner-scoped goals. Routine pipeline goals remain an explicit facet.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsBrowse"] in generated_concepts.go).
+type WorkGoalsBrowseArgs struct {
+	Search              string
+	IncludePipelines    bool
+	IncludePipelinesSet bool // set true to send includePipelines; required because zero-value bool is ambiguous
+}
+
+// WorkGoalsBrowse calls the engine query workGoalsBrowse.
+func (qc *QueryClient) WorkGoalsBrowse(ctx context.Context, args WorkGoalsBrowseArgs) (*Result, error) {
+	call := WorkGoalsBrowseBuild(args)
+	return qc.executeNamed(ctx, "workGoalsBrowse", call)
+}
+
+func WorkGoalsBrowseBuild(args WorkGoalsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludePipelinesSet {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includePipelines: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludePipelines))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkGoalsBrowseOldest wraps the query named "workGoalsBrowseOldest".
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsBrowseOldest"] in generated_concepts.go).
+type WorkGoalsBrowseOldestArgs struct {
+	Search              string
+	IncludePipelines    bool
+	IncludePipelinesSet bool // set true to send includePipelines; required because zero-value bool is ambiguous
+}
+
+// WorkGoalsBrowseOldest calls the engine query workGoalsBrowseOldest.
+func (qc *QueryClient) WorkGoalsBrowseOldest(ctx context.Context, args WorkGoalsBrowseOldestArgs) (*Result, error) {
+	call := WorkGoalsBrowseOldestBuild(args)
+	return qc.executeNamed(ctx, "workGoalsBrowseOldest", call)
+}
+
+func WorkGoalsBrowseOldestBuild(args WorkGoalsBrowseOldestArgs) string {
+	var b strings.Builder
+	b.WriteString("query workGoalsBrowseOldest(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.IncludePipelinesSet {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includePipelines: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludePipelines))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -13891,6 +15741,8 @@ func WorkHistorySearchSourcesForOwnerRunBuild(args WorkHistorySearchSourcesForOw
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallReceiptForOwnerRun"] in generated_concepts.go).
 type WorkModelCallReceiptForOwnerRunArgs struct {
+	RunId     string
+	ReceiptId string
 }
 
 // WorkModelCallReceiptForOwnerRun calls the engine query workModelCallReceiptForOwnerRun.
@@ -13900,8 +15752,17 @@ func (qc *QueryClient) WorkModelCallReceiptForOwnerRun(ctx context.Context, args
 }
 
 func WorkModelCallReceiptForOwnerRunBuild(args WorkModelCallReceiptForOwnerRunArgs) string {
-	_ = args
-	return "query workModelCallReceiptForOwnerRun()"
+	var b strings.Builder
+	b.WriteString("query workModelCallReceiptForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("receiptId: ")
+	b.WriteString(quoteMemQL(args.ReceiptId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkModelCallsForOwnerRun -- Every model call of one of the caller's runs. An on-demand read: the concept does not broadcast, so the Work app shows when it last read this.
@@ -13930,6 +15791,8 @@ func WorkModelCallsForOwnerRunBuild(args WorkModelCallsForOwnerRunArgs) string {
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.go).
 type WorkModelCallsForOwnerStepArgs struct {
+	RunId   string
+	StepKey string
 }
 
 // WorkModelCallsForOwnerStep calls the engine query workModelCallsForOwnerStep.
@@ -13939,8 +15802,17 @@ func (qc *QueryClient) WorkModelCallsForOwnerStep(ctx context.Context, args Work
 }
 
 func WorkModelCallsForOwnerStepBuild(args WorkModelCallsForOwnerStepArgs) string {
-	_ = args
-	return "query workModelCallsForOwnerStep()"
+	var b strings.Builder
+	b.WriteString("query workModelCallsForOwnerStep(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkModelCallsPageForOwnerRun -- A bounded page of model receipts for the caller's activity view.
@@ -14035,6 +15907,9 @@ func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) stri
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workOutcomeFormatReceiptsForOwnerStep"] in generated_concepts.go).
 type WorkOutcomeFormatReceiptsForOwnerStepArgs struct {
+	RunId       string
+	StepKey     string
+	AttemptedAt string
 }
 
 // WorkOutcomeFormatReceiptsForOwnerStep calls the engine query workOutcomeFormatReceiptsForOwnerStep.
@@ -14044,14 +15919,30 @@ func (qc *QueryClient) WorkOutcomeFormatReceiptsForOwnerStep(ctx context.Context
 }
 
 func WorkOutcomeFormatReceiptsForOwnerStepBuild(args WorkOutcomeFormatReceiptsForOwnerStepArgs) string {
-	_ = args
-	return "query workOutcomeFormatReceiptsForOwnerStep()"
+	var b strings.Builder
+	b.WriteString("query workOutcomeFormatReceiptsForOwnerStep(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 44 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if b.Len() > 44 {
+		b.WriteString(", ")
+	}
+	b.WriteString("attemptedAt: ")
+	b.WriteString(quoteMemQL(args.AttemptedAt))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkProgressCreditsForOwnerRun -- Bounded candidate lookup against durable consumed-evidence identities.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workProgressCreditsForOwnerRun"] in generated_concepts.go).
 type WorkProgressCreditsForOwnerRunArgs struct {
+	RunId      string
+	ReceiptIds []string
 }
 
 // WorkProgressCreditsForOwnerRun calls the engine query workProgressCreditsForOwnerRun.
@@ -14061,8 +15952,17 @@ func (qc *QueryClient) WorkProgressCreditsForOwnerRun(ctx context.Context, args 
 }
 
 func WorkProgressCreditsForOwnerRunBuild(args WorkProgressCreditsForOwnerRunArgs) string {
-	_ = args
-	return "query workProgressCreditsForOwnerRun()"
+	var b strings.Builder
+	b.WriteString("query workProgressCreditsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("receiptIds: ")
+	b.WriteString(renderMemQLValue(args.ReceiptIds))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkProgressReceiptsForOwnerRun -- Completed native/delegated source reads and capability contracts; checkpoints and model prose cannot buy more work.
@@ -14135,6 +16035,8 @@ func WorkQuestionsForOwnerRunBuild(args WorkQuestionsForOwnerRunArgs) string {
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workReplyReviewForOwnerStep"] in generated_concepts.go).
 type WorkReplyReviewForOwnerStepArgs struct {
+	RunId   string
+	StepKey string
 }
 
 // WorkReplyReviewForOwnerStep calls the engine query workReplyReviewForOwnerStep.
@@ -14144,14 +16046,25 @@ func (qc *QueryClient) WorkReplyReviewForOwnerStep(ctx context.Context, args Wor
 }
 
 func WorkReplyReviewForOwnerStepBuild(args WorkReplyReviewForOwnerStepArgs) string {
-	_ = args
-	return "query workReplyReviewForOwnerStep()"
+	var b strings.Builder
+	b.WriteString("query workReplyReviewForOwnerStep(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkResultFeedbackForOwnerRequest -- One stable owner-feedback receipt, including a not-yet-committed intent.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workResultFeedbackForOwnerRequest"] in generated_concepts.go).
 type WorkResultFeedbackForOwnerRequestArgs struct {
+	RunId         string
+	ObservationId string
 }
 
 // WorkResultFeedbackForOwnerRequest calls the engine query workResultFeedbackForOwnerRequest.
@@ -14161,8 +16074,17 @@ func (qc *QueryClient) WorkResultFeedbackForOwnerRequest(ctx context.Context, ar
 }
 
 func WorkResultFeedbackForOwnerRequestBuild(args WorkResultFeedbackForOwnerRequestArgs) string {
-	_ = args
-	return "query workResultFeedbackForOwnerRequest()"
+	var b strings.Builder
+	b.WriteString("query workResultFeedbackForOwnerRequest(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("observationId: ")
+	b.WriteString(quoteMemQL(args.ObservationId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkResultFeedbackForOwnerRun -- All accepted result feedback. The consumer follows every page and restores requestedAt order; a later continuation never erases an older direction.
@@ -14209,6 +16131,50 @@ func WorkRunForOwnerBuild(args WorkRunForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkRunSummariesByIds -- Names and statuses for requests on the visible approval page.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesByIds"] in generated_concepts.go).
+type WorkRunSummariesByIdsArgs struct {
+	RunIds []string
+}
+
+// WorkRunSummariesByIds calls the engine query workRunSummariesByIds.
+func (qc *QueryClient) WorkRunSummariesByIds(ctx context.Context, args WorkRunSummariesByIdsArgs) (*Result, error) {
+	call := WorkRunSummariesByIdsBuild(args)
+	return qc.executeNamed(ctx, "workRunSummariesByIds", call)
+}
+
+func WorkRunSummariesByIdsBuild(args WorkRunSummariesByIdsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunSummariesByIds(")
+	b.WriteString("runIds: ")
+	b.WriteString(renderMemQLValue(args.RunIds))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunSummariesForGoal -- Full run navigation for one opened goal, without the run execution payload.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForGoal"] in generated_concepts.go).
+type WorkRunSummariesForGoalArgs struct {
+	GoalId string
+}
+
+// WorkRunSummariesForGoal calls the engine query workRunSummariesForGoal.
+func (qc *QueryClient) WorkRunSummariesForGoal(ctx context.Context, args WorkRunSummariesForGoalArgs) (*Result, error) {
+	call := WorkRunSummariesForGoalBuild(args)
+	return qc.executeNamed(ctx, "workRunSummariesForGoal", call)
+}
+
+func WorkRunSummariesForGoalBuild(args WorkRunSummariesForGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunSummariesForGoal(")
+	b.WriteString("goalId: ")
+	b.WriteString(quoteMemQL(args.GoalId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkRunSummariesForOwner -- The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs.
 //
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.go).
@@ -14244,6 +16210,88 @@ func WorkRunSummaryForOwnerBuild(args WorkRunSummaryForOwnerArgs) string {
 	b.WriteString("query workRunSummaryForOwner(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunsBrowse -- Run navigation applies all list questions before its ten-row boundary.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsBrowse"] in generated_concepts.go).
+type WorkRunsBrowseArgs struct {
+	Search          string
+	ShowFinished    bool
+	ShowFinishedSet bool // set true to send showFinished; required because zero-value bool is ambiguous
+	ConversationId  string
+}
+
+// WorkRunsBrowse calls the engine query workRunsBrowse.
+func (qc *QueryClient) WorkRunsBrowse(ctx context.Context, args WorkRunsBrowseArgs) (*Result, error) {
+	call := WorkRunsBrowseBuild(args)
+	return qc.executeNamed(ctx, "workRunsBrowse", call)
+}
+
+func WorkRunsBrowseBuild(args WorkRunsBrowseArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunsBrowse(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.ShowFinishedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("showFinished: ")
+		b.WriteString(fmt.Sprintf("%v", args.ShowFinished))
+	}
+	if args.ConversationId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conversationId: ")
+		b.WriteString(quoteMemQL(args.ConversationId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunsBrowseOldest wraps the query named "workRunsBrowseOldest".
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsBrowseOldest"] in generated_concepts.go).
+type WorkRunsBrowseOldestArgs struct {
+	Search          string
+	ShowFinished    bool
+	ShowFinishedSet bool // set true to send showFinished; required because zero-value bool is ambiguous
+	ConversationId  string
+}
+
+// WorkRunsBrowseOldest calls the engine query workRunsBrowseOldest.
+func (qc *QueryClient) WorkRunsBrowseOldest(ctx context.Context, args WorkRunsBrowseOldestArgs) (*Result, error) {
+	call := WorkRunsBrowseOldestBuild(args)
+	return qc.executeNamed(ctx, "workRunsBrowseOldest", call)
+}
+
+func WorkRunsBrowseOldestBuild(args WorkRunsBrowseOldestArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunsBrowseOldest(")
+	if args.Search != "" {
+		b.WriteString("search: ")
+		b.WriteString(quoteMemQL(args.Search))
+	}
+	if args.ShowFinishedSet {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("showFinished: ")
+		b.WriteString(fmt.Sprintf("%v", args.ShowFinished))
+	}
+	if args.ConversationId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conversationId: ")
+		b.WriteString(quoteMemQL(args.ConversationId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -14331,6 +16379,8 @@ func WorkSignedRunsForOwnerBuild(args WorkSignedRunsForOwnerArgs) string {
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionForOwnerRun"] in generated_concepts.go).
 type WorkSkillSelectionForOwnerRunArgs struct {
+	RunId         string
+	ObservationId string
 }
 
 // WorkSkillSelectionForOwnerRun calls the engine query workSkillSelectionForOwnerRun.
@@ -14340,8 +16390,17 @@ func (qc *QueryClient) WorkSkillSelectionForOwnerRun(ctx context.Context, args W
 }
 
 func WorkSkillSelectionForOwnerRunBuild(args WorkSkillSelectionForOwnerRunArgs) string {
-	_ = args
-	return "query workSkillSelectionForOwnerRun()"
+	var b strings.Builder
+	b.WriteString("query workSkillSelectionForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("observationId: ")
+	b.WriteString(quoteMemQL(args.ObservationId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkSkillSelectionsForOwner -- Skill selection history visible only to the owner of the work.
@@ -14359,6 +16418,28 @@ func (qc *QueryClient) WorkSkillSelectionsForOwner(ctx context.Context, args Wor
 func WorkSkillSelectionsForOwnerBuild(args WorkSkillSelectionsForOwnerArgs) string {
 	_ = args
 	return "query workSkillSelectionsForOwner()"
+}
+
+// WorkSkillSelectionsForSkill -- Ten selection receipts for one skill in this caller's work. Filtering the nested receipt before the page boundary avoids walking unrelated history.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workSkillSelectionsForSkill"] in generated_concepts.go).
+type WorkSkillSelectionsForSkillArgs struct {
+	SkillId string
+}
+
+// WorkSkillSelectionsForSkill calls the engine query workSkillSelectionsForSkill.
+func (qc *QueryClient) WorkSkillSelectionsForSkill(ctx context.Context, args WorkSkillSelectionsForSkillArgs) (*Result, error) {
+	call := WorkSkillSelectionsForSkillBuild(args)
+	return qc.executeNamed(ctx, "workSkillSelectionsForSkill", call)
+}
+
+func WorkSkillSelectionsForSkillBuild(args WorkSkillSelectionsForSkillArgs) string {
+	var b strings.Builder
+	b.WriteString("query workSkillSelectionsForSkill(")
+	b.WriteString("skillId: ")
+	b.WriteString(quoteMemQL(args.SkillId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkSourceCheckpointsForOwnerRun -- Bounded checkpoints for source projection; callers expose only paired tool results, never system prompts or model reasoning from the saved exchange.
@@ -14459,6 +16540,8 @@ func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workToolSourcesForOwnerRun"] in generated_concepts.go).
 type WorkToolSourcesForOwnerRunArgs struct {
+	RunId        string
+	CheckpointId string
 }
 
 // WorkToolSourcesForOwnerRun calls the engine query workToolSourcesForOwnerRun.
@@ -14468,8 +16551,39 @@ func (qc *QueryClient) WorkToolSourcesForOwnerRun(ctx context.Context, args Work
 }
 
 func WorkToolSourcesForOwnerRunBuild(args WorkToolSourcesForOwnerRunArgs) string {
-	_ = args
-	return "query workToolSourcesForOwnerRun()"
+	var b strings.Builder
+	b.WriteString("query workToolSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("checkpointId: ")
+	b.WriteString(quoteMemQL(args.CheckpointId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkTrainingDeliveryForSelections -- Delivery receipts for the ten selections already visible in the inspector.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingDeliveryForSelections"] in generated_concepts.go).
+type WorkTrainingDeliveryForSelectionsArgs struct {
+	ObservationIds []string
+}
+
+// WorkTrainingDeliveryForSelections calls the engine query workTrainingDeliveryForSelections.
+func (qc *QueryClient) WorkTrainingDeliveryForSelections(ctx context.Context, args WorkTrainingDeliveryForSelectionsArgs) (*Result, error) {
+	call := WorkTrainingDeliveryForSelectionsBuild(args)
+	return qc.executeNamed(ctx, "workTrainingDeliveryForSelections", call)
+}
+
+func WorkTrainingDeliveryForSelectionsBuild(args WorkTrainingDeliveryForSelectionsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingDeliveryForSelections(")
+	b.WriteString("observationIds: ")
+	b.WriteString(renderMemQLValue(args.ObservationIds))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkTrainingEvidenceById wraps the query named "workTrainingEvidenceById".
@@ -14516,6 +16630,50 @@ func WorkTrainingLessonEventsBuild(args WorkTrainingLessonEventsArgs) string {
 	return b.String()
 }
 
+// WorkTrainingLessonHistory -- The immutable revision trail is only read after opening a lesson.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonHistory"] in generated_concepts.go).
+type WorkTrainingLessonHistoryArgs struct {
+	LessonId string
+}
+
+// WorkTrainingLessonHistory calls the engine query workTrainingLessonHistory.
+func (qc *QueryClient) WorkTrainingLessonHistory(ctx context.Context, args WorkTrainingLessonHistoryArgs) (*Result, error) {
+	call := WorkTrainingLessonHistoryBuild(args)
+	return qc.executeNamed(ctx, "workTrainingLessonHistory", call)
+}
+
+func WorkTrainingLessonHistoryBuild(args WorkTrainingLessonHistoryArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingLessonHistory(")
+	b.WriteString("lessonId: ")
+	b.WriteString(quoteMemQL(args.LessonId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkTrainingLessonIndexRows -- Owned lesson revisions used to compute current heads without browser history scans.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonIndexRows"] in generated_concepts.go).
+type WorkTrainingLessonIndexRowsArgs struct {
+	AsOf string
+}
+
+// WorkTrainingLessonIndexRows calls the engine query workTrainingLessonIndexRows.
+func (qc *QueryClient) WorkTrainingLessonIndexRows(ctx context.Context, args WorkTrainingLessonIndexRowsArgs) (*Result, error) {
+	call := WorkTrainingLessonIndexRowsBuild(args)
+	return qc.executeNamed(ctx, "workTrainingLessonIndexRows", call)
+}
+
+func WorkTrainingLessonIndexRowsBuild(args WorkTrainingLessonIndexRowsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingLessonIndexRows(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkTrainingLessonsForOwner wraps the query named "workTrainingLessonsForOwner".
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingLessonsForOwner"] in generated_concepts.go).
@@ -14531,6 +16689,28 @@ func (qc *QueryClient) WorkTrainingLessonsForOwner(ctx context.Context, args Wor
 func WorkTrainingLessonsForOwnerBuild(args WorkTrainingLessonsForOwnerArgs) string {
 	_ = args
 	return "query workTrainingLessonsForOwner()"
+}
+
+// WorkTrainingSelectionsForLesson -- Only selections of the inspected lesson, never all work/model-call history.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workTrainingSelectionsForLesson"] in generated_concepts.go).
+type WorkTrainingSelectionsForLessonArgs struct {
+	LessonId string
+}
+
+// WorkTrainingSelectionsForLesson calls the engine query workTrainingSelectionsForLesson.
+func (qc *QueryClient) WorkTrainingSelectionsForLesson(ctx context.Context, args WorkTrainingSelectionsForLessonArgs) (*Result, error) {
+	call := WorkTrainingSelectionsForLessonBuild(args)
+	return qc.executeNamed(ctx, "workTrainingSelectionsForLesson", call)
+}
+
+func WorkTrainingSelectionsForLessonBuild(args WorkTrainingSelectionsForLessonArgs) string {
+	var b strings.Builder
+	b.WriteString("query workTrainingSelectionsForLesson(")
+	b.WriteString("lessonId: ")
+	b.WriteString(quoteMemQL(args.LessonId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkTrainingUsageForOwner -- Selection and provider-delivery receipts for owned Training inspection.

@@ -1,5 +1,4 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import {
   Caption,
@@ -9,7 +8,8 @@ import {
   RecordRow,
   Subhead,
 } from "../../kit";
-import { useOsConnection } from "../../live/connection";
+import { usePagedCollection } from "../../live/useLiveCollection";
+import { LoadMore } from "../../kit/LoadMore";
 import { readHistory } from "./evaluations";
 type Call = {
   id: string;
@@ -50,29 +50,19 @@ export function lessonUsage(rows: Row[], id: string) {
   });
 }
 export function LessonUsage({ lessonId }: { lessonId: string }) {
-  const connection = useOsConnection();
-  const [rows, setRows] = useState<Row[] | null>(null),
-    [error, setError] = useState("");
-  useEffect(() => {
-    let active = true;
-    setRows(null);
-    setError("");
-    if (connection)
-      void readHistory((cursor) =>
-        connection.query.workTrainingUsageForOwner({}, { cursor }),
-      ).then(
-        (r) => {
-          if (active) setRows(r);
-        },
-        (e) => {
-          if (active) setError(String(e));
-        },
-      );
-    return () => {
-      active = false;
-    };
-  }, [connection, lessonId]);
-  const usage = rows ? lessonUsage(rows, lessonId) : [];
+  const feed = usePagedCollection<ReturnType<typeof lessonUsage>[number]>(`training:lesson-usage:${lessonId}`, connection => ({
+    concept: "v1:work:observation", actions: [],
+    seed: async (cursor, signal) => {
+      const selections = await connection.query.workTrainingSelectionsForLesson({ lessonId }, { cursor, signal });
+      const rows = selections.rows();
+      const observationIds = rows.map(row => String(row.id));
+      const deliveries = observationIds.length ? await readHistory(page => connection.query.workTrainingDeliveryForSelections({ observationIds }, { cursor: page, signal })) : [];
+      return { rows: lessonUsage([...rows, ...deliveries], lessonId), nextCursor: selections.meta()?.cursor ?? "" };
+    },
+  }));
+  const error = feed.snapshot.error;
+  const ready = feed.snapshot.state !== "seeding" && feed.snapshot.state !== "disconnected";
+  const usage = feed.snapshot.rows;
   return (
     <Panel>
       <Subhead>Use in work</Subhead>
@@ -82,7 +72,7 @@ export function LessonUsage({ lessonId }: { lessonId: string }) {
           sentence="Usage evidence could not be read."
           detail={error}
         />
-      ) : rows === null ? (
+      ) : !ready ? (
         <RecordListSkeleton label="Reading usage evidence" />
       ) : usage.length ? (
         <RecordList as="ul" label="Lesson usage">
@@ -110,6 +100,7 @@ export function LessonUsage({ lessonId }: { lessonId: string }) {
       ) : (
         <Caption>No selection recorded.</Caption>
       )}
+      <LoadMore feed={feed} />
       <Caption>
         Delivery does not establish that the advice was followed or improved the
         result.

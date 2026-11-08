@@ -1,8 +1,7 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
-  Button,
   Caption,
   Fact,
   Facts,
@@ -16,7 +15,10 @@ import {
   formatMoment,
   type RefineChip,
 } from "../../../kit";
-import { useOsConnection } from "../../../live/connection";
+import { usePagedCollection } from "../../../live/useLiveCollection";
+import { LoadMore } from "../../../kit/LoadMore";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../../logs/useDebouncedValue";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { AUDIT_CATEGORIES, auditFromRow, outcomeTone, type AuditRow } from "./rows";
 
 // The audit trail: the cluster's record of security decisions.
@@ -45,89 +47,20 @@ import { AUDIT_CATEGORIES, auditFromRow, outcomeTone, type AuditRow } from "./ro
 // An owner's genuinely empty result therefore renders "No events recorded",
 // which under that floor is a true sentence.
 
-/** The engine's page size. `paginate 50` is a literal in the query -- the
- *  struct-query directive takes nothing else -- so it is a fixed fact here
- *  rather than a parameter this surface chooses. */
-const PAGE_SIZE = 50;
-
-interface Page {
-  rows: AuditRow[];
-  cursor: string;
-  state: "unread" | "reading" | "read" | "failed";
-  error: string;
-  at: Date | null;
-}
-
-const EMPTY_PAGE: Page = { rows: [], cursor: "", state: "unread", error: "", at: null };
-
 export function AuditSection() {
-  const connection = useOsConnection();
-
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState<Page>(EMPTY_PAGE);
   const [openId, setOpenId] = useState("");
-  // Guards the in-flight case, so a double click on "Load more" cannot walk
-  // the cursor twice and lose a page between the two reads.
-  const running = useRef(false);
-
-  const load = useCallback(
-    async (from: string) => {
-      if (connection === null || running.current) return;
-      running.current = true;
-      setPage((held) => ({ ...held, state: "reading", error: "" }));
-      try {
-        const result = await connection.query.recentAuditEvents(
-          category === "" ? {} : { category },
-          // A keyset continuation, not an offset: the cursor is bound to the
-          // query's own ordering and carries no server session, so it
-          // resolves on whichever replica the front door picks next.
-          from === "" ? {} : { cursor: from },
-        );
-        const rows = result.rows().map(auditFromRow);
-        const next = result.meta()?.cursor ?? "";
-        setPage((held) => ({
-          rows: from === "" ? rows : [...held.rows, ...rows],
-          cursor: next,
-          state: "read",
-          error: "",
-          at: new Date(),
-        }));
-      } catch (err: unknown) {
-        setPage((held) => ({
-          ...held,
-          state: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        }));
-      } finally {
-        running.current = false;
-      }
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
+  const feed = usePagedCollection<Row>(`cluster:audit:${JSON.stringify([category, needle])}`, connection => ({
+    concept: "v1:identity:auditEvent", actions: [],
+    seed: async (cursor, signal) => {
+      const result = await connection.query.auditEventsBrowse({ category: category || undefined, search: needle }, { cursor, signal });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    [connection, category],
-  );
-
-  // A category change is a DIFFERENT SET, not a filter over this one: the
-  // cursor is bound to the query it came from, so carrying it across would
-  // continue a walk of the wrong set. The page resets and re-reads.
-  useEffect(() => {
-    setPage(EMPTY_PAGE);
-    setOpenId("");
-    if (connection === null) return;
-    void load("");
-    // `load` closes over `category`, which is what the reset is keyed on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, category]);
-
-  const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    if (needle === "") return page.rows;
-    return page.rows.filter((row) =>
-      [row.action, row.category, row.actorEmail, row.targetType, row.targetId, row.outcome]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
-    );
-  }, [page.rows, search]);
+  }));
+  const page = { rows: feed.snapshot.rows.map(auditFromRow), error: feed.snapshot.error, state: feed.snapshot.error ? "failed" : feed.snapshot.state === "seeding" ? "reading" : "read" };
+  const visible = page.rows;
 
   const open = useMemo(
     () => page.rows.find((row) => row.id === openId) ?? null,
@@ -148,7 +81,7 @@ export function AuditSection() {
         <Refine
           search={search}
           onSearch={setSearch}
-          placeholder="Filter these events"
+          placeholder="Search audit events"
           chips={chips}
           label="Refine the audit trail"
         >
@@ -181,7 +114,7 @@ export function AuditSection() {
       ) : null}
 
       {page.state === "read" && page.rows.length === 0 ? (
-        <Caption>No events recorded.</Caption>
+        <Caption>{needle ? "No audit events match this search." : "No events recorded."}</Caption>
       ) : null}
 
       {page.rows.length === 0 ? null : (
@@ -206,27 +139,7 @@ export function AuditSection() {
               ))}
             </RecordList>
 
-            {visible.length === 0 && page.rows.length > 0 ? (
-              <Caption>
-                Nothing loaded here matches that. The filter runs over the {page.rows.length} events
-                already read, not over the whole trail -- load more to widen it.
-              </Caption>
-            ) : null}
-
-            {page.cursor === "" ? (
-              <Caption>
-                That is the end of the trail{category === "" ? "" : ` for ${category}`}.
-              </Caption>
-            ) : (
-              <Button
-                tone="quiet"
-                busy={page.state === "reading"}
-
-                onClick={() => void load(page.cursor)}
-              >
-                Load {PAGE_SIZE} more
-              </Button>
-            )}
+            <LoadMore feed={feed} />
           </div>
 
           {open === null ? null : (
@@ -250,13 +163,7 @@ export function AuditSection() {
         </div>
       )}
 
-      {page.at === null ? null : (
-        <Caption>
-          Read {page.at.toLocaleTimeString()}, newest first, {PAGE_SIZE} at a time. The trail is not
-          live -- an audit row is a record, and a list that rearranged itself while being read would
-          be a worse one.
-        </Caption>
-      )}
+      <Caption>Newest first, ten at a time.</Caption>
     </div>
   );
 }

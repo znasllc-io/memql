@@ -67,7 +67,7 @@ export function LiveList<T>({
   // deploy map draws the same rows as a graph and has to announce a change
   // identically. A list and a map that disagreed about what counts as news
   // would be one app contradicting itself.
-  const ticks = useArrivals(snapshot, rowId, fingerprint);
+  const ticks = useArrivals(snapshot, rowId, fingerprint, source, snapshot.pageCount);
   const connection = useConnectionStatus();
   const { managed } = useConnectionRecovery();
 

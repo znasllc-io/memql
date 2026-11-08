@@ -1,0 +1,24 @@
+
+> @znasllc-io/memql-os@0.1.0 build
+> tsc -b && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 2976 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                 0.71 kB │ gzip:   0.39 kB
+dist/assets/squada-one-latin-400-normal-D3va-NvZ.woff2          5.63 kB
+dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2     21.17 kB
+dist/assets/jetbrains-mono-latin-500-normal-BWZEU5yA.woff2     21.83 kB
+dist/assets/jetbrains-mono-latin-700-normal-BYuf6tUa.woff2     21.91 kB
+dist/assets/inter-latin-wght-normal-Dx4kXJAl.woff2             48.26 kB
+dist/assets/index-B6TiTsYG.css                                344.81 kB │ gzip:  56.33 kB
+dist/assets/livekit-client.esm-YFZ4iydz.js                    583.09 kB │ gzip: 153.21 kB │ map:  2,107.53 kB
+dist/assets/index-DIWhzwnO.js                               3,348.84 kB │ gzip: 953.72 kB │ map: 14,258.12 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.44s

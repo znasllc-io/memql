@@ -1,0 +1,12 @@
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  34 passed (34)
+      Tests  319 passed (319)
+   Start at  16:25:12
+   Duration  2.86s (tests 35%, environment 27%, import 22%, transform 14%, setup 1%)
+
+Environment  jsdom was created 34 times · 8.29s total, 27% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments

@@ -117,8 +117,9 @@ describe("it is live", () => {
     const after = await within(list).findByRole("button", { name: /Reconcile last month's ledger/ });
     await waitFor(() => expect(after.textContent).toContain("Canary"));
     expect(after.textContent).not.toContain("Shadow");
-    expect(conn.query.learnedProceduresForOwner).toHaveBeenCalledTimes(1);
-    expect(conn.query.cataloguedConstructsForOwner).toHaveBeenCalledTimes(1);
+    expect(conn.query.learnedProceduresForOwner).not.toHaveBeenCalled();
+    expect(conn.query.nexusAutomationsBrowse).toHaveBeenCalledTimes(1);
+    expect(conn.query.cataloguedConstructsForOwner).not.toHaveBeenCalled();
   });
 
   it("rings on a rung change and stays silent on an evidence tick", async () => {
@@ -176,9 +177,8 @@ describe("it is live", () => {
         learnedProcedures: new Error("PERMISSION_DENIED: no procedures for you"),
       }),
     );
-    await screen.findByText("nightlyReconcile");
-    // Half the catalog was refused, so no number stands over the list as if
-    // it were the total.
+    await screen.findByText("PERMISSION_DENIED: no procedures for you");
+    // A refused unified read cannot claim that no matching rows exist.
     expect(document.querySelector(".os-head-meta")).toBeNull();
   });
 
@@ -193,8 +193,11 @@ describe("it is live", () => {
       many.push(constructRow({ id: `c${i}`, name: `automation${i}` }));
     }
     mount(fakeConnection({ constructs: many }));
-    await screen.findByText("automation0");
-    expect(screen.getByText(/Showing the first 50 catalogued constructs/)).toBeTruthy();
+    await screen.findByText("10 shown · Recent");
+    expect(document.querySelectorAll(".os-livelist-row")).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByText("20 shown · Recent");
+    expect(document.querySelectorAll(".os-livelist-row")).toHaveLength(20);
   });
 });
 
@@ -243,7 +246,7 @@ describe("arm and retire", () => {
     emitConstruct(conn, { ...UNPROVEN, status: "active" });
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(await within(bar).findByText("Retire it")).toBeTruthy();
-    expect(conn.query.cataloguedConstructsForOwner).toHaveBeenCalledTimes(1);
+    expect(conn.query.cataloguedConstructsForOwner).not.toHaveBeenCalled();
   });
 
   it("shows a refused write verbatim and leaves the act offered", async () => {
@@ -315,15 +318,15 @@ describe("learned procedures are automations with a different origin", () => {
     expect(screen.getByText("select one to see where it stands")).toBeTruthy();
   });
 
-  it("still lists every authored automation when the learned read is refused", async () => {
+  it("reports a refused unified catalog without claiming an empty answer", async () => {
     mount(
       fakeConnection({
         constructs: [PROVEN],
         learnedProcedures: new Error("PERMISSION_DENIED: no procedures for you"),
       }),
     );
-    expect(await screen.findByText("nightlyReconcile")).toBeTruthy();
-    expect(screen.getByText("PERMISSION_DENIED: no procedures for you")).toBeTruthy();
+    expect(await screen.findByText("PERMISSION_DENIED: no procedures for you")).toBeTruthy();
+    expect(screen.queryByText("Nothing here yet")).toBeNull();
   });
 
   it("follows the ladder's policy too: a new value arrives without a re-read", async () => {
@@ -367,6 +370,6 @@ describe("what a template is FOR", () => {
   it("shows the source, which is what it will actually replay", async () => {
     mount(fakeConnection({ constructs: [PROVEN] }));
     fireEvent.click(await screen.findByText("nightlyReconcile"));
-    expect(screen.getByText("automation nightlyReconcile { }")).toBeTruthy();
+    expect(await screen.findByText("automation nightlyReconcile { }")).toBeTruthy();
   });
 });

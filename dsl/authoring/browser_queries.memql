@@ -1,0 +1,68 @@
+/// Navigation facts shared by authored automations and learned procedures.
+/// Source, compiled closures, step bodies and recorded outputs stay in by-id detail.
+@row
+shape construct automationDirectoryRow {
+  row.id
+  row.createdAt
+  ownerUserId
+  kind
+  name
+  targetNamespace
+  status
+  catalogued
+  catalogedAt
+  catalogedFromBundleId
+  goalSignature
+  reliability
+  reinforceCount
+  lastReinforced
+  ladder
+  shadowMatches
+  canaryMatches
+  distinctBindings
+  failures
+  insufficient
+  promotionApprovalId
+  lastReplayAt
+  ladderReason
+  ladderChangedAt
+  reuse
+  reuseEvidence
+  reuseOverride
+  procedure.title
+  procedure.freeParameters
+  procedure.recordedFrom
+}
+
+@actor
+query construct nexusAutomationsBrowse {
+  args {
+    search string
+    origin string
+    reuse string
+    statusWords []string
+    includeLearned boolean
+    offLadder boolean
+  }
+  filter row => row.ownerUserId == actor.userId
+    && ((row.catalogued == true && row.kind == "automation" && row.targetNamespace != "procedure") || row.targetNamespace == "procedure")
+    && (args.origin == nil || args.origin == "" || (args.origin == "learned" && row.targetNamespace == "procedure") || (args.origin == "authored" && row.targetNamespace != "procedure"))
+    && (args.reuse == nil || args.reuse == ""
+      || (args.reuse == "unlabelled" && row.reuse == nil && (row.?reuseOverride.label == nil || row.?reuseOverride.label == ""))
+      || row.?reuseOverride.label == args.reuse
+      || ((row.?reuseOverride.label == nil || row.?reuseOverride.label == "") && row.reuse == args.reuse))
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.targetNamespace.includes(trim(args.search), true) || row.status.includes(trim(args.search), true) || row.goalSignature.includes(trim(args.search), true) || row.?procedure.title.includes(trim(args.search), true) || row.ladder.includes(trim(args.search), true) || (args.statusWords != nil && row.status in args.statusWords) || (args.includeLearned == true && row.targetNamespace == "procedure") || (args.offLadder == true && row.targetNamespace == "procedure" && row.ladder == nil))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape automationDirectoryRow
+}
+
+@actor
+query construct nexusAutomationSummaryById {
+  args {
+    constructId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.id == args.constructId
+  paginate 1
+  shape automationDirectoryRow
+}

@@ -4,9 +4,11 @@ import { getRowByConceptAndId, renderMemQLValue, rowString, type QueryClient, ty
 import { flatten } from "../../kit/rows";
 import { useSession } from "../../chrome/access";
 import { useLiveCollection } from "../../live/useLiveCollection";
+import { useOsConnection } from "../../live/connection";
 import { bare } from "../../apps/deployables/people";
 import { useWrite } from "../../apps/deployables/packages/actions";
 import type { CredentialRow } from "../../apps/deployables/sources/rows";
+import { useDemandedRead, useReadDemand } from "../../kit/readDemand";
 import { repositoryPageFrom, type InstallationRow, type PendingInstallation } from "../../apps/deployables/sources/repositories";
 
 export const SOURCE_CONNECTION_CONCEPT = "v1:platform:sourceConnection";
@@ -34,7 +36,7 @@ export interface SourceConnectionsFeed {
   observeCredentials: (rows: readonly CredentialRow[]) => void;
 }
 const EMPTY_CONNECTIONS: SourceConnectionsFeed = { rows: [], state: "disconnected", error: "", retry: () => {}, revokedCredentialIds: [], noteCredentialRevoked: () => {}, observeCredentials: () => {} };
-const ConnectionsContext = createContext<SourceConnectionsFeed | null>(null);
+const ConnectionsContext = createContext<{ feed: SourceConnectionsFeed; retain: () => () => void } | null>(null);
 /** One retained feed at the app root, shared by Sources, Settings and the wizard. */
 export function SharedSourceConnectionsProvider({ children }: { children: ReactNode }) {
   useSession();
@@ -46,9 +48,11 @@ export function SourceConnectionsProvider({ children, enabled = true }: { childr
 }
 function SourceConnectionsFeedProvider({ children, enabled }: { children: ReactNode; enabled: boolean }) {
   const { access } = useSession();
+  const demand = useReadDemand();
+  const connection = useOsConnection();
   const viewer = bare(access?.userId ?? "");
   const [revoked, setRevoked] = useState<{ viewer: string; entries: Record<string, boolean> }>({ viewer, entries: {} });
-  const { snapshot, reseed } = useLiveCollection<Row>(viewer && enabled ? `connections:githubOrganizations:${viewer}` : null, connection => ({
+  const { snapshot: activeSnapshot, source, reseed } = useLiveCollection<Row>(viewer && enabled && demand.requested ? `connections:githubOrganizations:${viewer}` : null, connection => ({
     concept: SOURCE_CONNECTION_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.executeNamed("sourceConnectionsMine", "query sourceConnectionsMine()", { signal });
@@ -57,6 +61,11 @@ function SourceConnectionsFeedProvider({ children, enabled }: { children: ReactN
     reread: async (id, signal) => await getRowByConceptAndId(connection.query, SOURCE_CONNECTION_CONCEPT, id, { signal }) as Row ?? null,
     paged: false,
   }));
+  // Parked editors keep their known options while their last active reader
+  // releases the network feed; a viewer change discards those options.
+  const retained = useRef({ viewer, connection, snapshot: activeSnapshot });
+  if (retained.current.viewer !== viewer || retained.current.connection !== connection || source !== null) retained.current = { viewer, connection, snapshot: activeSnapshot };
+  const snapshot = retained.current.snapshot;
   const noteCredentialRevoked = useCallback((id: string) => setRevoked(held => ({ viewer, entries: { ...(held.viewer === viewer ? held.entries : {}), [id]: false } })), [viewer]);
   const observeCredentials = useCallback((credentials: readonly CredentialRow[]) => setRevoked(held => {
     if (held.viewer !== viewer) return held;
@@ -70,9 +79,13 @@ function SourceConnectionsFeedProvider({ children, enabled }: { children: ReactN
     return changed ? { viewer, entries } : held;
   }), [viewer]);
   const rows = snapshot.rows.map(sourceConnectionFromRow).filter(row => row.id && row.status === "active" && bare(row.ownerUserId) === viewer);
-  return createElement(ConnectionsContext.Provider, { value: { rows, state: snapshot.state, error: snapshot.error, retry: reseed, revokedCredentialIds: revoked.viewer === viewer ? Object.keys(revoked.entries) : [], noteCredentialRevoked, observeCredentials } }, children);
+  return createElement(ConnectionsContext.Provider, { value: { feed: { rows, state: snapshot.state, error: snapshot.error, retry: reseed, revokedCredentialIds: revoked.viewer === viewer ? Object.keys(revoked.entries) : [], noteCredentialRevoked, observeCredentials }, retain: demand.retain } }, children);
 }
-export const useSourceConnections = () => useContext(ConnectionsContext) ?? EMPTY_CONNECTIONS;
+export function useSourceConnections(enabled = true): SourceConnectionsFeed {
+  const shared = useContext(ConnectionsContext);
+  useDemandedRead(shared?.retain, enabled);
+  return shared?.feed ?? EMPTY_CONNECTIONS;
+}
 
 export interface SourceInstallation extends InstallationRow { providerAccountId: string }
 export interface SourceInstallations { installations: SourceInstallation[]; pending: PendingInstallation[] }

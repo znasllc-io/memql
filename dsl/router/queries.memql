@@ -63,6 +63,12 @@ query call routerDecisionsRecent {
     outcome  string
     /// Only decisions made under this route a person chose: local, apps or one of their own.
     route    string
+    /// Search visible call metadata before selecting the next page.
+    search   string
+    /// Compact words match camel-cased custom prompt names.
+    compactSearch string
+    /// Shipped display names resolved by the client, such as Route composing.
+    promptNames []string
   }
   filter   row => (args.since == nil || row.createdAt >= args.since)
                && (args.level == nil || row.level == args.level)
@@ -70,9 +76,14 @@ query call routerDecisionsRecent {
                && (args.rule == nil || row.rule == args.rule)
                && (args.outcome == nil || row.outcome == args.outcome)
                && (args.route == nil || row.route == args.route)
+               && (args.search == nil || trim(args.search) == "" || row.promptName.includes(trim(args.search), true)
+                   || row.model.includes(trim(args.search), true) || row.providerName.includes(trim(args.search), true)
+                   || row.vendor.includes(trim(args.search), true) || row.rule.includes(trim(args.search), true)
+                   || (args.compactSearch != nil && args.compactSearch != "" && row.promptName.includes(args.compactSearch, true))
+                   || (args.promptNames.count() > 0 && row.promptName in args.promptNames))
   shape    routerDecision
-  sort     "row.createdAt", "desc"
-  paginate 200
+  sort     "row.createdAt", "desc", "row.id", "asc"
+  paginate 10
 }
 
 // ---- The sharing ledger's read (epic memql#5146) ----

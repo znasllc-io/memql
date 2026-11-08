@@ -18,6 +18,7 @@ import { useArtifactAccounts } from "./actions/accounts";
 import { useFileVersions } from "./actions/versions";
 import { VersionHistory } from "./VersionHistory";
 import { fileHeadFromRow, type VersionEntry } from "./versions";
+import { useLiveCollection } from "../../live/useLiveCollection";
 import { useOsConnection } from "../../live/connection";
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
@@ -102,7 +103,14 @@ export function Inspector({
     () => (row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : ""),
     [row.kind, row.sourceConceptRef],
   );
-  const liveHead = files.find(file => rowString(file, "id") === fileId);
+  const listedHead = files.find(file => rowString(file, "id") === fileId);
+  const head = useLiveCollection<Row>(fileId && !listedHead ? `files:head:${fileId}` : null, connection => ({
+    concept: "v1:library:file", paged: false,
+    eventInScope: id => id === fileId,
+    inScope: row => rowString(row, "id") === fileId,
+    seed: async (_cursor, signal) => ({ rows: (await connection.query.libraryFileById({ fileId }, { signal })).rows(), nextCursor: "" }),
+  }));
+  const liveHead = listedHead ?? head.snapshot.rows[0];
   const uploadUnavailable = !!liveHead && rowString(liveHead, "status") === "failed" && !rowString(liveHead, "blobUrl").includes("://");
   const liveVersion = liveHead ? fileHeadFromRow(liveHead) : null;
   const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";

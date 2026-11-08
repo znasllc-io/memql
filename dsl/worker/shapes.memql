@@ -3,6 +3,36 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Machine name and shared-cluster presence, without equipment or app payloads.
+@row
+shape registration workerPresence {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  displayName
+  lastSeenAt
+  connectedNodeId
+  revokedAt
+  registeredAt
+}
+
+/// Machine directory rows omit equipment, installed apps and sharing details.
+@row
+shape registration workerDirectorySummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  name
+  displayName
+  lastSeenAt
+  connectedNodeId
+  revokedAt
+  registeredAt
+  platformInfo
+  activeCount
+}
+
 /// Full projection of a v1:worker:invocation row. Backs the per-plan and per-user invocation feeds.
 @row
 shape invocation workerInvocationFull {

@@ -23,6 +23,16 @@
 @executor("integration.work.skillCatalog")
 builtin workSkillCatalog {}
 
+/// Ten recent skills with verified baseline provenance. Search precedes paging.
+@sdk
+@executor("integration.work.skillCatalogPage")
+builtin workSkillCatalogPage { search string cursor string }
+
+/// Inspect one skill and verify its complete current content against installed seeds.
+@sdk
+@executor("integration.work.skillCatalogEntry")
+builtin workSkillCatalogEntry { skillId string! }
+
 /// Consult reviewed knowledge for one need discovered while doing owned work.
 /// This read grants no tools and does not declare readiness or train new content.
 @executor("integration.work.consultKnowledge")

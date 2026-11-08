@@ -85,7 +85,7 @@ describe("the open intent", () => {
       consumeIntent: (id) => consumed.push(id),
     });
     expect(consumed).toEqual([]);
-    expect(conn.subscriptions.activeCount("v1:library:artifact")).toBe(1);
+    expect(conn.subscriptions.activeCount("v1:library:artifact", false)).toBe(1);
     await act(async () => {
       conn.subscriptions.emit("v1:library:artifact", artifactRow({
         id: "output-index", sourceConceptRef: "output-file", title: "Inventory.csv",

@@ -24,6 +24,8 @@ use knowledge.concepts.{ documentChunk }
 /// {domainId: count} map and a per-domain validated/unvalidated/rejected rollup from one read.
 @row
 shape documentChunk documentChunkDomainLite {
+  row.id
+  row.createdAt
   domainId
   validationStatus
 }

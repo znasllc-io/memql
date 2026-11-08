@@ -165,28 +165,28 @@ describe("the templates list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refine templates" }));
     // By name and by subject.
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "acme" } });
-    expect(screen.getByText("Acme welcome")).toBeTruthy();
-    expect(screen.queryByText("Welcome 2")).toBeNull();
+    expect(await screen.findByText("Acme welcome")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Welcome 2")).toBeNull());
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "glad" } });
-    expect(screen.getByText("Welcome 2")).toBeTruthy();
-    expect(screen.queryByText("Acme welcome")).toBeNull();
+    expect(await screen.findByText("Welcome 2")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Acme welcome")).toBeNull());
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
 
     chooseOption(screen.getByLabelText("Organization"), "Acme");
-    expect(screen.getByText("Acme welcome")).toBeTruthy();
-    expect(screen.queryByText("Welcome 2")).toBeNull();
+    expect(await screen.findByText("Acme welcome")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Welcome 2")).toBeNull());
     expect(headCount(view)).toBe("1");
     // The chip says which organization; the row does not say it again.
     expect(within(rowOf("Acme welcome")).queryByText("Acme")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Remove Acme" }));
 
     chooseOption(screen.getByLabelText("State"), "Draft");
-    expect(screen.getByText("Autumn draft")).toBeTruthy();
-    expect(screen.queryByText("Welcome 2")).toBeNull();
+    expect(await screen.findByText("Autumn draft")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Welcome 2")).toBeNull());
     chooseOption(screen.getByLabelText("State"), "Published");
-    expect(screen.getByText("Welcome 2")).toBeTruthy();
-    expect(screen.getByText("Acme welcome")).toBeTruthy();
-    expect(screen.queryByText("Autumn draft")).toBeNull();
+    expect(await screen.findByText("Welcome 2")).toBeTruthy();
+    expect(await screen.findByText("Acme welcome")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Autumn draft")).toBeNull());
     expect(headCount(view)).toBe("2");
 
     // A question that empties the list says so, and stays to be taken back.
@@ -227,7 +227,7 @@ describe("the templates list", () => {
     empty.view.unmount();
 
     const denied = fakeConnection();
-    denied.query.templates.mockRejectedValue(new Error("templates: permission denied"));
+    denied.query.templatesBrowse.mockRejectedValue(new Error("templates: permission denied"));
     const second = mount(denied);
     expect(await screen.findByText("This cluster did not return your templates.")).toBeTruthy();
     expect(screen.queryByText("No templates yet")).toBeNull();
@@ -246,7 +246,7 @@ describe("the templates list", () => {
     mount(conn, {}, { id: "ask-1", payload: { templateId: "t-gone" } });
     // Asked for by Ask, and the cluster answered without it: the list, and the sentence.
     expect(await screen.findByText("That template isn't available.")).toBeTruthy();
-    expect(screen.getByText("Welcome 2")).toBeTruthy();
+    expect(await screen.findByText("Welcome 2")).toBeTruthy();
     // Opening another one takes the sentence with it.
     fireEvent.click(screen.getByText("Welcome 2"));
     expect(await screen.findByRole("heading", { level: 3, name: "Welcome 2" })).toBeTruthy();
@@ -259,10 +259,10 @@ describe("the templates list", () => {
     const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "Welcome 2" })] });
     let release!: () => void;
     const gate = new Promise<void>((done) => { release = done; });
-    const answer = conn.query.templates.getMockImplementation()!;
-    conn.query.templates.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    const answer = conn.query.executeNamed.getMockImplementation()!;
+    conn.query.executeNamed.mockImplementation(async (name, filter) => { await gate; return answer(name, filter); });
     mount(conn, {}, { id: "ask-1", payload: { templateId: "t1" } });
-    await waitFor(() => expect(conn.query.templates).toHaveBeenCalled());
+    await waitFor(() => expect(conn.query.executeNamed).toHaveBeenCalled());
     expect(screen.queryByText("That template isn't available.")).toBeNull();
     await act(async () => { release(); });
     // It arrived: its page opens.

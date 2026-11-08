@@ -110,6 +110,18 @@ query askConversation myAskConversations {
   shape askConversationSummary
 }
 
+/// Search private conversation titles before taking the next ten summaries.
+@actor
+query askConversation myAskConversationsBrowse {
+  args {
+    search string
+  }
+  filter row => row.ownerUserId == actor.userId && (args.search == nil || trim(args.search) == "" || row.title.includes(trim(args.search), true))
+  sort "row.createdAt", "desc", "row.id", "desc"
+  paginate 10
+  shape askConversationSummary
+}
+
 /// Timing evidence from this person's recent conversations, across replicas.
 /// The same owner-scoped history is available to the person and their assistant.
 @actor

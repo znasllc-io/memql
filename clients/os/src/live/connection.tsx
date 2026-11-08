@@ -23,6 +23,7 @@ import {
 import type { OsAuthSource } from "../auth/source";
 import { ConnectionRecoveryContext, ConnectionStatusContext, type ShellConnectionStatus } from "../chrome/connection";
 import { onAppResume } from "./resume";
+import { disposeSessionCollections } from "./sessionCollections";
 import { setCaptureTransport } from "../logs/capture";
 
 /** The edge's same-origin API marker, resolved against document.location. */
@@ -128,6 +129,7 @@ export function OsConnectionProvider({
       retryRef.current = () => {};
       if (redial) clearTimeout(redial);
       unsubscribe?.();
+      if (conn) disposeSessionCollections(conn);
       conn?.close();
       setConnection(null);
     };

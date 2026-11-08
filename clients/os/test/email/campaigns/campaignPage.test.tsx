@@ -538,12 +538,12 @@ describe("a change on its way", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(conn.query.campaignStartSend).toHaveBeenCalledOnce();
     expect(barWord()).toBe("Starting");
-    const reads = conn.query.campaigns.mock.calls.length;
+    const reads = conn.query.executeNamed.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
     expect(barWord()).toBe("Starting");
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     // The page reads the campaign again itself, and stops holding the bar.
-    expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads);
+    expect(conn.query.executeNamed.mock.calls.length).toBeGreaterThan(reads);
     expect(barWord()).toBe("Draft");
     expect(pressable()).toEqual(["Edit", "Send a test", "Send now"]);
   });
@@ -556,7 +556,7 @@ describe("a change on its way", () => {
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send now"));
     await readTheBar();
-    const reads = conn.query.campaigns.mock.calls.length;
+    const reads = conn.query.executeNamed.mock.calls.length;
     press("Send now");
     await readTheBar();
     press("Send now");
@@ -564,7 +564,7 @@ describe("a change on its way", () => {
     expect(await screen.findByText("Couldn't confirm the send.")).toBeTruthy();
     expect(screen.getByText("Its status will update here.")).toBeTruthy();
     expect(screen.queryByText("The campaign wasn't sent.")).toBeNull();
-    await waitFor(() => expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(conn.query.executeNamed.mock.calls.length).toBeGreaterThan(reads));
 
     // It went: the row arrives, and what could not be confirmed no longer needs saying.
     act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: "sending" }));

@@ -28,7 +28,6 @@
 .os-automation-facts pre { white-space:pre-wrap; font-size:var(--os-text-xs); background:var(--os-raised); padding:10px; border-radius:var(--os-radius-sm); }
 .os-automation-facts code,.os-automation-chain code { font-family:var(--os-font-mono); font-size:var(--os-text-xs); }
 .os-automation-stops ol { list-style:none; padding:0; margin:0; }
-.os-automation-stops li { padding:14px 0; border-bottom:1px solid var(--os-line); }
 .os-automation-stops time { font-family:var(--os-font-mono); font-size:var(--os-text-xs); color:var(--os-muted); }
 .os-automation-chain { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:8px 0; overflow-wrap:anywhere; }
 .os-automation-chain code + code::before { content:""; display:inline-block; width:10px; border-top:1px solid var(--os-line); margin-right:8px; vertical-align:middle; }

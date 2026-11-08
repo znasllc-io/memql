@@ -205,3 +205,71 @@ test("an ordinary event reports payloadOmitted false, not undefined", () => {
   assert.equal(full.payloadOmitted, false);
   assert.equal(full.payload?.body, "the whole row", "a full-payload event was altered");
 });
+
+
+test("identical graph readers share one wire subscription across replay and independent release", () => {
+  const d = new MockDispatcher();
+  const manager = new SubscriptionManager(d.asDispatcher());
+  const calls: [number, number] = [0, 0];
+  const first = manager.subscribeGraph(() => { calls[0]++; throw new Error("consumer failure"); }, { concept: "v1:work:run", actions: ["updated", "created"] });
+  const second = manager.subscribeGraph(() => { calls[1]++; }, { concept: "v1:work:run", actions: ["created", "updated", "created"] });
+  assert.equal(manager.activeCount, 1);
+  assert.equal(d.sent.length, 1);
+  const id = d.lastSubscribe().subscriptionId;
+  const event = { event: { subscriptionId: id, kind: "EVENT_KIND_NODE_UPDATED", payload: { id: "run" } } } as unknown as ServerMessage;
+  d.emit(event);
+  assert.deepEqual(calls, [1, 1], "one consumer's exception cannot suppress another");
+  assert.equal(manager.replay(), 1);
+  first(); first();
+  assert.equal(manager.activeCount, 1);
+  d.emit(event);
+  assert.deepEqual(calls, [1, 2]);
+  second();
+  assert.equal(manager.activeCount, 0);
+  assert.equal(d.lastUnsubscribe().subscriptionId, id);
+});
+
+test("graph sharing preserves concept, action and authorization-payload distinctions", () => {
+  const d = new MockDispatcher();
+  const manager = new SubscriptionManager(d.asDispatcher());
+  for (const opts of [{ concept: "a" }, { concept: "b" }, { concept: "a", idOnly: true }, { concept: "a", actions: ["created" as const] }]) {
+    manager.subscribeGraph(() => {}, opts);
+  }
+  assert.equal(manager.activeCount, 4);
+  manager.stop();
+  assert.equal(manager.activeCount, 0);
+  assert.throws(() => manager.subscribeGraph(() => {}, { concept: "a" }), /stopped/);
+});
+
+
+test("the omitted graph action filter shares the explicit all-actions subscription", () => {
+  const d = new MockDispatcher();
+  const manager = new SubscriptionManager(d.asDispatcher());
+  const implicit = manager.subscribeGraph(() => {}, { concept: "v1:work:run" });
+  const explicit = manager.subscribeGraph(() => {}, { concept: "v1:work:run", actions: ["created", "updated", "deleted"] });
+  assert.equal(manager.activeCount, 1);
+  assert.equal(d.sent.length, 1);
+  implicit();
+  assert.equal(manager.activeCount, 1);
+  explicit();
+  assert.equal(manager.activeCount, 0);
+});
+
+test("graph readers registered while offline survive replay and release cleanly", () => {
+  const d = new MockDispatcher();
+  const manager = new SubscriptionManager(d.asDispatcher());
+  const send = d.send.bind(d);
+  d.send = () => { throw new Error("socket not open (readyState=3)"); };
+  let changes = 0;
+  const first = manager.subscribeGraph(() => { changes++; }, { concept: "v1:work:run" });
+  const second = manager.subscribeGraph(() => { changes++; }, { concept: "v1:work:run" });
+  assert.equal(manager.activeCount, 1, "offline consumers still share one retained registration");
+  d.send = send;
+  assert.equal(manager.replay(), 1);
+  const id = d.lastSubscribe().subscriptionId;
+  d.emit({ event: { subscriptionId: id, kind: "EVENT_KIND_NODE_UPDATED", payload: { id: "run" } } } as unknown as ServerMessage);
+  assert.equal(changes, 2, "recovery restores every consumer, not an empty fanout");
+  first(); second();
+  assert.equal(manager.activeCount, 0);
+  assert.equal(d.lastUnsubscribe().subscriptionId, id);
+});

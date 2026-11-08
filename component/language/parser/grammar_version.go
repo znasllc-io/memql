@@ -336,7 +336,7 @@ import (
 //
 // Before-write field statements and trigger timing coexist with the retirement
 // of error(). error("message") remains live; no statement has an onError context.
-const GrammarVersion = "2026.10-event-journal-on-write-bceec6b9"
+const GrammarVersion = "2026.11-case-insensitive-substring-bceec6b9"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

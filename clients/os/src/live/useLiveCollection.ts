@@ -1,6 +1,7 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   LiveCollection,
+  versionOrder,
   type Connection,
   type LiveCollectionSpec,
   type LiveSnapshot,
@@ -8,11 +9,12 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "./connection";
-import { onAppResume } from "./resume";
+import { sessionCollections } from "./sessionCollections";
 import { LiveReadVisibility } from "./useGraphRevision";
 import type { LiveListSource } from "./LiveList";
+import { onAppResume } from "./resume";
 
-// One live collection, retained for the life of the component.
+// One live collection per connection and resource key, shared across windows.
 //
 // ===========================================================================
 // WHY THIS EXISTS RATHER THAN new LiveCollection(...) AT EACH CALL SITE
@@ -36,8 +38,6 @@ import type { LiveListSource } from "./LiveList";
 // the same collection and issues no new read.
 
 const EMPTY: LiveSnapshot<never> = { rows: [], state: "disconnected", error: "", version: 0 };
-
-const LINGER_MS = 5_000;
 
 /**
  * Whether a feed is BEHIND -- showing rows it can no longer promise are
@@ -65,6 +65,12 @@ export interface LiveCollectionHandle<T> {
   reseed: () => void;
 }
 
+export interface LiveCollectionOptions {
+  cacheReleased?: boolean;
+  /** Explicit connection for injected read clients; omitted uses the OS session. */
+  connection?: Connection | null;
+}
+
 /**
  * `key` is the collection's IDENTITY. It must encode everything the spec
  * closes over that changes what is READ -- and must NOT encode anything that
@@ -74,49 +80,47 @@ export interface LiveCollectionHandle<T> {
 export function useLiveCollection<T>(
   key: string | null,
   spec: (connection: Connection) => LiveCollectionSpec<T>,
+  { cacheReleased = true, connection: suppliedConnection }: LiveCollectionOptions = {},
 ): LiveCollectionHandle<T> {
-  const connection = useOsConnection();
+  const sessionConnection = useOsConnection();
+  const connection = suppliedConnection === undefined ? sessionConnection : suppliedConnection;
   const visible = useContext(LiveReadVisibility);
   const visibleRef = useRef(visible);
-  useLayoutEffect(() => { visibleRef.current = visible; }, [visible]);
+  visibleRef.current = visible;
 
   // The spec is read once per (connection, key) and never again: it closes
   // over the caller's props, and re-reading it on every render would rebuild
   // the collection on every render.
   const collection = useMemo(() => {
     if (connection === null || key === null) return null;
-    return new LiveCollection<T>(spec(connection), connection.subscriptions ?? null, LINGER_MS);
+    // Legacy composed readers own React setters and mutable dependency refs.
+    // They cannot survive their component's lifetime in the session cache.
+    // Ordinary immutable resource/page specs always use the shared store.
+    if (!cacheReleased) return new LiveCollection<T>(spec(connection), connection.subscriptions ?? null, 5_000);
+    return sessionCollections(connection).prepare(key, spec(connection));
     // DEPS ARE (connection, key) ON PURPOSE: `spec` closes over the caller's
     // props and is a fresh function on every render, so depending on it would
     // rebuild the collection -- and therefore re-seed and re-subscribe -- on
     // every render. `key` is the contract that says when the read changed.
-  }, [connection, key]);
+  }, [connection, key, cacheReleased]);
 
   useEffect(() => {
-    if (collection === null) return;
-    collection.retain();
-    // This hook owns its collection directly, outside the SDK's LiveStore.
-    // It must therefore carry the same reconnect lifecycle: subscription
-    // replay alone cannot repair a failed seed or recover missed rows.
-    // The cycle fires AFTER subscriptions are restored, avoiding a gap
-    // between the fresh read and the stream that keeps it current.
+    if (collection === null || connection === null) return;
+    if (cacheReleased) return visible ? sessionCollections(connection).retain(collection) : undefined;
     let recoveredAt = -Infinity;
-    const stopCycle = connection?.onConnectionCycle?.(() => { recoveredAt = Date.now(); collection.reseed(); });
-    const stopStatus = connection?.onStatusChange?.(({ status }) => {
-      if (status !== "connected") collection.markDisconnected();
-    });
+    // The session observes stream-wide sequence gaps, including gaps delivered
+    // to another concept. Its onGap also covers reconnect after replay, so a
+    // second connection-cycle listener would ask for the same seed twice.
+    const stopGap = sessionCollections(connection).onGap(() => { recoveredAt = Date.now(); collection.reseed(); });
+    collection.retain();
+    const stopStatus = connection.onStatusChange?.(({ status }) => { if (status !== "connected") collection.markDisconnected(); });
     const stopResume = onAppResume(() => {
-      if (visibleRef.current && connection?.status === "connected" && Date.now() - recoveredAt >= 1_000) {
+      if (visibleRef.current && connection.status === "connected" && Date.now() - recoveredAt >= 1_000) {
         recoveredAt = Date.now(); collection.reseed();
       }
     });
-    return () => {
-      stopCycle?.();
-      stopStatus?.();
-      stopResume();
-      collection.release(() => {});
-    };
-  }, [collection, connection]);
+    return () => { stopGap(); stopStatus?.(); stopResume(); collection.release(() => {}); };
+  }, [collection, connection, cacheReleased, cacheReleased ? visible : true]);
 
   const snapshot = useSyncExternalStore(
     useMemo(
@@ -132,4 +136,41 @@ export function useLiveCollection<T>(
     snapshot,
     reseed,
   };
+}
+
+export interface PagedCollectionHandle<T> extends LiveCollectionHandle<T> {
+  loadMore: () => Promise<void>;
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMoreError: string;
+}
+
+/** The server query supplies a ten-row page and searches before pagination. */
+export function usePagedCollection<T>(
+  key: string | null,
+  spec: (connection: Connection) => LiveCollectionSpec<T>,
+  options: LiveCollectionOptions = {},
+): PagedCollectionHandle<T> {
+  const handle = useLiveCollection<T>(key, connection => ({ comparePageRows: compareRecentRows, ...spec(connection), manualPages: true }), options);
+  const loadMore = useCallback(async () => {
+    // The source is the collection prepared above; keeping the ordinary list
+    // interface small lets projected views continue to wrap the same source.
+    const source = handle.source;
+    if (source && "loadMore" in source && typeof source.loadMore === "function") await source.loadMore();
+  }, [handle.source]);
+  return { ...handle, loadMore, hasMore: handle.snapshot.hasMore ?? false,
+    loadingMore: handle.snapshot.loadingMore ?? false, loadMoreError: handle.snapshot.loadMoreError ?? "" };
+}
+
+/** Match the engine's ordinary row.createdAt DESC, row.id ASC page order.
+ * Resource timestamps (queuedAt/registeredAt) supply their own comparator. */
+function compareRecentRows<T>(left: T, right: T): number {
+  const fields = (value: T): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const a = fields(left), b = fields(right);
+  if (typeof a.createdAt !== "string" || typeof b.createdAt !== "string") return 0;
+  const order = versionOrder(b.createdAt, a.createdAt);
+  if (order === null) return 0;
+  if (order !== 0) return order;
+  const aid = String(a.id ?? ""), bid = String(b.id ?? "");
+  return aid < bid ? -1 : aid > bid ? 1 : 0;
 }

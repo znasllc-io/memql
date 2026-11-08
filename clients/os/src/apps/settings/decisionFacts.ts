@@ -1,7 +1,8 @@
 import { costEstimateFrom, type CostEstimateData } from "../../kit/CostEstimate";
-import { useReadEffect } from "../../live/useReadEffect";
-import { useGraphRevision } from "../../live/useGraphRevision";
-import { useCallback, useState } from "react";
+import { useMemo } from "react";
+import { usePagedCollection, type PagedCollectionHandle } from "../../live/useLiveCollection";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { promptSearchNames } from "../fleet/routing/vocabulary";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -201,6 +202,7 @@ export interface DecisionFilters {
   door: string;
   rule: string;
   outcome: string;
+  search?: string;
 }
 
 export const NO_FILTERS: DecisionFilters = {
@@ -211,7 +213,7 @@ export const NO_FILTERS: DecisionFilters = {
   outcome: "",
 };
 
-export interface DecisionsState {
+export interface DecisionsState extends Pick<PagedCollectionHandle<Row>, "loadMore" | "hasMore" | "loadingMore" | "loadMoreError"> {
   rows: DecisionRow[];
   loading: boolean;
   /** The cluster has the read at all. */
@@ -221,74 +223,30 @@ export interface DecisionsState {
   reload: () => void;
 }
 
-/**
- * The recent decisions.
- *
- * FILTERED SERVER-SIDE, because the query takes exactly these arguments and is
- * keyset-paged at 200. Filtering a page of 200 in the browser would narrow the
- * page rather than the search, so a facet would appear to find nothing the
- * moment the cluster got busy -- the classic "it works on my quiet cluster"
- * defect.
- */
+/** Ten recent decisions per read. The private cost ledger is not broadcast;
+ * reopening/resuming repairs the retained window and manual refresh stays available. */
 export function useDecisions(enabled: boolean, filters: DecisionFilters): DecisionsState {
   const connection = useOsConnection();
-  const [rows, setRows] = useState<DecisionRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [supported, setSupported] = useState(true);
-  const [error, setError] = useState("");
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  const [epoch, setEpoch] = useState(0);
-  const reload = useCallback(() => setEpoch((n) => n + 1), []);
-  const liveRevision = useGraphRevision(["v1:router:call"], enabled);
-
-  const { since, level, door, rule, outcome } = filters;
-
-  useReadEffect((signal) => {
-    if (!enabled || connection === null) return;
-    const q = connection.query as unknown as Record<string, unknown>;
-    const read = q["routerDecisionsRecent"];
-    if (typeof read !== "function") {
-      setSupported(false);
-      setRows([]);
-      return;
-    }
-    setSupported(true);
-    setLoading(true);
-    setError("");
-    // ONLY THE ARGUMENTS THAT ARE SET. The query's `when(args.x)` guards drop
-    // an absent argument and its connective as if never written; an empty
-    // string is a value and would filter on "". Same distinction the rule
-    // `when` object keeps, one layer down.
-    const args: Record<string, unknown> = {};
-    if (since !== "") args["since"] = since;
-    if (level !== "") args["level"] = level;
-    if (door !== "") args["door"] = door;
-    if (rule !== "") args["rule"] = rule;
-    if (outcome !== "") args["outcome"] = outcome;
-    // ON ITS CLIENT. A generated method lives on QueryClient.prototype and
-    // calls `this.executeNamed`; called bare, it throws inside this effect and
-    // the window's error boundary takes down the whole Fleet app.
-    return (read as (a: Record<string, unknown>, o?: unknown) => Promise<{ rows: () => Iterable<Row> }>).call(
-      connection.query,
-      args,
-      { signal, priority: "background" },
-    )
-      .then((result) => {
-        if (signal.aborted) return;
-        setRows([...result.rows()].map(decisionFromRow));
-        setFetchedAt(Date.now());
-      })
-      .catch((err: unknown) => {
-        if (signal.aborted) return;
-        setRows([]);
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!signal.aborted) setLoading(false);
-      });
-  }, [connection, enabled, since, level, door, rule, outcome], `${epoch}:${liveRevision}`);
-
-  return { rows, loading, supported, error, fetchedAt, reload };
+  const search = useDebouncedValue(filters.search ?? "", 250).trim();
+  const supported = connection === null || typeof connection.query.routerDecisionsRecent === "function";
+  const args = Object.fromEntries(Object.entries({ since: filters.since, level: filters.level,
+    door: filters.door, rule: filters.rule, outcome: filters.outcome }).filter(([, value]) => value !== ""));
+  if (search) Object.assign(args, { search, compactSearch: search.replace(/[\s_-]+/g, ""), promptNames: promptSearchNames(search) });
+  const feed = usePagedCollection<Row>(enabled && supported ? `routing:decisions:${JSON.stringify(args)}` : null, conn => ({
+    concept: "v1:router:call",
+    actions: [],
+    seed: async (cursor, signal) => {
+      const result = await conn.query.routerDecisionsRecent(args, { signal, priority: "background", ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    inScope: () => true,
+    reread: async () => null,
+  }));
+  const rows = useMemo(() => feed.snapshot.rows.map(decisionFromRow), [feed.snapshot.rows]);
+  const fetchedAt = useMemo(() => feed.snapshot.version > 0 ? Date.now() : null, [feed.snapshot.version]);
+  return { rows, loading: feed.snapshot.state === "seeding", supported, error: feed.snapshot.error,
+    fetchedAt, reload: feed.reseed, loadMore: feed.loadMore, hasMore: feed.hasMore,
+    loadingMore: feed.loadingMore, loadMoreError: feed.loadMoreError };
 }
 
 /** A cost figure that is deliberately not a number for a free call. */

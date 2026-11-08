@@ -1,0 +1,11 @@
+
+ RUN  v5.0.5 /Users/znas/memql-os-lists/clients/os
+
+
+ Test Files  33 passed (33)
+      Tests  404 passed (404)
+   Start at  16:46:44
+   Duration  8.40s (tests 42%, transform 22%, environment 19%, import 16%, setup 1%)
+
+    Isolate  33 workers spawned · ~763ms startup each (spawn + environment, per file)
+             at least ~916ms faster with isolate: false — reuses workers across files instead of one per file

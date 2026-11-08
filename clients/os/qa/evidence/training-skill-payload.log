@@ -1,0 +1,11 @@
+=== RUN   TestSkillCatalogPageVerifiesFullRowsButReturnsCompactPage
+--- PASS: TestSkillCatalogPageVerifiesFullRowsButReturnsCompactPage (0.00s)
+=== RUN   TestSkillCatalogEntryReadsOnlyRequestedSkill
+--- PASS: TestSkillCatalogEntryReadsOnlyRequestedSkill (0.00s)
+=== RUN   TestSkillCatalogPagesRequireIdentityBeforeReading
+--- PASS: TestSkillCatalogPagesRequireIdentityBeforeReading (0.00s)
+=== RUN   TestSkillCatalogBrowsePayloadBudget
+    skill_catalog_page_test.go:103: skill catalog fixture=200 rows/instruction_body_bytes=16800 old_wire_bytes=3390792 first_ten_summary_bytes=1047 old_list_queries=1 new_list_queries=1; selection history requests move off list open
+--- PASS: TestSkillCatalogBrowsePayloadBudget (0.00s)
+PASS
+ok  	github.com/znasllc-io/memql/integrations/work	0.842s

@@ -65,7 +65,7 @@ describe("Sources catalog review regressions", () => {
     let release!: () => void;
     const pending = new Promise<void>(resolve => { release = resolve; });
     vi.spyOn(connection.query, "executeNamed").mockImplementation(async (name, call, options) => {
-      if (call === "query sourceCredentialsMine()") await pending;
+      if (name === "deployableDirectoryPage" && call.includes("@alice")) await pending;
       return original(name, call, options);
     });
     mountCatalog();

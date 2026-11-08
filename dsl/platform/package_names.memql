@@ -1,0 +1,22 @@
+/// Names for linked visible resources; declarations, manifests and deployment
+/// configuration are deliberately absent. Ordinary package authorization applies.
+@actor
+query package packageNamesByIds {
+ args {
+  ids []string!
+ }
+ filter row => row.id in args.ids
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 200
+ shape packageName
+}
+
+@row
+shape package packageName {
+ row.id
+ row.createdAt
+ name
+ sourceKind
+ repoUrl
+ repoRef
+}

@@ -362,3 +362,26 @@ shape run workContinuationConflict {
   goalId
   status
 }
+
+/// Keep analysis evidence without run variables, trust, continuation or model payloads.
+@row
+shape run trainingAnalysisRow {
+ row.id
+ row.createdAt
+ ownerUserId
+ automationName
+ status
+ input
+ outcome
+ errorMessage
+ startedAt
+ finishedAt
+}
+
+
+@row
+shape observation workTrainingLessonIndexRow {
+ row.id
+ row.createdAt
+ data
+}

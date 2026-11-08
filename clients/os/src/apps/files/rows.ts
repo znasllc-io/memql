@@ -72,6 +72,7 @@ export function artifactFromRow(raw: Row): ArtifactRow {
 }
 
 export interface FolderRow {
+  createdAt?: string;
   id: string;
   name: string;
   /** "" = a root folder. */
@@ -97,6 +98,7 @@ export function folderFromRow(raw: Row): FolderRow {
   const row = flatten(raw);
   return {
     id: rowString(row, "id"),
+    createdAt: rowString(row, "createdAt"),
     name: rowString(row, "name"),
     parentFolderId: rowString(row, "parentFolderId"),
     archived: boolOr(row, "archived", false),

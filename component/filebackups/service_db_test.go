@@ -16,6 +16,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/database/storagequota"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/integrations/azureblob"
@@ -476,5 +477,89 @@ func TestBackupListShowsNewestFirstWithStablePagination(t *testing.T) {
 	page, err = another().List(ctx, "", "unknown-cursor", "all")
 	if err != nil || len(page) != 0 {
 		t.Fatalf("unowned cursor: %+v %v", page, err)
+	}
+}
+
+func TestBackupDirectorySearchPagesAndOwnerIsolation(t *testing.T) {
+	s, another, ctx, _ := serviceFixture(t)
+	base := time.Now().UTC().Add(-time.Hour)
+	for n := 0; n < 25; n++ {
+		name := fmt.Sprintf("recent-%02d.zip", n)
+		if n < 12 {
+			name = fmt.Sprintf("earlier-NEEDLE%%_-%02d.zip", n)
+		}
+		id := fmt.Sprintf("backup-%03d", n)
+		if _, err := s.Create(ctx, id, "worker-001", "/source/"+name, "archive", Metadata{WorkerName: "Fixture workstation"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB().ExecContext(ctx, `UPDATE file_backup_transfers SET created_at=$1 WHERE transfer_id=$2`, base.Add(time.Duration(n/2)*time.Minute), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Create(ctx, "backup-foreign", "worker-001", "/source/earlier-NEEDLE%_-foreign.zip", "archive", Metadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `UPDATE file_backup_transfers SET owner_id='someone-else' WHERE transfer_id='backup-foreign'`); err != nil {
+		t.Fatal(err)
+	}
+	var list func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
+	for _, capability := range another().Capabilities() {
+		if capability.Name == "list" {
+			list = capability.Handler
+		}
+	}
+	if list == nil {
+		t.Fatal("missing list capability")
+	}
+	for _, tc := range []struct {
+		search string
+		sizes  []int
+	}{{"", []int{10, 10, 5}}, {"needle%_", []int{10, 2}}, {"TEST COMPUTER", []int{10, 10, 5}}} {
+		after := ""
+		seen := map[string]bool{}
+		for page, size := range tc.sizes {
+			nodes, err := list(ctx, map[string]any{"scope": "all", "search": tc.search, "limit": 10, "after": after}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				Transfers []Transfer `json:"transfers"`
+				Next      string     `json:"nextCursor"`
+			}
+			if err = json.Unmarshal(nodes[0].Payload, &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Transfers) != size {
+				t.Fatalf("search %q page%d got%d want%d", tc.search, page, len(result.Transfers), size)
+			}
+			if len(nodes[0].Payload) > 12*1024 {
+				t.Fatalf("directory payload exceeded budget: %d", len(nodes[0].Payload))
+			}
+			for _, row := range result.Transfers {
+				if row.ID == "backup-foreign" || seen[row.ID] {
+					t.Fatal("foreign/duplicate row", row.ID)
+				}
+				seen[row.ID] = true
+			}
+			if (result.Next != "") != (page < len(tc.sizes)-1) {
+				t.Fatal("wrong continuation")
+			}
+			after = result.Next
+		}
+	}
+	// Existing callers keep the original page size, and inaccessible cursors do
+	// not reveal a foreign journal frontier.
+	rows, err := s.List(ctx, "", "", "all")
+	if err != nil || len(rows) != 25 {
+		t.Fatalf("legacy list %d %v", len(rows), err)
+	}
+	rows, err = s.ListPage(ctx, "", "backup-foreign", "all", "", 10)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("foreign cursor %d %v", len(rows), err)
+	}
+	for _, limit := range []int{0, -1, 101} {
+		if _, err = list(ctx, map[string]any{"limit": limit}, 0); err == nil {
+			t.Fatal("accepted invalid page size", limit)
+		}
 	}
 }

@@ -5,7 +5,7 @@ import { useMemo } from "react";
 // different `Check`s in one file is a rename waiting to go wrong.
 import { Check as CheckIcon, FileStack, X } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Head, Notice, ProvenanceDot, Subhead } from "../../kit";
+import { Button, Caption, Head, Notice, ProvenanceDot, Refine, Subhead } from "../../kit";
 import { REJECTED, VALIDATED, sourceMeaning, type ChunkDecision } from "./concepts";
 import { groupChunksByDocument, type Chunk, type ChunkGroup } from "./rows";
 import type { ChunkDecisions } from "./actions";
@@ -32,38 +32,23 @@ export function ReviewSection({
   queue,
   decisions,
   onDecide,
-  domainsError,
-  domainsAvailable = false,
 }: {
   queue: ReviewQueue;
   decisions: ChunkDecisions;
   onDecide: (chunkId: string, status: ChunkDecision) => void;
-  /** The domain read's own failure, if it failed. The queue cannot walk what
-   *  it was never told about, and reporting an empty queue in that case would
-   *  be a wrong answer rather than a missing one. */
-  domainsError: string;
-  domainsAvailable?: boolean;
 }) {
   const groups = useMemo(() => groupChunksByDocument(queue.chunks), [queue.chunks]);
   const awaiting = queue.chunks.filter((c) => c.validationStatus === "unvalidated").length;
 
   return (
     <div className="os-app-stack">
-      <Head title="Review" meta={domainsAvailable && queue.state === "ready" && !queue.error && !domainsError ? `${awaiting} loaded` : undefined}>
+      <Head title="Review" meta={queue.state === "ready" && !queue.error ? `${awaiting} loaded` : undefined}>
+        <Refine label="Search passages" search={queue.search} onSearch={queue.setSearch} placeholder="Search passages" />
         <Button onClick={queue.reload}>Re-read</Button>
       </Head>
 
       <LessonsReview />
       <Subhead>Document passages</Subhead>
-
-      {domainsError !== "" ? (
-        <Notice
-          tone="error"
-          sentence="This cluster did not return its knowledge domains, so there is nothing to walk."
-          next="The queue below is empty because the read failed, not because there is no work."
-          detail={domainsError}
-        />
-      ) : null}
 
       {queue.error !== "" ? (
         <Notice
@@ -93,10 +78,7 @@ export function ReviewSection({
         />
       ))}
 
-      {/* THE COUNT NAMES THE PAGES, NEVER A TOTAL. The walk reads a domain's
-          newest fifty at a time and has no way to know how many chunks are
-          behind the pages it has not asked for -- so "12 awaiting review" here
-          means twelve in what has been loaded, and the sentence says which. */}
+      {/* Counts describe loaded pending pages, never an assumed corpus total. */}
       <div className="os-refresh-row">
         <span className="os-caption">
           {awaiting} awaiting review in {queue.pagesRead} page{queue.pagesRead === 1 ? "" : "s"}{" "}
@@ -182,22 +164,12 @@ function ChunkCard({
     <div className="os-train-card" tabIndex={0} aria-label={`Chunk ${chunk.id}`}>
       <p className="os-train-card-text">{chunk.text.trim()}</p>
 
-      <Chips label="Provenance">
-        {/* The enum value in the data voice -- it is the word somebody greps
-            for -- and its meaning beside it. An unrecognised member renders as
-            itself with no sentence: a newer engine writing a seventh source is
-            a thing to show, not to erase. */}
-        <Chip tone="accent" title={sourceMeaning(chunk.source)}>
-          {chunk.source || "source unrecorded"}
-        </Chip>
-        {chunk.sourceRef === "" ? null : (
-          <Chip tone="muted" title={chunk.sourceRef}>
-            {chunk.sourceRef}
-          </Chip>
-        )}
-        {chunk.sourceTopic === "" ? null : <Chip tone="muted">{chunk.sourceTopic}</Chip>}
-        {chunk.tokenCount > 0 ? <Chip tone="muted">{chunk.tokenCount} tokens</Chip> : null}
-      </Chips>
+      <p className="os-caption" aria-label="Provenance">
+        <span title={sourceMeaning(chunk.source)}>{chunk.source || "source unrecorded"}</span>
+        {chunk.sourceRef ? <> · <span>{chunk.sourceRef}</span></> : null}
+        {chunk.sourceTopic ? <> · <span>{chunk.sourceTopic}</span></> : null}
+        {chunk.tokenCount > 0 ? <> · {chunk.tokenCount} tokens</> : null}
+      </p>
 
       <div className="os-train-card-actions">
         <Button

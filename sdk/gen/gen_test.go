@@ -30,7 +30,10 @@ func TestParseArgsBlock_BraceAwareForPatternQuantifiers(t *testing.T) {
     id: args.userId
   }`
 
-	got := parseArgsBlock(body)
+	got, err := parseArgsBlock(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 args fields (userId, epoch), got %d: %+v", len(got), got)
 	}
@@ -50,24 +53,27 @@ func TestParseArgsBlock_NoArgsBlock(t *testing.T) {
     id: "v1:identity:user:alice"
     revocationEpoch: 1
   }`
-	if got := parseArgsBlock(body); got != nil {
+	if got, err := parseArgsBlock(body); got != nil || err != nil {
 		t.Errorf("expected nil args for body with no `args {...}`, got %+v", got)
 	}
 }
 
 // TestParseArgsBlock_PreservesMixedAnnotations is the existing-shape
-// regression: every annotation flavor we already shipped (@required,
-// @enum, @default, @description) still threads through the
-// brace-aware extractor unchanged.
+// regression: valid field annotations and documentation survive the engine
+// argument grammar. Retired annotations are refused.
 func TestParseArgsBlock_PreservesMixedAnnotations(t *testing.T) {
 	body := `args {
-    name     string  @required @description("display name")
-    role     string  @enum("owner", "admin", "writer", "reader") @default("reader")
+    /// display name
+    name     string  @required
+    role     string  @enum("owner", "admin", "writer", "reader")
     locale   string
   }
 `
 
-	got := parseArgsBlock(body)
+	got, err := parseArgsBlock(body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 3 {
 		t.Fatalf("expected 3 args, got %d: %+v", len(got), got)
 	}
@@ -80,9 +86,7 @@ func TestParseArgsBlock_PreservesMixedAnnotations(t *testing.T) {
 	if len(got[1].Enum) != 4 {
 		t.Errorf("role enum should have 4 values, got %d", len(got[1].Enum))
 	}
-	if got[1].Default != "reader" {
-		t.Errorf("role default = %q, want \"reader\"", got[1].Default)
-	}
+
 }
 
 // TestEmitTSMethods_QueryWithArgs confirms the TS emission pipeline
@@ -658,7 +662,10 @@ func TestDescriptionFor_DocCommentPrecedence(t *testing.T) {
 
 func TestParseFields_DocCommentAboveField(t *testing.T) {
 	inner := "\n    /// The plan to inspect.\n    planId  string!\n    limit   number\n"
-	fields := parseFields(inner)
+	fields, err := parseFields(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(fields) != 2 {
 		t.Fatalf("fields = %d, want 2", len(fields))
 	}
@@ -697,7 +704,10 @@ func TestDescriptionFor_EngineParity(t *testing.T) {
 // does not attach.
 func TestParseFields_BlankDetachedDocIgnored(t *testing.T) {
 	inner := "\n    /// Detached note.\n\n    planId  string!\n"
-	fields := parseFields(inner)
+	fields, err := parseFields(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(fields) != 1 {
 		t.Fatalf("fields = %d", len(fields))
 	}
@@ -747,5 +757,62 @@ func TestCollectConstructs_RejectsMalformedBuiltinSchema(t *testing.T) {
 	writeFixture(t, root, "builtins.memql", "@sdk\nbuiltin removeAnnotation { artifactId string! commentId }")
 	if _, err := CollectConstructs(root); err == nil || !strings.Contains(err.Error(), "removeAnnotation") {
 		t.Fatalf("expected actionable schema error, got %v", err)
+	}
+}
+
+func TestCollectConstructs_InlineArgumentFieldsReachBothClients(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "queries.memql", `
+query item browseItems {
+  args { search string ids []string! archived boolean mode enum("recent", "name") }
+  filter row => row.name.includes(args.search)
+}
+mutation item changeItem {
+  args { id string! value string }
+}
+logic scopedRead {
+  args {
+    /// Stable resource identity.
+    id string! search string
+  }
+}
+`)
+	constructs, err := CollectConstructs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(constructs) != 3 {
+		t.Fatalf("constructs: %+v", constructs)
+	}
+	want := []ArgField{{Name: "search", Type: "string"}, {Name: "ids", Type: "[]string", Required: true}, {Name: "archived", Type: "boolean"}, {Name: "mode", Type: "string", Enum: []string{"recent", "name"}}}
+	if !reflect.DeepEqual(constructs[0].Args, want) {
+		t.Fatalf("inline fields: %+v, want %+v", constructs[0].Args, want)
+	}
+	if len(constructs[1].Args) != 2 || len(constructs[2].Args) != 2 || constructs[2].Args[0].Description != "Stable resource identity." {
+		t.Fatalf("mutation/logic arguments: %+v", constructs[1:])
+	}
+	for _, construct := range constructs {
+		ts := string(emitTSMethods([]Construct{construct}, construct.Kind, ""))
+		goCode := string(emitMethods([]Construct{construct}, pascalCase(construct.Kind)))
+		for _, field := range construct.Args {
+			if !strings.Contains(ts, field.Name+": ") {
+				t.Fatalf("TS omitted %s.%s: %s", construct.Name, field.Name, ts)
+			}
+			if !strings.Contains(goCode, field.Name+": ") {
+				t.Fatalf("Go omitted %s.%s: %s", construct.Name, field.Name, goCode)
+			}
+		}
+	}
+}
+
+func TestCollectConstructs_RefusesMalformedAndRetiredArgumentFields(t *testing.T) {
+	for _, fields := range []string{`search string missingType`, `search string @default("all")`, `search string @description("Search")`} {
+		t.Run(fields, func(t *testing.T) {
+			root := t.TempDir()
+			writeFixture(t, root, "query.memql", "query item browseItems { args { "+fields+" } }")
+			if _, err := CollectConstructs(root); err == nil || !strings.Contains(err.Error(), "browseItems") {
+				t.Fatalf("expected actionable query schema refusal, got %v", err)
+			}
+		})
 	}
 }

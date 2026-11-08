@@ -1116,6 +1116,43 @@ test("a failing seed keeps the rows it has and says so", async () => {
   store.dispose();
 });
 
+test("coalesced refresh refusals update the cached snapshot even while already degraded", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host);
+  const refusals: Array<(error: Error) => void> = [];
+  let attempt = 0;
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => {
+      if (++attempt === 1) return { rows: [{ id: "a" }], nextCursor: "" };
+      return new Promise((_resolve, reject) => refusals.push(reject));
+    },
+  });
+  await settle();
+  const observed: string[] = [];
+  handle.value.subscribe(() => observed.push(handle.value.snapshot.error));
+  handle.value.reseed();
+  handle.value.reseed(); // a simultaneous session-resume request
+  const pending = handle.value.snapshot;
+  assert.equal(pending.state, "degraded");
+  assert.equal(pending.error, "");
+
+  refusals[0]!(new Error("The cluster refused the refresh."));
+  await settle();
+  const firstFailure = handle.value.snapshot;
+  assert.notEqual(firstFailure, pending);
+  assert.equal(firstFailure.error, "The cluster refused the refresh.");
+  assert.equal(firstFailure.state, "degraded");
+  assert.equal(firstFailure.rows.length, 1);
+  assert.equal(attempt, 3, "the pending refresh runs once");
+
+  refusals[1]!(new Error("The caller no longer has access."));
+  await settle();
+  assert.notEqual(handle.value.snapshot, firstFailure);
+  assert.equal(handle.value.snapshot.error, "The caller no longer has access.");
+  assert.deepEqual(observed, ["", "The cluster refused the refresh.", "The caller no longer has access."]);
+  store.dispose();
+});
+
 test("the snapshot is identity-stable until something changes", async () => {
   // What keeps a binding from re-rendering on every unrelated event.
   const subs = new FakeSubscriptions();
@@ -1413,5 +1450,197 @@ test("a capped paged seed reports incomplete membership and a complete reseed cl
   handle.value.reseed();
   await settle();
   assert.equal(handle.value.snapshot.truncated, false);
+  store.dispose();
+});
+
+
+test("manual pages request one page per action and keep the loaded depth on recovery", async () => {
+  const h = hostWith(new FakeSubscriptions());
+  const store = new LiveStore(h.host);
+  const read = countingSeed([
+    { rows: Array.from({ length: 10 }, (_, n) => ({ id: String(n) })), nextCursor: "ten" },
+    { rows: Array.from({ length: 10 }, (_, n) => ({ id: String(n + 10) })), nextCursor: "twenty" },
+    { rows: [{ id: "20" }], nextCursor: "" },
+  ]);
+  const { value } = store.collection("paged", { concept: "c", seed: read.seed, manualPages: true });
+  await settle();
+  assert.deepEqual(read.calls, [""]);
+  assert.equal(value.snapshot.rows.length, 10);
+  assert.equal(value.snapshot.hasMore, true);
+  await value.loadMore();
+  assert.deepEqual(read.calls, ["", "ten"]);
+  assert.equal(value.snapshot.rows.length, 20);
+  h.cycle(1);
+  await settle();
+  assert.deepEqual(read.calls, ["", "ten", "", "ten"]);
+  assert.equal(value.snapshot.rows.length, 20);
+  await value.loadMore();
+  assert.equal(value.snapshot.rows.length, 21);
+  assert.equal(value.snapshot.hasMore, false);
+  await value.loadMore();
+  assert.equal(read.calls.length, 5);
+  store.dispose();
+});
+
+test("load-more coalesces clicks and live changes win over a late page", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let complete!: (page: { rows: Row[]; nextCursor: string }) => void;
+  let calls = 0;
+  const { value } = store.collection<Row>("paged", {
+    concept: "c", manualPages: true,
+    seed: async cursor => {
+      calls++;
+      if (!cursor) return { rows: [{ id: "held", createdAt: "2026-11-07T00:00:00Z", name: "before" }], nextCursor: "next" };
+      return new Promise(resolve => { complete = resolve; });
+    },
+  });
+  await settle();
+  const loading = value.loadMore();
+  await value.loadMore();
+  assert.equal(calls, 2);
+  assert.equal(value.snapshot.loadingMore, true);
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "held", createdAt: "2026-11-07T00:01:00Z", name: "after" } }));
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "removed" } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "arrived" } }));
+  complete({ rows: [{ id: "held", createdAt: "2026-11-07T00:00:00Z", name: "before" }, { id: "removed" }, { id: "older" }], nextCursor: "" });
+  await loading;
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["held", "arrived", "older"]);
+  assert.equal(value.snapshot.rows[0]?.name, "after");
+  assert.equal(value.snapshot.loadingMore, false);
+  store.dispose();
+});
+
+test("a failed next page preserves rows and its cursor for retry", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host);
+  let failed = false;
+  const cursors: string[] = [];
+  const { value } = store.collection<Row>("paged", { concept: "c", manualPages: true, seed: async cursor => {
+    cursors.push(cursor);
+    if (!cursor) return { rows: [{ id: "first" }], nextCursor: "next" };
+    if (!failed) { failed = true; throw new Error("temporarily unavailable"); }
+    return { rows: [{ id: "second" }], nextCursor: "" };
+  } });
+  await settle();
+  await value.loadMore();
+  assert.equal(value.snapshot.loadMoreError, "temporarily unavailable");
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first"]);
+  assert.equal(value.snapshot.hasMore, true);
+  await value.loadMore();
+  assert.deepEqual(cursors, ["", "next", "next"]);
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["first", "second"]);
+  assert.equal(value.snapshot.loadMoreError, "");
+  store.dispose();
+});
+
+test("released session pages pause work but reopen immediately with their cached rows", async () => {
+  const subs = new FakeSubscriptions();
+  const h = hostWith(subs);
+  const store = new LiveStore(h.host, { lingerMs: 0, cacheReleased: true });
+  const read = countingSeed([{ rows: [{ id: "one" }], nextCursor: "two" }, { rows: [{ id: "two" }], nextCursor: "" }]);
+  const spec = { concept: "c", manualPages: true, seed: read.seed };
+  const first = store.collection("paged", spec);
+  await settle();
+  await first.value.loadMore();
+  first.release();
+  await settle();
+  assert.equal(subs.subs.length, 0, "closed apps do not retain a live subscription");
+  h.cycle(1);
+  await settle();
+  assert.equal(read.calls.length, 2, "reconnect does not wake dormant lists");
+  const next = store.collection("paged", spec);
+  assert.equal(next.value, first.value);
+  assert.deepEqual(next.value.snapshot.rows.map(row => row.id), ["one", "two"]);
+  await settle();
+  assert.deepEqual(read.calls, ["", "two", "", "two"]);
+  store.dispose();
+  const anotherSession = new LiveStore(h.host, { cacheReleased: true });
+  const fresh = anotherSession.collection("paged", spec);
+  assert.equal(fresh.value.snapshot.rows.length, 0, "session caches never cross connections");
+  await settle();
+  assert.equal(fresh.value.snapshot.rows.length, 1);
+  anotherSession.dispose();
+});
+
+test("reconnect during load-more aborts the old page and repairs only completed pages", async () => {
+  const h = hostWith(new FakeSubscriptions());
+  const store = new LiveStore(h.host);
+  let finish!: (page: { rows: Row[]; nextCursor: string }) => void;
+  let oldSignal!: AbortSignal;
+  let calls = 0;
+  const { value } = store.collection<Row>("paged", { concept: "c", manualPages: true, seed: async (cursor, signal) => {
+    calls++;
+    if (!cursor) return { rows: [{ id: calls === 1 ? "before" : "fresh" }], nextCursor: "next" };
+    oldSignal = signal;
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  await settle();
+  const more = value.loadMore();
+  h.status("reconnecting");
+  h.cycle(1);
+  assert.equal(oldSignal.aborted, true);
+  finish({ rows: [{ id: "stale" }], nextCursor: "" });
+  await more;
+  await settle();
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["fresh"]);
+  assert.equal(value.snapshot.hasMore, true);
+  assert.equal(calls, 3);
+  store.dispose();
+});
+
+test("manual directories coalesce omitted events for unloaded rows into one bounded refresh", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let reads = 0;
+  let rereads = 0;
+  const { value } = store.collection<Row>("directory", {
+    concept: "c", manualPages: true,
+    seed: async () => { reads++; return { rows: [{ id: "visible" }], nextCursor: "older" }; },
+    reread: async () => { rereads++; return null; },
+  });
+  await settle();
+  for (let n = 0; n < 1_000; n++) subs.deliver(event({ kind: "NODE_UPDATED", payloadOmitted: true, payload: { id: `unloaded-${n}` } }));
+  assert.equal(rereads, 0);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  await settle();
+  assert.equal(reads, 2, "one initial page and one coalesced directory refresh");
+  assert.equal(value.snapshot.rows.length, 1);
+  store.dispose();
+});
+
+test("manual directory events respect the loaded ordering boundary but admit new arrivals", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const { value } = store.collection<Row>("directory", {
+    concept: "c", manualPages: true,
+    comparePageRows: (a, b) => Number(b.position) - Number(a.position),
+    seed: async () => ({ rows: [{ id: "visible", position: 50 }], nextCursor: "older" }),
+  });
+  await settle();
+  for (let n = 0; n < 50; n++) subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: `old-${n}`, position: n } }));
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["visible"]);
+  subs.deliver(event({ payload: { id: "new", position: 51 } }));
+  assert.deepEqual(value.snapshot.rows.map(row => row.id), ["visible", "new"]);
+  store.dispose();
+});
+
+test("identity scope rejects unrelated events before by-id reads and summaries can disable subscriptions", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let reads = 0;
+  store.collection<Row>("detail", {
+    concept: "c", eventInScope: id => id === "selected",
+    seed: async () => ({ rows: [], nextCursor: "" }),
+    reread: async id => { reads++; return { id }; },
+  });
+  store.collection<Row>("summary", { concept: "c", actions: [], seed: async () => ({ rows: [], nextCursor: "" }) });
+  await settle();
+  assert.equal(subs.subs.length, 1);
+  for (let n = 0; n < 100; n++) subs.deliver(event({ payloadOmitted: true, payload: { id: `unrelated-${n}` } }));
+  await settle();
+  assert.equal(reads, 0);
+  subs.deliver(event({ payloadOmitted: true, payload: { id: "selected" } }));
+  await settle();
+  assert.equal(reads, 1);
   store.dispose();
 });

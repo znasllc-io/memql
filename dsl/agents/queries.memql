@@ -126,12 +126,17 @@ query agent agentRoleSlugsInUse {
 
 /// Returns all AI agent templates regardless of active status.
 query agent allAgents {
-  filter  row => isNotDeleted(row)
+  args {
+    includeInactive bool
+    search string
+  }
+  filter row => isNotDeleted(row) && (args.includeInactive != false || isActiveRecord(row))
+    && (args.search == nil || trim(args.search) == "" || row.name.includes(trim(args.search), true) || row.description.includes(trim(args.search), true) || row.role.includes(trim(args.search), true) || row.roleSlug.includes(trim(args.search), true))
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
   sort     "row.createdAt", "desc"
-  paginate 50
+  paginate 10
   shape   agentFull
 }
 

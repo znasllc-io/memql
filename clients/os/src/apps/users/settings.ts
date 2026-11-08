@@ -33,17 +33,11 @@ export const USERS_SECTIONS: OsAppSection[] = [
 
 export const USERS_SECTION_IDS = USERS_SECTIONS.map((s) => s.id);
 
-/**
- * How the People list is ordered. A preference, per rule 3 and rule 4: sort is
- * quiet text on the scope line and its DEFAULT lives here.
- *
- * Two orderings and no more. "Name" is the one a person reads a directory by;
- * "last seen" is the one an operator reads it by when they are looking for
- * somebody who has stopped arriving. A third would be a column nobody sorts on.
- */
-export type UsersSort = "name" | "lastSeen";
+/** Recent is the bounded default. The two explicit directory orders retain
+ * computed names and last-seen semantics; saved preferences remain valid. */
+export type UsersSort = "recent" | "name" | "lastSeen";
 
-export const USERS_SORTS: readonly UsersSort[] = ["name", "lastSeen"];
+export const USERS_SORTS: readonly UsersSort[] = ["recent", "name", "lastSeen"];
 
 export interface UsersSettings {
   version: 1;
@@ -86,7 +80,7 @@ export const DEFAULT_USERS_SETTINGS: UsersSettings = {
   defaultSection: "people",
   showDeactivated: false,
   showArchivedGroups: false,
-  sort: "name",
+  sort: "recent",
 };
 
 /**
@@ -123,7 +117,7 @@ export function sanitizeUsersSettings(raw: unknown): UsersSettings {
         ? doc.showArchivedGroups
         : DEFAULT_USERS_SETTINGS.showArchivedGroups,
     sort:
-      doc.sort === "name" || doc.sort === "lastSeen" ? doc.sort : DEFAULT_USERS_SETTINGS.sort,
+      doc.sort === "recent" || doc.sort === "name" || doc.sort === "lastSeen" ? doc.sort : DEFAULT_USERS_SETTINGS.sort,
   };
 }
 

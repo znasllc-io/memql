@@ -456,7 +456,7 @@ func placeholderValue(op ComparisonOperator, intrinsic, conceptContext, typ stri
 	switch op {
 	case OpIn, OpOut:
 		return []any{scalar()}
-	case OpStartsWith, OpIncludes:
+	case OpStartsWith, OpIncludes, OpIncludesFold:
 		return "placeholder"
 	}
 	return scalar()

@@ -102,3 +102,32 @@ query connectionState emailReadyFeedbackOrganizations {
  paginate 50
  shape emailConnectionIndex
 }
+
+/// Operator-gated encrypted storage page. actor.userId cannot represent shared test transport mail; only the capture service executes this after the owner/developer check.
+@actor
+@serverOnly
+@cache(0)
+query capturedMessage capturedEmailsPage {
+ args {
+  since datetime!
+  asOf datetime!
+ }
+ filter row => actor.isClusterOwner == true && row.createdAt >= args.since && row.createdAt <= args.asOf
+ sort "row.createdAt", "desc", "row.id", "asc"
+ paginate 10
+ shape capturedEmailStored
+}
+
+/// Operator-gated single-message decrypt source. actor.userId cannot represent shared test transport mail; access is checked before the service actor is installed.
+@actor
+@serverOnly
+@cache(0)
+query capturedMessage capturedEmailById {
+ args {
+  messageId string!
+  since datetime!
+ }
+ filter row => actor.isClusterOwner == true && row.id == args.messageId && row.createdAt >= args.since
+ paginate 1
+ shape capturedEmailStored
+}

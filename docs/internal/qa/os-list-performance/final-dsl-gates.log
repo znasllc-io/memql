@@ -1,0 +1,13 @@
+go run ./cmd/memqllint dsl/
+OK: 375 file(s) loaded, no diagnostics.
+NOTE: engine-parity pass did not mount 46 domain(s) -- their names collide with core embedded
+      domains, so those namespaces were validated from the embedded tree rather than from the
+      directories here. If this root IS the engine's own dsl/, that embed was rebuilt from these
+      same files and they were covered; if it is a product bundle, or you are running a prebuilt
+      binary, it was not.
+      Skipped: accounts, actions, agents, authoring, bench, calendar, campaigns, capabilities ... and 38 more (--json for the full list)
+go run ./cmd/memqlbreaking -baseline component/language/surface/2026.json
+INFO: baseline component/language/surface/2026.json -- edition 2026, grammar 2026.09-before-write-error-accessor-77cda60c
+INFO: this tree -- edition 2026, grammar 2026.11-case-insensitive-substring-bceec6b9
+INFO: surface: 18 constructs, 82 annotations, 46 functions, 307 shapes
+SUCCESS: no breaks against component/language/surface/2026.json

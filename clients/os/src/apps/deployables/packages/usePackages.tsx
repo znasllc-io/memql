@@ -6,6 +6,7 @@ import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../../live/useLiveCollection";
 import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
+import { useDemandedRead, useReadDemand } from "../../../kit/readDemand";
 
 // The Packages feeds.
 //
@@ -31,16 +32,18 @@ import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
  * account whose group they are in. The collection key includes the session
  * identity so switching users cannot publish a previous person's package rows.
  */
-const PackagesContext = createContext<LiveCollectionHandle<Row> | null>(null);
+const PackagesContext = createContext<{ feed: LiveCollectionHandle<Row>; retain: () => () => void } | null>(null);
 export function SharedPackagesProvider({ children }: { children: ReactNode }) {
   useSession(); // Re-evaluate visibility when capability grants change.
-  const feed = usePackageFeed(accessAdmits("app:deployables"));
-  return <PackagesContext.Provider value={feed}>{children}</PackagesContext.Provider>;
+  const demand = useReadDemand();
+  const feed = usePackageFeed(demand.requested && accessAdmits("app:deployables"));
+  return <PackagesContext.Provider value={{ feed, retain: demand.retain }}>{children}</PackagesContext.Provider>;
 }
-export function usePackages(): LiveCollectionHandle<Row> {
+export function usePackages(enabled = true): LiveCollectionHandle<Row> {
   const shared = useContext(PackagesContext);
-  const own = usePackageFeed(shared === null);
-  return shared ?? own;
+  useDemandedRead(shared?.retain, enabled);
+  const own = usePackageFeed(enabled && shared === null);
+  return shared?.feed ?? own;
 }
 function usePackageFeed(enabled: boolean): LiveCollectionHandle<Row> {
   const session = useSessionIfPresent();

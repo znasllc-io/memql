@@ -2,10 +2,12 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Notice, RecordList, RecordRow, Subhead, flatten } from "../../../kit";
+import { Button, Caption, Notice, RecordList, RecordRow, Subhead, Refine, flatten } from "../../../kit";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { useOsConnection } from "../../../live/connection";
-import { useReading } from "../../../cluster/reading";
+import { usePagedCollection } from "../../../live/useLiveCollection";
+import { LoadMore } from "../../../kit/LoadMore";
+import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../../logs/useDebouncedValue";
 
 // The dead-letter band, for ONE connector, LOADED ONLY WHEN ASKED.
 //
@@ -61,19 +63,16 @@ export function entryFromRow(raw: Row): DeadLetterEntry {
 export function DeadLetterBand({ connector }: { connector: string }) {
   const connection = useOsConnection();
 
-  const read = useCallback(
-    async (signal: AbortSignal): Promise<DeadLetterEntry[]> => {
-      if (connection === null) throw new Error("not connected");
-      const result = await connection.query.outboxDeadLetters({ target: connector }, { signal });
-      return result.rows().map(entryFromRow);
+  const [search, setSearch] = useState("");
+  const needle = useDebouncedValue(search.trim(), TEXT_DEBOUNCE_MS);
+  const feed = usePagedCollection<Row>(`cluster:deadletters:${connector}:${needle}`, conn => ({
+    concept: "v1:platform:outboxEntry", actions: [],
+    seed: async (cursor, signal) => {
+      const result = await conn.query.outboxDeadLettersBrowse({ target: connector, search: needle }, { cursor, signal });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
-    [connection, connector],
-  );
-
-  const entries = useReading<DeadLetterEntry[]>(
-    `cluster:deadletters:${connector}`,
-    connection === null ? null : read,
-  );
+  }));
+  const entries = { value: feed.snapshot.rows.map(entryFromRow), state: feed.snapshot.error ? "failed" : feed.snapshot.state === "seeding" ? "reading" : "read", error: feed.snapshot.error, reread: feed.reseed };
 
   const [confirming, setConfirming] = useState<{ id: string; act: "retry" | "discard" } | null>(null);
   const [busy, setBusy] = useState("");
@@ -110,6 +109,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
     <div className="os-cluster-band">
       <Subhead meta={entries.state === "read" && !entries.error ? rows.length : undefined}>{connector} dead letters</Subhead>
 
+      <Refine label="Search dead letters" search={search} onSearch={setSearch} placeholder="Search dead letters" />
       {entries.state === "failed" ? (
         <Notice
           tone="error"
@@ -117,13 +117,12 @@ export function DeadLetterBand({ connector }: { connector: string }) {
           detail={entries.error}
         />
       ) : null}
-      {entries.state === "reading" && entries.value === null ? (
+      {entries.state === "reading" && rows.length === 0 ? (
         <RecordListSkeleton label="Loading dead letters" />
       ) : null}
       {entries.state === "read" && rows.length === 0 ? (
         <Caption>
-          Nothing is waiting for a person on {connector}. This one was read just now -- it is not a
-          standing figure.
+          {needle ? "No dead letters match this search." : `Nothing is waiting for a person on ${connector}.`}
         </Caption>
       ) : null}
 
@@ -170,9 +169,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
       ))}
       </RecordList>
 
-      {entries.at === null ? null : (
-        <Caption>Read {entries.at.toLocaleTimeString()}.</Caption>
-      )}
+      <LoadMore feed={feed} />
     </div>
   );
 }

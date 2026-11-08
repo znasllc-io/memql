@@ -1,9 +1,15 @@
+import { LoadMore } from "../../kit/LoadMore";
+import { useDebouncedValue } from "../../logs/useDebouncedValue";
+import { useAutomationDirectory } from "./useAutomationDirectory";
+import { useWorkRecord, useRunRecords } from "./useNexusDirectory";
+import { approvalFromRow, runFromRow } from "./rows";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { FileCode2, Footprints, Repeat } from "lucide-react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
   Caption,
+  ContentSkeleton,
   EmptyState,
   Head,
   LiveList,
@@ -107,7 +113,7 @@ import { idTail, type ApprovalRow, type RunRow } from "./rows";
 // rung is a word too, and its evidence is a count.
 
 export interface AutomationsSectionProps {
-  feeds: AutomationFeeds;
+  feeds?: AutomationFeeds;
   selectedId: string;
   onSelect: (constructId: string) => void;
   /** The learned procedure whose page is open, or "". */
@@ -156,6 +162,7 @@ function entriesOf(
   search: string,
   origin: "" | Origin,
   reuse: ReuseFacet,
+  recent = false,
 ): Entry[] {
   const needle = search.trim().toLowerCase();
   const out: Entry[] = [];
@@ -200,6 +207,11 @@ function entriesOf(
   // reliability: that moves on every run, and a live list ordered by it would
   // reshuffle under somebody reading it. A total order, so two rows never swap.
   return out.sort((a, b) => {
+    if (recent) {
+      const left = a.origin === "authored" ? a.automation : a.procedure;
+      const right = b.origin === "authored" ? b.automation : b.procedure;
+      return right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id);
+    }
     if (a.band !== b.band) return a.band - b.band;
     if (a.standing !== b.standing) return b.standing - a.standing;
     const byName = a.name.localeCompare(b.name);
@@ -237,7 +249,7 @@ function useErrorsSaidAbove<U>(source: LiveListSource<U> | null): LiveListSource
 }
 
 export function AutomationsSection({
-  feeds,
+  feeds: suppliedFeeds,
   selectedId,
   onSelect,
   openProcedureId,
@@ -253,6 +265,9 @@ export function AutomationsSection({
   const [search, setSearch] = useState("");
   const [origin, setOrigin] = useState<"" | Origin>("");
   const [reuse, setReuse] = useState<ReuseFacet>("");
+  const query = useDebouncedValue(search, 200);
+  const directory = useAutomationDirectory(query, origin, reuse, openProcedureId || selectedId, suppliedFeeds === undefined);
+  const feeds = suppliedFeeds ?? directory.feeds;
   // A LINK THAT NAMES A PROCEDURE THIS CATALOG DOES NOT HOLD is answered once
   // and let go: holding the id open would pop the page open by itself the day
   // the feed happened to deliver it, which is navigation nobody asked for.
@@ -264,27 +279,31 @@ export function AutomationsSection({
   const openProcedure =
     openProcedureId === ""
       ? null
-      : (feeds.procedureRows.find((p) => idTail(p.id) === idTail(openProcedureId)) ?? null);
+      : (suppliedFeeds === undefined ? directory.record.snapshot.rows.filter(isLearnedProcedure).map(procedureFromRow).find(p => idTail(p.id) === idTail(openProcedureId)) ?? null : feeds.procedureRows.find((p) => idTail(p.id) === idTail(openProcedureId)) ?? null);
+
+  const promotion = useWorkRecord("approval", openProcedure?.promotionApprovalId ?? "");
+  const recordedRuns = useRunRecords(openProcedure?.recordedFrom.runIds ?? []);
 
   // NOT THERE is said only by a feed that has answered and is current: while
   // it seeds the procedure may be on its way, and a refused or disconnected
   // feed cannot say what the cluster holds.
   useEffect(() => {
     if (openProcedureId === "" || openProcedure !== null) return;
-    if (learnedFeed.state !== "live" || learnedFeed.error !== "") return;
+    const answer = suppliedFeeds === undefined ? directory.record.snapshot : learnedFeed;
+    if (answer.state !== "live" || answer.error !== "") return;
     setMissing(openProcedureId);
     onCloseProcedure();
-  }, [openProcedureId, openProcedure, learnedFeed]);
+  }, [openProcedureId, openProcedure, learnedFeed, directory.record.snapshot, suppliedFeeds]);
 
   // KEYED ON THE QUESTION: a new search or facet re-baselines the arrival cue,
   // so revealing rows the browser already had is not announced as the cluster
   // sending them (README, "a resync is not an arrival").
-  const viewKey = `${search.trim().toLowerCase()}|${origin}|${reuse}`;
+  const viewKey = `${query.trim().toLowerCase()}|${origin}|${reuse}`;
   const view = useTwoFeedView<Row, Row, Entry>(
     feeds.catalog.source,
     feeds.procedures.source,
     viewKey,
-    (catalogRows, learnedRows) => entriesOf(catalogRows, learnedRows, search, origin, reuse),
+    (catalogRows, learnedRows) => entriesOf(catalogRows, learnedRows, query, origin, reuse, suppliedFeeds === undefined),
   );
   const listSource = useErrorsSaidAbove(view);
   const snapshot = useSyncExternalStore(
@@ -300,7 +319,7 @@ export function AutomationsSection({
     return { authored, total: authored + learnedFeed.rows.length };
   }, [catalogFeed, learnedFeed]);
 
-  const selected =
+  const selected = suppliedFeeds === undefined && directory.record.snapshot.rows[0] && !isLearnedProcedure(directory.record.snapshot.rows[0]) ? automationFromRow(directory.record.snapshot.rows[0]) :
     entries.find(
       (e): e is Extract<Entry, { origin: "authored" }> =>
         e.origin === "authored" && idTail(e.automation.id) === idTail(selectedId),
@@ -314,9 +333,9 @@ export function AutomationsSection({
         policyKnown={feeds.policyKnown}
         policyError={feeds.policy.snapshot.error}
         feedState={learnedFeed.state}
-        approvals={approvals}
-        approvalsKnown={approvalsKnown}
-        runs={runs}
+        approvals={promotion.snapshot.rows.length ? promotion.snapshot.rows.map(approvalFromRow) : approvals}
+        approvalsKnown={openProcedure.promotionApprovalId ? promotion.snapshot.state === "live" : approvalsKnown}
+        runs={recordedRuns.snapshot.rows.length ? recordedRuns.snapshot.rows.map(runFromRow) : runs}
         onBack={onCloseProcedure}
         onOpenApproval={onOpenApproval}
         onOpenRun={onOpenRun}
@@ -376,7 +395,7 @@ export function AutomationsSection({
 
   return (
     <div className="os-nexus-automations">
-      <Head title="Automations" meta={settled ? entries.length : undefined}>
+      <Head title="Automations" meta={settled ? `${entries.length} shown · Recent` : undefined}>
         {/* NO FILTER CHROME OVER NO CONTENT (rule 2): with nothing in the
             catalog there is no question to ask of it. */}
         {held.total === 0 && !filtered ? null : (
@@ -415,10 +434,11 @@ export function AutomationsSection({
 
       <div className="os-nexus-split">
         <div className="os-nexus-column">
-          {catalogFeed.error !== "" ? (
+          {suppliedFeeds === undefined && directory.feed.snapshot.error ? <Notice tone="error" sentence="Automations could not be read." detail={directory.feed.snapshot.error} /> : null}
+          {suppliedFeeds !== undefined && catalogFeed.error !== "" ? (
             <Notice tone="error" sentence="The catalog could not be read." detail={catalogFeed.error} />
           ) : null}
-          {learnedFeed.error !== "" ? (
+          {suppliedFeeds !== undefined && learnedFeed.error !== "" ? (
             <Notice
               tone="warn"
               sentence="The learned procedures could not be read."
@@ -498,7 +518,8 @@ export function AutomationsSection({
             }
           />
 
-          {catalogFeed.rows.length >= CATALOG_PAGE_BOUND || learnedFeed.rows.length >= PROCEDURE_PAGE_BOUND ? (
+          {suppliedFeeds === undefined ? <LoadMore feed={directory.feed} /> : null}
+          {suppliedFeeds !== undefined && (catalogFeed.rows.length >= CATALOG_PAGE_BOUND || learnedFeed.rows.length >= PROCEDURE_PAGE_BOUND) ? (
             // A PAGE IS NOT THE WHOLE. Said only when the list may be partial,
             // because then it is the one thing that changes how it is read.
             <Caption>
@@ -554,6 +575,8 @@ export function AutomationsSection({
 
             <ReusePanel key={selected.id} constructId={selected.id} facts={selected.reuse} />
 
+            {suppliedFeeds === undefined && directory.record.snapshot.state === "seeding" ? <ContentSkeleton kind="detail" label="Loading this automation" /> : null}
+            {suppliedFeeds === undefined && directory.record.snapshot.error ? <Notice tone="error" sentence="Could not read this automation." detail={directory.record.snapshot.error} /> : null}
             {selected.source === "" ? null : (
               <Panel label="What it does">
                 <pre className="os-nexus-source os-mono">{selected.source}</pre>

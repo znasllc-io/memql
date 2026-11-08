@@ -5,6 +5,7 @@ import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/clien
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { SOURCE_CREDENTIAL_CONCEPT } from "../../apps/deployables/sources/rows";
 import { useSession } from "../../chrome/access";
+import { useDemandedRead, useReadDemand } from "../../kit/readDemand";
 
 // The credentials feed: ONE LiveCollection over the caller's own source
 // credentials (epic memql#4885, design section D).
@@ -30,16 +31,18 @@ import { useSession } from "../../chrome/access";
  * builder does not exist in this tree yet; the compose task switches to it,
  * and the text here is exactly what that builder renders.
  */
-const CredentialsContext = createContext<LiveCollectionHandle<Row> | null>(null);
+const CredentialsContext = createContext<{ feed: LiveCollectionHandle<Row>; retain: () => () => void } | null>(null);
 export function SharedCredentialsProvider({ children }: { children: ReactNode }) {
   useSession();
-  const feed = useCredentialFeed(accessAdmits("app:settings/connections") || accessAdmits("app:deployables"));
-  return createElement(CredentialsContext.Provider, { value: feed }, children);
+  const demand = useReadDemand();
+  const feed = useCredentialFeed(demand.requested && (accessAdmits("app:settings/connections") || accessAdmits("app:deployables")));
+  return createElement(CredentialsContext.Provider, { value: { feed, retain: demand.retain } }, children);
 }
-export function useSourceCredentials(): LiveCollectionHandle<Row> {
+export function useSourceCredentials(enabled = true): LiveCollectionHandle<Row> {
   const shared = useContext(CredentialsContext);
-  const own = useCredentialFeed(shared === null);
-  return shared ?? own;
+  useDemandedRead(shared?.retain, enabled);
+  const own = useCredentialFeed(enabled && shared === null);
+  return shared?.feed ?? own;
 }
 function useCredentialFeed(enabled: boolean): LiveCollectionHandle<Row> {
   const { access } = useSession();
