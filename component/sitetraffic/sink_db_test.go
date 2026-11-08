@@ -2,10 +2,14 @@ package sitetraffic
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
+
+	"github.com/znasllc-io/memql/component/edge/visit"
 )
 
 // sink_db_test.go -- the visit columns against the real edge_request table.
@@ -15,7 +19,9 @@ import (
 // name the rollups will read and holds what the sink wrote, and that a row
 // written without them -- every row recorded before they existed, and every
 // row a previous release's edge writes during a rolling upgrade -- reads back
-// as unmeasured instead of failing to insert or reading as a page view.
+// as unmeasured instead of failing to insert or reading as a page view. And
+// only the database can say whether a row derived from a crafted request is
+// one it accepts, which is what decides whether the rest of its batch lands.
 //
 // Postgres-gated: edgeTestDB skips without a database and fails under
 // MEMQL_REQUIRE_DB=1, which is how CI's db-tests lane runs this package.
@@ -96,5 +102,46 @@ func TestARowWrittenWithoutTheVisitFieldsReadsAsUnmeasured(t *testing.T) {
 	}
 	if got := readVisitColumns(t, db, id); got != (visitColumns{}) {
 		t.Errorf("a row written without the visit columns reads %+v, want every column at its default: unmeasured, no page view, no bot, no dimension", got)
+	}
+}
+
+// ONE CRAFTED REQUEST MUST NOT ERASE A BATCH. A request path and a utm_source
+// arrive percent-decoded, so "/%00x" carries a NUL byte, and the database
+// driver refuses a NUL in a string outright: the whole INSERT fails, and with
+// it every row in the batch -- up to 256 requests, other sites' among them.
+//
+// The crafted row's fields are derived exactly as the edge derives them, from
+// the request itself, and the batch must land with the ordinary row beside it.
+func TestARequestWithANulPathStillRecordsTheBatch(t *testing.T) {
+	db := edgeTestDB(t)
+	siteID := "site-nul-path-" + suffix(t)
+	deleteSiteRequests(t, db, siteID)
+
+	crafted := httptest.NewRequest(http.MethodGet, "/%00x?utm_source=news%00letter", nil)
+	crafted.Host = "shop.example.com"
+	poisoned := Row{
+		ServedAt: visitFieldsServedAt, Id: newRowId(), SiteId: siteID, Node: "edge-test",
+		Status: 200, PathClass: PathClassDocument, Measured: true, PageView: true,
+		Path:   visit.NormalizePath(crafted.URL.Path),
+		Source: visit.Source(crafted, "shop.example.com"),
+	}
+	ordinary := Row{
+		ServedAt: visitFieldsServedAt.Add(time.Second), Id: newRowId(), SiteId: siteID, Node: "edge-test",
+		Status: 200, PathClass: PathClassAsset, Measured: true,
+	}
+
+	s := NewSink(db, SinkOptions{Logger: quietLogger()})
+	if err := s.insertBatch(context.Background(), []Row{poisoned, ordinary}); err != nil {
+		t.Fatalf("a batch holding a row built from a NUL-bearing request was refused, so every row in it would be lost: %v", err)
+	}
+	var landed int
+	if err := db.NewRaw("SELECT count(*) FROM edge_request WHERE site_id = ?", siteID).Scan(context.Background(), &landed); err != nil {
+		t.Fatalf("count the batch: %v", err)
+	}
+	if landed != 2 {
+		t.Errorf("%d of the batch's 2 rows landed", landed)
+	}
+	if got := readVisitColumns(t, db, poisoned.Id); got.Path != "/x" || got.Source != "newsletter" {
+		t.Errorf("the crafted row stored path %q and source %q, want /x and newsletter -- the NUL dropped, the rest kept", got.Path, got.Source)
 	}
 }

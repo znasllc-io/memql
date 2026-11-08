@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // requestlog_test.go -- the edge's per-request record (epic memql#4906).
@@ -672,5 +674,39 @@ func TestAPageViewWithNoSecretOrCountryDatabaseLeavesThoseEmpty(t *testing.T) {
 	_, records = serveVisit(t, navigate(visitRequest(http.MethodGet, "/", chromeOnWindows)), map[string]string{"index.html": "ROOT"}, unheld, nil)
 	if len(records) != 1 || !records[0].PageView || records[0].Visitor != "" {
 		t.Errorf("a keeper holding no secret for the day gave %+v, want a page view with no visitor", records)
+	}
+}
+
+// WHAT REACHES THE RECORD IS CLEAN TEXT. The path and the utm_source arrive
+// percent-decoded, so a navigation can carry control characters and bytes
+// that are not UTF-8 in both; a NUL among them would make the database refuse
+// the batch the row rides in, losing every other row in it. The edge answers
+// "/%01..." (only a NUL or an invalid byte in the PATH is refused before
+// serving), so this page view is real, and it is recorded with them removed.
+//
+// Every string on the record is checked, not only the two built from the
+// request, so a field added later that copies client text unchanged fails
+// here as well.
+func TestARecordCarriesOnlyCleanText(t *testing.T) {
+	visitors, countries := visitFakes()
+	req := navigate(visitRequest(http.MethodGet, "/products/%01a/?utm_source=News%00letter%ff", chromeOnWindows))
+
+	rec, records := serveVisit(t, req, map[string]string{"index.html": "ROOT"}, visitors, countries)
+	if rec.Code != http.StatusOK || len(records) != 1 {
+		t.Fatalf("answered %d and recorded %d requests, want a served page and one record", rec.Code, len(records))
+	}
+	got := records[0]
+	if !got.PageView || got.Path != "/products/a" || got.Source != "newsletter" {
+		t.Errorf("pageView=%v path=%q source=%q, want a page view of /products/a from newsletter", got.PageView, got.Path, got.Source)
+	}
+	fields := reflect.ValueOf(got)
+	for i := 0; i < fields.NumField(); i++ {
+		if fields.Field(i).Kind() != reflect.String {
+			continue
+		}
+		value := fields.Field(i).String()
+		if !utf8.ValidString(value) || strings.IndexFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+			t.Errorf("%s = %q carries a control character or a byte that is not UTF-8", fields.Type().Field(i).Name, value)
+		}
 	}
 }

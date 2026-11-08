@@ -35,10 +35,15 @@ func IsPageView(r *http.Request, pathClass string, status int) bool {
 		(pathClass == "document" || pathClass == "fallback")
 }
 
-// NormalizePath is the path a statistic groups on: no query or fragment (they
-// carry tokens and would split one page into thousands), no trailing slash,
-// and bounded so a hostile URL cannot grow a row. "" means not a path.
+// NormalizePath is the path a statistic groups on: clean text (cleanText), no
+// query or fragment (they carry tokens and would split one page into
+// thousands), no trailing slash, and bounded so a hostile URL cannot grow a
+// row. "" means not a path.
+//
+// Cleaned FIRST, so every later rule judges the path as it will be stored: a
+// trailing slash hidden behind a control character is still a trailing slash.
 func NormalizePath(p string) string {
+	p = cleanText(p)
 	if i := strings.IndexAny(p, "?#"); i >= 0 {
 		p = p[:i]
 	}
@@ -51,14 +56,43 @@ func NormalizePath(p string) string {
 	return truncate(p, maxPathBytes)
 }
 
-// truncate cuts to at most n bytes without splitting a rune.
+// cleanText keeps only text that can be stored and read back as written:
+// valid UTF-8 with no control characters (below U+0020, and DEL).
+//
+// THE INPUTS ARE THE CLIENT'S TO WRITE. A request path and a query value
+// arrive percent-decoded, so "%00" is a NUL and "%ff" a byte that is not
+// UTF-8, and a ping's body is raw bytes. A NUL is the dangerous one: Postgres
+// text cannot hold it, and the query builder fails the statement rather than
+// strip it, so one such value fails the whole batch insert its row rides in
+// and loses every other site's requests in it. Bytes that are not UTF-8 and
+// the other control characters are dropped as well: they would be stored as
+// replacement characters or invisible noise, and a value that differs only by
+// an invisible byte splits one page into many.
+//
+// Dropped rather than replaced with U+FFFD, which would store a character the
+// page's real path does not contain. Applied before any truncation, so a cut
+// never has to reason about bytes that are not text.
+func cleanText(s string) string {
+	s = strings.ToValidUTF8(s, "")
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// truncate cuts to at most n bytes. A cut that lands inside a multi-byte rune
+// drops that rune's leading bytes and nothing more: it backs up over at most
+// utf8.UTFMax-1 continuation bytes to the rune's start. Callers pass clean text
+// (cleanText), so the cut is the only place a partial rune can come from.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	s = s[:n]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
+	cut := n
+	for back := 0; back < utf8.UTFMax-1 && cut > 0 && !utf8.RuneStart(s[cut]); back++ {
+		cut--
 	}
-	return s
+	return s[:cut]
 }

@@ -2,8 +2,41 @@ package visit
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
+
+// A SOURCE IS STORED TOO, and it is written by whoever sent the request: a
+// utm_source is percent-decoded, so "%00" arrives as a NUL and "%ff" as a byte
+// that is not UTF-8. Both are dropped, with every other control character,
+// before the value is judged and cut; a utm_source with nothing left is no
+// utm_source at all. A referring host is cut at 253 bytes, the longest a DNS
+// name can be: url.Parse puts no limit on a host, so without the cap one
+// request could store a header-sized string as its source.
+func TestSourceDropsControlCharactersAndCapsTheHost(t *testing.T) {
+	for target, want := range map[string]string{
+		"https://site.test/?utm_source=news%00let%ffter%01": "newsletter",
+		"https://site.test/?utm_source=%00%ff":              "direct",
+		"https://site.test/?utm_source=%01%20Mail%7f":       "mail",
+	} {
+		r, _ := http.NewRequest("GET", target, nil)
+		if got := Source(r); got != want {
+			t.Errorf("Source(%s) = %q, want %q", target, got, want)
+		}
+	}
+
+	r, _ := http.NewRequest("GET", "https://site.test/", nil)
+	r.Header.Set("Referer", "https://ex%ffample.org/page")
+	if got := Source(r); got != "example.org" {
+		t.Errorf("a referring host holding a byte that is not UTF-8 gave %q, want example.org", got)
+	}
+
+	host := strings.Repeat("a", 296) + ".com" // 300 bytes
+	r.Header.Set("Referer", "https://"+host+"/page")
+	if got := Source(r); len(got) != 253 || !strings.HasPrefix(host, got) {
+		t.Errorf("a 300-byte referring host gave %d bytes, want its first 253", len(got))
+	}
+}
 
 func TestSource(t *testing.T) {
 	cases := []struct {
