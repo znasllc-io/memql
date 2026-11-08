@@ -115,7 +115,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rollup",
-			Description: "Fold the edge's request log into hourly and daily website statistics: every hour of today and today itself (yesterday too until 02:00 UTC), a backfill of any logged day no run has covered, then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
+			Description: "Fold the edge's request log into hourly and daily website statistics: today and every hour of it, every earlier logged day not yet final (a day is final once recomputed at or after 02:00 UTC the next day), then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
 			Handler:     i.handleRollup,
 		},
 	}

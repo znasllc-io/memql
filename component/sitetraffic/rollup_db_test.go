@@ -23,13 +23,13 @@ import (
 // rollup_db_test.go -- the statistics rollup against the real tables.
 //
 // Nothing here is provable in process: the hours and days are SQL's, the
-// distinct visitors and the visit windows are SQL's, and the backfill is a
-// decision read off what the tables hold.
+// distinct visitors and the visit windows are SQL's, and which days a run
+// recomputes is a decision read off what the tables hold.
 //
 // THE TESTS OWN A BAND OF DATES. The rollup recomputes every site in the days
-// it covers and decides a backfill from what its 400-day window holds, so a
-// test sharing that window with anybody else's rows would be asserting on
-// theirs. Every `now` below is in 2036, whose windows reach back no further
+// it covers, and chooses those days from the request log and the finalization
+// record inside its 400-day window, so a test sharing that window with anybody
+// else's rows would be asserting on theirs. Every `now` below is in 2036, whose windows reach back no further
 // than November 2034; no other test writes there, and the band is cleared
 // before and after each test. The dates are in the future for the reason the
 // reader tests' are: the hypertable's retention and compression jobs act on
@@ -64,11 +64,31 @@ func clearRollupBand(t *testing.T, db *bun.DB) {
 		{"DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?", []any{rollupBandStart, rollupBandEnd}},
 		{"DELETE FROM edge_stats_daily WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 		{"DELETE FROM edge_stats_daily_top WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_final WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 	} {
 		if _, err := db.ExecContext(ctx, q.sql, q.args...); err != nil {
 			t.Fatalf("clear the rollup tests' band (%s): %v", q.sql, err)
 		}
 	}
+}
+
+// finalDays reads the days in [from, to] the rollup has recorded final, keyed
+// "YYYY-MM-DD" with their finalized_at. The record is per day, not per site.
+func finalDays(t *testing.T, db *bun.DB, from, to time.Time) map[string]time.Time {
+	t.Helper()
+	var rows []struct {
+		Day         string    `bun:"day"`
+		FinalizedAt time.Time `bun:"finalized_at"`
+	}
+	if err := db.NewRaw(`SELECT day::text AS day, finalized_at FROM edge_stats_final WHERE day >= ?::date AND day <= ?::date`,
+		from.Format(time.DateOnly), to.Format(time.DateOnly)).Scan(context.Background(), &rows); err != nil {
+		t.Fatalf("read the finalization record: %v", err)
+	}
+	out := map[string]time.Time{}
+	for _, r := range rows {
+		out[r.Day] = r.FinalizedAt.UTC()
+	}
+	return out
 }
 
 // at is an instant on a UTC day.
@@ -467,9 +487,12 @@ func TestTopListsKeepAHundredAndFoldTheRest(t *testing.T) {
 	}
 }
 
-// THE FIRST RUN BACKFILLS. Every day still in the request log gets its daily
-// row, and every hour of the last thirty days its hourly row; a day older than
-// thirty days gets no hours, because the hourly table keeps thirty days.
+// THE FIRST RUN BACKFILLS. No day has a finalization record yet, so every day
+// still in the request log is recomputed: each gets its daily row, and every
+// hour of the last thirty days its hourly row; a day older than thirty days
+// gets no hours, because the hourly table keeps thirty days. Every day before
+// today is past 02:00 of the day after it, so each is recorded final, and the
+// next run recomputes today alone.
 func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -505,6 +528,13 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	if _, ok := hourly["2036-05-01T10"]; ok {
 		t.Error("an hour 45 days old was written, past the hourly table's thirty days")
 	}
+	final := finalDays(t, db, time.Date(2036, 5, 1, 0, 0, 0, 0, time.UTC), now)
+	if len(final) != 45 {
+		t.Errorf("%d days were recorded final, want the 45 before today", len(final))
+	}
+	if _, ok := final["2036-06-15"]; ok {
+		t.Error("today was recorded final")
+	}
 
 	again := runRollup(t, db, now)
 	if again.Backfilled || again.Days != 1 || again.Hours != 13 {
@@ -512,10 +542,10 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	}
 }
 
-// A backfill that stops part way is finished by the next run. The backfill
-// walks from the newest day to the oldest and stops at the first day it could
-// not write, so what is missing is always the oldest days, and the next run
-// finds them below the oldest daily row.
+// A run that stops part way is finished by the next one. A run walks from the
+// newest day to the oldest and stops at the first day it could not write, so
+// what it leaves is the oldest days, without a finalization record -- and the
+// next run recomputes every day without one.
 func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -525,11 +555,17 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	}
 	runRollup(t, db, now)
 
-	// What a run that stopped after 2036-06-12 leaves behind.
-	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_stats_daily WHERE site_id = ? AND day < '2036-06-12'", site); err != nil {
-		t.Fatal(err)
+	// What a run that stopped after 2036-06-12 leaves behind: the days before
+	// it neither written nor recorded final.
+	for _, q := range []string{
+		"DELETE FROM edge_stats_daily WHERE site_id = ? AND day < '2036-06-12'",
+		"DELETE FROM edge_stats_hourly WHERE site_id = ? AND hour < '2036-06-12T00:00:00Z'",
+	} {
+		if _, err := db.ExecContext(context.Background(), q, site); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_stats_hourly WHERE site_id = ? AND hour < '2036-06-12T00:00:00Z'", site); err != nil {
+	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_stats_final WHERE day >= '2036-06-01' AND day < '2036-06-12'"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -589,9 +625,9 @@ func dropDailyRefusal(t *testing.T, db *bun.DB) {
 	}
 }
 
-// A backfill day that fails stops the backfill there, so the days older than
-// it stay unwritten and the next run finds it again below the oldest daily
-// row. The newer days, and today, are written by the run that failed.
+// A day that fails stops the run there: it and the days older than it are
+// neither written nor recorded final, so the next run recomputes them. The
+// newer days, and today, are written by the run that failed.
 func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -615,6 +651,12 @@ func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
 			t.Errorf("after the failing run, a daily row for %s exists = %v, want %v", d, got, want)
 		}
 	}
+	final := finalDays(t, db, time.Date(2036, 6, 1, 0, 0, 0, 0, time.UTC), now)
+	for d, want := range map[string]bool{"2036-06-19": true, "2036-06-11": true, "2036-06-10": false, "2036-06-05": false} {
+		if _, got := final[d]; got != want {
+			t.Errorf("after the failing run, %s recorded final = %v, want %v", d, got, want)
+		}
+	}
 
 	restore()
 	rep = runRollup(t, db, now)
@@ -627,9 +669,10 @@ func TestAFailedBackfillDayIsRetriedOnTheNextRun(t *testing.T) {
 	}
 }
 
-// On a first run, a yesterday that fails stops the backfill too, so it is
-// still below the oldest daily row after 02:00 -- when it is no longer
-// recomputed as yesterday -- and the next run backfills it.
+// A yesterday that fails stops the run as any earlier day does: the days older
+// than it are left for the next run, and so is yesterday, which has no
+// finalization record and is recomputed -- and recorded final -- by the first
+// run after 02:00 that succeeds.
 func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -650,57 +693,161 @@ func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 		t.Error("today was not written by the run that failed on yesterday")
 	}
 	if _, ok := daily["2036-06-20"]; ok {
-		t.Error("a day older than the failed yesterday was written, which would leave yesterday above the oldest daily row for good")
+		t.Error("a day older than the failed yesterday was written; the run should stop at the first day it could not write")
 	}
 
 	restore()
 	rep := runRollup(t, db, dayAt(today, 3, 0))
 	if !rep.Backfilled {
-		t.Errorf("the run after 02:00 reported %+v, want it to backfill yesterday", rep)
+		t.Errorf("the run after 02:00 reported %+v, want it to backfill the days before yesterday", rep)
 	}
 	daily = dailyOf(t, db, site)
 	for _, d := range []string{"2036-06-24", "2036-06-20"} {
 		wantFigures(t, "backfilled day", daily, d, measuredFigures(1, 1, 1, 1))
 	}
+	if _, ok := finalDays(t, db, yesterday, yesterday)["2036-06-24"]; !ok {
+		t.Error("yesterday, recomputed after 02:00, was not recorded final")
+	}
+}
+
+// THE RULING THIS MECHANISM EXISTS FOR. A request served at 23:30 is written,
+// and then no run happens from 22:55 until 03:00 the next morning -- an
+// outage across 02:00. The run at 03:00 finds yesterday without a
+// finalization record, recomputes it with the 23:30 request in it, and only
+// then records it final.
+func TestAnOutageAcrossTwoAMHealsOnTheNextRun(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	yesterday := time.Date(2036, 7, 19, 0, 0, 0, 0, time.UTC)
+	today := yesterday.AddDate(0, 0, 1)
+	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 20, 0), "o1", "/"), pageViewRow(dayAt(yesterday, 22, 0), "o2", "/"))
+	runRollup(t, db, dayAt(yesterday, 22, 55))
+
+	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 30), "o3", "/late"))
+	// No run between 22:55 and 03:00.
+	rep := runRollup(t, db, dayAt(today, 3, 0))
+	if rep.Days != 2 {
+		t.Errorf("the run at 03:00 recomputed %d days, want today and yesterday", rep.Days)
+	}
+	wantFigures(t, "yesterday after the outage", dailyOf(t, db, site), "2036-07-19", measuredFigures(3, 3, 3, 3))
+	wantFigures(t, "yesterday's 23:00 after the outage", hourlyOf(t, db, site), "2036-07-19T23", measuredFigures(1, 1, 1, 1))
+	if got, ok := finalDays(t, db, yesterday, yesterday)["2036-07-19"]; !ok || !got.Equal(dayAt(today, 3, 0)) {
+		t.Errorf("yesterday's finalization record = %v (%v), want the 03:00 run's", got, ok)
+	}
+}
+
+// A day recorded final is left as it is: a request for it written later --
+// past the last recompute -- changes nothing, and the record keeps the run that
+// made it.
+func TestAFinalDayIsNotRecomputed(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	day := time.Date(2036, 7, 22, 0, 0, 0, 0, time.UTC)
+	next := day.AddDate(0, 0, 1)
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 10, 0), "l1", "/"))
+	runRollup(t, db, dayAt(next, 3, 0))
+	if _, ok := finalDays(t, db, day, day)["2036-07-22"]; !ok {
+		t.Fatal("the day was not recorded final by a run after 02:00 the next day, so this test would prove nothing")
+	}
+
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 11, 0), "l2", "/late"))
+	rep := runRollup(t, db, dayAt(next, 4, 0))
+	if rep.Days != 1 {
+		t.Errorf("the run recomputed %d days, want today alone", rep.Days)
+	}
+	wantFigures(t, "final day", dailyOf(t, db, site), "2036-07-22", measuredFigures(1, 1, 1, 1))
+	if _, ok := hourlyOf(t, db, site)["2036-07-22T11"]; ok {
+		t.Error("the late request's hour was written for a final day")
+	}
+	if got := finalDays(t, db, day, day)["2036-07-22"]; !got.Equal(dayAt(next, 3, 0)) {
+		t.Errorf("the finalization record now says %v, want the first run's 03:00", got)
+	}
+}
+
+// Today is never final, however late the run: it can still be served. A day
+// becomes final at 02:00 the day after it, and not a moment before.
+func TestTodayIsNeverFinal(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	day := time.Date(2036, 7, 25, 0, 0, 0, 0, time.UTC)
+	next := day.AddDate(0, 0, 1)
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 10, 0), "t1", "/"))
+
+	for _, when := range []time.Time{dayAt(day, 10, 5), dayAt(day, 23, 59).Add(59 * time.Second), dayAt(next, 1, 59).Add(59 * time.Second)} {
+		runRollup(t, db, when)
+		if final := finalDays(t, db, day, next); len(final) != 0 {
+			t.Errorf("after the run at %s the record holds %v, want nothing final yet", when.Format(time.RFC3339), final)
+		}
+	}
+	runRollup(t, db, dayAt(next, 2, 0))
+	final := finalDays(t, db, day, next)
+	if _, ok := final["2036-07-25"]; !ok {
+		t.Error("the day was not recorded final by the run at 02:00 the next day")
+	}
+	if _, ok := final["2036-07-26"]; ok {
+		t.Error("today was recorded final")
+	}
 }
 
 // Yesterday is recomputed until 02:00 UTC, so a request served at 23:59 and
-// written a little later still lands in yesterday's figures -- and after that,
+// written a little later still lands in yesterday's figures. The first run at
+// or after 02:00 recomputes it one last time and records it final; after that,
 // yesterday is left as it is.
 func TestYesterdayIsRecomputedUntilTwoAfterMidnight(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
 	yesterday := time.Date(2036, 7, 9, 0, 0, 0, 0, time.UTC)
 	today := yesterday.AddDate(0, 0, 1)
+	pageViewsOn := func(when time.Time) int64 {
+		got := dailyOf(t, db, site)["2036-07-09"]
+		if got.PageViews == nil {
+			t.Fatalf("at %s yesterday's page views are not measured", when.Format("15:04"))
+		}
+		return *got.PageViews
+	}
 
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 20, 0), "y1", "/"))
 	runRollup(t, db, dayAt(yesterday, 21, 0))
 
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59), "y2", "/"))
-	rep := runRollup(t, db, dayAt(today, 0, 30))
-	if rep.Days != 2 {
+	at0030 := dayAt(today, 0, 30)
+	if rep := runRollup(t, db, at0030); rep.Days != 2 {
 		t.Errorf("at 00:30 the run recomputed %d days, want yesterday and today", rep.Days)
 	}
-	if got := dailyOf(t, db, site)["2036-07-09"]; got.PageViews == nil || *got.PageViews != 2 {
-		t.Fatalf("at 00:30 yesterday reads %s, want the late page view counted", figuresOf(got))
+	if got := pageViewsOn(at0030); got != 2 {
+		t.Fatalf("at 00:30 yesterday reads %d page views, want the late page view counted", got)
+	}
+	if _, ok := finalDays(t, db, yesterday, yesterday)["2036-07-09"]; ok {
+		t.Error("yesterday was recorded final before 02:00")
 	}
 
+	// Written before 02:00: the 02:00 run is yesterday's last recompute.
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59).Add(30*time.Second), "y3", "/"))
-	for _, when := range []time.Time{dayAt(today, 2, 0), dayAt(today, 2, 30)} {
-		rep := runRollup(t, db, when)
-		if rep.Days != 1 {
-			t.Errorf("at %s the run recomputed %d days, want today alone", when.Format("15:04"), rep.Days)
-		}
-		if got := dailyOf(t, db, site)["2036-07-09"]; got.PageViews == nil || *got.PageViews != 2 {
-			t.Errorf("at %s yesterday reads %s, want it left as it was at 00:30", when.Format("15:04"), figuresOf(got))
-		}
-		if got := hourlyOf(t, db, site)["2036-07-09T23"]; got.PageViews == nil || *got.PageViews != 1 {
-			t.Errorf("at %s yesterday's 23:00 reads %s, want it left as it was at 00:30", when.Format("15:04"), figuresOf(got))
-		}
+	at0200 := dayAt(today, 2, 0)
+	if rep := runRollup(t, db, at0200); rep.Days != 2 {
+		t.Errorf("at 02:00 the run recomputed %d days, want yesterday one last time, and today", rep.Days)
+	}
+	if got := pageViewsOn(at0200); got != 3 {
+		t.Errorf("at 02:00 yesterday reads %d page views, want the 23:59:30 view counted", got)
+	}
+
+	// Written after it: a late row for 23:59 does not count at 02:30.
+	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59).Add(45*time.Second), "y4", "/"))
+	at0230 := dayAt(today, 2, 30)
+	if rep := runRollup(t, db, at0230); rep.Days != 1 {
+		t.Errorf("at 02:30 the run recomputed %d days, want today alone", rep.Days)
+	}
+	if got := pageViewsOn(at0230); got != 3 {
+		t.Errorf("at 02:30 yesterday reads %d page views, want it left as the 02:00 run wrote it", got)
+	}
+	if got := hourlyOf(t, db, site)["2036-07-09T23"]; got.PageViews == nil || *got.PageViews != 2 {
+		t.Errorf("at 02:30 yesterday's 23:00 reads %s, want it left as the 02:00 run wrote it", figuresOf(got))
 	}
 }
 
-// Retention: hourly rows go after thirty days, daily and top rows after 400.
+// Retention: hourly rows go after thirty days, daily and top rows after 400,
+// and a day's finalization record once the day is older than the oldest day
+// still in the request log, below which no day can be recomputed.
 func TestRowsPastRetentionAreDeleted(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -723,6 +870,15 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 		}
 		if _, err := db.NewRaw(`INSERT INTO edge_stats_daily_top (site_id, day, dimension, value, visitors, visits, page_views)
 			VALUES (?, ?::date, 'page', '/', 1, 1, 1)`, site, d.Format(time.DateOnly)).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The oldest day still in the request log is 2036-08-10, so the record for
+	// 2036-08-05 can never be used again; the one for 2036-08-12 still can.
+	seedRequests(t, db, site, pageViewRow(time.Date(2036, 8, 10, 9, 0, 0, 0, time.UTC), "r-oldest", "/"))
+	recordedAt := time.Date(2036, 8, 13, 3, 0, 0, 0, time.UTC)
+	for _, d := range []string{"2036-08-05", "2036-08-12"} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)`, d, recordedAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -764,6 +920,16 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 	}
 	if len(topOf(t, db, site, old)) != 0 {
 		t.Error("a top row older than 400 days was kept")
+	}
+	final := finalDays(t, db, time.Date(2036, 8, 1, 0, 0, 0, 0, time.UTC), now)
+	if _, ok := final["2036-08-05"]; ok {
+		t.Error("the finalization record of a day older than the oldest logged day was kept")
+	}
+	if got, ok := final["2036-08-12"]; !ok || !got.Equal(recordedAt) {
+		t.Errorf("the record for 2036-08-12 = %v (%v), want it kept as it was", got, ok)
+	}
+	if _, ok := final["2036-08-10"]; !ok {
+		t.Error("the oldest logged day was not recorded final by the run")
 	}
 }
 

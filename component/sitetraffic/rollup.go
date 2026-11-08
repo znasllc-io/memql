@@ -33,9 +33,36 @@ import (
 // it started (D17), so a page view arriving now can change an EARLIER hour: the
 // one-page visit that began at 09:50 stops being a bounce when its second page
 // arrives at 10:05, and 09:00's bounces fall. Recomputing only the current hour
-// would freeze 09:00's bounce at its first answer. Yesterday is recomputed too
-// until 02:00 UTC, so a request served at 23:59 and written after midnight
-// still lands in yesterday.
+// would freeze 09:00's bounce at its first answer.
+//
+// # When a day is final
+//
+// A day is recomputed by every run until it is FINAL. It becomes final when a
+// run recomputes it at or after 02:00 UTC the day after: that run records it in
+// edge_stats_final, in the same transaction as the recompute, and no run
+// touches the day again. Two hours past midnight, every request served that day
+// has long been written (the edge's sink flushes every second), so the last
+// recompute counts them all. A run before 02:00 recomputes yesterday without
+// closing it.
+//
+// So which days a run recomputes is read off the record, not off the clock:
+// today, and every day from the oldest one still in the request log through
+// yesterday that has no record. That one rule does three jobs. Yesterday is
+// recomputed until the first run at or after 02:00 finalizes it. On the first run
+// nothing is final, so every logged day is recomputed: the backfill. And an
+// outage of any length -- the cron leader down, every run failing -- leaves
+// its days open, so the next run that succeeds recomputes them, with every
+// request that arrived meanwhile. The bound is the request log's retention: a
+// day whose requests are gone cannot be recomputed and keeps the figures last
+// written for it, and its record is deleted, since no run can use it again
+// (TestAnOutageAcrossTwoAMHealsOnTheNextRun, TestAFinalDayIsNotRecomputed).
+//
+// Deleting those records relies on the request log losing days only from its
+// old end. A request stamped with a date below that line -- an edge replica
+// whose clock runs more than the log's retention behind -- would put the days
+// around it back in the open range, and the next run would rewrite their
+// figures from the requests that remain for them. Nothing in a healthy
+// cluster writes such a row.
 //
 // # Why every expression names UTC
 //
@@ -53,16 +80,6 @@ import (
 // fails, is logged by the caller, and is recomputed on the next run. A very
 // large cluster's day therefore degrades to "retried every five minutes"
 // rather than to a run that never ends.
-//
-// # What a run does not revisit (a known limitation)
-//
-// After 02:00 UTC yesterday is final, and a backfill only reaches below the
-// oldest day already written. So if no run succeeds between a day's last
-// recompute and 02:00 the next morning -- the cron leader down, every run
-// failing -- that day keeps the figures of its last successful run, and a day
-// on which no run succeeded at all has no rows, until somebody deletes the
-// rows from that day onward so the next run backfills them. Finding such gaps
-// would mean comparing every day's figures with the request log on every run.
 
 // RollupReport says what one run of the rollup did.
 type RollupReport struct {
@@ -72,11 +89,12 @@ type RollupReport struct {
 	Hours int `json:"hours"`
 	// Days is how many UTC days were recomputed, today among them.
 	Days int `json:"days"`
-	// Backfilled is true when the run reached past today and yesterday for
-	// days of the request log no run had covered: the whole log on the first
-	// run, or the older end of a backfill a failure cut short.
+	// Backfilled is true when the run recomputed a day before yesterday:
+	// every logged day on the first run, or the days an outage or a failure
+	// left without a finalization record.
 	Backfilled bool `json:"backfilled"`
-	// Deleted is how many rollup rows retention removed.
+	// Deleted is how many statistics rows retention removed -- hourly, daily
+	// and top rows. The finalization records it removes are not counted.
 	Deleted int64 `json:"deleted"`
 }
 
@@ -93,8 +111,9 @@ const (
 	// keep a row: thirteen months of daily totals (D4).
 	dailyRetentionDays = 400
 
-	// yesterdayGrace is how long into a UTC day yesterday is still recomputed.
-	yesterdayGrace = 2 * time.Hour
+	// finalAfter is how long after a day ends it is recomputed one last time:
+	// a run at or after 02:00 UTC the next day records the day final.
+	finalAfter = 2 * time.Hour
 
 	// topValuesKept is how many values a day's top list keeps per dimension
 	// before the rest fold into topOther.
@@ -106,22 +125,18 @@ const (
 
 // Rollup recomputes the statistics tables from edge_request as of now.
 //
-// It recomputes every hour of today and today itself, and yesterday's while
-// now is before 02:00 UTC. It backfills the logged days no run has covered --
-// on the first run, every day the request log still holds -- newest first,
-// writing hourly rows only for the hours the hourly table keeps. Then it
-// deletes the rows past retention: hourly rows older than now-30d, daily and
-// top rows older than today-400d.
+// It recomputes today and every hour of it, then every day from the oldest one
+// still in the request log through yesterday that is not yet final, newest
+// first, with the hours of each that the hourly table keeps. A day recomputed
+// at or after 02:00 UTC the day after it is recorded final in the same
+// transaction. Then it deletes the rows past retention: hourly rows older than
+// now-30d, daily and top rows older than today-400d, and the finalization
+// records of days older than the oldest day still in the request log.
 //
 // Every day is its own transaction, so one day that fails costs only that
 // day: the days before it in the run are still written, and the failure is
-// returned, joined with any other, for the caller to log. A failed day is
-// recomputed by a later run: today, and yesterday until 02:00, because every
-// run recomputes them; a backfill day because the run stops at the first
-// failed day before today, so every older day stays unwritten and the next
-// run's backfill, which starts below the oldest daily row, reaches it again.
-// On a run that is backfilling, that stop covers yesterday past 02:00 too; in
-// steady operation yesterday is final at 02:00 (see the package comment).
+// returned, joined with any other, for the caller to log. A failed day is not
+// recorded final, so the next run recomputes it.
 func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error) {
 	var rep RollupReport
 	if db == nil {
@@ -129,12 +144,12 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 	}
 	now = now.UTC()
 
-	// A backfill that cannot be planned still leaves today and yesterday to
-	// do: planRollup answers them whatever its reads said.
+	// A plan whose reads fail still has today to do: planRollup answers it
+	// whatever its reads said.
 	var failures []error
 	days, err := planRollup(ctx, db, now)
 	if err != nil {
-		failures = append(failures, fmt.Errorf("site statistics backfill: %w", err))
+		failures = append(failures, fmt.Errorf("site statistics plan: %w", err))
 	}
 	today := utcMidnight(now)
 	for _, d := range days {
@@ -145,20 +160,20 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 		if d.backfill {
 			rep.Backfilled = true
 		}
-		hours, err := recomputeDay(ctx, db, d.day, now)
+		hours, err := recomputeDay(ctx, db, d.day, now, d.final)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("site statistics for %s: %w", d.day.Format(time.DateOnly), err))
 			if d.day.Before(today) {
-				// Stop at the first failed day before today rather than
-				// skip ahead. The next run backfills below the oldest daily
-				// row, so a failed day is found again only while every day
-				// older than it is still missing: on a run that is
-				// backfilling, writing an older day would hide this one for
-				// good -- yesterday included, once 02:00 has passed. In
-				// steady operation nothing older is scheduled, so the stop
-				// costs nothing. Today is the exception: every run
-				// recomputes it, so a today that keeps failing does not also
-				// hold the backfill back.
+				// Stop at the first failed day before today. The days after
+				// it in this run are older, and none of them is recorded
+				// final, so the next run recomputes them; stopping keeps a
+				// struggling database from spending a statement timeout on
+				// each of them in turn. Newer days come first, so a broken
+				// day never holds back today or a more recent day -- only
+				// older ones, until it succeeds or leaves the request log.
+				// Today is the exception to the stop: every run recomputes it
+				// first, so a today that keeps failing does not also hold
+				// every earlier day back.
 				break
 			}
 			continue
@@ -178,93 +193,86 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 // rollupDay is one UTC day a run recomputes.
 type rollupDay struct {
 	day time.Time
-	// backfill marks a day outside the regular set (today, and yesterday
-	// before 02:00), found below the oldest day already rolled up.
+	// final marks a day this recompute records final: the run is at or after
+	// 02:00 UTC the day after it. Today is never final.
+	final bool
+	// backfill marks a day before yesterday: history on a first run, or a day
+	// an outage or a failure left open.
 	backfill bool
 }
 
-// planRollup lists the days to recompute: today and yesterday first, then the
-// backfill from the newest missing day to the oldest.
+// planRollup lists the days to recompute: today, then every day from the
+// oldest one still in the request log through yesterday that has no
+// finalization record, newest first.
 //
-// THE BACKFILL IS EVERY LOGGED DAY OLDER THAN THE OLDEST DAILY ROW, inside the
-// daily table's 400 days. With the table empty that is every day the request
-// log holds, which is the first run's backfill. Afterwards it is empty --
-// every logged day has a daily row once written, and the log only loses old
-// days -- unless a backfill stopped part way, in which case it is exactly the
-// days it did not reach. Both bounds are read inside the window: a day the
-// daily table could not keep is never backfilled, so retention and the
-// backfill cannot undo each other every run, and a row outside the window
-// (none, in production; a test's, elsewhere) does not move the decision.
+// THE OLDEST DAY IS READ INSIDE THE DAILY TABLE'S 400 DAYS. A day older than
+// that is one the daily table does not keep, so recomputing it would write rows
+// the same run's retention deletes -- which matters only where the request log
+// is configured to keep longer than that. And a request-log row outside the
+// window (none in production; a test's, elsewhere) does not move the plan.
 //
-// It does not find a gap between written days, such as a day the cron leader
-// never ran at all; see "What a run does not revisit" above.
-//
-// The regular days are answered even when the backfill's reads fail, with the
-// error beside them.
+// Today is answered even when the reads fail, with the error beside it.
 func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, error) {
 	today := utcMidnight(now)
 	days := []rollupDay{{day: today}}
-	// Keyed by date rather than by time.Time, whose == also compares the
-	// location and any monotonic reading.
-	regular := map[string]bool{dateArg(today): true}
-	if now.Before(today.Add(yesterdayGrace)) {
-		yesterday := today.AddDate(0, 0, -1)
-		days = append(days, rollupDay{day: yesterday})
-		regular[dateArg(yesterday)] = true
-	}
-
-	oldest, newest, ok, err := backfillRange(ctx, db, today)
-	if err != nil || !ok {
+	var oldest time.Time
+	var logged bool
+	final := map[string]bool{} // by date: time.Time's == also compares location and monotonic reading
+	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
+		var err error
+		if oldest, logged, err = oldestLoggedDay(ctx, tx, today); err != nil || !logged {
+			return err
+		}
+		var recorded []string
+		if err := tx.NewRaw(`SELECT day::text FROM edge_stats_final WHERE day >= ?::date AND day < ?::date`,
+			dateArg(oldest), dateArg(today)).Scan(ctx, &recorded); err != nil {
+			return fmt.Errorf("read the finalization record: %w", err)
+		}
+		for _, d := range recorded {
+			final[d] = true
+		}
+		return nil
+	})
+	if err != nil || !logged {
 		return days, err
 	}
-	for d := newest; !d.Before(oldest); d = d.AddDate(0, 0, -1) {
-		if !regular[dateArg(d)] {
-			days = append(days, rollupDay{day: d, backfill: true})
+	yesterday := today.AddDate(0, 0, -1)
+	for d := yesterday; !d.Before(oldest); d = d.AddDate(0, 0, -1) {
+		if final[dateArg(d)] {
+			continue
 		}
+		days = append(days, rollupDay{
+			day:      d,
+			final:    !now.Before(d.AddDate(0, 0, 1).Add(finalAfter)),
+			backfill: d.Before(yesterday),
+		})
 	}
 	return days, nil
 }
 
-// backfillRange answers the logged days below the oldest daily row, oldest
-// and newest, inside the daily table's window. Both reads are cheap: the
-// oldest daily row is an index lookup, and the request log is asked only for
-// its first row below that day, which in the steady state lies in no chunk at
-// all.
-func backfillRange(ctx context.Context, db *bun.DB, today time.Time) (oldest, newest time.Time, ok bool, err error) {
-	cutoff := dailyCutoff(today)
-	err = boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
-		var frontier sql.NullString
-		if err := tx.NewRaw(`SELECT min(day)::text FROM edge_stats_daily WHERE day >= ?::date AND day <= ?::date`,
-			dateArg(cutoff), dateArg(today)).Scan(ctx, &frontier); err != nil {
-			return fmt.Errorf("read the oldest daily row: %w", err)
-		}
-		newest = today
-		if frontier.Valid {
-			f, err := time.Parse(time.DateOnly, frontier.String)
-			if err != nil {
-				return fmt.Errorf("read the oldest daily row: %w", err)
-			}
-			newest = f.AddDate(0, 0, -1)
-		}
-		if newest.Before(cutoff) {
-			return nil
-		}
-		var first sql.NullTime
-		if err := tx.NewRaw(`SELECT min(served_at) FROM edge_request WHERE served_at >= ? AND served_at < ?`,
-			cutoff, newest.AddDate(0, 0, 1)).Scan(ctx, &first); err != nil {
-			return fmt.Errorf("read the oldest logged request: %w", err)
-		}
-		if first.Valid {
-			oldest, ok = utcMidnight(first.Time), true
-		}
-		return nil
-	})
-	return oldest, newest, ok, err
+// oldestLoggedDay answers the UTC day of the oldest request still in the
+// request log inside the daily table's window, and false when the window holds
+// none. It is the first row of an index range, so it is cheap on every run.
+func oldestLoggedDay(ctx context.Context, tx bun.Tx, today time.Time) (time.Time, bool, error) {
+	var first sql.NullTime
+	if err := tx.NewRaw(`SELECT min(served_at) FROM edge_request WHERE served_at >= ? AND served_at < ?`,
+		dailyCutoff(today), today.AddDate(0, 0, 1)).Scan(ctx, &first); err != nil {
+		return time.Time{}, false, fmt.Errorf("read the oldest logged request: %w", err)
+	}
+	if !first.Valid {
+		return time.Time{}, false, nil
+	}
+	return utcMidnight(first.Time), true, nil
 }
 
 // recomputeDay replaces one UTC day's rows -- its hours still inside the
 // hourly table's thirty days, its daily row and its top rows -- with what
 // edge_request holds, in one transaction. It returns the hour periods covered.
+//
+// With final, the same transaction records the day final, so a day is final
+// only if the recompute that closed it was written: a recompute that fails
+// leaves the day open for the next run. ON CONFLICT DO NOTHING keeps the first
+// record, should two runs ever close one day.
 //
 // ONE SNAPSHOT. The transaction is REPEATABLE READ, so the hours, the day and
 // the top lists are computed from the same rows and always agree with each
@@ -278,7 +286,7 @@ func backfillRange(ctx context.Context, db *bun.DB, today time.Time) (oldest, ne
 // sees the rows the other committed and replaces them, rather than failing on
 // them. SHARE ROW EXCLUSIVE conflicts with itself and with writers, never with
 // a reader, so the Statistics page is not held up by a run.
-func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time) (int, error) {
+func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final bool) (int, error) {
 	dayEnd := day.AddDate(0, 0, 1)
 	// The hours the hourly table keeps: retention removes every hour before
 	// hourlyFloor, so writing one would be work thrown away the same run.
@@ -318,6 +326,12 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time) (int, err
 		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			return fmt.Errorf("write the top lists: %w", err)
 		}
+		if final {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)
+				ON CONFLICT (day) DO NOTHING`, date, now); err != nil {
+				return fmt.Errorf("record the day final: %w", err)
+			}
+		}
 		return nil
 	})
 	if err != nil || !withHours {
@@ -338,9 +352,16 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time) (int, err
 // deletePastRetention removes hourly rows older than now-30d and daily and top
 // rows older than today-400d, and answers how many went. It takes the rollup
 // lock like a recompute, so it never deletes under a day being written.
+//
+// It also removes the finalization records of days older than the oldest day
+// still in the request log: no run can recompute such a day, so its record
+// can stop nothing. The line is read inside the daily table's window, the
+// planner's own bound; with no request in the window, only the records older
+// than the window go. These are not counted in the answer.
 func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64, error) {
 	var deleted int64
-	cutoff := dateArg(dailyCutoff(utcMidnight(now)))
+	today := utcMidnight(now)
+	cutoff := dateArg(dailyCutoff(today))
 	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
 		deleted = 0
 		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
@@ -363,6 +384,15 @@ func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64,
 				return err
 			}
 			deleted += n
+		}
+		line := cutoff
+		if oldest, logged, err := oldestLoggedDay(ctx, tx, today); err != nil {
+			return err
+		} else if logged {
+			line = dateArg(oldest)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, line); err != nil {
+			return fmt.Errorf("delete the spent finalization records: %w", err)
 		}
 		return nil
 	})

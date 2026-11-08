@@ -108,7 +108,7 @@ var maintenanceAutomations = map[string]string{
 	"siteStatisticsRollupSweep": "the five-minute fold of the edge's request log into every deployable's website " +
 		"statistics (the 2026-11-08 statistics design, D6 and D17). It is a cross-owner roll-up by nature: one " +
 		"statement per day over every site's requests, never one owner's at a time. What needs the principal is " +
-		"logsRetentionSweep's reason: edge_request and the three rollup tables are dedicated tables no row " +
+		"logsRetentionSweep's reason: edge_request and the rollup tables are dedicated tables no row " +
 		"admission ever sees, and builtin siteStatisticsRollup admits this principal and no other caller in its " +
 		"Go handler. Without it the automation's RoleReader system actor is refused every five minutes, nothing " +
 		"is folded, and every deployable's statistics read as not measured -- a failure that looks like a site " +
