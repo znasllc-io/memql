@@ -20,6 +20,16 @@ automation sweepPipelineArtifacts {
   result := builtin pipelinesSweepArtifacts()
 }
 
+/// Step logs written before logs had receipts have none, so the sweep above
+/// never saw them. Each minute, receipt one leased page of the list the
+/// 20261108150000 migration made, after verifying the bytes; the sweep then
+/// retires them under pipelineArtifactRetentionPolicy like any other file.
+/// Once the list is empty a pass reads one index and does nothing.
+@trigger(schedule="15 * * * * *", node="agent", lease="pipelines-legacy-log-enrollment")
+automation enrollLegacyPipelineLogs {
+  result := builtin pipelinesEnrollLegacyLogs()
+}
+
 /// Cleanup one authorized page. Byte retirement precedes Library removal;
 /// retained files are skipped, while an unconfirmed provider effect stops the
 /// page. A later invocation resumes through the same permanent native journal.

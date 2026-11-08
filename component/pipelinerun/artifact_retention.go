@@ -297,6 +297,7 @@ func retentionCapabilities(i *Integration) []memql.IntegrationCapability {
 	caps = append(caps, memql.IntegrationCapability{Name: "sweepArtifacts", Description: "Internal scheduled artifact retention over one leased producer page.", Handler: i.handleSweepArtifacts})
 	caps = append(caps, memql.IntegrationCapability{Name: "adoptLegacyLog", Description: "Verify the selected completed step's existing log before enrolling its bytes in native retention.", Handler: i.handleAdoptLegacyLog,
 		ArgsSchema: map[string]string{"runId": "string (required)", "stepKey": "string (required)"}})
+	caps = append(caps, memql.IntegrationCapability{Name: "enrollLegacyLogs", Description: "Internal scheduled enrollment of one leased page of pre-receipt step logs: verify each log's bytes and write its retention receipt.", Handler: i.handleEnrollLegacyLogs})
 	return append(caps, memql.IntegrationCapability{Name: "retireArtifacts", Description: "Retire one bounded page of a caller-owned completed pipeline's unretained artifacts; preserve native receipts and permanent storage fences.", Handler: i.handleRetireArtifacts,
 		ArgsSchema: map[string]string{"runId": "string (required)", "afterId": "string", "dryRun": "boolean"}})
 }

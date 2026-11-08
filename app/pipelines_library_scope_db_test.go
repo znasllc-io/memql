@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -330,6 +331,58 @@ VALUES ($1,$2,$3::jsonb,$4,$5,$6,1,'reserved')`, pipelineIntentID(identity), ide
 	}
 	if _, err := s.RetireRunFile(ctx, scope, reserved.ID); err != nil {
 		t.Fatal("provider retirement blocked by admission guard", err)
+	}
+}
+
+// TestPipelineScopeDBFenceAdmitsOnlyALegacyLogsAdoption: a fenced scope admits
+// exactly the insert adoption makes for a pre-receipt log -- 'ready', on the
+// .memql-legacy-log/ path of that row's own file (migration 20261108150100) --
+// and refuses every insert a producer, older or current, could make, as well
+// as the adoption shape bound to another file or carrying no path.
+func TestPipelineScopeDBFenceAdmitsOnlyALegacyLogsAdoption(t *testing.T) {
+	s, db := pipelineScopeSQLStore(t)
+	f := pipelineStreamFile(id.NewShortId(), "data")
+	f.StepKey = "tests.unit"
+	ctx, scope := pipelineLifecycleScope(f)
+	if err := s.FenceRunFileScope(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM pipeline_artifact_uploads WHERE owner_user_id=$1`, scope.OwnerUserID); err != nil {
+			t.Error(err)
+		}
+	})
+	insert := func(file, state, path string, withPath bool) error {
+		identity := map[string]any{"OwnerUserID": scope.OwnerUserID, "WorkRunID": scope.WorkRunID, "StepKey": scope.StepKey, "Attempt": scope.Attempt}
+		if withPath {
+			identity["Path"] = path
+		}
+		payload, err := json.Marshal(identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.ExecContext(ctx, `INSERT INTO pipeline_artifact_uploads
+(intent_id,owner_user_id,identity,file_id,object_key,size_bytes,generation,state)
+VALUES ($1,$2,$3::jsonb,$4,$5,4,1,$6)`, hex.EncodeToString([]byte(id.NewShortId() + id.NewShortId()))[:64], scope.OwnerUserID, string(payload), file, "fence-test/"+id.NewShortId(), state)
+		return err
+	}
+	file, other := id.NewShortId(), id.NewShortId()
+	for _, refused := range []struct {
+		name, file, state, path string
+		withPath                bool
+	}{
+		{"a producer's reservation", file, "reserved", "output/archive.tar", true},
+		{"a reservation on the legacy path", file, "reserved", ".memql-legacy-log/" + file + "/tests.unit.log", true},
+		{"a ready receipt on a producer path", file, "ready", "output/archive.tar", true},
+		{"the legacy path of another file", file, "ready", ".memql-legacy-log/" + other + "/tests.unit.log", true},
+		{"a ready receipt with no path", file, "ready", "", false},
+	} {
+		if err := insert(refused.file, refused.state, refused.path, refused.withPath); err == nil || !strings.Contains(err.Error(), "permanently fenced") {
+			t.Errorf("%s entered a fenced scope: %v", refused.name, err)
+		}
+	}
+	if err := insert(file, "ready", ".memql-legacy-log/"+file+"/tests.unit.log", true); err != nil {
+		t.Fatalf("a legacy log's adoption could not enter its fenced scope: %v", err)
 	}
 }
 

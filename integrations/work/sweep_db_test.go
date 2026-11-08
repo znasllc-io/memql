@@ -48,6 +48,7 @@ func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 		`CREATE TABLE work_retention_progress (LIKE public.work_retention_progress INCLUDING ALL)`,
 		`CREATE TABLE pipeline_artifact_uploads (LIKE public.pipeline_artifact_uploads INCLUDING ALL)`,
 		`CREATE TABLE release_candidates (LIKE public.release_candidates INCLUDING ALL)`,
+		`CREATE TABLE pipeline_legacy_log_enrollment (LIKE public.pipeline_legacy_log_enrollment INCLUDING ALL)`,
 	} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)

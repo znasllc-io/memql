@@ -762,6 +762,60 @@ VALUES(?,'pipeline-owner','{"WorkRunID":"artifact-authority"}'::jsonb,'legacy-au
 	assertRetired(t, db, work, run)
 }
 
+// A step log written before logs had receipts is proved against its producer's
+// journals before the scheduled enrollment writes its receipt
+// (component/pipelinerun EnrollLegacyLogs). So while its row in the enrollment
+// list is pending, the pipeline's work run and run row stay past their window,
+// at the candidate read and at the guarded delete alike; a pending row for
+// another run holds nothing here, and once the row is refused (or gone,
+// receipted) the run leaves on its window.
+func TestRetentionKeepsAPipelineRunWhileItsLegacyLogsAwaitEnrollment(t *testing.T) {
+	db, i := sweepDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.AddDate(0, 0, -40)
+	cutoff := now.AddDate(0, 0, -30)
+	work := seedPipelineWorkRun(t, db, "legacy-logs", pipelineOwner, runStatusSucceeded, old)
+	run := seedPipelinesRun(t, db, "legacy-logs", pipelineOwner, "completed", old)
+	if _, err := db.Exec(`UPDATE "MemoryNodes" SET payload=payload||jsonb_build_object('workRunId',?::text) WHERE id=?`, work, run); err != nil {
+		t.Fatal(err)
+	}
+	before := storedKeys(t, db, work, run)
+	// The list stores ids bare, as the migration's seed strips them.
+	if _, err := db.Exec(`INSERT INTO pipeline_legacy_log_enrollment(file_id,owner_user_id,work_run_id,step_key) VALUES
+('legacy-log','pipeline-owner','legacy-logs','tests.unit'),('elsewhere','pipeline-owner','another-run','tests.unit')`); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&verifyingArchive{})
+	records := []struct{ concept, id string }{{runConcept, work}, {pipelinesRunConcept, run}}
+	for _, record := range records {
+		p := operationalPolicy{concept: record.concept, predicate: "TRUE"}
+		q, args := retentionCandidateRead(p, cutoff, old.Add(-24*time.Hour), cutoff, nil)
+		var candidates []map[string]any
+		if err := db.NewRaw(q, args...).Scan(t.Context(), &candidates); err != nil {
+			t.Fatal(err)
+		}
+		if len(candidates) != 0 {
+			t.Fatal("a run whose legacy logs await enrollment was offered to history retention", candidates)
+		}
+		_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+		if err != nil || deleted != 0 {
+			t.Fatalf("deleted the journal a pending legacy log is proved against: %d %v", deleted, err)
+		}
+	}
+	assertStillStored(t, db, before)
+	if _, err := db.Exec(`UPDATE pipeline_legacy_log_enrollment SET state='refused' WHERE file_id='legacy-log'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		_, deleted, _, err := i.retireVerified(retentionOwner(), record.concept, []map[string]any{{"id": record.id, "createdAt": rfc(old)}}, record.concept == runConcept, cutoff, false)
+		if err != nil || deleted == 0 {
+			t.Fatalf("a refused legacy log still held its run: %d %v", deleted, err)
+		}
+	}
+	assertRetired(t, db, work, run)
+}
+
 // A candidate proves each reused step against the run that executed it, on every
 // read: at publication, and whenever an overlay is built from it, however long
 // after. A release's own rows stay while its artifacts are pinned, and the pull
@@ -1151,6 +1205,15 @@ FROM generate_series(1,200) g`); err != nil {
 	if _, err := db.Exec(`ANALYZE release_candidates`); err != nil {
 		t.Fatal(err)
 	}
+	// The legacy log hold's list, at about the size of a producer's share of
+	// the production list, none of it naming these runs.
+	if _, err := db.Exec(`INSERT INTO pipeline_legacy_log_enrollment(file_id,owner_user_id,work_run_id,step_key)
+SELECT 'legacy-'||g,'pipeline-owner','legacy-run-'||(g/16),'tests.unit' FROM generate_series(1,600) g`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ANALYZE pipeline_legacy_log_enrollment`); err != nil {
+		t.Fatal(err)
+	}
 	keys := make([]string, 0, 50)
 	raw := make([]retirementKey, 0, 50)
 	for n := range 50 {
@@ -1196,6 +1259,12 @@ FROM generate_series(1,200) g`); err != nil {
 			}
 			if lists := unhashedLists(plan, plans[0].Plan, "release_candidates"); len(lists) != 0 {
 				t.Errorf("%v read the candidates and are not hashed, so every row of the statement walks their list: %s", lists, plan)
+			}
+			if scans, loops := relationLoops(plans[0].Plan, "pipeline_legacy_log_enrollment"); scans != 1 || loops != 1 {
+				t.Errorf("the legacy log hold read its list %.0f times across %d scans, want one read: %s", loops, scans, plan)
+			}
+			if lists := unhashedLists(plan, plans[0].Plan, "pipeline_legacy_log_enrollment"); len(lists) != 0 {
+				t.Errorf("%v read the legacy log list and are not hashed: %s", lists, plan)
 			}
 		})
 	}
