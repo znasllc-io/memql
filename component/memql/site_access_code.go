@@ -335,7 +335,7 @@ const (
 )
 
 // The routes of the access surface on the bff: the base its handler mounts under and
-// the four paths the edge forwards to.
+// the five paths the edge forwards to.
 //
 // HERE WITH THE STAMP'S NAMES, for the same reason. The edge forwards to these and the
 // bff answers them, neither can import the other, and each used to have its own table
@@ -381,8 +381,9 @@ const (
 	// same reserved path as unlock, so the edge maps it to AccessGuestPath.
 	AccessGuestInboundPath = AccessInboundPath + "/guest"
 
-	// AccessSmallBodyBytes caps unlock, leave and the session check. A code is 29
-	// characters and a leave says nothing, so 1 KiB is generous for all of them.
+	// AccessSmallBodyBytes caps unlock, leave, the session check and the guest open.
+	// A code is 29 characters and a leave or a guest open says nothing, so 1 KiB is
+	// generous for all of them.
 	AccessSmallBodyBytes int64 = 1 << 10
 
 	// AccessCallBodyBytes caps a call, which carries a construct's arguments.

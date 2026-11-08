@@ -368,7 +368,7 @@ func TestAccessIgnoresAPIProxy(t *testing.T) {
 // assertion. Both headers carry a SECOND forged value as well, since a refactor
 // from Set to Add would keep the first.
 //
-// There are two halves, and they are one rule seen from either side. On the four
+// There are two halves, and they are one rule seen from either side. On the five
 // pairs the edge's own values are what arrive. On everything ELSE the edge
 // forwards -- an apiProxy site's ordinary /_memql/* calls and the shopper
 // surface -- nothing arrives, because the bff would otherwise read a stamp the
@@ -1581,7 +1581,7 @@ func requireCookieLines(t *testing.T, got http.Header, want []string) {
 	}
 }
 
-// THE COOKIE REACHES THE BFF ON THE FOUR PAIRS, ALONE. The bff reads this one cookie and
+// THE COOKIE REACHES THE BFF ON THE FIVE PAIRS, ALONE. The bff reads this one cookie and
 // nothing else a browser sends: not a sign-in cookie and not a bearer. Forwarding them
 // made a visitor's own browser state a read on the access path (the session-revocation
 // middleware looks up any bearer it finds) and locked out a visitor holding a revoked
@@ -1612,7 +1612,7 @@ func TestAccessForwardsOnlyTheAccessCookie(t *testing.T) {
 }
 
 // accessOutbound is every way a request leaves this edge for an upstream that is not one
-// of the four pairs, and the proof it took that way. If a route is added, it goes here.
+// of the five pairs, and the proof it took that way. If a route is added, it goes here.
 var accessOutbound = []struct {
 	name         string
 	method, path string
@@ -2026,7 +2026,7 @@ func TestAccessAQueryStringDoesNotChooseTheRoute(t *testing.T) {
 // A CODE PASTED INTO A URL TRAVELS NO FURTHER THAN IT HAS TO. The protocol puts a
 // code in the body of a POST and has no query parameters at all, so whatever
 // follows the question mark is not the bff's business: it is dropped here, on all
-// four pairs, and the route still works. What reaches the bff is the canonical
+// five pairs, and the route still works. What reaches the bff is the canonical
 // request target and nothing after it, so a code in a query string is not in the
 // bff's request line, and so not in anything that records the URL of what it
 // served. An empty query goes too: no query at all, not even a bare question mark.
@@ -2078,7 +2078,7 @@ func TestAccessACodeInTheQueryStringTravelsNoFurther(t *testing.T) {
 }
 
 // CASE IS NOT FOLDED. The route is an exact match, so a path in another case, or
-// a lower-case method, is not one of the four pairs. With apiProxy on the generic
+// a lower-case method, is not one of the five pairs. With apiProxy on the generic
 // proxy forwards what is under the marker -- unstamped, and to a path the bff does
 // not serve -- and with it off the request gets what it always did: the 404, or
 // the bundle's own answer. Either way nothing reaches the bff's /access routes.

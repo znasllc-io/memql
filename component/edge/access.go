@@ -80,8 +80,9 @@ import (
 // forged value can do is name a site that really has codes. Stripping first is
 // what lets it treat the header as the edge's alone.
 
-// The four inbound paths, on a deployable's own origin, under the one the bff
-// and this file share. Exact, and the routes below take no query string.
+// The five method and path pairs sit on four inbound paths, on a deployable's own
+// origin, under the one the bff and this file share. Exact, and the routes below take
+// no query string.
 const (
 	accessPath      = memql.AccessInboundPath
 	accessLeavePath = memql.AccessInboundPath + "/leave"
