@@ -45,18 +45,26 @@ import (
 // each one is its own authorization judgment.
 //
 // So `@serverOnly` remains the gate here, and it is the right one rather than a
-// stop-gap: this mutation has exactly one production caller, the identity admin
-// server, which already authorizes through `admin/auth.go`. The boundary sits
-// where the authorization already lived.
+// stop-gap: every production caller of this mutation is Go that has authorized
+// the write first -- the identity admin surface (component/identity/adminops),
+// behind its owner/admin gate, and role testing (component/identity/roletest),
+// which renames its own test persona with a payload of displayName alone after
+// the operator's gates. The boundary sits where the authorization already
+// lived.
 //
-// THE GATE HAS THREE HALVES, in three packages, and each covers a failure the
-// others cannot see:
+// THE GATE HAS THREE HALVES, and each covers a failure the others cannot see:
 //
 //  1. this file -- the annotation is present in the PARSED tree;
 //  2. component/memql/server_only_mutation_resolve_test.go -- the LOADER agrees
 //     and the mutation dispatch path actually refuses a client-origin call;
-//  3. component/identity/admin/server_only_origin_test.go -- the one production
-//     caller stamps an internal origin, so the gate does not break the admin UI.
+//  3. the production callers stamp an internal origin, so the gate does not
+//     refuse them: for the identity admin surface,
+//     component/identity/adminops/gate_test.go
+//     (TestAdmittedWritesStampInternalOrigin, the relocated memql#2991 guard)
+//     and user_display_name_test.go; for role testing's rename,
+//     component/identity/roletest/service_db_test.go
+//     (TestAPersonaIsCalledWhatItTests), which renames a persona on the real
+//     engine and reads the name back.
 //
 // (2) and (3) are not redundant with (1). An annotation the parser reads but
 // the loader drops is not a gate (memql#2875), and a gate nobody can call is an
