@@ -118,7 +118,9 @@ function main() {
     cap_parse_flags "$@"
 
     DB_URL="$(cap_param database-url "$DEFAULT_DB_URL")"
-    APPLY="$(cap_flag apply)"
+    # "" or "1", read with cap_bool: cap_flag returned the raw string, and
+    # --apply=false then passed the -n test below and rewrote stored ids.
+    if cap_bool apply; then APPLY=1; else APPLY=""; fi
     CONFIRM="$(cap_param confirm "")"
 
     require_prerequisites

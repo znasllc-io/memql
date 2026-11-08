@@ -41,6 +41,9 @@
 
 set -uo pipefail
 
+# shellcheck source=../lib/bool_flag.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/bool_flag.sh"
+
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
@@ -83,6 +86,10 @@ Usage: tag-submodules.sh --version=X.Y.Z [--line=all|wire|engine|lockstep]
                     tags land on exactly the commit the release was cut from.
   --dry-run         Print the plan; create and push nothing.
   --no-push         Create the tags locally but do not push them.
+
+  --dry-run and --no-push also take a value, --flag=true|false (or 1|0,
+  yes|no, on|off), which is how make tag-submodules forwards DRY_RUN= and
+  NO_PUSH=. Any other value is a bad argument.
 
 Exit codes: 0 ok, 2 bad argument, 3 refused (dirty tree, tag exists,
 unresolvable require), 4 prerequisite missing.
@@ -222,14 +229,23 @@ create_tags() {
 }
 
 main() {
-	local version="" line="all" commit="" dry="false" push="true" arg
+	local version="" line="all" commit="" dry="false" push="true" no_push arg
+	# Each boolean takes a value as well as the bare form, read by bool_flag
+	# (scripts/lib/bool_flag.sh, cap_bool's vocabulary): `make tag-submodules`
+	# forwards DRY_RUN=0 as --dry-run="0", and a bare --dry-run there would
+	# have planned instead of tagging.
 	for arg in "$@"; do
 		case "$arg" in
 		--version=*) version="${arg#*=}" ;;
 		--line=*) line="${arg#*=}" ;;
 		--commit=*) commit="${arg#*=}" ;;
 		--dry-run) dry="true" ;;
+		--dry-run=*) dry="$(bool_flag --dry-run "${arg#*=}")" || return 2 ;;
 		--no-push) push="false" ;;
+		--no-push=*)
+			no_push="$(bool_flag --no-push "${arg#*=}")" || return 2
+			if [[ "$no_push" == "true" ]]; then push="false"; else push="true"; fi
+			;;
 		--help | -h)
 			usage
 			return 0

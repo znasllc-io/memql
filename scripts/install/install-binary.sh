@@ -346,7 +346,9 @@ function main() {
     # a Mac binary written to a Linux box would simply not run -- and the
     # supported-set check below refuses a platform with no pins either way.
     platform="$(cap_param platform "$(platform_id)")"
-    dry_run="$(cap_flag dry-run)"
+    # "" or "1", read with cap_bool: an emptiness test made --dry-run=false,
+    # the argv the DSL action renders for `dryRun: false`, a dry run.
+    if cap_bool dry-run; then dry_run=1; else dry_run=""; fi
     cap_require tool "$tool"
     cap_require dest "$dest"
 

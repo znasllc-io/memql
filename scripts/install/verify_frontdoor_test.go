@@ -1114,6 +1114,29 @@ func TestVerifyFrontDoorReportOnlyExitsZero(t *testing.T) {
 	}
 }
 
+// TestVerifyFrontDoorReportOnlyFalseIsStrict pins the argv the install graph
+// actually renders. The DSL action declares `reportOnly boolean`, and the
+// capability step turns `reportOnly: false` into --report-only=false. That was
+// read with cap_flag and tested for emptiness, so it WAIVED strictness and a
+// broken front door passed the install step with exit 0.
+func TestVerifyFrontDoorReportOnlyFalseIsStrict(t *testing.T) {
+	env := fdWorld(t,
+		map[string]string{fdAPI: "10.0.0.5"},
+		map[string]string{fdAPI: "60|0|000"},
+	)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI, "--report-only=false")
+	if code != 5 {
+		t.Fatalf("--report-only=false exited %d over a failing front door, want 5\nstdout: %s", code, stdout)
+	}
+	e, res := fdParse(t, stdout)
+	if e.OK {
+		t.Error("ok=true over a failing front door with strictness asked for")
+	}
+	if res.ReportOnly {
+		t.Error("result.reportOnly=true for --report-only=false")
+	}
+}
+
 // TestVerifyFrontDoorGrpcHostIsParameterisable lets a product front door on a
 // different hostname be probed without editing the script.
 func TestVerifyFrontDoorGrpcHostIsParameterisable(t *testing.T) {
