@@ -655,6 +655,30 @@ builtin siteAccessCodeCreate {
   expiresAt  datetime!  @description("When the code stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every code expires; there is no 'never'.")
 }
 
+/// Open one gate of a deployable to anyone, without a code (design record 2026-11-08-deployable-guest-access).
+///
+/// A GUEST PASS IS A CODE ROW WITH NO CODE. It is a siteAccessCode marked guest whose digest is a fixed
+/// function of the site, so a visitor who asks at the guest route is let in to that one gate, and no
+/// typed code can ever match it. There is nothing to hand back but the row's id and its expiry.
+///
+/// THE CHECKS ARE THE MINT'S, siteAccessCodeCreate's in every respect: the part, the organization, an
+/// owned deployable with a package deployable, a gate the deployable declares, the bounds on label,
+/// subject and expiry. A refusal at any of them has written nothing.
+///
+/// Returns {codeId, expiresAt}.
+@sdk
+@executor("integration.siteAccess.guestPassCreate")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/access")
+@description("Open one gate of a deployable to anyone without a code, for one subject if given (design record 2026-11-08-deployable-guest-access). Writes a guest pass: an access code row marked guest with no plain code at all. Refused for the same causes as siteAccessCodeCreate: a deployable with no owner, a system-owned deployable, one with no package deployable, a gate the deployable does not declare with @accessGate, a label outside 1 to 80 characters, a subject over 120 characters, and an expiry under a minute or over 366 days away. Returns {codeId, expiresAt}.")
+builtin siteAccessGuestPassCreate {
+  siteId     string!    @description("The deployable the guest pass opens a part of.")
+  label      string!    @description("The operator's name for the pass, 1 to 80 characters. Never sent to a visitor.")
+  gate       string!    @description("Which gate the pass opens: one the deployable declares with @accessGate. siteAccessGates lists them.")
+  subject    string     @description("Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone.")
+  expiresAt  datetime!  @description("When the pass stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every pass expires; there is no 'never'.")
+}
+
 /// Replace a code's secret, keeping everything else (design record 2026-10-29-deployable-access-codes).
 ///
 /// THIS IS HOW A CODE IS REVOKED AND REPLACED IN ONE ACT. The id, label, gate and subject survive, so

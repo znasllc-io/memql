@@ -9604,6 +9604,60 @@ func SiteAccessGatesBuild(args SiteAccessGatesArgs) string {
 	return b.String()
 }
 
+// SiteAccessGuestPassCreate -- Open one gate of a deployable to anyone, without a code (design record 2026-11-08-deployable-guest-access).
+// A GUEST PASS IS A CODE ROW WITH NO CODE. It is a siteAccessCode marked guest whose digest is a fixed function of the site, so a visitor who asks at the guest route is let in to that one gate, and no typed code can ever match it. There is nothing to hand back but the row's id and its expiry.
+// THE CHECKS ARE THE MINT'S, siteAccessCodeCreate's in every respect: the part, the organization, an owned deployable with a package deployable, a gate the deployable declares, the bounds on label, subject and expiry. A refusal at any of them has written nothing.
+// Returns {codeId, expiresAt}.
+type SiteAccessGuestPassCreateArgs struct {
+	// The deployable the guest pass opens a part of.
+	SiteId string
+	// The operator's name for the pass, 1 to 80 characters. Never sent to a visitor.
+	Label string
+	// Which gate the pass opens: one the deployable declares with @accessGate. siteAccessGates lists them.
+	Gate string
+	// Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone.
+	Subject string
+	// When the pass stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every pass expires; there is no 'never'.
+	ExpiresAt string
+}
+
+// SiteAccessGuestPassCreate calls the engine builtin siteAccessGuestPassCreate.
+func (qc *QueryClient) SiteAccessGuestPassCreate(ctx context.Context, args SiteAccessGuestPassCreateArgs) (*Result, error) {
+	call := SiteAccessGuestPassCreateBuild(args)
+	return qc.executeNamed(ctx, "siteAccessGuestPassCreate", call)
+}
+
+func SiteAccessGuestPassCreateBuild(args SiteAccessGuestPassCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessGuestPassCreate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gate: ")
+	b.WriteString(quoteMemQL(args.Gate))
+	if args.Subject != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(quoteMemQL(args.Subject))
+	}
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SiteArchive -- Archive one of the caller's standalone deployables (epic memql#4794, D10). Refuses unless the site is already OFFLINE (disabled) -- archiving is the end of a lifecycle, not a shortcut past taking it offline -- and unless confirmHostname matches the site's NAME: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404), stays listed behind the Archived filter, and STILL HOLDS ITS NAME -- siteDelete is the rung that releases it. A source's app is never archived; it is deactivated (packageDeactivateDeployable). Returns {siteId, hostname, status}. Refusals carry stable codes.
 type SiteArchiveArgs struct {
 	// The v1:platform:site row to archive.

@@ -170,7 +170,7 @@ func TestAnAccessCodeCarriesNoHeartbeat(t *testing.T) {
 
 	for name, want := range map[string][]string{
 		"v1:platform:siteAccessCode": {
-			"accountId", "codeHash", "codeHint", "expiresAt", "gate", "generation", "issuedAt",
+			"accountId", "codeHash", "codeHint", "expiresAt", "gate", "generation", "guest", "issuedAt",
 			"label", "lastChangedBy", "ownerUserId", "revokedAt", "siteId", "subject",
 		},
 		"v1:platform:siteAccessSession": {

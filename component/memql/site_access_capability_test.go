@@ -153,8 +153,8 @@ func TestEveryClientCallableAccessCodeActIsAGatedBuiltin(t *testing.T) {
 	if underneath < 11 {
 		t.Errorf("found %d queries and mutations over access codes, want at least the 11 the contract declares; the walk or the bound concepts changed", underneath)
 	}
-	if builtins != 6 {
-		t.Errorf("found %d siteAccess builtins, want the 6 the contract declares", builtins)
+	if builtins != 7 {
+		t.Errorf("found %d siteAccess builtins, want the 7 the contract declares", builtins)
 	}
 }
 
