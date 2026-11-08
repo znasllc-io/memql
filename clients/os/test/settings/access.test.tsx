@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { AccessSection } from "../../src/apps/settings/AccessSection";
-import { accessResources, knownGrantCodes, type AccessGrant } from "../../src/apps/settings/access/model";
+import { accessResources, groupActs, knownGrantCodes, type AccessGrant, type AccessResource, type Subject } from "../../src/apps/settings/access/model";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { SessionProvider } from "../../src/chrome/access";
 import { OsProvider } from "../../src/chrome/state";
@@ -280,6 +280,18 @@ describe("the pure half", () => {
     for (let i = deployables + 1; i < rows.length && rows[i]!.appId === "deployables"; i++) expect(rows[i]!.part).not.toBe("");
     // A resource only a grant names is kept, so a deny on it can be lifted.
     expect(accessResources(OS_REGISTRY, catalog, ["app:ghost"]).some((r) => r.resource === "app:ghost")).toBe(true);
+  });
+
+  it("a group's acts: Allow wherever it does not already allow, Deny wherever it does not already deny", () => {
+    const files: AccessResource = { resource: "app:files", appId: "files", part: "", verb: "read", label: "Files" };
+    const acme: Subject = { kind: "group", id: "g-acme", name: "Acme", role: "" };
+    const allows: AccessGrant = { id: "grant-g1", subjectKind: "group", subjectId: "g-acme", verb: "read", resource: "app:files", effect: "allow", grantedBy: "u-me", active: true, createdAt: "" };
+    const denies: AccessGrant = { ...allows, id: "grant-g2", effect: "deny" };
+    expect(groupActs("allow", [allows], files, acme)).toEqual({ allow: false, deny: true, own: allows });
+    expect(groupActs("deny", [denies], files, acme)).toEqual({ allow: true, deny: false, own: denies });
+    // NOT GRANTED BY THIS GROUP: either act changes its answer. An allow
+    // widens what its people's roles give them; a deny narrows it.
+    expect(groupActs(null, [], files, acme)).toEqual({ allow: true, deny: true, own: null });
   });
 });
 
@@ -691,7 +703,21 @@ describe("by person: the acts", () => {
     await pickSubject("Acme");
     await waitFor(() => expect(actsOf("app:deployables")).toEqual(["Deny Deployables to Acme", "Remove Acme's grant for Deployables"]));
     expect(actsOf("app:logs")).toEqual(["Allow Logs to Acme", "Remove Acme's grant for Logs"]);
-    expect(actsOf("app:files")).toEqual(["Allow Files to Acme"]);
+    // Not granted by this group: it can allow Files, or deny it to everyone in
+    // the group whatever their role gives them.
+    expect(answersOf("app:files")).toEqual(["Not granted by this group"]);
+    expect(actsOf("app:files")).toEqual(["Allow Files to Acme", "Deny Files to Acme"]);
+
+    await act(async () => {
+      fireEvent.click(within(rowFor("app:files")).getByRole("button", { name: "Deny Files to Acme" }));
+    });
+    await waitFor(() => expect(state.calls.some((c) => c.name === "grantSet")).toBe(true));
+    const set = state.calls.find((c) => c.name === "grantSet")?.call ?? "";
+    expect(set).toContain('subjectKind: "group"');
+    expect(set).toContain('subjectId: "g-acme"');
+    expect(set).toContain('verb: "read"');
+    expect(set).toContain('resourceType: "app:files"');
+    expect(set).toContain('effect: "deny"');
   });
 
   it("a viewer whose role writes no grant reads the answers and is offered no act", async () => {

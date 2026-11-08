@@ -63,13 +63,15 @@ import { useAccessRoster, useEffectiveAccess, useGrantWrites, useResourceGrants,
 // ===========================================================================
 // ONLY AN ACT THAT CHANGES AN ANSWER IS OFFERED
 // ===========================================================================
-// Deny where something can be opened, Allow where a grant would open it,
-// "Use role" over the person's own grant (for a group, "Remove"). None on a
-// pair a role's limit bars, which no grant lifts; none that would write what
-// already stands. Absent for a viewer whose role does not write grants
-// (rule 12: an act that is not legal is absent, never disabled), and the
-// caption says why. A grant to a person counts in every organization they
-// are in, so a pair's acts are drawn once for the pair, never beside one
+// For a person: Deny where something can be opened, Allow where a grant would
+// open it, "Use role" over their own grant. For a group, whose answer is its
+// own grant: Allow wherever it does not already allow, Deny wherever it does
+// not already deny -- both where it grants nothing -- and "Remove" over its
+// grant. None on a pair a role's limit bars, which no grant lifts; none that
+// would write what already stands. Absent for a viewer whose role does not
+// write grants (rule 12: an act that is not legal is absent, never disabled),
+// and the caption says why. A grant to a person counts in every organization
+// they are in, so a pair's acts are drawn once for the pair, never beside one
 // organization's answer.
 //
 // ===========================================================================

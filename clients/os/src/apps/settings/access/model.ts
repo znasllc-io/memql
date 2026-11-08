@@ -33,12 +33,25 @@ import { roleHolds } from "../../users/rows";
 // ===========================================================================
 // The screen's rows are every `app:*` resource the role catalog names
 // (design D7: a part exists by being seeded on at least one role), plus any
-// the subject's grants or the engine's answers name -- so a deny on something
-// no role holds stays visible, or it could never be lifted. A person's row is
-// drawn where the engine answered it, and a group's for every resource, its
-// own grant or none. Labels come from the OS registry: an app's door reads as
-// the app's name, a section as its name under the app, a part (`deploy`,
-// `publish`) as the word the seeds use.
+// the chosen subject's grants or the engine's answers for them name. A row
+// asks one verb: the catalog's, or for a resource the catalog does not name,
+// `read` for a door or a section and `execute` for any other part. Labels
+// come from the OS registry: an app's door reads as the app's name, a section
+// as its name under the app, a part (`deploy`, `publish`) as the word the
+// seeds use.
+//
+// WHERE A PAIR THE CATALOG DOES NOT NAME SHOWS. A person's row is drawn only
+// where the engine answered the row's own pair. The engine answers every pair
+// the person's grants and their groups' grants name, as well as the catalog's
+// (component/auth, EffectiveCapabilities), so a deny on something no role
+// holds keeps its row under By person, and its "Use role". A grant under a
+// verb its resource's row does not ask -- `execute` on a door, `read` on a
+// part -- is answered under that verb and drawn by no row: it is seen, and
+// revoked, under By app only, whose holders are every grant on the resource
+// whatever its verb. By app offers a resource the catalog does not name only
+// while a subject whose grants or answers name it is chosen. A group's row is
+// drawn for every resource, from its own grant on the row's pair or none, so
+// its grant under another verb reads there as "Not granted by this group".
 
 /** The engine's five verbs; opening an app is `read`, a part is `execute`. */
 export const OPEN_VERB = "read";
@@ -334,13 +347,16 @@ export function groupAnswer(rows: readonly AccessRow[], resource: AccessResource
 }
 
 /**
- * The acts a group's answer admits: the one that flips it, and "Remove" over
- * a grant it holds. A group has no role, so there is no "Use role".
+ * The acts a group's answer admits: Allow wherever the group does not already
+ * allow, Deny wherever it does not already deny, and "Remove" over a grant it
+ * holds. A group that grants nothing can do either -- an allow widens what its
+ * people's roles give them, a deny narrows it -- so "Not granted by this
+ * group" offers both. A group has no role, so there is no "Use role".
  */
 export function groupActs(answer: GroupAnswer, ownGrants: readonly AccessGrant[], resource: AccessResource, subject: Subject): AccessActs {
   return {
     allow: answer !== "allow",
-    deny: answer === "allow",
+    deny: answer !== "deny",
     own: answer === null ? null : ownGrant(ownGrants, resource, subject),
   };
 }
