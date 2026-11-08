@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button, Caption, ContentSkeleton, Details, DetailsSection, InlineSkeleton, Input, Notice, RecordList, RecordListSkeleton, RecordRow, SettingRow, Switch } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -100,6 +100,16 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   useEffect(() => {
     if (value !== null) setDraft(draftOf(value.values));
   }, [value]);
+  // WHERE FOCUS GOES WHEN CLEAR GOES. Clear is drawn only while someone is
+  // named, so pressing it takes away the button that had focus. Focus moves to
+  // the approver's line, which now says nobody approves -- and, to the approver
+  // who is no operator, what saving leaves -- once the render that says so is
+  // drawn, so a keyboard is never left on a control that has gone.
+  const approverLine = useRef<HTMLDivElement>(null);
+  const [cleared, setCleared] = useState(0);
+  useEffect(() => {
+    if (cleared > 0) approverLine.current?.focus();
+  }, [cleared]);
 
   const context = { page: "Review settings" };
   if (value === null || draft === null) {
@@ -143,11 +153,17 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
     : "Nobody who can moderate this store by that name.";
   // NOBODY NAMED, ONLY AN OPERATOR CAN NAME ONE: besides an operator, the
   // store's current approver is the only one who may (writeSettings). So the
-  // approver who is no operator is told beside Clear that saving nobody leaves
-  // them unable to name anybody again. Both are the settings read's answers
-  // (packs/reviewspack/reads.go): `approvesRemovals` is true for the viewer
-  // named, and `nameSender` for an operator, alone.
+  // approver who is no operator is told beside Clear, and once it is pressed on
+  // the line that says nobody approves, that saving nobody leaves them unable
+  // to name anybody again. Both halves are the settings read's answers
+  // (packs/reviewspack/reads.go, readSettings): `approvesRemovals` is true only
+  // for the viewer the settings name, and only when they are no operator -- an
+  // operator named reads false -- and `nameSender` is true for an operator
+  // alone.
   const clearingLocksOut = value.viewer.approvesRemovals && !value.may.nameSender;
+  // That approver has cleared themselves in the draft: Clear and the sentence
+  // beside it are gone, and what Save does still has to be said.
+  const clearedYourself = clearingLocksOut && approverId === "";
 
   async function save() {
     if (problem !== "" || Object.keys(changes).length === 0) return;
@@ -223,23 +239,43 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
                 // carries the notice and its Try again.
                 <Caption>Nobody can be chosen, because who can moderate this store could not be read.</Caption>
               ) : null}
-              <Caption>
-                {approverReading ? (
-                  <InlineSkeleton label="Reading who approves removals" />
-                ) : (
-                  <>
-                    {approverWords(approverId, approverName, moderators.length > 0)}
-                    {value.may.nameApprover ? "" : approverId === "" ? " Only the cluster's operators can name one." : " Only that owner, or the cluster's operators, can name someone else."}
-                  </>
-                )}
-              </Caption>
+              {/* The approver's line holds focus after Clear (approverLine):
+                  never a tab stop, only where focus is put. */}
+              <div ref={approverLine} tabIndex={-1}>
+                <Caption>
+                  {approverReading ? (
+                    <InlineSkeleton label="Reading who approves removals" />
+                  ) : (
+                    <>
+                      {approverWords(approverId, approverName, moderators.length > 0)}
+                      {value.may.nameApprover
+                        ? clearedYourself
+                          ? " Once you save, only the cluster's operators can name someone."
+                          : ""
+                        : approverId === ""
+                          ? " Only the cluster's operators can name one."
+                          : " Only that owner, or the cluster's operators, can name someone else."}
+                    </>
+                  )}
+                </Caption>
+              </div>
               {/* NAMING NOBODY: the draft's approver set to "", which Save sends
                   as "" and the engine takes as nobody. Offered to whoever may
                   name one, only while someone is named, with what it leaves
-                  beside it for the approver who is no operator. */}
+                  beside it for the approver who is no operator; pressed, it
+                  goes, and the approver's line takes focus and keeps saying
+                  what it leaves until Save. */}
               {namesApprover && approverId !== "" ? (
                 <>
-                  <Button tone="quiet" onClick={() => set("removalApproverUserId")("")}>Clear the approver</Button>
+                  <Button
+                    tone="quiet"
+                    onClick={() => {
+                      set("removalApproverUserId")("");
+                      setCleared((n) => n + 1);
+                    }}
+                  >
+                    Clear the approver
+                  </Button>
                   {clearingLocksOut ? <Caption>Once you clear the approver and save, only the cluster&rsquo;s operators can name someone.</Caption> : null}
                 </>
               ) : null}

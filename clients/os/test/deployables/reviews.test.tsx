@@ -525,6 +525,59 @@ describe("who can moderate", () => {
     expect(clear.nextElementSibling).toBe(after);
   });
 
+  it("keep saying, once Clear is pressed, what saving leaves, on the line focus moves to", async () => {
+    // Clear goes once nobody is named, and the sentence beside it with it --
+    // but Save has still to do what it said. So the line that now says nobody
+    // approves says it too, and takes the focus the gone button had.
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-me" },
+      may: { edit: true, nameApprover: true, nameSender: false },
+      viewer: { moderates: true, approvesRemovals: true },
+    } as unknown as Row;
+    const people = {
+      storeId: "store-live",
+      people: [
+        { userId: "u-me", displayName: "Sam Me", email: "sam@example.com", mayRemove: true },
+        { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
+      ],
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    const clear = within(approver).getByRole("button", { name: "Clear the approver" });
+    clear.focus();
+    await click(clear);
+
+    expect(within(approver).queryByRole("button", { name: "Clear the approver" })).toBeNull();
+    const said = "Nobody can remove a published review until an owner is named. Once you save, only the cluster's operators can name someone.";
+    const line = within(approver).getByText(said);
+    expect(line.classList.contains("os-caption")).toBe(true);
+    // Focus is on that line, never left on the page itself.
+    const focused = document.activeElement as HTMLElement;
+    expect(approver.contains(focused)).toBe(true);
+    expect(focused.textContent).toBe(said);
+    // And it is still said when Save is pressed.
+    await readTheBar();
+    expect(barButtons()).toEqual(["Discard", "Save"]);
+    expect(within(approver).getByText(said)).toBe(line);
+  });
+
+  it("move focus to the line that says nobody approves once an operator presses Clear, and say nothing of operators naming", async () => {
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    const clear = within(approver).getByRole("button", { name: "Clear the approver" });
+    clear.focus();
+    await click(clear);
+    const said = "Nobody can remove a published review until an owner is named.";
+    const focused = document.activeElement as HTMLElement;
+    expect(approver.contains(focused)).toBe(true);
+    expect(focused.textContent).toBe(said);
+  });
+
   it("say nothing of the kind beside Clear to an operator, who can always name someone", async () => {
     const settings = {
       exists: true,
