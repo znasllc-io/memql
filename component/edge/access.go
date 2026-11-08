@@ -29,12 +29,13 @@ import (
 // trade or the session cookie one earned. It is nobody to MemQL: it has no
 // identity to open a stream with, and only an HTTP response can set an HttpOnly
 // cookie, so the other party dictates the wire (owner-approved HTTP exception,
-// 2026-10-29). Four method and path pairs, and nothing else:
+// 2026-10-29). Five method and path pairs, and nothing else:
 //
 //	POST /_memql/access        ->  bff POST /access/unlock    {"code": "..."}
 //	GET  /_memql/access        ->  bff GET  /access/session
 //	POST /_memql/access/leave  ->  bff POST /access/leave
 //	POST /_memql/access/call   ->  bff POST /access/call      {"call": "...", "args": {...}}
+//	POST /_memql/access/guest  ->  bff POST /access/guest     {}
 //
 // # What this file owns, and what it deliberately does not
 //
@@ -42,7 +43,7 @@ import (
 // the proxy hop, so a request that is wrong, too big or too frequent never
 // reaches the bff:
 //
-//  1. THE ROUTE. Exactly the four pairs. Anything else under the same prefix
+//  1. THE ROUTE. Exactly the five pairs. Anything else under the same prefix
 //     -- DELETE on /_memql/access, /_memql/access/x, /_memql/accessories -- is
 //     not this surface's and falls through to the generic /_memql/* proxy, so a
 //     site's apiProxy switch still means what it did before this surface
@@ -70,7 +71,7 @@ import (
 // IT DOES READ THE COOKIE'S NAME, on every way out of here, and that is the other
 // half of what this file owns. The cookie is a __Host- cookie, so it has Path=/ and a
 // browser sends it with every request to this host (memql.AccessCookieName says why it
-// has to be). So on these four routes the bff gets that cookie and nothing else a
+// has to be). So on these five routes the bff gets that cookie and nothing else a
 // browser holds, and on every other route it is taken out of what is forwarded
 // (accessStripCookie). Nothing the edge serves itself ever reads it.
 //
@@ -79,21 +80,23 @@ import (
 // forged value can do is name a site that really has codes. Stripping first is
 // what lets it treat the header as the edge's alone.
 
-// The three inbound paths, on a deployable's own origin, under the one the bff
+// The four inbound paths, on a deployable's own origin, under the one the bff
 // and this file share. Exact, and the routes below take no query string.
 const (
 	accessPath      = memql.AccessInboundPath
 	accessLeavePath = memql.AccessInboundPath + "/leave"
 	accessCallPath  = memql.AccessInboundPath + "/call"
+	accessGuestPath = memql.AccessGuestInboundPath
 )
 
-// The four operations. A fixed set, because the budget a request draws on is
+// The five operations. A fixed set, because the budget a request draws on is
 // chosen by it.
 const (
 	accessOpUnlock  = "unlock"
 	accessOpSession = "session"
 	accessOpLeave   = "leave"
 	accessOpCall    = "call"
+	accessOpGuest   = "guest"
 )
 
 const (
@@ -103,6 +106,13 @@ const (
 	accessUnlockPerMinutePerAddress = 10
 	accessUnlockPerMinutePerSite    = 60
 	accessOtherPerMinutePerAddress  = 600
+
+	// A guest open has buckets of its own, with unlock's numbers (G-D7). It is the one
+	// route that costs the bff a read with no credential to check first, so what bounds
+	// it is here; and it is kept apart from unlock so a crowd of guests cannot spend
+	// what a code holder needs, nor a flood of unlocks shut guests out.
+	accessGuestPerMinutePerAddress = 10
+	accessGuestPerMinutePerSite    = 60
 
 	// accessIPv6KeyBits is how much of an IPv6 address names one budget (see
 	// accessClientAddress).
@@ -121,11 +131,11 @@ const (
 )
 
 // accessStampHeaders is every header this surface controls. newBFFProxy deletes
-// them from everything it forwards, not only from the four pairs, so a client
+// them from everything it forwards, not only from the five pairs, so a client
 // cannot supply its own on any path.
 var accessStampHeaders = []string{AccessStampSiteHeader, AccessStampOwnerHeader}
 
-// accessRoute is one of the four method and path pairs and everything the edge
+// accessRoute is one of the five method and path pairs and everything the edge
 // needs to know about it. One table, so the routing decision and the forward
 // cannot name different pairs.
 type accessRoute struct {
@@ -141,9 +151,10 @@ var accessRoutes = [...]accessRoute{
 	{http.MethodGet, accessPath, memql.AccessSessionPath, accessOpSession, memql.AccessSmallBodyBytes},
 	{http.MethodPost, accessLeavePath, memql.AccessLeavePath, accessOpLeave, memql.AccessSmallBodyBytes},
 	{http.MethodPost, accessCallPath, memql.AccessCallPath, accessOpCall, memql.AccessCallBodyBytes},
+	{http.MethodPost, accessGuestPath, memql.AccessGuestPath, accessOpGuest, memql.AccessSmallBodyBytes},
 }
 
-// accessRouteFor reports which of the four pairs a request is, if it is one.
+// accessRouteFor reports which of the five pairs a request is, if it is one.
 //
 // AN EXACT MATCH ON BOTH, never a prefix. Claiming /_memql/access/* would make
 // /_memql/access/x and /_memql/accessories this file's business, and they are
@@ -158,7 +169,7 @@ func accessRouteFor(method, p string) (accessRoute, bool) {
 	return accessRoute{}, false
 }
 
-// accessLimits are the budgets in front of the surface: three token buckets and
+// accessLimits are the budgets in front of the surface: five token buckets and
 // the clock they are read against.
 //
 // PER REPLICA, which is honest rather than ideal and for the shopper bucket's
@@ -174,6 +185,10 @@ func accessRouteFor(method, p string) (accessRoute, bool) {
 // per-site unlock bucket is the cap on what they spend together. What stops
 // guessing is 125 bits of code, not a counter.
 //
+// A GUEST OPEN DRAWS ON TWO OF ITS OWN, in the same order and for the same reason, and
+// draws on nothing else: exhausting the guest buckets leaves unlock and the other
+// routes whole, and the reverse.
+//
 // UNLOCK DRAWS ON TWO, ADDRESS FIRST, and the order is the point. If the site's
 // bucket were spent first, one machine sending a hundred requests would drain
 // the whole site's sixty before its own ten ran out, and nobody else could get
@@ -182,6 +197,8 @@ func accessRouteFor(method, p string) (accessRoute, bool) {
 type accessLimits struct {
 	unlockAddress *shopperBucket // (site, address): 10 a minute
 	unlockSite    *shopperBucket // site: 60 a minute
+	guestAddress  *shopperBucket // (site, address): 10 a minute, for guest opens only
+	guestSite     *shopperBucket // site: 60 a minute, for guest opens only
 	other         *shopperBucket // (site, address): 600 a minute, for session, leave and call
 	now           func() time.Time
 }
@@ -190,6 +207,8 @@ func newAccessLimits() *accessLimits {
 	return &accessLimits{
 		unlockAddress: newShopperBucket(accessUnlockPerMinutePerAddress),
 		unlockSite:    newShopperBucket(accessUnlockPerMinutePerSite),
+		guestAddress:  newShopperBucket(accessGuestPerMinutePerAddress),
+		guestSite:     newShopperBucket(accessGuestPerMinutePerSite),
 		other:         newShopperBucket(accessOtherPerMinutePerAddress),
 		now:           time.Now,
 	}
@@ -208,6 +227,15 @@ func (l *accessLimits) allow(op, siteID, address string) (bool, int) {
 		}
 		if !l.unlockSite.allow(siteID, now) {
 			return false, accessRetryAfter(accessUnlockPerMinutePerSite)
+		}
+		return true, 0
+	}
+	if op == accessOpGuest {
+		if !l.guestAddress.allow(key, now) {
+			return false, accessRetryAfter(accessGuestPerMinutePerAddress)
+		}
+		if !l.guestSite.allow(siteID, now) {
+			return false, accessRetryAfter(accessGuestPerMinutePerSite)
 		}
 		return true, 0
 	}
@@ -443,7 +471,7 @@ func boundAccessBody(w http.ResponseWriter, r *http.Request, limit int64) error 
 	return nil
 }
 
-// serveAccessSurface gates one of the four access requests and forwards it.
+// serveAccessSurface gates one of the five access requests and forwards it.
 //
 // EVERY REFUSAL THIS FUNCTION MAKES IS A SMALL JSON BODY, because the caller is a
 // script and the protocol is JSON. The one reply that is not is not made here:
@@ -539,7 +567,7 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // delete, which is the only reason the values written here reach the bff.
 //
 // THE PATH IS SET HERE, not by upstreamPath. The shared rewrite swaps the marker
-// for the bff's /memql root, which would ask for /memql/access. The bff's four
+// for the bff's /memql root, which would ask for /memql/access. The bff's five
 // routes live at its own root under names of their own (/access/unlock, not
 // /access), and unlock and session share one inbound path, so no rule over the
 // inbound path alone could produce them.
@@ -552,7 +580,7 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // nothing here depends on the query. ForceQuery is cleared as well as RawQuery,
 // since a bare "?" is carried by that flag and the request line would otherwise
 // end in one; the bff then sees the canonical path and nothing after it. (A query
-// configured on MEMQL_EDGE_API_TARGET goes too, which these four routes do not
+// configured on MEMQL_EDGE_API_TARGET goes too, which these five routes do not
 // need. The generic proxy is untouched and keeps the queries its routes use.)
 //
 // THE ACCESS COOKIE, AND NO OTHER CREDENTIAL. The bff reads this one cookie and nothing
@@ -561,7 +589,7 @@ func (h *Handler) serveAccessSurface(w http.ResponseWriter, r *http.Request, sit
 // the shared rewrite copies it for the bridge), not a cookie the deployable's own page
 // set. Left on, they were a read a visitor could drive, from any page with a WebSocket
 // (the session-revocation middleware looks up any bearer it finds) and a lockout nobody
-// could explain (a revoked sign-in answered a plain-text 401 on all four routes). The
+// could explain (a revoked sign-in answered a plain-text 401 on all five routes). The
 // shared rewrite has already taken the access cookie out of what it copied, so this reads
 // the request as it arrived, and the value goes through as it was sent.
 func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRequest) {
@@ -581,7 +609,7 @@ func accessStamp(route accessRoute, siteID, owner string) func(*httputil.ProxyRe
 }
 
 // accessStripCookie takes the access cookie out of a request leaving the edge for
-// anywhere but the four routes, and leaves the rest of the header as it was.
+// anywhere but the five routes, and leaves the rest of the header as it was.
 //
 // EVERY WAY OUT CALLS THIS. The cookie has Path=/, so a browser sends it with everything
 // (see the file note), and a session token has no business in a request to the identity

@@ -66,7 +66,7 @@
 //
 // # The access surface
 //
-// Four method and path pairs on a deployable's own origin are answered ahead of
+// Five method and path pairs on a deployable's own origin are answered ahead of
 // the bundle and of the generic /_memql/* proxy, whatever the site's apiProxy
 // says (access.go). They are how a visitor holding an access code gets in, stays
 // in and leaves, and each is forwarded to the bff's /access family:
@@ -75,6 +75,7 @@
 //	GET  /_memql/access        ->  GET  /access/session
 //	POST /_memql/access/leave  ->  POST /access/leave
 //	POST /_memql/access/call   ->  POST /access/call
+//	POST /_memql/access/guest  ->  POST /access/guest
 //
 // Anything else under the same prefix is not this surface's and reaches the
 // generic proxy as it always did. A visitor's browser has no MemQL identity to
@@ -84,6 +85,6 @@
 // session cookie's value and never decides access, which the bff does on every
 // request (design record docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md).
 // It does read the cookie's name: a __Host- cookie reaches every path on the origin,
-// so these four routes forward it and no other credential, and every other way out
+// so these five routes forward it and no other credential, and every other way out
 // of this package removes it.
 package edge

@@ -390,7 +390,7 @@ const (
 )
 
 // AccessCookieName is the cookie a visitor's session token travels in. The edge reads
-// the name and never the value: it keeps the cookie to the four routes, and the bff
+// the name and never the value: it keeps the cookie to the five routes, and the bff
 // sets it and reads it.
 //
 // THE PREFIX IS A BROWSER RULE, AND IT IS THE POINT. Any site on a shared parent domain
@@ -403,7 +403,7 @@ const (
 //
 // THE COST IS Path=/, which the prefix requires. The cookie now reaches every path on the
 // origin, so the edge removes it from everything that leaves for an upstream except the
-// four routes (accessStripCookie, component/edge).
+// five routes (accessStripCookie, component/edge).
 const AccessCookieName = "__Host-memql_access"
 
 // hexSHA256 is how every digest in this file is spelled: lowercase hex, because
