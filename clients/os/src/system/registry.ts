@@ -7,7 +7,7 @@ import type { ComponentType, ReactNode } from "react";
 
 import type { ModuleId } from "./modules";
 import { isModuleId } from "./modules";
-import { availableInAnyOrganization, hasOrganizationDecisions, holds } from "./roles";
+import { availableInAnyOrganization, decidedPerOrganization, holds } from "./roles";
 
 // WHAT A MANIFEST ASKS OF THE PERSON (epic memql#5289, design D10): a
 // capability RESOURCE, named. `requires: "app:<id>"` on an app or widget,
@@ -28,12 +28,25 @@ export type AccessResource = string;
 /** The verb that opens a surface. A named PART of an app is `execute`. */
 export const OPEN_VERB = "read";
 
-/** Whether the effective set opens a surface naming `resource`. Absent = every signed-in person. */
+/**
+ * Whether the effective set opens a surface naming `resource`. Absent = every
+ * signed-in person.
+ *
+ * A DOOR THE ENGINE ANSWERS PER ORGANIZATION OPENS WHERE AN ORGANIZATION OPENS
+ * IT. For a person whose scope reaches organizations the engine answers some
+ * doors once in each of them -- opening Email, Deployables and Pipelines today
+ * -- and their organization entries then carry that verb and resource
+ * (`decidedPerOrganization`). The merged answer beside them lets a deny in Beta
+ * shut a door Acme opens, so such a door opens where an organization opens it
+ * with that organization's data readable (`availableInAnyOrganization`): the
+ * answer Settings > Access shows, and the one the engine asks where it acts, in
+ * the target's organization. Which doors those are is the engine's to say, so
+ * none is named here. Every other surface follows the merged answer, and so
+ * does every surface for an operator, who has no organization entries.
+ */
 export function accessAdmits(resource?: AccessResource): boolean {
   if (resource === undefined) return true;
-  if ((resource === "app:email" || resource === "app:deployables") && hasOrganizationDecisions()) {
-    return availableInAnyOrganization(OPEN_VERB, resource);
-  }
+  if (decidedPerOrganization(OPEN_VERB, resource)) return availableInAnyOrganization(OPEN_VERB, resource);
   return holds(OPEN_VERB, resource);
 }
 
