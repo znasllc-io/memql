@@ -46,22 +46,24 @@ import (
 // closing it.
 //
 // So which days a run recomputes is read off the record, not off the clock:
-// today, and every day from the oldest one still in the request log through
-// yesterday that has no record. That one rule does three jobs. Yesterday is
-// recomputed until the first run at or after 02:00 finalizes it. On the first
-// run nothing is final, so every logged day is recomputed: the backfill. And an
-// outage of any length -- the cron leader down, every run failing -- leaves
-// its days open, so the next run that succeeds recomputes them, with every
-// request that arrived meanwhile. The bound is the request log's retention: a
-// day whose requests are gone cannot be recomputed and keeps the figures last
-// written for it (TestAnOutageAcrossTwoAMHealsOnTheNextRun,
-// TestAFinalDayIsNotRecomputed).
+// today, and every day of the request log's retention window (the configured
+// MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS, capped at 400; see planRollup)
+// through yesterday that has no record. That one rule does three jobs.
+// Yesterday is recomputed until the first run at or after 02:00 finalizes it.
+// On the first run nothing is final, so every day of the window is recomputed:
+// the backfill. And an outage of any length -- the cron leader down, every run
+// failing -- leaves its days open, so the next run that succeeds recomputes
+// them, with every request that arrived meanwhile. The bound is the request
+// log's retention: a day whose requests are gone cannot be recomputed and
+// keeps the figures last written for it
+// (TestAnOutageAcrossTwoAMHealsOnTheNextRun, TestAFinalDayIsNotRecomputed).
 //
 // A record lives as long as its daily row, 400 days, and so a final day stays
 // final while its figures are kept. That matters once the request log has
-// dropped the day: a request dated on it can still turn up -- an edge replica
-// whose clock lags, rows restored to the log -- and a day without a record
-// would be reopened and rewritten from that request alone
+// dropped the day: the day comes back into the window if the retention is
+// raised again, and a request dated on it can still turn up -- an edge replica
+// whose clock lags, rows restored to the log. A day without a record would
+// then be reopened and rewritten from what is left of it
 // (TestAStrayRawRowCannotReopenAFinalDay). A day that never became final
 // before its requests aged out has no record to protect it; its figures were
 // short of the day already.
@@ -212,31 +214,37 @@ type rollupDay struct {
 	backfill bool
 }
 
-// planRollup lists the days to recompute: today, then every day from the
-// oldest one still in the request log through yesterday that has no
-// finalization record, newest first.
+// planRollup lists the days to recompute: today, then every day of the request
+// log's retention window through yesterday that has no finalization record,
+// newest first.
 //
-// THE OLDEST DAY IS READ INSIDE THE DAILY TABLE'S 400 DAYS. A day older than
-// that is one the daily table does not keep, so recomputing it would write rows
-// the same run's retention deletes -- which matters only where the request log
-// is configured to keep longer than that. And a request-log row outside the
-// window (none in production; a test's, elsewhere) does not move the plan.
+// THE WINDOW IS THE CONFIGURED RETENTION (openFrom, RetentionDays), not the
+// oldest row the log holds. The oldest rows sit in a compressed chunk -- the
+// log compresses every chunk older than a day -- so asking for the first of them
+// would decompress it on every run, every five minutes. The configuration says
+// the same thing for free: the log keeps exactly that many days. A day in the
+// window with no request recomputes to nothing, in an empty range, and is
+// recorded final like any other, so it is asked once.
 //
-// Today is answered even when the reads fail, with the error beside it.
+// RetentionDays reads MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS on whichever node
+// runs the rollup, while the edge applies the same variable to the log's
+// retention policy; the window and the policy agree only if both nodes see
+// the same value. A window wider than the policy reaches days the log has
+// dropped; it recomputes them to nothing only if they are not final, which a
+// day is the morning after it ends. A narrower one leaves the older days of an
+// outage open beyond its reach.
+//
+// The plan reads only the finalization record. Today is answered even when
+// that read fails, with the error beside it.
 func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, error) {
 	today := utcMidnight(now)
 	days := []rollupDay{{day: today}}
-	var oldest time.Time
-	var logged bool
+	from := openFrom(today, RetentionDays())
 	final := map[string]bool{} // by date: time.Time's == also compares location and monotonic reading
 	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
-		var err error
-		if oldest, logged, err = oldestLoggedDay(ctx, tx, today); err != nil || !logged {
-			return err
-		}
 		var recorded []string
 		if err := tx.NewRaw(`SELECT day::text FROM edge_stats_final WHERE day >= ?::date AND day < ?::date`,
-			dateArg(oldest), dateArg(today)).Scan(ctx, &recorded); err != nil {
+			dateArg(from), dateArg(today)).Scan(ctx, &recorded); err != nil {
 			return fmt.Errorf("read the finalization record: %w", err)
 		}
 		for _, d := range recorded {
@@ -244,11 +252,11 @@ func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, er
 		}
 		return nil
 	})
-	if err != nil || !logged {
+	if err != nil {
 		return days, err
 	}
 	yesterday := today.AddDate(0, 0, -1)
-	for d := yesterday; !d.Before(oldest); d = d.AddDate(0, 0, -1) {
+	for d := yesterday; !d.Before(from); d = d.AddDate(0, 0, -1) {
 		if final[dateArg(d)] {
 			continue
 		}
@@ -259,21 +267,6 @@ func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, er
 		})
 	}
 	return days, nil
-}
-
-// oldestLoggedDay answers the UTC day of the oldest request still in the
-// request log inside the daily table's window, and false when the window holds
-// none. It is the first row of an index range, so it is cheap on every run.
-func oldestLoggedDay(ctx context.Context, tx bun.Tx, today time.Time) (time.Time, bool, error) {
-	var first sql.NullTime
-	if err := tx.NewRaw(`SELECT min(served_at) FROM edge_request WHERE served_at >= ? AND served_at < ?`,
-		dailyCutoff(today), today.AddDate(0, 0, 1)).Scan(ctx, &first); err != nil {
-		return time.Time{}, false, fmt.Errorf("read the oldest logged request: %w", err)
-	}
-	if !first.Valid {
-		return time.Time{}, false, nil
-	}
-	return utcMidnight(first.Time), true, nil
 }
 
 // recomputeDay replaces one UTC day's rows -- its hours still inside the
@@ -311,6 +304,26 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final boo
 	err := boundedTx(ctx, db, &sql.TxOptions{Isolation: sql.LevelRepeatableRead}, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 			return fmt.Errorf("take the rollup lock: %w", err)
+		}
+		// Hold the request log still while this day is read. TimescaleDB
+		// compresses a chunk under an ACCESS EXCLUSIVE lock, moving its
+		// rows and truncating the chunk, and a truncate is not MVCC-safe:
+		// what a snapshot fixed before that commit reads afterwards depends
+		// on how the moved rows were written. On the CI image (TimescaleDB
+		// 2.29) a first compression's rows stay visible to it; nothing
+		// promises that of a recompression or another version, and a day
+		// read as empty would be written empty and recorded final. ACCESS
+		// SHARE on the hypertable locks every chunk too, and it is taken
+		// here, before the first query fixes the snapshot, so the snapshot
+		// always comes after any compression or retention drop that already
+		// holds a chunk. It does not conflict with the edge's inserts (ROW
+		// EXCLUSIVE). The cost runs the other way: a compression or a drop
+		// that reaches its exclusive step while this transaction holds the
+		// lock waits for it to end, which the statement bound limits to the
+		// statements of one day's recompute
+		// (TestTheSnapshotIsTakenAfterALockOnTheDaysChunk).
+		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
+			return fmt.Errorf("hold the request log: %w", err)
 		}
 		if withHours {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?`, hourStart, dayEnd); err != nil {
@@ -672,6 +685,22 @@ func hourlyFloor(now time.Time) time.Time {
 		h = h.Add(time.Hour)
 	}
 	return h
+}
+
+// openFrom is the first day a run looks for open days on: the request log's
+// retention counted back from today, capped at the daily table's 400 days.
+// RetentionDays is clamped to 365 today, so the cap guards a future wider
+// clamp rather than a value anyone can set now.
+//
+// The oldest day of that window is whole. The log drops a chunk only once all
+// of it is older than the retention, so on day D the chunk for D-retention is
+// still there, and the one before it is the first to go.
+func openFrom(today time.Time, retentionDays int) time.Time {
+	from := today.AddDate(0, 0, -retentionDays)
+	if cutoff := dailyCutoff(today); from.Before(cutoff) {
+		from = cutoff
+	}
+	return from
 }
 
 // dailyCutoff is the oldest day the daily and top tables keep on today.

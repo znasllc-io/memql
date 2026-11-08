@@ -92,13 +92,13 @@ func finalDays(t *testing.T, db *bun.DB, from, to time.Time) map[string]time.Tim
 	return out
 }
 
-// at is an instant on a UTC day.
+// dayAt is an instant on a UTC day.
 func dayAt(day time.Time, hour, minute int) time.Time {
 	return day.Add(time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute)
 }
 
-// view is a measured page view by one visitor, with the dimensions a desktop
-// Firefox on Linux in the Netherlands would carry.
+// pageViewRow is a measured page view by one visitor, with the dimensions a
+// desktop Firefox on Linux in the Netherlands would carry.
 func pageViewRow(when time.Time, visitor, path string) Row {
 	return Row{
 		ServedAt: when, Status: 200, PathClass: PathClassDocument, Bytes: 2048, DurationNs: 3_000_000,
@@ -107,7 +107,7 @@ func pageViewRow(when time.Time, visitor, path string) Row {
 	}
 }
 
-// request is a measured request that is not a page view.
+// requestRow is a measured request that is not a page view.
 func requestRow(when time.Time, status int, bytes, durationNs int64) Row {
 	return Row{ServedAt: when, Status: status, PathClass: PathClassAsset, Bytes: bytes, DurationNs: durationNs, Measured: true}
 }
@@ -251,7 +251,7 @@ func wantFigures(t *testing.T, where string, rows map[string]rollupRow, key stri
 	}
 }
 
-// histOf is the histogram the given durations should fold into.
+// histogramOf is the histogram the given durations should fold into.
 func histogramOf(durations ...int64) []int64 {
 	h := make([]int64, histogramBuckets)
 	for _, d := range durations {
@@ -489,16 +489,21 @@ func TestTopListsKeepAHundredAndFoldTheRest(t *testing.T) {
 }
 
 // THE FIRST RUN BACKFILLS. No day has a finalization record yet, so every day
-// still in the request log is recomputed: each gets its daily row, and every
-// hour of the last thirty days its hourly row; a day older than thirty days
-// gets no hours, because the hourly table keeps thirty days. Every day before
-// today is past 02:00 of the day after it, so each is recorded final, and the
-// next run recomputes today alone.
+// of the request log's window -- its configured retention, sixty days here --
+// is recomputed: each gets its daily row, and every hour of the last thirty
+// days its hourly row; a day older than thirty days gets no hours, because the
+// hourly table keeps thirty days. A day in the window with no request is
+// recomputed to nothing and recorded final all the same. A row older than the
+// window is not read at all: the log's retention says it is not there. Every
+// day before today is past 02:00 of the day after it, so each is recorded
+// final, and the next run recomputes today alone.
 func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
+	t.Setenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS", "60")
 	now := time.Date(2036, 6, 15, 12, 0, 0, 0, time.UTC)
 	seedRequests(t, db, site,
+		pageViewRow(time.Date(2036, 4, 1, 10, 0, 0, 0, time.UTC), "b0", "/"),
 		pageViewRow(time.Date(2036, 5, 1, 10, 0, 0, 0, time.UTC), "b1", "/"),
 		pageViewRow(time.Date(2036, 6, 1, 8, 0, 0, 0, time.UTC), "b2", "/"),
 		Row{ServedAt: time.Date(2036, 6, 1, 8, 30, 0, 0, time.UTC), Status: 200},
@@ -507,15 +512,19 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	)
 
 	rep := runRollup(t, db, now)
-	// 2036-05-01 through 2036-06-15 is 46 days. The hours run from the first
-	// one the hourly table keeps, 2036-05-16 12:00, through the current one:
-	// thirty days of them and the hour under way.
-	if !rep.Backfilled || rep.Days != 46 || rep.Hours != 30*24+1 {
-		t.Errorf("the first run reported %+v, want a backfill of 46 days and %d hours", rep, 30*24+1)
+	// The window is the sixty days 2036-04-16 through 2036-06-14, and today.
+	// The hours run from the first one the hourly table keeps, 2036-05-16
+	// 12:00, through the current one: thirty days of them and the hour under
+	// way.
+	if !rep.Backfilled || rep.Days != 61 || rep.Hours != 30*24+1 {
+		t.Errorf("the first run reported %+v, want a backfill of 61 days and %d hours", rep, 30*24+1)
 	}
 	daily := dailyOf(t, db, site)
 	for _, d := range []string{"2036-05-01", "2036-06-01", "2036-06-14", "2036-06-15"} {
 		wantFigures(t, "backfilled day", daily, d, measuredFigures(1, 1, 1, 1))
+	}
+	if _, ok := daily["2036-04-01"]; ok {
+		t.Error("a day older than the request log's retention was recomputed")
 	}
 	if r := daily["2036-06-01"]; r.Requests != 2 {
 		t.Errorf("2036-06-01 counts %d requests, want 2", r.Requests)
@@ -529,12 +538,15 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	if _, ok := hourly["2036-05-01T10"]; ok {
 		t.Error("an hour 45 days old was written, past the hourly table's thirty days")
 	}
-	final := finalDays(t, db, time.Date(2036, 5, 1, 0, 0, 0, 0, time.UTC), now)
-	if len(final) != 45 {
-		t.Errorf("%d days were recorded final, want the 45 before today", len(final))
+	final := finalDays(t, db, time.Date(2036, 3, 1, 0, 0, 0, 0, time.UTC), now)
+	if len(final) != 60 {
+		t.Errorf("%d days were recorded final, want the 60 of the window, empty ones included", len(final))
 	}
 	if _, ok := final["2036-06-15"]; ok {
 		t.Error("today was recorded final")
+	}
+	if _, ok := final["2036-04-01"]; ok {
+		t.Error("a day older than the window was recorded final")
 	}
 
 	again := runRollup(t, db, now)
@@ -543,10 +555,10 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 	}
 }
 
-// A run that stops part way is finished by the next one. A run walks from the
-// newest day to the oldest and stops at the first day it could not write, so
-// what it leaves is the oldest days, without a finalization record -- and the
-// next run recomputes every day without one.
+// A run that is cut off part way is finished by the next one. A run carries on
+// past a day it could not write; only a cancelled context stops it -- a node
+// shutting down mid-run, say -- and the days it had not reached are left
+// without a finalization record, which the next run recomputes.
 func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -556,7 +568,7 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	}
 	runRollup(t, db, now)
 
-	// What a run that stopped after 2036-06-12 leaves behind: the days before
+	// What a run cancelled after 2036-06-12 leaves behind: the days before
 	// it neither written nor recorded final.
 	for _, q := range []string{
 		"DELETE FROM edge_stats_daily WHERE site_id = ? AND day < '2036-06-12'",
@@ -645,9 +657,10 @@ func TestAFailedDayDoesNotHoldBackOtherDays(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2036-06-10") {
 		t.Fatalf("the run reported %v, want the failure of 2036-06-10", err)
 	}
-	// Today and the fifteen open days 2036-06-05..19, less the one that failed.
-	if !rep.Backfilled || rep.Days != 15 {
-		t.Errorf("the failing run reported %+v, want every day written but the one that failed: 15", rep)
+	// Today and the thirty open days of the window, 2036-05-21..06-19, less
+	// the one that failed.
+	if !rep.Backfilled || rep.Days != 30 {
+		t.Errorf("the failing run reported %+v, want every day written but the one that failed: 30", rep)
 	}
 	daily := dailyOf(t, db, site)
 	for d, want := range map[string]bool{"2036-06-20": true, "2036-06-15": true, "2036-06-10": false, "2036-06-05": true} {
@@ -783,10 +796,11 @@ func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 }
 
 // A FINAL DAY STAYS FINAL. Once the request log's retention has dropped a
-// day's requests, a stray request for it -- an edge replica whose clock lags,
-// or rows restored to the log -- must not reopen the day and rewrite its
-// figures from what little is there. The day's record lives as long as its
-// daily row, so the run leaves it alone.
+// day's requests, the day can come back into a run's window -- the retention
+// raised again -- and a stray request for it can turn up -- an edge replica
+// whose clock lags, rows restored to the log. Neither may reopen the day and
+// rewrite its figures from what little is there. The day's record lives as
+// long as its daily row, so the run leaves it alone.
 func TestAStrayRawRowCannotReopenAFinalDay(t *testing.T) {
 	db := rollupTestDB(t)
 	site := "site-rollup-" + suffix(t)
@@ -801,14 +815,17 @@ func TestAStrayRawRowCannotReopenAFinalDay(t *testing.T) {
 	runRollup(t, db, now)
 	wantFigures(t, "the day", dailyOf(t, db, site), "2036-08-01", measuredFigures(3, 3, 3, 3))
 
-	// The request log's retention drops the day: the oldest day still logged
-	// is now 2036-08-05, and a run's retention passes over the day's record.
+	// The request log is cut to five days, which drops the day's requests, and
+	// a run passes with the day outside its window.
+	t.Setenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS", "5")
 	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_request WHERE served_at >= ? AND served_at < ?", day, day.AddDate(0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
 	runRollup(t, db, now.Add(5*time.Minute))
 
-	// A replica with a lagging clock writes a request dated on the day.
+	// Then the retention goes back to thirty days, bringing the day back into
+	// the window, and a replica with a lagging clock writes a request on it.
+	t.Setenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS", "30")
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 12, 0), "stray", "/stray"))
 	rep := runRollup(t, db, now.Add(10*time.Minute))
 	if rep.Days != 1 {
@@ -983,12 +1000,15 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The oldest day still in the request log is 2036-08-10. The record for
-	// 2036-08-05 is older than that and stays all the same: its daily row is
-	// kept 400 days, and so is the record that keeps it final.
-	seedRequests(t, db, site, pageViewRow(time.Date(2036, 8, 10, 9, 0, 0, 0, time.UTC), "r-oldest", "/"))
+	// Records for days inside and outside the run's window: 2036-07-21 and
+	// 2036-08-01 are final, as every past day is in practice, so the run leaves
+	// the rows above for retention to judge; the day cutoff and the day before
+	// it are outside the window. A record goes with its daily row, after 400
+	// days, and with nothing else. 2036-08-10 has a request and no record, so
+	// the run recomputes it and records it final.
+	seedRequests(t, db, site, pageViewRow(time.Date(2036, 8, 10, 9, 0, 0, 0, time.UTC), "r-open", "/"))
 	recordedAt := time.Date(2036, 8, 13, 3, 0, 0, 0, time.UTC)
-	for _, d := range []string{dayCutoff.AddDate(0, 0, -1).Format(time.DateOnly), dayCutoff.Format(time.DateOnly), "2036-08-05", "2036-08-12"} {
+	for _, d := range []string{dayCutoff.AddDate(0, 0, -1).Format(time.DateOnly), dayCutoff.Format(time.DateOnly), "2036-07-21", "2036-08-01", "2036-08-05", "2036-08-12"} {
 		if _, err := db.ExecContext(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)`, d, recordedAt); err != nil {
 			t.Fatal(err)
 		}
@@ -1036,13 +1056,13 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 	if _, ok := final[old.Format(time.DateOnly)]; ok {
 		t.Error("a finalization record older than 400 days was kept")
 	}
-	for _, d := range []string{dayCutoff.Format(time.DateOnly), "2036-08-05", "2036-08-12"} {
+	for _, d := range []string{dayCutoff.Format(time.DateOnly), "2036-07-21", "2036-08-01", "2036-08-05", "2036-08-12"} {
 		if got, ok := final[d]; !ok || !got.Equal(recordedAt) {
 			t.Errorf("the record for %s = %v (%v), want it kept as it was", d, got, ok)
 		}
 	}
 	if _, ok := final["2036-08-10"]; !ok {
-		t.Error("the oldest logged day was not recorded final by the run")
+		t.Error("an open day in the window was not recorded final by the run")
 	}
 }
 
@@ -1312,6 +1332,88 @@ func TestDaysAndHoursAreUTCWhateverTheSessionTimeZone(t *testing.T) {
 	daily := dailyOf(t, db, site)
 	wantFigures(t, "UTC day", daily, "2036-05-12", measuredFigures(1, 1, 1, 1))
 	wantFigures(t, "UTC day", daily, "2036-05-13", measuredFigures(1, 1, 1, 1))
+}
+
+// ONE SNAPSHOT, FIXED AFTER WHATEVER HOLDS THE DAY'S CHUNK. TimescaleDB
+// compresses a chunk under an exclusive lock and moves its rows as it goes, and
+// a recompute whose snapshot was fixed before such a change committed would
+// read the day as that change left it for an older snapshot -- empty, if the
+// move truncates. The recompute takes ACCESS SHARE on edge_request before its
+// first query, so it waits for the holder and fixes its snapshot only after the
+// holder has committed. Here the holder locks today's chunk as compression does
+// and writes a page view under the lock; the recompute must count it.
+//
+// The holder is simulated, not a real compress_chunk: on the CI image a
+// snapshot taken before a first compression still reads the compressed rows,
+// so a real compression would not tell the two orders apart. A committed write
+// under the same lock does, and it is the ordering the lock exists to give.
+func TestTheSnapshotIsTakenAfterALockOnTheDaysChunk(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	ctx := context.Background()
+	day := time.Date(2036, 9, 5, 0, 0, 0, 0, time.UTC)
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 9, 0), "h1", "/"))
+
+	// The day's chunk where TimescaleDB keeps one, else the table itself.
+	target := "edge_request"
+	var timescale bool
+	if err := db.NewRaw("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb')").Scan(ctx, &timescale); err != nil {
+		t.Fatal(err)
+	}
+	if timescale {
+		if err := db.NewRaw(`SELECT c::text FROM show_chunks('edge_request', newer_than => ?::timestamptz, older_than => ?::timestamptz) c LIMIT 1`,
+			day, day.AddDate(0, 0, 1)).Scan(ctx, &target); err != nil {
+			t.Fatalf("find the day's chunk: %v", err)
+		}
+	}
+
+	holder, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Rollback() })
+	if _, err := holder.ExecContext(ctx, "LOCK TABLE "+target+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatalf("lock %s: %v", target, err)
+	}
+	held := []Row{pageViewRow(dayAt(day, 10, 0), "h2", "/held")}
+	held[0].Id, held[0].SiteId, held[0].Node = newRowId(), site, "edge-rollup-test"
+	if _, err := holder.NewInsert().Model(&held).Exec(ctx); err != nil {
+		t.Fatalf("write under the lock: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Rollup(ctx, db, dayAt(day, 12, 0))
+		done <- err
+	}()
+	// Commit only once the recompute is waiting on the lock.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := db.NewRaw(`SELECT count(*) FROM pg_locks WHERE locktype = 'relation' AND relation = ?::regclass AND NOT granted`,
+			target).Scan(ctx, &waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the rollup never waited on %s, so this test would prove nothing", target)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Rollup: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the rollup did not finish after the lock was released")
+	}
+	wantFigures(t, "the day", dailyOf(t, db, site), "2036-09-05", measuredFigures(2, 2, 2, 2))
 }
 
 // Two runs at once -- a leader change mid-run, say -- both finish, and the rows
