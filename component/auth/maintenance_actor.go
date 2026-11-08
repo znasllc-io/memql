@@ -105,6 +105,14 @@ var maintenanceAutomations = map[string]string{
 	// party's bytes -- not grounds for granting cross-owner authority to an
 	// event-triggered run.
 	"checkDeployableHealth": "engine-owned scheduled availability checks across every owner's published sites; without a cluster maintenance principal an unobserved site would remain indistinguishable from a healthy one",
+	"siteStatisticsRollupSweep": "the five-minute fold of the edge's request log into every deployable's website " +
+		"statistics (the 2026-11-08 statistics design, D6 and D17). It is a cross-owner roll-up by nature: one " +
+		"statement per day over every site's requests, never one owner's at a time. What needs the principal is " +
+		"logsRetentionSweep's reason: edge_request and the three rollup tables are dedicated tables no row " +
+		"admission ever sees, and builtin siteStatisticsRollup admits this principal and no other caller in its " +
+		"Go handler. Without it the automation's RoleReader system actor is refused every five minutes, nothing " +
+		"is folded, and every deployable's statistics read as not measured -- a failure that looks like a site " +
+		"nobody has measured yet",
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
 		"nothing looks exactly like a sweep with nothing to retire",

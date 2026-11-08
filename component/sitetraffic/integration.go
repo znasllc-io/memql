@@ -6,16 +6,21 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// The DSL-callable half: `builtin siteTrafficInWindow`, declared in
-// dsl/platform/builtins.memql and executed here.
+// The DSL-callable half: `builtin siteTrafficInWindow` and `builtin
+// siteStatisticsRollup`, declared in dsl/platform/builtins.memql and executed
+// here. The first is a read any caller makes about the deployables they may
+// see; the second is the five-minute rollup (rollup.go), which only its
+// scheduled automation's maintenance principal may run.
 //
 // # Why a builtin rather than a query
 //
@@ -46,11 +51,32 @@ const integrationName = "siteTraffic"
 // a client that knows the concept rather than a shape somebody has to guess.
 const resultConcept = "v1:observability:siteTraffic"
 
-// Integration exposes the read capability.
+// rollupConcept is the concept of the one node the rollup answers with, its
+// report. Not a DSL concept: nothing stores it and no client reads it, the
+// logStore sweep's precedent (integration:logs:sweep).
+const rollupConcept = "integration:siteTraffic:rollup"
+
+// rollupPrincipal is the only caller the rollup admits: the maintenance
+// principal its scheduled automation runs under
+// (auth.MaintenanceActor("siteStatisticsRollupSweep")).
+const rollupPrincipal = "system:maintenance:siteStatisticsRollupSweep"
+
+// Integration exposes the read and the rollup.
 type Integration struct {
 	engine Engine
 	bunDB  func() *bun.DB
 	logger *slog.Logger
+
+	// now is the rollup's clock; nil is time.Now. A field so a test runs the
+	// builtin at an instant of its own choosing.
+	now func() time.Time
+
+	// rollupRunning keeps one rollup per process. A run slower than the
+	// five-minute schedule must not have the next one queue up behind it --
+	// each would wait on the table lock and then redo the same days. The
+	// lock in rollup.go is what keeps two REPLICAS apart; this keeps one
+	// process from stacking its own runs.
+	rollupRunning atomic.Bool
 }
 
 // NewIntegration wires the handles. The db getter is resolved lazily at call
@@ -87,7 +113,73 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"summary":     "boolean -- one row per deployable for the whole window instead of one per bucket",
 			},
 		},
+		{
+			Name:        "rollup",
+			Description: "Fold the edge's request log into hourly and daily website statistics: every hour of today and today itself (yesterday too until 02:00 UTC), a backfill of any logged day no run has covered, then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
+			Handler:     i.handleRollup,
+		},
 	}
+}
+
+// handleRollup runs the rollup for the scheduled automation, and for nobody
+// else, and answers one node with its report.
+//
+// THE PRINCIPAL AND NOTHING ELSE, the site health sweep's rule
+// (component/sitehealth). The rollup writes every deployable's statistics and
+// spends the database's time on a schedule; a cluster owner has no reason to
+// run it by hand, and an owner who could would only queue a second run behind
+// the lock. So the check is the automation's own maintenance id together
+// with the cluster-owner role that principal carries -- the id alone with any
+// other role is refused, as is any other automation's principal.
+//
+// A failed period is logged here and returned, so the automation's run says
+// it failed; the next run recomputes the period (rollup.go).
+func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	actor, ok := auth.AccessFromContext(ctx)
+	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() {
+		return nil, fmt.Errorf("site statistics rollup requires the engine maintenance principal")
+	}
+	if !i.rollupRunning.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	defer i.rollupRunning.Store(false)
+
+	var db *bun.DB
+	if i.bunDB != nil {
+		db = i.bunDB()
+	}
+	now := time.Now()
+	if i.now != nil {
+		now = i.now()
+	}
+	rep, err := Rollup(ctx, db, now)
+	if err != nil {
+		i.logger.Warn("Site statistics rollup left periods for the next run",
+			"component", "sitetraffic", "days", rep.Days, "hours", rep.Hours,
+			"backfilled", rep.Backfilled, "deleted", rep.Deleted, "error", err)
+		return nil, err
+	}
+	// A routine run is the same line every five minutes, so it is Debug; a
+	// backfill or a retention delete is a change worth a line at Info.
+	level := slog.LevelDebug
+	if rep.Backfilled || rep.Deleted > 0 {
+		level = slog.LevelInfo
+	}
+	i.logger.Log(ctx, level, "Site statistics rolled up",
+		"component", "sitetraffic", "days", rep.Days, "hours", rep.Hours,
+		"backfilled", rep.Backfilled, "deleted", rep.Deleted)
+
+	payload, err := json.Marshal(rep)
+	if err != nil {
+		return nil, fmt.Errorf("site statistics rollup: encode the report: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        "siteStatisticsRollup",
+		Concept:   rollupConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: now.UTC(),
+		Payload:   payload,
+	}}, nil
 }
 
 func (i *Integration) handleInWindow(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

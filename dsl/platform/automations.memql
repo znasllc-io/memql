@@ -125,6 +125,27 @@ automation checkDeployableHealth {
   sweep := builtin siteHealthSweep()
 }
 
+/// Fold the edge's request log into every deployable's website statistics (the 2026-11-08
+/// statistics design, section 5).
+///
+/// EVERY FIVE MINUTES ON THE CRON LEADER, so while runs succeed a figure is at most five minutes
+/// behind the traffic it counts, and one replica writes each run. A run recomputes today -- every
+/// hour of it, because a visit is a window over the whole day's page views and a page view now can
+/// stop an earlier hour's one-page visit from being a bounce -- and yesterday until 02:00 UTC.
+///
+/// THE WORK IS A BUILTIN, builtin siteStatisticsRollup in component/sitetraffic, because none of it
+/// is graph work. It reads the edge_request log and writes three plain rollup tables, none of them a
+/// concept, and its figures are a COUNT(DISTINCT) over visitors and a window over each visitor's
+/// page views -- neither a query nor a continuous aggregate can fold them.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller, so the default reader actor would be
+/// refused on every run.
+@trigger(schedule="0 */5 * * * *")
+automation siteStatisticsRollupSweep {
+  roll := builtin siteStatisticsRollup()
+}
+
 /// The FOURTH observation of a storefront preview, and the only passive one (epic memql#5531,
 /// issue memql#5547): an order arrived in the mirror under a store somebody is exercising a
 /// candidate against.

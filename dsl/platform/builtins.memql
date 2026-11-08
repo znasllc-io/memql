@@ -244,6 +244,13 @@ builtin siteTrafficInWindow {
   summary      boolean    @description("Fold the whole window into one row per deployable instead of one row per bucket. Summed in the database, which is the point of the mode.")
 }
 
+/// The website statistics rollup (the 2026-11-08 statistics design, section 5). NO @sdk: it is the
+/// siteStatisticsRollupSweep automation's work, and its handler admits that automation's maintenance
+/// principal and no other caller, a cluster owner included.
+@executor("integration.siteTraffic.rollup")
+@description("Fold the edge's request log into every deployable's website statistics. Recomputes every hour of today and today itself, and yesterday until 02:00 UTC, as hourly and daily rows -- visitors, visits, bounces, page views, requests, errors, not found, bytes, bot requests and a response-time histogram -- and the day's top pages, sources, countries, devices, browsers and systems; a visit is one visitor's page views with no gap over thirty minutes, counted in the hour it started. On the first run it backfills every day the request log still holds. Then it deletes hourly rows past thirty days and daily and top rows past four hundred days. Each day is its own transaction, so a day that fails costs only itself and is recomputed by the next run that covers it. Answers {hours, days, backfilled, deleted}.")
+builtin siteStatisticsRollup { }
+
 // ---- the deploy pipeline (epic memql#4794) ----
 //
 // Three capabilities and one shape: each runs under the CALLER's actor,

@@ -132,6 +132,15 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// approval rather than a write anybody has to trust.
 		"routingEvidenceFold",
 		"seedSelfAccount",
+		// siteStatisticsRollupSweep (the 2026-11-08 statistics design) is
+		// logsRetentionSweep's case with a cross-owner read besides: it folds
+		// every deployable's requests into its statistics in one statement per
+		// day, and the rows it reads and writes are dedicated tables outside
+		// graph admission. What needs the principal is the builtin's own
+		// floor -- siteStatisticsRollup admits this principal and nobody else
+		// -- so under the default RoleReader actor every run is refused and
+		// every deployable's statistics read as not measured.
+		"siteStatisticsRollupSweep",
 		"sweepAbandonedPackageDeployments",
 		// sweepConstructReuse (epic memql#5414) reads before it knows whose,
 		// for mineProcedureCorpusAcrossAutomations' reason: a schedule carries

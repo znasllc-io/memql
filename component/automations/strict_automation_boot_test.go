@@ -266,7 +266,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 196 -> 197: reclaimClosedChunkSpace, the nightly closed-chunk compaction
 // that gives back the space retention deletes leave in closed MemoryNodes
 // chunks (2026-11-06). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 197
+// 197 -> 198: siteStatisticsRollupSweep, the five-minute fold of the edge's
+// request log into website statistics (2026-11-08). One added, none removed;
+// measured by the strict loader.
+const shippedAutomationCount = 198
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
