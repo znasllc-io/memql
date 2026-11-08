@@ -154,9 +154,10 @@ func HandlerAuthorizedPaths() []string {
 	// entry stops being true -- which is why TestFrontDoorPathsAreNotStale
 	// and the classification map are where that change would be caught.
 	paths = append(paths, ShopperSurfacePaths()...)
-	// POST /access/unlock, GET /access/session, POST /access/leave + POST /access/call
-	// -- a deployable's ACCESS SURFACE (design record 2026-10-29, section 6). The
-	// caller is a visitor with a code and no MemQL identity, so this cannot be an
+	// POST /access/unlock, GET /access/session, POST /access/leave, POST /access/call +
+	// POST /access/guest -- a deployable's ACCESS SURFACE (design record 2026-10-29,
+	// section 6, and 2026-11-08, section 6, for the guest route). The caller is a visitor
+	// with a code, or a guest with none, and no MemQL identity, so this cannot be an
 	// ordinary authenticated route.
 	//
 	// It qualifies under the rule above: with no credentials it fails CLOSED, and
@@ -167,6 +168,11 @@ func HandlerAuthorizedPaths() []string {
 	// gets nothing from naming somebody real. Nothing runs without a session the store
 	// still honours, minted from a code an operator made, and a construct runs only once
 	// the site's own owner has been shown able to read the site and its package.
+	//
+	// THE GUEST ROUTE NEEDS NO CODE, and it is the one place a stamped request with no
+	// credential of its own costs a read: the site's guest pass, by the site's own digest.
+	// It opens a session only on a pass an operator made, for one gate, with an end, so it
+	// fails closed on every deployable whose operator has not let guests in.
 	//
 	// The same qualification as the entry above, and it is as real: the stamp is
 	// trusted because the route is classified servedButNotExternallyRouted, which is a
@@ -303,7 +309,7 @@ func SelfAuthenticatedPaths() []string {
 	return append(paths, ShopperSelfAuthenticatedPaths()...)
 }
 
-// AccessSelfAuthenticatedPaths returns the four exact routes of the access surface.
+// AccessSelfAuthenticatedPaths returns the five exact routes of the access surface.
 //
 // WITHOUT THIS LIST THE SURFACE DOES NOT EXIST. The bff installs a verifier ahead of
 // its mux and a visitor carries no MemQL credential and never will

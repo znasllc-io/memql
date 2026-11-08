@@ -17,8 +17,9 @@ import (
 // 2026-10-29-deployable-access-codes, section 6).
 //
 // THE BFF ONLY, for the reason the shopper surface is: this is the node the edge
-// forwards to, and the caller is a visitor with a code and no MemQL identity. No
-// internal node should carry it. Only transportBFF calls mountAccessSurface.
+// forwards to, and the caller is a visitor with a code, or a guest with none, and no
+// MemQL identity. No internal node should carry it. Only transportBFF calls
+// mountAccessSurface.
 //
 // NO BUILD TAG ON THIS FILE, unlike transport_shopper_surface.go, and the reason is
 // where the test of it can run. The db-gated lane compiles this package with no tags,
@@ -178,6 +179,13 @@ func (s *accessStore) CodeByHash(ctx context.Context, siteID, codeHash string) (
 func (s *accessStore) CodeByID(ctx context.Context, codeID string) (*server.AccessCode, error) {
 	code, err := s.graph.CodeByID(ctx, codeID)
 	return accessCodeOf(code), err
+}
+
+// GuestPassForSite is the site's guest pass that has not been removed, as the store reads
+// it: the same row, converted the same way, as a code a session is checked against.
+func (s *accessStore) GuestPassForSite(ctx context.Context, siteID string) (*server.AccessCode, error) {
+	pass, err := s.graph.GuestPassForSite(ctx, siteID)
+	return accessCodeOf(pass), err
 }
 
 func (s *accessStore) SessionByTokenHash(ctx context.Context, tokenHash string) (*server.AccessSession, error) {

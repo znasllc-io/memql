@@ -1097,19 +1097,20 @@ func ShopperSurfacePaths() []string {
 
 // AccessSurfacePaths declares the base a deployable's ACCESS SURFACE mounts under
 // on the bff (design record 2026-10-29-deployable-access-codes, section 6): POST
-// /access/unlock, GET /access/session, POST /access/leave and POST /access/call. A
+// /access/unlock, GET /access/session, POST /access/leave, POST /access/call and POST
+// /access/guest (design record 2026-11-08-deployable-guest-access, section 6). A
 // hosted site reaches them on its OWN origin under /_memql/access, which the edge
 // maps to these, as it does for the shopper surface above. Nothing about them
 // speaks gRPC, and nothing else in the tree mounts /access/.
 //
 // A PREFIX, because that is the mount: GET and POST on one base, with the handler
-// answering 404 for everything that is not one of its four pairs, so "there is
+// answering 404 for everything that is not one of its five pairs, so "there is
 // nothing here" has one answer rather than a 405 a prober can tell apart. What the
 // verifier steps aside for is narrower, and is AccessSelfAuthenticatedPaths.
 //
-// WHY HTTP AT ALL. Owner-approved exception, 2026-10-29. A visitor's browser has no
-// MemQL identity to open a stream with, and only an HTTP response can set an HttpOnly
-// cookie, so the other party dictates the wire.
+// WHY HTTP AT ALL. Owner-approved exception, 2026-10-29, and for the guest route
+// 2026-11-08. A visitor's browser has no MemQL identity to open a stream with, and only
+// an HTTP response can set an HttpOnly cookie, so the other party dictates the wire.
 //
 // IN HandlerAuthorizedPaths(), NOT PublicPaths(), for ShopperSurfacePaths' reason:
 // the handler authorizes every request itself and FAILS CLOSED WITH NO CREDENTIALS. A

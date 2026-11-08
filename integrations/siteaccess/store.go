@@ -45,7 +45,7 @@ import (
 // with the site's own ownerUserId once a digest has found a row and before anything is
 // delivered, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
-// why a caller outside this package holds only the seven functions below. A test persona
+// why a caller outside this package holds only the eight functions below. A test persona
 // is judged under the caller, at the reads above, and only asked after that whether its
 // session is still live: see asCluster.
 //
@@ -96,6 +96,12 @@ type Code struct {
 	Generation                                  int
 	ExpiresAt                                   time.Time
 	Revoked                                     bool
+	// Guest is true for a site's guest pass: a row with no code behind it, whose digest
+	// is the site's guest digest (memql.AccessGuestPassDigest). A row that says nothing
+	// is a code, which is every row written before guest passes existed. It is here
+	// rather than only on the operator's view because the bff says it back in every reply
+	// about a session, so a page can tell a guest's from a code holder's.
+	Guest bool
 }
 
 // Session is one v1:platform:siteAccessSession as the access decision needs it.
@@ -253,6 +259,25 @@ func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*
 	return &code, nil
 }
 
+// GuestPassForSite finds a site's guest pass for the guest route: the one not removed, or
+// (nil, nil) when the site has none (design record 2026-11-08, section 6). A pass past its
+// end still answers, as an expired code does from CodeByHash: it lets nobody in, and which
+// reply that means is the handler's.
+//
+// IT IS livePassForSite, READ AND CHOICE, so the route a visitor opens and the mint that
+// refuses a second pass can never disagree about which pass stands. That is one read
+// through the digest index, by the site's guest digest, as the cluster acting, and it
+// checks no owner, for CodeByHash's reason. It is also the whole of what a guest open costs
+// when the site lets nobody in, so it stays one read.
+func (s *GraphStore) GuestPassForSite(ctx context.Context, siteID string) (*Code, error) {
+	pass, ok, err := s.livePassForSite(ctx, siteID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	code := pass.Code
+	return &code, nil
+}
+
 // CodeByID resolves the code a session was opened with. A miss is (nil, nil). It reads
 // as the cluster acting, for CodeByHash's reason.
 func (s *GraphStore) CodeByID(ctx context.Context, codeID string) (*Code, error) {
@@ -353,19 +378,15 @@ type siteView struct {
 }
 
 // codeView is a Code with what only the operator's surface reads: the row's own
-// words, as they were stored, and the version an act decides from. The label is
-// the Code's own, since the handler stamps it too.
+// words, as they were stored, and the version an act decides from. The label and
+// whether the row is a guest pass are the Code's own, since the handler needs both.
 type codeView struct {
 	Code
 	Hint      string
 	IssuedAt  string
 	ExpiresOn string // expiresAt as stored; Code.ExpiresAt is the same value parsed
 	RevokedAt string
-	// Guest is true for a site's guest pass: a row with no code behind it, whose digest
-	// is the site's guest digest (memql.AccessGuestPassDigest). A row that says nothing
-	// is a code, which is every row written before guest passes existed.
-	Guest   bool
-	Version time.Time
+	Version   time.Time
 }
 
 func codeFromRow(r map[string]any) codeView {
@@ -381,12 +402,12 @@ func codeFromRow(r map[string]any) codeView {
 			Generation: rowInt(r, "generation"),
 			ExpiresAt:  rowTime(r, "expiresAt"),
 			Revoked:    revokedAt != "",
+			Guest:      rowBool(r, "guest"),
 		},
 		Hint:      rowString(r, "codeHint"),
 		IssuedAt:  rowString(r, "issuedAt"),
 		ExpiresOn: rowString(r, "expiresAt"),
 		RevokedAt: revokedAt,
-		Guest:     rowBool(r, "guest"),
 		Version:   rowTime(r, "createdAt"),
 	}
 }

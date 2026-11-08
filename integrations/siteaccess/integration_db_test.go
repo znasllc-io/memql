@@ -874,6 +874,88 @@ func TestGuestPassAllowedAgainAfterRemoval(t *testing.T) {
 	require.False(t, ok, "a code read as a guest pass")
 }
 
+// THE GUEST ROUTE OPENS THE PASS THAT STANDS, NEVER THE FIRST ROW ITS DIGEST FINDS. A site that
+// turned guest access off and on again holds a row for each time, all under one digest, and
+// GuestPassForSite is what the bff asks (design record 2026-11-08, section 6). It is read as
+// the cluster, so no caller's tier decides which pass a visitor is let in on.
+func TestGuestTakesTheLivePassAmongRemovedOnes(t *testing.T) {
+	w := newWorld(t, "guestroute")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	background := context.Background()
+
+	pass, err := store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a deployable that never let guests in has a pass")
+
+	// CREATE, REMOVE, CREATE: two rows under the site's guest digest, the first removed.
+	first := w.allowGuests(operator, map[string]any{"gate": "clients", "label": "Earlier guests"})
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": first}, 0)
+	require.NoError(t, err)
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a pass that was turned off still opens a guest session")
+
+	second := w.allowGuests(operator, map[string]any{"subject": "acme"})
+	require.Equal(t, 2, w.passesOn(w.site), "the site does not hold both rows, so this proves nothing about choosing")
+
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.NotNil(t, pass, "the pass that stands is not found")
+	require.Equal(t, second, pass.ID, "the guest route took the removed pass: it shares the live one's digest")
+	require.True(t, pass.Guest, "the pass does not say it is one, so a guest's reply would call the session a code's")
+	require.False(t, pass.Revoked)
+	require.Equal(t, w.site, pass.SiteID, "the site comes back bare")
+	require.Equal(t, w.account, pass.AccountID, "the account comes back bare: the handler compares it with the site's")
+	require.Equal(t, "dashboard", pass.Gate)
+	require.Equal(t, "acme", pass.Subject)
+	require.Equal(t, "Guests", pass.Label, "a mutation that declares accessCodeLabel is stamped with this")
+	require.Equal(t, 1, pass.Generation)
+	require.WithinDuration(t, time.Now().Add(time.Hour), pass.ExpiresAt, time.Minute)
+
+	// A GUEST'S SESSION IS CHECKED AS A CODE'S, by the pass's id, and that read has to see the
+	// same row the guest route did, saying the same thing about it.
+	byID, err := store.CodeByID(background, second)
+	require.NoError(t, err)
+	require.Equal(t, pass, byID, "the guest route and the session check disagree about one pass")
+
+	// PAST ITS END IT STILL ANSWERS, as a code past its expiry does: which reply that is, is
+	// the handler's.
+	w.moveExpiry(second, time.Now().Add(-time.Minute))
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.NotNil(t, pass, "a pass past its end read as no pass")
+	require.Equal(t, second, pass.ID)
+	require.True(t, pass.ExpiresAt.Before(time.Now()), "the pass's end is not the one stored")
+
+	// TURNED OFF AGAIN, the site has no pass, though it holds two rows under the digest.
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": second}, 0)
+	require.NoError(t, err)
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a deployable with every pass turned off still lets guests in")
+
+	// ANOTHER DEPLOYABLE'S PASS IS ITS OWN, and a site with codes and no pass has none.
+	other := "ac-site-other-" + w.suffix
+	w.siteRow(other, nil)
+	theirs := w.allowGuests(operator, map[string]any{"siteId": other})
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "this site's read found another site's pass")
+	pass, err = store.GuestPassForSite(background, other)
+	require.NoError(t, err)
+	require.NotNil(t, pass)
+	require.Equal(t, theirs, pass.ID)
+	require.Equal(t, other, pass.SiteID)
+
+	plain := "ac-site-plain-" + w.suffix
+	w.siteRow(plain, nil)
+	w.mint(operator, map[string]any{"siteId": plain})
+	pass, err = store.GuestPassForSite(background, plain)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a code read as a guest pass")
+}
+
 // TWO OPERATORS ALLOWING GUESTS AT ONCE LEAVE ONE PASS. Neither mint writes the site, so
 // the site's witness cannot tell them apart: both would find the site as they read it.
 // What does is the pass's id, the same for both because both read the same passes, and a
@@ -3334,6 +3416,7 @@ func TestTheStoreFindsCodesAndSessions(t *testing.T) {
 	require.Equal(t, "acme", got.Subject)
 	require.Equal(t, 1, got.Generation)
 	require.False(t, got.Revoked)
+	require.False(t, got.Guest, "a code reads as a guest pass, so its holder's replies would call the session a guest's")
 	require.WithinDuration(t, time.Now().Add(time.Hour), got.ExpiresAt, time.Minute)
 
 	byID, err := store.CodeByID(background, codeID)
@@ -3536,6 +3619,10 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		_, err = store.SessionByTokenHash(context.Background(), token)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), token)
+		clean(t, err.Error())
+		_, err = store.GuestPassForSite(context.Background(), w.site)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), memql.AccessGuestPassDigest(w.site))
 		clean(t, err.Error())
 		err = store.CreateSession(context.Background(), w.owner, Session{SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now()}, token)
 		require.Error(t, err)
