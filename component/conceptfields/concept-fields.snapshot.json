@@ -2814,7 +2814,8 @@
         "origin": [
           "added",
           "domain",
-          "invitation"
+          "invitation",
+          "role-test"
         ],
         "status": [
           "active",
