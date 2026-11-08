@@ -366,7 +366,7 @@ function AccessAnswers({
                 Remove
               </Button>
             ) : (
-              <Button key="revoke" disabled={busy} onClick={() => onRevoke(grant, r)} ariaLabel={`Use the role's answer for ${r.label}`}>
+              <Button key="revoke" disabled={busy} onClick={() => onRevoke(grant, r)} ariaLabel={`Use role for ${r.label}`}>
                 Use role
               </Button>
             ),

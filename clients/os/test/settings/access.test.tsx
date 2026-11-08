@@ -607,11 +607,11 @@ describe("by person: the acts", () => {
     });
     mount(state);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]));
+    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use role for publish"]));
     // Held from the role: only Deny changes it.
     expect(actsOf("app:deployables")).toEqual(["Deny Deployables to Ada Lovelace"]);
     // Allowed by their own grant: Deny, or back to the role; never a second Allow.
-    expect(actsOf("app:files")).toEqual(["Deny Files to Ada Lovelace", "Use the role's answer for Files"]);
+    expect(actsOf("app:files")).toEqual(["Deny Files to Ada Lovelace", "Use role for Files"]);
     // Held through a group, their own grant on it revoked: nothing of theirs to revoke.
     expect(actsOf("app:logs")).toEqual(["Deny Logs to Ada Lovelace"]);
     // Nothing grants it: only Allow changes it.
@@ -619,7 +619,7 @@ describe("by person: the acts", () => {
 
     // Use role revokes the very grant the person holds on that pair.
     await act(async () => {
-      fireEvent.click(within(rowFor("app:deployables/publish")).getByRole("button", { name: "Use the role's answer for publish" }));
+      fireEvent.click(within(rowFor("app:deployables/publish")).getByRole("button", { name: "Use role for publish" }));
     });
     await waitFor(() => expect(state.calls.find((c) => c.name === "grantRevoke")?.call).toContain('grantId: "grant-1"'));
   });
@@ -640,7 +640,7 @@ describe("by person: the acts", () => {
     });
     mount(state);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]));
+    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use role for publish"]));
     await pickSubject("Max Planck");
     await waitFor(() => expect(answersOf("app:deployables/publish")).toEqual(["Can't open, nothing grants it"]));
     await screen.findByText("Their grants could not be read.");
@@ -665,7 +665,7 @@ describe("by person: the acts", () => {
     });
     mount(state);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]));
+    await waitFor(() => expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use role for publish"]));
     await pickSubject("Max Planck");
     await waitFor(() => expect(answersOf("app:deployables/publish")).toEqual(["Can't open, nothing grants it"]));
     expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Max Planck"]);
@@ -707,7 +707,7 @@ describe("by person: the acts", () => {
     await pickSubject("Ada Lovelace");
     await waitFor(() => expect(answersOf("app:deployables")).toEqual(["Can open, from the role Developer"]));
     expect(answersOf("app:cluster/audit")).toEqual(["Can't open, nothing grants it"]);
-    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use the role)/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use role)/ })).toBeNull();
     expect(screen.getByText(/Writing a grant takes/)).toBeTruthy();
   });
 
@@ -766,7 +766,7 @@ describe("by person: the acts", () => {
     mount(freshState({ access: { "user:u-me": [accessRow({ resource: "app:users", held: true, source: "role", sourceId: "owner" })] } }));
     await pickSubject("Owner");
     await waitFor(() => expect(answersOf("app:users")).toEqual(["Can open, from the role Owner"]));
-    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use the role)/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use role)/ })).toBeNull();
     expect(screen.getByText(/Nobody grants to themselves/)).toBeTruthy();
   });
 });
@@ -791,7 +791,7 @@ describe("by person: a read the engine refuses", () => {
     // No answers, no acts, nothing else about them (the reads behind the scope
     // line are refused too), and no second notice for those reads.
     expect(document.querySelector("[data-resource]")).toBeNull();
-    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use the role)/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Allow|Deny|Use role)/ })).toBeNull();
     expect(screen.queryByText(/holds the .* role/)).toBeNull();
     expect(screen.queryByText("Their grants could not be read.")).toBeNull();
   });
@@ -947,7 +947,7 @@ describe("a canonical roster id against a bare session", () => {
     // no grant to revoke.
     expect(state.calls.find((c) => c.name === "effectiveAccessForSubject")?.call).toContain('subjectId: "u-ada"');
     expect(state.calls.find((c) => c.name === "grantsForSubject")?.call).toContain('subjectId: "u-ada"');
-    expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use the role's answer for publish"]);
+    expect(actsOf("app:deployables/publish")).toEqual(["Allow publish to Ada Lovelace", "Use role for publish"]);
   });
 });
 
