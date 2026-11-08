@@ -530,6 +530,54 @@ published releases, and candidates containing registry publications. Reconcile
 unfinished effects under their original authority before renewing. Uploading or
 promoting alone never transfers authority to a different candidate.
 
+### Archive a candidate that has no catalog
+
+Archival needs a signed catalog, and some approved candidates can never have
+one: a candidate a renewal replaced (its draft moved to the successor, and a
+superseded candidate cannot be sealed), one whose publication stopped before it
+completed, and one published before catalogs were configured. Retirement refuses
+them too, because they have publication intents. Their build inputs would stay
+retained for good, so an owner can call
+`releaseArchiveWithoutCatalog(candidateId)`, which archives one when three
+things hold:
+
+- **A catalogued release supersedes it.** Every component the candidate contains
+  has another candidate of the same owner, at the same or a higher version, with
+  a catalog that verifies under the configured publisher trust. A renewal's
+  successor counts. The newest release of a component never qualifies, so this
+  cannot stand in for sealing a current release.
+- **What it published is read back first.** Every destination whose publication
+  completed is verified as archival verifies it: registry images by their content,
+  published release assets by their bytes (on the successor's release for a
+  renewed candidate), npm archives by digest and size. Only these destinations
+  are resolved through the candidate's release profile or the current
+  configuration; one that no longer matches its approved digest refuses.
+- **Nothing it began is still running.** No upload is in progress, and no pending
+  publication or draft creation or promotion has changed in the last two hours,
+  longer than any publication operation runs.
+
+Every declared destination is recorded with its outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `verified` | The publication completed and its published copy was read back. |
+| `uploaded` | A file was uploaded to a release that was never published; nothing was read. |
+| `pending` | The publication began and never completed. |
+| `notBegun` | Nothing was attempted for this destination. |
+
+The candidate is then permanently `archived`. Its archive evidence is these
+outcomes, the verified copies and the catalogued release that superseded each
+component, in place of a catalog digest. It can never prepare, publish or be
+sealed again, and a publication that never completed stays pending in its
+history. Nothing remote changes: registry tags and their reservations, GitHub
+drafts and releases, approvals, publication receipts and catalogs stay as they
+are. Only this candidate's own retention references are released, so files that
+another live candidate also pins stay until that one is terminal too. A
+candidate that has a catalog is refused and belongs to `releaseArchiveCandidate`.
+An interrupted run leaves the archived state in place; running it again on any
+replica finishes releasing the references without reading a provider. Only the
+owner can call it; the 48-hour schedule never does.
+
 ### Publish a whole release in one call
 
 **Publish release** (`releasePublishBuild`) runs the saved recipe once and finishes

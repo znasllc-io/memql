@@ -1361,17 +1361,21 @@ Each active reference belongs to one consumer, and only that consumer releases i
 
 | Consumer | Keeps | Releases it when |
 | --- | --- | --- |
-| A [release candidate](release-candidates.md) | its evidence files and every component artifact | it is retired, which only an unpublished candidate can be, or archived, which needs a complete publication and a signed catalog |
+| A [release candidate](release-candidates.md) | its evidence files and every component artifact | it is retired, which only an unpublished candidate can be, or archived: with a complete publication and a signed catalog, or, with no catalog, once a later catalogued release supersedes it and what it published is read back |
 | A SARIF publication | its report | the publication completes, fails or is rejected |
 | A repository change | its proposal | the change is applied; one that never applied keeps it |
 | An installation's source capture | its capture | the preparation is retired |
 
 A prepared candidate nobody approved keeps its inputs until its owner retires it
 with `releaseRetireCandidate(candidateId)`. A candidate with any publication
-intent, even a pending one, cannot be retired, and one without a signed catalog
-cannot be archived, so a candidate approved before signed catalogs existed keeps
-its inputs. Once a reference is released, the sweep's next visit to that
-producer retires the file, since its window has already passed.
+intent, even a pending one, cannot be retired. An approved candidate that has no
+signed catalog, such as one approved before catalogs existed or one a draft
+renewal replaced, keeps its inputs until its owner calls
+`releaseArchiveWithoutCatalog(candidateId)`, which needs a later or equal
+catalogued release of every component it contains and reads back what it
+published ([Archive a candidate that has no catalog](release-candidates.md#archive-a-candidate-that-has-no-catalog)).
+Once a reference is released, the sweep's next visit to that producer retires
+the file, since its window has already passed.
 
 `sweepPipelineArtifacts` runs on the agent cron leader once a minute. Each pass
 handles at most 32 files from one producer, with a four-minute time bound. A
