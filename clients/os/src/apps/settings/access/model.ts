@@ -345,6 +345,40 @@ export function groupActs(answer: GroupAnswer, ownGrants: readonly AccessGrant[]
   };
 }
 
+/** One app a group opens for its people, the parts of it the group allows, and the grant each "Remove" takes. */
+export interface GroupApp {
+  door: AccessResource;
+  /** The group's own grant on the door; null until the grant read has answered for this group. */
+  grant: AccessGrant | null;
+  parts: { part: AccessResource; grant: AccessGrant | null }[];
+}
+
+/**
+ * The apps a group's ALLOW grants open for its people, in the list's order:
+ * each door the group allows, with what it allows inside that app beneath.
+ * A deny opens nothing, so it is not here (Settings > Access shows it, where
+ * it can be lifted), and nor is a part whose door the group does not open.
+ * The grant a "Remove" revokes is the group's own on that pair, from the grant
+ * read: the engine's rows carry no grant id.
+ */
+export function groupApps(rows: readonly AccessRow[], resources: readonly AccessResource[], ownGrants: readonly AccessGrant[], subject: Subject): GroupApp[] {
+  const allows = (r: AccessResource) => groupAnswer(rows, r) === "allow";
+  return resources
+    .filter((r) => r.part === "" && r.verb === OPEN_VERB && allows(r))
+    .map((door) => ({
+      door,
+      grant: ownGrant(ownGrants, door, subject),
+      parts: resources
+        .filter((r) => r.appId === door.appId && r.part !== "" && allows(r))
+        .map((part) => ({ part, grant: ownGrant(ownGrants, part, subject) })),
+    }));
+}
+
+/** The catalog's apps a group does not already open for its people: what "Add an app" offers. */
+export function appsToAdd(rows: readonly AccessRow[], resources: readonly AccessResource[]): AccessResource[] {
+  return resources.filter((r) => r.part === "" && r.verb === OPEN_VERB && groupAnswer(rows, r) !== "allow");
+}
+
 /**
  * The subject's own active grant on the pair: THEIRS, by kind and bare id, as
  * well as on the pair. A revoke acts on the id it is handed, so a grant read

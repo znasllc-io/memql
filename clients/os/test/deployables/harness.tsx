@@ -220,6 +220,8 @@ export interface FakeSeed {
     get?: Record<string, Row>;
     log?: Row;
     settings?: Row;
+    /** What `reviewsPeople` answers: the people who can moderate the store. */
+    people?: Row;
     /** Fails the next decision or erasure with this server message. */
     decideError?: string;
     /** Fails the next settings save with this server message. */
@@ -504,6 +506,9 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin reviewsDecisionLog(")) return builtinReply("reviewsDecisionLog", [seed.reviews?.log ?? ({ decisions: [], total: 0, next: "" } as unknown as Row)]);
       if (call.startsWith("builtin reviewsSettings(")) {
         return builtinReply("reviewsSettings", [seed.reviews?.settings ?? ({ exists: false, settings: {}, may: { edit: false, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin reviewsPeople(")) {
+        return builtinReply("reviewsPeople", [seed.reviews?.people ?? ({ storeId: "", people: [] } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsDecide(") || call.startsWith("builtin reviewsEraseReviewer(")) {
         if (seed.reviews?.decideError !== undefined) throw new Error(seed.reviews.decideError);

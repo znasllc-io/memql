@@ -71,13 +71,14 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// asked about the REVIEW, whose accountId was copied off its site when
 		// it was written; one on a store's reviews as a whole -- the moderation
 		// list, the decision log, the settings, the display toggle, issuing a
-		// link, the export -- is asked about the SITE the store is served
-		// through, which the pack checks is bound to that store. Beneath the
-		// builtins the rows stay row-tier: a review row is admitted only to its
-		// merchant, its organization's people and the cluster's owners.
+		// link, the export, who can moderate it -- is asked about the SITE the
+		// store is served through, which the pack checks is bound to that store.
+		// Beneath the builtins the rows stay row-tier: a review row is admitted
+		// only to its merchant, its organization's people and the cluster's
+		// owners.
 		case "reviewsDecide", "reviewsEraseReviewer", "reviewsGet":
 			return "v1:reviews:review", "reviewId"
-		case "reviewsList", "reviewsDecisionLog", "reviewsSettings", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore":
+		case "reviewsList", "reviewsDecisionLog", "reviewsSettings", "reviewsUpdateSettings", "reviewsSetPublicDisplay", "reviewsIssueRequest", "reviewsExportStore", "reviewsPeople":
 			return "v1:platform:site", "siteId"
 		}
 	}

@@ -4,8 +4,8 @@ import type { RecordTone } from "../../../kit/RecordRow";
 
 // A store's reviews, as the reviews pack's builtins answer them
 // (packs/reviewspack: reviewsList, reviewsGet, reviewsDecisionLog,
-// reviewsSettings). Pure: the engine's answers in, what the Reviews section
-// draws out, so every reading is a unit test.
+// reviewsSettings, reviewsPeople). Pure: the engine's answers in, what the
+// Reviews section draws out, so every reading is a unit test.
 //
 // A REVIEW'S STATE IS THE ENGINE'S, never worked out here. It is derived from
 // the decision log against the words the review holds now, and the panel only
@@ -240,6 +240,36 @@ export function reviewSettingsFrom(row: Row | null): ReviewSettings {
     may: { edit: flag(may, "edit"), nameApprover: flag(may, "nameApprover"), nameSender: flag(may, "nameSender") },
     viewer: { moderates: flag(viewer, "moderates"), approvesRemovals: flag(viewer, "approvesRemovals") },
   };
+}
+
+/**
+ * One person who can moderate a store's reviews (reviewsPeople): somebody of
+ * the store's organization the engine answers able to moderate there.
+ */
+export interface ReviewPerson {
+  /** Bare, as the engine answers it: the id the removal approver is named by. */
+  userId: string;
+  displayName: string;
+  email: string;
+  /** They are the store's removal approver, as the settings stand. */
+  mayRemove: boolean;
+}
+
+/** reviewsPeople's answer, in the engine's order (by name). */
+export function reviewPeopleFrom(row: Row | null): ReviewPerson[] {
+  return list(row, "people")
+    .map((r) => ({
+      userId: rowString(r, "userId"),
+      displayName: rowString(r, "displayName"),
+      email: rowString(r, "email"),
+      mayRemove: flag(r, "mayRemove"),
+    }))
+    .filter((p) => p.userId !== "");
+}
+
+/** What a person is called: their name, else their address. */
+export function personCalled(person: ReviewPerson): string {
+  return person.displayName || person.email;
 }
 
 // ---------------------------------------------------------------------------

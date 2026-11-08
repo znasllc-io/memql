@@ -7,6 +7,7 @@ import {
   reviewDetailFrom,
   reviewName,
   reviewPageFrom,
+  reviewPeopleFrom,
   reviewSettingsFrom,
   waitedFor,
 } from "../../src/apps/deployables/reviews/model";
@@ -68,6 +69,23 @@ describe("the reviews pack's answers", () => {
     expect(none.viewer.moderates).toBe(true);
     const defaults = reviewSettingsFrom({ exists: true, settings: {} });
     expect(defaults.values).toMatchObject({ linkLifetimeDays: 14, requestDelayDays: 14, publicDisplay: false, requestsEnabled: false });
+  });
+});
+
+describe("who can moderate", () => {
+  it("reads the store's people in the engine's order, parsed or as JSON text", () => {
+    const people = [
+      { userId: "u-owner", displayName: "Avery Owner", email: "avery@example.com", mayRemove: true },
+      { userId: "u-mod", displayName: "", email: "robin@example.com", mayRemove: "false" },
+      { userId: "", displayName: "Nobody", email: "", mayRemove: false },
+    ];
+    for (const answer of [{ storeId: "store-live", people }, { storeId: "store-live", people: JSON.stringify(people) }]) {
+      expect(reviewPeopleFrom(answer)).toEqual([
+        { userId: "u-owner", displayName: "Avery Owner", email: "avery@example.com", mayRemove: true },
+        { userId: "u-mod", displayName: "", email: "robin@example.com", mayRemove: false },
+      ]);
+    }
+    expect(reviewPeopleFrom(null)).toEqual([]);
   });
 });
 

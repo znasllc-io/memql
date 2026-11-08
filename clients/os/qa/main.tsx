@@ -5,7 +5,7 @@ import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpd
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
 import { LocalUsersSettingsStore } from "../src/apps/users/settings";
-import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup } from "../test/users/harness";
+import { fakeConnection as usersConnection, withSession as usersSession, roleRow as usersRole, grantRow as usersGrant, groupRow as usersGroup, groupAccessRow as usersGroupAccess, subjectGrantRow as usersSubjectGrant } from "../test/users/harness";
 import { StorageScene } from "./storageScenes";
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
@@ -837,6 +837,21 @@ const QA_REVIEWS_SEED: FakeSeed = {
       total: 5, next: "",
     } as unknown as Row,
     settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-owner" }, may: { edit: true, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row,
+    people: {
+      storeId: "store-live",
+      people: [
+        { userId: "u-carol", displayName: "Carol Reyes", email: "carol@example.com", mayRemove: false },
+        { userId: "u-owner", displayName: "Store Owner", email: "owner@shop.example.com", mayRemove: true },
+        { userId: "u-me", displayName: "", email: "moderator@shop.example.com", mayRemove: false },
+      ],
+    } as unknown as Row,
+  },
+};
+/** The settings as the store's approver reads them: they may hand the role on. */
+const QA_REVIEWS_APPROVER_SEED: FakeSeed = {
+  reviews: {
+    ...QA_REVIEWS_SEED.reviews,
+    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-owner" }, may: { edit: true, nameApprover: true }, viewer: { moderates: true, approvesRemovals: true } } as unknown as Row,
   },
 };
 const QA_NAMES: Record<string, string> = { "u-carol": "Carol Reyes", "u-owner": "Store Owner" };
@@ -851,6 +866,7 @@ const REVIEWS_CLICKS: Record<string, string> = {
   "reviews-published": "Published",
   "reviews-log": "Decision log",
   "reviews-settings": "Settings",
+  "reviews-settings-approver": "Settings|focus:Choose who approves removals",
 };
 
 function ReviewsPage({ site = REVIEWS_SITE }: { site?: Row }) {
@@ -1386,6 +1402,7 @@ const VIEWS: Record<
   "review-decline": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   "reviews-log": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
   "reviews-settings": { seed: QA_REVIEWS_SEED, framed: true, render: () => <ReviewsPage /> },
+  "reviews-settings-approver": { seed: QA_REVIEWS_APPROVER_SEED, framed: true, render: () => <ReviewsPage /> },
   access: { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
   "access-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
@@ -2458,9 +2475,29 @@ function usersWizardView(section: string) {
     role: "owner",
     connect: () => usersConnection({
       activeRoles: [usersRole({ slug: "owner", name: "Owner", rank: 400 }), usersRole({ slug: "developer", name: "Developer", rank: 300 }), usersRole({ slug: "admin", name: "Admin", rank: 200 }), usersRole({ slug: "user", name: "Member", rank: 100, aliases: ["writer"] })],
-      activeCapabilities: ["principal", "role", "group", "admission"].flatMap(resource => ["read", "create", "update", "delete"].map(verb => usersGrant("owner", verb, resource))),
+      activeCapabilities: [
+        ...["principal", "role", "group", "admission"].flatMap(resource => ["read", "create", "update", "delete"].map(verb => usersGrant("owner", verb, resource))),
+        // The apps the catalog names, so the group page's "Add an app" has some to offer.
+        ...["app:email", "app:files", "app:deployables", "app:logs", "app:settings"].map(resource => usersGrant("owner", "read", resource)),
+        ...["reviews", "deploy", "publish"].map(part => usersGrant("owner", "execute", `app:deployables/${part}`)),
+      ],
       clientAccountsAll: [accountRow({ id: "acme", name: "Acme", domain: "acme.com", domainStatus: "verified", joinOnDomain: true })],
       groupsAll: [usersGroup({ id: "acme-group", name: "Acme", kind: "account", accountId: "acme" })],
+      // An organization's people open Email and Deployables, and moderate its reviews.
+      effectiveAccess: {
+        "group:acme-group": [
+          usersGroupAccess("acme-group", "acme", "read", "app:email"),
+          usersGroupAccess("acme-group", "acme", "read", "app:deployables"),
+          usersGroupAccess("acme-group", "acme", "execute", "app:deployables/reviews"),
+        ],
+      },
+      grantsForSubject: {
+        "group:acme-group": [
+          usersSubjectGrant({ id: "grant-email", subjectKind: "group", subjectId: "acme-group", verb: "read", resourceType: "app:email" }),
+          usersSubjectGrant({ id: "grant-deployables", subjectKind: "group", subjectId: "acme-group", verb: "read", resourceType: "app:deployables" }),
+          usersSubjectGrant({ id: "grant-reviews", subjectKind: "group", subjectId: "acme-group", verb: "execute", resourceType: "app:deployables/reviews" }),
+        ],
+      },
     }),
     wrap: (el: JSX.Element, role: string) => withSession(usersSession(el, { role }), { role }),
     render: () => <UsersWizardQa section={section} />,

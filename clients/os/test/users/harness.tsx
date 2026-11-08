@@ -107,6 +107,11 @@ export interface FakeQuery {
   groupArchive: ReturnType<typeof vi.fn>;
   groupMemberAdd: ReturnType<typeof vi.fn>;
   groupMemberRemove: ReturnType<typeof vi.fn>;
+  /** Settings > Access's reads and writes, which a group's page reuses for the apps its people can open. */
+  effectiveAccessForSubject: ReturnType<typeof vi.fn>;
+  grantsForSubject: ReturnType<typeof vi.fn>;
+  grantSet: ReturnType<typeof vi.fn>;
+  grantRevoke: ReturnType<typeof vi.fn>;
   /**
    * The one entry point for everything without a generated builder yet: the
    * group reads and every group and role BUILTIN (`useGroups.ts` and
@@ -140,6 +145,24 @@ export interface FakeSeed {
   byId?: Record<string, Row>;
   /** Builtin replies by name; a thrown value is the refusal path. */
   builtins?: Record<string, Row | Error>;
+  /**
+   * What `effectiveAccessForSubject` answers, by `<kind>:<id>`; an Error is the
+   * engine's refusal. The grant writes below change it, as the cluster's rows
+   * would change, so the re-read after a write is what shows it took.
+   */
+  effectiveAccess?: Record<string, Row[] | Error>;
+  /** What `grantsForSubject` answers, by `<kind>:<id>`: the grant rows, with the ids a revoke takes. */
+  grantsForSubject?: Record<string, Row[]>;
+}
+
+/** A grant row, as `grantsForSubject` projects one. */
+export function subjectGrantRow(over: Partial<Row> & { id: string; subjectKind: string; subjectId: string; verb: string; resourceType: string }): Row {
+  return { effect: "allow", grantedBy: "v1:identity:user:me", active: true, createdAt: "2026-08-01T00:00:00Z", ...over };
+}
+
+/** One row of `effectiveAccessForSubject` for a group: one of its own grants. */
+export function groupAccessRow(groupId: string, accountId: string, verb: string, resourceType: string, held = true): Row {
+  return { verb, resourceType, held, source: "group", sourceId: groupId, accountId };
 }
 
 export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
@@ -157,6 +180,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const argOf = (call: string, name: string): string => {
     const m = new RegExp(`${name}:\\s*"([^"]*)"`).exec(call);
     return m?.[1] ?? "";
+  };
+
+  const subjectOf = (args: Record<string, unknown>): string => `${String(args["subjectKind"] ?? "")}:${String(args["subjectId"] ?? "")}`;
+  const accessOf = (key: string): Row[] => {
+    const answer = seed.effectiveAccess?.[key];
+    return Array.isArray(answer) ? answer : [];
   };
 
   /** A generated builtin's reply, or the seeded refusal. */
@@ -200,6 +229,39 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       groupArchive: builtin("groupArchive", { ok: "true" }),
       groupMemberAdd: builtin("groupMemberAdd", { ok: "true" }),
       groupMemberRemove: builtin("groupMemberRemove", { ok: "true" }),
+      effectiveAccessForSubject: vi.fn(async (args: Record<string, unknown>) => {
+        const answer = seed.effectiveAccess?.[subjectOf(args)];
+        if (answer instanceof Error) throw answer;
+        return rowsResult(answer ?? []);
+      }),
+      grantsForSubject: vi.fn(async (args: Record<string, unknown>) => rowsResult(seed.grantsForSubject?.[subjectOf(args)] ?? [])),
+      // THE TWO GRANT WRITES, applied to the seeds as the engine applies them:
+      // one grant per (subject, verb, resource), a revoke takes it away.
+      grantSet: vi.fn(async (args: Record<string, unknown>) => {
+        const key = subjectOf(args);
+        const verb = String(args["verb"]);
+        const resourceType = String(args["resourceType"]);
+        const grantId = `grant-${String(args["subjectId"])}-${verb}-${resourceType}`;
+        const same = (r: Row) => r["verb"] === verb && r["resourceType"] === resourceType;
+        const access = accessOf(key).filter((r) => !same(r));
+        access.push({ verb, resourceType, held: args["effect"] === "allow", source: "group", sourceId: String(args["subjectId"]), accountId: String(access[0]?.["accountId"] ?? "") });
+        (seed.effectiveAccess ??= {})[key] = access;
+        (seed.grantsForSubject ??= {})[key] = [
+          ...(seed.grantsForSubject[key] ?? []).filter((r) => !same(r)),
+          subjectGrantRow({ id: grantId, subjectKind: String(args["subjectKind"]), subjectId: String(args["subjectId"]), verb, resourceType, effect: String(args["effect"]) }),
+        ];
+        return rowsResult([{ ok: true, grantId, code: "", message: "" } as Row]);
+      }),
+      grantRevoke: vi.fn(async (args: Record<string, unknown>) => {
+        for (const [key, grants] of Object.entries(seed.grantsForSubject ?? {})) {
+          const grant = grants.find((g) => g["id"] === args["grantId"]);
+          if (grant === undefined) continue;
+          seed.grantsForSubject![key] = grants.filter((g) => g !== grant);
+          seed.effectiveAccess![key] = accessOf(key).filter((r) => !(r["verb"] === grant["verb"] && r["resourceType"] === grant["resourceType"]));
+          return rowsResult([{ ok: true, grantId: grant["id"], code: "", message: "" } as Row]);
+        }
+        return rowsResult([{ ok: false, code: "grant_not_found", message: "no such grant" } as Row]);
+      }),
       executeNamed: vi.fn(async (name: string, call: string) => {
         if (name === "groupsAll") return rowsResult(seed.groupsAll ?? []);
         if (name === "membersOfGroup") {

@@ -39,8 +39,12 @@ import {
 } from "./rows";
 import { useMembersOfGroup } from "./useGroups";
 import type { RoleCatalog } from "./useRoles";
+import { OrganizationApps } from "./OrganizationApps";
 
 // ONE GROUP: who is in it, who is standing in it by rule, and what it grants.
+//
+// An organization's group also carries what its people may open: the apps its
+// allow grants open, set here (OrganizationApps) for whoever manages access.
 
 export function GroupPage({
   group,
@@ -134,7 +138,7 @@ export function GroupPage({
   const askActivity = useAskActivity();
   const memberAction = askActivity?.arguments?.groupId === group.id && askActivity.name?.endsWith(".groupMemberAdd") ? askActivity : null;
   return (
-    <div className="os-action-pane">
+    <div className="os-action-pane" data-os-dividers="none">
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`group:${group.id}`} title={group.name} meta={group.kind === "account" ? "A client's group" : undefined} back={{ label: "Groups", onSelect: onBack }}>
 
@@ -149,6 +153,7 @@ export function GroupPage({
         {group.accountId ? (
           <Panel label="Organization access">
             <p className="os-caption">Membership gives access to this organization’s work. Apps and actions must also be granted by a cluster operator. An organization administrator uses a role scoped to this organization, never the cluster Admin role.</p>
+            {os && holds("read", "app:settings/access") ? <OrganizationApps group={group} catalog={catalog} registry={os.registry} /> : null}
             {os && holds("read", "app:settings/access") ? <Button onClick={() => os.actions.openApp("settings", "access", { groupId: group.id })}>Manage app access</Button> : null}
             {os && holds("create", "role") ? <Button onClick={() => os.actions.openApp("users", "roles", { accountId: group.accountId, createRole: true })}>Create organization role</Button> : null}
           </Panel>

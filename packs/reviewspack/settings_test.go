@@ -13,8 +13,9 @@ import (
 // Every settings write is a new version of the store's one row, and a version
 // is a whole payload. A writer that sent only the field it changed would
 // silently clear every other one -- the display toggle used to do exactly
-// that. These tests pin the merge, the defaults and who may name the owner
-// who approves removals.
+// that. These tests pin the merge, the defaults, who may name the owner who
+// approves removals, and whom they may name: one of the store's own people who
+// can moderate it (shopRoster, reads_test.go).
 
 func settingsReader(row map[string]any) *decideReader {
 	return &decideReader{settings: row}
@@ -23,7 +24,8 @@ func settingsReader(row map[string]any) *decideReader {
 func writeSettings(t *testing.T, ctx context.Context, row map[string]any, args map[string]any, display bool) (map[string]any, error) {
 	t.Helper()
 	w := &fakeWriter{}
-	p := &Provider{reader: settingsReader(row), writer: w}
+	roster := shopRoster()
+	p := &Provider{reader: withRoster{rowReader: settingsReader(row), roster: roster}, organizations: roster, writer: w}
 	var err error
 	if display {
 		_, err = p.setPublicDisplay(ctx, args, 0)
@@ -111,6 +113,106 @@ func TestOnlyTheCurrentOwnerOrAnOperatorNamesTheRemovalApprover(t *testing.T) {
 	opCtx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "staff-1", Role: auth.RoleOwner})
 	if _, err := writeSettings(t, opCtx, existingSettings(), args, false); err != nil {
 		t.Fatalf("an operator setting the store up was refused: %v", err)
+	}
+}
+
+// approverRefusal is the one sentence a refused removal approver gets.
+const approverRefusal = "reviews: Choose someone in this store's organization who can moderate reviews."
+
+// THE REMOVAL APPROVER IS ONE OF THE STORE'S OWN PEOPLE WHO CAN MODERATE IT
+// (review focus 4). Not somebody outside the store's organization, however much
+// they hold in their own; not one of the cluster's operators, who host the
+// reviews and decide none; nobody who could not moderate there. Whoever names
+// them -- an operator, or the current approver handing the role on -- and in
+// addition to the rule on who may name one, which is unchanged.
+func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
+	name := func(who string) map[string]any {
+		return map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": who}
+	}
+	for _, c := range []struct{ who, why string }{
+		{"outsider-1", "a person of another organization, who moderates there"},
+		{"staff-1", "a cluster operator in the store's own group"},
+		{"viewer-1", "a person of the organization without the reviews part"},
+		{"doorless-1", "a person with the part who cannot open the organization's Deployables"},
+		{"away-1", "a deactivated person"},
+		{"gone-1", "a person who left the organization"},
+		{"nobody-1", "nobody this cluster knows"},
+	} {
+		for _, namer := range []struct {
+			ctx  context.Context
+			name string
+		}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+			_, err := writeSettings(t, namer.ctx, existingSettings(), name(c.who), false)
+			if err == nil || err.Error() != approverRefusal {
+				t.Errorf("%s naming %s (%s): err = %v, want %q", namer.name, c.who, c.why, err, approverRefusal)
+			}
+		}
+	}
+	// THE STORE'S MODERATOR IS ACCEPTED, from either, and the row says so.
+	out, err := writeSettings(t, operatorCtxFor("op-1"), existingSettings(), name("mod-1"), false)
+	if err != nil || out["removalApproverUserId"] != "mod-1" {
+		t.Fatalf("an operator naming the store's moderator: %v (saved %v)", err, out["removalApproverUserId"])
+	}
+	if _, err := writeSettings(t, moderatorCtx("owner-1"), existingSettings(), name("mod-1"), false); err != nil {
+		t.Fatalf("the current approver handing the role to the store's moderator: %v", err)
+	}
+	// Naming nobody names nobody to check, and the rule on who may name one
+	// still stands over a moderator who is not the approver.
+	if _, err := writeSettings(t, operatorCtxFor("op-1"), existingSettings(), name(""), false); err != nil {
+		t.Fatalf("an operator clearing the approver: %v", err)
+	}
+	if _, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(), name("mod-1"), false); err == nil || err.Error() == approverRefusal {
+		t.Fatalf("a moderator naming themselves: err = %v, want the rule on who names the approver", err)
+	}
+}
+
+// A ROLE TEST'S STAND-IN IS NEVER ONE OF THE STORE'S PEOPLE (ruling R3). While
+// an organization role's test is live its 30-minute identity is a member of the
+// organization's account group, and the engine answers it able to moderate --
+// but it is nobody, so it is never listed and never accepted as the approver.
+func TestARoleTestStandInIsNeverAModeratorOrTheApprover(t *testing.T) {
+	persona := auth.RoleTestUserPrefix + "stand-in"
+	people, err := readPeople(t, operatorCtxFor("op-1"), settingsReader(existingSettings()), shopRoster(),
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range peopleIDs(people) {
+		if auth.IsRoleTestUser(id) {
+			t.Fatalf("people = %v: a role test's stand-in is listed as a moderator", peopleIDs(people))
+		}
+	}
+	if _, err := writeSettings(t, operatorCtxFor("op-1"), existingSettings(),
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": persona}, false); err == nil || err.Error() != approverRefusal {
+		t.Fatalf("naming a role test's stand-in the approver: err = %v, want %q", err, approverRefusal)
+	}
+}
+
+// THE APPROVER IS KNOWN WHICHEVER WAY THEIR ID IS SPELLED. A person is chosen
+// by the id reviewsPeople answers, bare; a signed-in caller's id arrives as the
+// token carried it, `v1:identity:user:<id>` on a deployed cluster. One person
+// must be one person to every rule that asks whether they approve removals.
+func TestTheApproverIsKnownInEitherSpellingOfTheirId(t *testing.T) {
+	canonical := moderatorCtx("v1:identity:user:owner-1")
+	set := readSettings(t, canonical, &readsReader{settings: existingSettings()})
+	if viewer, _ := set["viewer"].(map[string]any); viewer["approvesRemovals"] != true {
+		t.Fatalf("viewer = %v, want the approver recognised", set["viewer"])
+	}
+	if may, _ := set["may"].(map[string]any); may["nameApprover"] != true {
+		t.Fatalf("may = %v, want the approver able to hand the role on", set["may"])
+	}
+	published := &readsReader{reviews: []map[string]any{readReview("r1", "boot", "Warm", 1)},
+		decisions: []map[string]any{decisionRow("r1", ActionPublish, 1, 0)}, settings: existingSettings()}
+	got, err := getReview(t, canonical, published, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acts := actsOf(got["acts"]); acts != "escalate,remove,erase" {
+		t.Fatalf("the approver's acts = %q, want removal among them", acts)
+	}
+	if _, err := writeSettings(t, canonical, existingSettings(),
+		map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": "mod-1"}, false); err != nil {
+		t.Fatalf("the approver, signed in under their canonical id, handing the role on: %v", err)
 	}
 }
 

@@ -1,6 +1,6 @@
 import { readTheBar } from "../readTheBar";
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -15,14 +15,21 @@ const {
   accountRow,
   fakeConnection,
   grantRow,
+  groupAccessRow,
   groupRow,
   invitationRow,
   membershipRow,
   roleRow,
+  subjectGrantRow,
   userRow,
   withSession,
 } = await import("./harness");
 const { click, memoryStore, renderApp } = await import("./mount");
+const { OsProvider } = await import("../../src/chrome/state");
+const { OS_REGISTRY } = await import("../../src/apps/registry");
+const { LocalDesktopStore } = await import("../../src/system/store");
+const { installSeededAccess, seededAccessFor } = await import("../seededAccess");
+const { setEffectiveCapabilities } = await import("../../src/system/roles");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -248,6 +255,155 @@ describe("a group's page", () => {
     );
     const list = screen.getByRole("list", { name: /People invited into Acme/ });
     expect(within(list).getByText("kit@acme.com")).toBeTruthy();
+    view.unmount();
+  });
+});
+
+describe("an organization's apps on its group page", () => {
+  // WHAT THE ORGANIZATION'S PEOPLE MAY OPEN IS SET ON ITS GROUP (access
+  // clarity, 2026-11-06): the group's allow grants on apps, each app a row with
+  // the parts of it allowed beneath, each with Remove; Add an app offers the
+  // catalog's apps the group does not already allow. The rows are the engine's
+  // (`effectiveAccessForSubject`); the grant a Remove takes is the group's own
+  // (`grantsForSubject`), matched on verb and resource.
+  const GROUP = groupRow({ id: "g-acme", name: "Acme", kind: "account", accountId: "acct-acme" });
+  const APPS = [
+    grantRow("owner", "read", "app:email"),
+    grantRow("owner", "read", "app:deployables"),
+    grantRow("owner", "execute", "app:deployables/reviews"),
+    grantRow("owner", "execute", "app:deployables/deploy"),
+    grantRow("owner", "read", "app:files"),
+    grantRow("owner", "read", "app:logs"),
+  ];
+
+  function acmeSeed(over: Parameters<typeof fakeConnection>[0] = {}) {
+    return seed({
+      activeCapabilities: [...GRANTS, ...APPS],
+      groupsAll: [GROUP],
+      membersOfGroup: { "g-acme": [] },
+      effectiveAccess: {
+        "group:g-acme": [
+          groupAccessRow("g-acme", "acct-acme", "read", "app:deployables"),
+          groupAccessRow("g-acme", "acct-acme", "execute", "app:deployables/reviews"),
+          // A deny is not an app its people can open: Settings > Access shows it.
+          groupAccessRow("g-acme", "acct-acme", "read", "app:logs", false),
+        ],
+      },
+      grantsForSubject: {
+        "group:g-acme": [
+          subjectGrantRow({ id: "grant-door", subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:deployables" }),
+          subjectGrantRow({ id: "grant-reviews", subjectKind: "group", subjectId: "g-acme", verb: "execute", resourceType: "app:deployables/reviews" }),
+          subjectGrantRow({ id: "grant-logs", subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:logs", effect: "deny" }),
+        ],
+      },
+      ...over,
+    });
+  }
+
+  function memStorage(): Pick<Storage, "getItem" | "setItem"> {
+    const data = new Map<string, string>();
+    return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
+  }
+
+  /**
+   * The group page inside the shell, which is what names the apps, as an
+   * owner holding `held` -- the owner's whole set unless a case takes away
+   * the one capability it is about.
+   */
+  async function openAcmeInShell(connection: Conn, held = seededAccessFor("owner")) {
+    setEffectiveCapabilities(held);
+    h.connection = connection;
+    const view = renderApp(
+      withSession(
+        <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 12, rows: 8 }} store={new LocalDesktopStore(memStorage())}>
+          <UsersApp sectionId="groups" navigate={() => {}} askContext={() => {}} store={memoryStore()} />
+        </OsProvider>,
+      ),
+    );
+    await click(await screen.findByRole("button", { name: /Acme/ }));
+    await screen.findByText("Members");
+    return view;
+  }
+
+  /** What the list says, row by row: each name, and the acts beside it. */
+  function appRows(list: HTMLElement): string[] {
+    return within(list).getAllByRole("listitem").map((item) => {
+      const name = item.querySelector(".os-row-name")?.textContent ?? "";
+      const acts = within(item).queryAllByRole("button").map((b) => b.textContent ?? "");
+      return [`${item.hasAttribute("data-part") ? "  " : ""}${name}`, ...acts].join(" | ");
+    });
+  }
+
+  afterEach(() => {
+    installSeededAccess("owner");
+  });
+
+  it("an account group lists the apps its people can open and adds one", async () => {
+    const connection = acmeSeed();
+    const view = await openAcmeInShell(connection);
+    const list = await screen.findByRole("list", { name: "Apps its people can open" });
+    expect(connection.query.effectiveAccessForSubject.mock.calls[0]?.[0]).toEqual({ subjectKind: "group", subjectId: "g-acme" });
+    // Deployables, and the reviews part beneath it; the denied Logs is not here.
+    expect(appRows(list)).toEqual(["Deployables | Remove", "  reviews | Remove"]);
+
+    // ADD AN APP: the catalog's apps the group does not already allow.
+    await click(screen.getByRole("button", { name: "Add an app" }));
+    const picker = await screen.findByRole("listbox", { name: "Apps to add" });
+    const offered = within(picker).getAllByRole("option").map((o) => o.getAttribute("aria-label") ?? "");
+    expect(offered).toContain("Email");
+    expect(offered).toContain("Files");
+    expect(offered).toContain("Logs");
+    expect(offered).not.toContain("Deployables");
+    await click(within(picker).getByRole("option", { name: "Email" }));
+    await waitFor(() => expect(connection.query.grantSet).toHaveBeenCalledTimes(1));
+    expect(connection.query.grantSet.mock.calls[0]?.[0]).toEqual({ subjectKind: "group", subjectId: "g-acme", verb: "read", resourceType: "app:email", effect: "allow" });
+    // What the cluster holds is read again, and is the list.
+    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove", "  reviews | Remove"]));
+    expect(screen.queryByRole("listbox", { name: "Apps to add" })).toBeNull();
+    // The keyboard is back on the control the picker was opened from.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add an app" }));
+
+    // REMOVE takes the group's own grant on that pair.
+    const reviews = within(screen.getByRole("list", { name: "Apps its people can open" })).getAllByRole("listitem")[2]!;
+    await click(within(reviews).getByRole("button", { name: "Remove reviews from Acme" }));
+    await waitFor(() => expect(connection.query.grantRevoke).toHaveBeenCalledWith({ grantId: "grant-reviews" }));
+    await waitFor(() => expect(appRows(screen.getByRole("list", { name: "Apps its people can open" }))).toEqual(["Email | Remove", "Deployables | Remove"]));
+    view.unmount();
+  });
+
+  it("says why when the cluster will not read the group's grants, and offers nothing", async () => {
+    const connection = acmeSeed({
+      effectiveAccess: { "group:g-acme": new Error("effectiveAccessForSubject: MemQL engine failed to execute query. Details: access_unknown_subject: no active group by that id") },
+    });
+    const view = await openAcmeInShell(connection);
+    const panel = screen.getByRole("region", { name: "Organization access" });
+    expect(await within(panel).findByText(/access_unknown_subject/)).toBeTruthy();
+    expect(within(panel).queryByRole("list", { name: "Apps its people can open" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Add an app" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: /^Remove/ })).toBeNull();
+    view.unmount();
+  });
+
+  /** The owner's set without one (verb, resource) pair. */
+  const ownerWithout = (verb: string, resource: string) => seededAccessFor("owner").filter((c) => !(c.verb === verb && c.resource === resource));
+
+  it("shows the apps without acts to someone who reads access but writes no grant", async () => {
+    // A developer opens Settings > Access and holds no update on principal,
+    // which every grant write takes: the acts are absent, never disabled.
+    const view = await openAcmeInShell(acmeSeed(), ownerWithout("update", "principal"));
+    const list = await screen.findByRole("list", { name: "Apps its people can open" });
+    expect(appRows(list)).toEqual(["Deployables", "  reviews"]);
+    expect(screen.queryByRole("button", { name: "Add an app" })).toBeNull();
+    view.unmount();
+  });
+
+  it("is not on the page for someone who does not manage access", async () => {
+    // Shown only to those who hold Settings > Access, as the button beside it is.
+    const connection = acmeSeed();
+    const view = await openAcmeInShell(connection, ownerWithout("read", "app:settings/access"));
+    expect(screen.getByRole("region", { name: "Organization access" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Apps its people can open" })).toBeNull();
+    expect(connection.query.effectiveAccessForSubject).not.toHaveBeenCalled();
     view.unmount();
   });
 });

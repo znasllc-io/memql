@@ -28,9 +28,12 @@ func TestLiveE2E_TheAdminPanelReadsOneReviewTheLogAndTheSettings(t *testing.T) {
 	stranger := "user-reviews-reads-nopart-" + n
 	store := "store-reviews-reads-" + n
 	site := "site-reviews-reads-" + n
+	account := "acct-reviews-reads-" + n
 	handle := "boot-" + n
-	seedSite(t, eng, site, merchant, store)
+	seedSiteIn(t, eng, site, merchant, store, account)
 	grantReviewsPart(t, eng, merchant)
+	// The removal approver is one of the store's organization's people.
+	seedStorePerson(t, eng, account, merchant)
 
 	call := `submitReview(body: "Warm all winter", productHandle: ` + quote(handle) +
 		`, rating: 4, siteId: "site-reviews-e2e", storeId: ` + quote(store) +
@@ -43,7 +46,7 @@ func TestLiveE2E_TheAdminPanelReadsOneReviewTheLogAndTheSettings(t *testing.T) {
 		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, linkLifetimeDays: 21, removalApproverUserId: `+quote(merchant)+`)`); err != nil {
 		t.Fatalf("reviewsUpdateSettings: %v", err)
 	}
-	moderator := asPerson(merchant, auth.Role("user"))
+	moderator := asPerson(merchant, auth.RoleWriter)
 	queue := payloadOf(t, eng, moderator, `builtin reviewsList(storeId: `+quote(store)+`, siteId: `+quote(site)+`)`)
 	queued := queue["reviews"].([]any)[0].(map[string]any)
 	reviewID := queued["id"].(string)

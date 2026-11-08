@@ -55,6 +55,70 @@ func seedSiteIn(t *testing.T, eng *memql.MemQLEngine, siteID, owner, storeID, ac
 	}
 }
 
+// seedOrganization writes an active organization and its account group, at the
+// id integrations/groups derives (acct-<account>), and answers the group's id.
+func seedOrganization(t *testing.T, eng *memql.MemQLEngine, account string) string {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"name": account, "status": "active", "domainStatus": "unverified"})
+	if _, err := eng.Execute(seedCtx(), fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString("v1:accounts:account"), langparser.QuoteString(account), string(payload))); err != nil {
+		t.Fatalf("seed organization: %v", err)
+	}
+	group := "acct-" + account
+	seedGroup(t, eng, group, "account", account)
+	return group
+}
+
+// seedGroup writes an active group tied to an organization.
+func seedGroup(t *testing.T, eng *memql.MemQLEngine, groupID, kind, account string) {
+	t.Helper()
+	call := `mutation writeGroup(groupId: ` + quote(groupID) + `, name: ` + quote(groupID) + `, kind: ` + quote(kind) +
+		`, accountId: ` + quote(account) + `, status: "active")`
+	if _, err := eng.Execute(seedCtx(), call); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+}
+
+// seedPersonIn writes a user row holding role and places the person in a group
+// of the organization, with the membership's origin.
+func seedPersonIn(t *testing.T, eng *memql.MemQLEngine, userID, name, role string, active bool, groupID, account, origin string) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"displayName": name, "primaryEmail": userID + "@example.test", "role": role, "active": active})
+	if _, err := eng.Execute(seedCtx(), fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString("v1:identity:user"), langparser.QuoteString(userID), string(payload))); err != nil {
+		t.Fatalf("seed person: %v", err)
+	}
+	call := `mutation writeGroupMembership(membershipId: ` + quote(groupID+"-"+userID) + `, groupId: ` + quote(groupID) +
+		`, userId: ` + quote(userID) + `, origin: ` + quote(origin) + `, status: "active", accountId: ` + quote(account) + `)`
+	if _, err := eng.Execute(seedCtx(), call); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+}
+
+// seedStorePerson makes a store's merchant one of the people of the store's
+// organization: the organization and its account group, and the merchant in
+// it as a member on the member rung. A store's removal approver is one of
+// those people.
+//
+// WRITER, the member rung's compiled name: this engine installs no role
+// catalog, so the catalog's own slug for the rung ("user") holds nothing here,
+// and an organization's store is judged on what its people hold there.
+func seedStorePerson(t *testing.T, eng *memql.MemQLEngine, account, userID string) {
+	t.Helper()
+	seedPersonIn(t, eng, userID, userID, string(auth.RoleWriter), true, seedOrganization(t, eng, account), account, "added")
+}
+
+// grantGroup gives a group one allow grant, at the id the grant writer derives.
+func grantGroup(t *testing.T, eng *memql.MemQLEngine, groupID, verb, resource string) {
+	t.Helper()
+	call := `writeGrant(grantId: ` + quote(auth.GrantRowID(auth.SubjectKindGroup, groupID, verb, resource)) +
+		`, subjectKind: "group", subjectId: ` + quote(groupID) + `, verb: ` + quote(verb) + `, resourceType: ` + quote(resource) +
+		`, effect: "allow", grantedBy: "reviews-e2e-seeder")`
+	if _, err := eng.Execute(seedCtx(), call); err != nil {
+		t.Fatalf("grant the group: %v", err)
+	}
+}
+
 // grantReviewsPart gives one person the reviews part, the way a store's
 // moderator is given it: a grant on top of a role that does not hold it.
 func grantReviewsPart(t *testing.T, eng *memql.MemQLEngine, userID string) {

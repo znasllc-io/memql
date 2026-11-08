@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Button, Caption, ContentSkeleton, Details, DetailsSection, Input, Notice, SettingRow, Switch } from "../../../kit";
+import { Button, Caption, ContentSkeleton, Details, DetailsSection, Input, Notice, RecordList, RecordListSkeleton, RecordRow, SettingRow, Switch } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
+import { SearchPicker } from "../../../kit/SearchPicker";
 import type { Reading } from "../../../cluster/reading";
-import { deployedByLabel, type NameOf } from "../people";
-import type { ReviewSettings, ReviewSettingsValues } from "./model";
+import { bare, deployedByLabel, type NameOf } from "../people";
+import { personCalled, type ReviewPerson, type ReviewSettings, type ReviewSettingsValues } from "./model";
 import { ReviewsPane } from "./ReviewsPane";
-import type { ReviewWrites } from "./useReviews";
+import { useReviewPeople, type ReviewsScope, type ReviewWrites } from "./useReviews";
 
 // A STORE'S REVIEW SETTINGS, the last of its Reviews tabs, laid out as Fleet
 // lays out a machine's Settings (DESIGN.md, "Details and settings content"):
@@ -19,6 +20,11 @@ import type { ReviewWrites } from "./useReviews";
 // with no settings is set up by the cluster's operators, and only the store's
 // current owner, or an operator, names who approves removals. A field this
 // person may not change is shown, not offered.
+//
+// THE REMOVAL APPROVER IS ONE OF THE STORE'S PEOPLE WHO CAN MODERATE IT
+// (reviewsPeople), so they are chosen from those people by name, never typed
+// as an id, and the engine refuses anybody else. The same read is the "Who can
+// moderate" list, which says in words which of them approves removals.
 
 type Draft = {
   publicDisplay: boolean;
@@ -73,15 +79,17 @@ export function settingsChanges(from: ReviewSettingsValues, draft: Draft, may: {
   return { changes, problem: "" };
 }
 
-export function ReviewSettingsView({ heading, settings, writes, nameOf, viewerUserId }: {
+export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, viewerUserId }: {
   /** The Reviews heading and its tabs. */
   heading: ReactNode;
+  scope: ReviewsScope;
   settings: Reading<ReviewSettings>;
   writes: ReviewWrites;
   nameOf: NameOf;
   viewerUserId: string;
 }) {
   const value = settings.value;
+  const people = useReviewPeople(scope, writes.revision);
   const [draft, setDraft] = useState<Draft | null>(null);
   // A fresh answer from the engine is the form's new starting point.
   useEffect(() => {
@@ -107,7 +115,14 @@ export function ReviewSettingsView({ heading, settings, writes, nameOf, viewerUs
   const saving = writes.busy === "settings";
   const exporting = writes.busy === "export";
   const set = <K extends keyof Draft>(key: K) => (next: Draft[K]) => setDraft((d) => (d === null ? d : { ...d, [key]: next }));
-  const approverName = draft.removalApproverUserId.trim() === "" ? "" : deployedByLabel(draft.removalApproverUserId.trim(), viewerUserId, nameOf);
+  const moderators = people.value ?? [];
+  // Named from the store's people first: they are who an approver is chosen from.
+  const nameOfPerson: NameOf = (userId) => {
+    const person = moderators.find((p) => bare(p.userId) === bare(userId));
+    return person === undefined ? nameOf(userId) : personCalled(person);
+  };
+  const approverName = draft.removalApproverUserId.trim() === "" ? "" : deployedByLabel(draft.removalApproverUserId.trim(), viewerUserId, nameOfPerson);
+  const choosesApprover = canEdit && value.may.nameApprover && moderators.length > 0;
 
   async function save() {
     if (problem !== "" || Object.keys(changes).length === 0) return;
@@ -167,11 +182,24 @@ export function ReviewSettingsView({ heading, settings, writes, nameOf, viewerUs
               <Input id="review-notify-email" label="Email when a review is waiting" value={draft.notifyEmail} disabled={!canEdit} onChange={set("notifyEmail")} placeholder="moderators@example.com" />
             </SettingRow>
             <SettingRow label="Removal approver">
-              <Input id="review-removal-approver" label="Owner who approves removals" code value={draft.removalApproverUserId} disabled={!canEdit || !value.may.nameApprover} onChange={set("removalApproverUserId")} placeholder="A person's user id" />
+              {choosesApprover ? (
+                <SearchPicker
+                  id="review-removal-approver"
+                  label="Choose who approves removals"
+                  listLabel="People who can moderate"
+                  placeholder="Search the people who can moderate"
+                  choices={moderators.map((p) => ({ id: p.userId, name: personCalled(p), detail: p.displayName === "" ? undefined : p.email }))}
+                  emptyText="Nobody who can moderate this store by that name."
+                  onChoose={(choice) => set("removalApproverUserId")(choice.id)}
+                />
+              ) : null}
               <Caption>
                 {approverName !== "" ? `${approverName === "you" ? "You are" : `${approverName} is`} the one person who can remove a published review or erase a writer's data.` : "Nobody can remove a published review until an owner is named."}
                 {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
               </Caption>
+            </SettingRow>
+            <SettingRow label="Who can moderate">
+              <Moderators people={people} />
             </SettingRow>
           </DetailsSection>
           <DetailsSection title="Data">
@@ -183,6 +211,27 @@ export function ReviewSettingsView({ heading, settings, writes, nameOf, viewerUs
         </Details>
       </div>
     </ReviewsPane>
+  );
+}
+
+/**
+ * Everybody who can moderate the store, by name, and in words which of them
+ * approves removals: no chip, no badge.
+ */
+function Moderators({ people }: { people: Reading<ReviewPerson[]> }) {
+  if (people.state === "failed") {
+    return <Notice tone="warn" sentence="Who can moderate this store could not be read." detail={people.error}><Button onClick={people.reread}>Try again</Button></Notice>;
+  }
+  if (people.value === null) return <RecordListSkeleton label="Reading who can moderate this store" rows={2} />;
+  if (people.value.length === 0) return <Caption>Nobody in this store&rsquo;s organization can moderate its reviews.</Caption>;
+  return (
+    <RecordList as="ul" density="compact" label="Who can moderate this store's reviews">
+      {people.value.map((person) => (
+        <RecordRow key={person.userId} name={personCalled(person)} secondary={person.displayName === "" ? undefined : person.email}>
+          {person.mayRemove ? <span>Approves removals</span> : null}
+        </RecordRow>
+      ))}
+    </RecordList>
   );
 }
 

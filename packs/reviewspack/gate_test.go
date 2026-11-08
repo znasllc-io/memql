@@ -69,6 +69,7 @@ func TestEveryActingBuiltinDeclaresTheReviewsPartAndItsTarget(t *testing.T) {
 		"reviewsGet":              "reviewId",
 		"reviewsDecisionLog":      "siteId",
 		"reviewsSettings":         "siteId",
+		"reviewsPeople":           "siteId",
 	}
 	for name, target := range acting {
 		b, ok := builtins[name]

@@ -3412,6 +3412,16 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-picker-more { display: block; width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--os-line); background: transparent; color: var(--os-muted); font: inherit; font-size: var(--os-text-sm); text-align: left; cursor: pointer; }
 .os-picker-more:hover, .os-picker-more:focus-visible { background: var(--os-hover); color: var(--os-ink); }
 .os-picker-empty { margin: 0; padding: 12px; color: var(--os-muted); font-size: var(--os-text-sm); }
+/* A picker that chooses ONE (kit/SearchPicker). Its options stand apart by
+ * their spacing, with no line between them; the arrows' position is a wash and
+ * an accent edge, the same as the sharing picker's, and a pointer's a hover. */
+.os-search-picker { min-width: 0; max-width: 34rem; }
+.os-search-picker .os-input { width: 100%; box-sizing: border-box; }
+.os-search-picker-option { display: grid; gap: 2px; padding: 8px 10px; cursor: pointer; }
+.os-search-picker-option:hover { background: var(--os-hover); }
+.os-search-picker-option[data-active] { background: var(--os-accent-soft); box-shadow: inset 2px 0 var(--os-accent); }
+.os-search-picker-name { min-width: 0; color: var(--os-ink); overflow-wrap: anywhere; }
+.os-search-picker-detail { min-width: 0; font-size: var(--os-text-xs); color: var(--os-muted); overflow-wrap: anywhere; }
 .fleet-share-selection-count { margin: 0; }
 .fleet-share-option {
   display: grid;

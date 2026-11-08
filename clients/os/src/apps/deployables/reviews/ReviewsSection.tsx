@@ -102,7 +102,7 @@ export function ReviewsSection({ site, storeId, nameOf, viewerUserId, trail, bac
     case "log":
       return <DecisionLog scope={scope} heading={heading} revision={writes.revision} nameOf={nameOf} viewerUserId={viewerUserId} onOpenReview={setOpenReview} />;
     case "settings":
-      return <ReviewSettingsView heading={heading} settings={settings} writes={writes} nameOf={nameOf} viewerUserId={viewerUserId} />;
+      return <ReviewSettingsView heading={heading} scope={scope} settings={settings} writes={writes} nameOf={nameOf} viewerUserId={viewerUserId} />;
   }
 }
 

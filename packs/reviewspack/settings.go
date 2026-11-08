@@ -3,8 +3,10 @@ package reviewspack
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -186,6 +188,10 @@ func stampOrganization(changes map[string]any, site map[string]any) {
 	}
 }
 
+// errApproverCannotModerate refuses a removal approver who is not one of the
+// people who can moderate the store (reviewsPeople).
+var errApproverCannotModerate = errors.New("reviews: Choose someone in this store's organization who can moderate reviews.")
+
 // writeSettings merges changes into the store's current settings row and
 // answers the new version.
 //
@@ -196,6 +202,12 @@ func stampOrganization(changes map[string]any, site map[string]any) {
 // nobody approved. And the mailbox the store's requests leave from is named
 // only by an operator: it may be the installation's own, standing in for an
 // organization with none, and only the installation's people may lend it.
+//
+// And one rule decides whom: the approver named is one of the people who can
+// moderate the store, in its organization as this write leaves it
+// (moderatorsIn) -- never somebody outside it, never one of the cluster's
+// operators, never a role test's stand-in. Whoever names them, operator or
+// current owner.
 func (p *Provider) writeSettings(ctx context.Context, storeID string, changes map[string]any) ([]memorynodes.MemoryNode, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || strings.TrimSpace(ac.UserId) == "" {
@@ -222,8 +234,21 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 	}
 	if next, naming := changes["removalApproverUserId"]; naming && next != asString(current["removalApproverUserId"]) {
 		now := strings.TrimSpace(asString(current["removalApproverUserId"]))
-		if !operator && (now == "" || now != strings.TrimSpace(ac.UserId)) {
+		if !operator && !sameUser(now, ac.UserId) {
 			return nil, fmt.Errorf("reviews: only the store's current owner, or the cluster's operators, can name who approves removals")
+		}
+		if named := strings.TrimSpace(asString(next)); named != "" {
+			account := asString(changes["accountId"])
+			if bareAccount(account) == "" {
+				account = asString(current["accountId"])
+			}
+			people, err := p.moderatorsIn(ctx, account)
+			if err != nil {
+				return nil, err
+			}
+			if !slices.ContainsFunc(people, func(m Moderator) bool { return sameUser(m.UserID, named) }) {
+				return nil, errApproverCannotModerate
+			}
 		}
 	}
 

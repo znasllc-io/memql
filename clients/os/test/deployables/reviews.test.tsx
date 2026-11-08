@@ -298,8 +298,9 @@ describe("the settings", () => {
     await click(tab("Settings"));
     const lifetime = (await screen.findByLabelText("Days a review link stays open")) as HTMLInputElement;
     expect(lifetime.value).toBe("14");
-    // Only the owner, or an operator, names who approves removals.
-    expect((screen.getByLabelText("Owner who approves removals") as HTMLInputElement).disabled).toBe(true);
+    // Only the owner, or an operator, names who approves removals: to anybody
+    // else the choice is absent, never disabled.
+    expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
     expect(barButtons()).toEqual([]);
 
     await typeInto(lifetime, "21");
@@ -340,5 +341,77 @@ describe("the settings", () => {
     await typeInto((await screen.findByLabelText("Days a review link stays open")) as HTMLInputElement, "0");
     expect(await screen.findByText(/a whole number from 1 to 365/)).toBeTruthy();
     expect(barButtons()).toEqual(["Discard"]);
+  });
+});
+
+describe("who can moderate", () => {
+  // THE REMOVAL APPROVER IS ONE OF THE STORE'S PEOPLE WHO CAN MODERATE IT
+  // (reviewsPeople): chosen from them in a picker, never typed as an id, and
+  // the settings say who they are -- in words, on a list of everybody who can
+  // moderate the store.
+  const PEOPLE = {
+    storeId: "store-live",
+    people: [
+      { userId: "u-owner", displayName: "Avery Owner", email: "avery@example.com", mayRemove: true },
+      { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
+    ],
+  } as unknown as Row;
+  const APPROVER_SETTINGS = {
+    exists: true,
+    settings: { linkLifetimeDays: 14, requestDelayDays: 14, notifyEmail: "support@example.com", removalApproverUserId: "u-owner" },
+    may: { edit: true, nameApprover: true },
+    viewer: { moderates: true, approvesRemovals: true },
+  } as unknown as Row;
+
+  it("review settings pick the approver from the people who can moderate", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    const moderators = await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    expect(connection.callsNamed("reviewsPeople")[0]).toContain('storeId: "store-live"');
+    expect(connection.callsNamed("reviewsPeople")[0]).toContain('siteId: "site-shop"');
+    const rows = within(moderators).getAllByRole("listitem");
+    expect(rows.map((r) => r.querySelector(".os-row-name")?.textContent)).toEqual(["Avery Owner", "Robin Moderator"]);
+    // Who approves removals is said in words on their row: no chip, no badge.
+    expect(within(rows[0]!).getByText("Approves removals")).toBeTruthy();
+    expect(within(rows[1]!).queryByText("Approves removals")).toBeNull();
+    expect(within(rows[1]!).getByText("robin@example.com")).toBeTruthy();
+    // The address a waiting review is sent to stays a field.
+    expect((screen.getByLabelText("Email when a review is waiting") as HTMLInputElement).value).toBe("support@example.com");
+    expect(screen.getByText(/Avery Owner is the one person who can remove a published review/)).toBeTruthy();
+
+    const field = screen.getByRole("combobox", { name: "Choose who approves removals" });
+    fireEvent.focus(field);
+    const choices = await screen.findByRole("listbox", { name: "People who can moderate" });
+    expect(within(choices).getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual(["Avery Owner", "Robin Moderator"]);
+    await click(within(choices).getByRole("option", { name: "Robin Moderator" }));
+    expect(screen.queryByRole("listbox", { name: "People who can moderate" })).toBeNull();
+    expect(screen.getByText(/Robin Moderator is the one person who can remove a published review/)).toBeTruthy();
+
+    await readTheBar();
+    expect(barButtons()).toEqual(["Discard", "Save"]);
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    const call = connection.callsNamed("reviewsUpdateSettings")[0];
+    expect(call).toContain('removalApproverUserId: "u-mod"');
+    expect(call).not.toContain("notifyEmail");
+  });
+
+  it("say so when the engine refuses the approver chosen", async () => {
+    const refusal = "reviews: Choose someone in this store's organization who can moderate reviews.";
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE, settingsError: refusal }));
+    await click(tab("Settings"));
+    fireEvent.focus(await screen.findByRole("combobox", { name: "Choose who approves removals" }));
+    await click(within(await screen.findByRole("listbox", { name: "People who can moderate" })).getByRole("option", { name: "Robin Moderator" }));
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Choose someone in this store's organization who can moderate reviews.")).toBeTruthy();
+  });
+
+  it("say nobody can moderate when the store's organization has nobody who can", async () => {
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: { storeId: "store-live", people: [] } as unknown as Row }));
+    await click(tab("Settings"));
+    expect(await screen.findByText(/Nobody in this store.s organization can moderate its reviews\./)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Who can moderate this store's reviews" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
   });
 });

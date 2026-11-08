@@ -63,8 +63,11 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	handle := "floss-picks-" + n
 	token := "tok-" + n + "-0123456789abcdefghijklmnopqrstuvwxyz"
 	site := "site-reviews-link-" + n
-	seedSite(t, eng, site, merchant, store)
+	account := "acct-reviews-link-" + n
+	seedSiteIn(t, eng, site, merchant, store, account)
 	grantReviewsPart(t, eng, merchant)
+	// The removal approver is one of the store's organization's people.
+	seedStorePerson(t, eng, account, merchant)
 	putRequest(t, eng, merchant, store, "request-"+n, handle, token, time.Now().Add(14*24*time.Hour))
 
 	if err := submitThrough(eng, merchant, store, handle, token, "first words"); err != nil {
@@ -92,7 +95,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 		t.Fatalf("settings: %v", err)
 	}
 	reviewID := rows[0]["id"].(string)
-	if _, err := eng.Execute(asPerson(merchant, auth.Role("user")),
+	if _, err := eng.Execute(asPerson(merchant, auth.RoleWriter),
 		`builtin reviewsDecide(reviewId: `+quote(reviewID)+`, action: "publish", revision: 2)`); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -105,7 +108,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 	refusedAs(t, submitThrough(eng, merchant, store, handle, token, "too late"), "link_used")
 
 	// ---- the store's record leaves with it ---------------------------------
-	export := payloadOf(t, eng, asPerson(merchant, auth.Role("user")),
+	export := payloadOf(t, eng, asPerson(merchant, auth.RoleWriter),
 		`builtin reviewsExportStore(storeId: `+quote(store)+`, siteId: `+quote(site)+`)`)
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(export["json"].(string)), &doc); err != nil {
@@ -120,7 +123,7 @@ func TestLiveE2E_ABuyersLinkWritesAVerifiedReviewAndClosesOnPublish(t *testing.T
 		`builtin reviewsUpdateSettings(storeId: `+quote(store)+`, siteId: `+quote(site)+`, removalApproverUserId: `+quote(merchant)+`)`); err != nil {
 		t.Fatalf("naming the removal approver: %v", err)
 	}
-	if _, err := eng.Execute(asPerson(merchant, auth.Role("user")),
+	if _, err := eng.Execute(asPerson(merchant, auth.RoleWriter),
 		`builtin reviewsEraseReviewer(reviewId: `+quote(reviewID)+`, note: "asked by email")`); err != nil {
 		t.Fatalf("the named owner could not erase: %v", err)
 	}

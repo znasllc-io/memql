@@ -86,6 +86,9 @@ type Provider struct {
 	osBase func() string
 	// mailer sends a message an order entitles (due.go).
 	mailer orderMailer
+	// organizations answers what a named person holds in each of their
+	// organizations (reads.go, organizationDecisions); nil asks the engine.
+	organizations organizationDecisions
 }
 
 func (p *Provider) IntegrationName() string { return integrationName }
@@ -246,6 +249,15 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Name:        "settings",
 			Description: "One store's reviews settings with defaults applied, and what the caller may change.",
 			Handler:     p.readSettings,
+			ArgsSchema: map[string]string{
+				"storeId": "string (required)",
+				"siteId":  "string (required) - the store's site, judged by the organization gate",
+			},
+		},
+		{
+			Name:        "people",
+			Description: "The people who can moderate one store's reviews, and which of them approves removals.",
+			Handler:     p.people,
 			ArgsSchema: map[string]string{
 				"storeId": "string (required)",
 				"siteId":  "string (required) - the store's site, judged by the organization gate",

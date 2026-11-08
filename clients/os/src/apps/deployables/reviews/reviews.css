@@ -38,3 +38,9 @@
 .os-review-settings .os-setting-value > .os-input {
   justify-self: stretch;
 }
+/* A record list -- who can moderate -- and its skeleton take the column too:
+   each is a size container, so shrunk to its content it would have no width
+   at all. The approver's picker keeps a field's width, as the inputs do. */
+.os-review-settings .os-setting-value > :is(.os-record-list, .os-record-skeleton, .os-search-picker) {
+  justify-self: stretch;
+}

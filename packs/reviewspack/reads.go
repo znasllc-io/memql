@@ -11,20 +11,26 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // reads.go -- WHAT THE ADMIN PANEL READS: ONE REVIEW (reviewsGet), THE
-// STORE'S DECISION LOG (reviewsDecisionLog), THE SETTINGS (reviewsSettings).
+// STORE'S DECISION LOG (reviewsDecisionLog), THE SETTINGS (reviewsSettings),
+// WHO CAN MODERATE THE STORE (reviewsPeople).
 //
 // The moderation list answers the queue. A moderator who opens one review
 // needs its whole decision log and the acts they may take on it now; the
 // store's log answers who decided what across every review, newest first;
-// and the settings answer what is in force with the defaults applied.
+// the settings answer what is in force with the defaults applied; and the
+// store's people answer who can moderate it, the people its removal approver
+// is chosen from.
 //
 // EACH READ SAYS WHAT THE VIEWER MAY DO, worked out here with the rules the
 // writes enforce (ValidateDecision, moderatorOf, writeSettings), so the panel
 // offers no act the engine would then refuse. Every read runs under the
-// caller's own actor: a caller outside the store reads nothing.
+// caller's own actor: a caller outside the store reads nothing. The one
+// exception is the organization's roster under reviewsPeople, read as the
+// deployment once the caller is admitted (moderatorsIn says why).
 
 // LoggedDecision is one entry of a decision log.
 type LoggedDecision struct {
@@ -238,7 +244,7 @@ func (p *Provider) readSettings(ctx context.Context, args map[string]any, _ int)
 	eff := EffectiveSettings(row)
 	userID, operator := viewerOf(ctx)
 	exists := len(row) > 0
-	approver := !operator && userID != "" && eff.RemovalApproverUserID != "" && eff.RemovalApproverUserID == userID
+	approver := !operator && sameUser(eff.RemovalApproverUserID, userID)
 	return receipt("v1:reviews:settingsRead", SettingsRowID(storeID), map[string]any{
 		"storeId": storeID,
 		"exists":  exists,
@@ -263,4 +269,248 @@ func (p *Provider) readSettings(ctx context.Context, args map[string]any, _ int)
 			"approvesRemovals": approver,
 		},
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Who can moderate (reviewsPeople)
+// ---------------------------------------------------------------------------
+
+// reviewsPart is the Deployables part a store's moderation is, and
+// reviewsDoor the app it is a part of.
+const (
+	reviewsPart = "app:deployables/reviews"
+	reviewsDoor = "app:deployables"
+)
+
+// peopleActor is the identity an organization's roster is read under: the
+// deployment, once the organization gate has admitted the caller.
+const peopleActor = "reviews-people"
+
+// maxPeople bounds how many of an organization's people are considered, the
+// bound integrations/groups/people.go puts on its roster.
+const maxPeople = 100
+
+// Moderator is one person who can moderate a store's reviews. Nothing else of
+// their user row leaves this package.
+type Moderator struct {
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+	Email       string `json:"email"`
+	// MayRemove: they are the store's removal approver (isRemovalApprover).
+	MayRemove bool `json:"mayRemove"`
+}
+
+// organizationDecisions is what the engine answers about a NAMED person in
+// each of their organizations (memql.MemQLEngine.ResolveOrganizationDecisionsFor):
+// the action guards' own resolver, run for them -- their role, their groups
+// filtered to the organization answered, the grants on both. Declared here, as
+// integrations/rbac declares its own, so this package's doubles need not
+// stand up an engine.
+type organizationDecisions interface {
+	ResolveOrganizationDecisionsFor(ctx context.Context, userId string, role auth.Role, known []auth.Decision) []memql.OrganizationDecision
+}
+
+// organizationResolver is the Provider's, or the engine's.
+func (p *Provider) organizationResolver() (organizationDecisions, error) {
+	if p.organizations != nil {
+		return p.organizations, nil
+	}
+	if r, ok := p.engine.(organizationDecisions); ok {
+		return r, nil
+	}
+	return nil, fmt.Errorf("reviews: this node cannot resolve who can moderate a store's reviews")
+}
+
+// people answers reviewsPeople: the people who can moderate one store's
+// reviews, each saying whether they are its removal approver.
+func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	storeID := strings.TrimSpace(asString(args["storeId"]))
+	if storeID == "" {
+		return nil, fmt.Errorf("reviews: storeId is required")
+	}
+	site, err := p.siteForStore(ctx, asString(args["siteId"]), storeID)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := p.settingsFor(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	people, err := p.moderatorsIn(ctx, storeOrganization(site, settings))
+	if err != nil {
+		return nil, err
+	}
+	for i := range people {
+		people[i].MayRemove = namesApprover(settings, people[i].UserID)
+	}
+	return receipt("v1:reviews:people", "people-"+slugOf(storeID), map[string]any{
+		"storeId": storeID,
+		"people":  people,
+	})
+}
+
+// storeOrganization is the organization a store's reviews belong to: the one
+// its settings record, else its site's. siteForStore has already refused a
+// site of another organization than the settings name.
+func storeOrganization(site, settings map[string]any) string {
+	if acct := bareAccount(asString(settings["accountId"])); acct != "" {
+		return acct
+	}
+	return bareAccount(asString(site["accountId"]))
+}
+
+// moderatorsIn answers the people who can moderate a store's reviews in its
+// organization, by name: the active members of any of the organization's
+// groups whom the engine answers able to moderate there, never one of the
+// cluster's operators and never a role test's stand-in. A store of no
+// organization has nobody.
+//
+// CAN MODERATE IS THE ORGANIZATION GATE'S QUESTION, answered by the engine's
+// own resolver for each person: the three things it asks before any reviews
+// builtin runs for them (component/memql, refuseOrganizationActionCapability)
+// -- the organization's data read, its Deployables door and the reviews part
+// -- each held in THIS organization. The part alone would list a person whose
+// every act on the store the gate then refuses.
+//
+// WHO THEY ARE IS DROPPED FIRST, before the engine is asked: an operator hosts
+// the reviews and decides none (moderatorOf), and a role test's stand-in is a
+// member of the organization's group only while an organization role's test is
+// live -- a 30-minute identity that is nobody (ruling R3).
+//
+// THE ROSTER IS THE DEPLOYMENT'S READ, not the caller's. Who can moderate a
+// store is a fact about the store, and answering it from what this caller may
+// see would let a moderator and an operator get different answers -- and the
+// approver check different verdicts. So the organization's groups, their
+// members and each member's user row are read as the deployment, the way
+// integrations/groups/people.go reads an organization's people, and only after
+// the organization gate admitted the caller to this store (reviewsPeople) or
+// writeSettings' own rule admitted them to name an approver. The user row is
+// @serverOnly; the internal stamp is on that one read, and nothing of the row
+// but the person's id, name and address leaves.
+//
+// ANSWERED IN FULL OR NOT AT ALL. The engine's readers answer from what they
+// could read when a read fails, which a gate wants; a list of who can moderate
+// drawn from part of the grants could name somebody a deny it never read has
+// barred. Any failed read under the answer refuses it.
+func (p *Provider) moderatorsIn(ctx context.Context, account string) ([]Moderator, error) {
+	account = bareAccount(account)
+	if account == "" {
+		return []Moderator{}, nil
+	}
+	resolver, err := p.organizationResolver()
+	if err != nil {
+		return nil, err
+	}
+	sys := auth.ContextWithSystemActor(ctx, peopleActor)
+	members, err := p.organizationMembers(sys, account)
+	if err != nil {
+		return nil, err
+	}
+	resolving, failures := auth.ContextWithReadFailures(ctx)
+	known := []auth.Decision{{Verb: auth.VerbExecute, Resource: reviewsPart}}
+	out := []Moderator{}
+	for _, userID := range members {
+		if auth.IsRoleTestUser(userID) {
+			continue
+		}
+		rows, err := p.rowsFor(auth.ContextWithInternalOrigin(sys), "userByIdSystem", map[string]string{"userId": userID})
+		if err != nil {
+			return nil, fmt.Errorf("reviews: reading the organization's people: %w", err)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		row := rows[0]
+		if active, _ := row["active"].(bool); !active {
+			continue
+		}
+		role := auth.Role(strings.ToLower(strings.TrimSpace(asString(row["role"]))))
+		if auth.IsClusterOperator(role) {
+			continue
+		}
+		if !moderatesIn(resolver.ResolveOrganizationDecisionsFor(resolving, userID, role, known), account) {
+			continue
+		}
+		out = append(out, Moderator{UserID: userID, DisplayName: displayNameOf(row), Email: strings.TrimSpace(asString(row["primaryEmail"]))})
+	}
+	if err := failures.Err(); err != nil {
+		return nil, fmt.Errorf("reviews: a read behind who can moderate this store failed, so it cannot be answered: %w", err)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := strings.ToLower(out[i].DisplayName+" "+out[i].Email), strings.ToLower(out[j].DisplayName+" "+out[j].Email)
+		if a != b {
+			return a < b
+		}
+		return out[i].UserID < out[j].UserID
+	})
+	return out, nil
+}
+
+// organizationMembers is every active member of every active group of the
+// organization, bare and sorted, at most maxPeople of them: the people
+// integrations/groups/people.go collects.
+func (p *Provider) organizationMembers(sys context.Context, account string) ([]string, error) {
+	groups, err := p.rowsFor(sys, "groupsForAccount", map[string]string{"accountId": account})
+	if err != nil {
+		return nil, fmt.Errorf("reviews: reading the organization's groups: %w", err)
+	}
+	ids := map[string]bool{}
+	for _, group := range groups {
+		if strings.TrimSpace(asString(group["status"])) != "active" {
+			continue
+		}
+		members, err := p.rowsFor(sys, "membersOfGroup", map[string]string{"groupId": memql.BareShortId(asString(group["id"]))})
+		if err != nil {
+			return nil, fmt.Errorf("reviews: reading the organization's members: %w", err)
+		}
+		for _, member := range members {
+			if strings.TrimSpace(asString(member["status"])) != "active" {
+				continue
+			}
+			if id := memql.BareShortId(asString(member["userId"])); id != "" {
+				ids[id] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	if len(out) > maxPeople {
+		out = out[:maxPeople]
+	}
+	return out, nil
+}
+
+// moderatesIn reports whether the engine's decisions for one person admit them
+// to a store's reviews in account (moderatorsIn says which three).
+func moderatesIn(decisions []memql.OrganizationDecision, account string) bool {
+	held := map[auth.VerbResource]bool{}
+	for _, d := range decisions {
+		if d.Held && bareAccount(d.AccountID) == account {
+			held[auth.VerbResource{Verb: d.Verb, Resource: d.Resource}] = true
+		}
+	}
+	return held[auth.VerbResource{Verb: auth.VerbRead, Resource: auth.ResourceData}] &&
+		held[auth.VerbResource{Verb: auth.VerbRead, Resource: reviewsDoor}] &&
+		held[auth.VerbResource{Verb: auth.VerbExecute, Resource: reviewsPart}]
+}
+
+// displayNameOf is what a person is called: their display name, else their
+// first and last names, else nothing (a client names them by their address).
+func displayNameOf(row map[string]any) string {
+	if name := strings.TrimSpace(asString(row["displayName"])); name != "" {
+		return name
+	}
+	return strings.TrimSpace(strings.TrimSpace(asString(row["firstName"])) + " " + strings.TrimSpace(asString(row["lastName"])))
+}
+
+// sameUser reports whether two user ids name one person. They arrive in two
+// spellings: a signed-in caller's as the token carried it -- canonical,
+// `v1:identity:user:<id>`, on a deployed cluster -- and a chosen or stored one
+// as clients write ids, bare. Empty names nobody.
+func sameUser(a, b string) bool {
+	a, b = memql.BareShortId(a), memql.BareShortId(b)
+	return a != "" && a == b
 }

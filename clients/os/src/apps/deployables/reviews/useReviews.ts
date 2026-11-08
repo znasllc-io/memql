@@ -9,12 +9,14 @@ import {
   decisionLogFrom,
   reviewDetailFrom,
   reviewPageFrom,
+  reviewPeopleFrom,
   reviewSettingsFrom,
   type DecisionLogPage,
   type ReviewAct,
   type ReviewDetail,
   type ReviewFilter,
   type ReviewPage,
+  type ReviewPerson,
   type ReviewRow,
   type ReviewSettings,
   type ReviewSettingsValues,
@@ -105,6 +107,21 @@ export function useReviewSettings(scope: ReviewsScope, revision: number): Readin
       reviewSettingsFrom(await answerOf(connection.query, "reviewsSettings", { storeId: scope.storeId, siteId: scope.siteId }, signal));
   }, [connection, scope.storeId, scope.siteId]);
   return useReading(`review-settings:${scope.siteId}:${scope.storeId}`, read, revision);
+}
+
+/**
+ * Who can moderate the store (reviewsPeople): the people its removal approver
+ * is chosen from. Read again with every write, as the settings are, so who
+ * approves removals follows a save.
+ */
+export function useReviewPeople(scope: ReviewsScope, revision: number): Reading<ReviewPerson[]> {
+  const connection = useOsConnection();
+  const read = useMemo(() => {
+    if (connection === null || scope.storeId === "") return null;
+    return async (signal: AbortSignal) =>
+      reviewPeopleFrom(await answerOf(connection.query, "reviewsPeople", { storeId: scope.storeId, siteId: scope.siteId }, signal));
+  }, [connection, scope.storeId, scope.siteId]);
+  return useReading(`review-people:${scope.siteId}:${scope.storeId}`, read, revision);
 }
 
 /**

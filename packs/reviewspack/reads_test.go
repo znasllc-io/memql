@@ -3,20 +3,27 @@ package reviewspack
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // reads_test.go -- WHAT THE ADMIN PANEL READS: ONE REVIEW, THE DECISION LOG,
-// THE SETTINGS.
+// THE SETTINGS, AND WHO CAN MODERATE.
 //
 // The moderation list (list_test.go) answers the queue. A moderator who opens
 // one review needs its whole decision log and the acts they may take on it
 // NOW; the store's log answers who decided what, newest first, across every
-// review; and the settings answer what is in force with the defaults applied.
-// Each read says what the viewer may do, computed here with the rules the
-// writes enforce, so the panel never offers an act the engine would refuse.
+// review; the settings answer what is in force with the defaults applied; and
+// the store's people answer who can moderate it, the people its removal
+// approver is chosen from. Each read says what the viewer may do, computed
+// here with the rules the writes enforce, so the panel never offers an act the
+// engine would refuse.
 
 type readsReader struct {
 	reviews   []map[string]any // reviewsInStore; reviewById picks one
@@ -317,5 +324,265 @@ func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 	}
 	if viewer, _ := set["viewer"].(map[string]any); viewer["moderates"] != true || viewer["approvesRemovals"] != false {
 		t.Fatalf("viewer = %v", set["viewer"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Who can moderate (reviewsPeople)
+// ---------------------------------------------------------------------------
+
+// orgRoster is an organization's people as the pack reads them -- each
+// organization's groups, their members and every person's user row -- and what
+// the engine answers for each person in each of their organizations. It
+// answers the roster's reads and stands in for the engine's resolver
+// (organizationDecisions), so the rule over them is tested as a function.
+type orgRoster struct {
+	groups  map[string][]map[string]any             // groupsForAccount, by account
+	members map[string][]map[string]any             // membersOfGroup, by group
+	users   map[string]map[string]any               // userByIdSystem, by user
+	holds   map[string][]memql.OrganizationDecision // the engine's decisions, by user
+	// failRead: the engine notes a failed grant read while it resolves.
+	failRead bool
+	asked    []string
+}
+
+func (r *orgRoster) rows(query string, args map[string]string) ([]map[string]any, bool) {
+	switch query {
+	case "groupsForAccount":
+		return r.groups[args["accountId"]], true
+	case "membersOfGroup":
+		return r.members[args["groupId"]], true
+	case "userByIdSystem":
+		if row, ok := r.users[args["userId"]]; ok {
+			return []map[string]any{row}, true
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+func (r *orgRoster) ResolveOrganizationDecisionsFor(ctx context.Context, userId string, _ auth.Role, _ []auth.Decision) []memql.OrganizationDecision {
+	r.asked = append(r.asked, userId)
+	if r.failRead {
+		auth.NoteReadFailure(ctx, errors.New("the grant rows could not be read"))
+	}
+	return r.holds[userId]
+}
+
+// withRoster answers the roster's reads and hands every other read on.
+type withRoster struct {
+	rowReader
+	roster *orgRoster
+}
+
+func (w withRoster) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
+	if rows, ok := w.roster.rows(query, args); ok {
+		return rows, nil
+	}
+	return w.rowReader.Rows(ctx, query, args)
+}
+
+func rosterGroup(id, account string) map[string]any {
+	return map[string]any{"id": id, "name": id, "kind": "custom", "accountId": account, "status": "active"}
+}
+
+func rosterMember(group, user, origin, status string) map[string]any {
+	return map[string]any{"id": group + "-" + user, "groupId": group, "userId": user, "origin": origin, "status": status}
+}
+
+func rosterUser(id, name, role string, active bool) map[string]any {
+	return map[string]any{"id": id, "displayName": name, "primaryEmail": id + "@example.com", "role": role, "active": active}
+}
+
+// heldIn is the engine's answer for one person in one organization: each
+// pair named is held there.
+func heldIn(account string, pairs ...auth.VerbResource) []memql.OrganizationDecision {
+	out := make([]memql.OrganizationDecision, 0, len(pairs))
+	for _, p := range pairs {
+		out = append(out, memql.OrganizationDecision{AccountID: account, Decision: auth.Decision{Verb: p.Verb, Resource: p.Resource, Held: true}})
+	}
+	return out
+}
+
+var (
+	readData        = auth.VerbResource{Verb: auth.VerbRead, Resource: auth.ResourceData}
+	openDeployables = auth.VerbResource{Verb: auth.VerbRead, Resource: "app:deployables"}
+	moderateReviews = auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/reviews"}
+)
+
+// shopRoster is the store's organization (acct-shop, the fixtures' own) and
+// one other. Two of its people can moderate: owner-1, the removal approver the
+// settings name, and mod-1, who is in two of its groups. Everybody else is in
+// it for a reason that must keep them off the list -- a cluster operator, a
+// role test's stand-in, someone deactivated, someone who left, someone without
+// the reviews part, someone with the part and no way into Deployables -- or is
+// in the other organization, where they hold everything.
+func shopRoster() *orgRoster {
+	persona := auth.RoleTestUserPrefix + "stand-in"
+	moderates := func(account string) []memql.OrganizationDecision {
+		return heldIn(account, readData, openDeployables, moderateReviews)
+	}
+	return &orgRoster{
+		groups: map[string][]map[string]any{
+			"acct-shop":  {rosterGroup("group-shop", "acct-shop"), rosterGroup("group-shop-support", "acct-shop")},
+			"acct-other": {rosterGroup("group-other", "acct-other")},
+		},
+		members: map[string][]map[string]any{
+			"group-shop": {
+				rosterMember("group-shop", "mod-1", "added", "active"),
+				rosterMember("group-shop", "owner-1", "added", "active"),
+				rosterMember("group-shop", "staff-1", "added", "active"),
+				rosterMember("group-shop", persona, "role-test", "active"),
+				rosterMember("group-shop", "away-1", "added", "active"),
+				rosterMember("group-shop", "gone-1", "added", "removed"),
+				rosterMember("group-shop", "doorless-1", "added", "active"),
+			},
+			"group-shop-support": {
+				rosterMember("group-shop-support", "viewer-1", "added", "active"),
+				rosterMember("group-shop-support", "mod-1", "domain", "active"),
+			},
+			"group-other": {rosterMember("group-other", "outsider-1", "added", "active")},
+		},
+		users: map[string]map[string]any{
+			"mod-1":      rosterUser("mod-1", "Robin Moderator", "shop-moderator", true),
+			"owner-1":    rosterUser("owner-1", "Avery Owner", "user", true),
+			"staff-1":    rosterUser("staff-1", "Sam Staff", "developer", true),
+			persona:      rosterUser(persona, "Test Shop moderator", "shop-moderator", true),
+			"away-1":     rosterUser("away-1", "Alex Away", "user", false),
+			"gone-1":     rosterUser("gone-1", "Gale Gone", "user", true),
+			"doorless-1": rosterUser("doorless-1", "Dee Doorless", "user", true),
+			"viewer-1":   rosterUser("viewer-1", "Val Viewer", "reader", true),
+			"outsider-1": rosterUser("outsider-1", "Oli Outsider", "user", true),
+		},
+		holds: map[string][]memql.OrganizationDecision{
+			"mod-1":      moderates("acct-shop"),
+			"owner-1":    moderates("acct-shop"),
+			"staff-1":    moderates("acct-shop"),
+			persona:      moderates("acct-shop"),
+			"away-1":     moderates("acct-shop"),
+			"gone-1":     moderates("acct-shop"),
+			"doorless-1": heldIn("acct-shop", readData, moderateReviews),
+			"viewer-1":   heldIn("acct-shop", readData, openDeployables),
+			"outsider-1": moderates("acct-other"),
+		},
+	}
+}
+
+func readPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) ([]map[string]any, error) {
+	t.Helper()
+	nodes, err := (&Provider{reader: withRoster{rowReader: r, roster: roster}, organizations: roster}).people(ctx, args, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		StoreID string           `json:"storeId"`
+		People  []map[string]any `json:"people"`
+	}
+	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.StoreID != "store-live" {
+		t.Fatalf("storeId = %q, want the store asked about", out.StoreID)
+	}
+	return out.People, nil
+}
+
+func peopleIDs(people []map[string]any) []string {
+	out := make([]string, 0, len(people))
+	for _, p := range people {
+		out = append(out, asString(p["userId"]))
+	}
+	return out
+}
+
+// THE PEOPLE WHO CAN MODERATE A STORE ARE ITS ORGANIZATION'S OWN: the active
+// members of any of its groups whom the engine answers able to moderate its
+// reviews there -- the organization's data, its Deployables door and the
+// reviews part, the three things the organization gate asks of every reviews
+// act -- and never one of the cluster's operators, who host the reviews and
+// decide none. Each says whether they are the one who approves removals.
+func TestReviewsPeopleListsTheStoresModerators(t *testing.T) {
+	roster := shopRoster()
+	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,mod-1" {
+		t.Fatalf("people = %s, want owner-1 and mod-1, by name -- nobody else in the organization can moderate, and nobody outside it is in it", got)
+	}
+	want := []map[string]any{
+		{"userId": "owner-1", "displayName": "Avery Owner", "email": "owner-1@example.com", "mayRemove": true},
+		{"userId": "mod-1", "displayName": "Robin Moderator", "email": "mod-1@example.com", "mayRemove": false},
+	}
+	for i, w := range want {
+		if len(people[i]) != len(w) {
+			t.Fatalf("person %d = %v, want exactly %v: nothing else of a user row leaves", i, people[i], w)
+		}
+		for k, v := range w {
+			if people[i][k] != v {
+				t.Fatalf("person %d %s = %v, want %v (%v)", i, k, people[i][k], v, people[i])
+			}
+		}
+	}
+	// The operator, the stand-in and the deactivated were dropped by who they
+	// are, before the engine was asked about them; the rest because of what it
+	// answered for them in this organization.
+	asked := append([]string(nil), roster.asked...)
+	sort.Strings(asked)
+	if got := strings.Join(asked, ","); got != "doorless-1,mod-1,owner-1,viewer-1" {
+		t.Fatalf("the engine was asked about %s", got)
+	}
+
+	// An operator reads the same people: who can moderate is the store's
+	// answer, not the viewer's.
+	again, err := readPeople(t, operatorCtxFor("staff-9"), settingsReader(existingSettings()), shopRoster(),
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil || strings.Join(peopleIDs(again), ",") != "owner-1,mod-1" {
+		t.Fatalf("an operator read %v (%v), want the same two people", peopleIDs(again), err)
+	}
+}
+
+// A STORE WHOSE SITE BELONGS TO NO ORGANIZATION HAS NOBODY TO MODERATE IT, and
+// its people are never looked for.
+func TestReviewsPeopleOfAStoreInNoOrganizationIsNobody(t *testing.T) {
+	untied := map[string]any{"id": "site-1", "ownerUserId": "merchant-1", "binding": map[string]any{"storeId": "store-live"}}
+	roster := shopRoster()
+	people, err := readPeople(t, operatorCtxFor("staff-9"), &decideReader{site: untied, settings: map[string]any{"storeId": "store-live"}}, roster,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(people) != 0 || len(roster.asked) != 0 {
+		t.Fatalf("people = %v (asked %v), want nobody", people, roster.asked)
+	}
+}
+
+// WHO CAN MODERATE IS ANSWERED IN FULL OR NOT AT ALL: a grant read that failed
+// under the answer could hide a deny, and a list drawn without it names a
+// moderator the store's organization has barred.
+func TestReviewsPeopleRefusesWhenAReadBehindItFails(t *testing.T) {
+	roster := shopRoster()
+	roster.failRead = true
+	if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"}); err == nil {
+		t.Fatal("an answer was drawn from part of the grants")
+	}
+}
+
+func TestReviewsPeopleNeedsTheStoreAndItsSite(t *testing.T) {
+	roster := shopRoster()
+	for _, args := range []map[string]any{
+		{"siteId": "site-1"},
+		{"storeId": "store-live"},
+		{"storeId": "store-other", "siteId": "site-1"},
+	} {
+		if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster, args); err == nil {
+			t.Errorf("%v was answered", args)
+		}
+	}
+	if _, err := (&Provider{reader: withRoster{rowReader: settingsReader(existingSettings()), roster: roster}}).people(moderatorCtx("mod-1"),
+		map[string]any{"storeId": "store-live", "siteId": "site-1"}, 0); err == nil {
+		t.Fatal("a node with no resolver answered who can moderate")
 	}
 }

@@ -183,8 +183,15 @@ func (p *Provider) isRemovalApprover(ctx context.Context, storeID, userID string
 	if err != nil {
 		return false, err
 	}
-	approver := strings.TrimSpace(asString(settings["removalApproverUserId"]))
-	return approver != "" && approver == userID, nil
+	return namesApprover(settings, userID), nil
+}
+
+// namesApprover reports whether a store's settings row names userID as the
+// owner who approves removals, in either spelling of the id (sameUser): the
+// approver is chosen by the bare id reviewsPeople answers, and a signed-in
+// caller's id is the token's.
+func namesApprover(settings map[string]any, userID string) bool {
+	return sameUser(strings.TrimSpace(asString(settings["removalApproverUserId"])), userID)
 }
 
 // settingsFor reads one store's settings row; an absent row is an empty map.
