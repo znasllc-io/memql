@@ -942,6 +942,27 @@ func TestAnEndWhoseMembershipStaysHasStillEndedTheTest(t *testing.T) {
 	require.Empty(t, activeGroups(t, session.UserID), "until the operator's next Start removes it")
 }
 
+// TestTheConceptSaysWhenARoleTestMembershipGoes: groupMembership's `origin`,
+// which the concept catalog publishes, tells a reader when a role-test
+// membership goes the way the tests above prove it: when its test is ended, or
+// at the operator's next Start or End once the test has expired. Not "when the
+// test ends": an expired test ends with nothing removing it.
+func TestTheConceptSaysWhenARoleTestMembershipGoes(t *testing.T) {
+	_, err := memql.LoadUnifiedConcepts(nil)
+	require.NoError(t, err)
+	membership, err := concept.DefaultRegistry().Get("v1:identity:groupMembership")
+	require.NoError(t, err)
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	require.NoError(t, json.Unmarshal(membership.Schemas["definition"], &schema))
+	origin := schema.Properties["origin"].Description
+	require.Contains(t, origin, "removed when the test is ended, or at the operator's next Start or End after it expires")
+	require.NotContains(t, origin, "removed when the test ends")
+}
+
 func offeredSlugs(t *testing.T, s *Service, ctx context.Context) []string {
 	t.Helper()
 	_, roles, err := s.List(ctx)
