@@ -476,6 +476,18 @@ func (dr *runDriver) heartbeat(ctx context.Context) {
 // the work run's driving node (RecordDriver). The work run is not beaten: the
 // lease written here is its liveness (guardJournal). It answers false when
 // there is nothing left to renew: the lease is lost, or the run concluded.
+//
+// THE RENEWAL IS A CURRENT OBSERVATION, NOT A VERSION, where the cluster has
+// switched pipeline-run observation storage on (migration
+// 20261108190000_pipeline_run_lease_observations, memorynodes.HasLiveness):
+// because the patch names driverHeartbeatAt ALONE, the database replaces the
+// run's one row in memory_liveness instead of appending a whole version with
+// its policySnapshot. Nothing here depends on which: every read below and in
+// claim merges that row, so a takeover judges the newest renewal, and the
+// row-version fence compares the newest createdAt across both tables, so a
+// write decided before a renewal is refused. Add a field to this patch and
+// every renewal is a version again. Pinned on two engines by
+// TestLeaseRenewalsAreObservationsAcrossTwoReplicas.
 func (dr *runDriver) renew(ctx context.Context) bool {
 	cancelAsked := false
 	err := dr.underLease(ctx, func(gctx context.Context, current Run) error {

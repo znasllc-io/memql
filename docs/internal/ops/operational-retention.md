@@ -34,9 +34,11 @@ history disposable. Unmarked concepts keep their current policies.
 
 Two status rows declare `@retention(ttl="1d", keepLatest=true, archive="none")`:
 `v1:pipelines:run` and `v1:worker:appSession`. Their holders rewrite them on a
-heartbeat and after every step, and each write appends a full version (a
+heartbeat and after every step, and each write appended a full version (a
 pipeline run's copies its ~14 KB `policySnapshot`); on 2026-11-06 the two
-accounted for 1.9 GB in one week. Nothing reads a superseded version: a pipeline
+accounted for 1.9 GB in one week. A pipeline run's heartbeat is a current
+observation instead where its observation storage is on (Current liveness
+observations, below). Nothing reads a superseded version: a pipeline
 run's attempt history is its rows, one per attempt, and a session's record is its
 steps and Library transcript. The newest version of each stays; a day keeps
 recent progress readable to whoever debugs a stuck drive, and keeps most expired
@@ -52,13 +54,15 @@ each chunk that closes, not lasting growth: the rest are deleted inside the chun
 still taking inserts. Taking it off the versions needs a second store for it,
 content-addressed by the snapshot's own `version` digest, and a lookup on every
 fresh run read the driver makes (each guarded journal write makes one), plus
-retention and archive coverage for that store. The larger lever on this row is
-the 30-second lease renewal, about three quarters of its versions, and moving
-`driverHeartbeatAt` into `memory_liveness` needs a third reader handshake that
-would activate only where liveness storage is enabled (production), on the lease
-every pipeline run depends on. Both are left for a change scheduled on purpose.
-The pipeline's `v1:work:run` is no longer beaten at all (the lease is its
-liveness, `docs/internal/ops/harness-decisions.md`).
+retention and archive coverage for that store, so it stays left. The larger
+lever on this row, the 30-second lease renewal (about three quarters of its
+versions), was first left too, and was then taken on the same day: a renewal is
+now a current observation in `memory_liveness`, with a third reader handshake
+of its own (Current liveness observations, below). The snapshot is still copied
+by every business write of the run: the open, each claim, the stage table after
+each step, the work run, a cancel request and the conclusion. The pipeline's
+`v1:work:run` is no longer beaten at all (the lease is its liveness,
+`docs/internal/ops/harness-decisions.md`).
 
 The hourly platform automation invokes `integration.retention.sweep` under
 cluster-owner authority. Each page scans at most 100 versions, has a 20-second
@@ -162,6 +166,54 @@ recent support from every non-stopped node before `memory_liveness_storage`
 enables the switch. Offline nodes still block it. Downgrading after activation
 requires a complete backup restore; an old binary cannot read the observation
 store.
+
+**A pipeline run's lease renewal is a current observation (2026-11-08).** The
+pipelines driver renews its lease every 30 s by writing `driverHeartbeatAt`
+alone on the `v1:pipelines:run` row (`renew`, `component/pipelinerun/lease.go`).
+Since migration `20261108190000_pipeline_run_lease_observations` that field is
+the run's whole observation list, so a renewal replaces the run's one row in
+`memory_liveness`. Everything else is still a version and carries the observed
+heartbeat into it through the read-merge: the open, every claim (a new
+`driverNodeId` and `driverLeaseId`), the stage table, the work run, a cancel
+request and the conclusion. The lease stays the authority. A claim judges the
+observed heartbeat, so a takeover waits for the observation, not the newest
+version, to be `leaseStaleAfter` old; recovery's list read sees it too; and the
+row-version fence compares the newest `createdAt` across both tables, so a
+decision made before an observed renewal is refused. Declared retention judges
+keep-latest within `MemoryNodes`, so it keeps the newest business version, and
+the observation beside it stays until whole-run retention retires the run and
+the prune trigger takes it.
+
+It has its own handshake, `memory_pipeline_run_observation_readers`
+(`EnablePipelineRunObservationsWhenReady`, `component/database/memory-nodes/liveness.go`):
+an engine that predates it does not list the concept in `HasLiveness`, and a
+reader of the two earlier handshakes does not count. The schema compactor
+advertises it, so it runs only where schema references are enabled, which a
+cluster that never set `MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE=true` (a local
+one) never is. Where they already are, as on production since 2026-10-14, the
+switch turns on by itself once every non-stopped node runs an engine that
+advertises it: deploying that engine is the decision, and there is no separate
+setting. Unlike the first two
+stores it has a working down migration, which folds each observation back into
+the run's newest version and removes the handshake. Tests over a real Postgres
+with two engines: `TestLeaseRenewalsAreObservationsAcrossTwoReplicas`
+(`component/pipelinerun`: ten renewals add no version, the other replica and its
+recovery list read the observed heartbeat, a stale writer is refused, the
+takeover waits for the observation to age, a stage write carries it, retention
+keeps it, the down migration folds it) and
+`TestPipelineRunObservationsWaitForTheirOwnReaderHandshake` (`component/memql`).
+Measured locally on 2,000 runs with 14 KiB snapshots, the OS run lists keep
+their plan with one empty index-only scan of `memory_liveness` added; not
+measured on production data, and no production run has been observed with the
+switch on.
+
+A work run's journal heartbeat (`heartbeatAt`, every 20 s, for a Library pass or
+an app session's recording, `component/workjournal`) does not join this store as
+the engine stands. `v1:work:run` is served by four payload lookup indexes and a
+walk index (`payloadLookups`, `payloadWalks` in `component/memql`), and listing
+a concept in `HasLiveness` turns both paths off for it, which is the read cost
+`TestWorkRunReadsDoNotScanTheOwnersHistory` pins. Those paths would first have
+to read the newest version across both tables.
 
 ## Steady writers
 

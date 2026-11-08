@@ -13,7 +13,10 @@ import (
 // heartbeat (every 30 s and every 2 s) and on every step, and each write appends a
 // full version of the row: on production on 2026-11-06 that was ~17 KB a pipeline
 // run version (its policySnapshot copied each time) and ~10 KB an app session
-// version, 1.9 GB in the week of October 29. Nothing reads a superseded version of
+// version, 1.9 GB in the week of October 29. (A pipeline run's heartbeat is a
+// current observation instead where its observation storage is on, migration
+// 20261108190000_pipeline_run_lease_observations; its other writes stay versions.)
+// Nothing reads a superseded version of
 // either; what each run or session did is kept as rows of its own (one pipeline run
 // row per attempt; a session's steps and Library transcript). So each concept keeps
 // only its newest version past one day, and does not archive the rest.

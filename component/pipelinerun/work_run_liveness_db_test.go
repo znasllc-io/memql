@@ -23,7 +23,10 @@ import (
 // a day. Here ten renewals on the opening replica add no version of the work
 // run, a takeover by another replica adds exactly one (the node now driving
 // it), and ten renewals after it add none -- while the pipelines run row, whose
-// driverHeartbeatAt IS the lease, still takes one version per renewal.
+// driverHeartbeatAt IS the lease, still takes one version per renewal: the
+// shared test schema never switches pipeline-run observation storage on. Where
+// it is on, a renewal is a current observation instead
+// (TestLeaseRenewalsAreObservationsAcrossTwoReplicas).
 func TestLeaseRenewalsWriteNoWorkRunVersionsOverRealRows(t *testing.T) {
 	eng := dbEngine(t)
 	store := NewDSLStore(eng)
