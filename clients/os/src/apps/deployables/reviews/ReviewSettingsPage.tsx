@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { Button, Caption, ContentSkeleton, Details, DetailsSection, Input, Notice, RecordList, RecordListSkeleton, RecordRow, SettingRow, Switch } from "../../../kit";
+import { Button, Caption, ContentSkeleton, Details, DetailsSection, InlineSkeleton, Input, Notice, RecordList, RecordListSkeleton, RecordRow, SettingRow, Switch } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { SearchPicker } from "../../../kit/SearchPicker";
 import type { Reading } from "../../../cluster/reading";
@@ -127,6 +127,10 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
   };
   const approverId = draft.removalApproverUserId.trim();
   const approverName = approverId === "" ? "" : deployedByLabel(approverId, viewerUserId, nameOfPerson);
+  // WHO APPROVES IS STILL BEING READ: the settings name somebody nothing on
+  // hand names, and the people who might are not read yet. Until they are,
+  // the approver's place has a name's shape, never a sentence about them.
+  const approverReading = approverId !== "" && approverName === "" && people.value === null && people.state !== "failed";
   const namesApprover = canEdit && value.may.nameApprover;
   const choosesApprover = namesApprover && moderators.length > 0;
 
@@ -205,8 +209,14 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
                 <Caption>Nobody can be chosen, because who can moderate this store could not be read.</Caption>
               ) : null}
               <Caption>
-                {approverWords(approverId, approverName)}
-                {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
+                {approverReading ? (
+                  <InlineSkeleton label="Reading who approves removals" />
+                ) : (
+                  <>
+                    {approverWords(approverId, approverName, moderators.length > 0)}
+                    {value.may.nameApprover ? "" : " Only that owner, or the cluster's operators, can name someone else."}
+                  </>
+                )}
               </Caption>
               {/* NAMING NOBODY: the draft's approver set to "", which Save sends
                   as "" and the engine takes as nobody. Offered to whoever may
@@ -233,14 +243,16 @@ export function ReviewSettingsView({ heading, scope, settings, writes, nameOf, v
 
 /**
  * Who approves removals, in words, drawn from the settings: nobody only when
- * the settings name nobody. Somebody this page cannot name -- past the people
- * the engine listed, or with the list unread -- is still somebody, so a list
- * never decides that nobody approves.
+ * the settings name nobody, so a list never decides that nobody approves.
+ * Somebody this page cannot name is still somebody, said by what is on the
+ * page: past the people listed when some are (the engine cut the list), and
+ * with no list to point at when none are -- its read failed, or it found
+ * nobody. A read still in flight says nothing (`approverReading`).
  */
-function approverWords(approverId: string, approverName: string): string {
+function approverWords(approverId: string, approverName: string, listsPeople: boolean): string {
   const role = "the one person who can remove a published review or erase a writer's data.";
   if (approverId === "") return "Nobody can remove a published review until an owner is named.";
-  if (approverName === "") return `Someone not among the people listed is ${role}`;
+  if (approverName === "") return listsPeople ? `Someone not among the people listed is ${role}` : `Someone this page cannot name is ${role}`;
   return approverName === "you" ? `You are ${role}` : `${approverName} is ${role}`;
 }
 

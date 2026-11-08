@@ -444,6 +444,10 @@ describe("who can moderate", () => {
     expect(await screen.findByText(/Nobody in this store.s organization can moderate its reviews\./)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Who can moderate this store's reviews" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    // An approver is still named, and nobody is listed to point at.
+    const approver = settingRow("Removal approver");
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).getByText(/Someone this page cannot name is the one person who can remove a published review/)).toBeTruthy();
   });
 
   it("clear the approver, so Save names nobody", async () => {
@@ -493,10 +497,11 @@ describe("who can moderate", () => {
     const why = await within(approver).findByText("Nobody can be chosen, because who can moderate this store could not be read.");
     expect(why.classList.contains("os-caption")).toBe(true);
     expect(within(approver).queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
-    // An approver is still named. A list that could not be read says nothing
-    // about who they are, and never that there is nobody.
+    // An approver is still named. A list that could not be read lists nobody:
+    // it says nothing about who they are, and never that there is nobody.
     expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
-    expect(within(approver).getByText(/Someone not among the people listed is the one person who can remove a published review/)).toBeTruthy();
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).getByText(/Someone this page cannot name is the one person who can remove a published review/)).toBeTruthy();
 
     // The Who can moderate row keeps its notice, and Try again asks again.
     const moderate = settingRow("Who can moderate");
@@ -504,6 +509,20 @@ describe("who can moderate", () => {
     const reads = connection.callsNamed("reviewsPeople").length;
     await click(within(moderate).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(connection.callsNamed("reviewsPeople")).toHaveLength(reads + 1));
+  });
+
+  it("draw who approves as the shape of a name while who can moderate is read, never a sentence about them", async () => {
+    // The settings name Avery, whom this session's roster cannot name: until
+    // the people who can moderate are read, nothing on hand says who she is.
+    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, peoplePending: true }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    const approver = settingRow("Removal approver");
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).queryByText(/cannot name/)).toBeNull();
+    expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
+    const reading = within(approver).getByText("Reading who approves removals");
+    expect(reading.closest('[aria-busy="true"]')).not.toBeNull();
   });
 
   it("say when only the first people by name are listed, and never that nobody approves", async () => {

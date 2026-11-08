@@ -239,6 +239,8 @@ export interface FakeSeed {
     people?: Row;
     /** Fails every `reviewsPeople` read with this server message. */
     peopleError?: string;
+    /** Leaves every `reviewsPeople` read unanswered: who can moderate is still being read. */
+    peoplePending?: boolean;
     /** Fails the next decision or erasure with this server message. */
     decideError?: string;
     /** Fails the next settings save with this server message. */
@@ -561,6 +563,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin reviewsPeople(")) {
         if (seed.reviews?.peopleError !== undefined) throw new Error(seed.reviews.peopleError);
+        if (seed.reviews?.peoplePending === true) return new Promise<never>(() => {});
         return builtinReply("reviewsPeople", [seed.reviews?.people ?? ({ storeId: "", people: [] } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsDecide(") || call.startsWith("builtin reviewsEraseReviewer(")) {
