@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Organization membership, including peer-authored accounts and groups, is
@@ -53,7 +54,7 @@ func TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB(t *testing.T) {
 			cursor := ""
 			seen := map[string]bool{}
 			for page, size := range []int{10, 10, 5} {
-				result, err := engine.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf("query %s(search:%q)", name, needle))
+				result, err := engine.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf("query %s(search:%s)", name, langparser.QuoteString(needle)))
 				require.NoError(t, err)
 				rows := MaterializeRows(result.OutputPayload())
 				require.Len(t, rows, size)
@@ -82,7 +83,7 @@ func TestAccountsAndGroupsBrowsePreserveOrganizationMembershipDB(t *testing.T) {
 	outsider := f.person("outsider", true)
 	for _, denied := range []context.Context{rankActorCtx(outsider, auth.RoleWriter), context.Background()} {
 		old, oldErr := engine.Execute(denied, `query clientAccountsAll()`)
-		browse, browseErr := engine.Execute(denied, fmt.Sprintf(`query clientAccountsBrowse(search:%q)`, needle))
+		browse, browseErr := engine.Execute(denied, fmt.Sprintf(`query clientAccountsBrowse(search:%s)`, langparser.QuoteString(needle)))
 		require.Equal(t, oldErr == nil, browseErr == nil, "browse must retain the original caller admission contract")
 		if oldErr == nil {
 			require.Empty(t, MaterializeRows(old.OutputPayload()))
@@ -107,8 +108,8 @@ func TestExistingIdentityQueriesPageSearchAndKeepTheirRankFloorDB(t *testing.T) 
 	expired := f.id("v1:identity:invitation", "expired")
 	f.insert("v1:identity:invitation", expired, map[string]any{"active": true, "status": "pending", "kind": "user", "inviteeName": prefix, "inviteeRole": "viewer", "groupIds": []string{"test-group"}, "expiresAt": "2020-01-01T00:00:00Z", "tokenHash": "hidden-token-hash"})
 	for _, call := range []string{
-		fmt.Sprintf(`paginate(query searchUsers(search:%q,role:"viewer",showDeactivated:false),10)`, prefix),
-		fmt.Sprintf(`paginate(query pendingUserInvitations(search:%q,role:"viewer",groupId:"test-group",unexpired:true),10)`, prefix),
+		fmt.Sprintf(`paginate(query searchUsers(search:%s,role:"viewer",showDeactivated:false),10)`, langparser.QuoteString(prefix)),
+		fmt.Sprintf(`paginate(query pendingUserInvitations(search:%s,role:"viewer",groupId:"test-group",unexpired:true),10)`, langparser.QuoteString(prefix)),
 	} {
 		cursor := ""
 		seen := map[string]bool{}
@@ -142,7 +143,7 @@ func TestExistingIdentityQueriesPageSearchAndKeepTheirRankFloorDB(t *testing.T) 
 	}
 	// The invitation picker did not previously exclude expired links. Its
 	// omitted new options still keep that contract; only the directory opts in.
-	legacy, err := engine.Execute(ctx, fmt.Sprintf(`query pendingUserInvitations(search:%q)`, prefix))
+	legacy, err := engine.Execute(ctx, fmt.Sprintf(`query pendingUserInvitations(search:%s)`, langparser.QuoteString(prefix)))
 	require.NoError(t, err)
 	require.Len(t, MaterializeRows(legacy.OutputPayload()), 26)
 	// Legacy records may omit the optional active field. The UI treats those
@@ -152,7 +153,7 @@ func TestExistingIdentityQueriesPageSearchAndKeepTheirRankFloorDB(t *testing.T) 
 	f.insert(conceptIdentityUser, unset, map[string]any{"displayName": unsetName, "primaryEmail": f.prefix + "-unset@example.test", "role": "viewer"})
 	f.insert(conceptIdentityUser, f.id(conceptIdentityUser, "inactive"), map[string]any{"displayName": unsetName, "primaryEmail": f.prefix + "-inactive@example.test", "role": "viewer", "active": false})
 	for _, state := range []string{"", "active"} {
-		result, err := engine.Execute(ctx, fmt.Sprintf(`paginate(query searchUsers(search:%q,showDeactivated:false,state:%q),10)`, unsetName, state))
+		result, err := engine.Execute(ctx, fmt.Sprintf(`paginate(query searchUsers(search:%s,showDeactivated:false,state:%s),10)`, langparser.QuoteString(unsetName), langparser.QuoteString(state)))
 		require.NoError(t, err)
 		rows := MaterializeRows(result.OutputPayload())
 		require.Len(t, rows, 1)
@@ -178,7 +179,7 @@ func TestPeopleBrowseSearchesFallbackFullNamesBeforePagingDB(t *testing.T) {
 	for _, tc := range []struct{ search, want string }{
 		{"jAnE dOe", plain}, {"ne%_ d'O", literal},
 	} {
-		call := fmt.Sprintf(`paginate(query searchUsers(search:%q,showDeactivated:false),10)`, tc.search)
+		call := fmt.Sprintf(`paginate(query searchUsers(search:%s,showDeactivated:false),10)`, langparser.QuoteString(tc.search))
 		result, err := engine.Execute(ctx, call)
 		require.NoError(t, err)
 		rows := MaterializeRows(result.OutputPayload())

@@ -1,3 +1,12 @@
+---
+title: "Second review: OS lists and live sessions"
+audience: internal
+status: stable
+area: build
+sinceVersion: 0.31.23
+owner: znas
+---
+
 # Second review: OS lists and live sessions
 
 Reviewed `codex/os-resource-lists-20261107` after feature commit

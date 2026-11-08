@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestRoutingHistoryPagesSearchAndRankDB(t *testing.T) {
@@ -30,7 +31,7 @@ func TestRoutingHistoryPagesSearchAndRankDB(t *testing.T) {
 		t.Helper()
 		cursor, seen := "", map[string]bool{}
 		for n, size := range sizes {
-			result, err := eng.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf(`query routerDecisionsRecent(rule: %q%s)`, f.prefix, args))
+			result, err := eng.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf(`query routerDecisionsRecent(rule: %s%s)`, langparser.QuoteString(f.prefix), args))
 			require.NoError(t, err)
 			rows := MaterializeRows(result.OutputPayload())
 			require.Len(t, rows, size)

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestConceptRowsSearchAuthorizedCursorDB(t *testing.T) {
@@ -28,7 +29,7 @@ func TestConceptRowsSearchAuthorizedCursorDB(t *testing.T) {
 	seen := map[string]bool{}
 	for page, size := range []int{10, 10, 5} {
 		engine := []*MemQLEngine{eng, other}[page%2]
-		result, err := engine.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId: "v1:work:goal",search: "needle%%_",cursor: %q)`, cursor))
+		result, err := engine.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId: "v1:work:goal",search: "needle%%_",cursor: %s)`, langparser.QuoteString(cursor)))
 		require.NoError(t, err)
 		envelope := MaterializeRows(result.OutputPayload())
 		require.Len(t, envelope, 1)
@@ -64,7 +65,7 @@ func TestConceptRowsSearchAuthorizedCursorDB(t *testing.T) {
 	first, err := eng.Execute(ctx, `builtin conceptRowsSearch(conceptId: "v1:work:goal",search: "needle%_")`)
 	require.NoError(t, err)
 	token := fmt.Sprint(MaterializeRows(first.OutputPayload())[0]["nextCursor"])
-	_, err = eng.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId: "v1:work:goal",search: "different",cursor: %q)`, token))
+	_, err = eng.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId: "v1:work:goal",search: "different",cursor: %s)`, langparser.QuoteString(token)))
 	require.Error(t, err)
 }
 
@@ -87,7 +88,7 @@ func TestConceptRowsSearchPreservesGenericPIIBoundaryBeforePagingDB(t *testing.T
 	}
 	read := func(ctx context.Context, cursor string) ([]map[string]any, string) {
 		t.Helper()
-		result, err := eng.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId:"v1:identity:user",search:%q,cursor:%q)`, f.prefix, cursor))
+		result, err := eng.Execute(ctx, fmt.Sprintf(`builtin conceptRowsSearch(conceptId:"v1:identity:user",search:%s,cursor:%s)`, langparser.QuoteString(f.prefix), langparser.QuoteString(cursor)))
 		require.NoError(t, err)
 		envelope := MaterializeRows(result.OutputPayload())
 		require.Len(t, envelope, 1)

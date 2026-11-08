@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestSecondaryBrowsePagesAndSearchDB(t *testing.T) {
@@ -46,11 +47,11 @@ func TestSecondaryBrowsePagesAndSearchDB(t *testing.T) {
 			}
 		}
 	}
-	walk(fmt.Sprintf(`query pendingAccessRequests(search:%q)`, f.prefix), []int{10, 10, 5})
-	walk(fmt.Sprintf(`query pendingAccessRequests(search:%q)`, f.prefix+" older needle%_"), []int{10, 2})
-	walk(fmt.Sprintf(`query myWorkspaces(search:%q,includeReleased:false)`, f.prefix), []int{10, 10, 5})
-	walk(fmt.Sprintf(`query myWorkspaces(search:%q,includeReleased:false)`, f.prefix+" older needle%_"), []int{10, 2})
-	walk(fmt.Sprintf(`query myWorkspaces(search:%q)`, f.prefix), []int{10, 10, 6})
+	walk(fmt.Sprintf(`query pendingAccessRequests(search:%s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
+	walk(fmt.Sprintf(`query pendingAccessRequests(search:%s)`, langparser.QuoteString(f.prefix+" older needle%_")), []int{10, 2})
+	walk(fmt.Sprintf(`query myWorkspaces(search:%s,includeReleased:false)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
+	walk(fmt.Sprintf(`query myWorkspaces(search:%s,includeReleased:false)`, langparser.QuoteString(f.prefix+" older needle%_")), []int{10, 2})
+	walk(fmt.Sprintf(`query myWorkspaces(search:%s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 6})
 	reader := shareDirActor(context.Background(), owner, auth.RoleReader)
 	_, err := eng.Execute(reader, `query pendingAccessRequests()`)
 	require.Error(t, err)

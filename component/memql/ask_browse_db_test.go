@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestAskBrowsePagesSearchAndOwnerDB(t *testing.T) {
@@ -29,7 +30,7 @@ func TestAskBrowsePagesSearchAndOwnerDB(t *testing.T) {
 		cursor := ""
 		ids := map[string]bool{}
 		for n, size := range sizes {
-			result, err := eng.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf(`query myAskConversationsBrowse(search: %q)`, search))
+			result, err := eng.Execute(ContextWithCursor(ctx, cursor), fmt.Sprintf(`query myAskConversationsBrowse(search: %s)`, langparser.QuoteString(search)))
 			require.NoError(t, err)
 			rows := MaterializeRows(result.OutputPayload())
 			require.Len(t, rows, size)

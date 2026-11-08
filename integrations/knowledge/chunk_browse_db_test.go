@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -56,7 +57,7 @@ func TestTrainingReviewNativePagesAndDomainBoundaryDB(t *testing.T) {
 			}
 		}
 	}
-	index, err := f.ea.Execute(ctx, fmt.Sprintf(`paginate(query allDocumentChunkDomains(asOf:%q,pending:true,search:%q),10)`, time.Now().UTC().Format(time.RFC3339Nano), prefix))
+	index, err := f.ea.Execute(ctx, fmt.Sprintf(`paginate(query allDocumentChunkDomains(asOf:%s,pending:true,search:%s),10)`, langparser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano)), langparser.QuoteString(prefix)))
 	require.NoError(t, err)
 	require.Len(t, memql.MaterializeRows(index.OutputPayload()), 10, "metadata is also bounded before full-text hydration")
 	require.NotEmpty(t, index.GetMeta().Cursor)
@@ -70,7 +71,7 @@ func TestTrainingReviewNativePagesAndDomainBoundaryDB(t *testing.T) {
 	require.ErrorContains(t, err, "writer")
 	_, err = f.ea.Execute(reader, `query documentChunksForDomain(pending:true)`)
 	require.Error(t, err, "direct callers still require a domain")
-	_, err = f.ea.Execute(reader, fmt.Sprintf(`query documentChunksForDomain(domainId:%q)`, prefix))
+	_, err = f.ea.Execute(reader, fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(prefix)))
 	require.NoError(t, err, "existing domain-scoped reader admission is unchanged")
 }
 
@@ -83,7 +84,7 @@ func TestTrainerCorpusWalkPreservesPromptBudgetAndRejectsPartialDB(t *testing.T)
 	})
 	_, err := f.db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id,concept,type,"createdBy","createdAt",payload,schema,metadata,provenance) SELECT 'v1:knowledge:documentChunk:'||$1||'-'||n,'v1:knowledge:documentChunk','object','test',clock_timestamp(),jsonb_build_object('domainId',$1,'text',repeat('x',900),'source','fileUpload','validationStatus',CASE WHEN n<40 THEN 'validated' ELSE 'rejected' END),'{"$id":"v1:knowledge:documentChunk"}'::jsonb,'{}'::jsonb,'{}'::jsonb FROM generate_series(0,99) n`, prefix)
 	require.NoError(t, err)
-	call := fmt.Sprintf(`query documentChunksForDomain(domainId:%q)`, prefix)
+	call := fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(prefix))
 	count := 0
 	rows, err := collectExistingCorpus(ctx, func(ctx context.Context, q string) (*memql.ExecuteResult, error) {
 		count++
@@ -131,7 +132,7 @@ func TestTrainingReviewCursorSurvivesConcurrentApprovalDB(t *testing.T) {
 	})
 	_, err := f.db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id,concept,type,"createdBy","createdAt",payload,schema,metadata,provenance) SELECT 'v1:knowledge:documentChunk:'||$1||'-'||n,'v1:knowledge:documentChunk','object','test',$2::timestamptz+n*interval '1 second',jsonb_build_object('domainId',$1,'text',$1||' pending','source','fileUpload','validationStatus','unvalidated'),'{"$id":"v1:knowledge:documentChunk"}'::jsonb,'{}'::jsonb,'{}'::jsonb FROM generate_series(0,24) n`, prefix, time.Now().UTC().Add(-time.Hour))
 	require.NoError(t, err)
-	original, err := f.ea.Execute(ctx, fmt.Sprintf(`query allDocumentChunkDomains(search:%q,pending:true)`, prefix))
+	original, err := f.ea.Execute(ctx, fmt.Sprintf(`query allDocumentChunkDomains(search:%s,pending:true)`, langparser.QuoteString(prefix)))
 	require.NoError(t, err)
 	expected := []string{}
 	for _, row := range memql.MaterializeRows(original.OutputPayload()) {
@@ -158,7 +159,7 @@ func TestTrainingReviewCursorSurvivesConcurrentApprovalDB(t *testing.T) {
 		}
 		cursor = page.Cursor
 		if pageNumber == 0 {
-			_, err = f.eb.Execute(ctx, fmt.Sprintf(`mutation setChunkValidationStatus(chunkId:%q,status:"validated")`, memql.BareShortId(seen[0])))
+			_, err = f.eb.Execute(ctx, fmt.Sprintf(`mutation setChunkValidationStatus(chunkId:%s,status:"validated")`, langparser.QuoteString(memql.BareShortId(seen[0]))))
 			require.NoError(t, err)
 		}
 	}

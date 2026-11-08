@@ -1,3 +1,12 @@
+---
+title: "Email, encrypted Inbox and derived deployment directories"
+audience: internal
+status: stable
+area: build
+sinceVersion: 0.31.23
+owner: znas
+---
+
 # Email, encrypted Inbox and derived deployment directories
 
 These checks use synthetic local fixtures in the same disposable PostgreSQL

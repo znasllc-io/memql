@@ -1,3 +1,12 @@
+---
+title: "Final local verification"
+audience: internal
+status: stable
+area: build
+sinceVersion: 0.31.23
+owner: znas
+---
+
 # Final local verification
 
 Evidence audited November 7, 2026. All recorded automated checks pass, including

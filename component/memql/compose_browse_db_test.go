@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Verify the authored DSL against storage, including the composite owner tier.
@@ -43,7 +44,7 @@ func TestComposeBrowsePagesSearchArchiveAndOwnerScopeDB(t *testing.T) {
 			walk := func(search string, includeArchived bool, sizes []int) {
 				cursor := ""
 				seen := map[string]bool{}
-				call := fmt.Sprintf("query %s(search: %q, includeArchived: %t)", resource.query, search, includeArchived)
+				call := fmt.Sprintf("query %s(search: %s, includeArchived: %t)", resource.query, langparser.QuoteString(search), includeArchived)
 				for page, size := range sizes {
 					result, err := engine.Execute(ContextWithCursor(caller, cursor), call)
 					require.NoError(t, err)
@@ -77,7 +78,7 @@ func TestComposeBrowsePagesSearchArchiveAndOwnerScopeDB(t *testing.T) {
 			walk(f.prefix, false, []int{10, 10, 5})
 			walk(f.prefix+" needle%_", false, []int{10, 2})
 			walk(f.prefix, true, []int{10, 10, 6})
-			call := fmt.Sprintf("query %s(%s: %q)", resource.detail, resource.argument, BareShortId(foreign))
+			call := fmt.Sprintf("query %s(%s: %s)", resource.detail, resource.argument, langparser.QuoteString(BareShortId(foreign)))
 			denied, err := engine.Execute(caller, call)
 			require.NoError(t, err)
 			require.Empty(t, MaterializeRows(denied.OutputPayload()))

@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Exercise the actual named queries and cursor across two engine instances:
@@ -168,7 +169,7 @@ func TestOSBrowseMutationEventsAndReplicaRead(t *testing.T) {
 	require.Equal(t, "completed", rows[0]["status"])
 	require.Equal(t, "success", rows[0]["conclusion"])
 	require.NotContains(t, rows[0], "policySnapshot")
-	detail := read(fmt.Sprintf(`query pipelineRunForOwner(runId:%q)`, stored))
+	detail := read(fmt.Sprintf(`query pipelineRunForOwner(runId:%s)`, langparser.QuoteString(stored)))
 	require.Len(t, detail, 1)
 	require.Contains(t, detail[0], "policySnapshot", "detail still has the full resource")
 }

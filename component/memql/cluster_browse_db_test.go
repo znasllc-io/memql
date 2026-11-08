@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestClusterBrowsePagesSearchAndScopeDB(t *testing.T) {
@@ -42,14 +43,14 @@ func TestClusterBrowsePagesSearchAndScopeDB(t *testing.T) {
 		}
 		return all
 	}
-	walk(fmt.Sprintf(`query allAgents(search: %q)`, f.prefix), []int{10, 10, 5})
-	walk(fmt.Sprintf(`query allAgents(search: %q)`, f.prefix+" old needle%_"), []int{10, 2})
-	walk(fmt.Sprintf(`query auditEventsBrowse(search: %q)`, f.prefix), []int{10, 10, 5})
-	walk(fmt.Sprintf(`query auditEventsBrowse(search: %q)`, f.prefix+" old needle%_"), []int{10, 2})
-	walk(fmt.Sprintf(`query outboxDeadLettersBrowse(target: %q)`, f.prefix), []int{10, 10, 5})
-	walk(fmt.Sprintf(`query outboxDeadLettersBrowse(target: %q,search: "needle%%_")`, f.prefix), []int{10, 2})
+	walk(fmt.Sprintf(`query allAgents(search: %s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
+	walk(fmt.Sprintf(`query allAgents(search: %s)`, langparser.QuoteString(f.prefix+" old needle%_")), []int{10, 2})
+	walk(fmt.Sprintf(`query auditEventsBrowse(search: %s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
+	walk(fmt.Sprintf(`query auditEventsBrowse(search: %s)`, langparser.QuoteString(f.prefix+" old needle%_")), []int{10, 2})
+	walk(fmt.Sprintf(`query outboxDeadLettersBrowse(target: %s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
+	walk(fmt.Sprintf(`query outboxDeadLettersBrowse(target: %s,search: "needle%%_")`, langparser.QuoteString(f.prefix)), []int{10, 2})
 	admin := shareDirActor(context.Background(), owner, auth.RoleAdmin)
-	for _, call := range []string{fmt.Sprintf(`query auditEventsBrowse(search: %q)`, f.prefix), fmt.Sprintf(`query outboxDeadLettersBrowse(target: %q)`, f.prefix)} {
+	for _, call := range []string{fmt.Sprintf(`query auditEventsBrowse(search: %s)`, langparser.QuoteString(f.prefix)), fmt.Sprintf(`query outboxDeadLettersBrowse(target: %s)`, langparser.QuoteString(f.prefix))} {
 		result, err := eng.Execute(admin, call)
 		require.NoError(t, err)
 		require.Empty(t, MaterializeRows(result.OutputPayload()))

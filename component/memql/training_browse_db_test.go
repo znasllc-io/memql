@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestTrainingBrowsePagesSearchAndScopeDB(t *testing.T) {
@@ -56,10 +57,10 @@ func TestTrainingBrowsePagesSearchAndScopeDB(t *testing.T) {
 		require.NotContains(t, row, "blobUrl")
 	}
 	walk(`query trainingFilesBrowse(search: "needle%_")`, []int{10, 2})
-	chunks := walk(fmt.Sprintf(`query documentChunksForDomain(domainId: %q)`, f.prefix), []int{10, 10, 5})
+	chunks := walk(fmt.Sprintf(`query documentChunksForDomain(domainId: %s)`, langparser.QuoteString(f.prefix)), []int{10, 10, 5})
 	require.Len(t, chunks, 25)
-	walk(fmt.Sprintf(`query documentChunksForDomain(domainId: %q, pending: true, search: %q)`, f.prefix, f.prefix), []int{10, 2})
-	runs, err := eng.Execute(ctx, fmt.Sprintf(`query trainingAnalysisRunsForFiles(fileIds: [%q,%q])`, fileIDs[0], fileIDs[1]))
+	walk(fmt.Sprintf(`query documentChunksForDomain(domainId: %s, pending: true, search: %s)`, langparser.QuoteString(f.prefix), langparser.QuoteString(f.prefix)), []int{10, 2})
+	runs, err := eng.Execute(ctx, fmt.Sprintf(`query trainingAnalysisRunsForFiles(fileIds: [%s,%s])`, langparser.QuoteString(fileIDs[0]), langparser.QuoteString(fileIDs[1])))
 	require.NoError(t, err)
 	rows := MaterializeRows(runs.OutputPayload())
 	require.Len(t, rows, 2)
@@ -112,5 +113,5 @@ func TestTrainingEvidenceBrowseScopesAndBatchesDB(t *testing.T) {
 	read(`query workGoalEvaluationsBrowse(scenarioId: "old-scenario")`, []int{10, 2})
 	read(`query workTrainingSelectionsForLesson(lessonId: "lesson-one")`, []int{10, 10, 5})
 	read(`query workTrainingSelectionsForLesson(lessonId: "missing")`, []int{0})
-	read(fmt.Sprintf(`query workTrainingDeliveryForSelections(observationIds: [%q])`, firstSelection), []int{2})
+	read(fmt.Sprintf(`query workTrainingDeliveryForSelections(observationIds: [%s])`, langparser.QuoteString(firstSelection)), []int{2})
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -77,7 +78,7 @@ func TestReviewDirectoriesReadCompletePagedSourcesDB(t *testing.T) {
 		insert("v1:reviews:reviewDecision", "v1:reviews:reviewDecision:"+fmt.Sprintf("%s-d-%03d", prefix, n), at.Add(time.Duration(n)*time.Millisecond), map[string]any{"ownerUserId": owner, "storeId": store, "reviewId": id, "action": "escalate", "note": title, "decidedBy": owner, "revision": 1})
 	}
 	ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter}), &auth.TokenInfo{Subject: owner})
-	probe, probeErr := engine.Execute(ctx, fmt.Sprintf("query siteById(siteId:%q)", site))
+	probe, probeErr := engine.Execute(ctx, fmt.Sprintf("query siteById(siteId:%s)", langparser.QuoteString(site)))
 	if probeErr != nil {
 		t.Fatal("site query", probeErr)
 	}
@@ -145,7 +146,7 @@ func TestReviewDirectoriesReadCompletePagedSourcesDB(t *testing.T) {
 	ids = append(ids, decisionID)
 	system := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.SystemActor("review-directory-test")))
 	system = auth.ContextWithToken(system, &auth.TokenInfo{Subject: "review-directory-test"})
-	_, err = engine.Execute(system, fmt.Sprintf(`mutation appendReviewDecision(decisionId:%q,ownerUserId:%q,reviewId:%q,storeId:%q,action:"publish",revision:1,decidedBy:%q)`, decisionID, owner, "v1:reviews:review:"+prefix+"-000", store, owner))
+	_, err = engine.Execute(system, fmt.Sprintf(`mutation appendReviewDecision(decisionId:%s,ownerUserId:%s,reviewId:%s,storeId:%s,action:"publish",revision:1,decidedBy:%s)`, langparser.QuoteString(decisionID), langparser.QuoteString(owner), langparser.QuoteString("v1:reviews:review:"+prefix+"-000"), langparser.QuoteString(store), langparser.QuoteString(owner)))
 	if err != nil {
 		t.Fatal(err)
 	}

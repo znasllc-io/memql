@@ -1,3 +1,12 @@
+---
+title: "OS resource-list execution evidence"
+audience: internal
+status: stable
+area: build
+sinceVersion: 0.31.23
+owner: znas
+---
+
 # OS resource-list execution evidence
 
 Measured locally on 2026-11-07, comparing baseline `8b7b3a483` with this branch.

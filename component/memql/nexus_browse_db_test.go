@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestNexusBrowsePagesSearchScopeAndPayloadDB(t *testing.T) {
@@ -104,17 +105,17 @@ func TestNexusBrowsePagesSearchScopeAndPayloadDB(t *testing.T) {
 		require.Equal(t, id, matched[0]["id"])
 	}
 
-	status, err := eng.Execute(ctx, fmt.Sprintf(`query workGoalRunStatuses(goalIds: [%q])`, goals[0]))
+	status, err := eng.Execute(ctx, fmt.Sprintf(`query workGoalRunStatuses(goalIds: [%s])`, langparser.QuoteString(goals[0])))
 	require.NoError(t, err)
 	require.Len(t, MaterializeRows(status.OutputPayload()), 1)
-	detail, err := eng.Execute(ctx, fmt.Sprintf(`query workGoalForOwner(goalId: %q)`, goals[0]))
+	detail, err := eng.Execute(ctx, fmt.Sprintf(`query workGoalForOwner(goalId: %s)`, langparser.QuoteString(goals[0])))
 	require.NoError(t, err)
 	require.Contains(t, MaterializeRows(detail.OutputPayload())[0], "input")
-	source, err := eng.Execute(ctx, fmt.Sprintf(`query authoringConstructById(constructId: %q)`, constructs[0]))
+	source, err := eng.Execute(ctx, fmt.Sprintf(`query authoringConstructById(constructId: %s)`, langparser.QuoteString(constructs[0])))
 	require.NoError(t, err)
 	require.Contains(t, MaterializeRows(source.OutputPayload())[0], "source")
 	other := shareDirActor(context.Background(), stranger, auth.RoleOwner)
-	hidden, err := eng.Execute(other, fmt.Sprintf(`query workGoalForOwner(goalId: %q)`, goals[0]))
+	hidden, err := eng.Execute(other, fmt.Sprintf(`query workGoalForOwner(goalId: %s)`, langparser.QuoteString(goals[0])))
 	require.NoError(t, err)
 	require.Empty(t, MaterializeRows(hidden.OutputPayload()))
 }

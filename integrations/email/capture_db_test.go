@@ -15,6 +15,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 )
@@ -102,8 +103,8 @@ func TestInboxPagesExecuteAgainstEncryptedStorage(t *testing.T) {
 	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleDeveloper} {
 		client := auth.ContextWithClientOrigin(auth.ContextWithToken(configureCtx(role), &auth.TokenInfo{Subject: "op"}))
 		for _, query := range []string{
-			fmt.Sprintf("query capturedEmailsPage(since: %q, asOf: %q)", time.Now().UTC().Add(-7*24*time.Hour).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)),
-			fmt.Sprintf("query capturedEmailById(messageId: %q, since: %q)", marker, time.Now().UTC().Add(-7*24*time.Hour).Format(time.RFC3339Nano)),
+			fmt.Sprintf("query capturedEmailsPage(since: %s, asOf: %s)", langparser.QuoteString(time.Now().UTC().Add(-7*24*time.Hour).Format(time.RFC3339Nano)), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339Nano))),
+			fmt.Sprintf("query capturedEmailById(messageId: %s, since: %s)", langparser.QuoteString(marker), langparser.QuoteString(time.Now().UTC().Add(-7*24*time.Hour).Format(time.RFC3339Nano))),
 		} {
 			if _, err := store.Execute(client, query); err == nil || !strings.Contains(err.Error(), "server-only") {
 				t.Fatalf("encrypted source admitted client role %s: %v", role, err)
