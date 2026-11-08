@@ -2306,8 +2306,13 @@ the public API becomes reachable. Maintenance also discovers older connections
 and imported packages, resumes pending provisioning, and repairs a deleted
 subscription. The receiver credential is encrypted before Azure validates the
 endpoint, so validation can reach any replica. An unfinished subscription stays
-pending and retries; one unavailable organization does not stop the others or
-prevent processing-receipt reconciliation.
+pending and retries every five minutes; one unavailable organization does not
+stop the others or prevent processing-receipt reconciliation. Once Azure has
+confirmed a subscription and its credential is applied, maintenance checks it
+hourly, so a subscription deleted in Azure is repaired within the hour. Each
+check reschedules the organization's stored connection row, so the hourly pace
+is what keeps that row from taking a new version every five minutes. A
+connection whose stored state cannot be decrypted is retried hourly as well.
 
 The approved HTTP exception is `POST /email/events/azure`. Azure sends a secret
 Authorization header. MemQL validates that credential, the saved subscription,

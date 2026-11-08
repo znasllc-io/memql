@@ -6,9 +6,14 @@ shape capturedMessage capturedEmailStored {
   encryptedValue
 }
 
+/// A sealed connection state as its gated readers take it. purpose and nextAttemptAt are the
+/// feedback indexer's schedule, which it re-reads under the row's gate so a look another replica
+/// already took is not taken (and written) again.
 @row
 shape connectionState emailConnectionStateStored {
   accountId
+  purpose
+  nextAttemptAt
   row.id
   row.createdAt
   encryptedValue
