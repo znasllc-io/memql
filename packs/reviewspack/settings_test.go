@@ -164,6 +164,40 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	if _, err := writeSettings(t, moderatorCtx("mod-1"), existingSettings(), name("mod-1"), false); err == nil || err.Error() == approverRefusal {
 		t.Fatalf("a moderator naming themselves: err = %v, want the rule on who names the approver", err)
 	}
+
+	// A SETTINGS ROW WRITTEN BEFORE THE ORGANIZATION WAS STAMPED carries none,
+	// and the store's organization is then its site's -- for this check as for
+	// reviewsPeople, which offers the site's people (storeOrganization). Every
+	// person the picker offers is accepted, from either namer; somebody outside
+	// is still refused; and the current approver's write leaves the row untied,
+	// because only an operator records whose store it is.
+	legacy := existingSettings()
+	delete(legacy, "accountId")
+	offered, err := readPeople(t, moderatorCtx("owner-1"), settingsReader(legacy), shopRoster(),
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil || strings.Join(peopleIDs(offered), ",") != "owner-1,mod-1" {
+		t.Fatalf("people of a store whose settings carry no organization = %v (%v), want its site's two moderators", peopleIDs(offered), err)
+	}
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		for _, who := range peopleIDs(offered) {
+			if _, err := writeSettings(t, namer.ctx, legacy, name(who), false); err != nil {
+				t.Errorf("%s naming %s, whom the picker offers for settings with no organization: %v", namer.name, who, err)
+			}
+		}
+		if _, err := writeSettings(t, namer.ctx, legacy, name("outsider-1"), false); err == nil || err.Error() != approverRefusal {
+			t.Errorf("%s naming outsider-1 for settings with no organization: err = %v, want %q", namer.name, err, approverRefusal)
+		}
+	}
+	handed, err := writeSettings(t, moderatorCtx("owner-1"), legacy, name("mod-1"), false)
+	if err != nil {
+		t.Fatalf("the current approver handing the role on, settings with no organization: %v", err)
+	}
+	if got, set := handed["accountId"]; set {
+		t.Fatalf("the current approver's write tied the store to organization %v; only an operator records it", got)
+	}
 }
 
 // A ROLE TEST'S STAND-IN IS NEVER ONE OF THE STORE'S PEOPLE (ruling R3). While

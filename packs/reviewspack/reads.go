@@ -336,7 +336,7 @@ func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]me
 	if err != nil {
 		return nil, err
 	}
-	people, err := p.moderatorsIn(ctx, storeOrganization(site, settings))
+	people, err := p.moderatorsIn(ctx, storeOrganization(settings, asString(site["accountId"])))
 	if err != nil {
 		return nil, err
 	}
@@ -352,11 +352,17 @@ func (p *Provider) people(ctx context.Context, args map[string]any, _ int) ([]me
 // storeOrganization is the organization a store's reviews belong to: the one
 // its settings record, else its site's. siteForStore has already refused a
 // site of another organization than the settings name.
-func storeOrganization(site, settings map[string]any) string {
+//
+// ONE RULE FOR THE PICKER AND THE WRITE. reviewsPeople offers the people of
+// this organization, and writeSettings checks a named removal approver against
+// the people of this same one -- so a settings row written before the
+// organization was stamped (stampOrganization), which carries none, takes its
+// site's for both, and the picker never offers somebody the write refuses.
+func storeOrganization(settings map[string]any, siteAccount string) string {
 	if acct := bareAccount(asString(settings["accountId"])); acct != "" {
 		return acct
 	}
-	return bareAccount(asString(site["accountId"]))
+	return bareAccount(siteAccount)
 }
 
 // moderatorsIn answers the people who can moderate a store's reviews in its

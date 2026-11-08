@@ -204,10 +204,10 @@ var errApproverCannotModerate = errors.New("reviews: Choose someone in this stor
 // organization with none, and only the installation's people may lend it.
 //
 // And one rule decides whom: the approver named is one of the people who can
-// moderate the store, in its organization as this write leaves it
-// (moderatorsIn) -- never somebody outside it, never one of the cluster's
-// operators, never a role test's stand-in. Whoever names them, operator or
-// current owner.
+// moderate the store, in its organization as reviewsPeople reads it
+// (storeOrganization, moderatorsIn) -- never somebody outside it, never one of
+// the cluster's operators, never a role test's stand-in. Whoever names them,
+// operator or current owner.
 func (p *Provider) writeSettings(ctx context.Context, storeID string, changes map[string]any) ([]memorynodes.MemoryNode, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || strings.TrimSpace(ac.UserId) == "" {
@@ -223,7 +223,10 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 	}
 	// THE ORGANIZATION IS THE OPERATORS' TO SET. Whose store this is must not
 	// be decided by the first site that happens to touch it, so a change of
-	// organization from anyone else is dropped and the row keeps its own.
+	// organization from anyone else is dropped and the row keeps its own. The
+	// site's, which the caller stamped (stampOrganization), is taken first: the
+	// approver check below reads it for settings that carry none.
+	siteAccount := asString(changes["accountId"])
 	if acct, set := changes["accountId"]; set && !operator &&
 		bareAccount(asString(acct)) != bareAccount(asString(current["accountId"])) {
 		delete(changes, "accountId")
@@ -238,11 +241,11 @@ func (p *Provider) writeSettings(ctx context.Context, storeID string, changes ma
 			return nil, fmt.Errorf("reviews: only the store's current owner, or the cluster's operators, can name who approves removals")
 		}
 		if named := strings.TrimSpace(asString(next)); named != "" {
-			account := asString(changes["accountId"])
-			if bareAccount(account) == "" {
-				account = asString(current["accountId"])
-			}
-			people, err := p.moderatorsIn(ctx, account)
+			// The settings' own organization, else the site's: the rule the
+			// picker reads by. siteForStore has already matched the site to any
+			// organization the settings carry, so the site's is safe to check
+			// against; whether the write records it is the rule above.
+			people, err := p.moderatorsIn(ctx, storeOrganization(current, siteAccount))
 			if err != nil {
 				return nil, err
 			}
