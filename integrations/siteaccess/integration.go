@@ -63,8 +63,9 @@ import (
 // statements included. A dry run does not stamp one, and it journals nothing and refuses
 // every integration executor (CheckBuiltinPreview). A person's own call is not in one: the
 // stream builds its context from the request (component/grpc, handleExecuteQuery) and
-// stamps no run, and the top-level builtin branch of executeWith adds none. The act of
-// re-timing or removing a code carries no code, so a run may do either.
+// stamps no run, and the top-level builtin branch of executeWith adds none. Removing a code carries no
+// code, so a run may remove one; re-timing a code carries none either, so a run may re-time one. A guest pass is
+// the exception for re-timing, below.
 //
 // NOR ARE GUESTS LET IN INSIDE A RUN, for a reason of a pass's own. It has no code for a
 // journal to keep, but a pass opens a gate of a deployable to anybody who asks, and that

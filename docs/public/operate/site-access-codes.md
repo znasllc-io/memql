@@ -20,8 +20,13 @@ one takes everyone using the old one out. Codes are managed in the Deployables
 app of MemQL OS, and the mechanism is generic: nothing in the engine knows what
 a deployable's gates mean.
 
+An operator can also let **anyone** open a gate with no code at all, for a
+deployable meant to be explored in public. That is a **guest pass**, covered
+under [Guest access](#guest-access).
+
 **Audience:** operators who hand codes out, authors who declare what a code
-opens, and front-end authors who build the page that takes one.
+opens, and front-end authors who build the page that takes one or opens guests
+in.
 
 Related: [Deployables](deployables.md) · [Site hosting](site-hosting.md) ·
 [Packages and deployables](packages.md) ·
@@ -151,7 +156,7 @@ there.**
 Add and Regenerate refuse **inside a run**. The plain code exists in the reply
 and nowhere else, and a run's journal is durable and readable by the cluster, so
 a pack that regenerates a client's code and emails it would have written it into
-the journal. All four acts also need a person behind them, because the person is
+the journal. All the acts also need a person behind them, because the person is
 recorded on the code and in the audit event: a synthetic actor, a connector, an
 anonymous caller and the operator credential are refused. Tooling that holds
 the operator key can read the list. It cannot end a code; a person signs in and
@@ -165,14 +170,16 @@ receives it, and it reaches whatever that client records.
 | Builtin | Reply |
 |---|---|
 | `siteAccessCodeCreate(siteId, label, gate, subject?, expiresAt)` | `{codeId, code, expiresAt}` -- `code` appears here and nowhere else, ever |
+| `siteAccessGuestPassCreate(siteId, label, gate, subject?, expiresAt)` | `{codeId, expiresAt}` -- a guest pass has no code to return ([Guest access](#guest-access)) |
 | `siteAccessCodeRegenerate(codeId, expiresAt?)` | the same shape |
 | `siteAccessCodeSetExpiry(codeId, expiresAt)` | `{codeId, expiresAt}` |
 | `siteAccessCodeRemove(codeId)` | `{codeId}` |
-| `siteAccessCodesForSite(siteId)` | every code of the site, ended ones included, with `lastOpenedAt` from the newest session of the code's current generation. Never the code or its digest |
+| `siteAccessCodesForSite(siteId)` | every code of the site, ended ones included, with `lastOpenedAt` from the newest session of the code's current generation. A guest pass is a row of its own with `guest: true`. Never the code or its digest |
 | `siteAccessGates(siteId)` | `{gate, usesSubject, constructs[]}` for each gate the deployable declares |
 
 Each act writes a `v1:identity:auditEvent` with `targetType: siteAccessCode`
-and the action `site_access_code_created`, `site_access_code_regenerated`,
+and the action `site_access_code_created` (for a guest pass too, with the detail
+`act: guestPassCreate`), `site_access_code_regenerated`,
 `site_access_code_expiry_changed` or `site_access_code_removed`, naming the
 person. The code is never in it.
 
@@ -443,12 +450,165 @@ not a defense against a hostile author: DSL is already cluster-wide authority.
 
 ---
 
+## Guest access
+
+Some deployables are meant to be explored by anyone: a public example, a demo.
+For those an operator turns on **guest access**. Anyone who asks gets a session
+on one gate with no code to type, and the deployable's own page decides whether
+to ask. Code holders are unaffected: their codes still end, and still take their
+holders out the moment they do.
+
+### A guest pass is a code that nobody holds
+
+A **guest pass** is an access code's row marked `guest`, with no secret at all.
+Its digest is the SHA-256 of `guest:` and the site's bare id, a string no typed
+code can produce, since unlock hashes only the 25 symbols of the code alphabet.
+Unlock therefore never finds the row, and the guest route finds it by that
+digest through the index codes already use.
+
+From the first request on, a guest's session is a code's session in every
+respect: the same session row, the same cookie, the same 24-hour cap and the
+same checks on every request. So everything that ends a code ends guest access:
+removing the pass or letting its end date pass takes every guest out at once, an
+idle tab learns within 5 seconds, and the end date is exact to the timer.
+
+Guest access is **an operator's act and never DSL's**. A deployable with no
+guest pass answers the guest route `closed`, and nothing in a package can create
+one, so no annotation opens a deployable to the internet. An operator who turns
+guests on has chosen the internet for that one gate until they say otherwise.
+
+### Turning it on and off
+
+In the same Access codes dialog in Deployables, a **Guest access** part sits above
+the codes, for a person who holds `execute` on `app:deployables/access`:
+
+- **Off** says "Off. Only someone with a code can open it." and offers **Allow
+  guests**, which is absent when the deployable declares no gate or has no
+  owner.
+- **Allow guests** is a code's Add form without the code: a **Name** (prefilled
+  "Guests"), **Opens** (one of the deployable's gates), **Subject** only when the
+  chosen gate's constructs read `accessSubject`, and **Ends** with the same
+  presets and the same 366-day cap as a code. A guest pass always ends.
+- **On** shows what it opens, when it ends ("Ends in 12 days", with the exact
+  time behind it, and "Ended" once past), and when a guest last opened it ("Last
+  opened 2 minutes ago", or "Not opened yet"). Two acts: **Change end date**, and
+  **Turn off**, which asks in place and says "Everyone in as a guest is taken out
+  now."
+
+No step shows a code, because there is none, and the list of codes leaves the
+guest pass out.
+
+A deployable has **at most one guest pass that is not removed**. Allowing guests
+again while one stands is refused with "This deployable already lets guests in.
+Change when guest access ends, or turn it off first." Regenerate refuses a pass
+too: "Guest access has no code to regenerate. Change when it ends, or turn it
+off." Changing the end date and turning off are the code acts, unchanged
+(`siteAccessCodeSetExpiry`, `siteAccessCodeRemove`). Turning guests on creates a
+new pass, so a site that turns guest access on and off again accumulates one
+removed row each time.
+
+Allowing guests refuses for every cause a code's Add does: no owner, a
+system-owned deployable, no package deployable, a gate the package does not
+declare, a name or subject out of bounds and an expiry out of bounds.
+
+**A run may not create or re-time a guest pass, and may remove one.** Creating
+one inside a run is refused, with the reason that opening a deployable to anyone
+is an operator's decision and never a run's. So is changing when a pass ends:
+extending one, or reviving it past its end, keeps the deployable open to
+anybody, and shortening one still decides who may come in until when. Removing a
+pass is allowed in a run, as removing a code is, because ending guest access only
+narrows who can get in. Creating a pass also needs a person behind it, as a
+code's Add does: a synthetic actor and the operator credential are refused.
+
+### The guest route
+
+`POST /_memql/access/guest` (bff `POST /access/guest`) takes the body `{}` and
+the same content-type, `Origin` and 1 KiB checks as unlock. Its replies:
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{"gate":"engagement","subject":"","expiresAt":"...","remainingMs":86399000,"guest":true}` | in, with `Set-Cookie` |
+| `403` | `{"state":"closed"}` | guest access is not on for this deployable, for any reason |
+| `400` | `{"error":"invalid_body"}` | a body that is not a JSON object. Its fields are ignored |
+| `429` | `{"error":"rate_limited"}` | a guest bucket is spent. `Retry-After` is in whole seconds |
+| `502` | `{"error":"refused"}` | the bff could not read or write the rows. Try again |
+
+`closed` is one reply for every reason guest access is not open: there is no
+pass, it was removed, it has passed its end date, or its organization differs
+from the deployable's. The route is public, so the reply tells a visitor nothing
+they could not learn by asking again.
+
+The `200` reads like an unlock's, and `expiresAt` and `remainingMs` are the same
+one instant, the earlier of the pass's end and 24 hours after the session opened.
+`guest` is `true` for a guest's session and `false` for a code's, in the unlock
+reply and the session check as well, so a page can say "Guest" instead of
+counting down to an end its visitor never chose.
+
+**The order is what a stranger costs.** A request with no stamps is the one
+`404`, with no read. A body that is not an object is a `400` with no read. Then
+one read finds the site's guest pass through the existing digest index; none, a
+removed one and one past its end are `closed` with no site read. Only a pass
+that stands pays for the site read, and the stamp is compared with the site's
+owner as for unlock: a stamp that does not check out is the one `404`, with a
+`WARN`. Only then is the session written. A guest open has no secret to check
+first, so unlike the others it cannot be free, and the edge's guest buckets are
+what bound it (below).
+
+**The edge limits the route in buckets of its own**: 10 a minute per site and
+address and 60 a minute per site, on each replica ([Rate limits](#rate-limits)).
+Keeping them apart from unlock's is deliberate: a crowd of guests cannot lock
+code holders out, and code holders' unlocks cannot lock guests out.
+
+### What a guest's call is
+
+A call from a guest runs exactly as a code's does: the construct must be
+declared `@accessGate` for the pass's gate, and the reserved arguments are
+stamped the same way. `accessCodeId` is the pass's id, `accessCodeLabel` is its
+name on a mutation only, and `accessGate` and `accessSubject` are its own. There
+is no new reserved argument, so **to a product all guests together are one more
+code**: they share its limits and its partition, and code holders keep theirs.
+A guest reaches one gate's declared constructs and nothing a code for that gate
+does not.
+
+### What the page does for guests
+
+The three obligations of [What the page does](#what-the-page-does) apply to a
+guest's session unchanged. A fourth is added for a page that lets guests in:
+
+**When a guest's session ends, ask the guest route once.** A `200` is a new
+session and the visit goes on. `closed` means guest access has ended, and the
+page leaves, as it does on any other end. A guest's session most often ends at
+its 24-hour cap, and this keeps a long visit unbroken without letting it outlive
+guest access. Ask once, not in a loop: a `429` or a `5xx` says nothing, so keep
+the page's state and try at the next tick as for any other reply.
+
+```js
+// Call this where the session helper's lock() would show the code box.
+async function reopenAsGuest() {
+  const response = await post("/guest", {});
+  if (response.ok) return open(await response.json()); // a new session: the visit goes on
+  if (response.status === 403) return lock(); // closed: guest access has ended
+  // 429, 5xx, a network error: say nothing either way, and ask again at the next tick
+}
+```
+
+### What a product must keep out of a gate open to guests
+
+**All guests share one partition.** Whatever a product writes for one guest,
+stamped with the pass, is readable by every guest through the gate's queries,
+because to the product they are one code. A product must keep anything personal
+out of a gate it opens to guests: no names, messages or uploads that one visitor
+would not want every other visitor to read. There is no per-guest identity in
+this version.
+
+---
+
 ## The wire
 
 This is a documented exception to the engine's gRPC-first rule, owner-approved on
 2026-10-29. A visitor's browser has no MemQL identity to open a stream with, and
 only an HTTP response can set an `HttpOnly` cookie, so the other party dictates
-the wire. It is one route family on the deployable's own origin, with four
+the wire. It is one route family on the deployable's own origin, with five
 method and path pairs. The edge answers them ahead of the bundle and of the
 generic `/_memql/*` proxy, **whatever the site's `apiProxy` says**.
 
@@ -458,9 +618,10 @@ generic `/_memql/*` proxy, **whatever the site's `apiProxy` says**.
 | `GET /_memql/access` | `GET /access/session` |
 | `POST /_memql/access/leave` | `POST /access/leave` |
 | `POST /_memql/access/call`, body `{"call":"name","args":{...}}` | `POST /access/call` |
+| `POST /_memql/access/guest`, body `{}` | `POST /access/guest` |
 
 Any other method or path under `/_memql/access` is not this surface's and
-reaches the generic proxy as it always did. The four take no query string: the
+reaches the generic proxy as it always did. The five take no query string: the
 edge forwards the path alone, so a code pasted into a URL never reaches the bff or
 anything that records what it served. The bff routes are never reachable from
 outside: the edge is the only way in.
@@ -469,7 +630,7 @@ Every reply carries `Cache-Control: no-store` and `X-Content-Type-Options:
 nosniff`. Every POST must declare `Content-Type: application/json`, **`leave`
 included**, whose body is empty or `{}`. There is no CORS: the page that calls
 this is the deployable's own. **The bff sees the access cookie and no other
-credential**: the edge drops `Authorization` and every other cookie on these four
+credential**: the edge drops `Authorization` and every other cookie on these five
 routes, a MemQL sign-in cookie included, because nothing here reads them.
 
 ### The cookie
@@ -494,7 +655,7 @@ visitor's gated writes.
 
 **`Path=/` is the price, and the edge pays it.** A browser sends this cookie with
 every request to the site, so the edge takes it out of everything it forwards
-anywhere but the four routes: the generic `/_memql/*` proxy, shopper forms and
+anywhere but the five routes: the generic `/_memql/*` proxy, shopper forms and
 reads, and the identity endpoints. The rest of the `Cookie` header goes through
 as it was. The bundle's own files are served by the edge, which reads nothing from
 it.
@@ -520,7 +681,7 @@ is JSON:
 | `404` | `{"error":"not_found"}` | the site has no owner (the platform's own sites), or the edge has no API target |
 | `415` | `{"error":"json_required"}` | a POST that does not declare `application/json` |
 | `403` | `{"error":"forbidden_origin"}` | a POST whose `Origin` names another host. `Origin: null` is refused too; a POST with **no** `Origin` is allowed |
-| `413` | `{"error":"too_large"}` | a body over 1 KiB (unlock, leave) or 64 KiB (call), by what it declares or by what is read |
+| `413` | `{"error":"too_large"}` | a body over 1 KiB (unlock, leave, guest) or 64 KiB (call), by what it declares or by what is read |
 | `400` | `{"error":"bad_request"}` | a body that could not be read |
 | `429` | `{"error":"rate_limited"}` | a budget is spent. `Retry-After` is in whole seconds |
 
@@ -542,24 +703,29 @@ to equal the stamp, and its account to equal the code's copy.
 
 ### What the bff answers
 
-**A stranger costs nothing.** Anybody on the internet can send these four, so the
+**A stranger costs nothing.** Anybody on the internet can send these five, so the
 order is deliberate. A request with no cookie, a cookie that could not be a token
 (`mql_acs_` and 43 base64url characters) and a body that could not hold a code (25
 symbols once normalized) are answered without a read. Anything else is looked up
 by its digest first, and a digest that finds nothing is answered with no other read
 and no write. The site is read only for a request whose digest found a row, and its
-package and the owner's own view of both only for a gated call.
+package and the owner's own view of both only for a gated call. **The guest route
+is the one exception**: it has no secret to check first, so it costs one read
+through the same index before anything else
+([Guest access](#guest-access)).
 
 **`POST /_memql/access`** trades a code for a session.
 
 | Status | Body | Meaning |
 |---|---|---|
-| `200` | `{"gate":"engagement","subject":"acme","expiresAt":"2026-10-30T18:00:00Z","remainingMs":86399000}` | in, with `Set-Cookie` |
+| `200` | `{"gate":"engagement","subject":"acme","expiresAt":"2026-10-30T18:00:00Z","remainingMs":86399000,"guest":false}` | in, with `Set-Cookie` |
 | `401` | `{"state":"invalid"}` | unknown, removed, another site's, or superseded by a regenerate. All one reply, so it is no oracle |
 | `403` | `{"state":"expired"}` | the exact code, past its expiry. Only somebody holding the code can learn this |
 | `502` | `{"error":"refused"}` | the bff could not read or write the rows. Try again |
 
 A failed attempt writes nothing. `subject` is `""` when the code has none.
+`guest` is `false` here, and true only on a guest's session
+([Guest access](#guest-access)); the session check carries it too.
 
 **`expiresAt` and `remainingMs` are one instant**, the *session's* end: the
 earlier of the code's expiry and 24 hours after it opened, stated two ways.
@@ -633,6 +799,8 @@ replicas:
 |---|---|---|
 | unlock | 10 a minute | the site and the address |
 | unlock | 60 a minute | the site |
+| guest | 10 a minute | the site and the address, in buckets apart from unlock's |
+| guest | 60 a minute | the site, in a bucket apart from unlock's |
 | session, leave, call | 600 a minute | the site and the address |
 
 The address is the **right-most** `X-Forwarded-For` entry: the hop the ingress
@@ -646,6 +814,10 @@ pick any address in it, so everybody behind one /64 shares a bucket. Unlock draw
 on the address's bucket first, so one machine can take at most ten of the sixty.
 `Retry-After` is how long the refusing bucket takes to give one token back: 6
 seconds for an address that spent its ten unlocks, 1 otherwise.
+
+A guest open draws on the two guest buckets and on nothing else, and unlock
+never draws on them, so a crowd of guests cannot spend the budget a code holder's
+unlock needs, and a flood of unlocks cannot shut guests out.
 
 **These bound load, not guessing.** What stops guessing is 125 bits.
 
@@ -780,6 +952,8 @@ export function accessSession({ onOpen, onLocked }) {
   active.** A construct runs as the owner, as a shopper's form does, and nothing
   per request asks whether that person is still around. **Removing the codes is
   how an operator ends access.**
+- **Guests share one partition.** A product must keep anything personal out of a
+  gate it opens to guests ([above](#what-a-product-must-keep-out-of-a-gate-open-to-guests)).
 - **A code is a bearer credential.** Whoever holds it can use it until it
   expires, is replaced, or is removed, and a stolen cookie is good until the
   code's expiry, a regenerate, a removal, 24 hours or `leave`. Several people can
@@ -788,6 +962,11 @@ export function accessSession({ onOpen, onLocked }) {
 
 | Threat | What stands in the way |
 |---|---|
+| A stranger opening guest sessions in bulk | The guest buckets, a session written only after the pass and the site check out, and the 30-day retention of sessions. Each open costs one indexed read, one point read and one write |
+| A crowd of guests locking code holders out | Guest opens draw on buckets of their own, and unlock never draws on them |
+| Guests spending a product's per-code budget | By design all guests are one code, so they share its limits. Code holders keep their own |
+| A guest pass's secret | There is none. Its digest is of `guest:` and the site's id, which no typed code normalizes to, so no code opens it and regenerate refuses it. The guest route is the way in, and it is open to everyone already |
+| A cross-site page opening a guest session | `SameSite=Strict`, a JSON-only POST and the `Origin` check, as for unlock. It would only hand the visitor what the operator gave everyone |
 | Guessing a code | 125 bits. Failures write nothing and are one reply. Rate limits bound load |
 | A leaked row, backup or log | Only digests are stored. A code, a token, a digest and a call's arguments are never logged or put in an audit event |
 | Cross-site request forgery | `SameSite=Strict`, JSON-only POSTs and the `Origin` check |
@@ -813,7 +992,7 @@ export function accessSession({ onOpen, onLocked }) {
 | One call answers `404` and others work | The name is not declared, is on another gate, is `@disabled`, is in a nested directory, or two of the package's domains both declare it | Check the gate, the name and `dsl_access_gate_*` in the analysis |
 | Unlock and the status check work, every call answers `404`, and the bff logs "this site's calls answer 404" | The site's owner cannot read it or its package. A site whose owner was removed from its organization reads as zero rows under that owner. The log line carries the reason | Restore the owner's membership, or give the site an owner who can read it |
 | A code unlocks and every call answers `404`, and the bff logs nothing | Which node the edge reaches. On an instance where the neutral `bff` mounts no product bundle, a code minted through `bff-<product>` unlocks, because the rows are the same everywhere, and every call misses the gate registry of a node that never loaded the gate | Check which node the edge's `bff-http` selects, and mount the product's DSL there ([which node](#which-node-answers)) |
-| All four routes answer `404` for a platform-managed site | It has no owner to borrow | Codes are for your own deployables |
+| All five routes answer `404` for a platform-managed site | It has no owner to borrow | Codes are for your own deployables |
 | Add is absent, and a visitor is only ever told `invalid` or `none` | The deployable was not deployed from a package, so it has no deployable name, no gate can be its own, and it has no codes | Deploy it from a package that declares a gate |
 | A `503` or a plain `404` before any JSON | The deployable is offline, or not live | Take it live. An offline spell does not end a session: it works again if its code has not expired |
 
@@ -828,13 +1007,16 @@ that mounts it too.
 
 ## Operating it
 
-- **`memql_site_access_requests_total{op,result}`** counts the four operations
-  by result on bff nodes (`app="bff"`), with no per-attempt rows behind it. A
+- **`memql_site_access_requests_total{op,result}`** counts the five operations
+  (`op="guest"` is the guest route) by result on bff nodes (`app="bff"`), with no per-attempt rows behind it. A
   climb in `unlock`/`invalid` is somebody guessing or a code passed along
   wrongly. **`refused` on `unlock`, `session` or `leave` is the store failing
   under the surface, and is the one to alert on.** `refused` on `call` is not an
   alert: a visitor can move it by sending a construct a wrong argument type, and
   a code with no subject calling a construct that needs one counts there.
+  `closed` on `guest` is guests being turned away, which is what an operator
+  who has not allowed them should see. A guest pass's "last opened" says whether
+  guests are coming.
 - **"Has anybody opened this?"** is answered by the newest session of the code's
   current generation, with no write to the credential itself.
 - **Logs name the deployable and the construct, never an argument.** A code, a
@@ -905,6 +1087,6 @@ live, and no lock is left in `bun_migration_locks`.
   `component/memql/access_gate_load.go`. Codes and tokens:
   `component/memql/site_access_code.go`.
 - Operator acts: `integrations/siteaccess/`; DSL in `dsl/platform/`
-  (`siteAccessCode`, `siteAccessSession`, the six builtins).
+  (`siteAccessCode`, `siteAccessSession`, the seven builtins).
 - MemQL OS: `clients/os/src/apps/deployables/access/`.
 - Design: `docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md`.

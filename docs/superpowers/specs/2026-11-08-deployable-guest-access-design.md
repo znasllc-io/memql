@@ -89,10 +89,12 @@ regenerated.
 
 | Construct | Purpose |
 | --- | --- |
-| `builtin siteAccessGuestPassCreate(siteId, label, gate, subject?, expiresAt)` | Mints a guest pass. Returns `{codeId, expiresAt}`, never a code. Refused `guest_pass_exists` while the site has a guest pass not removed, and with every refusal a code's mint has. |
-| `builtin siteAccessCodeRegenerate(codeId, expiresAt?)` | Refuses a guest pass, `guest_pass_has_no_code`. |
-| `builtin siteAccessCodeSetExpiry(codeId, expiresAt)`, `builtin siteAccessCodeRemove(codeId)` | Unchanged, and how an operator changes or ends guest access. |
+| `builtin siteAccessGuestPassCreate(siteId, label, gate, subject?, expiresAt)` | Mints a guest pass. Returns `{codeId, expiresAt}`, never a code. Refused while the site has a guest pass not removed, with the sentence "This deployable already lets guests in. Change when guest access ends, or turn it off first.", and with every refusal a code's mint has. Refused inside a run. |
+| `builtin siteAccessCodeRegenerate(codeId, expiresAt?)` | Refuses a guest pass: "Guest access has no code to regenerate. Change when it ends, or turn it off." |
+| `builtin siteAccessCodeSetExpiry(codeId, expiresAt)`, `builtin siteAccessCodeRemove(codeId)` | How an operator changes or ends guest access. Removal is unchanged and a run may do it. Re-timing a guest pass is refused inside a run, since keeping a deployable open to anybody is an operator's decision. |
 | `builtin siteAccessCodesForSite(siteId)` | Each row gains `guest`. |
+
+This package refuses by sentence and has no reason codes. A run may not create or re-time a guest pass, and may remove one, because ending guest access only narrows who can get in.
 
 **Authority** is the code mint's: `@requiresCapability("execute",
 "app:deployables/access")`, with the site as the organization target in
@@ -149,7 +151,7 @@ so the reply is no oracle about anything a visitor could not learn by asking aga
 ## 7. Ending in real time
 
 The access-code record's section 8 applies unchanged. Turning guest access off is a
-removal, refused at the server at once and reaching an idle tab within 5 seconds. An
+removal, which a run may also do, refused at the server at once and reaching an idle tab within 5 seconds. An
 end date is exact to the timer.
 
 **The client half gains one obligation.** When a guest's session ends, the page

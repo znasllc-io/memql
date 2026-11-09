@@ -939,13 +939,13 @@ rather than by omission.
 
 A deployable is public: anybody who resolves its hostname is served its bundle.
 **Access codes** let part of it open only for people an operator gives a code to,
-with no sign-in. The full account -- the wire, what the page must do, how a gate
+with no sign-in, or to anyone, with guest access. The full account -- the wire, what the page must do, how a gate
 is declared and the limits -- is [Access codes](site-access-codes.md). This
 section is what belongs to the deployable.
 
 **Where.** The lock after Traffic in a deployable's page head opens its Access
-codes: a list, a short Add form, and Regenerate, Change expiry and Remove on each
-row. The control is *absent*, not disabled, for a person who does not hold the
+codes: a Guest access part, a list, a short Add form, and Regenerate, Change
+expiry and Remove on each row. The control is *absent*, not disabled, for a person who does not hold the
 part, on a system-owned deployable, and on one that was not deployed from a
 package.
 
@@ -984,6 +984,15 @@ code copies its deployable's organization when it is minted, so the organization
 cannot change while a code has not been removed -- expired ones included, since a
 new expiry revives them. The refusal says to remove the codes first; add new ones
 after the move.
+
+**Guest access** is the same dialog's other half, for a deployable meant to be
+explored in public: a **Guest access** part above the codes turns on a guest
+pass, which lets anyone open one gate with no code until an end date the operator
+sets (the same presets and 366-day cap). One pass at a time; Change end date and
+Turn off are on it, and Turn off takes every guest out now. It shows no code,
+because there is none, and a run may remove a pass but not create or re-time one.
+All guests share one partition, so a product keeps anything personal out of a gate
+it opens to them ([Guest access](site-access-codes.md#guest-access)).
 
 **Regenerate is revocation.** It replaces the secret and keeps the id, name, gate
 and subject, so rows a product stamped with the code's id stay attached, and

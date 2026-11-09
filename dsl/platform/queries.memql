@@ -583,7 +583,7 @@ query siteAccessCode siteAccessCodeById {
 /// is the wire: a client-callable lookup by digest is an oracle for whether a guessed digest is a live
 /// code, for a caller who never held the code.
 @serverOnly
-@unbounded("access code by site and digest -- a single row for a code, whose digest is its credential and shared by no other row; for a site's guest digest, the guest passes one deployable has had, which is a handful")
+@unbounded("access code by site and digest -- a single row for a code, whose digest is its credential and shared by no other row; for a site's guest digest, every guest pass the deployable has ever had: a site gains one row each time guest access is turned on, nothing removes them, and the guest route reads them all")
 @actor
 @cache(0)
 query siteAccessCode siteAccessCodeByHash {
