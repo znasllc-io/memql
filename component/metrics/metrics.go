@@ -193,7 +193,7 @@ var (
 		Namespace: namespace,
 		Subsystem: "site_traffic",
 		Name:      "written_total",
-		Help:      "EDGE NODES ONLY -- select app=\"edge\"; every other node type exports this at a constant 0 because only the edge serves sites. Requests recorded into the edge_request log, which is what the traffic figure on a deployable's Live stop is folded from (epic memql#4906). A steady non-zero rate on a cluster serving traffic is the healthy shape. Read it BESIDE site_traffic_dropped_total: the two together are the honest denominator, and a figure that looks low is explained by one of them or by nobody visiting.",
+		Help:      "EDGE NODES ONLY -- select app=\"edge\"; every other node type exports this at a constant 0 because only the edge serves sites. Requests recorded into the edge_request log, which a deployable's website statistics and the Deployables list's request counts are folded from (epic memql#4906). A steady non-zero rate on a cluster serving traffic is the healthy shape. Read it BESIDE site_traffic_dropped_total: the two together are the honest denominator, and a figure that looks low is explained by one of them or by nobody visiting.",
 	})
 	siteTrafficDropped = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

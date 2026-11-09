@@ -103,6 +103,18 @@ function story(snapshot: LiveSnapshot<Row>): { refusal: string; kept: string } {
   return { refusal: refusalOf(snapshot.error, snapshot.rows.length), kept: snapshot.rows.length > 0 ? snapshot.error : "" };
 }
 
+/** How many clients the Clients list shows: the kit's leading eight. */
+const CLIENTS_SHOWN = 8;
+
+/**
+ * The Clients list's quiet last line when it shows fewer clients than the read
+ * covers (DESIGN.md "Statistics"): eight rows under figures that add up every
+ * client read as all of them.
+ */
+function busiestClientsOf(rows: readonly RankedRow[]): string | undefined {
+  return rows.length > CLIENTS_SHOWN ? `The ${CLIENTS_SHOWN} busiest of ${formatCount(rows.length)} clients.` : undefined;
+}
+
 /** Whether a record belongs to the client in scope: every record for All, else the chosen organization's. */
 function inScope(accountIds: readonly string[], accountId: string): boolean {
   return accountIds.length === 0 || accountIds.includes(accountId);
@@ -410,7 +422,7 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
       {!firstUse && answered(feeds.campaigns.snapshot) && campaignsStory.refusal === "" ? (
         <OverviewBreakdown title="Campaigns" segments={campaignDistribution(campaigns)} />
       ) : null}
-      {subjects && clients.length > 0 ? <RankedList title="Clients" rows={clientRows} /> : null}
+      {subjects && clients.length > 0 ? <RankedList title="Clients" rows={clientRows} limit={CLIENTS_SHOWN} footer={busiestClientsOf(clientRows)} /> : null}
       <PageHelp title="Overview">
         <p>A rate is the share of the campaign messages sent in the period that have been opened or clicked.</p>
         <p>Automations show no opens or clicks, because automated mail is not tracked for them.</p>

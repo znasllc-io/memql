@@ -2818,7 +2818,7 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	return b.String()
 }
 
-// EmailStatistics -- The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns nothing.
+// EmailStatistics -- The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns nothing. A figure over days whose records the rollup has not yet walked is null, never zero, and test runs and the consent events of an organization's testing audience are left out.
 type EmailStatisticsArgs struct {
 	// The organizations to read, as bare ids. Empty reads every organization you reach. It narrows what you reach and never widens it.
 	AccountIds []string
@@ -9982,7 +9982,7 @@ func SiteStatisticsBuild(args SiteStatisticsArgs) string {
 	return b.String()
 }
 
-// SiteTrafficInWindow -- The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id.
+// SiteTrafficInWindow -- The request counts a deployable's row in the Deployables list reads ("served 3m ago"). Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same answer a deployable with no traffic gives -- so the call is never an existence oracle for somebody else's id.
 type SiteTrafficInWindowArgs struct {
 	// The deployables to read, as bare ids.
 	SiteIds []string

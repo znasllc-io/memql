@@ -152,8 +152,9 @@ func (c *SinkComponent) ComponentName() common.ComponentName {
 func (c *SinkComponent) Ready() <-chan struct{} { return c.readyCh }
 
 // RequestLogEnabled reads MEMQL_EDGE_REQUEST_LOG_ENABLED. ON BY DEFAULT: a
-// deployable's Live stop asks "is anybody using it", and a cluster where
-// nobody had opted in would answer unmeasured forever with nothing to say why.
+// deployable's Statistics and its row in the Deployables list ask "is anybody
+// using it", and a cluster where nobody had opted in would answer unmeasured
+// forever with nothing to say why.
 func RequestLogEnabled() bool {
 	reader := env.NewEnvReader("MEMQL_EDGE_REQUEST_LOG")
 	v, err := reader.OptionalBool("ENABLED")

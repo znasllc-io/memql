@@ -12,8 +12,8 @@ verification is tracked separately from a passing typecheck.
 | Users | Shared directory/membership live lists, with a detail skeleton while a deep-linked group is first read. |
 | Bin | Shared `LiveList` handles initial reads and preserves archived rows during refresh. |
 | Files | Shared live lists and explicit file-version skeletons; the folder hierarchy and version chronology retain their navigation model. |
-| Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, traffic, access codes, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
-| Email | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
+| Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, statistics (the figures, chart and lists of a deployable's Statistics, its whole lists and the Overview's Websites), access codes, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
+| Email | Shared live collections; audience members, template sample, delivery ledger and breakdown reads; the Overview's statistics (figures, charts, facts and lists). Recipient filters remain filters. |
 | Concepts | Registry, concept details, initial rows and additional pages. Schema and row inspectors retain their split view. |
 | Logs | Search/tail data and settings reads; loaded virtual rows remain usable on refresh. |
 | Materializer | Live compositions, templates and recipes; their pages replace the lists. The Make a file wizard keeps local answers while the From tray groups load as skeletons. Its making stage shows the running operation with Stop and Leave. A described file waits for its Files entry on a live feed; notices stay beside the file and are announced. |
@@ -22,7 +22,7 @@ verification is tracked separately from a passing typecheck.
 | Settings | Access roster, rules, decisions, language, cluster/mail facts, benchmark, tokens, keys, policies, integration reports and provider registry. Access's two sibling views use `LocalTabs`; saved preferences remain form choices. |
 | Identity | Shared form skeleton while the native identity page is fetched; passkey/email interactions retain meaningful operation status. |
 | Ask | Conversation-shaped history placeholder; active model calls retain the reverse response estimate. Sheet and widget share the same surface. The route picker keeps every Where row in place with an `InlineSkeleton` for its line until the machines feed and `inferenceStatus` answer; a failed read says so on the row, and with no connection (or a dropped feed) the rows say "Not connected" instead of keeping a skeleton. |
-| Shared surfaces | OS bootstrap, app setup facts, connection dialogs, `LiveList`, `RecordListSkeleton`, `ContentSkeleton`, `InlineSkeleton`, `LocalTabs`. |
+| Shared surfaces | OS bootstrap, app setup facts, connection dialogs, `LiveList`, `RecordListSkeleton`, `ContentSkeleton`, `InlineSkeleton`, `TimeChartSkeleton`, `LocalTabs`. |
 
 The governing rules are in [DESIGN.md](../DESIGN.md#loading-is-the-shape-of-the-content-never-a-message).
 A skeleton's label is screen-reader-only. Errors, disconnections and successful

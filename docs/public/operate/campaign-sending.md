@@ -1885,6 +1885,218 @@ other.
 
 ---
 
+## Email statistics
+
+The Email Overview's figures: what a period's mail did, for every organization
+a person reaches or for one of them. A scheduled rollup records each countable
+fact once in the cluster's own table, `email_stat_fact`, and
+`builtin emailStatistics` counts those facts for its caller. `campaignStats`
+above stays the live account of one campaign, counted from its own rows; a send
+reaches the statistics with the next five-minute rollup run.
+
+### What is counted
+
+A record counts once for each kind of fact it makes, however often the rollup
+reads it, on the UTC day the table names:
+
+| Fact | Counted from | Day |
+|---|---|---|
+| sent | a delivery that reached `sent` | its `sentAt`, or the day of the version that says so when it has none |
+| failed, skipped | a delivery that reached that status | the day it did |
+| suppressed | a skipped delivery whose skip reason `campaignStats` counts as suppressed | the day it was skipped |
+| delivered | the provider's report `delivered` or `expanded` | `providerAt`, or the day of the version |
+| undelivered | the provider's report `bounced`, `suppressed`, `quarantined`, `filtered-spam` or `failed` | the same |
+| open, click | each open or click | when it happened |
+| unique open, unique click | a message's first open or first click, by delivery rather than by address | the day of that first one |
+| unsubscribe, new subscriber, bounce, complaint | a consent event: a withdrawal, a grant, a bounce, a complaint (a suppression is none of them) | when it happened |
+
+- **Opens and clicks are campaign mail's alone**, because only campaign mail
+  is tracked; a rule's or a journey's mail counts its sends, failures and
+  suppressions.
+- **Each fact is attributed** to its organization and campaign; a rule's send
+  to its rule; and a journey's send to its journey, found through the send's
+  request id (`journey-<enrollment>-<step>`) only when the enrollment belongs
+  to the delivery's own organization. A subscribe or an unsubscribe counts
+  under the audience of the recipient it names; one that names no recipient
+  counts in its organization's totals only.
+- **A fact is never taken back.** A delivery read once as failed and later
+  proved sent by a provider report keeps both facts, and a provider verdict
+  that changed between two readings leaves both a delivered and an undelivered
+  fact, so the two are not a split of the sends.
+- **Tests are not statistics.** A test run makes no fact — not its sends, opens
+  or clicks, nor the consent events it gave rise to — and neither does a
+  consent event about a person in an organization's testing audience. A
+  subscription the rollup counted before its audience became the testing
+  audience stays counted.
+
+### Open and click rates
+
+The **open rate** is the share of the campaign messages sent in a period, by
+the day they were sent, that were opened at least once, on any day; the
+**click rate** is the same share for clicks. Rule and journey mail is on
+neither side, because it is not tracked, and with no campaign mail sent both
+rates are `null`. A campaign's row and an organization's row use the same
+cohort. The totals' `uniqueOpens` and `uniqueClicks` count instead the first
+opens and clicks that happened in the period, whatever day their message was
+sent, so unique opens over sent is not the open rate. What an open does and does
+not show is under [Open and click tracking](#open-and-click-tracking).
+
+### How the facts are recorded
+
+Every five minutes, at half past the minute, the cron leader runs the
+`emailStatisticsRollupSweep` automation, which calls
+`builtin emailStatisticsRollup`; the builtin admits that automation's
+maintenance principal and no other caller, a cluster owner included. It walks
+three sources through the engine, never with SQL over the graph: deliveries,
+open and click events, and consent events. Each walk reads in creation order
+and resumes from the newest row it has read, less five minutes, so a row whose
+writer's clock ran behind is still read; a delivery that changed is read again
+at its latest version and adds what it newly says. A page's facts and the
+source's place are written in one transaction, so a run that stops part way
+leaves the next to carry on from the last page written, and two runs at once,
+as when the cron lead moves, write each fact once. Every run deletes the facts
+older than 400 days.
+
+**A first run catches up over many runs.** A source's first walk starts 400
+days back, and a run reads at most forty pages of 500 rows of each source past
+where it resumes: 20,000 rows of a source a run. At twelve runs an hour that is
+at most 240,000 rows of a source an hour, so a history of a million deliveries
+takes at least fifty runs, about four hours and ten minutes, to reach today.
+That is the walk's bound, not a measurement: a run whose pages the database
+answers slowly takes longer than five minutes, and a run that starts on a node
+while its last run there is still going does nothing. While a source is
+behind, each run logs `Email statistics rolled up` at Info and names it in
+`behind`; a run with nothing to catch up and nothing to delete logs the line at
+Debug.
+
+**A history too long for one page.** The first page of a first walk reads every
+version the source wrote since the walk's start, and on a long history it can
+outlast the request pool's eight-second statement timeout. When it does, the
+next first walk starts about halfway from that start to now — 400 days back,
+then about 200, then about 100 — at a UTC midnight and never later than a day
+before now, so a very large history begins with its most recent part. Each move
+is a Warn naming the source and the day, `email statistics for <source> start
+from <day>: the first walk over a longer history timed out`. The start is
+stored in `email_stat_walk_start`, so a new cron leader carries on from it, and
+the days before it read *not measured* for that source's figures. Only that
+timeout moves a start: any other failure leaves it where it was, and the next
+run tries the same walk again. A walk that has read a page and whose later
+pages outlast the timeout is not moved either: it stalls, with a Warn on every
+run, and the figures it feeds stay not measured.
+
+**A source whose walk fails** is logged `Email statistics for a source were not
+folded; the next run carries on from its watermark`; the other sources still
+run.
+
+### Not measured is not zero
+
+A figure the statistics cannot vouch for is `null`, which the Email Overview
+draws as a dash, never as 0:
+
+- **Before the first fact.** `measuredSince` is the cluster's first day with a
+  fact, whichever organization's mail it was, so a member may be shown a date
+  that came from another organization's mail, never a figure. A bucket that
+  ends before that day begins is null, and with no fact at all every figure is.
+- **Where the rollup has not walked.** A finished day is measured for a figure
+  only once every source the figure is counted from has been walked through the
+  end of that day. The day under way, and a period that holds it, need them
+  walked only to fifteen minutes before now (a day that ended less than fifteen
+  minutes ago, to fifteen minutes before its end): three runs' grace. Sent,
+  delivered, undelivered, failed, skipped and suppressed need the deliveries
+  walked; opens, clicks and their unique counts need the open and click events;
+  the rates need both; and unsubscribes, new subscribers, bounces and
+  complaints need the consent events. So while a first walk catches up, the
+  days it has not reached read not measured, and so do the current period's
+  totals until it reaches today; a rollup that stops leaves the days since it
+  stopped not measured. A walk that finds nothing new still records how far it
+  walked, separately from where it resumes, so a quiet cluster reads zeros.
+- **Lists** are listed only for a period measured for every figure their rows
+  carry: campaigns and organizations need their sends and opens, rules and
+  journeys their sends, audiences their subscription changes. Otherwise a list
+  is empty, and the Overview says *Not measured.* rather than *Nothing in this
+  period.*
+- **A dated-back event.** Coverage follows when a record was written, as the
+  walk does, so a consent event a provider's report dates earlier can still add
+  to a day already shown.
+
+Between those bounds, a day with no fact is a measured zero. Recent days that
+read not measured after a first walk has caught up are a rollup that stopped or
+fails: its log lines above say which.
+
+### Reading the statistics
+
+```
+builtin emailStatistics(period: "30d")
+builtin emailStatistics(accountIds: ["abc"], period: "12m")
+```
+
+`emailStatistics` answers one `integration:emailStats:statistics` row.
+
+- **Periods.** `7d`, `30d` and `90d` end with today, in daily buckets; `12m` is
+  the current month and the twelve before it, in 13 monthly buckets, so this
+  month stands beside the same month last year. The bucket under way is
+  included. There is no `24h`: a fact has a day and no hour. `period` is
+  required, and any other value is refused with a sentence naming the periods.
+- **The previous period.** `7d`, `30d` and `90d` come with the period of the
+  same length just before: `previous` holds its totals and `previousSeries` its
+  buckets, aligned by offset with `series`. Twelve months have none
+  (`hasPrevious` is false, and `previous`, `previousSeries`, `prevStart` and
+  `prevEnd` are `null`): the thirteen months before them are past the facts'
+  400 days.
+- **What it answers.** `period`, `bucket`, `start`, `end` and `measuredSince`
+  (`YYYY-MM-DD`); `totals`, the figures of the table above as `sent`,
+  `delivered`, `undelivered`, `failed`, `skipped`, `suppressed`, `opens`,
+  `clicks`, `uniqueOpens`, `uniqueClicks`, `unsubscribes`, `bounces`,
+  `complaints` and `subscribes`, with `openRate` and `clickRate`; `series`, one
+  point per bucket with `at`, `sent`, `uniqueOpens`, `uniqueClicks`,
+  `unsubscribes`, `subscribes`, `bounces`, `complaints`, `failed`, `suppressed`
+  and the bucket's cohort rates; `campaigns`, the 50 with sends in the period,
+  most unique opens first and then most unique clicks, each with `sent`,
+  `uniqueOpens`, `uniqueClicks` and both rates; `automations`, each rule and
+  journey with a send, a failure or a suppression (`kind` is `rule` or
+  `journey`), most sent first; `audiences`, each with subscribes or
+  unsubscribes in the period and their `net`, the largest net change first; and
+  `accounts`, each organization's sends and rates, only when more than one
+  organization is in scope.
+- **A figure nothing measured is present and `null`**, never 0 and never left
+  out, so a client can tell *not measured* from a key it does not know.
+
+### For one client
+
+`accountIds` keeps a read to the organizations it names; leave it out, or send
+an empty list, to read every organization the caller reaches. What the caller
+reaches is decided by their own grant (`ResolveAccessGrant`, the resolution the
+row gate uses), never by the list, and a grant that cannot be resolved reaches
+nothing:
+
+- **Staff** — a role at admin rank or above that is not scoped to one
+  organization — reach every organization, and with no `accountIds` their
+  figures also count the facts older than organization attribution, which
+  belong to no organization.
+- **Anyone else** reaches the organizations their groups tie them to.
+- **An organization outside the caller's reach is dropped, not refused.** A
+  member who names only another client's organization gets every figure `null`
+  and no `measuredSince`, the answer of somebody who reaches nothing, whether
+  that organization exists or not. A list that holds only blank ids names
+  nothing and reaches nothing.
+
+In the Email app the client control follows the same reach and is drawn only
+when there is a choice: staff choose **All clients** or one organization, a
+person in several organizations **All my clients** or one of theirs, and a
+member of one organization sees no control and reads that organization. The
+control is presentation; the read narrows on the server.
+
+### What the rollup reads
+
+The rollup reads every organization's mail, so it reads only what a figure
+needs: each of its queries projects the ids, statuses and times the facts use,
+and no recipient's address, address digest or owner. The one reference to a
+person it reads is a consent event's recipient id, to find that person's
+audience. A fact holds its kind, the record's id, the organization, campaign,
+rule, journey and audience ids and a UTC day, and nothing else.
+
+---
+
 ## Open and click tracking
 
 Two booleans on the campaign, both defaulting **true**: `trackOpens` and
@@ -2364,10 +2576,22 @@ original resource is connected again.
 ## The Email app
 
 Email brings Campaigns, Automations, Audiences and Templates into one app.
-Overview shows recent sends and activity. Inbox captures messages for owners
-and developers when the cluster uses capture mode; Logs follows the reader's
-access. Settings holds the sending domain, senders, testing audience and
-package configuration for each organization.
+Overview holds the email statistics of a period — the last 7, 30 or 90 days or
+the last 12 months, remembered in the app's settings — for every client the
+reader reaches or, when they reach more than one, the one they choose: Sent,
+Open rate, Click rate, Unsubscribes and New subscribers, each with its change
+from the period before where that period can be compared, and a chart of the
+one chosen; the current Subscriptions and Active automations; Delivery
+problems, with Delivered where the provider reports outcomes; each audience's
+growth, the top campaigns and each automation's sends, each row opening what it
+names; the campaigns by state; and, under All clients, each client. A figure
+nothing measured is a dash, never 0 ([Email statistics](#email-statistics)).
+With no campaign or automation yet, it says *Nothing sent yet* and offers
+**Add a campaign**.
+Inbox captures messages for owners and developers when the cluster uses
+capture mode; Logs follows the reader's access. Settings holds the sending
+domain, senders, testing audience and package configuration for each
+organization.
 
 Use **Add a campaign** to choose an audience, template, sender and schedule.
 **Create new template** opens the editor and keeps the campaign's answers while

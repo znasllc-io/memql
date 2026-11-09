@@ -541,6 +541,76 @@ another information icon. Errors and stale-data notices remain visible.
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
 
+### Statistics
+
+Statistics are drawn with the kit's statistics pieces and nothing else
+(`kit/statistics`, from the website and email statistics design, 2026-11-08):
+`StatFigures` for the figure row, `TimeChart` for the one chart, `RankedList`
+for a dimension's leading values and `PeriodControl` for the period, with
+`kit/format`'s `formatCount`, `formatRate` and `formatBytes` for the numbers.
+The client picker is `ScopeControl` over `useClientScope`, which live with the
+account concept (`apps/accounts`): the kit is the shell's vocabulary, and a
+client picker is one domain's surface. A deployable's Statistics, the
+Deployables Overview's Websites and the Email Overview are built from these
+and draw no figure row, chart or ranked list of their own; a piece a second
+page needs is promoted into the kit, as `TimeChartSkeleton` and `RankedList`'s
+`control` were. These are the real time series the Overview rule above asks
+for, and an Overview that is its app's statistics hands `StatFigures` to
+`Overview` as its `figures`, so the page has one figure row, not two.
+
+- **The controls stand at the right of the heading that owns the figures, and
+  stay quiet.** `ScopeControl`, then `PeriodControl`, both the kit's quiet
+  select (`Select tone="quiet"`), in the Head's actions (a deployable's
+  Statistics, the Email Overview) or a Subhead's (the Websites section). A
+  period reads "Last 30 days", the way `SortControl` reads its order, and the
+  control offers only what its read answers: Email has no 24 hours, because
+  its facts have days and no hours. Each app remembers both choices in its
+  settings document. `ScopeControl` is drawn only when there is a choice --
+  staff choose All clients or one organization, a person in several
+  organizations All my clients or one of theirs -- and a member of one
+  organization sees no control and no other client's name. It is
+  presentation: the read narrows on the server.
+- **The figure row chooses what the chart draws.** `StatFigures` is one
+  radiogroup, a single tab stop the arrow keys move, and the checked figure is
+  the chart beneath it. A figure its series cannot draw stands as a plain
+  figure, never as a choice that changes nothing.
+- **A change is drawn only against a period that can be compared with.** A
+  figure's change ("+12%", "New", "No change") is against the period of the
+  same length before it, and only when that period began on or after the first
+  measured day (`previousComparable`). A previous period that began before
+  measurement adds up its unmeasured days as nothing, so every change against
+  it would overstate growth: then no figure carries a change and no chart draws
+  the previous line. Twelve months have no previous period, because the months
+  before them are past what the statistics keep, so they draw neither. A floor
+  ("5,000 or more") has no change either.
+- **Not measured is a dash with its reason, never a zero.** An unmeasured
+  figure is `Measure`'s em dash with its reason a hover away ("Nothing has
+  been recorded yet."), and a rate with nothing to divide by is a dash, never
+  0%.
+- **A chart is drawn only from a real series.** `TimeChart` draws the buckets
+  a read answered: the current period as a line with a soft fill, the previous
+  as a faint dashed line at the same offsets. A bucket nothing measured is a
+  gap where the line stops and starts again, never a zero, and a lone measured
+  bucket is a dot. With no series there is no chart.
+- **Loading is the chart's shape.** While a read is out, `TimeChartSkeleton`
+  stands in the chart's place with its head, plot and time axis, and the
+  figures and lists are their shapes (`loading` on `StatFigures` and
+  `RankedList`); a refresh keeps what it has. A refused read says so in the
+  engine's words and keeps saying so while it is tried again: a shape never
+  stands over an error.
+- **A list's own control stands under its heading.** What chooses the rows of
+  one list -- Devices' Device, Browser and OS -- is `RankedList`'s `control`,
+  between the heading and the rows, so the heading lines up with the list
+  beside it and the control reads as that list's.
+- **A list of a whole set says when it shows fewer than the set.** A ranked
+  list shows the leading eight. Where its rows stand for every member of a set
+  the figures above add up -- every website, every client in scope -- and
+  there are more, it opens the whole list as a page under the trail ("All
+  pages", never a pop-up) or says so in its quiet last line, its `footer` ("The
+  8 busiest of 23 websites."): eight rows under figures that add up
+  twenty-three read as all of them. A list of leading values -- sources,
+  countries, top campaigns -- is the leaders by name and needs no such line.
+
 ### A tab is a different kind of thing; a subset is a filter
 
 An app's section tabs are its NOUNS. Fleet's are machines, policies, the model

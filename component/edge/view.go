@@ -20,7 +20,11 @@
 // HTTP Exceptions). A beacon is a plain POST a page sends on its way to the
 // next view; it cannot open a stream, and a visitor has no MemQL identity to
 // open one with. Both routes are answered by the edge itself on a deployable's
-// own origin. Neither is forwarded, and neither reads a cookie.
+// own origin, and neither is forwarded. The script reads no cookie and stores
+// nothing in the browser. The edge reads no visitor cookie on either route:
+// the one cookie it may look at is an operator's preview grant, which serve
+// checks before these routes are reached (previewGrantFor), and which is how a
+// ping from a previewed page is told apart and counted as no page view.
 //
 // # Why every ping is answered 204
 //

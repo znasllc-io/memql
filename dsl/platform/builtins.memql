@@ -229,9 +229,10 @@ builtin customDomainCheck {
 // nothing at all. The working shape for a read served from Go is the @sdk
 // builtin whose executor returns synthetic nodes.
 
-/// The traffic figure a deployable's Live stop reads. Gated by the SITE: a deployable the caller
-/// cannot read contributes no rows, which is the same answer a deployable with no traffic gives --
-/// so the call is never an existence oracle for somebody else's id.
+/// The request counts a deployable's row in the Deployables list reads ("served 3m ago").
+/// Gated by the SITE: a deployable the caller cannot read contributes no rows, which is the same
+/// answer a deployable with no traffic gives -- so the call is never an existence oracle for
+/// somebody else's id.
 @sdk
 @executor("integration.siteTraffic.inWindow")
 @args(profile="object")

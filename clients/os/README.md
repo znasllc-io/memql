@@ -172,8 +172,9 @@ verifies it before beginning session-bound authorization. Storefronts identify
 Shopify development stores as Sandbox and require review before replacing the
 active store. The sandbox and production stores may have different Shopify owners.
 Storefronts choose an authorized store using the shared wizard
-and keep serving design previews until connected. The Store icon stays beside
-Traffic. See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
+and keep serving design previews until connected. A storefront's Store is the
+first of the connections on its page (`StorePiece`, for a person who holds the
+store part). See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
 
 A storefront's Visit action opens a page in the deployable's place
 (`Deployables > <name> > Visit`, never a dialog) offering **Testing** and
@@ -184,6 +185,18 @@ binding, even when the browser holds a Testing session. Either destination may
 use a sandbox, both may use the same store, and an unconnected destination shows
 design preview. Every other kind of deployable has one address, and its page
 links straight to it in a new tab.
+
+A deployable's **Statistics** (lucide `ChartLine`, after Logs in its head, and
+absent on a draft, which has never served) opens a page in its place
+(`Deployables > <name> > Statistics`, `apps/deployables/statistics/`), drawn
+with the kit's statistics pieces ([DESIGN.md, Statistics](DESIGN.md#statistics)):
+who came, then Pages and Sources, Countries and Devices, then Health. A list
+holding more than eight rows offers "All pages" (sources, countries, devices),
+which opens the whole list one step further down the trail, never a pop-up. The
+period is `statisticsPeriod` in the app's settings, shared with the Overview's
+Websites section, which adds up every deployable the person may read, kept to
+the client they chose, in one `siteStatistics` call that names no deployable,
+and remembers that client in `statisticsScope`.
 
 ## Right-click belongs to the shell
 
@@ -998,7 +1011,8 @@ repetitions of what the app already had.
 
 ### Access codes: who a deployable is for (design record 2026-10-29)
 
-A lock after Traffic in a deployable's head opens its **Access codes**
+A lock after Statistics in a deployable's head (after Logs on a draft, which has
+no Statistics icon) opens its **Access codes**
 (`apps/deployables/access/`): the codes in label order, a short Add form, and
 Regenerate, Change expiry and Remove on each row. The engine side, the wire a
 visitor's page speaks and the limits are in

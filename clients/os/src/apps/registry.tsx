@@ -231,8 +231,9 @@ const deployables: OsAppManifest = {
   id: "deployables",
   name: "Deployables",
   searchSection: "deployables",
-  // A deployable's sections (Reviews, Traffic, Access codes) change the page
-  // rather than opening a dialog, so the browser's Back has to step out of them.
+  // A deployable's pages (Statistics and its whole lists, Access codes,
+  // Reviews, Visit, a version) change the page rather than opening a dialog,
+  // so the browser's Back has to step out of them.
   browserHistory: true,
   icon: Rocket,
   requires: "app:deployables",

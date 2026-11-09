@@ -545,6 +545,16 @@ describe("whose mail", () => {
     const clients = await screen.findByRole("region", { name: "Clients" });
     // By sent, each with its open rate; a client that sent no campaign mail has none to state.
     await waitFor(() => expect(ranked(clients)).toEqual(["Acme | 45% opened | 900", "Borden Ltd | 304"]));
+    // Every client is listed, so nothing says some were left out.
+    expect(within(clients).queryByText(/busiest of/)).toBeNull();
+  });
+
+  it("says when the Clients list shows fewer clients than the read covers", async () => {
+    const many = Array.from({ length: 10 }, (_, index) => ({ id: `acct-${index}`, sent: 1000 - index * 10, uniqueOpens: 100, uniqueClicks: 10, openRate: 0.1, clickRate: 0.01 }));
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: many })] }));
+    const clients = await screen.findByRole("region", { name: "Clients" });
+    await waitFor(() => expect(within(clients).getAllByRole("listitem")).toHaveLength(8));
+    expect(within(clients).getByText("The 8 busiest of 10 clients.")).toBeTruthy();
   });
 
   it("lists the clients under All clients only, not once one client is chosen", async () => {

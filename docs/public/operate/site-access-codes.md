@@ -82,7 +82,8 @@ authenticates nobody to MemQL.
 ## Handing a code out
 
 In MemQL OS, open **Deployables**, select a deployable, and choose the lock
-after Traffic in the page head: **Access codes**. The control is *absent*, not
+after Statistics in the page head (after Logs on a draft, which has no
+Statistics icon): **Access codes**. The control is *absent*, not
 disabled, when you do not hold the part, when the deployable is one the cluster
 manages itself, and when it was not deployed from a package, since only a
 package's own deployable can declare a gate.

@@ -363,7 +363,8 @@ screen.
 deployable's bar and the end of the compose flow ask `sitePreviewReadiness`,
 which answers from the same rule the write guard refuses with. A storefront
 with no connected store may go live for design review. Catalog, cart and checkout
-become available after connection through the Store icon beside Traffic.
+become available after a store is connected through the Store, the first of the
+connections on the deployable's page.
 An amber marker identifies incomplete Shopify setup independently of Live status.
 A bound development store or unreadable store still refuses publication.
 GitHub accounts and organization access are managed in Settings; the repository
@@ -1215,9 +1216,10 @@ with no sign-in, or to anyone, with guest access. The full account -- the wire, 
 is declared and the limits -- is [Access codes](site-access-codes.md). This
 section is what belongs to the deployable.
 
-**Where.** The lock after Traffic in a deployable's page head opens its Access
-codes: a Guest access part, a list, a short Add form, and Regenerate, Change
-expiry and Remove on each row. The control is *absent*, not disabled, for a person who does not hold the
+**Where.** The lock after Statistics in a deployable's page head (after Logs on a
+draft, which has no Statistics icon) opens its Access codes: a Guest access part,
+a list, a short Add form, and Regenerate, Change expiry and Remove on each row.
+The control is *absent*, not disabled, for a person who does not hold the
 part, on a system-owned deployable, and on one that was not deployed from a
 package.
 
@@ -1283,8 +1285,11 @@ and not a modal: New deployable opens the same page in compose mode, in place,
 with a quiet Back to the list.
 
 A package with two apps is **two rows sharing a source**, grouped under it --
-one row per thing that serves or will. On a deployable's page, a lock after
-Traffic in the head opens its Access codes, for a person who holds the part.
+one row per thing that serves or will. On a deployable's page the head carries,
+where each applies, Visit (the live site in a new tab, or a storefront's Visit
+page), Logs, Statistics, the lock that opens its Access codes for a person who
+holds the part, and Reviews on a storefront bound to a store. A draft has no
+Statistics icon, because it has never served.
 
 The Deployables app is the one surface, and `/sites` and
 everything under it redirect to it, tail included, so an old bookmark or a

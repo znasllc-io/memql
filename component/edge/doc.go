@@ -103,6 +103,9 @@
 // refresh script (handler.go). A ping from the site's own origin, naming a path
 // within its address's budget, becomes a page view in the request log
 // (requestlog.go). A beacon is a plain POST that cannot open a stream, so this
-// is an owner-approved HTTP exception (2026-11-08); it reads no cookie, and it
-// answers every outcome with the same 204 so a refusal discloses nothing.
+// is an owner-approved HTTP exception (2026-11-08). The script reads no cookie
+// and stores nothing in the browser; the edge reads no visitor cookie on these
+// routes, only an operator's preview grant (previewGrantFor), which makes a
+// previewed page's ping no page view; and every outcome is answered with the
+// same 204 so a refusal discloses nothing.
 package edge

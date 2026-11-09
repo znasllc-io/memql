@@ -33,11 +33,11 @@ type Options struct {
 	APITarget      string
 	IdentityTarget string
 	SecretResolver SecretResolver
-	// RequestLog records one row per served request, which is what the
-	// traffic figure on a deployable's Live stop is folded from (epic
-	// memql#4906). NIL IS THE OFF SWITCH and it is the ordinary state for a
-	// handler built by a test: recording costs one nil check per request
-	// when it is absent. See requestlog.go for why it must not block.
+	// RequestLog records one row per served request, which a deployable's
+	// website statistics and the Deployables list's request counts are folded
+	// from (epic memql#4906). NIL IS THE OFF SWITCH and it is the ordinary
+	// state for a handler built by a test: recording costs one nil check per
+	// request when it is absent. See requestlog.go for why it must not block.
 	RequestLog RequestRecorder
 	// PreviewExec resolves the v1:platform:sitePreviewGrant a request presents
 	// (epic memql#5531, issue memql#5545). NIL IS THE OFF SWITCH and it is the
