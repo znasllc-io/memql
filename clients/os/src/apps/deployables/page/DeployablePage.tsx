@@ -540,7 +540,10 @@ export function DeployablePage({
           <Head navigationKey={`deployable:${site.id}`} title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
             <VisitSiteButton site={site} name={name} onOpenVisit={() => setDetail("visit")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
-            <IconButton label="Statistics" onClick={() => setDetail("statistics")}><ChartLine size={16} aria-hidden /></IconButton>
+            {/* ABSENT ON A DRAFT, the way Access codes is absent where it would
+                open nothing: a draft has never served. A system-owned site keeps
+                it, for the note that says why its traffic is not recorded. */}
+            {site.status !== "draft" ? <IconButton label="Statistics" onClick={() => setDetail("statistics")}><ChartLine size={16} aria-hidden /></IconButton> : null}
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
                 the whole axis, and a code opens a gate that only a package's own
                 deployable can declare. */}

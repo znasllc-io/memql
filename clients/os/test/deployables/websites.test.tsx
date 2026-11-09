@@ -8,9 +8,9 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
-import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
+import { DEFAULT_DEPLOYABLES_SETTINGS, LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import type { OsAppProps } from "../../src/system/registry";
-import { chooseOption } from "../selectControl";
+import { chooseOption, openSelect, selectedLabel } from "../selectControl";
 import { PLATFORM_SITE, click, fakeConnection, siteRow, siteStatisticsRow, withSession, type FakeSeed } from "./harness";
 
 // Every website a person may see, together, in the Deployables Overview (the
@@ -43,10 +43,9 @@ function memStore() {
  * The app on its Overview, with a `navigate` that moves the window the way
  * the shell does, so a link to another section lands there.
  */
-function mount(seed: FakeSeed, session: Parameters<typeof withSession>[1] = { role: "owner", userId: "u-me" }) {
+function mount(seed: FakeSeed, session: Parameters<typeof withSession>[1] = { role: "owner", userId: "u-me" }, store = memStore()) {
   const connection = fakeConnection(seed);
   h.connection = connection;
-  const store = memStore();
   let revision = 0;
   const app = (section: string, origin: NonNullable<OsAppProps["navigation"]>["origin"]) =>
     withSession(<DeployablesApp sectionId={section} navigation={{ origin, revision }} navigate={navigate} askContext={vi.fn()} store={store} />, session);
@@ -96,7 +95,53 @@ describe("the Overview's websites", () => {
     expect(call).not.toContain("siteIds");
     expect(call).toContain('period: "7d"');
     // Named by title, else hostname, and valued by visitors.
-    expect(rowsOf(within(section).getByRole("region", { name: "Websites" }))).toEqual([["Shop", "800"], ["blog.memql.example.com", "404"]]);
+    const list = within(section).getByRole("region", { name: "Websites" });
+    expect(rowsOf(list)).toEqual([["Shop", "800"], ["blog.memql.example.com", "404"]]);
+    // Every website is on the list, so nothing says otherwise.
+    expect(within(list).queryByText(/busiest of/)).toBeNull();
+  });
+
+  it("lists the eight busiest websites, and says how many there are", async () => {
+    // The figures above add up every website in scope; a list that stops at
+    // eight says so, or it reads as all of them.
+    const many = Array.from({ length: 12 }, (_, index) => siteRow({ id: `site-${index + 1}`, hostname: `site-${index + 1}.memql.example.com`, title: `Website ${index + 1}`, status: "live" }));
+    const perSite = many.map((site, index) => ({ siteId: String(site["id"]), visitors: 1200 - index * 50, visits: 1300 - index * 50, pageViews: 3000 - index * 100 }));
+    mount({ sites: many, siteStatistics: siteStatisticsRow({ sites: perSite }) });
+    const list = within(await websites()).getByRole("region", { name: "Websites" });
+    expect(rowsOf(list).map(([label]) => label)).toEqual(["Website 1", "Website 2", "Website 3", "Website 4", "Website 5", "Website 6", "Website 7", "Website 8"]);
+    expect(within(list).getByText("The 8 busiest of 12 websites.")).toBeTruthy();
+  });
+
+  it("leaves out a website nothing measured, and says which row counts page views", async () => {
+    const docs = siteRow({ id: "site-docs", hostname: "docs.memql.example.com", title: "Docs", status: "live" });
+    mount({
+      sites: [SHOP, BLOG, docs],
+      siteStatistics: siteStatisticsRow({
+        sites: [
+          { siteId: "site-shop", visitors: 800, visits: 1000, pageViews: 3000 },
+          { siteId: "site-blog", visitors: null, visits: null, pageViews: 300 },
+          { siteId: "site-docs", visitors: null, visits: null, pageViews: null },
+        ],
+      }),
+    });
+    const list = within(await websites()).getByRole("region", { name: "Websites" });
+    // The figures above do not count a website neither of whose figures was
+    // measured, so the list has nothing to rank it by either.
+    expect(rowsOf(list)).toEqual([["Shop", "800"], ["blog.memql.example.com", "300"]]);
+    expect(list.textContent).not.toContain("Docs");
+    expect(list.textContent).not.toContain("--");
+    // A row valued by its page views says so; one valued by visitors says nothing.
+    const secondary = [...list.querySelectorAll(".os-ranked-row")].map((row) => row.querySelector(".os-ranked-secondary")?.textContent ?? "");
+    expect(secondary).toEqual(["", "Page views"]);
+  });
+
+  it("stands between the status breakdown and the map", async () => {
+    mount({ sites: [SHOP, BLOG], siteStatistics: siteStatisticsRow({ sites: PER_SITE }) });
+    const section = await websites();
+    const breakdown = screen.getByRole("region", { name: "Deployment status" });
+    const map = await screen.findByRole("application", { name: "Deploy map" });
+    expect(breakdown.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("opens a website's Statistics from its row", async () => {
@@ -110,7 +155,9 @@ describe("the Overview's websites", () => {
   it("offers staff every client and a member of one organization no control at all", async () => {
     mount({ sites: [SHOP, BLOG], siteStatistics: siteStatisticsRow({ sites: PER_SITE }), accounts: ACCOUNTS });
     let section = await websites();
-    await waitFor(() => expect(within(section).getByLabelText("Client")).toBeTruthy());
+    // Staff are offered every client, and All clients first.
+    const client = await within(section).findByLabelText("Client");
+    expect(within(openSelect(client)).getAllByRole("option").map((option) => option.textContent)).toEqual(["All clients", "Acme", "Borden Ltd"]);
     cleanup();
 
     const { connection } = mount(
@@ -134,6 +181,19 @@ describe("the Overview's websites", () => {
     await waitFor(() => expect(connection.callsNamed("siteStatistics").at(-1)).toContain('accountIds: ["acme"]'));
     expect(connection.callsNamed("siteStatistics").at(-1)).not.toContain("siteIds");
     expect(store.load().statisticsScope).toBe("acme");
+  });
+
+  it("asks for the client it remembers from its very first read", async () => {
+    // A staff member's stored client stands before the account list answers,
+    // so the page never reads every client first and then theirs.
+    const store = memStore();
+    store.save({ ...DEFAULT_DEPLOYABLES_SETTINGS, statisticsScope: "acme" });
+    const { connection } = mount({ sites: [SHOP, BLOG], siteStatistics: siteStatisticsRow({ sites: PER_SITE }), accounts: ACCOUNTS }, { role: "owner", userId: "u-me" }, store);
+    const section = await websites();
+    const calls = connection.callsNamed("siteStatistics");
+    expect(calls[0]).toContain('accountIds: ["acme"]');
+    expect(calls.every((call) => call.includes('accountIds: ["acme"]'))).toBe(true);
+    await waitFor(() => expect(selectedLabel(within(section).getByLabelText("Client"))).toBe("Acme"));
   });
 
   it("shows the sources and countries of the websites in scope, crediting DB-IP", async () => {

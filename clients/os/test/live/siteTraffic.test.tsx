@@ -25,11 +25,11 @@ function connection() {
 describe("traffic summaries", () => {
   it("shares requests, restores cached figures, and ignores a late answer after the visible ids change", async () => {
     const { pending } = connection();
-    const hook = renderHook(({ ids }) => useSiteTraffic(ids, "hour"), { initialProps: { ids: ["a"] } });
+    const hook = renderHook(({ ids }) => useSiteTraffic(ids, "week"), { initialProps: { ids: ["a"] } });
     await waitFor(() => expect(pending).toHaveLength(1));
     await act(async () => pending[0]!.complete([{ siteId: "a", requestCount: 7 }]));
     expect(hook.result.current.figures.get("a")?.requests).toBe(7);
-    const duplicate = renderHook(() => useSiteTraffic(["a"], "hour"));
+    const duplicate = renderHook(() => useSiteTraffic(["a"], "week"));
     expect(duplicate.result.current.figures.get("a")?.requests).toBe(7);
     expect(pending).toHaveLength(1);
     hook.rerender({ ids: ["b"] });
@@ -45,7 +45,7 @@ describe("traffic summaries", () => {
   it("does no work while the pane is hidden and stops its refresh cadence when parked", async () => {
     const { pending, conn } = connection();
     let visible = false;
-    const hook = renderHook(() => useSiteTraffic(["a"], "hour"), { wrapper: ({ children }) => <LiveReadVisibility.Provider value={visible}>{children}</LiveReadVisibility.Provider> });
+    const hook = renderHook(() => useSiteTraffic(["a"], "week"), { wrapper: ({ children }) => <LiveReadVisibility.Provider value={visible}>{children}</LiveReadVisibility.Provider> });
     await act(async () => {});
     expect(pending).toHaveLength(0);
     visible = true; hook.rerender();
@@ -54,7 +54,8 @@ describe("traffic summaries", () => {
     expect(conn.subscriptions.subscribeGraph).not.toHaveBeenCalled();
     vi.useFakeTimers();
     visible = false; hook.rerender();
-    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    // Two of the week's fifteen-minute intervals: a parked list asks for nothing.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_800_000); });
     expect(pending).toHaveLength(1);
   });
 });

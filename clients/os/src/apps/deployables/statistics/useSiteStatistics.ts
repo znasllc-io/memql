@@ -27,10 +27,19 @@ import { fetchSiteStatistics, type SiteStatistics } from "./read";
 // never land over the new one. A refresh of the same identity keeps the
 // figures it has while it reads (DESIGN.md, "Preserve loaded rows during
 // refresh"), and a refresh that fails keeps them too, beside the failure.
+//
+// A FAILURE STANDS UNTIL A READ ANSWERS. A retry asks the same question again,
+// so while it is out the state stays "error" rather than turning to
+// "loading": the page keeps the refusal on screen, and draws no loading shapes
+// over it (DESIGN.md: a skeleton must never conceal an error). Only a new
+// identity starts over, because the failure was an answer to another question.
+// Regression: test/deployables/statistics.test.tsx, "keeps a refusal standing
+// while its retry is out".
 
 export interface StatisticsReading {
   /** The read's answer, null before the first one and after an identity change. */
   value: SiteStatistics | null;
+  /** "error" while the last answer was a failure, its retry included; "loading" only while nothing has failed. */
   state: "idle" | "loading" | "ready" | "error";
   /** The server's own sentence for a refusal; empty for a dropped connection, which the shell reports. */
   error: string;
@@ -78,7 +87,8 @@ export function useSiteStatistics({ siteIds, accountIds, period, enabled }: {
     if (out.current?.key === ask.key) return out.current.done;
     out.current?.controller.abort();
     const controller = new AbortController();
-    setState("loading");
+    // A retry of a failed read leaves the failure standing until it answers.
+    setState((held) => (held === "error" ? "error" : "loading"));
     const done = fetchSiteStatistics(ask.connection.query, { siteIds: ask.sites, accountIds: ask.accounts, period: ask.period }, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
@@ -108,6 +118,8 @@ export function useSiteStatistics({ siteIds, accountIds, period, enabled }: {
       setState("idle");
       return;
     }
+    // A new question: whatever failed before was about another one.
+    setState("loading");
     void read();
     return () => {
       out.current?.controller.abort();

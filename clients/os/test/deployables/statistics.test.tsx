@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Result } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -13,10 +14,12 @@ vi.mock("../../src/live/connection", () => ({
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LIST_TRAFFIC_WINDOW, MAX_SITES_PER_READ, fetchTrafficSummaries, windowBounds, windowSpec } from "../../src/apps/deployables/traffic";
 import { SYSTEM_OWNED_TRAFFIC_NOTE, countingStartedSentence, formatMs, parseSiteStatistics, valueWord } from "../../src/apps/deployables/statistics/read";
+import { statisticsRefreshMs } from "../../src/apps/deployables/statistics/useSiteStatistics";
 import { chooseOption } from "../selectControl";
 import {
   PLATFORM_SITE,
   SHOP,
+  builtinReply,
   click,
   fakeConnection,
   siteRow,
@@ -57,14 +60,39 @@ function mount(connection: FakeConnection) {
  * Scoped to the page region rather than the document: a hostname matches the
  * list row, the head and the rail's address alike.
  */
-async function openStatistics(seed: FakeSeed, hostname = HOST): Promise<{ connection: FakeConnection; page: HTMLElement }> {
+async function openStatistics(seed: FakeSeed, hostname = HOST, prepare?: (connection: FakeConnection) => void): Promise<{ connection: FakeConnection; page: HTMLElement }> {
   const connection = fakeConnection(seed);
+  prepare?.(connection);
   mount(connection);
   await waitFor(() => expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"));
   await click((await screen.findByText(hostname)).closest("button"));
   const deployable = await screen.findByRole("region", { name: `Deployable ${hostname}` });
   await click(within(deployable).getByRole("button", { name: "Statistics" }));
   return { connection, page: await screen.findByRole("region", { name: `Statistics for ${hostname}` }) };
+}
+
+/** A `siteStatistics` read held until the test answers it, or lets it through to the fake. */
+interface HeldRead {
+  call: string;
+  answer: (reply: Result) => void;
+  through: () => Promise<void>;
+}
+
+/**
+ * Hold the `siteStatistics` reads `which` picks. The fake records only the
+ * calls it is handed, so a held call is in the returned list, not in
+ * `connection.calls`, until it is let through.
+ */
+function holdStatisticsReads(connection: FakeConnection, which: (call: string) => boolean): HeldRead[] {
+  const execute = connection.query.executeNamed.bind(connection.query) as (name: string, call: string, options?: unknown) => Promise<Result>;
+  const held: HeldRead[] = [];
+  connection.query.executeNamed = ((name: string, call: string, options?: unknown) => {
+    if (name !== "siteStatistics" || !which(call)) return execute(name, call, options);
+    return new Promise<Result>((resolve, reject) => {
+      held.push({ call, answer: resolve, through: () => execute(name, call, options).then(resolve, reject) });
+    });
+  }) as typeof connection.query.executeNamed;
+  return held;
 }
 
 /** The trail a page's Head names, crumb by crumb. */
@@ -376,6 +404,84 @@ describe("a deployable's Statistics", () => {
     expect(connection.callsNamed("siteStatistics").at(-1)).toBe(before.at(-1));
   });
 
+  it("keeps a refusal standing while its retry is out, and draws no loading shapes over it", async () => {
+    // DESIGN.md: a skeleton must never conceal an error. The retry asks the
+    // same question again; until something answers it, the refusal is still
+    // the last word, so it stays, and shapes would read as progress.
+    const sentence = 'siteStatistics: period must be one of 24h, 7d, 30d, 90d, 12m; got "week"';
+    const seed: FakeSeed = { sites: [BLOG], siteStatisticsError: sentence };
+    let held: HeldRead[] = [];
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { page } = await openStatistics(seed, HOST, (connection) => {
+        // Only the retry is held; the first read is refused at once.
+        held = holdStatisticsReads(connection, () => seed.siteStatisticsError === undefined);
+      });
+      await waitFor(() => expect(within(page).getByText(sentence)).toBeTruthy());
+      delete seed.siteStatisticsError;
+      seed.siteStatistics = siteStatisticsRow();
+      // The retry that "Retrying automatically." promises: the page's own cadence.
+      await act(async () => { await vi.advanceTimersByTimeAsync(statisticsRefreshMs("7d") + 1_000); });
+      await waitFor(() => expect(held).toHaveLength(1));
+      expect(page.isConnected).toBe(true);
+      expect(within(page).getByText(sentence)).toBeTruthy();
+      expect(within(page).getByText("Retrying automatically.")).toBeTruthy();
+      expect(page.querySelector('[aria-busy="true"]')).toBeNull();
+      expect(within(page).queryByRole("radiogroup")).toBeNull();
+      // The retry answers: the figures replace the refusal.
+      await act(async () => { await held[0]!.through(); });
+      expect(figureValue(await websiteFigures(page), "Visitors")).toBe("1,204");
+      expect(within(page).queryByText(sentence)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards a read still out for the period it left", async () => {
+    let held: HeldRead[] = [];
+    const { page } = await openStatistics(
+      { sites: [BLOG], siteStatistics: siteStatisticsRow({ period: "30d", totals: statisticsTotals({ visitors: 4321, requests: 9000 }) }) },
+      HOST,
+      // The week's read is held; the month's is answered at once.
+      (connection) => { held = holdStatisticsReads(connection, (call) => call.includes('period: "7d"')); },
+    );
+    await waitFor(() => expect(held).toHaveLength(1));
+    chooseOption(within(page).getByLabelText("Period"), "Last 30 days");
+    expect(figureValue(await websiteFigures(page), "Visitors")).toBe("4,321");
+    // The week's answer lands after the month's. It is about a period this page
+    // no longer shows, and is thrown away.
+    await act(async () => {
+      held[0]!.answer(builtinReply("siteStatistics", [siteStatisticsRow({ totals: statisticsTotals({ visitors: 7, requests: 10 }) })]));
+    });
+    await act(async () => {});
+    expect(figureValue(within(page).getByRole("radiogroup", { name: "Website figures" }), "Visitors")).toBe("4,321");
+  });
+
+  it("reads again every fifteen minutes, and every five for the last 24 hours", async () => {
+    expect(statisticsRefreshMs("24h")).toBe(300_000);
+    for (const period of ["7d", "30d", "90d", "12m"] as const) expect(statisticsRefreshMs(period)).toBe(900_000);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { connection, page } = await openStatistics({ sites: [BLOG], siteStatistics: siteStatisticsRow() });
+      await websiteFigures(page);
+      expect(connection.callsNamed("siteStatistics")).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(600_000); });
+      expect(connection.callsNamed("siteStatistics")).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(320_000); });
+      await waitFor(() => expect(connection.callsNamed("siteStatistics")).toHaveLength(2));
+
+      // The last 24 hours fill by the hour, so they are read three times as often.
+      chooseOption(within(page).getByLabelText("Period"), "Last 24 hours");
+      await waitFor(() => expect(connection.callsNamed("siteStatistics")).toHaveLength(3));
+      await act(async () => { await vi.advanceTimersByTimeAsync(320_000); });
+      await waitFor(() => expect(connection.callsNamed("siteStatistics")).toHaveLength(4));
+      expect(connection.callsNamed("siteStatistics").at(-1)).toContain('period: "24h"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows a system-owned deployable's note and asks for nothing", async () => {
     const { connection, page } = await openStatistics({ sites: [PLATFORM_SITE] }, String(PLATFORM_SITE["hostname"]));
     await waitFor(() => expect(within(page).getByText(SYSTEM_OWNED_TRAFFIC_NOTE)).toBeTruthy());
@@ -384,11 +490,17 @@ describe("a deployable's Statistics", () => {
     expect(connection.callsNamed("siteStatistics")).toHaveLength(0);
   });
 
-  it("draws nothing for a draft, which has never served", async () => {
+  it("offers no Statistics on a draft, which has never served", async () => {
+    // ABSENT, NOT A PAGE OF NOTHING: the way Access codes is left out where it
+    // would have nothing to open.
     const draft = siteRow({ id: "site-draft", hostname: "draft.memql.example.com", status: "draft" });
-    const { connection, page } = await openStatistics({ sites: [draft], siteStatistics: siteStatisticsRow() }, "draft.memql.example.com");
-    expect(within(page).queryByLabelText("Period")).toBeNull();
-    expect(within(page).queryByRole("radiogroup")).toBeNull();
+    const connection = fakeConnection({ sites: [draft], siteStatistics: siteStatisticsRow() });
+    mount(connection);
+    await waitFor(() => expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"));
+    await click((await screen.findByText("draft.memql.example.com")).closest("button"));
+    const page = await screen.findByRole("region", { name: "Deployable draft.memql.example.com" });
+    expect(within(page).queryByRole("button", { name: "Statistics" })).toBeNull();
+    expect(within(page).getByRole("button", { name: /^Logs for / }).nextElementSibling).toBeNull();
     expect(connection.callsNamed("siteStatistics")).toHaveLength(0);
   });
 
@@ -411,7 +523,7 @@ describe("a deployable's Statistics", () => {
 // ---------------------------------------------------------------------------
 
 describe("the list row's figure", () => {
-  it("agrees with the stop for the same deployable, and says nothing when unmeasured", async () => {
+  it("says when a deployable was last served, and nothing for one the week did not cover", async () => {
     const summary = trafficRow({
       windowStart: "2026-08-27T12:00:00Z",
       siteId: "site-shop",

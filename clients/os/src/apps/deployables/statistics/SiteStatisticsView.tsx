@@ -205,9 +205,10 @@ export function SiteStatisticsView({ site, onShowAll }: { site: SiteRow; onShowA
     );
   }
   // A DRAFT HAS NEVER SERVED ANYTHING, and figures about nobody visiting would
-  // answer a question it is too early to ask.
+  // answer a question it is too early to ask. Its page offers no Statistics
+  // (DeployablePage); this holds for a page opened some other way.
   if (!statisticsMeasured(site)) return null;
-  return <SiteStatistics siteId={site.id} period={settings.statisticsPeriod} onShowAll={onShowAll} />;
+  return <SiteStatisticsBody siteId={site.id} period={settings.statisticsPeriod} onShowAll={onShowAll} />;
 }
 
 /**
@@ -215,7 +216,7 @@ export function SiteStatisticsView({ site, onShowAll }: { site: SiteRow; onShowA
  * element whose width decides the lists' columns exists from its first render
  * (kit `useWide` measures the element it is given when it mounts).
  */
-function SiteStatistics({ siteId, period, onShowAll }: { siteId: string; period: Period; onShowAll: (dimension: Dimension) => void }) {
+function SiteStatisticsBody({ siteId, period, onShowAll }: { siteId: string; period: Period; onShowAll: (dimension: Dimension) => void }) {
   const connection = useOsConnection();
   const reading = useSiteStatistics({ siteIds: [siteId], period, enabled: siteId !== "" });
   const root = useRef<HTMLDivElement | null>(null);

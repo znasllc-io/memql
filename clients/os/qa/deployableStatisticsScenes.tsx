@@ -31,6 +31,9 @@ type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
 const BLOG = siteRow({ id: "site-blog", hostname: "blog.memql.example.com", title: "Field notes", status: "live", kind: "spa" });
 const SHOP = siteRow({ id: "site-shop", hostname: "shop.memql.example.com", title: "Storefront", status: "live", kind: "spa", accountId: "acme" });
 const DOCS = siteRow({ id: "site-docs", hostname: "docs.memql.example.com", title: "", status: "live", kind: "static", accountId: "borden" });
+/** Eight more, so the Overview's Websites list stops short of every website and says so. */
+const MORE = ["Spring sale", "Careers", "Help centre", "Status", "Press kit", "Events", "Wholesale", "Recipes"].map((title, index) =>
+  siteRow({ id: `site-more-${index + 1}`, hostname: `more-${index + 1}.memql.example.com`, title, status: "live", kind: "spa" }));
 const DAY = 86_400_000;
 
 function at(ms: number): string {
@@ -92,6 +95,9 @@ const MONTH = siteStatisticsRow({
     { siteId: "site-shop", visitors: 7400, visits: 9300, pageViews: 25100 },
     { siteId: "site-blog", visitors: 4100, visits: 5300, pageViews: 14000 },
     { siteId: "site-docs", visitors: 1900, visits: 2300, pageViews: 6100 },
+    ...MORE.map((site, index) => ({ siteId: String(site["id"]), visitors: 1500 - index * 160, visits: 1800 - index * 190, pageViews: 4100 - index * 420 })),
+    // Served, and nothing about its visitors measured: not on the list.
+    { siteId: "site-more-unmeasured", visitors: null, visits: null, pageViews: null },
   ],
 });
 
@@ -152,7 +158,7 @@ export function deployableStatisticsScenes(Frame: Frame) {
     render: () => <Frame fallback="Deployables"><DeployableOn site={BLOG} detail="statistics" period={period} /></Frame>,
   });
   const overview = (session: Parameters<typeof withSession>[1]) => ({
-    connect: () => fakeConnection({ sites: [SHOP, BLOG, DOCS], siteStatistics: MONTH, accounts: ACCOUNTS }),
+    connect: () => fakeConnection({ sites: [SHOP, BLOG, DOCS, ...MORE], siteStatistics: MONTH, accounts: ACCOUNTS }),
     wrap: (element: ReactElement) => withSession(element, session),
     render: () => <Frame fallback="Overview"><DeployablesApp sectionId="map" navigate={() => {}} askContext={() => {}} store={settingsStore()} /></Frame>,
   });

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { AutoRefresh, Caption, Subhead } from "../../../kit";
+import { formatCount } from "../../../kit/format";
 import { PeriodControl, RankedList, SITE_PERIODS, StatFigures, periodLabel, type RankedRow } from "../../../kit/statistics";
 import { useWide } from "../../../kit/useWide";
 import { useOsConnection } from "../../../live/connection";
@@ -30,27 +31,43 @@ import "./statistics.css";
 /** The Overview's figures: who came. The rates are each website's own page. */
 const OVERVIEW_FIGURES = WEBSITE_FIGURES.filter((spec) => spec.id === "visitors" || spec.id === "visits" || spec.id === "pageViews");
 
+/** How many websites the list shows; the figures above add up every one in scope. */
+const WEBSITES_SHOWN = 8;
+
 /**
  * Each website in the read, named by its title, else its hostname, and
  * valued by its visitors -- else its page views, said so on the row, because
  * a figure beside its neighbours must be the same kind of figure or say it is
  * not. A website the feed does not hold yet is named by its id and opens
  * nothing.
+ *
+ * A WEBSITE NEITHER OF WHOSE FIGURES WAS MEASURED IS LEFT OUT: there is
+ * nothing to rank it by, and the figures above do not count it either. A row
+ * of "--" with an empty bar would read as a website nobody visited.
  */
 function websiteRows(stats: SiteStatistics, sites: readonly SiteRow[], onOpen: (siteId: string) => void): RankedRow[] {
-  return stats.sites.map((entry) => {
+  return stats.sites.flatMap((entry) => {
+    const value = entry.visitors ?? entry.pageViews;
+    if (value === null) return [];
     const site = sites.find((candidate) => candidate.id === entry.siteId);
     const label = site === undefined ? entry.siteId : site.title.trim() || site.hostname.trim() || entry.siteId;
-    const byPageViews = entry.visitors === null && entry.pageViews !== null;
-    return {
+    return [{
       key: entry.siteId,
       label,
-      // NaN, not zero, when neither was measured: the kit writes it "--".
-      value: entry.visitors ?? entry.pageViews ?? Number.NaN,
-      ...(byPageViews ? { secondary: "Page views" } : {}),
+      value,
+      ...(entry.visitors === null ? { secondary: "Page views" } : {}),
       ...(site === undefined ? {} : { onOpen: () => onOpen(site.id) }),
-    };
+    }];
   });
+}
+
+/**
+ * The list's quiet last line when it stops short of every website: "The 8
+ * busiest of 23 websites." Without it, eight rows under figures that add up
+ * twenty-three websites read as all of them.
+ */
+function busiestOf(rows: readonly RankedRow[]): string | undefined {
+  return rows.length > WEBSITES_SHOWN ? `The ${WEBSITES_SHOWN} busiest of ${formatCount(rows.length)} websites.` : undefined;
 }
 
 export function WebsitesSection({ sites, onOpenStatistics }: { sites: readonly SiteRow[]; onOpenStatistics: (siteId: string) => void }) {
@@ -78,6 +95,7 @@ function Websites({ sites, onOpenStatistics }: { sites: readonly SiteRow[]; onOp
   const pending = stats === null && (reading.state === "idle" || reading.state === "loading");
   const nothing = stats === null ? reading.state === "ready" : nothingRecorded(stats);
   const counting = stats === null ? null : countingStartedIn(stats);
+  const websites = stats === null ? [] : websiteRows(stats, sites, onOpenStatistics);
 
   return (
     <section ref={root} className="deployable-statistics deployable-websites" aria-label="Website statistics">
@@ -103,7 +121,7 @@ function Websites({ sites, onOpenStatistics }: { sites: readonly SiteRow[]; onOp
             {counting !== null ? <Caption>{countingStartedSentence(counting)}</Caption> : null}
             <FigureChart specs={OVERVIEW_FIGURES} selected={selected} stats={stats} />
           </div>
-          <RankedList title="Websites" rows={stats === null ? [] : websiteRows(stats, sites, onOpenStatistics)} loading={stats === null} empty={EMPTY_LIST} />
+          <RankedList title="Websites" rows={websites} limit={WEBSITES_SHOWN} loading={stats === null} empty={EMPTY_LIST} footer={busiestOf(websites)} />
           <div className="deployable-statistics-lists" data-wide={wide || undefined}>
             <RankedList title="Sources" rows={stats === null ? [] : rankedRows(stats.top.source, "source")} loading={stats === null} empty={EMPTY_LIST} />
             <RankedList title="Countries" rows={stats === null ? [] : rankedRows(stats.top.country, "country")} loading={stats === null} empty={EMPTY_LIST} footer={<DbIpCredit />} />

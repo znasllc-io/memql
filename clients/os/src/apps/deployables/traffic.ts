@@ -21,22 +21,22 @@ import { rowString, type QueryClient, type Row } from "@znasllc-io/memql-sdk-cor
 // deployable the answer does not cover is absent from the map, and its row
 // says nothing rather than "never".
 
-/** The windows the request aggregates are read over. The list reads a week. */
-export type TrafficWindow = "hour" | "day" | "week";
-
 /**
- * The window the LIST reads.
+ * The window the LIST reads, and the only one: the request aggregates are read
+ * for nothing else now that a deployable's page reads its Statistics.
  *
  * A WEEK, because a list row answers "is anybody using this at all", and a
  * deployable that served nobody yesterday but two hundred people on Monday is
  * one somebody is using -- a day-wide row would say nothing about it and read
  * as abandoned.
  */
-export const LIST_TRAFFIC_WINDOW: TrafficWindow = "week";
+export const LIST_TRAFFIC_WINDOW = "week";
+
+export type TrafficWindow = typeof LIST_TRAFFIC_WINDOW;
 
 interface WindowSpec {
   /** Which aggregate to read. */
-  bucket: "1m" | "1h";
+  bucket: "1h";
   /** How long the window is, in milliseconds. */
   spanMs: number;
   /** How long one bucket is, in milliseconds. */
@@ -49,24 +49,20 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
 /**
- * What each window reads and how often.
+ * What the week reads and how often.
  *
- * THE BUCKET IS THE WINDOW'S OWN, not a preference: a week of minute buckets
- * is ten thousand rows to answer one figure.
+ * HOUR BUCKETS: a week of minute buckets is ten thousand rows to answer one
+ * figure.
  *
- * THE CADENCE FOLLOWS THE WINDOW, NOT THE BUCKET: one more request changes an
- * hour's figure visibly and a week's not at all, so a week is read a quarter
- * as often as an hour, and none of them is read more than once a minute -- a
+ * EVERY FIFTEEN MINUTES: one more request does not move a week's figure, and a
  * list left open on somebody's desk must not become a query loop.
  */
 const WINDOW_SPECS: Record<TrafficWindow, WindowSpec> = {
-  hour: { bucket: "1m", spanMs: HOUR, bucketMs: MINUTE, refreshMs: MINUTE },
-  day: { bucket: "1h", spanMs: 24 * HOUR, bucketMs: HOUR, refreshMs: 5 * MINUTE },
   week: { bucket: "1h", spanMs: 7 * 24 * HOUR, bucketMs: HOUR, refreshMs: 15 * MINUTE },
 };
 
 export function windowSpec(window: TrafficWindow): WindowSpec {
-  return WINDOW_SPECS[window] ?? WINDOW_SPECS.day;
+  return WINDOW_SPECS[window];
 }
 
 export interface WindowBounds {

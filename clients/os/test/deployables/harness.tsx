@@ -318,18 +318,15 @@ export interface FakeSeed {
    */
   awaitingConfirm?: Row[];
   /**
-   * What `siteTrafficInWindow` answers with, keyed by the mode the call is
-   * in: "series" for a stop's per-bucket read, "summary" for the list's
-   * one-row-per-deployable read.
+   * What `siteTrafficInWindow` answers in the summary mode, the list row's
+   * one-row-per-deployable read and the only one the app makes.
    *
    * ABSENT MEANS UNMEASURED, which is exactly what the server does -- it
    * sends no row for a window it measured nothing in -- so a seed that says
    * nothing about traffic exercises the unmeasured path rather than a
    * zero-filled one.
    */
-  traffic?: { series?: Row[]; summary?: Row[] };
-  /** Fails the next `siteTrafficInWindow` with this server message. */
-  trafficError?: string;
+  traffic?: { summary?: Row[] };
   /**
    * What `siteStatistics` answers: ONE payload, keyed as
    * component/sitetraffic's `Statistics.Payload()` writes it
@@ -721,13 +718,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call.startsWith("builtin siteTrafficInWindow(")) {
-        if (seed.trafficError !== undefined) throw new Error(seed.trafficError);
         // The MODE is read off the rendered call string rather than from a
-        // separate stub, so the generated builder is what decides which
+        // separate stub, so the generated builder is what decides whether the
         // fixture answers -- the same reason this fake sits under
-        // executeNamed at all.
-        const summary = call.includes("summary: true");
-        return builtinReply("siteTrafficInWindow", (summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
+        // executeNamed at all. A read in any other mode measured nothing.
+        return builtinReply("siteTrafficInWindow", call.includes("summary: true") ? seed.traffic?.summary ?? [] : []);
       }
 
       if (call.startsWith("builtin siteStatistics(")) {
