@@ -3,6 +3,7 @@ package sitetraffic
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,4 +176,109 @@ func TestAClosedDayIsFoldedAgainOnlyFromItsRequests(t *testing.T) {
 		t.Errorf("yesterday was folded again from its requests, and still holds the recompute's row for %s, which has none", site)
 	}
 	wantFigures(t, "yesterday, folded again", dailyOf(t, db, logged), dateArg(kept), measuredFigures(2, 2, 2, 2))
+}
+
+// A CLOCK FINER THAN THE DATABASE'S. A run's clock carries nanoseconds and the
+// database keeps microseconds, rounding to the nearest. The settled fold that
+// reaches the horizon stores the horizon as the day's progress, and when the
+// nanoseconds rounded down the stored progress stayed a fraction of a
+// microsecond short of it: every pass read the day as not caught up, folded the
+// same empty sliver again, and the run spun until its budget ran out without
+// publishing the day (0.31.28 in production: today never published, the
+// progress row rewritten thirty-five times a second). Here each run's clock is
+// 234 ns past a microsecond, which rounds down, and each must come back
+// promptly having published: yesterday, still open before 02:00 with its tail,
+// today, and the 24-hour window.
+func TestARunWhoseClockIsFinerThanTheDatabasesStillPublishes(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	yesterday := time.Date(2036, 10, 26, 0, 0, 0, 0, time.UTC)
+	today := yesterday.AddDate(0, 0, 1)
+	seedRequests(t, db, site,
+		pageViewRow(dayAt(yesterday, 21, 0), "na", "/"),
+		pageViewRow(dayAt(yesterday, 23, 30), "nb", "/late"),
+		pageViewRow(dayAt(today, 0, 20), "nc", "/"),
+		pageViewRow(dayAt(today, 9, 0), "nd", "/"),
+	)
+	for _, now := range []time.Time{
+		dayAt(today, 1, 0).Add(234 * time.Nanosecond),  // yesterday open, with its tail
+		dayAt(today, 14, 0).Add(234 * time.Nanosecond), // yesterday final, today with its tail
+	} {
+		at := now.Format(time.RFC3339Nano)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		start := time.Now()
+		_, err := Rollup(ctx, testSession, now)
+		took := time.Since(start)
+		cancel()
+		if err != nil {
+			t.Fatalf("the run at %s failed after %s: %v", at, took.Round(time.Millisecond), err)
+		}
+		if took > 15*time.Second {
+			t.Fatalf("the run at %s took %s for four requests", at, took.Round(time.Millisecond))
+		}
+		daily := dailyOf(t, db, site)
+		// A published day counts its requests through its midnight, the tail's
+		// end, so today's 09:00 request counts at 01:00 as well.
+		wantFigures(t, "yesterday after the run at "+at, daily, dateArg(yesterday), measuredFigures(2, 2, 2, 2))
+		wantFigures(t, "today after the run at "+at, daily, dateArg(today), measuredFigures(2, 2, 2, 2))
+		var windows int
+		if err := db.NewRaw(`SELECT count(*) FROM edge_stats_window_top WHERE site_id = ? AND window_end = ?`,
+			site, statsperiod.For(statsperiod.Last24Hours, now).End).Scan(context.Background(), &windows); err != nil {
+			t.Fatal(err)
+		}
+		if windows == 0 {
+			t.Errorf("the run at %s published no 24-hour top lists for the window", at)
+		}
+	}
+}
+
+// A FOLD WHOSE PROGRESS DOES NOT LAND STOPS THE DAY, AT ONCE. Whatever keeps a
+// day's stored progress from reading back as the instant the fold moved it to
+// -- a clock finer than the database's was one -- the run must not fold again
+// from where it was, which spins and, over a range with requests, counts them
+// twice. Each settled pass reads the progress back in its own transaction and,
+// when it differs, rolls the pass back and fails the day by name, so the run
+// moves on promptly and nothing is folded. Here a trigger moves the stored
+// progress a microsecond back.
+func TestAFoldWhoseProgressDoesNotLandFailsTheDayPromptly(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	day := time.Date(2036, 10, 29, 0, 0, 0, 0, time.UTC)
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 9, 0), "pa", "/"))
+	ctx := context.Background()
+	const shift = "rollup_test_shift_progress"
+	drop := func() {
+		_, _ = db.ExecContext(ctx, "DROP TRIGGER IF EXISTS "+shift+" ON edge_stats_progress")
+		_, _ = db.ExecContext(ctx, "DROP FUNCTION IF EXISTS "+shift+"()")
+	}
+	drop()
+	t.Cleanup(drop)
+	for _, stmt := range []string{
+		"CREATE FUNCTION " + shift + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN " +
+			"IF NEW.day = '" + dateArg(day) + "' THEN NEW.settled_through := NEW.settled_through - interval '1 microsecond'; END IF; " +
+			"RETURN NEW; END $$",
+		"CREATE TRIGGER " + shift + " BEFORE INSERT OR UPDATE ON edge_stats_progress FOR EACH ROW EXECUTE FUNCTION " + shift + "()",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := Rollup(run, testSession, dayAt(day, 14, 0))
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("the run took %s: it spun on the day instead of failing it", took.Round(time.Millisecond))
+	}
+	if err == nil || !strings.Contains(err.Error(), dateArg(day)) || !strings.Contains(err.Error(), "progress") {
+		t.Fatalf("the run answered %v, want the day failed by name for its progress", err)
+	}
+	var settled int
+	if err := db.NewRaw(`SELECT count(*) FROM edge_stats_settled_hour WHERE day = ?::date`, dateArg(day)).Scan(ctx, &settled); err != nil {
+		t.Fatal(err)
+	}
+	if settled != 0 {
+		t.Errorf("%d settled hours were kept for a pass whose progress did not land, want the pass rolled back", settled)
+	}
 }

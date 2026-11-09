@@ -234,7 +234,18 @@ func Rollup(ctx context.Context, open MaintenanceSession, now time.Time) (Rollup
 	if open == nil {
 		return rep, errNoMaintenanceSession
 	}
-	now = now.UTC()
+	// THE RUN'S CLOCK IS THE DATABASE'S PRECISION. A Go clock carries
+	// nanoseconds and a timestamptz keeps microseconds, rounding to the
+	// nearest, and the settled fold stores the horizon it reaches (now less
+	// finalAfter) as the day's progress and reads it back to compare with the
+	// same horizon. Kept to the nanosecond, a horizon whose nanoseconds rounded
+	// down came back a fraction of a microsecond short of itself: every pass
+	// read the day as not caught up, folded the same empty sliver again and
+	// never published, until the run's budget ran out (0.31.28 in production,
+	// TestARunWhoseClockIsFinerThanTheDatabasesStillPublishes). Truncated
+	// once, here, every instant the run derives from its clock is one the
+	// database stores exactly.
+	now = now.UTC().Truncate(time.Microsecond)
 	ctx, cancel := context.WithTimeout(ctx, rollupRunBudget)
 	defer cancel()
 
@@ -452,6 +463,22 @@ func rollupDayAt(ctx context.Context, s *rollupSession, d rollupDay, now time.Ti
 			}
 			if err := settle(ctx, tx, ft, day, end); err != nil {
 				return err
+			}
+			// THE PROGRESS MUST LAND WHERE THE PASS MOVED IT. The next pass
+			// starts from what the day's progress reads back as; one that
+			// read back short of end -- a clock finer than the database's
+			// did, see Rollup -- would fold from there again, spinning to the
+			// budget over an empty sliver and counting a range twice over a
+			// full one. So the pass is rolled back and the day fails by name,
+			// and the run moves on
+			// (TestAFoldWhoseProgressDoesNotLandFailsTheDayPromptly).
+			landed, err := dayProgress(ctx, tx, day)
+			if err != nil {
+				return err
+			}
+			if !landed.progress.Equal(end) {
+				return fmt.Errorf("the day's progress reads back as %s after the fold moved it to %s, so the fold is not kept: folding again from where it reads would repeat it",
+					landed.progress.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano))
 			}
 			res.read = true
 			if !end.Before(dayEnd) {
