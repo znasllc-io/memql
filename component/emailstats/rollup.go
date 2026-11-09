@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -71,28 +73,38 @@ import (
 // hundred days back, fail the same way, and the source's statistics would
 // never begin.
 //
-// So when the FIRST page of a FIRST walk ends at the statement timeout
-// (SQLSTATE 57014, isStatementTimeout), the next first walk starts half way
-// from this one's start to the clock it asked the page by: 400 days, then
-// 200, then 100, down to a floor of a day (firstWalkFloor), at a UTC
-// midnight. The start is recorded in email_stat_walk_start, not in memory, so
-// a run on another node after the cron lead moves carries on from it, and
-// each move is a Warn naming the source and the start (plugin.go). A start
-// only moves later (GREATEST): two replicas that both timed out leave the
-// later of their starts. Once a walk reads a page, the watermark takes over,
-// and the start stays where it was as the beginning of that source's record:
-// the statistics read counts nothing of the source before it
+// So when the FIRST page of a FIRST walk takes longer than a read may
+// (isPageTimeout), the next first walk starts half way from this one's start
+// to the clock it asked the page by: 400 days, then 200, then 100, down to a
+// floor of a day (firstWalkFloor), at a UTC midnight. A read may take as long
+// as the sooner of two deadlines allows: the server's statement timeout,
+// which ends the page with SQLSTATE 57014, and pgdriver's own 10 s client read
+// deadline, which ends it first, as an i/o timeout on the read, when
+// MEMQL_DB_STATEMENT_TIMEOUT_MS is 0 or 10000 or more
+// (TestAFirstPageThatOutlastsTheDriversReadDeadlineStartsLater). The start is
+// recorded in email_stat_walk_start, not in memory, so a run on another node
+// after the cron lead moves carries on from it, and each move is a Warn
+// naming the source and the start (plugin.go). A start only moves later
+// (GREATEST): two replicas that both timed out leave the later of their
+// starts. Once a walk reads a page, the watermark takes over, and the start
+// stays where it was as the beginning of that source's record: the
+// statistics read counts nothing of the source before it
 // (statistics_coverage.go), so the days the walk gave up read as not measured
 // rather than as zero.
 //
 // ONLY THE TIMEOUT. What the page costs grows with the span; nothing else that
-// can go wrong does. Any other failure -- a connection reset while the
-// database switches over, a node stopping, attributing or writing a page --
-// leaves the start where it was and is the run's failure like any other, and
-// the next run tries the same walk again: moved on every failure, a source
-// would be down to its last day after nine failing runs. Not when the run's
-// own context ended either, because 57014 is query_canceled, which is also
-// what a statement cancelled on request answers
+// can go wrong does. Any other failure leaves the start where it was and is
+// the run's failure like any other, and the next run tries the same walk
+// again: a connection reset or refused while the database switches over, a
+// statement an operator cancels with pg_cancel_backend (57014 as well, but
+// "user request", which isPageTimeout tells apart by the message), attributing
+// or writing a page. Moved on every failure, a source would be down to its
+// last day after nine failing runs. And not when the run's own context ended:
+// pgdriver v1.3.0 sends no cancel request when a context ends, so a stopping
+// run's statement does not answer 57014 of its own accord; what this skips is
+// a real timeout that lands as the run is stopping -- among them a read
+// deadline, which pgdriver sets to the context's own when that is sooner --
+// and skipping it is harmless, since the next run reads the same page again
 // (TestAFirstWalkThatCannotReadItsFirstPageStartsLater).
 //
 // THE KNOWN LIMIT. The remedy covers a first walk's first page; a walk that has
@@ -144,9 +156,12 @@ import (
 // whole history for nothing (TestARowDatedAheadOfTheClockDoesNotHoldTheWalk,
 // TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept). How far a source is
 // walked is held to the same bound: one further ahead than the overlap is
-// forgotten, and the run records its own, so a leader whose clock ran fast
-// cannot leave the read counting as measured what no walk has read
-// (TestAWalkedThroughFarAheadOfTheClockIsForgotten).
+// forgotten, and the run records its own
+// (TestAWalkedThroughFarAheadOfTheClockIsForgotten). One less far ahead is
+// kept by design, as a watermark that close is, being another run's on a node
+// whose clock is a little ahead (TestAWalkedThroughWithinTheOverlapIsKept):
+// so a leader whose clock ran fast can leave the read counting as measured up
+// to the overlap, five minutes, past what any walk has read, and no more.
 //
 // # Bounded runs that always advance
 //
@@ -469,12 +484,13 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		// walk is through this instant. See "Walked, nothing there" above.
 		askedAt := clock()
 		res, err := engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
-		if err != nil && !found && read == 0 && ctx.Err() == nil && isStatementTimeout(err) {
-			// The first page of a first walk ended at the statement timeout:
-			// start the next run's first walk later. Only the timeout, and not
-			// when the run's own context ended -- the node stopping, the lead
-			// moving -- whose cancelled statement answers the same SQLSTATE. See
-			// "A first walk that cannot read its first page".
+		if err != nil && !found && read == 0 && ctx.Err() == nil && isPageTimeout(err) {
+			// The first page of a first walk took longer than a read may: start
+			// the next run's first walk later. Not when the run's own context
+			// ended -- the node stopping, the lead moving: a timeout that lands
+			// as the run stops is skipped, harmlessly, since the next run reads
+			// the same page again. See "A first walk that cannot read its first
+			// page".
 			next := laterStart(since, askedAt)
 			if serr := recordWalkStart(ctx, db, src.name, next); serr != nil {
 				return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
@@ -512,8 +528,9 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 			return w, err
 		}
 		// Where the next walk resumes: the newest row's own time, capped at the
-		// clock as it reads now. The clock never decides it. See "Never past
-		// the clock".
+		// clock as it reads now. The clock only caps it, for a row dated past
+		// it; it never moves it past a row the walk read. See "Never past the
+		// clock".
 		through := newest
 		if now := clock(); through.After(now) {
 			through = now
@@ -850,19 +867,40 @@ func laterStart(since, askedAt time.Time) time.Time {
 	return next
 }
 
-// isStatementTimeout reports whether a read ended at the server's statement
-// timeout (SQLSTATE 57014): the driver's own error when the engine passes it
-// on, and the text it renders when the engine passes on only the text. 57014
-// is query_canceled, which a statement cancelled on request answers too, so
-// the walk asks it only while the run's own context is live.
-func isStatementTimeout(err error) bool {
+// isPageTimeout reports whether a read ended because the page took longer
+// than a read may: see "A first walk that cannot read its first page". Two
+// deadlines can end it, and both say that:
+//
+//   - the server's statement timeout: SQLSTATE 57014 whose message says
+//     "statement timeout". 57014 is query_canceled, which a statement
+//     cancelled on request -- an operator's pg_cancel_backend -- answers too,
+//     with "user request"; that says nothing about the page, so the message
+//     tells the two apart, as component/retention's failureKind does;
+//   - pgdriver's own client read deadline (Config.ReadTimeout, 10 s), which
+//     ends a slower page first when the statement timeout is off or at 10 s
+//     or more: a *net.OpError on a read whose Timeout() is true. A dial or a
+//     write that timed out, or a connection reset or refused, is the network,
+//     not the page.
+//
+// Each is read off the driver's error when the engine passes it on, and off
+// the text the driver renders when the engine passes on only that
+// (TestAPageTooLongForItsDeadlineIsToldApartFromAnyOtherFailure).
+func isPageTimeout(err error) bool {
 	var pgerr pgdriver.Error
 	if errors.As(err, &pgerr) {
-		return pgerr.StatementTimeout()
+		return pgerr.StatementTimeout() && strings.Contains(pgerr.Field('M'), "statement timeout")
 	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "57014") || strings.Contains(text, "canceling statement due to statement timeout")
+	var op *net.OpError
+	if errors.As(err, &op) {
+		return op.Op == "read" && op.Timeout()
+	}
+	text := err.Error()
+	return strings.Contains(text, "canceling statement due to statement timeout") || readDeadlineText.MatchString(text)
 }
+
+// readDeadlineText is how a *net.OpError renders a read that reached its
+// deadline: "read tcp 10.0.0.5:51334->10.0.0.9:5432: i/o timeout".
+var readDeadlineText = regexp.MustCompile(`\bread (tcp|tcp4|tcp6|unix) [^ ]+: i/o timeout`)
 
 // readWalkStart answers where a source's first walk starts when an earlier
 // first walk moved it, and false when none has.

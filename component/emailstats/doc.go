@@ -47,9 +47,10 @@
 // with a time before a watermark another run already moved past; reading five
 // minutes behind picks it up, and reading a row twice costs nothing. The
 // watermark never passes the clock of the run that writes it, so one row
-// stamped ahead cannot hide the rows after it, and the run's clock never sets
-// it, so a cron leader whose clock runs fast cannot shrink the overlap
-// (rollup.go, "Never past the clock"). How far the read counts is a second
+// stamped ahead cannot hide the rows after it; that clock only caps it, for a
+// row dated past it, and never moves it past a row the walk read, so a cron
+// leader whose clock runs fast cannot shrink the overlap for rows a true clock
+// stamps (rollup.go, "Never past the clock"). How far the read counts is a second
 // instant beside it, how far the source has been walked: the newest row too,
 // or, once a walk has read its last page, the clock it asked that page by,
 // rows or none. A figure whose sources' walks have not reached a day is null

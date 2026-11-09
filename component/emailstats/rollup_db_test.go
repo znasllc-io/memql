@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -1720,6 +1722,35 @@ func TestAWalkedThroughFarAheadOfTheClockIsForgotten(t *testing.T) {
 	}
 }
 
+// ONE AHEAD BY LESS THAN THE OVERLAP IS KEPT. A walked-through instant a few
+// minutes ahead of this run's clock is another run's, written a moment ago by
+// a node whose clock is a little ahead of this one, as a watermark that close
+// is (TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept): forgetting it
+// would have the read show the day under way as unmeasured between runs for
+// nothing. Three minutes ahead survives the run; an hour ahead, in the same
+// run, is forgotten.
+func TestAWalkedThroughWithinTheOverlapIsKept(t *testing.T) {
+	_, db := statsEngine(t)
+	t.Cleanup(func() { walkFrom(t, db, time.Now()) })
+	walkFrom(t, db, time.Now().UTC().Truncate(time.Millisecond).Add(-time.Minute))
+	near := time.Now().UTC().Truncate(time.Microsecond).Add(watermarkOverlap - 2*time.Minute)
+	far := time.Now().UTC().Add(time.Hour)
+	for source, at := range map[string]time.Time{sourceConsent: near, sourceEngagement: far} {
+		if _, err := db.NewRaw(`UPDATE email_stat_watermark SET walked_through = ? WHERE source = ?`, at, source).Exec(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := runRollup(principalCtx(t), &scriptedEngine{pages: map[string]map[string]scriptedPage{}}, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if walked, ok := walkedOf(t, db, sourceConsent); !ok || !walked.Equal(near) {
+		t.Errorf("a walk three minutes ahead of the clock is now through %v (%v), want it kept at %v", walked, ok, near)
+	}
+	if walked, ok := walkedOf(t, db, sourceEngagement); !ok || !walked.Before(far) {
+		t.Errorf("a walk an hour ahead of the clock is still through %v (%v), want it forgotten", walked, ok)
+	}
+}
+
 // MOVING A FIRST WALK'S START NEVER MOVES THE DELETE. A test puts a first
 // walk at its own rows through firstWalkFrom, and retention -- how long a fact
 // is kept, which the run's delete is counted from -- is a constant no test
@@ -1783,13 +1814,62 @@ func TestAWalkStartNeverMovesBack(t *testing.T) {
 	}
 }
 
-// THE TIMEOUT IS KNOWN BY THE SERVER'S OWN ANSWER. A statement the server ends
-// at its statement timeout answers SQLSTATE 57014, which isStatementTimeout
-// reads off the driver's error, wrapped as the walk wraps it, or off its text
-// alone when the engine passes on only that; a connection reset or an ended
-// context is not a timeout.
-func TestAStatementTimeoutIsToldApartFromAnyOtherFailure(t *testing.T) {
+// A PAGE TOO LONG FOR ITS DEADLINE IS KNOWN BY THE DRIVER'S OWN ANSWER, in the
+// two forms it takes: the server ending the statement at its statement timeout
+// (SQLSTATE 57014, "canceling statement due to statement timeout"), and, with
+// that timeout off or at the driver's ten seconds or more, pgdriver's own read
+// deadline ending the read (a net.Error whose Timeout() is true, on a read).
+// Each is read off the driver's error, wrapped as the walk wraps it, flattened
+// as an engine might, or off its text alone. NOT a statement cancelled on
+// request -- pg_cancel_backend, also 57014 -- nor a refused or reset
+// connection, nor an ended context: none says what the page costs.
+func TestAPageTooLongForItsDeadlineIsToldApartFromAnyOtherFailure(t *testing.T) {
 	_, db := statsEngine(t)
+	timeout := driverStatementTimeout(t, db)
+	deadline := driverReadDeadline(t)
+	var ne net.Error
+	if !errors.As(deadline, &ne) || !ne.Timeout() {
+		t.Fatalf("pgdriver's read deadline answered %T (%v), want a net.Error whose Timeout() is true", deadline, deadline)
+	}
+	for name, err := range map[string]error{
+		"the statement timeout":                timeout,
+		"the statement timeout, wrapped":       fmt.Errorf("read a page: %w", timeout),
+		"the statement timeout, as text":       errors.New(timeout.Error()),
+		"the statement timeout, flattened":     fmt.Errorf("execute: %v", timeout),
+		"the driver's read deadline":           deadline,
+		"the driver's read deadline, wrapped":  fmt.Errorf("read a page: %w", deadline),
+		"the driver's read deadline, as text":  errors.New(deadline.Error()),
+		"the driver's read deadline, flatten.": fmt.Errorf("execute: %v", deadline),
+	} {
+		if !isPageTimeout(err) {
+			t.Errorf("%s (%v) is not read as a page too long for its deadline", name, err)
+		}
+	}
+	cancelled := driverCancelOnRequest(t, db)
+	refused := driverConnectionRefused(t)
+	for name, err := range map[string]error{
+		"a statement cancelled on request":            cancelled,
+		"a statement cancelled on request, wrapped":   fmt.Errorf("read a page: %w", cancelled),
+		"a statement cancelled on request, as text":   errors.New(cancelled.Error()),
+		"a refused connection":                        refused,
+		"a refused connection, as text":               errors.New(refused.Error()),
+		"a reset connection":                          errors.New("read tcp 10.0.0.5:5432: connection reset by peer"),
+		"a dial that timed out":                       &net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded},
+		"a dial that timed out, as text":              errors.New("dial tcp 10.0.0.5:5432: i/o timeout"),
+		"a write that timed out":                      &net.OpError{Op: "write", Net: "tcp", Err: os.ErrDeadlineExceeded},
+		"the run's context ending":                    fmt.Errorf("read a page: %w", context.Canceled),
+		"the run's context reaching its own deadline": fmt.Errorf("read a page: %w", context.DeadlineExceeded),
+	} {
+		if isPageTimeout(err) {
+			t.Errorf("%s (%v) is read as a page too long for its deadline", name, err)
+		}
+	}
+}
+
+// driverStatementTimeout is the error pgdriver answers for a statement the
+// server ends at its statement timeout.
+func driverStatementTimeout(t *testing.T, db *bun.DB) error {
+	t.Helper()
 	var timeout error
 	_ = db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '50ms'`); err != nil {
@@ -1801,24 +1881,117 @@ func TestAStatementTimeoutIsToldApartFromAnyOtherFailure(t *testing.T) {
 	if timeout == nil {
 		t.Fatal("a two-second statement under a fifty-millisecond timeout did not fail")
 	}
-	for name, err := range map[string]error{
-		"the driver's error":    timeout,
-		"the walk's wrapping":   fmt.Errorf("read a page: %w", timeout),
-		"its text alone":        errors.New(timeout.Error()),
-		"the engine's wrapping": fmt.Errorf("execute: %v", timeout),
-	} {
-		if !isStatementTimeout(err) {
-			t.Errorf("%s (%v) is not read as the statement timeout", name, err)
+	return timeout
+}
+
+// driverReadDeadline is the error pgdriver answers for a statement that
+// outlasts its own client read deadline, on a handle of its own with a short
+// one and no server statement timeout: what a first page gets when
+// MEMQL_DB_STATEMENT_TIMEOUT_MS is 0, or 10000 or more.
+func driverReadDeadline(t *testing.T) error {
+	t.Helper()
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithReadTimeout(200*time.Millisecond)))
+	defer func() { _ = sqldb.Close() }()
+	_, err := sqldb.ExecContext(context.Background(), `SELECT pg_sleep(2)`)
+	if err == nil {
+		t.Fatal("a two-second statement under a two-hundred-millisecond read deadline did not fail")
+	}
+	return err
+}
+
+// driverCancelOnRequest is the error pgdriver answers for a statement another
+// session cancels, as an operator's pg_cancel_backend does: SQLSTATE 57014,
+// like the statement timeout, with the run's own context live throughout.
+func driverCancelOnRequest(t *testing.T, db *bun.DB) error {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := db.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	var pid int
+	if err := conn.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := conn.ExecContext(ctx, `SELECT pg_sleep(5)`)
+		done <- err
+	}()
+	for waited := 0; ; waited++ {
+		var cancelled bool
+		if err := db.NewRaw(`SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE pid = ? AND state = 'active' AND query LIKE 'SELECT pg_sleep(5)%'`, pid).Scan(ctx, &cancelled); err == nil && cancelled {
+			break
+		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal(err)
+		}
+		if waited > 200 {
+			t.Fatal("the statement to cancel never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	err = <-done
+	if err == nil {
+		t.Fatal("a statement cancelled on request did not fail")
+	}
+	return err
+}
+
+// driverConnectionRefused is the error pgdriver answers when no server takes
+// the connection: what a page gets while the database switches over.
+func driverConnectionRefused(t *testing.T) error {
+	t.Helper()
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithAddr("127.0.0.1:1"), pgdriver.WithUser("memql"), pgdriver.WithInsecure(true), pgdriver.WithTimeout(2*time.Second)))
+	defer func() { _ = sqldb.Close() }()
+	_, err := sqldb.ExecContext(context.Background(), `SELECT 1`)
+	if err == nil {
+		t.Fatal("a connection to a port nothing listens on did not fail")
+	}
+	return err
+}
+
+// A FIRST PAGE THAT OUTLASTS THE DRIVER'S READ DEADLINE STARTS LATER TOO. With
+// the server's statement timeout off (MEMQL_DB_STATEMENT_TIMEOUT_MS=0), or at
+// the driver's ten seconds or more, a first page too long for one read never
+// answers 57014: pgdriver's own read deadline ends it first, as an i/o timeout
+// on the read. Read as any other failure, the first walk would fail on every
+// run and never move. It is the same signal -- the page costs more than a read
+// may take -- so it moves the start the same way, while a refused connection,
+// which says nothing about the page, moves nothing. The errors are the real
+// driver's (driverReadDeadline, driverConnectionRefused), handed to the walk as
+// the engine hands on a read's error.
+func TestAFirstPageThatOutlastsTheDriversReadDeadlineStartsLater(t *testing.T) {
+	_, db := statsEngine(t)
+	ctx := context.Background()
+	firstWalks := []string{sourceDelivery, sourceConsent}
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source IN (?)`, bun.In(firstWalks)).Exec(ctx)
+		walkFrom(t, db, time.Now())
+	})
+	deadline, refused := driverReadDeadline(t), driverConnectionRefused(t)
+	now := dayOf(time.Now()).Add(12 * time.Hour)
+	walkFrom(t, db, now)
+	for _, s := range firstWalks {
+		for _, q := range []string{`DELETE FROM email_stat_watermark WHERE source = ?`, `DELETE FROM email_stat_walk_start WHERE source = ?`} {
+			if _, err := db.NewRaw(q, s).Exec(ctx); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	for _, err := range []error{
-		errors.New("read tcp 10.0.0.5:5432: connection reset by peer"),
-		fmt.Errorf("read a page: %w", context.Canceled),
-		fmt.Errorf("read a page: %w", context.DeadlineExceeded),
-	} {
-		if isStatementTimeout(err) {
-			t.Errorf("%v is read as the statement timeout", err)
-		}
+	failing := &scriptedEngine{pages: map[string]map[string]scriptedPage{
+		"deliveriesWrittenSince":    {"": {err: deadline}},
+		"consentEventsWrittenSince": {"": {err: refused}},
+	}}
+	if _, err := runRollup(principalCtx(t), failing, db, now); err == nil {
+		t.Fatal("the run answered no error for two sources whose first page failed")
+	}
+	horizon := now.Add(-retention)
+	if got, ok := walkStartOf(t, db, sourceDelivery); !ok || !got.Equal(dayOf(horizon.Add(now.Sub(horizon)/2))) {
+		t.Errorf("after the driver's read deadline the delivery first walk starts at %v (%v), want half way, %v", got, ok, dayOf(horizon.Add(now.Sub(horizon)/2)))
+	}
+	if got, ok := walkStartOf(t, db, sourceConsent); ok {
+		t.Errorf("a refused connection moved the consent first walk to %v", got)
 	}
 }
 
@@ -1842,22 +2015,25 @@ func walkStartOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
 // in four hundred days, and can outlast the request pool's statement timeout;
 // a failed page writes no watermark, so every run would start over and fail
 // the same way, and the source's statistics would never begin. Instead each
-// failure moves the next first walk's start half way to the clock, to the UTC
+// timeout moves the next first walk's start half way to the clock, to the UTC
 // day, durably, with a Warn naming the source and the start: four hundred
 // days back, then two hundred, then one hundred. The next run that reads the
 // page walks from there, and the read counts nothing before it for that
 // source's figures, while a source walked from further back is measured there.
 //
-// ONLY THE TIMEOUT MOVES IT. Any other failure of that page -- a connection
-// reset while the database switches over -- says nothing about how long the
-// history is: it leaves the start where it was, is logged as the run's
-// failure, and the next run tries the same walk again. Moved on every
-// failure, nine failing runs would bring a source down to its last day.
+// ONLY THE TIMEOUT MOVES IT. Any other failure of that page says nothing about
+// how long the history is: a connection reset while the database switches
+// over, or a statement an operator cancels with pg_cancel_backend, which
+// answers 57014 like the timeout but says "user request". Each leaves the
+// start where it was, is logged as the run's failure, and the next run tries
+// the same walk again. Moved on every failure, nine failing runs would bring a
+// source down to its last day.
 func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	_, db := statsEngine(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("cliff-%d", time.Now().UnixNano())
-	firstWalks := []string{sourceDelivery, sourceConsent}
+	firstWalks := []string{sourceDelivery, sourceEngagement, sourceConsent}
+	cancelledOnRequest := driverCancelOnRequest(t, db)
 	t.Cleanup(func() {
 		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(ctx)
 		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source IN (?)`, bun.In(firstWalks)).Exec(ctx)
@@ -1884,8 +2060,9 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	}
 
 	failing := &scriptedEngine{pages: map[string]map[string]scriptedPage{
-		"deliveriesWrittenSince":    {"": {err: errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE=57014)")}},
-		"consentEventsWrittenSince": {"": {err: errors.New("read tcp 10.0.0.5:5432: connection reset by peer")}},
+		"deliveriesWrittenSince":       {"": {err: errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE=57014)")}},
+		"engagementEventsWrittenSince": {"": {err: cancelledOnRequest}},
+		"consentEventsWrittenSince":    {"": {err: errors.New("read tcp 10.0.0.5:5432: connection reset by peer")}},
 	}}
 	horizon := now.Add(-retention)
 	halfWay := dayOf(horizon.Add(now.Sub(horizon) / 2))
@@ -1900,6 +2077,9 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 		if got, ok := walkStartOf(t, db, sourceConsent); ok {
 			t.Errorf("after failure %d the %s first walk starts at %v: a connection reset moved it", n+1, sourceConsent, got)
 		}
+		if got, ok := walkStartOf(t, db, sourceEngagement); ok {
+			t.Errorf("after failure %d the %s first walk starts at %v: a statement cancelled on request moved it", n+1, sourceEngagement, got)
+		}
 		for _, s := range firstWalks {
 			if through, ok := watermarkOf(t, db, s); ok {
 				t.Errorf("a failed first page left a %s watermark at %v", s, through)
@@ -1910,24 +2090,28 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, halfWay.Format(time.DateOnly)),
 		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, threeQuarters.Format(time.DateOnly)),
 		"source=" + sourceConsent + " error=\"read a page: read tcp 10.0.0.5:5432: connection reset by peer\"",
+		"source=" + sourceEngagement + " error=\"read a page: ERROR: canceling statement due to user request (SQLSTATE=57014)\"",
 	} {
 		if !strings.Contains(logs.String(), line) {
 			t.Errorf("the log does not say %q:\n%s", line, logs.String())
 		}
 	}
-	if line := fmt.Sprintf("email statistics for %s start from", sourceConsent); strings.Contains(logs.String(), line) {
-		t.Errorf("the log says %q, for a failure that moved nothing:\n%s", line, logs.String())
+	for _, s := range []string{sourceConsent, sourceEngagement} {
+		if line := fmt.Sprintf("email statistics for %s start from", s); strings.Contains(logs.String(), line) {
+			t.Errorf("the log says %q, for a failure that moved nothing:\n%s", line, logs.String())
+		}
 	}
 
 	// A run whose own context ends during the first page -- the node
-	// stopping, the lead moving -- moves nothing: it says nothing about how
-	// long the history is, though its cancelled statement answers the
-	// timeout's SQLSTATE, 57014. It does not try to: a write on the ended
-	// context would fail anyway, so the error is what shows the attempt.
+	// stopping, the lead moving -- moves nothing, even when that page meanwhile
+	// ends at the statement timeout: the run is stopping, and the next run reads
+	// the same page again, so skipping it costs nothing. It does not try to: a
+	// write on the ended context would fail anyway, so the error is what shows
+	// the attempt.
 	stopping, stop := context.WithCancel(principalCtx(t))
 	defer stop()
 	cancelled := &scriptedEngine{
-		pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": {"": {err: errors.New("ERROR: canceling statement due to user request (SQLSTATE=57014)")}}},
+		pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": {"": {err: errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE=57014)")}}},
 		before: func(construct, _ string) {
 			if construct == "deliveriesWrittenSince" {
 				stop()
@@ -1955,9 +2139,9 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 			if since := sinceOf(t, c.query); !since.Equal(threeQuarters) {
 				t.Errorf("the deliveries' first walk started at %v, want the start the timeouts left, %v", since, threeQuarters)
 			}
-		case "consentEventsWrittenSince":
+		case "consentEventsWrittenSince", "engagementEventsWrittenSince":
 			if since := sinceOf(t, c.query); !since.Equal(horizon) {
-				t.Errorf("the consent first walk started at %v, want four hundred days back, %v: a connection reset moves nothing", since, horizon)
+				t.Errorf("%s's first walk started at %v, want four hundred days back, %v: its failure moved nothing", c.construct, since, horizon)
 			}
 		}
 	}

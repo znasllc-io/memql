@@ -1980,9 +1980,13 @@ is a Warn naming the source and the day, `email statistics for <source> start
 from <day>: the first walk over a longer history timed out`. The start is
 stored in `email_stat_walk_start`, so a new cron leader carries on from it, and
 the days before it, and a twelve-month view's month that it falls inside, read
-*not measured* for that source's figures. Only that
-timeout moves a start: any other failure leaves it where it was, and the next
-run tries the same walk again. A walk that has read a page and whose later
+*not measured* for that source's figures. With the statement timeout off
+(`MEMQL_DB_STATEMENT_TIMEOUT_MS=0`) or set to ten seconds or more, the database
+driver's own ten-second read deadline ends such a page first, and moves the
+start the same way. Only those two deadlines move a start: any other failure,
+such as a statement an operator cancels or a connection reset or refused while
+the database switches over, leaves it where it was, and the next run tries the
+same walk again. A walk that has read a page and whose later
 pages outlast the timeout is not moved either: it stalls, with a Warn on every
 run, and the figures it feeds stay not measured.
 

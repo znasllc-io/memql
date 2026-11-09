@@ -62,8 +62,9 @@ import (
 // (its sends and their opens), and a subscription change or a bounce the
 // consent events; so a range is measured for a figure only when every source
 // it is counted from has been walked through the range's end -- for the range
-// under way, through the read's clock less coverageGrace, and for a range
-// that ended long ago, through its end itself (statistics_coverage.go). Without this the
+// under way, through the sooner of its end and the read's clock, less
+// coverageGrace, and for a range that ended longer ago than the grace,
+// through its end itself (statistics_coverage.go). Without this the
 // days a backfill has not reached, or a stalled rollup's days since it
 // stopped, read as zero, and a source walked more slowly than another reads as
 // a wrong number rather than a missing one: deliveries caught up and opens
