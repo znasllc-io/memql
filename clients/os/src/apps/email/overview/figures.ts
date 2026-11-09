@@ -1,6 +1,7 @@
+import { formatRate } from "../../../kit/format";
 import { absent, figureOf, type Figure } from "../../../kit/measure";
 import type { OverviewMetric, OverviewSegment } from "../../../kit/Overview";
-import { campaignName, formatRate, type CampaignRow, type CampaignStats } from "../rows";
+import { campaignName, type CampaignRow, type CampaignStats } from "../rows";
 import type { Reading } from "../useEmail";
 import { WORDS } from "../words";
 

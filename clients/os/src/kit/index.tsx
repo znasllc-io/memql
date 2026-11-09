@@ -87,7 +87,7 @@ export { LiveList, type LiveListSource } from "../live/LiveList";
 export { useLiveView, type LiveView } from "../live/liveView";
 export { useThreeFeedView, useTwoFeedView } from "../live/mergedView";
 export { useNow } from "./useNow";
-export { formatBytes, formatCount, formatDuration, formatFreshness, formatMoment } from "./format";
+export { formatBytes, formatCount, formatDuration, formatFreshness, formatMoment, formatRate } from "./format";
 // A figure with its own provenance, and the component that refuses to draw
 // a number it does not have (epic memql#5153, D3). Promoted from
 // src/cluster/; the pure half is importable on its own as "kit/measure" so a

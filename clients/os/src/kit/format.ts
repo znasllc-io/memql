@@ -87,6 +87,21 @@ export function formatCount(value: number): string {
   return value.toLocaleString("en-US");
 }
 
+/**
+ * A rate as a person reads one: "42%", "4.3%", "0%". Whole percents from 10%
+ * up and at zero, one decimal below 10%, where a whole number would round a
+ * 4.3% click rate to 4% and hide the difference between two campaigns. Null
+ * renders "--": a rate with no denominator is absent, never 0%.
+ *
+ * It was Email's, and moved here when the website statistics needed the same
+ * reading for bounce rate (the second use promotes, as this file's header says).
+ */
+export function formatRate(rate: number | null): string {
+  if (rate === null || !Number.isFinite(rate)) return "--";
+  const pct = rate * 100;
+  return pct >= 10 || pct === 0 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
+}
+
 /** A call's duration. Zero and negative render as "--": a row whose
  *  `completedAt` never landed has no duration, and "0ms" would claim one. */
 export function formatDuration(ms: number): string {

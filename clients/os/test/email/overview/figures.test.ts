@@ -10,7 +10,8 @@ import {
   statsWanted,
   type OverviewInputs,
 } from "../../../src/apps/email/overview/figures";
-import { campaignFromRow, formatRate, statsFromPayload, type CampaignStats } from "../../../src/apps/email/rows";
+import { formatRate } from "../../../src/kit/format";
+import { campaignFromRow, statsFromPayload, type CampaignStats } from "../../../src/apps/email/rows";
 import type { Reading } from "../../../src/apps/email/useEmail";
 import { absent, figureOf } from "../../../src/kit/measure";
 import { campaignRow } from "../harness";

@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 
 import { AutoRefresh, Caption, Fact, Facts, Notice, Panel, RecordList, RecordRow, Refine, Select, Subhead, type RefineChip } from "../../../kit";
 import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { formatRate } from "../../../kit/format";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import {
   deliveryFromRow,
-  formatRate,
   providerDeliverySentence,
   rateOf,
   sendBreakdown,

@@ -427,13 +427,6 @@ export function rateOf(numerator: Figure, sent: number, denominatorAtLeast = fal
   return numerator.value / sent;
 }
 
-/** A rate as a person reads one. Null renders as the em dash everywhere. */
-export function formatRate(rate: number | null): string {
-  if (rate === null) return "--";
-  const pct = rate * 100;
-  return pct >= 10 || pct === 0 ? `${Math.round(pct)}%` : `${pct.toFixed(1)}%`;
-}
-
 /** A measured figure, or the em dash. Never a zero standing in for silence. */
 export function formatFigure(figure: Figure): string {
   return figure.value === null ? "--" : `${figure.atLeast ? "≥" : ""}${figure.value}`;

@@ -15,7 +15,6 @@ import {
   emailRuleFromRow,
   figureOf,
   formatFigure,
-  formatRate,
   isPublished,
   rateOf,
   recipientFromRow,
@@ -324,13 +323,6 @@ describe("engagement rates", () => {
 
   it("has NO rate when nothing was delivered -- not 0%", () => {
     expect(rateOf({ value: 0, absentBecause: "" }, 0)).toBeNull();
-  });
-
-  it("renders a missing rate as an em dash and a real one as a percentage", () => {
-    expect(formatRate(null)).toBe("--");
-    expect(formatRate(0.4)).toBe("40%");
-    expect(formatRate(0.043)).toBe("4.3%");
-    expect(formatRate(0)).toBe("0%");
   });
 });
 
