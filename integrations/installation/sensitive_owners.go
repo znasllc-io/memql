@@ -105,14 +105,55 @@ func (p *protectedOwners) observe(ctx context.Context, child resourceIdentity, m
 				return err
 			}
 		}
+		digest, err := protectedOwnerFingerprint(live)
+		if err != nil {
+			return err
+		}
 		p.visiting[parent] = true
 		if err := p.observe(ctx, parent, resourceMap(live, "metadata"), depth+1); err != nil {
 			return err
 		}
 		delete(p.visiting, parent)
-		p.seen[parent] = protectedOwnerObservation{Address: resourceAddress{parent, version, path}, UID: uid, Digest: sensitiveDigest("owner", live)}
+		p.seen[parent] = protectedOwnerObservation{Address: resourceAddress{parent, version, path}, UID: uid, Digest: digest}
 	}
 	return nil
+}
+
+// A protected plan compares this fingerprint, taken at preparation, with a
+// fresh one before Apply, at completion and before a rollback, so it must
+// change exactly when the owner could act differently on a protected Secret:
+// its identity, its declaration (what protectedOwnerMatchesLive compares), the
+// ownership and finalizers that decide garbage collection, and the Argo prune
+// and comparison options that keep an owner outside Git. Status,
+// resourceVersion, managedFields, generation, labels and other annotations are
+// controller and API-server bookkeeping and stay out. An External Secrets
+// refresh rewrites them hourly; fingerprinting the whole object refused
+// production's 0.31.27 Apply and then its completion on 2026-11-09 with
+// nothing protected changed
+// (TestSensitiveOwnerEvidenceSurvivesControllerStatusButNotMaterialChanges).
+func protectedOwnerFingerprint(live map[string]any) (string, error) {
+	declaration, err := protectedOwnerDeclaration(live)
+	if err != nil {
+		return "", errors.New("protected resource owner material is malformed")
+	}
+	meta := resourceMap(live, "metadata")
+	annotations := resourceMap(meta, "annotations")
+	return sensitiveDigest("owner-material", map[string]any{
+		"apiVersion": live["apiVersion"], "kind": live["kind"], "namespace": meta["namespace"], "name": meta["name"], "uid": meta["uid"],
+		"declaration": declaration, "owners": meta["ownerReferences"], "finalizers": meta["finalizers"],
+		"prune": annotations["argocd.argoproj.io/sync-options"], "comparison": annotations["argocd.argoproj.io/compare-options"],
+	}), nil
+}
+
+// What an owner declares: decoded credential material for a Secret, and for
+// anything else the object without identity, metadata or status, normalized
+// only by qualified defaults. Matching a rendered owner and fingerprinting a
+// live one read the same material.
+func protectedOwnerDeclaration(value map[string]any) (map[string]any, error) {
+	if resourceText(value, "kind") == "Secret" {
+		return secretValue(value)
+	}
+	return protectedOwnerMaterial(value)
 }
 
 // An unchanged Git declaration can still overwrite drifted controller state.
@@ -123,18 +164,10 @@ func protectedOwnerMatchesLive(desired, live map[string]any) bool {
 	if resourceText(desired, "apiVersion") != resourceText(live, "apiVersion") || resourceText(desired, "kind") != resourceText(live, "kind") {
 		return false
 	}
-	if resourceText(desired, "kind") == "Secret" {
-		a, ea := secretValue(desired)
-		b, eb := secretValue(live)
-		if ea != nil || eb != nil || !sameJSON(a, b) {
-			return false
-		}
-	} else {
-		a, ea := protectedOwnerMaterial(desired)
-		b, eb := protectedOwnerMaterial(live)
-		if ea != nil || eb != nil || !sameJSON(a, b) {
-			return false
-		}
+	a, ea := protectedOwnerDeclaration(desired)
+	b, eb := protectedOwnerDeclaration(live)
+	if ea != nil || eb != nil || !sameJSON(a, b) {
+		return false
 	}
 	meta, current := resourceMap(desired, "metadata"), resourceMap(live, "metadata")
 	for _, field := range []string{"ownerReferences", "finalizers"} {

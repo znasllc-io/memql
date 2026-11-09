@@ -823,6 +823,24 @@ no longer available after a pause, cancel the unfinished preparation and prepare
 again. A started installation must be reconciled from its saved intent; missing
 history never authorizes replacing an uncertain operation.
 
+Protected-resource evidence likewise tolerates routine controller updates to
+the owner of a protected Secret, such as an External Secrets refresh rewriting
+its ExternalSecret's status every hour. An owner's fingerprint covers its
+identity and UID, what it declares, its owner references and finalizers, and
+its Argo prune and comparison options, but not its status, `resourceVersion`,
+`managedFields`, generation, labels or other annotations. A change to any
+fingerprinted field between preparation and Apply, completion or restoration
+still refuses the plan.
+
+A started update whose saved protected-resource evidence can no longer match
+cannot be finished yet. **Check progress** and **Restore previous release**
+both compare fresh evidence with the evidence saved at preparation, and
+cancellation applies only to an update that has not started, so the update
+keeps the installation busy and no other release can be prepared. That happens
+when a controller updates a protected owner after an earlier engine, which
+fingerprinted whole owners, prepared the update, or when a fingerprinted field
+of a protected owner changes outside the installation after the update starts.
+
 
 ## Restore a selected installation
 

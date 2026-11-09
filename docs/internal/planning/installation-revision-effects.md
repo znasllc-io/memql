@@ -592,7 +592,18 @@ that could garbage-collect otherwise unchanged credentials. Unchanged rendered
 owners must also match live material: restoring drifted Certificate or other
 controller configuration can rotate credentials. Unknown controller defaults
 require a qualified codec rather than being silently ignored. Evidence retains
-only resource identities and fingerprints. Arbitrary annotations, including
+only resource identities and fingerprints. An owner's fingerprint
+(`protectedOwnerFingerprint`) covers its identity and UID, the declaration
+`protectedOwnerMatchesLive` compares, its owner references and finalizers, and
+its Argo prune and comparison options. Status and API-server bookkeeping
+(`resourceVersion`, `managedFields`, generation) stay out, as do labels and
+other annotations: controllers rewrite them routinely, and the whole-object
+fingerprint refused production's 0.31.27 Apply and completion on 2026-11-09
+after an hourly ExternalSecret refresh. A started plan whose saved
+fingerprint cannot be reproduced, including one prepared before that change,
+can neither complete nor roll back, because both compare against the
+preparation digest and cancellation admits only an unstarted plan; an explicit
+operator requalification or close is not built yet. Arbitrary annotations, including
 last-applied configuration containing Secret data, are never retained in the
 observation or formatted as diagnostics.
 

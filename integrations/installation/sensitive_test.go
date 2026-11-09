@@ -296,3 +296,100 @@ func TestSensitiveRefusesUnchangedRenderedOwnerThatWouldOverwriteLiveMaterial(t 
 	require.Error(t, err, "equal Git declarations can still overwrite different live owner material")
 	require.Empty(t, evidence.digest)
 }
+
+// Production's database credentials are a Secret owned by an ExternalSecret
+// that refreshes hourly. A refresh rewrites the owner's status, resourceVersion
+// and managedFields and nothing it declares; binding them refused the 0.31.27
+// plan's Apply and its completion on 2026-11-09 with no protected material
+// changed. Owner evidence binds who the owner is, what it declares, what owns
+// it and how Argo may prune it, so those changes still refuse. "Accepted"
+// mirrors verifyProtected: a fresh read must succeed with the prepared digest.
+func TestSensitiveOwnerEvidenceSurvivesControllerStatusButNotMaterialChanges(t *testing.T) {
+	const ownerPath = "apis/external-secrets.io/v1/namespaces/memql/externalsecrets/keys"
+	declared := `{"apiVersion":"external-secrets.io/v1","kind":"ExternalSecret","metadata":{"name":"keys","namespace":"memql","annotations":{"argocd.argoproj.io/compare-options":"IgnoreExtraneous"}},` +
+		`"spec":{"refreshInterval":"1h","secretStoreRef":{"name":"keyvault","kind":"SecretStore"},"target":{"name":"keys","creationPolicy":"Owner","deletionPolicy":"Retain"},"data":[{"secretKey":"example","remoteRef":{"key":"memql-example"}}]}}`
+	// The live object as the API server and the ESO controller leave it. The
+	// owner reference to the Namespace exists only so a change of the owner's
+	// own ownership has something to change.
+	live := `{"apiVersion":"external-secrets.io/v1","kind":"ExternalSecret","metadata":{"name":"keys","namespace":"memql","uid":"external-secret-uid","resourceVersion":"40","generation":1,"creationTimestamp":"2026-11-01T00:00:00Z",` +
+		`"annotations":{"argocd.argoproj.io/sync-options":"Prune=false","argocd.argoproj.io/compare-options":"IgnoreExtraneous"},` +
+		`"ownerReferences":[{"apiVersion":"v1","kind":"Namespace","name":"memql","uid":"namespace-uid"}],` +
+		`"managedFields":[{"manager":"external-secrets","operation":"Update","subresource":"status","time":"2026-11-09T12:33:00Z","fieldsType":"FieldsV1","fieldsV1":{"f:status":{"f:refreshTime":{}}}}]},` +
+		`"spec":{"refreshInterval":"1h","secretStoreRef":{"name":"keyvault","kind":"SecretStore"},"target":{"name":"keys","creationPolicy":"Owner","deletionPolicy":"Retain"},"data":[{"secretKey":"example","remoteRef":{"key":"memql-example","conversionStrategy":"Default","decodingStrategy":"None","metadataPolicy":"None"}}]},` +
+		`"status":{"binding":{"name":"keys"},"refreshTime":"2026-11-09T12:33:00Z","syncedResourceVersion":"1-0123abcd","conditions":[{"type":"Ready","status":"True","reason":"SecretSynced","message":"secret synced","lastTransitionTime":"2026-11-01T00:00:05Z"}]}}`
+	editOwner := func(t *testing.T, api *inventoryAPI, change func(owner, meta map[string]any)) {
+		editStorageResponse(t, api, ownerPath, func(owner map[string]any) { change(owner, resourceMap(owner, "metadata")) })
+	}
+	for _, test := range []struct {
+		name     string
+		change   func(*testing.T, *inventoryAPI)
+		accepted bool
+	}{
+		{"hourly refresh", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(owner, meta map[string]any) {
+				meta["resourceVersion"] = "41"
+				meta["managedFields"].([]any)[0].(map[string]any)["time"] = "2026-11-09T13:33:00Z"
+				status := resourceMap(owner, "status")
+				status["refreshTime"] = "2026-11-09T13:33:00Z"
+				status["conditions"].([]any)[0].(map[string]any)["lastTransitionTime"] = "2026-11-09T13:33:01Z"
+			})
+		}, true},
+		{"changed declaration", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(owner, _ map[string]any) { resourceMap(owner, "spec")["refreshInterval"] = "5m" })
+		}, false},
+		{"replaced owner", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(_, meta map[string]any) { meta["uid"] = "replacement-uid" })
+			editStorageResponse(t, api, protectedSecretPath, func(secret map[string]any) {
+				resourceMap(secret, "metadata")["ownerReferences"].([]any)[0].(map[string]any)["uid"] = "replacement-uid"
+			})
+		}, false},
+		{"owner finalizers", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(_, meta map[string]any) { meta["finalizers"] = []any{"example.com/hold"} })
+		}, false},
+		{"owner ownership", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(_, meta map[string]any) {
+				meta["ownerReferences"].([]any)[0].(map[string]any)["blockOwnerDeletion"] = true
+			})
+		}, false},
+		{"prune protection", func(t *testing.T, api *inventoryAPI) {
+			editOwner(t, api, func(_, meta map[string]any) {
+				delete(resourceMap(meta, "annotations"), "argocd.argoproj.io/sync-options")
+			})
+		}, false},
+	} {
+		for _, rendered := range []bool{true, false} {
+			name := test.name + "/out-of-band owner"
+			if rendered {
+				name = test.name + "/rendered owner"
+			}
+			t.Run(name, func(t *testing.T) {
+				api, before, after, required := sensitiveFixture(t)
+				if rendered {
+					withOwner := func(r argocd.RenderedRevision, revision string) argocd.RenderedRevision {
+						manifests := []string{declared}
+						for _, body := range r.Resources() {
+							manifests = append(manifests, string(body))
+						}
+						return renderInventoryFixture(t, revision, manifests)
+					}
+					before, after = withOwner(before, strings.Repeat("a", 40)), withOwner(after, strings.Repeat("b", 40))
+				}
+				api.response["apis/external-secrets.io/v1"] = `{"groupVersion":"external-secrets.io/v1","resources":[{"name":"externalsecrets","kind":"ExternalSecret","namespaced":true}]}`
+				api.response[ownerPath] = live
+				editStorageResponse(t, api, protectedSecretPath, func(secret map[string]any) {
+					resourceMap(secret, "metadata")["ownerReferences"] = []any{map[string]any{"apiVersion": "external-secrets.io/v1", "kind": "ExternalSecret", "name": "keys", "uid": "external-secret-uid", "controller": true, "blockOwnerDeletion": true}}
+				})
+				prepared, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+				require.NoError(t, err)
+				test.change(t, api)
+				fresh, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+				if test.accepted {
+					require.NoError(t, err)
+					require.Equal(t, prepared.digest, fresh.digest, "controller bookkeeping is not protected material")
+					return
+				}
+				require.False(t, err == nil && fresh.digest == prepared.digest, "a changed protected owner must not reuse its prepared evidence")
+			})
+		}
+	}
+}
