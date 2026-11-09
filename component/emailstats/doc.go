@@ -1,7 +1,8 @@
 // Package emailstats keeps the email statistics: the facts the Email
-// Overview's figures are counted from, and the scheduled walk that fills them
+// Overview's figures are counted from, the scheduled walk that fills them
 // (docs/superpowers/specs/2026-11-08-site-and-email-statistics-design.md,
-// section 5, D10 and D18). It is the `emailStats` plug-in, a component: it
+// section 5, D10 and D18), and the read that counts them for a caller
+// (section 7, statistics.go). It is the `emailStats` plug-in, a component: it
 // reads this cluster's own campaign rows and writes this cluster's own
 // tables, and calls nobody's API.
 //
@@ -57,4 +58,14 @@
 // or an unsubscribe names a recipient, whose audience it is counted under.
 // The two lookups run once per page through the engine, in batches. Opens and
 // clicks exist for campaign mail only, because only campaign mail is tracked.
+//
+// # The read, narrowed to the caller's organizations (D11)
+//
+// builtin emailStatistics groups the facts with ordinary SQL over this
+// package's own table, for the organizations the caller's grant reaches
+// (MemQLEngine.ResolveAccessGrant, the row gate's own resolution). An
+// organization the caller does not reach is dropped, not refused, so naming
+// another client's organization answers every figure null; a figure nothing
+// measured is null, never zero; and the open and click rates are of the
+// campaign mail sent in a period, by send-day cohort (statistics.go).
 package emailstats

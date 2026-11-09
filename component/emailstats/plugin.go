@@ -14,19 +14,23 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/statsperiod"
 )
 
 // The DSL-callable half, declared in dsl/campaigns/builtins.memql and executed
-// here: `builtin emailStatisticsRollup`, the five-minute fold of campaign rows
-// into email_stat_fact (rollup.go), which only its own automation's
-// maintenance principal may run.
+// here. `builtin emailStatisticsRollup` is the five-minute fold of campaign
+// rows into email_stat_fact (rollup.go), which only its own automation's
+// maintenance principal may run. `builtin emailStatistics` is the read the
+// Email Overview makes (statistics.go), which any caller may make and which
+// answers only for the organizations their grant reaches.
 //
 // # Why it is registered on EVERY node type
 //
-// The builtin is declared in dsl/campaigns/builtins.memql, which every binary
-// loads, and a capability present in the DSL and absent from the registry is a
-// boot-time resolution failure. So the plug-in registers everywhere, from
-// app/plugins_core.go; the cron leader, wherever it is, runs it.
+// The builtins are declared in dsl/campaigns/builtins.memql, which every
+// binary loads, and a capability present in the DSL and absent from the
+// registry is a boot-time resolution failure. So the plug-in registers
+// everywhere, from app/plugins_core.go; the cron leader, wherever it is, runs
+// the rollup, and any node a caller reaches answers the read.
 
 // integrationName is the plug-in name. Spelled as a string literal in
 // RegisterPlugin below as well, because the taxonomy gate scans source for the
@@ -43,15 +47,21 @@ const rollupConcept = "integration:emailStats:rollup"
 // (auth.MaintenanceActor("emailStatisticsRollupSweep")).
 const rollupPrincipal = "system:maintenance:emailStatisticsRollupSweep"
 
-// Integration exposes the rollup.
+// Integration exposes the rollup and the statistics read.
 type Integration struct {
 	engine Engine
 	bunDB  func() *bun.DB
 	logger *slog.Logger
 
+	// grants answers which organizations a statistics read's caller reaches;
+	// nil when the engine handle cannot say, and then every read answers
+	// nothing (statistics.go).
+	grants GrantResolver
+
 	// now is the rollup's clock at the start of a run, which the walk moves on
-	// by the time the run has taken; nil is time.Now. A field so a test runs
-	// the builtin at an instant of its own choosing.
+	// by the time the run has taken, and the instant a statistics read's
+	// period is counted back from; nil is time.Now. A field so a test runs
+	// either builtin at an instant of its own choosing.
 	now func() time.Time
 
 	// rollupRunning keeps one rollup per process: a run slower than the
@@ -65,11 +75,19 @@ type Integration struct {
 // NewIntegration wires the handles. The db getter is resolved at call time,
 // not at construction: a node's database handle is not necessarily up when
 // plug-ins are materialized.
+//
+// The statistics read's grant resolver is ASSERTED on the engine handle, not
+// required of it: the rollup needs only Execute, and the engine every node
+// passes is one (memql.MemQLEngine.ResolveAccessGrant). A handle that is not
+// leaves grants nil, which narrows every read to nothing rather than failing
+// the rollup's wiring or widening a read.
 func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Integration{engine: engine, bunDB: bunDB, logger: logger}
+	i := &Integration{engine: engine, bunDB: bunDB, logger: logger}
+	i.grants, _ = engine.(GrantResolver)
+	return i
 }
 
 func init() {
@@ -89,6 +107,99 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Fold new and changed campaign deliveries, engagement events and consent events into the email statistics facts, each source walked through the engine from its watermark less five minutes, at most forty pages past it per run, one fact per source record and kind; then delete facts past four hundred days. Admits only the emailStatisticsRollupSweep maintenance principal.",
 			Handler:     i.handleRollup,
 		},
+		{
+			Name:        "statistics",
+			Description: "Read a period of email statistics for the organizations the caller reaches: totals against the previous period, the open and click rates of the campaign mail sent in it, a series of one point per day or month, the leading campaigns, each rule, journey and audience, and each organization when more than one is in scope. A figure nothing measured is null, never zero, and an organization the caller does not reach is dropped, not refused.",
+			Handler:     i.handleStatistics,
+			ArgsSchema: map[string]string{
+				"accountIds": "[]string -- the organizations to read, bare ids; empty reads every organization the caller reaches; it never widens what the caller reaches",
+				"period":     "string (required) -- 7d, 30d, 90d or 12m",
+			},
+		},
+	}
+}
+
+// handleStatistics answers builtin emailStatistics: one node whose payload is
+// the read's answer (EmailStatistics.Payload), which a client reads as its
+// row.
+//
+// ANY CALLER, NARROWED, the website read's rule (component/sitetraffic):
+// there is no principal check, because what a caller reaches is decided in
+// the read by their own grant, and a caller who reaches nothing gets every
+// figure null. Only a malformed call is refused -- a period the read does not
+// offer, in a sentence that names the periods -- and before the grant is
+// read, so a malformed call costs nothing.
+func (i *Integration) handleStatistics(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	period, err := statsperiod.Parse(stringArg(args, "period"), emailPeriods...)
+	if err != nil {
+		return nil, err
+	}
+	var db *bun.DB
+	if i.bunDB != nil {
+		db = i.bunDB()
+	}
+	now := time.Now()
+	if i.now != nil {
+		now = i.now()
+	}
+	// No resolver is the zero grant: no organization, and not staff.
+	var grant memql.AccessGrant
+	if i.grants != nil {
+		grant = i.grants.ResolveAccessGrant(ctx)
+	}
+	// namedIDsArg, not a decoder that drops blanks: a list of blank ids is
+	// NAMED and names nothing, and must not read as no list at all
+	// (allowedAccounts).
+	stats, err := readStatistics(ctx, db, grant, namedIDsArg(args, "accountIds"), period, now)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(stats.Payload())
+	if err != nil {
+		return nil, fmt.Errorf("email statistics: encode the answer: %w", err)
+	}
+	return []memorynodes.MemoryNode{{
+		ID:        "statistics",
+		Concept:   statisticsConcept,
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: now.UTC(),
+		Payload:   payload,
+	}}, nil
+}
+
+func stringArg(args map[string]any, key string) string {
+	if v, ok := args[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// namedIDsArg decodes a list of ids KEEPING THAT IT WAS NAMED, as the website
+// read's twin does (component/sitetraffic, namedIdsArg): an element that is
+// blank or not a string is kept as "", which names no organization, so a list
+// holding nothing usable stays a named list and its answer stays empty --
+// never the "none named" that reads every organization the caller reaches.
+//
+// Absent, null and an empty list name nothing (nil or empty). A string is one
+// id, blank or not. Any other value is a list of one unusable id.
+func namedIDsArg(args map[string]any, key string) []string {
+	switch v := args[key].(type) {
+	case nil:
+		return nil
+	case []any:
+		out := make([]string, len(v))
+		for i, e := range v {
+			if s, ok := e.(string); ok {
+				out[i] = s
+			}
+		}
+		return out
+	case []string:
+		return append([]string{}, v...)
+	case string:
+		return []string{v}
+	default:
+		return []string{""}
 	}
 }
 

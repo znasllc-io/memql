@@ -2818,6 +2818,36 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 	return b.String()
 }
 
+// EmailStatistics -- The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns nothing.
+type EmailStatisticsArgs struct {
+	// The organizations to read, as bare ids. Empty reads every organization you reach. It narrows what you reach and never widens it.
+	AccountIds []string
+	// 7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison.
+	Period string
+}
+
+// EmailStatistics calls the engine builtin emailStatistics.
+func (qc *QueryClient) EmailStatistics(ctx context.Context, args EmailStatisticsArgs) (*Result, error) {
+	call := EmailStatisticsBuild(args)
+	return qc.executeNamed(ctx, "emailStatistics", call)
+}
+
+func EmailStatisticsBuild(args EmailStatisticsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailStatistics(")
+	if args.AccountIds != nil {
+		b.WriteString("accountIds: ")
+		b.WriteString(renderMemQLValue(args.AccountIds))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("period: ")
+	b.WriteString(quoteMemQL(args.Period))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetAppSignIn -- Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster.
 type FleetAppSignInArgs struct {
 	// v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does.

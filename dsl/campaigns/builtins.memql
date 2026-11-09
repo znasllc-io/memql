@@ -601,3 +601,17 @@ builtin campaignRunJourney { id string! }
 @executor("integration.emailStats.rollup")
 @description("Fold new and changed campaign deliveries, engagement events and consent events into the email statistics facts. Each source is walked through the engine in creation order from its watermark less five minutes, at most forty pages past it per run, and every row becomes its facts: a send on its send day; a failed or skipped delivery, and a suppression for a skip campaignStats counts as suppressed; delivered or undelivered from the provider's report; an open or click and a unique open or click per message; an unsubscribe, subscribe, bounce or complaint. One fact per record and kind, so a rerun counts nothing twice. A rule's send is attributed to its rule, a journey's send to its journey through its request id when the two are in one organization, and a subscribe or unsubscribe to its recipient's audience. Then facts past four hundred days are deleted. Answers {rows, facts, deleted, behind}.")
 builtin emailStatisticsRollup { }
+
+/// The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated
+/// by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is
+/// dropped, an empty list means every organization they reach, and a list that names none of them
+/// answers every figure null -- so a client's member who names another client's organization gets the
+/// answer of somebody who reaches nothing, and learns nothing.
+@sdk
+@executor("integration.emailStats.statistics")
+@args(profile="object")
+@description("Read a period of email statistics for the organizations the caller reaches, from the facts the email statistics rollup records: sent, delivered, undelivered, failed, skipped, suppressed, opens, clicks, unique opens, unique clicks, unsubscribes, bounces, complaints and new subscribers, against the period before; the open and click rates, the share of the campaign messages sent in the period that were opened or clicked, on any day; a series of one point per day or month with its sends, unique opens and clicks, unsubscribes, new subscribers, bounces, complaints, failures and suppressions, and the rates of the campaign mail sent that day or month; the fifty campaigns with sends in the period, by unique opens and then unique clicks; each rule and journey with mail in the period, with its sent, failed and suppressed; each audience with new subscribers, unsubscribes and the net change; and, when more than one organization is in scope, each organization's sent and rates. Answers one integration:emailStats:statistics row. A FIGURE NOTHING MEASURED IS NULL, NEVER ZERO: a day before the first recorded fact is null, and a rate is null when no campaign mail was sent. Rule and journey mail has no opens or clicks, because automated mail is not tracked. Twelve months are the current month and the twelve before it with no previous period, so previous and previousSeries are null. An organization the caller does not reach is dropped, not refused.")
+builtin emailStatistics {
+  accountIds  []string  @description("The organizations to read, as bare ids. Empty reads every organization you reach. It narrows what you reach and never widens it.")
+  period      string!   @description("7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison.")
+}

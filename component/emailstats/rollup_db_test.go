@@ -1164,8 +1164,8 @@ func TestASecondRollupInTheSameProcessIsSkipped(t *testing.T) {
 	}
 }
 
-// The plug-in registers under the name its executor names, with the one
-// capability the builtin calls.
+// The plug-in registers under the name its executors name, with the two
+// capabilities its builtins call: the rollup and the statistics read.
 func TestThePlugInOffersTheRollupItsBuiltinNames(t *testing.T) {
 	var found bool
 	for _, p := range memql.RegisteredPlugins() {
@@ -1184,8 +1184,8 @@ func TestThePlugInOffersTheRollupItsBuiltinNames(t *testing.T) {
 		for _, c := range provider.Capabilities() {
 			names = append(names, c.Name)
 		}
-		if strings.Join(names, ",") != "rollup" {
-			t.Errorf("the capabilities are %v, want rollup", names)
+		if strings.Join(names, ",") != "rollup,statistics" {
+			t.Errorf("the capabilities are %v, want rollup and statistics", names)
 		}
 	}
 	if !found {

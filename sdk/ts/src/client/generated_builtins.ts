@@ -2064,6 +2064,31 @@ QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRend
   return this.executeNamed("emailRender", buildEmailRender(args), opts);
 };
 
+/** The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns nothing. */
+export interface EmailStatisticsArgs {
+  /** The organizations to read, as bare ids. Empty reads every organization you reach. It narrows what you reach and never widens it. */
+  accountIds?: string[];
+  /** 7d, 30d or 90d (daily), each compared with the period just before it; or 12m, the current month and the twelve before it, with no comparison. */
+  period: string;
+}
+
+export function buildEmailStatistics(args: EmailStatisticsArgs): string {
+  const parts: string[] = [];
+  if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
+  parts.push("period: " + renderMemQLValue(args.period));
+  return "builtin emailStatistics(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailStatistics(args: EmailStatisticsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailStatistics = function (this: QueryClient, args: EmailStatisticsArgs = {} as EmailStatisticsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailStatistics", buildEmailStatistics(args), opts);
+};
+
 /** Start signing in to an app on YOUR OWN machine, and return at once with the id of the record to watch. The machine must be yours, connected, with the app allowed for this cluster and a Cockpit that can run a sign-in; each of those is refused before anything is written. The v1:worker:appSignIn row then carries the page to open and any code to enter. The app writes its own login on the machine, and no credential ever crosses to the cluster. */
 export interface FleetAppSignInArgs {
   /** v1:worker:registration.id of the machine. Another user's answers exactly as a made-up one does. */
