@@ -582,13 +582,23 @@ its 24-hour cap, and this keeps a long visit unbroken without letting it outlive
 guest access. Ask once, not in a loop: a `429` or a `5xx` says nothing, so keep
 the page's state and try at the next tick as for any other reply.
 
+The helper under [What the page does](#what-the-page-does) already has the
+change, inside `accessSession`: it remembers from the reply's `guest` whether
+the session is a guest's, and the end timer and a `401` call `end()` instead of
+`lock()`. For a guest's session `end()` is this:
+
 ```js
-// Call this where the session helper's lock() would show the code box.
+// Inside accessSession. open() sets guest = session.guest on every reply.
 async function reopenAsGuest() {
-  const response = await post("/guest", {});
-  if (response.ok) return open(await response.json()); // a new session: the visit goes on
-  if (response.status === 403) return lock(); // closed: guest access has ended
-  // 429, 5xx, a network error: say nothing either way, and ask again at the next tick
+  let response;
+  try {
+    response = await post("/guest", {});
+  } catch {
+    return; // a network error says nothing either way: the next tick asks again
+  }
+  if (response.ok) open(await response.json()); // a new session: the visit goes on
+  else if (response.status === 403) lock(); // closed: guest access has ended
+  // 429 and 5xx the same: say nothing, and ask again at the next tick
 }
 ```
 
@@ -854,6 +864,7 @@ const post = (path, body) =>
 
 export function accessSession({ onOpen, onLocked }) {
   let live = false;
+  let guest = false; // the session reply says whose session it is
   let endTimer;
   let poller;
 
@@ -866,11 +877,15 @@ export function accessSession({ onOpen, onLocked }) {
     onLocked();
   }
 
+  // A guest's session that ends is not yet the end of the visit: ask the guest route once.
+  const end = () => (guest ? reopenAsGuest() : lock());
+
   // Obligation 1: end the visit from remainingMs, never from expiresAt against this clock.
   function open(session) {
     live = true;
+    guest = session.guest;
     clearTimeout(endTimer);
-    endTimer = setTimeout(lock, session.remainingMs); // a changed remainingMs lands here again
+    endTimer = setTimeout(end, session.remainingMs); // a changed remainingMs lands here again
     poller ??= setInterval(recheck, 5000);
     onOpen(session);
   }
@@ -883,9 +898,20 @@ export function accessSession({ onOpen, onLocked }) {
     } catch {
       return;
     }
-    if (response.status === 401) lock(); // none or ended
+    if (response.status === 401) end(); // none or ended
     else if (response.ok) open(await response.json());
   }
+  async function reopenAsGuest() {
+    let response;
+    try {
+      response = await post("/guest", {});
+    } catch {
+      return; // a network error says nothing either way: the next tick asks again
+    }
+    if (response.ok) open(await response.json());
+    else if (response.status === 403) lock();
+  }
+
   const recheck = () => live && document.visibilityState === "visible" && check();
   document.addEventListener("visibilitychange", recheck);
   window.addEventListener("focus", recheck);
@@ -909,7 +935,7 @@ export function accessSession({ onOpen, onLocked }) {
     async call(name, args) {
       const response = await post("/call", { call: name, args });
       if (response.status === 401) {
-        lock();
+        end();
         throw new Error("The visit has ended.");
       }
       if (!response.ok) throw new Error(`The call was refused (${response.status}).`);
