@@ -825,39 +825,35 @@ how to declare a gate are in [Access codes](site-access-codes.md).
 
 ## Counting a single-page app's pages
 
-A page view is counted from the navigation that opens a page. A single-page app
-navigates once and changes pages with `history.pushState` after that, which the
-edge never sees. So the edge also inserts a small script into every HTML
-document of a live deployable that is not system-owned, beside the version
-monitor, and the script reports those changes. Nothing is added to the site's
-build, and the site's content policy (`script-src 'self'`, `connect-src 'self'`)
-already admits it.
+A page view is counted from the navigation that opens a page, and a single-page
+app navigates once, changing pages with `history.pushState` after that. So the
+edge inserts `<script src="/_memql/view.js" defer></script>` into every HTML
+document a live, non-system-owned deployable serves from its own origin, and the
+script reports those changes. Nothing is added to the site's build, and the
+site's content policy (`script-src 'self'`, `connect-src 'self'`) already admits
+it.
+
+**Where the tags land.** The edge's hosting tags -- the version monitor, then
+this one -- go right after `<head>`; in a document without a `<head>`, ahead of
+`<body>`, else after the doctype, else at the very start. The document's ETag
+gains a `view-v1` marker, so a copy a browser or a CDN cached without the tag is
+answered in full rather than revalidated as current.
 
 The edge answers two exact paths on the site's own origin for this
-(`component/edge/view.go`), ahead of the generic `/_memql/*` proxy:
+(`component/edge/view.go`), ahead of the generic `/_memql/*` proxy, and forwards
+neither, whatever the site's `apiProxy` says:
 
 | On the site's origin | Does |
 |---|---|
 | `GET /_memql/view.js` | serves the script, cached for a day |
 | `POST /_memql/view` | takes a page change the script reported, and answers `204` |
 
-- **The first load is never reported.** The navigation that loaded the page was
-  already counted, so the script reports only a later change of
-  `location.pathname`.
-- **A ping counts only from the site itself.** Its `Origin` must name the site's
-  own host. When there is no `Origin`, or it is the `null` a browser sends from
-  a page whose referrer policy is `no-referrer`, `Sec-Fetch-Site` must say
-  `same-origin`. The body is the path, at most 1 KiB, and one address may send
-  120 a minute to a site on each replica.
-- **Every ping is answered `204`,** whether it counted or not, so the route says
-  nothing about why one was refused. A refused ping is still a request the edge
-  answered, and counts under health.
-- **Nothing is forwarded,** whatever the site's `apiProxy` says, **and no
-  visitor cookie is read.** The one cookie the edge looks at is an operator's
-  preview grant: a ping from a page an operator is previewing is not a page
-  view, as the navigation that opened it is not.
+**No visitor cookie is read.** The one cookie the edge looks at is an operator's
+preview grant: a ping from a page an operator is previewing is not a page view,
+as the navigation that opened it is not.
 
-What a page view records, and what is never stored, is in
+What makes a ping a page view -- the origin rule, the per-address budget and the
+body limit -- and what a page view records are in
 [Statistics and health](deployables.md#statistics-and-health).
 
 ---
@@ -1192,45 +1188,16 @@ see [The prerender budget](#the-prerender-budget).
 
 ## What the edge records about a request
 
-Every request the edge serves for a site is recorded once -- which
-deployable, which replica, the status answered, the bytes, the duration, what
-the edge did with it (an asset, an HTML document, the SPA fallback, a proxied
-call, its own runtime-config document or scripts, a page-change ping, or
-nothing at all for a paused or draft site), and whether a bot asked. A page
-view also records the page's path, where the visitor arrived from, their
-country, device, browser and operating system, and a visitor id that lasts one
-UTC day. The database folds the log into per-minute and per-hour request
-counts, which therefore cannot disagree with it, and a rollup every five
-minutes folds it into each deployable's hourly and daily website statistics.
-
-Worth knowing while reading this page:
-
-- **The address and the user agent are never stored.** The edge reads them
-  while serving, only to derive a page view's country, device, browser,
-  operating system and visitor id, and neither is a field of the record. The
-  query string, the fragment and the referring URL are not kept either: the
-  path is normalized, and a source is a `utm_source` or a referring host.
-- **The address is the front door's**: the right-most `X-Forwarded-For` entry,
-  which a caller cannot choose, else the connection's peer. Behind a CDN or
-  another proxy in front of the front door it is the proxy's, so every visitor
-  behind one of its addresses counts as one visitor, placed in the proxy's
-  country.
-- **System-owned sites are excluded**, by their own row field rather than by
-  name: MemQL OS never writes a request line, so its traffic reads as
-  unmeasured forever and a third system-owned surface added later is excluded
-  by the same line. So are the cluster's own health probe of a home page and
-  the version checks open pages make.
-- **Neither a bot's request nor one served under a preview grant is ever a
-  page view.** Both are still recorded for health.
-- **The write is off the request path.** It is a non-blocking hand-off to a
-  batching writer that drops and counts under pressure; nothing a visitor
-  waits for touches the database. `MEMQL_EDGE_REQUEST_LOG_ENABLED=false`
-  switches it off on a replica, and every figure then misses what that replica
-  served -- which reads as a low figure, not as an error.
-
-What counts as a page view, how a visitor is counted without a cookie, the
-retention of each tier and how "unmeasured" differs from zero are in
+Every request the edge serves for a deployable is recorded once, through a
+non-blocking hand-off to a batching writer, so nothing a visitor waits for
+touches the database. What a row carries, what is never stored, which requests
+are not recorded at all and how long each tier is kept are in
 [Statistics and health](deployables.md#statistics-and-health).
+
+**A CDN in front of the edge changes who a visitor is.** A visitor is counted
+by the address the front door records, the right-most `X-Forwarded-For` entry,
+and behind a CDN that is the CDN's address: everyone behind one of its
+addresses counts as one visitor, placed in the CDN's country.
 
 ---
 
