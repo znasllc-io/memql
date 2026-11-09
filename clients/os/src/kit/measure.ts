@@ -179,3 +179,53 @@ export function absentSentence(figure: AbsentFigure): string {
 export function figureWords(figure: Figure | undefined): string {
   return figure?.kind === "measured" ? `${figure.value.toLocaleString()}${figure.atLeast ? " or more" : ""}` : "--";
 }
+
+/**
+ * How a figure moved against the same figure for the period before it: by a
+ * share of what it was, from nothing to something (`new`), or not at all
+ * that can be said (`none`).
+ *
+ * `none` IS AN ANSWER ABOUT THE COMPARISON, NOT ABOUT THE FIGURE. It is what
+ * a period with no period before it gives (twelve months, spec D4), and what
+ * either side being absent gives -- a website whose visitors were not counted
+ * last week did not grow from zero, and the badge that says so would be the
+ * absent-is-zero mistake this module exists to prevent, one figure removed.
+ */
+export type Change = { kind: "none" } | { kind: "new" } | { kind: "ratio"; ratio: number };
+
+/**
+ * The change from `previous` to `current`.
+ *
+ * Absent on either side, or no previous figure at all, is `none`. A previous
+ * zero is `new` when there is something now and no change when there is still
+ * nothing. Otherwise the difference as a share of the previous figure.
+ *
+ * A FLOOR ON EITHER SIDE IS `none` too: "5,000 or more" against 4,000 is at
+ * least a quarter up, and "+25%" would state the least it could be as what it
+ * is. A negative figure (nothing here counts below zero) has no share to
+ * speak of either.
+ */
+export function changeOf(current: Figure, previous: Figure | undefined): Change {
+  if (previous === undefined || current.kind !== "measured" || previous.kind !== "measured") return { kind: "none" };
+  if (current.atLeast || previous.atLeast) return { kind: "none" };
+  if (current.value < 0 || previous.value < 0) return { kind: "none" };
+  if (previous.value === 0) return current.value > 0 ? { kind: "new" } : { kind: "ratio", ratio: 0 };
+  return { kind: "ratio", ratio: (current.value - previous.value) / previous.value };
+}
+
+/** Below half a percent either way, a change rounds to no change rather than to a signed zero. */
+const NO_CHANGE_BELOW = 0.005;
+
+/**
+ * A change as a person reads it: "+12%", "−8%" (a true minus sign, U+2212,
+ * the width of the plus), "No change", "New", or nothing for `none`.
+ */
+export function changeLabel(change: Change): string {
+  if (change.kind === "none") return "";
+  if (change.kind === "new") return "New";
+  const { ratio } = change;
+  if (!Number.isFinite(ratio)) return "";
+  if (Math.abs(ratio) < NO_CHANGE_BELOW) return "No change";
+  const percent = Math.round(Math.abs(ratio) * 100).toLocaleString("en-US");
+  return `${ratio > 0 ? "+" : "−"}${percent}%`;
+}
