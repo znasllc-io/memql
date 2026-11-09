@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"os"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/envregistry"
@@ -79,6 +80,9 @@ func TestLegacyEngineEnvNamesStillConfigure(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.legacy, func(t *testing.T) {
+			// Per case, so each one also starts from the defaults its comment
+			// assumes rather than from the previous case's bridged values.
+			preserveAliasTargets(t)
 			// ONLY the legacy name is set -- exactly an operator who has not
 			// touched their configuration since before the rename.
 			t.Setenv(tc.legacy, tc.value)
@@ -104,6 +108,7 @@ func TestLegacyEngineEnvNamesStillConfigure(t *testing.T) {
 // new spelling should not be overridden by a stale legacy value still sitting
 // in a sealed envelope or a shell profile they forgot about.
 func TestNewEngineEnvNameBeatsItsLegacyAlias(t *testing.T) {
+	preserveAliasTargets(t)
 	t.Setenv("MEMORY_ENGINE_MAX_RESULTS", "111")
 	t.Setenv("MEMQL_MEMORY_ENGINE_MAX_RESULTS", "222")
 
@@ -113,5 +118,29 @@ func TestNewEngineEnvNameBeatsItsLegacyAlias(t *testing.T) {
 		t.Errorf("MaxResults = %d, want 222. A legacy value that overrides the new "+
 			"name turns the migration path into a trap: adopting the new spelling "+
 			"would appear to do nothing.", got)
+	}
+}
+
+// preserveAliasTargets restores, when t ends, every variable
+// envregistry.ApplyLegacyEnvAliases may write.
+//
+// t.Setenv on a LEGACY name restores that name only. The shim then copies its
+// value onto the NEW name with a bare os.Setenv, and it does that for every
+// legacy name it finds set, not just the one the test set. Nothing restored
+// the new names, so this file used to leave five engine variables set for the
+// rest of the `go test` run: every engine built after it had a 37-row list cap,
+// MaxResults 4321 and MaxWindow 9876. TestMain now fails a run that leaves any
+// environment variable changed.
+func preserveAliasTargets(t *testing.T) {
+	t.Helper()
+	for newName := range envregistry.LegacyAliases {
+		value, set := os.LookupEnv(newName)
+		t.Setenv(newName, value) // registers the restore
+		if !set {
+			// Unset meanwhile, as it was before the test.
+			if err := os.Unsetenv(newName); err != nil {
+				t.Fatalf("unset %s: %v", newName, err)
+			}
+		}
 	}
 }
