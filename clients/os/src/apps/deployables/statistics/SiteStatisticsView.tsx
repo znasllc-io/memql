@@ -1,13 +1,13 @@
 import { useId, useRef, useState } from "react";
 
 import { AutoRefresh, Caption, Fact, Facts, Notice, Subhead } from "../../../kit";
-import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatBytes, formatCount, formatRate } from "../../../kit/format";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { Measure } from "../../../kit/MeasureView";
 import { absent, figureOf, type Figure } from "../../../kit/measure";
 import { PageHelp } from "../../../kit/pageHelp";
-import { PeriodControl, RankedList, SITE_PERIODS, StatFigures, TimeChart, periodLabel, previousComparable, type ChartPoint, type Period, type StatFigure } from "../../../kit/statistics";
+import { PeriodControl, RankedList, SITE_PERIODS, StatFigures, TimeChart, TimeChartSkeleton, periodLabel, previousComparable, type ChartPoint, type Period, type StatFigure } from "../../../kit/statistics";
 import { useWide } from "../../../kit/useWide";
 import { useOsConnection } from "../../../live/connection";
 import type { SiteRow } from "../rows";
@@ -138,7 +138,7 @@ function pointsOf(spec: FigureSpec, series: readonly SitePoint[]): ChartPoint[] 
 export function FigureChart({ specs, selected, stats }: { specs: readonly FigureSpec[]; selected: string; stats: SiteStatistics | null }) {
   const spec = specs.find((candidate) => candidate.id === selected) ?? specs[0]!;
   if (stats === null) {
-    return <div className="deployable-statistics-chart-pending"><ContentSkeleton label={`Loading ${spec.label.toLowerCase()} over time`} /></div>;
+    return <TimeChartSkeleton label={`Loading ${spec.label.toLowerCase()} over time`} />;
   }
   const comparable = previousComparable(stats.prevStart, stats.measuredSince);
   return (
@@ -253,17 +253,22 @@ function SiteStatistics({ siteId, period, onShowAll }: { siteId: string; period:
             <RankedList title="Pages" rows={list("page")} onShowAll={() => onShowAll("page")} showAllLabel={SHOW_ALL_LABELS.page} loading={stats === null} empty={EMPTY_LIST} />
             <RankedList title="Sources" rows={list("source")} onShowAll={() => onShowAll("source")} showAllLabel={SHOW_ALL_LABELS.source} loading={stats === null} empty={EMPTY_LIST} />
             <RankedList title="Countries" rows={list("country")} onShowAll={() => onShowAll("country")} showAllLabel={SHOW_ALL_LABELS.country} loading={stats === null} empty={EMPTY_LIST} footer={<DbIpCredit />} />
-            <div className="deployable-statistics-devices">
-              {/* THE TABS SWITCH ONE LIST IN PLACE, not the page, so the shared
-                  tabs' return to the top of the page (kit/pageScroll, "Tabs
-                  start at the top") must not apply: the person is halfway down
-                  it. They stand above the list's heading because RankedList
-                  has no place under its heading for them. */}
-              <div className="deployable-statistics-device-tabs" data-os-scroll-ignore>
-                <LocalTabs label="Device lists" value={devices} onChange={setDevices} options={DEVICE_TABS} />
-              </div>
-              <RankedList title="Devices" rows={list(devices)} onShowAll={() => onShowAll(devices)} showAllLabel={SHOW_ALL_LABELS[devices]} loading={stats === null} empty={EMPTY_LIST} />
-            </div>
+            <RankedList
+              title="Devices"
+              rows={list(devices)}
+              onShowAll={() => onShowAll(devices)}
+              showAllLabel={SHOW_ALL_LABELS[devices]}
+              loading={stats === null}
+              empty={EMPTY_LIST}
+              control={
+                // THE TABS SWITCH ONE LIST IN PLACE, not the page, so the shared
+                // tabs' return to the top of the page (kit/pageScroll, "Tabs
+                // start at the top") must not apply: the person is halfway down it.
+                <div className="deployable-statistics-device-tabs" data-os-scroll-ignore>
+                  <LocalTabs label="Device lists" value={devices} onChange={setDevices} options={DEVICE_TABS} />
+                </div>
+              }
+            />
           </div>
 
           <section className="deployable-statistics-health" aria-label="Health">

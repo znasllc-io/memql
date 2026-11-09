@@ -68,6 +68,7 @@ export function RankedList({
   onShowAll,
   showAllLabel = "Show all",
   footer,
+  control,
   loading = false,
   empty = "Nothing yet.",
 }: {
@@ -83,6 +84,12 @@ export function RankedList({
   showAllLabel?: string;
   /** A quiet line under the rows (the country data's attribution); drawn only under rows. */
   footer?: ReactNode;
+  /**
+   * A control that chooses what the list shows (Devices' Device / Browser /
+   * OS tabs), drawn under the heading and above the rows, so the heading
+   * lines up with the lists beside it and the control reads as the list's own.
+   */
+  control?: ReactNode;
   /** The read has not answered: with no rows yet, the list's shape is drawn. */
   loading?: boolean;
   /** What an empty answer says. */
@@ -97,6 +104,7 @@ export function RankedList({
   return (
     <section className="os-ranked-list" aria-label={title}>
       <Subhead actions={showAll}>{title}</Subhead>
+      {control ? <div className="os-ranked-control">{control}</div> : null}
       {rows.length === 0 ? (
         loading ? <RecordListSkeleton label={`Loading ${title.toLowerCase()}`} rows={Math.min(Math.max(limit, 1), 5)} /> : <Caption>{empty}</Caption>
       ) : (

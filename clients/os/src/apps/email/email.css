@@ -22,13 +22,6 @@
   margin: 8px 0 0;
 }
 
-/* A chart's place while its read is on its way: the content shape, in the
- * height the kit's TimeChart draws at its default (a 160px plot with its
- * readout line and time axis, 208px), so nothing below moves when it lands. */
-.email-overview-chart-shape {
-  min-height: 208px;
-}
-
 /* One part of a row's quiet line ("1,204 subscribed"): a narrow window wraps
  * the line at its separators, never between a figure and its word. */
 .email-overview-part {

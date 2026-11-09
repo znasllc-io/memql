@@ -3,13 +3,13 @@ import { Send, Users, Workflow, Zap } from "lucide-react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AutoRefresh, Button, Caption, EmptyState, Fact, Facts, HeadNote, Measure, Notice, RecordList, RecordRow, Subhead } from "../../../kit";
-import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatCount } from "../../../kit/format";
 import { absent, figureOf, type AbsentFigure } from "../../../kit/measure";
 import { Overview, OverviewBreakdown } from "../../../kit/Overview";
 import { PageHelp } from "../../../kit/pageHelp";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
-import { EMAIL_PERIODS, PeriodControl, RankedList, StatFigures, TimeChart, type RankedRow } from "../../../kit/statistics";
+import { EMAIL_PERIODS, PeriodControl, RankedList, StatFigures, TimeChart, TimeChartSkeleton, type RankedRow } from "../../../kit/statistics";
 import { feedIsBehind } from "../../../live/useLiveCollection";
 import { useClientScope } from "../../accounts/clientScope";
 import { accountName, untitledAccountName } from "../../accounts/rows";
@@ -119,9 +119,7 @@ function chosen(specs: readonly FigureSpec[], id: string): FigureSpec {
 
 /** A chart of one figure, its shape while the read is on its way, and nothing without an answer to draw. */
 function FigureChart({ spec, stats, reading }: { spec: FigureSpec; stats: EmailStatistics | null; reading: boolean }) {
-  // The chart has no reading state of its own (kit TimeChart), so its place
-  // holds the content shape, in the chart's own height.
-  if (reading) return <div className="email-overview-chart-shape"><ContentSkeleton label="Loading the chart" /></div>;
+  if (reading) return <TimeChartSkeleton label={`Loading ${spec.label.toLowerCase()} over time`} />;
   if (stats === null) return null;
   return <TimeChart label={spec.label} bucket={stats.bucket} points={chartPoints(stats.series, spec.id)} previous={previousPoints(stats, spec.id)} format={formatOf(spec)} />;
 }

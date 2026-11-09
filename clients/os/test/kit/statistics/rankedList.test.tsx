@@ -123,6 +123,24 @@ describe("its states", () => {
     rerender(<RankedList title="Countries" rows={[]} footer={footer} />);
     expect(screen.queryByRole("link", { name: "IP Geolocation by DB-IP" })).toBeNull();
   });
+
+  it("stands a control under its heading and above its rows, in every state", () => {
+    const control = <button type="button">Browser</button>;
+    const { rerender } = render(<RankedList title="Devices" rows={pages(2)} control={control} />);
+    const section = screen.getByRole("region", { name: "Devices" });
+    const heading = within(section).getByRole("heading", { name: "Devices" });
+    const tab = within(section).getByRole("button", { name: "Browser" });
+    const list = within(section).getByRole("list");
+    // Document order: heading, then the control, then the rows.
+    expect(heading.compareDocumentPosition(tab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tab.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tab.closest(".os-ranked-control")).not.toBeNull();
+    // The control stays while the list reads and when it comes back empty.
+    rerender(<RankedList title="Devices" rows={[]} control={control} loading />);
+    expect(screen.getByRole("button", { name: "Browser" })).toBeTruthy();
+    rerender(<RankedList title="Devices" rows={[]} control={control} />);
+    expect(screen.getByRole("button", { name: "Browser" })).toBeTruthy();
+  });
 });
 
 describe("its look", () => {

@@ -301,10 +301,12 @@ describe("the period's figures", () => {
       expect(figure(id).shaped).toBe(true);
       expect(figure(id).value).not.toContain(DASH);
     }
-    // The chart's place holds a shape too: the chart itself has no reading of its own.
-    expect(document.querySelector(".os-time-chart")).toBeNull();
+    // The chart's place holds a shape too (kit TimeChartSkeleton): no plot to
+    // read or focus yet.
+    expect(document.querySelector(".os-time-chart[aria-busy='true']")).not.toBeNull();
+    expect(within(pane("overview")).queryByRole("application")).toBeNull();
     expect(within(pane("overview")).getAllByRole("status").map((node) => node.textContent)).toEqual(
-      expect.arrayContaining(["Loading sent", "Loading the chart", "Loading audience growth", "Loading top campaigns", "Loading automations"]),
+      expect.arrayContaining(["Loading sent", "Loading sent over time", "Loading audience growth", "Loading top campaigns", "Loading automations"]),
     );
     expect(pane("overview").querySelector(".os-notice")).toBeNull();
     expect(screen.queryByText("Nothing sent yet")).toBeNull();

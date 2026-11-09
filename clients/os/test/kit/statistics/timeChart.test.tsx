@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { TimeChart, type ChartPoint } from "../../../src/kit/statistics/TimeChart";
+import { TimeChart, TimeChartSkeleton, type ChartPoint } from "../../../src/kit/statistics/TimeChart";
 
 afterEach(cleanup);
 
@@ -239,6 +239,27 @@ describe("for a screen reader", () => {
     expect(container.querySelector("figcaption")?.textContent).toBe("Visitors: 1 point on Nov 2; highest 7 on Nov 2.");
     rerender(<TimeChart label="Visitors" bucket="day" points={[]} format={count} />);
     expect(container.querySelector("figcaption")?.textContent).toBe("Visitors: no points.");
+  });
+});
+
+describe("while its read is on its way", () => {
+  it("stands in the chart's own place as a shape, announced and not painted", () => {
+    const { container } = render(<TimeChartSkeleton label="Loading visitors over time" height={120} />);
+    const shape = screen.getByRole("status");
+    expect(shape.getAttribute("aria-busy")).toBe("true");
+    expect(shape.tagName).toBe("FIGURE");
+    expect(shape.classList.contains("os-time-chart")).toBe(true);
+    // The words are for a screen reader only: loading is shapes, never words.
+    expect(shape.querySelector(".os-sr-only")?.textContent).toBe("Loading visitors over time");
+    // The same head, plot and time axis a chart draws, at the plot's height.
+    expect(container.querySelector(".os-time-chart-head")).not.toBeNull();
+    expect(container.querySelector(".os-time-chart-times")).not.toBeNull();
+    const plot = container.querySelector<HTMLElement>(".os-time-chart-plot");
+    expect(plot?.style.height).toBe("120px");
+    expect(plot?.querySelector(".os-skeleton-block")).not.toBeNull();
+    // Nothing to focus or read yet: no application, no readout.
+    expect(screen.queryByRole("application")).toBeNull();
+    expect(container.querySelector("figcaption")).toBeNull();
   });
 });
 

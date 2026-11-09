@@ -54,6 +54,10 @@
 .os-time-chart-dot[data-series="previous"] { background: var(--os-muted); }
 .os-time-chart-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--os-rail); transform: translateX(-50%); pointer-events: none; }
 .os-time-chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--os-muted); font-size: var(--os-text-sm); pointer-events: none; }
+/* TimeChartSkeleton: the kit's skeleton block, softened, filling the plot's
+ * place (two classes, so it wins over the block's own 12px wherever the
+ * stylesheets land in the cascade). */
+.os-time-chart-plot > .os-time-chart-skeleton { position: absolute; inset: 0; height: auto; border-radius: 6px; opacity: 0.55; }
 
 .os-time-chart-times { grid-column: 2; position: relative; height: 14px; color: var(--os-muted); font-size: var(--os-text-xs); line-height: 14px; font-variant-numeric: tabular-nums; }
 .os-time-chart-times > span { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
@@ -100,6 +104,7 @@ button.os-stat-figure:hover { background: var(--os-hover); }
 .os-ranked-list > .os-subhead { min-height: var(--os-control-h); margin: 0; }
 .os-ranked-list > .os-subhead { display: flex; align-items: center; }
 
+.os-ranked-control { min-width: 0; }
 .os-ranked-rows { display: grid; gap: 2px; margin: 0 -8px; padding: 0; list-style: none; }
 .os-ranked-rows > li { min-width: 0; }
 .os-ranked-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; width: 100%; min-height: 34px; padding: 6px 8px; border: 0; border-radius: var(--os-selection-radius); background: none; color: var(--os-ink); font: inherit; font-size: var(--os-text-base); text-align: left; }

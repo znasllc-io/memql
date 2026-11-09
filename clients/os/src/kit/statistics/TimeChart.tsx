@@ -152,6 +152,33 @@ function Swatch({ series }: { series: "current" | "previous" }) {
   return <span className="os-time-chart-swatch" data-series={series} aria-hidden="true" />;
 }
 
+/**
+ * The chart's place while its read is on its way: the same figure, head,
+ * plot and time axis a TimeChart draws, with a quiet shape where the line
+ * will be, so nothing below moves when the chart lands. Loading is shapes,
+ * never words: the label is announced, not painted.
+ */
+export function TimeChartSkeleton({ label, height = DEFAULT_HEIGHT }: {
+  /** What is on its way ("Loading visitors over time"), for assistive technology. */
+  label: string;
+  /** The plot's height, as the TimeChart it stands for will be given. */
+  height?: number;
+}) {
+  return (
+    <figure className="os-time-chart" role="status" aria-busy="true">
+      <span className="os-sr-only">{label}</span>
+      <div className="os-time-chart-head" aria-hidden="true" />
+      <div className="os-time-chart-body" aria-hidden="true">
+        <div className="os-time-chart-values" style={{ height }} />
+        <div className="os-time-chart-plot" style={{ height }}>
+          <span className="os-skeleton-block os-time-chart-skeleton" />
+        </div>
+        <div className="os-time-chart-times" />
+      </div>
+    </figure>
+  );
+}
+
 export function TimeChart({ label, bucket, points, previous, format, height = DEFAULT_HEIGHT }: {
   /** What is drawn ("Visitors"). Names the plot, and starts its sentence. */
   label: string;

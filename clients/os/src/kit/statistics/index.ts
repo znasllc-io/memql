@@ -3,7 +3,7 @@
 // picker that stands beside PeriodControl lives with the account concept
 // (apps/accounts/ScopeControl), not here.
 
-export { TimeChart, type ChartPoint } from "./TimeChart";
+export { TimeChart, TimeChartSkeleton, type ChartPoint } from "./TimeChart";
 export { StatFigures, type StatFigure } from "./StatFigures";
 export { RankedList, type RankedRow } from "./RankedList";
 export { PeriodControl } from "./PeriodControl";
