@@ -402,22 +402,25 @@ func (f *fixture) journeyWithEnrollment(recipient string) (journey, enrollment s
 	return journey, enrollment
 }
 
-// walkFrom sets every source's watermark to at, so the next run walks from
-// five minutes before it -- the rows this test is about, and at most a few
-// minutes of the tests before it.
+// walkFrom sets every source's watermark to at, and records each walked
+// through it, so the next run walks from five minutes before it -- the rows
+// this test is about, and at most a few minutes of the tests before it.
 func walkFrom(t *testing.T, db *bun.DB, at time.Time) {
 	t.Helper()
 	for _, s := range sources {
-		if _, err := db.NewRaw(`INSERT INTO email_stat_watermark (source, through) VALUES (?, ?)
-			ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through`, s.name, at.UTC()).Exec(context.Background()); err != nil {
+		if _, err := db.NewRaw(`INSERT INTO email_stat_watermark (source, through, walked_through) VALUES (?, ?, ?)
+			ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through, walked_through = EXCLUDED.walked_through`,
+			s.name, at.UTC(), at.UTC()).Exec(context.Background()); err != nil {
 			t.Fatalf("set the %s watermark: %v", s.name, err)
 		}
 	}
 }
 
+// watermarkOf answers where a source's next walk resumes, and false when it
+// has nowhere to resume from: never walked, or walked with no row yet.
 func watermarkOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
 	t.Helper()
-	var through time.Time
+	var through sql.NullTime
 	err := db.NewRaw(`SELECT through FROM email_stat_watermark WHERE source = ?`, source).Scan(context.Background(), &through)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false
@@ -425,7 +428,22 @@ func watermarkOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
 	if err != nil {
 		t.Fatalf("read the %s watermark: %v", source, err)
 	}
-	return through, true
+	return through.Time, through.Valid
+}
+
+// walkedOf answers how far a source has been walked for the statistics read
+// (email_stat_watermark.walked_through), and false when it has not been.
+func walkedOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
+	t.Helper()
+	var at sql.NullTime
+	err := db.NewRaw(`SELECT walked_through FROM email_stat_watermark WHERE source = ?`, source).Scan(context.Background(), &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false
+	}
+	if err != nil {
+		t.Fatalf("read how far the %s walk has gone: %v", source, err)
+	}
+	return at.Time, at.Valid
 }
 
 type storedFact struct {
@@ -739,6 +757,70 @@ func TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept(t *testing.T) {
 	if !asked {
 		t.Error("the run never read the engagement source")
 	}
+}
+
+// THE LEADER'S CLOCK NEVER DECIDES WHAT THE NEXT WALK READS. Rows are stamped
+// by their writers' clocks; the cron leader's clock may run fast. Here it runs
+// six minutes fast. Had the walk resumed from that clock less the overlap, the
+// next run would start a minute after the true time of this one, and a row
+// that a writer with a true clock stamped half a minute after it -- written
+// after it -- would never be read while its day read as measured. The walk
+// resumes from the newest row it read, so the next run, on a leader whose
+// clock is right, reads it.
+//
+// sinceEngine answers as the engine does, with the rows written since the
+// walk's since and no others: the shared database holds rows another test
+// dates an hour ahead, which a real walk reads and caps at the leader's clock,
+// and which would decide this test.
+func TestALeaderClockRunningFastStillReadsTheRowsWrittenAfterIt(t *testing.T) {
+	_, db := statsEngine(t)
+	suffix := fmt.Sprintf("fastleader-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(context.Background())
+		walkFrom(t, db, time.Now())
+	})
+	start := time.Now().UTC().Truncate(time.Millisecond)
+	walkFrom(t, db, start.Add(-time.Minute))
+	row := func(name string, at time.Time) map[string]any {
+		return map[string]any{"id": "v1:campaigns:delivery:" + suffix + "-" + name, "accountId": "org-x", "status": "sent", "sentAt": stamp(at), "createdAt": at}
+	}
+	engine := &sinceEngine{t: t, rows: []map[string]any{row("before", start.Add(-30*time.Second))}}
+
+	if _, err := runRollup(principalCtx(t), engine, db, start.Add(6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if through, _ := watermarkOf(t, db, sourceDelivery); through.After(start) {
+		t.Errorf("after a run whose clock ran six minutes fast the walk resumes from %v, past every row it read", through)
+	}
+
+	engine.rows = append(engine.rows, row("after", start.Add(30*time.Second)))
+	if _, err := runRollup(principalCtx(t), engine, db, start.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	facts := storedFacts(t, db, suffix+"-before", suffix+"-after")
+	wantFact(t, facts, kindSent, suffix+"-before")
+	wantFact(t, facts, kindSent, suffix+"-after")
+}
+
+// sinceEngine answers the delivery walk with every row written at or after its
+// since, oldest first, in one page, and every other read with nothing.
+type sinceEngine struct {
+	t    *testing.T
+	rows []map[string]any
+}
+
+func (e *sinceEngine) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
+	if m := queryName.FindStringSubmatch(query); m == nil || m[1] != "deliveriesWrittenSince" {
+		return memql.NewResultWithOutput([]any{}), nil
+	}
+	since := sinceOf(e.t, query)
+	out := []any{}
+	for _, r := range e.rows {
+		if at, _ := r["createdAt"].(time.Time); !at.Before(since) {
+			out = append(out, r)
+		}
+	}
+	return memql.NewResultWithOutput(out), nil
 }
 
 var sinceArg = regexp.MustCompile(`since: "([^"]+)"`)
@@ -1217,10 +1299,14 @@ func TestAFailedPageLeavesTheWatermarkAtTheLastWrittenPage(t *testing.T) {
 	if through, _ := watermarkOf(t, db, sourceDelivery); !through.Equal(t2) {
 		t.Errorf("the delivery watermark is %v, want the written page's newest row, %v", through, t2)
 	}
-	// The consent walk read its last page, so it is through the clock it asked
-	// that page by, past its one row (TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy).
-	if through, _ := watermarkOf(t, db, sourceConsent); through.Before(t3) || through.After(time.Now()) {
-		t.Errorf("the consent watermark is %v, want it past its row's %v and not past the clock: one source's failure must not stop another", through, t3)
+	// The consent walk read its last page: it resumes from its one row, and is
+	// walked through the clock it asked that page by
+	// (TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy).
+	if through, _ := watermarkOf(t, db, sourceConsent); !through.Equal(t3) {
+		t.Errorf("the consent watermark is %v, want its row's %v: one source's failure must not stop another", through, t3)
+	}
+	if walked, _ := walkedOf(t, db, sourceConsent); walked.Before(t3) || walked.After(time.Now()) {
+		t.Errorf("the consent walk is through %v, want it past its row's %v and not past the clock", walked, t3)
 	}
 	facts := storedFacts(t, db, suffix+"-1", suffix+"-2", suffix+"-c")
 	wantFact(t, facts, kindSent, suffix+"-1")
@@ -1518,13 +1604,16 @@ func TestTheRollupKeepsThePoolsStatementTimeout(t *testing.T) {
 	wantThePoolsTimeout(t, "the rollup", rec, "email_stat_fact")
 }
 
-// A WALK THAT READS ITS LAST PAGE IS THROUGH THE CLOCK IT ASKED BY, rows or
-// none: every row written before that instant had been read or was inside the
-// overlap the next run reads again. So a source with nothing new, or nothing
-// at all, records how far it was walked, and the statistics read can tell
-// "walked, nothing there" from "never walked" (statistics.go). A walk that
-// stops at its page bound with rows still to read is through the newest row
-// it wrote, not the clock: it has not read what comes after.
+// A WALK THAT READS ITS LAST PAGE IS WALKED THROUGH THE CLOCK IT ASKED BY, rows
+// or none: every row written before that instant had been read or was inside
+// the overlap the next run reads again. So a source with nothing new, or
+// nothing at all, records how far it was walked, and the statistics read can
+// tell "walked, nothing there" from "never walked" (statistics.go). Where the
+// next walk resumes is still the newest row it read, never the clock: a
+// source with nothing new keeps its old watermark, and one that never had a
+// row has none. A walk that stops at its page bound with rows still to read is
+// walked through the newest row it wrote, not the clock: it has not read what
+// comes after.
 func TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy(t *testing.T) {
 	_, db := statsEngine(t)
 	suffix := fmt.Sprintf("caughtup-%d", time.Now().UnixNano())
@@ -1555,14 +1644,22 @@ func TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy(t *testing.T) {
 	}
 	ended := time.Now().UTC()
 	for _, source := range []string{sourceDelivery, sourceEngagement, sourceConsent} {
-		through, ok := watermarkOf(t, db, source)
+		walked, ok := walkedOf(t, db, source)
 		if !ok {
-			t.Errorf("%s has no watermark after a walk that read its last page: walked with nothing there reads as never walked", source)
+			t.Errorf("%s is walked through nothing after a walk that read its last page: walked with nothing there reads as never walked", source)
 			continue
 		}
-		if through.Before(began) || through.After(ended) {
-			t.Errorf("the %s watermark is %v, want the clock its walk asked its last page by, within [%v, %v]", source, through, began, ended)
+		if walked.Before(began) || walked.After(ended) {
+			t.Errorf("the %s walk is through %v, want the clock it asked its last page by, within [%v, %v]", source, walked, began, ended)
 		}
+	}
+	for source, want := range map[string]time.Time{sourceDelivery: base.Add(10 * time.Minute), sourceEngagement: base} {
+		if through, ok := watermarkOf(t, db, source); !ok || !through.Equal(want) {
+			t.Errorf("the %s walk resumes from %v (%v), want its newest row's time, %v: the clock never decides it", source, through, ok, want)
+		}
+	}
+	if through, ok := watermarkOf(t, db, sourceConsent); ok {
+		t.Errorf("a source walked with no row resumes from %v, want nowhere: it has no row to resume from", through)
 	}
 
 	// Forty-one pages of a row each: the run stops at forty, behind, through
@@ -1588,7 +1685,38 @@ func TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy(t *testing.T) {
 		t.Fatalf("the run read %d deliveries without stopping at its page bound: %+v", rep.Rows[sourceDelivery], rep)
 	}
 	if through, _ := watermarkOf(t, db, sourceDelivery); !through.Equal(fortieth) {
-		t.Errorf("a walk stopped behind is through %v, want the newest row it wrote, %v", through, fortieth)
+		t.Errorf("a walk stopped behind resumes from %v, want the newest row it wrote, %v", through, fortieth)
+	}
+	if walked, _ := walkedOf(t, db, sourceDelivery); !walked.Equal(fortieth) {
+		t.Errorf("a walk stopped behind is walked through %v, want the newest row it wrote, %v", walked, fortieth)
+	}
+}
+
+// HOW FAR A SOURCE IS WALKED IS NEVER PAST THE CLOCK EITHER. A leader whose
+// clock ran an hour fast records its caught-up walks through its own clock;
+// kept, that would let the read count as measured an hour no walk has read,
+// and a rollup that stopped inside it would go unseen. A run on a leader
+// whose clock is right forgets one further ahead than the overlap and records
+// its own. Where the walk resumes is left as it was.
+func TestAWalkedThroughFarAheadOfTheClockIsForgotten(t *testing.T) {
+	_, db := statsEngine(t)
+	t.Cleanup(func() { walkFrom(t, db, time.Now()) })
+	base := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Minute)
+	walkFrom(t, db, base)
+	ahead := time.Now().UTC().Add(time.Hour)
+	if _, err := db.NewRaw(`UPDATE email_stat_watermark SET walked_through = ? WHERE source = ?`, ahead, sourceEngagement).Exec(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	began := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := runRollup(principalCtx(t), &scriptedEngine{pages: map[string]map[string]scriptedPage{}}, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ended := time.Now().UTC()
+	if walked, ok := walkedOf(t, db, sourceEngagement); !ok || walked.Before(began) || walked.After(ended) {
+		t.Errorf("a walk an hour ahead of the clock is now through %v (%v), want this run's clock, within [%v, %v]", walked, ok, began, ended)
+	}
+	if through, ok := watermarkOf(t, db, sourceEngagement); !ok || !through.Equal(base) {
+		t.Errorf("the engagement walk resumes from %v (%v), want where it was, %v", through, ok, base)
 	}
 }
 
@@ -1655,6 +1783,45 @@ func TestAWalkStartNeverMovesBack(t *testing.T) {
 	}
 }
 
+// THE TIMEOUT IS KNOWN BY THE SERVER'S OWN ANSWER. A statement the server ends
+// at its statement timeout answers SQLSTATE 57014, which isStatementTimeout
+// reads off the driver's error, wrapped as the walk wraps it, or off its text
+// alone when the engine passes on only that; a connection reset or an ended
+// context is not a timeout.
+func TestAStatementTimeoutIsToldApartFromAnyOtherFailure(t *testing.T) {
+	_, db := statsEngine(t)
+	var timeout error
+	_ = db.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SET LOCAL statement_timeout = '50ms'`); err != nil {
+			t.Fatal(err)
+		}
+		_, timeout = tx.ExecContext(ctx, `SELECT pg_sleep(2)`)
+		return timeout
+	})
+	if timeout == nil {
+		t.Fatal("a two-second statement under a fifty-millisecond timeout did not fail")
+	}
+	for name, err := range map[string]error{
+		"the driver's error":    timeout,
+		"the walk's wrapping":   fmt.Errorf("read a page: %w", timeout),
+		"its text alone":        errors.New(timeout.Error()),
+		"the engine's wrapping": fmt.Errorf("execute: %v", timeout),
+	} {
+		if !isStatementTimeout(err) {
+			t.Errorf("%s (%v) is not read as the statement timeout", name, err)
+		}
+	}
+	for _, err := range []error{
+		errors.New("read tcp 10.0.0.5:5432: connection reset by peer"),
+		fmt.Errorf("read a page: %w", context.Canceled),
+		fmt.Errorf("read a page: %w", context.DeadlineExceeded),
+	} {
+		if isStatementTimeout(err) {
+			t.Errorf("%v is read as the statement timeout", err)
+		}
+	}
+}
+
 // walkStartOf is where a source's first walk starts (email_stat_walk_start),
 // and false when nothing has moved it from four hundred days back.
 func walkStartOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
@@ -1680,22 +1847,27 @@ func walkStartOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
 // days back, then two hundred, then one hundred. The next run that reads the
 // page walks from there, and the read counts nothing before it for that
 // source's figures, while a source walked from further back is measured there.
-// The timeout and any other failure are said apart in the log.
+//
+// ONLY THE TIMEOUT MOVES IT. Any other failure of that page -- a connection
+// reset while the database switches over -- says nothing about how long the
+// history is: it leaves the start where it was, is logged as the run's
+// failure, and the next run tries the same walk again. Moved on every
+// failure, nine failing runs would bring a source down to its last day.
 func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	_, db := statsEngine(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("cliff-%d", time.Now().UnixNano())
-	moved := []string{sourceDelivery, sourceConsent}
+	firstWalks := []string{sourceDelivery, sourceConsent}
 	t.Cleanup(func() {
 		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(ctx)
-		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source IN (?)`, bun.In(moved)).Exec(ctx)
+		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source IN (?)`, bun.In(firstWalks)).Exec(ctx)
 		walkFrom(t, db, time.Now())
 	})
 	// Noon, so each half way lands mid-day: the day it moves the start to is
 	// the same however long a run takes.
 	now := dayOf(time.Now()).Add(12 * time.Hour)
 	walkFrom(t, db, now)
-	for _, s := range moved {
+	for _, s := range firstWalks {
 		for _, q := range []string{`DELETE FROM email_stat_watermark WHERE source = ?`, `DELETE FROM email_stat_walk_start WHERE source = ?`} {
 			if _, err := db.NewRaw(q, s).Exec(ctx); err != nil {
 				t.Fatal(err)
@@ -1713,7 +1885,7 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 
 	failing := &scriptedEngine{pages: map[string]map[string]scriptedPage{
 		"deliveriesWrittenSince":    {"": {err: errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE=57014)")}},
-		"consentEventsWrittenSince": {"": {err: errors.New("the engine went away")}},
+		"consentEventsWrittenSince": {"": {err: errors.New("read tcp 10.0.0.5:5432: connection reset by peer")}},
 	}}
 	horizon := now.Add(-retention)
 	halfWay := dayOf(horizon.Add(now.Sub(horizon) / 2))
@@ -1722,10 +1894,13 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 		if err := runAt(failing); err == nil {
 			t.Fatalf("failure %d: the run answered no error for two sources whose first page failed", n+1)
 		}
-		for _, s := range moved {
-			if got, ok := walkStartOf(t, db, s); !ok || !got.Equal(want) {
-				t.Errorf("after failure %d the %s first walk starts at %v (%v), want %v", n+1, s, got, ok, want)
-			}
+		if got, ok := walkStartOf(t, db, sourceDelivery); !ok || !got.Equal(want) {
+			t.Errorf("after timeout %d the %s first walk starts at %v (%v), want %v", n+1, sourceDelivery, got, ok, want)
+		}
+		if got, ok := walkStartOf(t, db, sourceConsent); ok {
+			t.Errorf("after failure %d the %s first walk starts at %v: a connection reset moved it", n+1, sourceConsent, got)
+		}
+		for _, s := range firstWalks {
 			if through, ok := watermarkOf(t, db, s); ok {
 				t.Errorf("a failed first page left a %s watermark at %v", s, through)
 			}
@@ -1734,21 +1909,25 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	for _, line := range []string{
 		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, halfWay.Format(time.DateOnly)),
 		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, threeQuarters.Format(time.DateOnly)),
-		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history failed", sourceConsent, threeQuarters.Format(time.DateOnly)),
+		"source=" + sourceConsent + " error=\"read a page: read tcp 10.0.0.5:5432: connection reset by peer\"",
 	} {
 		if !strings.Contains(logs.String(), line) {
 			t.Errorf("the log does not say %q:\n%s", line, logs.String())
 		}
 	}
+	if line := fmt.Sprintf("email statistics for %s start from", sourceConsent); strings.Contains(logs.String(), line) {
+		t.Errorf("the log says %q, for a failure that moved nothing:\n%s", line, logs.String())
+	}
 
 	// A run whose own context ends during the first page -- the node
 	// stopping, the lead moving -- moves nothing: it says nothing about how
-	// long the history is. It does not try to: a write on the ended context
-	// would fail anyway, so the error is what shows the attempt.
+	// long the history is, though its cancelled statement answers the
+	// timeout's SQLSTATE, 57014. It does not try to: a write on the ended
+	// context would fail anyway, so the error is what shows the attempt.
 	stopping, stop := context.WithCancel(principalCtx(t))
 	defer stop()
 	cancelled := &scriptedEngine{
-		pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": {"": {err: context.Canceled}}},
+		pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": {"": {err: errors.New("ERROR: canceling statement due to user request (SQLSTATE=57014)")}}},
 		before: func(construct, _ string) {
 			if construct == "deliveriesWrittenSince" {
 				stop()
@@ -1770,18 +1949,27 @@ func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
 	}
 	walked := 0
 	for _, c := range reading.calls {
-		if c.construct == "deliveriesWrittenSince" {
+		switch c.construct {
+		case "deliveriesWrittenSince":
 			walked++
 			if since := sinceOf(t, c.query); !since.Equal(threeQuarters) {
-				t.Errorf("the deliveries' first walk started at %v, want the start the failures left, %v", since, threeQuarters)
+				t.Errorf("the deliveries' first walk started at %v, want the start the timeouts left, %v", since, threeQuarters)
+			}
+		case "consentEventsWrittenSince":
+			if since := sinceOf(t, c.query); !since.Equal(horizon) {
+				t.Errorf("the consent first walk started at %v, want four hundred days back, %v: a connection reset moves nothing", since, horizon)
 			}
 		}
 	}
 	if walked == 0 {
 		t.Fatal("the run never read the deliveries")
 	}
-	if _, ok := watermarkOf(t, db, sourceDelivery); !ok {
-		t.Error("the walk that read its first page left no delivery watermark")
+	// The walks found no rows, so there is nothing to resume from, but each is
+	// walked through the clock it asked its last page by.
+	for _, s := range firstWalks {
+		if at, ok := walkedOf(t, db, s); !ok || at.Before(now) {
+			t.Errorf("the %s walk that read its first page is walked through %v (%v), want the run's clock", s, at, ok)
+		}
 	}
 
 	// Before the start nothing of the deliveries is measured: a month that

@@ -42,15 +42,18 @@
 // # Why the five-minute overlap
 //
 // Each source is walked from a watermark, the newest row.createdAt a run has
-// written past -- or, once a walk has read its last page, the clock it asked
-// that page by, rows or none -- less five minutes. A row's time is stamped by
-// the clock of the node that wrote it and the row commits after that, so a
-// row can arrive with a time before a watermark another run already moved
-// past; reading five minutes behind picks it up, and reading a row twice
-// costs nothing. The watermark never passes the clock of the run that writes
-// it, so one row stamped ahead cannot hide the rows after it (rollup.go). It
-// is also how far the read counts: a figure whose sources' walks have not
-// reached a day is null there, never zero (statistics.go).
+// written past, less five minutes. A row's time is stamped by the clock of
+// the node that wrote it and the row commits after that, so a row can arrive
+// with a time before a watermark another run already moved past; reading five
+// minutes behind picks it up, and reading a row twice costs nothing. The
+// watermark never passes the clock of the run that writes it, so one row
+// stamped ahead cannot hide the rows after it, and the run's clock never sets
+// it, so a cron leader whose clock runs fast cannot shrink the overlap
+// (rollup.go, "Never past the clock"). How far the read counts is a second
+// instant beside it, how far the source has been walked: the newest row too,
+// or, once a walk has read its last page, the clock it asked that page by,
+// rows or none. A figure whose sources' walks have not reached a day is null
+// there, never zero (statistics.go).
 //
 // # Attribution (D18)
 //

@@ -67,8 +67,9 @@ type Integration struct {
 	// rollupRunning keeps one rollup per process: a run slower than the
 	// five-minute schedule must not have the next one queue up behind it and
 	// walk the same pages again. Two replicas need no such guard: the facts are
-	// keyed, and no watermark write moves a watermark back -- "Multi-node" in
-	// rollup.go, which also names the one write that lowers one.
+	// keyed, and no write moves a watermark, or how far a source is walked,
+	// back -- "Multi-node" in rollup.go, which also names the writes that lower
+	// one.
 	rollupRunning atomic.Bool
 }
 
@@ -277,20 +278,16 @@ func (i *Integration) logFailures(err error) {
 	for _, f := range failures {
 		var src *sourceFailure
 		if errors.As(f, &src) {
-			// A first walk whose first page failed moved the next one's start
-			// (rollup.go, "A first walk that cannot read its first page"): the
-			// Warn names the source and the day its statistics now start from,
-			// and says apart the timeout the move exists for.
+			// A first walk whose first page timed out moved the next one's
+			// start (rollup.go, "A first walk that cannot read its first
+			// page"): the Warn names the source and the day its statistics now
+			// start from. Any other failure moves nothing and is logged below.
 			var moved *firstWalkMoved
 			if errors.As(src.Err, &moved) {
-				why := "failed"
-				if moved.TimedOut {
-					why = "timed out"
-				}
-				i.logger.Warn(fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history %s",
-					src.Source, moved.Start.Format(time.DateOnly), why),
+				i.logger.Warn(fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out",
+					src.Source, moved.Start.Format(time.DateOnly)),
 					"component", "emailstats", "source", src.Source, "start", moved.Start.Format(time.DateOnly),
-					"timedOut", moved.TimedOut, "error", moved.Err)
+					"error", moved.Err)
 				continue
 			}
 			i.logger.Warn("Email statistics for a source were not folded; the next run carries on from its watermark",

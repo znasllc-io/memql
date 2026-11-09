@@ -13,16 +13,22 @@ import (
 // from above how far the rollup has walked each source (statistics.go,
 // "Absent is never zero").
 
-// coverageGrace is how far behind the end of a range, or the read's clock, a
-// source's watermark may be with the range still counted as walked: three of
-// the rollup's five-minute runs (emailStatisticsRollupSweep,
-// dsl/campaigns/automations.memql). A healthy rollup records each source's
-// watermark at the clock it asked the source's last page by, every run
+// coverageGrace is how far behind the read's clock a source may have been
+// walked with the range under way still counted as walked: three of the
+// rollup's five-minute runs (emailStatisticsRollupSweep,
+// dsl/campaigns/automations.memql). A healthy rollup records each source as
+// walked through the clock it asked the source's last page by, every run
 // (rollup.go, "Walked, nothing there"), so a read made between two runs finds
-// each watermark up to one run old and must not show today's figures as
-// missing for it; one three runs old belongs to a rollup that has stopped or
-// is catching up. The price is that a range read within this long of its end
-// may lack those last minutes' facts, as the range under way does.
+// each up to one run old and must not show today's figures as missing for it;
+// three runs old belongs to a rollup that has stopped or is catching up. The
+// price is that the range under way, and one that ended within this long of
+// the read, may lack those last minutes' facts.
+//
+// ONLY THE RANGE UNDER WAY. A range that ended longer ago than this needs its
+// sources walked through its end: given the grace too, a rollup that stopped
+// in a day's last quarter hour would leave that day measured but short, while
+// every bucket after it read as null
+// (TestAFinishedDayIsMeasuredOnlyOnceItsSourcesAreWalkedThroughItsEnd).
 const coverageGrace = 15 * time.Minute
 
 // The sources each figure is counted from (facts.go): a figure is measured
@@ -39,7 +45,8 @@ var (
 // read, in the read's own snapshot (statistics.go, "Absent is never zero").
 type coverage struct {
 	since time.Time
-	// walked is each source's watermark; a source with none was never walked.
+	// walked is how far each source has been walked (walked_through, rollup.go,
+	// "Never past the clock"); a source with none was never walked.
 	walked map[string]time.Time
 	// startsAt is where a source's walk starts when a first walk that could
 	// not read its first page moved it (rollup.go): the walk never reads what
@@ -54,18 +61,21 @@ type coverage struct {
 // covers reports whether a range [start, end) is measured for a figure
 // counted from these sources: it ends after the first recorded day, and each
 // source's walk began no later than its start and has been walked through its
-// end -- through the read's clock for a range under way -- less
-// coverageGrace. A range that straddles a source's start is not measured for
-// it: the part before the start was never read.
+// end. A range under way -- one that ends after the read's clock less
+// coverageGrace -- needs its sources walked only through the sooner of its end
+// and that clock, less the grace. A range that straddles a source's start is
+// not measured for it: the part before the start was never read.
 func (c coverage) covers(start, end time.Time, sources ...string) bool {
 	if !end.After(c.since) {
 		return false
 	}
 	need := end
-	if c.now.Before(need) {
-		need = c.now
+	if end.After(c.now.Add(-coverageGrace)) {
+		if c.now.Before(need) {
+			need = c.now
+		}
+		need = need.Add(-coverageGrace)
 	}
-	need = need.Add(-coverageGrace)
 	for _, s := range sources {
 		through, ok := c.walked[s]
 		if !ok || through.Before(need) {
@@ -84,9 +94,9 @@ func readCoverage(ctx context.Context, tx bun.Tx, since, now time.Time) (coverag
 	c := coverage{since: since, now: now, walked: map[string]time.Time{}, startsAt: map[string]time.Time{}}
 	var walked []struct {
 		Source  string    `bun:"source"`
-		Through time.Time `bun:"through"`
+		Through time.Time `bun:"walked_through"`
 	}
-	if err := tx.NewRaw(`SELECT source, through FROM email_stat_watermark`).Scan(ctx, &walked); err != nil {
+	if err := tx.NewRaw(`SELECT source, walked_through FROM email_stat_watermark WHERE walked_through IS NOT NULL`).Scan(ctx, &walked); err != nil {
 		return coverage{}, fmt.Errorf("read how far the rollup has walked: %w", err)
 	}
 	for _, r := range walked {

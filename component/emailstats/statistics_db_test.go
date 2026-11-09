@@ -131,14 +131,15 @@ func clearStatsBand(t *testing.T, db *bun.DB) {
 	}
 }
 
-// walked records how far a source's walk has read, as the rollup records it;
+// walked records how far a source has been walked, which is what the read
+// counts a figure as measured by (walked_through, as the rollup records it);
 // neverWalked removes the record, as on a cluster the rollup has not reached.
 // On a band fixture these move the shared watermarks, which the fixture puts
 // back at the real clock when the test ends.
 func (f *statsFixture) walked(source string, through time.Time) {
 	f.t.Helper()
-	if _, err := f.db.NewRaw(`INSERT INTO email_stat_watermark (source, through) VALUES (?, ?)
-		ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through`, source, through.UTC()).Exec(context.Background()); err != nil {
+	if _, err := f.db.NewRaw(`INSERT INTO email_stat_watermark (source, walked_through) VALUES (?, ?)
+		ON CONFLICT (source) DO UPDATE SET walked_through = EXCLUDED.walked_through`, source, through.UTC()).Exec(context.Background()); err != nil {
 		f.t.Fatalf("record the %s walk through %s: %v", source, through, err)
 	}
 }
@@ -1263,6 +1264,32 @@ func TestAWatermarkARunBehindStillCountsTheDayUnderWay(t *testing.T) {
 	}
 	if num(got.Series[5].Sent) != "0" {
 		t.Errorf("yesterday %s, want it measured: it ended long before the watermark", pointLine(got.Series[5]))
+	}
+}
+
+// A FINISHED DAY NEEDS ITS SOURCES WALKED THROUGH ITS END. The grace is for the
+// range under way, which a healthy rollup is always up to a run behind; a day
+// that ended long before the read, walked to ten minutes short of its end -- a
+// rollup that stopped in its last quarter hour -- is not measured, rather than
+// measured and short while every bucket after it is null. The day before it,
+// walked through, is measured.
+func TestAFinishedDayIsMeasuredOnlyOnceItsSourcesAreWalkedThroughItsEnd(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	a := statFact{account: f.id("a"), campaign: f.id("camp")}
+	f.times(3, kindSent, day("2041-06-14"), a)
+	f.times(2, kindSent, day("2041-06-15"), a)
+	f.walked(sourceDelivery, day("2041-06-16").Add(-10*time.Minute))
+
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	if p := got.Series[3]; num(p.Sent) != "3" {
+		t.Errorf("the fourteenth, walked through: %s; want its 3 sends measured", pointLine(p))
+	}
+	if p := got.Series[4]; p.Sent != nil {
+		t.Errorf("the fifteenth, walked to ten minutes before its end: %s; want its sends null", pointLine(p))
+	}
+	if got.Totals.Sent != nil {
+		t.Errorf("the week, walked only part way: %s; want its sends null", totalsLine(got.Totals))
 	}
 }
 

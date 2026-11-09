@@ -43,17 +43,21 @@ import (
 //
 // # Walked, nothing there
 //
-// The page a walk reads LAST moves the watermark further: to the clock as the
-// walk asked for it, rows or none. Every row written before that instant had
-// been read, or was a late commit inside the overlap the next run reads again
+// The watermark is where the next walk resumes; how far a source has been
+// WALKED is a second instant beside it (email_stat_watermark.walked_through),
+// which the statistics read counts a figure as measured by (statistics.go,
+// "Absent is never zero"). It is the newest row written, like the watermark,
+// until a walk reads its LAST page: then it is the clock as the walk asked for
+// that page, rows or none. Every row written before that instant had been
+// read, or was a late commit inside the overlap the next run reads again
 // (below), so the walk is through that instant. Without it a source with
-// nothing new keeps the watermark of its last row -- days old on a quiet
-// cluster, absent on one that never had a row -- and the statistics read,
-// which counts a figure only where its sources have been walked
-// (statistics.go, "Absent is never zero"), could not tell a source walked to
-// the clock with nothing in it from one the rollup has not reached. A walk
-// that stops at its page bound with rows still to read has not read what
-// comes after, and keeps the newest row it wrote
+// nothing new would be walked only through its last row -- days old on a
+// quiet cluster, nothing on one that never had a row -- and the read could not
+// tell a source walked to the clock with nothing in it from one the rollup has
+// not reached. A source walked with no row yet has no watermark to resume
+// from, and its next walk is a first walk again; a source never walked has
+// neither. A walk that stops at its page bound with rows still to read has not
+// read what comes after, and is walked through the newest row it wrote
 // (TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy).
 //
 // # A first walk that cannot read its first page
@@ -67,22 +71,33 @@ import (
 // hundred days back, fail the same way, and the source's statistics would
 // never begin.
 //
-// So when the FIRST page of a FIRST walk fails -- any failure of the engine's
-// read of it, though the timeout is the one it exists for and is logged apart
-// -- the next first walk starts half way from this one's start to the clock
-// it asked the page by: 400 days, then 200, then 100, down to a floor of a day
-// (firstWalkFloor), at a UTC midnight. The start is recorded in
-// email_stat_walk_start, not in memory, so a run on another node after the
-// cron lead moves carries on from it, and each move is a Warn naming the
-// source and the start (plugin.go). A start only moves later (GREATEST): two
-// replicas that both failed leave the later of their starts. Once a walk
-// reads a page, the watermark takes over, and the start stays where it was
-// as the beginning of that source's record: the statistics read counts
-// nothing of the source before it (statistics_coverage.go), so the days the
-// walk gave up read as not measured rather than as zero. Only the read of the
-// page moves it, and not when the run's own context ended: what the page costs
-// grows with the span, while attributing or writing a page, or a node
-// stopping, does not (TestAFirstWalkThatCannotReadItsFirstPageStartsLater).
+// So when the FIRST page of a FIRST walk ends at the statement timeout
+// (SQLSTATE 57014, isStatementTimeout), the next first walk starts half way
+// from this one's start to the clock it asked the page by: 400 days, then
+// 200, then 100, down to a floor of a day (firstWalkFloor), at a UTC
+// midnight. The start is recorded in email_stat_walk_start, not in memory, so
+// a run on another node after the cron lead moves carries on from it, and
+// each move is a Warn naming the source and the start (plugin.go). A start
+// only moves later (GREATEST): two replicas that both timed out leave the
+// later of their starts. Once a walk reads a page, the watermark takes over,
+// and the start stays where it was as the beginning of that source's record:
+// the statistics read counts nothing of the source before it
+// (statistics_coverage.go), so the days the walk gave up read as not measured
+// rather than as zero.
+//
+// ONLY THE TIMEOUT. What the page costs grows with the span; nothing else that
+// can go wrong does. Any other failure -- a connection reset while the
+// database switches over, a node stopping, attributing or writing a page --
+// leaves the start where it was and is the run's failure like any other, and
+// the next run tries the same walk again: moved on every failure, a source
+// would be down to its last day after nine failing runs. Not when the run's
+// own context ended either, because 57014 is query_canceled, which is also
+// what a statement cancelled on request answers
+// (TestAFirstWalkThatCannotReadItsFirstPageStartsLater).
+//
+// THE KNOWN LIMIT. The remedy covers a first walk's first page; a walk that has
+// a watermark and whose later pages grow past the timeout stalls visibly, its
+// figures null and a Warn on every run.
 //
 // # Why the overlap
 //
@@ -97,6 +112,18 @@ import (
 //
 // # Never past the clock
 //
+// Two clocks are in play, and each decides one thing. The WRITERS' clocks stamp
+// row.createdAt, and the watermark is the newest of those a walk wrote past:
+// it alone decides where the next walk resumes. The cron LEADER's clock -- the
+// run's own `now` plus the time since the run began, so a run long enough to
+// overlap the next one judges by the time it reads -- only caps the
+// watermark, and decides how far a caught-up source is walked for the
+// statistics read (above). Resumed from the leader's clock, a leader whose
+// clock runs fast would move the next walk's start past rows not yet written:
+// the five-minute overlap would shrink by its error, and past five minutes the
+// rows a true clock stamps in between would never be read while their days
+// read as measured (TestALeaderClockRunningFastStillReadsTheRowsWrittenAfterIt).
+//
 // The opposite skew is worse, so the watermark is capped at the clock. A row
 // dated AHEAD -- a writer whose clock runs fast, a version time somebody got
 // wrong -- would otherwise carry the watermark with it, every row written
@@ -105,18 +132,21 @@ import (
 // caught up. Capped, the row is counted and read again on each run until the
 // clock passes it, which costs nothing.
 //
-// The clock is the run's own `now` plus the time since the run began, so a run
-// long enough to overlap the next one judges by the time it reads, not the time
-// it started. A stored watermark further ahead of that clock than the overlap
-// absorbs -- which only a database restored from elsewhere, or a leader whose
-// clock ran fast, could leave -- cannot say how far the walk really read, so it
-// is dropped and the source is walked again from four hundred days back, as on
-// a first run; the keyed facts make the re-read count nothing twice. A
-// watermark less far ahead is kept: it is another run's, written a moment ago
-// by a node whose clock is a little ahead of this one, and dropping it would
-// send this run back over the whole history for nothing
-// (TestARowDatedAheadOfTheClockDoesNotHoldTheWalk,
-// TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept).
+// A stored watermark further ahead of the clock than the overlap absorbs --
+// which only a database restored from elsewhere, or a row dated ahead read by
+// a leader whose clock ran fast, could leave -- cannot say how far the walk really
+// read, so it is dropped and the source is walked again as a first walk: from
+// four hundred days back, or from the start an earlier first walk's timeout
+// moved it to, and that walk's first page can move the start again. The keyed
+// facts make the re-read count nothing twice. A watermark less far ahead is
+// kept: it is another run's, written a moment ago by a node whose clock is a
+// little ahead of this one, and dropping it would send this run back over the
+// whole history for nothing (TestARowDatedAheadOfTheClockDoesNotHoldTheWalk,
+// TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept). How far a source is
+// walked is held to the same bound: one further ahead than the overlap is
+// forgotten, and the run records its own, so a leader whose clock ran fast
+// cannot leave the read counting as measured what no walk has read
+// (TestAWalkedThroughFarAheadOfTheClockIsForgotten).
 //
 // # Bounded runs that always advance
 //
@@ -199,11 +229,11 @@ import (
 //
 // The run executes on whichever node holds the cron lead, and a lead that
 // moves mid-run can briefly leave two runs walking at once. Nothing here needs
-// a lock for that: the facts are keyed, and a watermark write never moves it
-// back (GREATEST), so two runs over the same rows write each fact once and
-// leave the watermark where the further of them got. The one write that does
-// lower a watermark is the drop above, of one further ahead of the clock than
-// any run could have written.
+// a lock for that: the facts are keyed, and neither the watermark nor how far
+// a source is walked is ever moved back by a write (GREATEST), so two runs
+// over the same rows write each fact once and leave both where the further of
+// them got. The only writes that lower either are the drops above, of one
+// further ahead of the clock than any run could have written.
 
 // Engine is the narrow engine surface the rollup needs: the seam every Go
 // component in this tree uses to ask a named query.
@@ -399,12 +429,17 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 	// A watermark further ahead of the clock -- as it reads now, at the start
 	// of this source's walk -- than the overlap absorbs is dropped, and the
 	// walk starts over as a first run; one less far ahead is another run's
-	// and is kept. See "Never past the clock" above.
-	if tolerance := clock().Add(watermarkOverlap); found && from.After(tolerance) {
+	// and is kept. How far the source is walked is held to the same bound.
+	// See "Never past the clock" above.
+	tolerance := clock().Add(watermarkOverlap)
+	if found && from.After(tolerance) {
 		if err := dropWatermarkAhead(ctx, db, src.name, tolerance); err != nil {
 			return w, err
 		}
 		from, found = time.Time{}, false
+	}
+	if err := forgetWalkedAhead(ctx, db, src.name, tolerance); err != nil {
+		return w, err
 	}
 	// Never further back than retention keeps: a row older than the horizon
 	// gives facts the same run would delete.
@@ -434,16 +469,17 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		// walk is through this instant. See "Walked, nothing there" above.
 		askedAt := clock()
 		res, err := engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
-		if err != nil && !found && read == 0 && ctx.Err() == nil {
-			// The first page of a first walk: start the next run's first walk
-			// later. See "A first walk that cannot read its first page". Not
+		if err != nil && !found && read == 0 && ctx.Err() == nil && isStatementTimeout(err) {
+			// The first page of a first walk ended at the statement timeout:
+			// start the next run's first walk later. Only the timeout, and not
 			// when the run's own context ended -- the node stopping, the lead
-			// moving -- which says nothing about how long the history is.
+			// moving -- whose cancelled statement answers the same SQLSTATE. See
+			// "A first walk that cannot read its first page".
 			next := laterStart(since, askedAt)
 			if serr := recordWalkStart(ctx, db, src.name, next); serr != nil {
 				return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
 			}
-			return w, &firstWalkMoved{Start: next, TimedOut: isStatementTimeout(err), Err: fmt.Errorf("read a page: %w", err)}
+			return w, &firstWalkMoved{Start: next, Err: fmt.Errorf("read a page: %w", err)}
 		}
 		if err != nil {
 			return w, fmt.Errorf("read a page: %w", err)
@@ -475,18 +511,21 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		if facts, err = attribute(ctx, engine, uniqueFacts(facts), refs, testRuns); err != nil {
 			return w, err
 		}
-		// Capped at the clock as it reads now: see "Never past the clock".
+		// Where the next walk resumes: the newest row's own time, capped at the
+		// clock as it reads now. The clock never decides it. See "Never past
+		// the clock".
 		through := newest
 		if now := clock(); through.After(now) {
 			through = now
 		}
-		// The last page is through the clock it was asked by, rows or none:
-		// see "Walked, nothing there". askedAt is never past the clock, so the
-		// cap above still holds.
-		if next == "" && askedAt.After(through) {
-			through = askedAt
+		// How far the source is walked: as far, or for the last page the clock
+		// it was asked by, rows or none. See "Walked, nothing there". askedAt is
+		// never past the clock, so the cap above still holds.
+		walkedThrough := through
+		if next == "" && askedAt.After(walkedThrough) {
+			walkedThrough = askedAt
 		}
-		n, err := recordPage(ctx, db, src.name, facts, through)
+		n, err := recordPage(ctx, db, src.name, facts, through, walkedThrough)
 		if err != nil {
 			return w, err
 		}
@@ -715,14 +754,16 @@ type factRow struct {
 	Day           string `bun:"day"`
 }
 
-// recordPage writes one page's facts and moves the source's watermark to
-// through -- the page's newest row, capped at the clock, or for the last page
-// the clock it was asked by -- in one transaction, and answers how many facts
-// were new. The write never moves the watermark back (GREATEST): a run
-// finishing behind a faster one leaves it where the faster one got. Only
-// dropWatermarkAhead lowers one. Its statements run under the request pool's
-// own statement timeout: see "The request pool's statement timeout stands".
-func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through time.Time) (int, error) {
+// recordPage writes one page's facts, moves the source's watermark to through
+// -- the page's newest row, capped at the clock; none for a page with no rows
+// -- and records the source walked through walked -- as far, or for the last
+// page the clock it was asked by -- in one transaction, and answers how many
+// facts were new. The write never moves either back (GREATEST, which passes
+// over a NULL): a run finishing behind a faster one leaves both where the
+// faster one got. Only dropWatermarkAhead and forgetWalkedAhead lower one. Its
+// statements run under the request pool's own statement timeout: see "The
+// request pool's statement timeout stands".
+func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through, walked time.Time) (int, error) {
 	var inserted int64
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if len(facts) > 0 {
@@ -740,12 +781,14 @@ func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, th
 			}
 			inserted, _ = res.RowsAffected()
 		}
-		if through.IsZero() {
+		if through.IsZero() && walked.IsZero() {
 			return nil
 		}
-		if _, err := tx.NewRaw(`INSERT INTO email_stat_watermark (source, through) VALUES (?, ?)
-			ON CONFLICT (source) DO UPDATE SET through = GREATEST(email_stat_watermark.through, EXCLUDED.through)`,
-			source, through.UTC()).Exec(ctx); err != nil {
+		if _, err := tx.NewRaw(`INSERT INTO email_stat_watermark (source, through, walked_through) VALUES (?, ?, ?)
+			ON CONFLICT (source) DO UPDATE SET
+				through = GREATEST(email_stat_watermark.through, EXCLUDED.through),
+				walked_through = GREATEST(email_stat_watermark.walked_through, EXCLUDED.walked_through)`,
+			source, instantOrNull(through), instantOrNull(walked)).Exec(ctx); err != nil {
 			return fmt.Errorf("move the watermark: %w", err)
 		}
 		return nil
@@ -753,9 +796,19 @@ func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, th
 	return int(inserted), err
 }
 
-// readWatermark answers a source's watermark, and false when it has none.
+// instantOrNull is an instant as a statement argument, and NULL for none.
+func instantOrNull(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t.UTC()
+}
+
+// readWatermark answers a source's watermark, and false when it has none: a
+// source never walked, or walked with no row yet to resume from (a NULL
+// through; see "Walked, nothing there").
 func readWatermark(ctx context.Context, db *bun.DB, source string) (time.Time, bool, error) {
-	var through time.Time
+	var through sql.NullTime
 	err := db.NewRaw(`SELECT through FROM email_stat_watermark WHERE source = ?`, source).Scan(ctx, &through)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
@@ -763,17 +816,15 @@ func readWatermark(ctx context.Context, db *bun.DB, source string) (time.Time, b
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("read the watermark: %w", err)
 	}
-	return through, true, nil
+	return through.Time, through.Valid, nil
 }
 
-// firstWalkMoved is a first walk whose first page failed, and where the next
-// one starts: see "A first walk that cannot read its first page".
+// firstWalkMoved is a first walk whose first page ended at the statement
+// timeout, and where the next one starts: see "A first walk that cannot read
+// its first page".
 type firstWalkMoved struct {
 	Start time.Time
-	// TimedOut is whether the page ended at the statement timeout, which is
-	// the failure the move exists for and is logged apart.
-	TimedOut bool
-	Err      error
+	Err   error
 }
 
 func (m *firstWalkMoved) Error() string {
@@ -801,7 +852,9 @@ func laterStart(since, askedAt time.Time) time.Time {
 
 // isStatementTimeout reports whether a read ended at the server's statement
 // timeout (SQLSTATE 57014): the driver's own error when the engine passes it
-// on, and the text it renders when the engine passes on only the text.
+// on, and the text it renders when the engine passes on only the text. 57014
+// is query_canceled, which a statement cancelled on request answers too, so
+// the walk asks it only while the run's own context is live.
 func isStatementTimeout(err error) bool {
 	var pgerr pgdriver.Error
 	if errors.As(err, &pgerr) {
@@ -837,13 +890,25 @@ func recordWalkStart(ctx context.Context, db *bun.DB, source string, start time.
 	return nil
 }
 
-// dropWatermarkAhead removes a source's watermark when it is past tolerance,
-// the clock plus the overlap -- the one write that lowers a watermark. The
-// condition is in the statement, so a watermark another run has just written
-// at a true time is kept.
+// dropWatermarkAhead removes a source's watermark, and how far it is walked
+// with it, when the watermark is past tolerance, the clock plus the overlap --
+// the one write that lowers a watermark. The condition is in the statement, so
+// a watermark another run has just written at a true time is kept.
 func dropWatermarkAhead(ctx context.Context, db *bun.DB, source string, tolerance time.Time) error {
 	if _, err := db.NewRaw(`DELETE FROM email_stat_watermark WHERE source = ? AND through > ?`, source, tolerance.UTC()).Exec(ctx); err != nil {
 		return fmt.Errorf("drop a watermark ahead of the clock: %w", err)
+	}
+	return nil
+}
+
+// forgetWalkedAhead forgets how far a source is walked when that is past
+// tolerance, the clock plus the overlap: only a leader whose clock ran fast
+// could have recorded it, and kept, it would count as measured what no walk
+// has read. The walk this run makes records it again, at its own clock. See
+// "Never past the clock".
+func forgetWalkedAhead(ctx context.Context, db *bun.DB, source string, tolerance time.Time) error {
+	if _, err := db.NewRaw(`UPDATE email_stat_watermark SET walked_through = NULL WHERE source = ? AND walked_through > ?`, source, tolerance.UTC()).Exec(ctx); err != nil {
+		return fmt.Errorf("forget a walk ahead of the clock: %w", err)
 	}
 	return nil
 }
