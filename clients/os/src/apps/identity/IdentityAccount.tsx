@@ -54,6 +54,10 @@ export function IdentityAccount({ page, data, busy, error = "", submit, navigate
     {data.NextCursor && <Button onClick={() => navigate(`/me/tokens?cursor=${encodeURIComponent(value(data, "NextCursor"))}`)}>Show more</Button>}
   </>;
   const security = data.SignInSecurity as IdentityData | undefined;
+  // The acceptance history identity read from the person's own row. Absent or
+  // unavailable reads as "unavailable", never as nothing accepted.
+  const legal = data.LegalAcceptance as IdentityData | undefined;
+  const accepted = legal?.Available === true && Array.isArray(legal.Items) ? rows(legal, "Items") : undefined;
   return <>
     <p>Manage how you sign in and which devices can access your account.</p>
     {!security?.Available ? <p>Sign-in policy is unavailable.</p> : <>
@@ -65,5 +69,12 @@ export function IdentityAccount({ page, data, busy, error = "", submit, navigate
       {button(security.SharedMailbox ? "Mark mailbox as personal" : "Mark mailbox as shared", "/me/settings/shared-mailbox", { shared: security.SharedMailbox ? "false" : "true" })}
     </>}
     <Button onClick={() => navigate("/me/devices")}>Manage passkeys and sessions</Button>
+    <Subhead meta={counted && accepted ? accepted.length : undefined}>Legal acceptance</Subhead>
+    {!accepted ? <p>Acceptance history is unavailable.</p>
+      : accepted.length === 0 ? <p>No acceptance records yet. The versions in force are recorded when you sign in.</p>
+      : <RecordList as="ul" label="Legal acceptance">{accepted.map((row, index) => <RecordRow key={`${value(row, "DocumentType")}-${value(row, "Version")}-${index}`}
+          name={value(row, "Document") || value(row, "DocumentType")} secondary={`Version ${value(row, "Version")}`}>
+          <span>Accepted {value(row, "AcceptedAt")}</span>
+        </RecordRow>)}</RecordList>}
   </>;
 }

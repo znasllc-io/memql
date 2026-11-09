@@ -572,6 +572,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "activeUsers"}:                  true,
 		{Path: "identity/queries.memql", Name: "userByEmail"}:                  true,
 		{Path: "identity/queries.memql", Name: "userByIdSystem"}:               true,
+		// Legal acceptance (legal-pages.md). The identity session seam records
+		// the Terms of Service and Privacy Notice versions a sign-in accepts, at
+		// the moment the session is minted -- inside the request that is still
+		// authenticating the person, so neither the read nor the write has an
+		// actor to scope to (userByIdSystem's circularity). The write is also a
+		// record whose value is that the SERVICE wrote it: a self-scoped client
+		// write would let a person author their own acceptance history.
+		{Path: "identity/queries.memql", Name: "userLegalAcceptanceById"}: true,
+		{Path: "identity/mutations.memql", Name: "recordLegalAcceptance"}: true,
 		// memql#3217. The complete-set sibling of activeUsers, behind the
 		// startup per-user seed sweep. @serverOnly for activeUsers' reason
 		// minus most of the exposure -- its projection is userIdRef (row.id

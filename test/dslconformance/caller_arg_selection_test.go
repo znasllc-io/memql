@@ -185,7 +185,6 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql cancelScheduledDeletion": "cancels deletion for any userId.",
 	"identity/mutations.memql bumpUserRevocationEpoch": "sets revocationEpoch to a caller-supplied int on any userId. RAISING it invalidates every live session (denial of service); LOWERING it re-validates previously revoked tokens, because the verifier rejects only claims BELOW the stored value (see the field @description). Both directions matter.",
 	"identity/mutations.memql bumpUserDataExport":      "stamps the data-export marker on any userId.",
-	"identity/mutations.memql recordLegalAcceptance":   "records legal acceptance on behalf of any userId -- attributing consent to a person who did not give it.",
 
 	// --- identity: the row is one person's credential ------------------------
 	"identity/mutations.memql rotateAuthSession":         "sets refreshTokenHash to a CALLER-SUPPLIED value on an arbitrary session id -- an attacker who can name a session can install a refresh token they control. The sharpest entry in this map after updateUser.",

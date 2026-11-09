@@ -2,8 +2,11 @@
  * me-settings.js
  * ==============
  *
- * Loader for /me/settings. Fills the profile + legal-acceptance
- * panels by calling /me/api/profile and /me/api/legal-acceptance.
+ * Loader for /me/settings. Fills the profile panel by calling
+ * /me/api/profile. The legal-acceptance card is server-rendered from the
+ * caller's own row (me_legal_acceptance.go); this script must not touch it,
+ * because the fetch it used to make went to an endpoint nothing mounted and
+ * replaced the card with its error.
  */
 
 (function () {
@@ -32,24 +35,6 @@
     zone.innerHTML = html;
   }
 
-  function fillLegal(items) {
-    var zone = document.querySelector('[data-content="legal"]');
-    if (!zone) return;
-    if (!items || !items.length) {
-      zone.innerHTML = '<p class="text-muted">No acceptance records on file yet.</p>';
-      return;
-    }
-    var html = '<table class="data"><tr><th>Document</th><th>Version</th><th>Accepted at</th></tr>';
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i];
-      html += "<tr><td>" + escapeHTML(it.documentType || "") +
-              "</td><td>" + escapeHTML(it.version || "") +
-              "</td><td>" + escapeHTML(it.acceptedAt || "") + "</td></tr>";
-    }
-    html += "</table>";
-    zone.innerHTML = html;
-  }
-
   window.IdentityMe.register(function (token) {
     var headers = { "Authorization": "Bearer " + token, "Accept": "application/json" };
     fetch("/me/api/profile", { headers: headers })
@@ -58,14 +43,6 @@
       .catch(function () {
         var zone = document.querySelector('[data-content="profile"]');
         if (zone) zone.innerHTML = '<p class="text-danger">Could not load profile.</p>';
-      });
-
-    fetch("/me/api/legal-acceptance", { headers: headers })
-      .then(function (r) { return r.json(); })
-      .then(function (data) { fillLegal(data && data.items); })
-      .catch(function () {
-        var zone = document.querySelector('[data-content="legal"]');
-        if (zone) zone.innerHTML = '<p class="text-danger">Could not load acceptance history.</p>';
       });
   });
 })();

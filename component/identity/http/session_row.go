@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
@@ -14,7 +15,8 @@ import (
 // Both of the identity service's session paths run through here:
 //
 //	issueSessionForUser  the /oauth/token grants (authorization_code, device)
-//	startBrowserSession  the first-party cookie (magic link, passkey web login)
+//	startBrowserSession  the first-party cookie (magic link, passkey web login,
+//	                     upstream OIDC)
 //
 // One function rather than two call sites, because two would drift on the
 // first change and the drift would be invisible: a session that skipped the
@@ -22,6 +24,10 @@ import (
 // hypothetical -- the browser-cookie path skipped the ROW entirely until
 // memql#4303, and the consequence (a session its owner could neither see nor
 // revoke) went unnoticed for the whole life of the feature.
+//
+// The same seam records the legal-document versions the sign-in accepted
+// (recordLegalAcceptance below), for the same reason: a path that skipped the
+// record would read as a person who never signed in.
 
 // sessionRowInput names everything a session row needs. The caller has
 // already decided who signed in and how.
@@ -62,6 +68,7 @@ func (s *Server) createSessionRow(ctx context.Context, r *http.Request, in sessi
 	); err != nil {
 		return err
 	}
+	s.recordLegalAcceptance(r, in)
 	s.notifyNewSession(r, newSessionNotice{
 		SessionId:   in.SessionId,
 		UserId:      in.UserId,
@@ -71,6 +78,69 @@ func (s *Server) createSessionRow(ctx context.Context, r *http.Request, in sessi
 		At:          in.Now,
 	})
 	return nil
+}
+
+// recordLegalAcceptance appends the legal-document versions in force that
+// the account has not yet accepted, once per version, and audits what it did.
+//
+// NEVER FATAL, and the asymmetry with the row above is deliberate: a session
+// with no row cannot be seen or revoked, so it must not exist; a sign-in whose
+// acceptance record failed to write is still the acceptance the terms
+// describe (a person accepts by signing in), and the record is evidence of
+// it, which the next sign-in writes because recording is per version. Failing
+// the sign-in would turn a bookkeeping outage into a lockout. The failure is
+// logged and audited so it is not silent.
+//
+// Nil LegalDocuments means no documents are wired -- an engine-less harness,
+// a test that models only the session row -- and nothing is read or written.
+func (s *Server) recordLegalAcceptance(r *http.Request, in sessionRowInput) {
+	if s == nil || s.Store == nil || s.LegalDocuments == nil || strings.TrimSpace(in.UserId) == "" {
+		return
+	}
+	docs := s.LegalDocuments()
+	if len(docs) == 0 {
+		return
+	}
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	recorded, err := s.Store.RecordLegalAcceptance(r.Context(), in.UserId, docs, clientIP(r), now)
+	ev := identity.AuditEvent{
+		Category:    identity.AuditCategoryIdentity,
+		Action:      "legal_acceptance_recorded",
+		TargetType:  "user",
+		TargetId:    in.UserId,
+		ActorUserId: in.UserId,
+		TargetEmail: in.Email,
+		Outcome:     identity.AuditOutcomeSuccess,
+		Detail: map[string]any{
+			"sessionId": in.SessionId,
+			"source":    in.Source,
+		},
+	}
+	if err != nil {
+		ev.Action = "legal_acceptance_record_failed"
+		ev.Outcome = identity.AuditOutcomeFailure
+		ev.FailureReason = "write_failed"
+		if s.Logger != nil {
+			s.Logger.Warn("legal_acceptance_record_failed",
+				"user_id", in.UserId, "session_id", in.SessionId, "error", err.Error())
+		}
+		s.audit(r, ev)
+		return
+	}
+	if len(recorded) == 0 {
+		// Every version in force was already on the record: the ordinary
+		// sign-in, and not an event.
+		return
+	}
+	documents := make([]map[string]any, 0, len(recorded))
+	for _, e := range recorded {
+		documents = append(documents, map[string]any{"documentType": e.DocumentType, "version": e.Version})
+	}
+	ev.Detail["documents"] = documents
+	s.audit(r, ev)
 }
 
 // newSessionNotice is the local shape of one notification.

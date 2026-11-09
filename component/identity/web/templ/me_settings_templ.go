@@ -8,9 +8,10 @@ package webtempl
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// MeSettingsData drives /me/settings. The profile + legal panels are
-// hydrated client-side; the deletion cooldown copy comes from config
-// and is pre-rendered server-side.
+// MeSettingsData drives /me/settings. The profile panel is hydrated
+// client-side; the sign-in-security and legal-acceptance cards are rendered
+// server-side from the caller's own row, and the deletion cooldown copy comes
+// from config.
 type MeSettingsData struct {
 	Layout               LayoutData
 	DeletionCooldownDays int
@@ -20,6 +21,35 @@ type MeSettingsData struct {
 	// (memql#4304). Zero value renders nothing, which is what an
 	// engine-less binary and a failed lookup both get.
 	SignInSecurity SignInSecurityData
+
+	// LegalAcceptance is the caller's own acceptance history, read from
+	// their row (me_legal_acceptance.go). The zero value renders the card
+	// saying it could not load: an engine-less binary, no caller, and a
+	// failed lookup are all "unavailable", never "nothing accepted".
+	LegalAcceptance LegalAcceptanceData
+}
+
+// LegalAcceptanceData is the "Legal acceptance" card.
+type LegalAcceptanceData struct {
+	// Available is false when the history could not be read. A LISTING
+	// ERROR IS NOT AN EMPTY LIST: an empty table would read as "you have
+	// agreed to nothing", which a transport blip must not say.
+	Available bool
+	// Items is newest first.
+	Items []LegalAcceptanceRow
+}
+
+// LegalAcceptanceRow is one accepted version as the card shows it. The
+// stored source IP is deliberately not here: the person's card lists what
+// they accepted and when.
+type LegalAcceptanceRow struct {
+	// DocumentType is the stored discriminator, "tos" or "privacy".
+	DocumentType string
+	// Document is the title the page shows for it.
+	Document string
+	Version  string
+	// AcceptedAt is formatted for display.
+	AcceptedAt string
 }
 
 // SignInSecurityData is the state of the two sign-in controls for the
@@ -122,7 +152,7 @@ func MeSettings(data MeSettingsData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.Flash.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 52, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 82, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -139,33 +169,41 @@ func MeSettings(data MeSettingsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card card-wide\"><h1 class=\"card-title\">Profile</h1><div data-content=\"profile\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your profile&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Legal acceptance</h1><p class=\"card-subtitle\">Versions of our Terms of Service and Privacy Notice you've agreed to.</p><div data-content=\"legal\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Delete account</h1><p class=\"text-muted\">Account deletion enters a ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card card-wide\"><h1 class=\"card-title\">Profile</h1><div data-content=\"profile\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your profile&hellip;</p></div></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = legalAcceptanceCard(data.LegalAcceptance).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Delete account</h1><p class=\"text-muted\">Account deletion enters a ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(formatInt(data.DeletionCooldownDays))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 76, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 97, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "-day cooldown window. You can cancel deletion any time during cooldown by signing back in. After ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "-day cooldown window. You can cancel deletion any time during cooldown by signing back in. After ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(formatInt(data.DeletionCooldownDays))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 78, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 99, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " days, your user record, sessions, and personal partition are permanently removed.</p><form method=\"POST\" action=\"/me/settings/delete\" data-submit-once>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, " days, your user record, sessions, and personal partition are permanently removed.</p><form method=\"POST\" action=\"/me/settings/delete\" data-submit-once>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -173,7 +211,7 @@ func MeSettings(data MeSettingsData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<button type=\"submit\" class=\"btn btn-danger\">Schedule account deletion</button></form></div></section></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<button type=\"submit\" class=\"btn btn-danger\">Schedule account deletion</button></form></div></section></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -215,22 +253,22 @@ func signInSecurityCard(data MeSettingsData) templ.Component {
 			templ_7745c5c3_Var8 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"card card-wide\"><h1 class=\"card-title\">Sign-in security</h1>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"card card-wide\"><h1 class=\"card-title\">Sign-in security</h1>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if data.SignInSecurity.SharedMailbox {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"alert alert-warning\">This account's address looks like a shared mailbox. Anyone who can read it can request a sign-in link and enter this account. Consider turning off sign-in links below and using a passkey.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"alert alert-warning\">This account's address looks like a shared mailbox. Anyone who can read it can request a sign-in link and enter this account. Consider turning off sign-in links below and using a passkey.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<p class=\"card-subtitle\">Sign-in links are emailed to this account's address, so whoever can read that mailbox can sign in. Turning links off leaves your passkey as the way in. Enrolment links and the owner recovery key are unaffected -- those are the routes back if you lose a passkey.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<p class=\"card-subtitle\">Sign-in links are emailed to this account's address, so whoever can read that mailbox can sign in. Turning links off leaves your passkey as the way in. Enrolment links and the owner recovery key are unaffected -- those are the routes back if you lose a passkey.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if data.SignInSecurity.PasskeyOnly {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<p class=\"text-small\"><strong>Sign-in links are off.</strong> A request for one sends a notice to this address instead, and signs nobody in.</p><form method=\"POST\" action=\"/me/settings/sign-in-policy\" data-submit-once>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<p class=\"text-small\"><strong>Sign-in links are off.</strong> A request for one sends a notice to this address instead, and signs nobody in.</p><form method=\"POST\" action=\"/me/settings/sign-in-policy\" data-submit-once>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -238,12 +276,12 @@ func signInSecurityCard(data MeSettingsData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<input type=\"hidden\" name=\"policy\" value=\"any\"> <button type=\"submit\" class=\"btn\">Turn sign-in links back on</button></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<input type=\"hidden\" name=\"policy\" value=\"any\"> <button type=\"submit\" class=\"btn\">Turn sign-in links back on</button></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if data.SignInSecurity.CanEnablePasskeyOnly() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<form method=\"POST\" action=\"/me/settings/sign-in-policy\" data-submit-once>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<form method=\"POST\" action=\"/me/settings/sign-in-policy\" data-submit-once>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -251,47 +289,47 @@ func signInSecurityCard(data MeSettingsData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<input type=\"hidden\" name=\"policy\" value=\"passkey_only\"> <button type=\"submit\" class=\"btn btn-primary\">Turn off sign-in links</button></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<input type=\"hidden\" name=\"policy\" value=\"passkey_only\"> <button type=\"submit\" class=\"btn btn-primary\">Turn off sign-in links</button></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<p class=\"text-small text-subtle\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<p class=\"text-small text-subtle\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if data.SignInSecurity.PasskeyCountKnown {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "Add a passkey first. Turning off sign-in links with none enrolled would leave you unable to sign in at all.")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "Add a passkey first. Turning off sign-in links with none enrolled would leave you unable to sign in at all.")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "We couldn't check your passkeys just now, so this control is unavailable. Reload the page to try again.")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "We couldn't check your passkeys just now, so this control is unavailable. Reload the page to try again.")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<hr><p class=\"text-small text-muted\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<hr><p class=\"text-small text-muted\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if data.SignInSecurity.SharedMailbox {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "We think this is a shared mailbox. If it is only yours, say so and the warning above goes away.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "We think this is a shared mailbox. If it is only yours, say so and the warning above goes away.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "Is this address read by more than one person? Marking it shows the warning above to anyone looking at this account.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "Is this address read by more than one person? Marking it shows the warning above to anyone looking at this account.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</p><form method=\"POST\" action=\"/me/settings/shared-mailbox\" data-submit-once>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</p><form method=\"POST\" action=\"/me/settings/shared-mailbox\" data-submit-once>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -300,17 +338,120 @@ func signInSecurityCard(data MeSettingsData) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if data.SignInSecurity.SharedMailbox {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<input type=\"hidden\" name=\"shared\" value=\"false\"> <button type=\"submit\" class=\"btn\">This mailbox is only mine</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<input type=\"hidden\" name=\"shared\" value=\"false\"> <button type=\"submit\" class=\"btn\">This mailbox is only mine</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<input type=\"hidden\" name=\"shared\" value=\"true\"> <button type=\"submit\" class=\"btn\">Mark as a shared mailbox</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<input type=\"hidden\" name=\"shared\" value=\"true\"> <button type=\"submit\" class=\"btn\">Mark as a shared mailbox</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</form></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+// legalAcceptanceCard lists the Terms of Service and Privacy Notice versions
+// the caller accepted by signing in, newest first. Server-rendered from the
+// caller's own row (me_legal_acceptance.go); its script used to fetch an
+// endpoint nothing mounted and the card spent its life saying it could not
+// load.
+func legalAcceptanceCard(data LegalAcceptanceData) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var9 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var9 == nil {
+			templ_7745c5c3_Var9 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Legal acceptance</h1><p class=\"card-subtitle\">The versions of the Terms of Service and the Privacy Notice you accepted by signing in. A new version is recorded the next time you sign in.</p>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if !data.Available {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<p class=\"text-muted\">We couldn't load your acceptance history just now. Reload the page to try again.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else if len(data.Items) == 0 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<p class=\"text-muted\">No acceptance records on file yet.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<table class=\"table\"><thead><tr><th>Document</th><th>Version</th><th>Accepted</th></tr></thead> <tbody>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, row := range data.Items {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<tr><td>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var10 string
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(row.Document)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 220, Col: 25}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</td><td class=\"text-small\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var11 string
+				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(row.Version)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 221, Col: 43}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</td><td class=\"text-small\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(row.AcceptedAt)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `me_settings.templ`, Line: 222, Col: 46}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</td></tr>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</tbody></table>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

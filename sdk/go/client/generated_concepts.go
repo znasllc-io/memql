@@ -797,7 +797,6 @@ var BoundConcepts = map[string]string{
 	"recordConsentSuppress":                            "v1:campaigns:consentEvent",
 	"recordConsentWithdraw":                            "v1:campaigns:consentEvent",
 	"recordDependencyEdge":                             "v1:authoring:dependencyEdge",
-	"recordLegalAcceptance":                            "v1:identity:user",
 	"recordMentoredEvent":                              "v1:forge:requestEvent",
 	"recordPasskeyAssertion":                           "v1:identity:identity",
 	"recordReputationWindow":                           "v1:campaigns:reputationWindow",

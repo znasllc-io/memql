@@ -45,3 +45,34 @@ describe("identity record lists", () => {
     expect(actions.submit).toHaveBeenCalledWith("/me/devices/sessions/revoke", { id: "session" });
   });
 });
+
+describe("legal acceptance on the settings page", () => {
+  const items = [
+    { DocumentType: "tos", Document: "Terms of Service", Version: "2.0.0", AcceptedAt: "9 Nov 2026 16:10 UTC" },
+    { DocumentType: "privacy", Document: "Privacy Notice", Version: "2.0.0", AcceptedAt: "9 Nov 2026 16:10 UTC" },
+    { DocumentType: "tos", Document: "Terms of Service", Version: "1.0.0", AcceptedAt: "2 Jan 2026 03:04 UTC" },
+  ];
+
+  it("lists each accepted version with its date and counts them", () => {
+    render(<IdentityAccount page="me/settings" busy={false} {...acts()} data={{ LegalAcceptance: { Available: true, Items: items } }} />);
+    const list = screen.getByRole("list", { name: "Legal acceptance" });
+    const rows = Array.from(list.querySelectorAll(".os-record-row"), row => row.textContent ?? "");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("Terms of Service");
+    expect(rows[0]).toContain("2.0.0");
+    expect(rows[0]).toContain("9 Nov 2026 16:10 UTC");
+    expect(rows[1]).toContain("Privacy Notice");
+    expect(screen.getByRole("heading", { name: /^Legal acceptance/ }).querySelector(".os-subhead-meta")?.textContent).toBe("3");
+    expect(list.querySelector(".os-record-status")).toBeNull();
+  });
+
+  it("says the history is unavailable after a failed read and empty only after a successful one", () => {
+    const view = render(<IdentityAccount page="me/settings" busy={false} {...acts()} data={{ LegalAcceptance: { Available: false } }} />);
+    expect(screen.getByText(/acceptance history is unavailable/i)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Legal acceptance" })).toBeNull();
+    expect(document.querySelector(".os-subhead-meta")).toBeNull();
+    view.rerender(<IdentityAccount page="me/settings" busy={false} {...acts()} data={{ LegalAcceptance: { Available: true, Items: [] } }} />);
+    expect(screen.getByText(/No acceptance records/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^Legal acceptance/ }).querySelector(".os-subhead-meta")?.textContent).toBe("0");
+  });
+});

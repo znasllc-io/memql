@@ -8638,34 +8638,6 @@ func RecordDependencyEdgeBuild(args RecordDependencyEdgeArgs) string {
 	return b.String()
 }
 
-// RecordLegalAcceptance -- Replace a user's legalAcceptance array (caller must read-modify-write to append).
-//
-// Bound concept: v1:identity:user (machine-readable: BoundConcepts["recordLegalAcceptance"] in generated_concepts.go).
-type RecordLegalAcceptanceArgs struct {
-	UserId          string
-	LegalAcceptance []map[string]any
-}
-
-// RecordLegalAcceptance calls the engine mutation recordLegalAcceptance.
-func (qc *QueryClient) RecordLegalAcceptance(ctx context.Context, args RecordLegalAcceptanceArgs) (*Result, error) {
-	call := RecordLegalAcceptanceBuild(args)
-	return qc.executeNamed(ctx, "recordLegalAcceptance", call)
-}
-
-func RecordLegalAcceptanceBuild(args RecordLegalAcceptanceArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordLegalAcceptance(")
-	b.WriteString("userId: ")
-	b.WriteString(quoteMemQL(args.UserId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("legalAcceptance: ")
-	b.WriteString(renderMemQLValue(args.LegalAcceptance))
-	b.WriteString(")")
-	return b.String()
-}
-
 // RecordMentoredEvent -- Append a 'mentored' v1:forge:requestEvent after a non-owner submitter was taught about the area they touched. Injects kind='mentored' and forwards eventId / requestId / note. actorUserId + actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).
 //
 // Bound concept: v1:forge:requestEvent (machine-readable: BoundConcepts["recordMentoredEvent"] in generated_concepts.go).

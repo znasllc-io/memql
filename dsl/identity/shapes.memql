@@ -517,6 +517,22 @@ shape user userIdRef {
   row.id
 }
 
+/// One user's legal-acceptance history and nothing else: `legalAcceptance`
+/// beside the row's id and version (row.createdAt). Backs
+/// userLegalAcceptanceById, the read the identity service makes before a
+/// sign-in appends the versions in force and when /me/settings shows a person
+/// their own history (component/identity/legal_acceptance.go).
+///
+/// A shape of its own for two reasons: neither read should pay for, or
+/// expose, userFull's directory fields, and the history must not ride along
+/// on every other user read -- it grows with every published version.
+@row
+shape user userLegalAcceptance {
+  row.id
+  legalAcceptance
+  row.createdAt
+}
+
 /// Full projection of a v1:identity:deviceCode row (RFC 8628, memql#3410). Backs BOTH lookups: the
 /// polling path (by deviceCodeHash) and the verification page (by userCodeHash). The two hashes ARE
 /// projected -- they are the lookup keys, they are already digests rather than credentials, and the

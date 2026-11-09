@@ -1748,6 +1748,29 @@ query user userByIdSystem {
   shape   userFull
 }
 
+/// One user's legal-acceptance history -- SERVER-SIDE ONLY, no caller scoping.
+///
+/// The identity service reads it twice: before a sign-in appends the versions
+/// in force (component/identity/legal_acceptance.go, under the per-user
+/// advisory lock and a fresh read, so the read sees what a sibling replica
+/// wrote a moment ago), and when /me/settings shows a person their own
+/// history. Scoping it to actor.userId is not the fix: the first read runs at
+/// the moment the session is minted, inside the request that is still
+/// authenticating the person -- there is no actor for it yet, so an
+/// actor.userId filter would be circular there, exactly as it is for
+/// userByIdSystem. The caller is scoped by the HANDLER instead (the session's
+/// subject), and @serverOnly is what keeps the read off the wire. Projects
+/// userLegalAcceptance: the history, the id and the row version, none of
+/// userFull's directory fields.
+@serverOnly
+query user userLegalAcceptanceById {
+  args {
+    userId  string!
+  }
+  filter  row => row.id == args.userId && isActiveRecord(row)
+  shape   userLegalAcceptance
+}
+
 /// Resolve a user id to a display name. Client-callable for any user.
 ///
 /// memql#2800: the cross-user read that rosters, mentions and participant

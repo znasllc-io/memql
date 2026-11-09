@@ -66,8 +66,9 @@ Key fields:
 - `preferences` -- theme, language, notifications, archive
   retention, and product-specific control settings
 - `active`, `suspendedAt`, `suspendedReason`, `lastSeenAt`
-- `legalAcceptance[]` -- append-only history of ToS / Privacy
-  acceptances
+- `legalAcceptance[]` -- append-only history of the Terms of Service and
+  Privacy Notice versions the person accepted, written at sign-in
+  ([legal-pages.md](legal-pages.md))
 - `deletionScheduledAt` -- soft-delete request timestamp; honored by
   the `accountDeletionSweep` cron after the configured cooldown
 

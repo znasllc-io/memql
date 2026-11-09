@@ -1,8 +1,9 @@
 package webtempl
 
-// MeSettingsData drives /me/settings. The profile + legal panels are
-// hydrated client-side; the deletion cooldown copy comes from config
-// and is pre-rendered server-side.
+// MeSettingsData drives /me/settings. The profile panel is hydrated
+// client-side; the sign-in-security and legal-acceptance cards are rendered
+// server-side from the caller's own row, and the deletion cooldown copy comes
+// from config.
 type MeSettingsData struct {
 	Layout               LayoutData
 	DeletionCooldownDays int
@@ -12,6 +13,35 @@ type MeSettingsData struct {
 	// (memql#4304). Zero value renders nothing, which is what an
 	// engine-less binary and a failed lookup both get.
 	SignInSecurity SignInSecurityData
+
+	// LegalAcceptance is the caller's own acceptance history, read from
+	// their row (me_legal_acceptance.go). The zero value renders the card
+	// saying it could not load: an engine-less binary, no caller, and a
+	// failed lookup are all "unavailable", never "nothing accepted".
+	LegalAcceptance LegalAcceptanceData
+}
+
+// LegalAcceptanceData is the "Legal acceptance" card.
+type LegalAcceptanceData struct {
+	// Available is false when the history could not be read. A LISTING
+	// ERROR IS NOT AN EMPTY LIST: an empty table would read as "you have
+	// agreed to nothing", which a transport blip must not say.
+	Available bool
+	// Items is newest first.
+	Items []LegalAcceptanceRow
+}
+
+// LegalAcceptanceRow is one accepted version as the card shows it. The
+// stored source IP is deliberately not here: the person's card lists what
+// they accepted and when.
+type LegalAcceptanceRow struct {
+	// DocumentType is the stored discriminator, "tos" or "privacy".
+	DocumentType string
+	// Document is the title the page shows for it.
+	Document string
+	Version  string
+	// AcceptedAt is formatted for display.
+	AcceptedAt string
 }
 
 // SignInSecurityData is the state of the two sign-in controls for the
@@ -60,16 +90,7 @@ templ MeSettings(data MeSettingsData) {
 						<p class="text-muted"><span class="spinner"></span> Loading your profile&hellip;</p>
 					</div>
 				</div>
-				<div class="card card-wide mt-3">
-					<h1 class="card-title">Legal acceptance</h1>
-					<p class="card-subtitle">
-						Versions of our Terms of Service and Privacy Notice you've
-						agreed to.
-					</p>
-					<div data-content="legal">
-						<p class="text-muted"><span class="spinner"></span> Loading&hellip;</p>
-					</div>
-				</div>
+				@legalAcceptanceCard(data.LegalAcceptance)
 				<div class="card card-wide mt-3">
 					<h1 class="card-title">Delete account</h1>
 					<p class="text-muted">
@@ -161,5 +182,48 @@ templ signInSecurityCard(data MeSettingsData) {
 				<button type="submit" class="btn">Mark as a shared mailbox</button>
 			}
 		</form>
+	</div>
+}
+
+// legalAcceptanceCard lists the Terms of Service and Privacy Notice versions
+// the caller accepted by signing in, newest first. Server-rendered from the
+// caller's own row (me_legal_acceptance.go); its script used to fetch an
+// endpoint nothing mounted and the card spent its life saying it could not
+// load.
+templ legalAcceptanceCard(data LegalAcceptanceData) {
+	<div class="card card-wide mt-3">
+		<h1 class="card-title">Legal acceptance</h1>
+		<p class="card-subtitle">
+			The versions of the Terms of Service and the Privacy Notice you
+			accepted by signing in. A new version is recorded the next time
+			you sign in.
+		</p>
+		if !data.Available {
+			<p class="text-muted">
+				We couldn't load your acceptance history just now. Reload the page
+				to try again.
+			</p>
+		} else if len(data.Items) == 0 {
+			<p class="text-muted">No acceptance records on file yet.</p>
+		} else {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Document</th>
+						<th>Version</th>
+						<th>Accepted</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, row := range data.Items {
+						<tr>
+							<td>{ row.Document }</td>
+							<td class="text-small">{ row.Version }</td>
+							<td class="text-small">{ row.AcceptedAt }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
 	</div>
 }

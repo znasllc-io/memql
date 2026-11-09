@@ -314,6 +314,12 @@ func (a *App) integrationsIdentity() {
 	// device grant, the browser cookie session and the passkey web login are
 	// all covered by one hook rather than four call sites that would drift.
 	httpSrv.SignInNotifier = emailSender
+	// Which legal-document versions a sign-in accepts (legal-pages.md).
+	// The web server owns the documents -- it loaded them, override path
+	// included -- and the http server owns the one seam that creates a
+	// session row, so the seam asks per sign-in and records what the node is
+	// serving. Set after the web server exists, before anything serves.
+	httpSrv.LegalDocuments = webSrv.LegalDocumentsInForce
 	webSrv.Abuse = abuseMW
 	webSrv.IssueMagicLink = func(ctx context.Context, in identityweb.IssueMagicLinkInput) (identityweb.IssueMagicLinkResult, error) {
 		if in.IsAccessRequest {

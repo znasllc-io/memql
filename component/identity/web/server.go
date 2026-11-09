@@ -766,6 +766,34 @@ func newLegalDocument(body []byte) legalDocument {
 	}
 }
 
+// LegalDocumentsInForce names the version of each legal document this node
+// serves, for the session seam that records a sign-in's acceptance
+// (component/identity/http.Server.LegalDocuments, wired in
+// app/integrations_identity.go). What a sign-in records is exactly what the
+// page shows, override file included, because both read the same loaded
+// document.
+//
+// A document whose front matter declares no version is left out: the page
+// shows "unknown" for it, and a record saying somebody accepted version
+// "unknown" would be no evidence of anything.
+func (s *Server) LegalDocumentsInForce() []identity.LegalDocumentVersion {
+	if s == nil {
+		return nil
+	}
+	out := make([]identity.LegalDocumentVersion, 0, 2)
+	for _, d := range []struct {
+		kind string
+		doc  legalDocument
+	}{{"tos", s.tos}, {"privacy", s.privacy}} {
+		version := strings.TrimSpace(d.doc.Version)
+		if version == "" || version == "unknown" {
+			continue
+		}
+		out = append(out, identity.LegalDocumentVersion{DocumentType: d.kind, Version: version})
+	}
+	return out
+}
+
 // frontMatterValue does a minimal scan of the leading `---` block for
 // `<key>:` and returns its trimmed value, or fallback when the document has
 // no front matter or no such key. Minimal on purpose: the block is three

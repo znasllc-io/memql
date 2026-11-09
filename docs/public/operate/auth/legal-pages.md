@@ -50,15 +50,59 @@ each contract's terms here.
 
 ## What the service records
 
-Acceptance is by signing in: the sign-in page says so, and the page shows
-the version in force and its effective date. **Nothing records the accepted
-version today.** `v1:identity:user.legalAcceptance` and the
-`recordLegalAcceptance` mutation exist, but no code path writes them at
-sign-in, and the "Legal acceptance" card on `/me/settings` reads an endpoint
-the service does not mount, so it shows an error. The documents are written
-to match: they say a person accepts by signing in and do not promise a
-re-acceptance prompt. Recording the version at sign-in is a feature to
-build, not a setting to turn on.
+Acceptance is by signing in: the sign-in page says so, and each document
+shows its version and effective date. The identity service records which
+versions a person accepted, once per version.
+
+- **When.** Every sign-in that creates a session (magic link, passkey, device
+  code, upstream OIDC) appends to `v1:identity:user.legalAcceptance` one
+  entry per document whose version in force differs from the newest entry
+  already recorded for that document: `{documentType, version, acceptedAt,
+  sourceIP}`. A second sign-in on the same version records nothing. A new
+  version is recorded at the person's next sign-in. Earlier entries are never
+  edited or dropped. Each recording also writes a `legal_acceptance_recorded`
+  audit event naming the documents and versions.
+- **Where it runs.** `createSessionRow` in `component/identity/http` is the
+  one place a session row is created, so every factor is covered by one hook.
+  The versions come from the web server, which loaded the documents
+  (`LegalDocumentsInForce` in `component/identity/web`), so what a sign-in
+  records is what the page shows, override file included. A document whose
+  front matter has no `version` is not recorded. The write is the
+  `recordLegalAcceptance` mutation, which is server-only: no client can write
+  anybody's history, their own included.
+- **Across replicas.** Two identity replicas can finish one person's sign-ins
+  at the same moment. The recorder holds a per-user Postgres advisory lock
+  across its read and write, reads fresh (never from the node's result
+  cache), and writes under a row-version fence stamped after the version it
+  read. A row that moved in between is read again and only what is still due
+  is appended (memql#5431). Tests: `component/identity/legal_acceptance_test.go`
+  (the protocol) and `legal_acceptance_db_test.go` (the lock, against
+  Postgres).
+- **If the write fails.** The sign-in still succeeds. The terms make signing
+  in the acceptance, and the record is evidence of it; the next sign-in
+  writes the missing version. The failure is logged and audited as
+  `legal_acceptance_record_failed`.
+- **What a person sees.** Settings in MemQL OS (the identity account pages),
+  which is identity's `/me/settings` page, lists the documents, versions and
+  dates from the person's own row, newest first. The source IP stays on the
+  record and off the page. A history that could not be read says so instead
+  of showing as empty.
+- **What the record is not.** It is not a change notice, and none is shown
+  at sign-in. Before a person signs in the page does not know who they are,
+  so it cannot compare the version in force with their record; after
+  sign-in, the terms say that continuing to sign in once a new version is
+  in force is acceptance, and the record shows exactly that. The documents
+  promise notice in the platform and by email at least 30 days before a
+  material change takes effect (next section); the engine has no notice
+  mechanism for either, so today the operator gives that notice, and an
+  in-platform notice of an upcoming version is a feature to build. It would
+  need a way to publish the next version beside the current one, because
+  the engine serves one document per type and records acceptance of the
+  version it serves.
+
+The Privacy Notice describes the sign-in records the service keeps,
+including the IP address a sign-in arrives from. An installation that
+revises its notice may want to name the acceptance record itself.
 
 ## Versions, dates and the 30-day promise
 

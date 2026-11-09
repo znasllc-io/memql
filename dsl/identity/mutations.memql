@@ -1807,29 +1807,42 @@ mutation accessRequest expireAccessRequest {
 // recordLegalAcceptance
 // =====================
 //
-// Append a legal-document acceptance entry to a v1:identity:user row.
-// Each entry records {documentType, version, acceptedAt, sourceIP}
-// so compliance has an immutable per-user trail of which ToS /
-// privacy versions the user has accepted.
+// Replace a v1:identity:user row's legalAcceptance array. Each entry records
+// {documentType, version, acceptedAt, sourceIP}, so compliance has a per-user
+// trail of which Terms of Service and Privacy Notice versions the person
+// accepted and when.
 //
-// Implementation note: MemQL doesn't support array-append in update()
-// natively (the engine splats the supplied fields onto the prior
-// row, replacing each field whole). Caller is responsible for
-// reading the user's current legalAcceptance array, appending the
-// new entry, and passing the full new array as `legalAcceptance`.
-// The bff handler that wires the legal-acceptance flow does the
-// read-modify-write; this mutation is the write half.
+// THE WRITER IS THE IDENTITY SERVICE'S SESSION SEAM, and nothing else. Every
+// sign-in that creates a v1:identity:authSession row (magic link, passkey,
+// device code, upstream OIDC) runs component/identity/http's createSessionRow,
+// which appends the versions in force the account has not yet accepted
+// (component/identity/legal_acceptance.go) -- once per VERSION, never per
+// session. @serverOnly because a wire caller could otherwise write anybody's
+// history, or their own, which is the same defect for a record whose value
+// is that nobody authored it.
 //
-// If a future MemQL release adds array-append, the contract here
-// can flip to {documentType, version, sourceIP?} and the mutation
-// can compose the entry inline -- callers don't have to change.
+// Implementation note: update{} replaces each supplied field whole (there is
+// no array-append), so the caller reads the current array, appends and writes
+// the whole array back -- under a per-user Postgres advisory lock, a fresh
+// read and a row-version fence (memql#5431), so two replicas finishing one
+// person's sign-ins at once cannot lose each other's entries.
 //
 // Arguments:
-//   userId           (string)  - User node ID
-//   legalAcceptance  (object)  - Full new legalAcceptance array (caller pre-appended)
+//   userId           (string)    - User node ID
+//   legalAcceptance  ([]object)  - The full new array: every earlier entry, then the appended ones
 //
 
-/// Replace a user's legalAcceptance array (caller must read-modify-write to append).
+/// Replace a user's legalAcceptance array: the identity session seam reads,
+/// appends and writes the whole array at sign-in
+/// (component/identity/legal_acceptance.go).
+///
+/// Scoping the write to actor.userId is not the fix. It runs at the moment a
+/// session is minted, inside the request that is still authenticating the
+/// person, so there is no actor to scope it to; and the record's value is
+/// that the SERVICE wrote it -- a self-scoped client write would let a
+/// person author their own acceptance history, which is the same defect as
+/// writing somebody else's. @serverOnly bars both.
+@serverOnly
 mutation user recordLegalAcceptance {
   args {
     userId           string!

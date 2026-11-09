@@ -1110,6 +1110,13 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	// caller's own row, and simply absent when there is no caller to read.
 	if claims := s.optionalUser(r); claims != nil {
 		data.SignInSecurity = s.signInSecurityCard(r, claims)
+		// The legal-acceptance card is server-rendered for the same reason
+		// as the sessions panel on /me/devices (me_sessions.go): it answers
+		// what a person agreed to, and a card that renders that only when a
+		// client-side fetch succeeds fails in the wrong direction. Its
+		// script used to fetch /me/api/legal-acceptance, which nothing ever
+		// mounted, so the card spent its life saying it could not load.
+		data.LegalAcceptance = s.legalAcceptanceCard(r, claims)
 	}
 	s.render(w, r, "me/settings", webtempl.MeSettings(data), data)
 }

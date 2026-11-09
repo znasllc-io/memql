@@ -86,6 +86,19 @@ type Server struct {
 	// sign-in, because a mail outage must not lock people out.
 	SignInNotifier identity.SignInNotifier
 
+	// LegalDocuments answers, per sign-in, which legal-document versions are
+	// in force, so createSessionRow can record the ones the account has not
+	// yet accepted (component/identity/legal_acceptance.go). Asked at every
+	// sign-in rather than copied at boot because the web server owns the
+	// documents (override path included) and this package must not import
+	// it; app/integrations_identity.go wires it to the web server's
+	// LegalDocumentsInForce. Nil records nothing, which is what an
+	// engine-less harness gets; a failed record is logged and audited and
+	// NEVER blocks a sign-in -- the terms make signing in the acceptance, and
+	// the record is evidence of it that the next sign-in writes if this one
+	// could not.
+	LegalDocuments func() []identity.LegalDocumentVersion
+
 	// Abuse is the anti-abuse middleware stack (Phase 4). When
 	// non-nil, it wraps POST /auth/magic-link and emits audit events
 	// for blocked requests. Nil keeps the legacy "no abuse layer"
