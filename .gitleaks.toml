@@ -283,3 +283,8 @@ regexes = [
   '''^mql_acs_A{43}$''',
   '''^mql_acs_B{43}$''',
 ]
+
+[[allowlists]]
+description = "A Go identifier, not a credential (2026-11-09): the implementation plan of the website and email statistics (commit aa680dc8b, docs/superpowers/plans/2026-11-08-site-and-email-statistics.md, deleted when the epic merged) wrote 'Use crypto/rand for the secret, `geoip2.FromBytes` with ...', and generic-api-key read the reader constructor geoip2.FromBytes as the value of a secret. Value-keyed on the exact identifier (memql#3484): it names a library function wherever it appears, and the file it was found in no longer exists, so only the history scan ever sees it."
+regexTarget = "secret"
+regexes = ['''^geoip2\.FromBytes$''']
