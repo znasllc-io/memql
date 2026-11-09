@@ -760,9 +760,14 @@ function AddCodeForm({
         </Select>
       </Field>
       {usesSubject ? (
-        <Field label={guest ? "Subject" : "Subject (optional)"}>
-          <Input id={`access-subject-${siteId}`} label={guest ? "Subject" : "Subject (optional)"} value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
-        </Field>
+        <>
+          <Field label={guest ? "Subject" : "Subject (optional)"}>
+            <Input id={`access-subject-${siteId}`} label={guest ? "Subject" : "Subject (optional)"} value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
+          </Field>
+          {/* A PASS'S SUBJECT IS PUBLIC: whoever asks the guest route gets it, where a code's
+              subject is only its holder's. Said where the subject is chosen. */}
+          {guest ? <Caption>{"Anyone can open this subject's part."}</Caption> : null}
+        </>
       ) : null}
       <ExpiryField id={`access-expiry-${siteId}`} draft={draft} now={now} onChange={setDraft} label={guest ? "Ends" : "Expires"} />
       {refusal === "" ? null : <Notice tone="error" sentence={refusal} />}

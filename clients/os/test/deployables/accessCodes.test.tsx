@@ -1499,7 +1499,7 @@ function guestPass(over: Partial<Row> = {}): Row {
 const guestPart = () => screen.findByRole("region", { name: "Guest access" });
 
 describe("guest access", () => {
-  it("guest access reads off, and Allow guests is absent without gates", async () => {
+  it("guest access reads off with no pass, and offers Allow guests once a gate is declared", async () => {
     mountPanel({ accessGates: [DASHBOARD], accessCodes: [] });
     const part = await guestPart();
     expect(within(part).getByText("Off. Only someone with a code can open it.")).toBeTruthy();
@@ -1540,6 +1540,25 @@ describe("guest access", () => {
     await typeInto(screen.getByLabelText("Subject") as HTMLInputElement, "acme");
     await click(screen.getAllByRole("button", { name: "Allow guests" }).at(-1)!);
     expect(connection.callsNamed("siteAccessGuestPassCreate")[0]).toContain('gate: "engagement", subject: "acme"');
+  });
+
+  it("says under the guest form's Subject that anyone can open that subject's part, and the code form does not", async () => {
+    const PUBLIC_SUBJECT = "Anyone can open this subject's part.";
+    mountPanel({ accessGates: [DASHBOARD, ENGAGEMENT], accessCodes: [] });
+    await click(await screen.findByRole("button", { name: "Allow guests" }));
+    expect(screen.queryByText(PUBLIC_SUBJECT)).toBeNull();
+    chooseOption(screen.getByLabelText("Opens"), "engagement");
+    // UNDER THE FIELD: after the Subject, and before Ends.
+    const caption = screen.getByText(PUBLIC_SUBJECT);
+    expect(screen.getByLabelText("Subject").compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(caption.compareDocumentPosition(screen.getByLabelText("Ends")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // A CODE'S SUBJECT IS ITS HOLDER'S, so its form says nothing of the kind.
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    await fillAdd("Acme");
+    chooseOption(screen.getByLabelText("Unlocks"), "engagement");
+    expect(screen.getByLabelText(SUBJECT)).toBeTruthy();
+    expect(screen.queryByText(PUBLIC_SUBJECT)).toBeNull();
   });
 
   it("shows the engine's refusal in the form and keeps the draft", async () => {
