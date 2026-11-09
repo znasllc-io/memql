@@ -75,6 +75,18 @@ export function formatBytes(bytes: number): string {
   return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`;
 }
 
+/**
+ * A count, grouped: "1,204". In ONE locale, the one the statistics chart's
+ * axis and bucket labels use (kit/statistics), so a figure and the axis beside
+ * it never disagree about what a comma means. A value that is not a finite
+ * number renders "--": NaN on screen is an absent number dressed as a measured
+ * one, which is what kit/measure exists to prevent.
+ */
+export function formatCount(value: number): string {
+  if (!Number.isFinite(value)) return "--";
+  return value.toLocaleString("en-US");
+}
+
 /** A call's duration. Zero and negative render as "--": a row whose
  *  `completedAt` never landed has no duration, and "0ms" would claim one. */
 export function formatDuration(ms: number): string {

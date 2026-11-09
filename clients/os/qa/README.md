@@ -290,6 +290,17 @@ The `accounts` and `accounts-empty` views compare the Accounts registry with
 and absent measurements. Check light and dark modes at wide and narrow widths.
 The full app inventory and inspected exceptions are in [list-coverage.md](list-coverage.md).
 
+## Statistics
+
+`/statistics.html` draws the statistics kit (`src/kit/statistics`) from
+fixtures, before any page reads a figure: `view=page` (a website's figure row,
+its chart, ranked lists side by side and Health), `view=overview` (an Overview
+whose figures are statistics), `view=charts` (hours, twelve months with no
+previous period, a rate with a gap, the first day counted, nothing measured)
+and `view=states` (reading and empty). Hover the chart, then Tab into it and
+use the arrow keys: one readout above the plot follows both. Check `mode=light`
+and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
+
 ## GitHub repository creation
 
 Use `connected` for a populated repository picker and `connected-empty` for a

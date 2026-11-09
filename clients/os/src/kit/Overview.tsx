@@ -23,8 +23,15 @@ export interface OverviewMetric {
 }
 
 /** App summaries share a layout; each app supplies its own measured facts. */
-export function Overview({ metrics, scope, note, children, actions }: {
-  metrics: readonly OverviewMetric[];
+export function Overview({ metrics = [], figures, scope, note, children, actions }: {
+  metrics?: readonly OverviewMetric[];
+  /**
+   * A figure row of the app's own, drawn IN PLACE OF the metrics: an app whose
+   * Overview is its statistics (Email, spec 9) gives its `StatFigures` here,
+   * so the page has one row of figures under its heading rather than two.
+   * `metrics` is ignored while it is given.
+   */
+  figures?: ReactNode;
   scope?: string;
   /** What stopped arriving, on the title's line: a `HeadNote`. */
   note?: ReactNode;
@@ -33,12 +40,12 @@ export function Overview({ metrics, scope, note, children, actions }: {
 }) {
   return <section className="os-overview os-app-stack" aria-label="Overview" data-os-page-context={JSON.stringify({ page: "Overview", scope })}>
     <Head title="Overview" meta={scope} note={note}>{actions}</Head>
-    <dl className="os-overview-metrics" aria-label="Overview statistics">
+    {figures !== undefined ? figures : <dl className="os-overview-metrics" aria-label="Overview statistics">
       {metrics.map(metric => <div key={metric.label} data-overview-metric={metric.label}>
         <dt>{metric.label}</dt><dd>{metric.loading ? <InlineSkeleton label={`Loading ${metric.label.toLowerCase()}`} /> : <Measure figure={metric.figure} format={metric.format} />}</dd>
         {metric.detail && !metric.loading ? <small>{metric.detail}</small> : null}
       </div>)}
-    </dl>
+    </dl>}
     {children}
   </section>;
 }
