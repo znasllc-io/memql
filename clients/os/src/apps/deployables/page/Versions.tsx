@@ -1,36 +1,78 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 import { FileArchive } from "lucide-react";
-import { Button, Caption, Fact, Facts, Notice } from "../../../kit";
+import { Button, Caption, Notice } from "../../../kit";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { formatMoment } from "../../../kit/format";
 import { useOsConnection } from "../../../live/connection";
 import { fetchSiteVersions, type SiteVersion } from "../packages/calls";
-import type { SiteLifecycleActions } from "../packages/actions";
 import type { DeploymentRow } from "../packages/rows";
 import type { SiteRow } from "../rows";
-import { ProblemNotice } from "../packages/ReportView";
-import { DetailDialog } from "./DetailDialog";
 
-/** A version is a bundle, not a health observation or a change to site settings. */
-export function Versions({ site, runs, canPublish, lifecycle }: {
+/** What a version is to its deployable now. */
+export type VersionState = "Current" | "Candidate" | "Available";
+
+/** Whether the deployable serves a build baked into the installed MemQL, which has no version history of its own. */
+export function bundledWithMemQL(site: SiteRow): boolean {
+  return site.bundleRef.startsWith("file://");
+}
+
+/** A version's name: the last segment of its bundle, or that MemQL ships it. */
+export function versionLabel(ref: string): string {
+  return ref.startsWith("file://") ? "Bundled with MemQL" : ref.replace(/\/$/, "").split("/").pop() || ref;
+}
+
+/** What `ref` is to `site`, read from the row as it stands. */
+export function versionState(site: SiteRow, ref: string): VersionState {
+  return ref === site.bundleRef ? "Current" : site.kind !== "shopify_storefront" && ref === site.candidateRef ? "Candidate" : "Available";
+}
+
+/**
+ * Whether the deployable may be rolled back to `version`: an uploaded build
+ * (never one MemQL ships) that it has SERVED and is not serving now, on a live
+ * or offline deployable that is not system-owned, for a person who may
+ * publish. The act is ABSENT otherwise (DESIGN.md rule 12), never offered and
+ * then refused.
+ */
+export function rollBackLegal({ site, version, served, canPublish }: {
+  site: SiteRow;
+  version: SiteVersion;
+  served: boolean;
+  canPublish: boolean;
+}): boolean {
+  return (
+    canPublish &&
+    !site.systemOwned &&
+    version.bundleRef.startsWith("blob://") &&
+    version.bundleRef !== site.bundleRef &&
+    served &&
+    (site.status === "live" || site.status === "disabled")
+  );
+}
+
+/**
+ * A version is a bundle, not a health observation or a change to site settings.
+ *
+ * A ROW OPENS THE VERSION'S PAGE (design record 2026-11-08, section 10). It
+ * opened a dialog holding the facts and a Roll back button; the page that owns
+ * the trail and the bar draws the version now, so this list only says which
+ * one was chosen, what it is, and whether it ever served.
+ */
+export function Versions({ site, runs, onOpenVersion }: {
   site: SiteRow;
   runs: readonly DeploymentRow[];
-  canPublish: boolean;
-  lifecycle: SiteLifecycleActions;
+  onOpenVersion: (version: SiteVersion, state: VersionState, served: boolean) => void;
 }) {
   const connection = useOsConnection();
-  const bundled = site.bundleRef.startsWith("file://");
+  const bundled = bundledWithMemQL(site);
   const [history, setHistory] = useState<SiteVersion[]>([]);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
-  const [selected, setSelected] = useState<SiteVersion | null>(null);
 
   useEffect(() => {
     let active = true;
     setHistory([]);
-    setSelected(null);
     setError("");
     setReading(false);
     // A baked path is mutable across engine releases. Row history cannot
@@ -70,35 +112,23 @@ export function Versions({ site, runs, canPublish, lifecycle }: {
     const madeBy = runs.find((run) => run.deployables.some((o) => (o.candidateRef ?? "") === candidate));
     add({ bundleRef: candidate, createdAt: madeBy ? madeBy.finishedAt || madeBy.createdAt : "", status: "", artifactId: "" });
   }
-  const label = (ref: string) => ref.startsWith("file://") ? "Bundled with MemQL" : ref.replace(/\/$/, "").split("/").pop() || ref;
-  const state = (ref: string) => ref === site.bundleRef ? "Current" : site.kind !== "shopify_storefront" && ref === site.candidateRef ? "Candidate" : "Available";
 
   return <>
     <RecordList as="ul" label="Versions">
-      {[...versions.values()].map(version => <RecordRow key={version.bundleRef}
-        icon={<FileArchive size={18} aria-hidden />}
-        name={label(version.bundleRef)}
-        secondary={bundled ? "No separate version number is recorded" : version.createdAt ? formatMoment(version.createdAt) : undefined}
-        state={state(version.bundleRef)} tone={version.bundleRef === site.bundleRef ? "accent" : "muted"}
-        current={version.bundleRef === site.bundleRef}
-        onOpen={() => setSelected(version)} label={`Version ${label(version.bundleRef)}, ${state(version.bundleRef).toLowerCase()}`}
-      />)}
+      {[...versions.values()].map(version => {
+        const state = versionState(site, version.bundleRef);
+        return <RecordRow key={version.bundleRef}
+          icon={<FileArchive size={18} aria-hidden />}
+          name={versionLabel(version.bundleRef)}
+          secondary={bundled ? "No separate version number is recorded" : version.createdAt ? formatMoment(version.createdAt) : undefined}
+          state={state} tone={version.bundleRef === site.bundleRef ? "accent" : "muted"}
+          current={version.bundleRef === site.bundleRef}
+          onOpen={() => onOpenVersion(version, state, served.has(version.bundleRef))} label={`Version ${versionLabel(version.bundleRef)}, ${state.toLowerCase()}`}
+        />;
+      })}
     </RecordList>
     {versions.size === 0 && !reading && !error ? <Caption>No versions have been published yet.</Caption> : null}
     {reading ? <RecordListSkeleton label="Loading versions" /> : null}
     {error ? <Notice tone="error" sentence="Earlier versions could not be read." detail={error}><Button onClick={() => setRetry(value => value + 1)}>Try again</Button></Notice> : null}
-    {selected ? <DetailDialog title={`Version ${label(selected.bundleRef)}`} onClose={() => setSelected(null)}>
-      <Facts>
-        <Fact label="Version" value={label(selected.bundleRef)} />
-        <Fact label="State" value={state(selected.bundleRef)} />
-        <Fact label="Bundle" value={selected.bundleRef} />
-        {selected.createdAt ? <Fact label="Recorded" value={formatMoment(selected.createdAt)} /> : null}
-      </Facts>
-      {bundled ? <Caption>This app is included with the installed MemQL build. Earlier builds are managed with the cluster release.</Caption> : null}
-      {!served.has(selected.bundleRef) ? <Caption>Deployed as the candidate and not served yet. Promote the candidate to serve it.</Caption> : null}
-      {canPublish && !site.systemOwned && selected.bundleRef.startsWith("blob://") && selected.bundleRef !== site.bundleRef && served.has(selected.bundleRef) && (site.status === "live" || site.status === "disabled") ?
-        <Button busy={lifecycle.busy} onClick={() => void lifecycle.rollTo(site.id, selected.bundleRef)} ariaLabel={`Roll ${site.hostname} back to ${label(selected.bundleRef)}`}>Roll back to this version</Button> : null}
-      {lifecycle.refusal ? <ProblemNotice problem={lifecycle.refusal} tone="error" /> : null}
-    </DetailDialog> : null}
   </>;
 }

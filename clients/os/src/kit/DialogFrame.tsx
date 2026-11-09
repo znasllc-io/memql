@@ -8,10 +8,11 @@ import { Button } from "./controls";
 // ===========================================================================
 // PROMOTED ON ITS SECOND USE
 // ===========================================================================
-// It was `apps/deployables/page/DetailDialog`, which is now a thin wrapper
-// over this. Nexus's composer ("Run again", "Branch from here") is the second
-// surface that needs a modal holding a draft, and the rule in controls.tsx is
-// that the second use promotes -- waiting for a third means the second has
+// It was `apps/deployables/page/DetailDialog`, a thin wrapper over this until
+// Deployables stopped opening dialogs (2026-11-08) and the wrapper went.
+// Nexus's composer ("Run again", "Branch from here") was the second surface
+// that needed a modal holding a draft, and the rule in controls.tsx is that
+// the second use promotes -- waiting for a third means the second has
 // already forked. Fleet's share dialog, which predates this, carries the same
 // guards written out by hand; it is the precedent for the floor.
 //

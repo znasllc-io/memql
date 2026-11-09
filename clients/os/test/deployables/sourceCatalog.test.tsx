@@ -54,7 +54,7 @@ describe("configured Sources catalog", () => {
     await waitFor(() => expect(within(source).getByText("Not deployed")).toBeTruthy());
     expect(within(source).queryByText("Deployed by")).toBeNull();
   });
-  it("confirms catalog removal and calls only the narrow visibility mutation", async () => {
+  it("confirms catalog removal in place and calls only the narrow visibility mutation", async () => {
     const { connection } = mount({ packages: [A] });
     const source = await screen.findByRole("button", { name: /Open Website, @alice/ });
     expect(screen.queryByRole("button", { name: "Remove source Website" })).toBeNull();
@@ -63,10 +63,11 @@ describe("configured Sources catalog", () => {
     expect(remove.title).toBe("Remove source Website");
     expect(remove.querySelector(".lucide-trash2, .lucide-trash-2")).toBeTruthy();
     await click(remove);
-    const dialog = screen.getByRole("dialog", { name: "Remove Website?" });
-    expect(within(dialog).getByText(/Existing deployables and automatic updates keep running/)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const ask = screen.getByRole("group", { name: "Confirm source removal" });
+    expect(screen.getByText(/Existing deployables and automatic updates keep running/)).toBeTruthy();
     await readTheBar();
-    await click(within(dialog).getByRole("button", { name: "Remove source" }));
+    await click(within(ask).getByRole("button", { name: "Remove source" }));
     await waitFor(() => expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(1));
     expect(connection.callsNamed("setPackageSourceRemoved")[0]).toContain('packageId: "pkg-a"');
     for (const name of ["packageArchive", "sourceCredentialRevoke", "sourceConnectionRemove", "deactivateDeployable"]) expect(connection.callsNamed(name)).toHaveLength(0);
@@ -108,8 +109,11 @@ describe("configured Sources catalog", () => {
   });
 });
 
-// The removal asks in a dialog that opens over the icon that asked it (memql#6033):
-// the second click of a double-click on that icon must not remove the source.
+// THE REMOVAL ASKS IN PLACE, where its trash stood (the owner, 2026-11-08;
+// design record 2026-11-08-site-and-email-statistics, section 10, and
+// DESIGN.md "Edits together"). It used to ask in a dialog over the icon. The
+// question takes the trash's place, so the second click of a double-click on
+// the trash lands on it: it is held (memql#6033), as the dialog was.
 describe("removing a source, one double-click later", () => {
   useFakeDate();
 
@@ -117,29 +121,56 @@ describe("removing a source, one double-click later", () => {
     const { connection } = mount({ packages: [A] });
     await click(await screen.findByRole("button", { name: /Open Website, @alice/ }));
     await click(await screen.findByRole("button", { name: "Remove source Website" }));
-    return { connection, dialog: screen.getByRole("dialog", { name: "Remove Website?" }) };
+    return { connection, ask: screen.getByRole("group", { name: "Confirm source removal" }) };
   }
 
-  it("does not remove on the second click of the click that asked, and does once it is read", async () => {
-    const { connection, dialog } = await ask();
+  it("Remove source asks in place: focus on Cancel, the first press held, Cancel hands focus back, Remove source removes", async () => {
+    const { connection, ask: question } = await ask();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(/Remove this source from the list and saved choices\?/)).toBeTruthy();
+    expect(document.activeElement).toBe(within(question).getByRole("button", { name: "Cancel" }));
+    // The question stands where the trash did.
+    expect(screen.queryByRole("button", { name: "Remove source Website" })).toBeNull();
+
+    // A press before the question can have been read answers nothing.
     betweenTheClicks();
-    await click(within(dialog).getByRole("button", { name: "Remove source" }));
+    await click(within(question).getByRole("button", { name: "Remove source" }));
     expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
-    expect(screen.getByRole("dialog", { name: "Remove Website?" })).toBeTruthy();
 
     await readTheBar();
-    await click(within(dialog).getByRole("button", { name: "Remove source" }));
+    await click(within(question).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm source removal" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove source Website" }));
+    expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
+
+    await click(screen.getByRole("button", { name: "Remove source Website" }));
+    const again = screen.getByRole("group", { name: "Confirm source removal" });
+    await readTheBar();
+    await click(within(again).getByRole("button", { name: "Remove source" }));
+    await waitFor(() => expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(1));
+    expect(connection.callsNamed("setPackageSourceRemoved")[0]).toContain('packageId: "pkg-a"');
+  });
+
+  it("does not remove on the second click of the click that asked, and does once it is read", async () => {
+    const { connection, ask: question } = await ask();
+    betweenTheClicks();
+    await click(within(question).getByRole("button", { name: "Remove source" }));
+    expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
+    expect(screen.getByRole("group", { name: "Confirm source removal" })).toBeTruthy();
+
+    await readTheBar();
+    await click(within(question).getByRole("button", { name: "Remove source" }));
     await waitFor(() => expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(1));
   });
 
   it("does not cancel on that click either", async () => {
-    const { connection, dialog } = await ask();
+    const { connection, ask: question } = await ask();
     betweenTheClicks();
-    await click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("dialog", { name: "Remove Website?" })).toBeTruthy();
+    await click(within(question).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("group", { name: "Confirm source removal" })).toBeTruthy();
     await readTheBar();
-    await click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog", { name: "Remove Website?" })).toBeNull();
+    await click(within(question).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm source removal" })).toBeNull();
     expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
   });
 });

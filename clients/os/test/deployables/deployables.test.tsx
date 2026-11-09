@@ -997,24 +997,85 @@ describe("Where it lives", () => {
 // ---------------------------------------------------------------------------
 
 describe("the Live stop", () => {
-  it("lists distinct versions automatically, marks the current bundle, and rolls back from a version row", async () => {
-    const history = [
-      { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:01:00Z" },
-      { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:00:00Z" },
-      { ...STORE, bundleRef: "blob://sites/site-store/v1/", createdAt: "2026-08-20T12:00:00Z" },
-    ];
-    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: history }, "store.memql.example.com");
+  const HISTORY = [
+    { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:01:00Z" },
+    { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:00:00Z" },
+    { ...STORE, bundleRef: "blob://sites/site-store/v1/", createdAt: "2026-08-20T12:00:00Z" },
+  ];
+
+  /** The trail a page's Head names, crumb by crumb. */
+  function crumbs(page: HTMLElement): string[] {
+    return within(within(page).getByRole("navigation", { name: "Breadcrumbs" })).getAllByRole("listitem").map((item) => (item.textContent ?? "").trim());
+  }
+
+  it("lists distinct versions automatically and marks the current bundle", async () => {
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: HISTORY }, "store.memql.example.com");
     const versions = within(page).getByRole("list", { name: "Versions" });
-    const previous = await within(versions).findByRole("button", { name: "Version v1, available" });
+    await within(versions).findByRole("button", { name: "Version v1, available" });
     expect(within(versions).getAllByRole("listitem")).toHaveLength(2);
     expect(within(versions).getByRole("button", { name: "Version v2, current" })).toBeTruthy();
     expect(connection.calls.filter((c) => c.startsWith("asOf(siteById(")).length).toBeGreaterThan(0);
     expect(within(page).queryByRole("button", { name: /Version history|Stored version details/ })).toBeNull();
-    await click(previous);
+  });
+
+  // A VERSION IS A PAGE (the owner, 2026-11-08; design record
+  // 2026-11-08-site-and-email-statistics, section 10). It opened a dialog
+  // holding its facts and a Roll back button; it takes the deployable's place
+  // now, and the one act it offers is on the bar, where every act is (rule 12).
+  it("a version opens as a page, and Roll back to this version is in the bar", async () => {
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: HISTORY }, "store.memql.example.com");
+    const state = barState(page);
+    expect(barActs(page)).toEqual(["Take offline", "Redeploy"]);
+    await click(await within(within(page).getByRole("list", { name: "Versions" })).findByRole("button", { name: "Version v1, available" }));
+
+    const version = await screen.findByRole("region", { name: "Version v1 for store.memql.example.com" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Deployable store.memql.example.com" })).toBeNull();
+    expect(crumbs(version)).toEqual(["Deployables", "storefront", "Version v1"]);
+    expect(within(version).getByText("blob://sites/site-store/v1/")).toBeTruthy();
+    expect(within(version).getByText("Available")).toBeTruthy();
+    // ONE ACT, AND IT IS THIS VERSION'S. The deployable's own acts come back
+    // with Back; three of them could have pushed this one out of the bar.
+    expect(barActs(page)).toEqual(["Roll back to this version"]);
+    expect(barState(page)).toBe(state);
+    expect(within(version).queryByRole("button", { name: /^Roll / })).toBeNull();
+
+    // The bar has just changed, so it is read before it is pressed.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Roll store.memql.example.com back to v1" }));
     expect(connection.callsNamed("updateSiteBundle")).toEqual([
       'mutation updateSiteBundle(siteId: "site-store", bundleRef: "blob://sites/site-store/v1/")',
     ]);
+
+    await click(within(version).getByRole("button", { name: "Back to storefront" }));
+    expect(await screen.findByRole("region", { name: "Deployable store.memql.example.com" })).toBeTruthy();
+    expect(barActs(page)).toEqual(["Take offline", "Redeploy"]);
+  });
+
+  it("Roll back is absent for the current version, and so are the deployable's other acts", async () => {
+    const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: HISTORY }, "store.memql.example.com");
+    const versions = within(page).getByRole("list", { name: "Versions" });
+    await within(versions).findByRole("button", { name: "Version v1, available" });
+    await click(within(versions).getByRole("button", { name: "Version v2, current" }));
+
+    const version = await screen.findByRole("region", { name: "Version v2 for store.memql.example.com" });
+    expect(within(version).getByText("Current")).toBeTruthy();
+    // ABSENT, NEVER DISABLED (rule 12): a version already serving has nothing to roll back to.
+    expect(barActs(page)).toEqual([]);
+    expect(screen.queryByRole("button", { name: /^Roll .* back/ })).toBeNull();
+    expect(connection.callsNamed("updateSiteBundle")).toHaveLength(0);
+  });
+
+  it("a refused roll back stands on the version's page, in the server's words", async () => {
+    const refusal = "site_status_guard: store.memql.example.com is being deleted and cannot change its version";
+    const { page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: HISTORY, repointError: refusal }, "store.memql.example.com");
+    await click(await within(within(page).getByRole("list", { name: "Versions" })).findByRole("button", { name: "Version v1, available" }));
+    const version = await screen.findByRole("region", { name: "Version v1 for store.memql.example.com" });
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Roll store.memql.example.com back to v1" }));
+    expect(await within(version).findByText(/cannot change its version/)).toBeTruthy();
+    expect(within(version).getByText("This cluster refused")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("labels built-in bundles honestly and keeps Traffic immediately after Logs", async () => {
@@ -1035,6 +1096,9 @@ describe("the Live stop", () => {
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: history }, "store.memql.example.com", { role: "user" });
     const versions = within(page).getByRole("list", { name: "Versions" });
     await click(await within(versions).findByRole("button", { name: "Version v1, available" }));
+    const version = await screen.findByRole("region", { name: "Version v1 for store.memql.example.com" });
+    expect(within(version).getByText("blob://sites/site-store/v1/")).toBeTruthy();
+    expect(barActs(page)).toEqual([]);
     expect(screen.queryByRole("button", { name: /^Roll .* back/ })).toBeNull();
   });
 

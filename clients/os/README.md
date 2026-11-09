@@ -175,12 +175,15 @@ Storefronts choose an authorized store using the shared wizard
 and keep serving design previews until connected. The Store icon stays beside
 Traffic. See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
 
-A storefront's Visit action offers **Testing** and **Production**, with each
-URL and its connected store. Both use the same published build. Testing has a
-stable `test--<hostname>` address; Visit opens it with private access handled
-automatically. Production always uses its own binding, even when the browser
-holds a Testing session. Either destination may use a sandbox, both may use the
-same store, and an unconnected destination shows design preview.
+A storefront's Visit action opens a page in the deployable's place
+(`Deployables > <name> > Visit`, never a dialog) offering **Testing** and
+**Production**, with each URL and its connected store. Both use the same
+published build. Testing has a stable `test--<hostname>` address; Visit opens it
+with private access handled automatically. Production always uses its own
+binding, even when the browser holds a Testing session. Either destination may
+use a sandbox, both may use the same store, and an unconnected destination shows
+design preview. Every other kind of deployable has one address, and its page
+links straight to it in a new tab.
 
 ## Right-click belongs to the shell
 
@@ -1016,13 +1019,13 @@ the engine's clock on every request, so these words only say what a row says.
   Done is held by `InPlaceAsk` for the other side of the same race -- the second
   click of a double-click on Create must not press what the first one brought and
   throw away a code shown once. It is the one loud thing on the surface.
-- **THE DIALOG WAITS WHILE IT HOLDS THE ONLY COPY.** The panel tells the dialog
-  (`DetailDialog`'s `busy`, through `onBusyChange`) when a write is out or a new
-  code is on screen, and Close is disabled and Escape waits until it is not.
-  Closed with a write out, the reply lands in nothing: the old code is dead and
-  the new one was never seen. Closed over a new code, that code is gone for good
-  and a regenerate is the only recovery. Done is the way out, which costs one
-  deliberate click.
+- **THE PAGE WAITS WHILE IT HOLDS THE ONLY COPY.** The codes are a page of the
+  deployable, not a dialog (2026-11-03). The panel tells the page (through
+  `onBusyChange`) when a write is out or a new code is on screen, and the page
+  offers no Back, in its Head or its trail, until it is not. Left with a write
+  out, the reply lands in nothing: the old code is dead and the new one was never
+  seen. Left over a new code, that code is gone for good and a regenerate is the
+  only recovery. Done is the way out, which costs one deliberate click.
 - **A LOST REPLY IS NOT A REFUSAL.** A write whose reply never came
   (`isTransportInterruption`), or came without the code, ends `unknown`
   (`WriteOutcome`) rather than `refused`. The panel says in words of its own
@@ -1051,9 +1054,6 @@ the engine's clock on every request, so these words only say what a row says.
   through `refusalSentence` and stays on screen after its row has gone, which is
   what a regenerate of a code somebody else removed needs: the re-read takes the
   row, and the question under it, away.
-- **THE DIALOG'S TOP EDGE STANDS STILL** (`composition.css`). A centred modal
-  moved everything in it when a question opened or the form took the list's
-  place, and the second click of a double-click on Add landed on Close.
 
 The QA harness has fixtures for it (`access`, `access-empty`, `access-minted`,
 `access-no-gates` and `access-refused`), and `test/deployables/accessCodes.test.tsx`

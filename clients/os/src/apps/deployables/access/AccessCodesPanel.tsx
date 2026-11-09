@@ -41,11 +41,12 @@ import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRo
 // code gone from under them would cost a regenerate to learn that.
 //
 // ===========================================================================
-// THE DIALOG WAITS WHILE IT HOLDS THE ONLY COPY
+// THE PAGE WAITS WHILE IT HOLDS THE ONLY COPY
 // ===========================================================================
-// Closed with a write out, the reply lands in nothing: the old code is dead and the
-// new one was never seen. Closed over a new code, that code is gone for good. So
-// `onBusyChange` keeps Close and Escape from acting for both, and Done is the way out.
+// Left with a write out, the reply lands in nothing: the old code is dead and the
+// new one was never seen. Left over a new code, that code is gone for good. So
+// `onBusyChange` takes the deployable page's Back away for both, and Done is the
+// way out.
 
 /** One clock for the panel (`useNow`), so a code turns to Expired with the panel left open. */
 const CLOCK_MS = 5_000;

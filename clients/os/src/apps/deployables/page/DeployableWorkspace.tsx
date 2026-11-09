@@ -1,6 +1,6 @@
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
-import { Versions } from "./Versions";
-import type { SiteLifecycleActions } from "../packages/actions";
+import { Versions, type VersionState } from "./Versions";
+import type { SiteVersion } from "../packages/calls";
 import { AvailableVersion } from "./AvailableVersion";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
@@ -21,9 +21,9 @@ import { NO_PARTS, type PartsHeld } from "../parts";
 import { useStore } from "../store/useStore";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
-export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "access" | "store" | "reviews";
+export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "access" | "store" | "reviews" | "visit" | "version";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onOpenSourceSettings, lifecycle, onUpdate, deployChoice, readiness = null }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onOpenSourceSettings, onOpenVersion, onUpdate, deployChoice, readiness = null }: {
   onUpdate?: () => void;
   onOpenSourceSettings?: () => void;
   /** The engine's readiness answer, read once by the page; the Store slot's connection comes from it. */
@@ -36,7 +36,9 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   /** The parts this session holds, for the Preview section's own acts. */
   can?: PartsHeld;
   canDomains: boolean; canStore: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
-  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; lifecycle: SiteLifecycleActions;
+  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void;
+  /** Opens one version's page, from its row under Versions. */
+  onOpenVersion: (version: SiteVersion, state: VersionState, served: boolean) => void;
 }) {
   const storefront = site.kind === "shopify_storefront";
   const storeId = storefront ? boundStoreId(site) : "";
@@ -90,7 +92,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
     <section className="deployable-versions" aria-label="Serving version and latest attempt">
       <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
-      <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
+      <Versions site={site} runs={runs ?? []} onOpenVersion={onOpenVersion} />
       {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? candidateAttempt ? "Deployed as candidate" : attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), candidateAttempt ? "the live site is unchanged" : build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><ArrowUpRight size={16} aria-hidden /></IconButton> : null}</div> : null}
       {deployChoice ? <DeployTargetChoice {...deployChoice} /> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}

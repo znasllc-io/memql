@@ -526,13 +526,19 @@ describe("after a version went out as the candidate", () => {
   it("lists the candidate among the versions, and does not offer to roll back to what never served", async () => {
     openPage({ deployments: { "pkg-acme": [CANDIDATE_V3, SERVED_V2, SERVED_V1] } }, { site: WITH_CANDIDATE });
     await click(await screen.findByRole("button", { name: "Version v3, candidate" }));
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("Deployed as the candidate and not served yet. Promote the candidate to serve it.")).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: /Roll .* back/ })).toBeNull();
-    await click(within(dialog).getByRole("button", { name: /^Close/ }));
-    // A version that DID serve keeps its roll back.
+    // The version's page, in the deployable's place, and no dialog over it.
+    const candidate = await screen.findByRole("region", { name: "Version v3 for web.memql.example.com" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(candidate).getByText("Deployed as the candidate and not served yet. Promote the candidate to serve it.")).toBeTruthy();
+    // Its bar offers nothing: a candidate never served, so there is no going back to it.
+    expect(barActs()).toEqual([]);
+    expect(screen.queryByRole("button", { name: /Roll .* back/ })).toBeNull();
+    await click(within(candidate).getByRole("button", { name: /^Back to / }));
+    // A version that DID serve keeps its roll back, in the bar.
     await click(await screen.findByRole("button", { name: "Version v1, available" }));
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Roll web.memql.example.com back to v1" })).toBeTruthy();
+    await screen.findByRole("region", { name: "Version v1 for web.memql.example.com" });
+    expect(barActs()).toEqual(["Roll back to this version"]);
+    expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Roll web.memql.example.com back to v1" })).toBeTruthy();
   });
 });
 

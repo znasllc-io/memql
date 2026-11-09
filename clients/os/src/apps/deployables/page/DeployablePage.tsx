@@ -9,7 +9,7 @@ import { useAccountOptions } from "../../accounts/tie";
 import { AccessCodesPanel } from "../access/AccessCodesPanel";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
-import { everyOtherAppSkipped, type DeployTarget, type Placement } from "../packages/calls";
+import { everyOtherAppSkipped, type DeployTarget, type Placement, type SiteVersion } from "../packages/calls";
 import { deploymentFromRow, recordedAsCandidate, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
@@ -34,6 +34,9 @@ import { DomainWizard } from "./stops/Domains";
 import { ShopifyStorePanel } from "../store/ShopifyStorePanel";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { useBundleFlip } from "./useBundleFlip";
+import { VersionPage } from "./VersionPage";
+import { bundledWithMemQL, rollBackLegal, versionLabel, versionState } from "./Versions";
+import { VisitPage } from "./VisitPage";
 import { VisitSiteButton } from "./VisitSiteButton";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
@@ -167,6 +170,11 @@ export function DeployablePage({
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
   const [detail, setDetail] = useState<WorkspaceDetail | null>(initialDetail ?? null);
+  // WHICH VERSION THE VERSION PAGE IS ABOUT, and whether it had served when
+  // its row was pressed. Its state is NOT kept: the page reads it from the
+  // live row on every render (`versionOpen` below), so a roll back that lands
+  // while the page is open turns it to Current and takes the act off the bar.
+  const [chosenVersion, setChosenVersion] = useState<{ version: SiteVersion; served: boolean } | null>(null);
   // WHETHER THE ACCESS CODES HOLD BACK: what they hold is the only copy.
   const [accessHeld, setAccessHeld] = useState(false);
   useEffect(() => {
@@ -182,10 +190,21 @@ export function DeployablePage({
   const [typed, setTyped] = useState("");
   useEffect(() => {
     setDetail(initialDetail ?? null);
+    setChosenVersion(null);
     setDomainView({ kind: "list" });
     setConfirming(false);
     setTyped("");
   }, [site.id, initialDetail, openRevision]);
+
+  // A VERSION'S ROW OPENS ITS PAGE. A typed confirmation standing in the bar
+  // is about the deployable, and the version's bar carries none of the
+  // deployable's acts, so it is dropped rather than carried under the page.
+  function openVersion(version: SiteVersion, served: boolean) {
+    setConfirming(false);
+    setTyped("");
+    setChosenVersion({ version, served });
+    setDetail("version");
+  }
 
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
   const refusalStop = refusalStopFor(run);
@@ -402,10 +421,10 @@ export function DeployablePage({
   // THE STORE TAKES THE PANE, beside Addresses and for its reason (DESIGN.md
   // rules 9 and 11). A store's detail is credentials, a scope comparison, a
   // subscription record, a paired development store and a table per mirrored
-  // concept -- which is a page, not the 680px dialog that is right for
-  // Traffic and App values. It is absent for anyone whose grants do not reach
-  // `execute app:deployables/store`, so the branch cannot be entered by a
-  // person the engine would then serve nothing to.
+  // concept -- which is a page of its own, with its own bar, rather than a
+  // detail drawn under the deployable's. It is absent for anyone whose grants
+  // do not reach `execute app:deployables/store`, so the branch cannot be
+  // entered by a person the engine would then serve nothing to.
   if (detail === "store" && can.store) {
     const toOverview = () => setDetail(null);
     return <ShopifyStorePanel
@@ -433,27 +452,52 @@ export function DeployablePage({
   // the page; now each takes the page's place under its own Head, so the
   // trail names where the person is and both Backs -- the row's and the
   // browser's -- step out. The bar stays: the deployable's acts are still the
-  // deployable's while one of its details is open. Visit still asks in a
-  // dialog, and Logs opens the Logs app.
-  const inPage = detail !== null && detail !== "whereItLives" && detail !== "store" && detail !== "reviews" ? detail : null;
+  // deployable's while one of its details is open. Visit and a version's
+  // details followed on 2026-11-08 ("no pop-up at all"), and Logs opens the
+  // Logs app. A version's page needs the version it is about, so without one
+  // the overview stands.
+  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || (detail === "version" && chosenVersion === null) ? null : detail;
+  // WHAT THE OPEN VERSION IS NOW, read from the live row rather than kept
+  // from the click: one that has become the one serving has served.
+  const versionOpen = inPage === "version" && chosenVersion !== null ? {
+    version: chosenVersion.version,
+    state: versionState(site, chosenVersion.version.bundleRef),
+    served: chosenVersion.served || chosenVersion.version.bundleRef === site.bundleRef,
+  } : null;
+  const pageTitle = versionOpen !== null ? `Version ${versionLabel(versionOpen.version.bundleRef)}` : inPage === null ? "" : detailTitle(inPage);
   // A NEW ACCESS CODE IS SHOWN ONCE, so Back waits for Done while one stands,
   // as the dialog's Close and Escape did: the row's Back is inert, and the
   // browser's Back lands on it.
   const holding = inPage === "access" && accessHeld;
   const toOverview = () => setDetail(null);
   const detailView = inPage === null ? null : (
-    <Panel label={`${detailTitle(inPage)} for ${siteName(site)}`}>
-      <Head navigationKey={`deployable:${site.id}:${inPage}`} title={detailTitle(inPage)}
-        breadcrumbs={[{ label: backLabel, onSelect: holding ? undefined : onBack }, { label: name, onSelect: holding ? undefined : toOverview }, { label: detailTitle(inPage) }]}
+    <Panel label={`${pageTitle} for ${siteName(site)}`}>
+      <Head navigationKey={`deployable:${site.id}:${inPage}${versionOpen !== null ? `:${versionOpen.version.bundleRef}` : ""}`} title={pageTitle}
+        breadcrumbs={[{ label: backLabel, onSelect: holding ? undefined : onBack }, { label: name, onSelect: holding ? undefined : toOverview }, { label: pageTitle }]}
         back={holding ? undefined : { label: name, onSelect: toOverview }} />
       {inPage === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
         inPage === "traffic" ? <TrafficPanel site={site} /> :
         // KEYED, so a code held for one deployable is never drawn over another.
         inPage === "access" ? <AccessCodesPanel key={site.id} site={site} onBusyChange={setAccessHeld} /> :
+        inPage === "visit" ? <VisitPage key={site.id} site={site} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} /> :
+        versionOpen !== null ? <VersionPage site={site} version={versionOpen.version} state={versionOpen.state} served={versionOpen.served} bundled={bundledWithMemQL(site)} /> :
         (() => { const stage = railFor(rail).stages.find(s => s.id === inPage); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
       {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
     </Panel>
   );
+
+  // ON A VERSION'S PAGE THE BAR IS THE VERSION'S (design record 2026-11-08,
+  // section 10): Roll back to this version when that is legal, and nothing
+  // otherwise. Not the deployable's other acts: the page is about one version,
+  // a bar holds three acts, and three of the deployable's could push this one
+  // out. They come back with Back. A refusal stands on the page, above.
+  const versionActs: Act[] = versionOpen !== null && rollBackLegal({ site, version: versionOpen.version, served: versionOpen.served, canPublish: can.publish }) ? [{
+    label: "Roll back to this version",
+    tone: "primary",
+    busy: lifecycle.busy,
+    onAct: () => void lifecycle.rollTo(site.id, versionOpen.version.bundleRef),
+    ariaLabel: `Roll ${site.hostname} back to ${versionLabel(versionOpen.version.bundleRef)}`,
+  }] : [];
 
   if (detail === "whereItLives") {
     const stage = railFor(rail).stages.find(stage => stage.id === "whereItLives");
@@ -467,12 +511,12 @@ export function DeployablePage({
   }
 
   return (
-    <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, status: site.status, packageId: pkg?.id, view: detail ? detailTitle(detail) : "Overview" })}>
+    <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, status: site.status, packageId: pkg?.id, view: inPage === null ? "Overview" : pageTitle })}>
       <div className="os-deploy-scroll">
         {detailView ?? <Panel label={`Deployable ${siteName(site)}`}>
           {/* Page navigation stays with the title; Ask belongs to the window. */}
           <Head navigationKey={`deployable:${site.id}`} title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
-            <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
+            <VisitSiteButton site={site} name={name} onOpenVisit={() => setDetail("visit")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
@@ -530,7 +574,7 @@ export function DeployablePage({
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource ? onOpenSource(pkg.id) : setDetail("source")}
             onOpenSourceSettings={pkg && onOpenSource ? () => onOpenSource(pkg.id, "settings") : undefined}
-            lifecycle={lifecycle}
+            onOpenVersion={(version, _shown, served) => openVersion(version, served)}
             readiness={previewReadiness}
             deployChoice={offerCandidate ? {
               target: gateTarget,
@@ -558,7 +602,7 @@ export function DeployablePage({
         </Panel>}
       </div>
 
-      <ActionBar state={reading.state} detail={reading.detail} tone={reading.tone} acts={confirming ? [] : acts}>
+      <ActionBar state={reading.state} detail={reading.detail} tone={reading.tone} acts={versionOpen !== null ? versionActs : confirming ? [] : acts}>
         {confirming && confirmAct ? (
           <ConfirmRow
             site={site}
@@ -700,5 +744,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 
 // Each detail's title, as its page's Head and the trail name it.
 function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store", reviews: "Reviews" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store", reviews: "Reviews", visit: "Visit", version: "Version" }[detail];
 }

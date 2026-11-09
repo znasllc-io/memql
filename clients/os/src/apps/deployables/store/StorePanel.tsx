@@ -69,16 +69,16 @@ import {
 // learned something.
 //
 // ===========================================================================
-// THE PANE, NOT A DIALOG
+// THE PANE, NOT A DETAIL UNDER THE DEPLOYABLE'S BAR
 // ===========================================================================
-// The deployable's other details (Traffic, App values) open in
-// `DetailDialog`, which is 680px with its own header and right for a short
-// read and a small form. A store is neither: it is credentials, a scope
-// comparison, a subscription record, a paired development store and a table
-// per mirrored concept. DESIGN.md rule 9 says real estate belongs to content
-// and rule 11 says a tall detail replaces its list rather than sharing a
-// scroll column, so this takes the pane on the list's own gutters -- the
-// arrangement `whereItLives` already uses.
+// The deployable's other details take its page's place under a Head of their
+// own and keep its bar, which is right for a short read and a small form. A
+// store is neither: it is credentials, a scope comparison, a subscription
+// record, a paired development store and a table per mirrored concept.
+// DESIGN.md rule 9 says real estate belongs to content and rule 11 says a
+// tall detail replaces its list rather than sharing a scroll column, so this
+// takes the pane on the list's own gutters -- the arrangement `whereItLives`
+// already uses.
 
 export interface StorePanelProps {
   site: SiteRow;
