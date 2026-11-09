@@ -5440,7 +5440,7 @@ QueryClient.prototype.releaseCandidates = function (this: QueryClient, args: Rel
   return this.executeNamed("releaseCandidates", buildReleaseCandidates(args), opts);
 };
 
-/** Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. The reason, one line of at most 500 characters, is kept with the closed plan. */
+/** Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. A restoration of a completed update that has recorded no reverse start returns to that completed update instead; once it has recorded one it cannot be closed. The reason, one line of at most 500 characters, is kept with the record. */
 export interface ReleaseCloseInstallationArgs {
   installationId: string;
   planId: string;

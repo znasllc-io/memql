@@ -98,6 +98,129 @@ func (c *Client) PlanObservedRevision(ctx context.Context, snapshot Snapshot, re
 	return PlanRevision(fresh, request, revision, prune)
 }
 
+// BoundaryProof checks an intent's complete history from the boundary it was
+// planned at (NewContinuityState) and returns the proof its patch needs. It is
+// for a reversal (PlanRollback, or PlanUnappliedRollback over a ReadPlanning
+// snapshot), whose journal keeps no cursor. Every check rereads the whole
+// window from the planning boundary, so an edit seen once is seen by every
+// later check while Kubernetes retains the history. Status-only generation
+// advances pass, as CheckContinuity allows; a spec, marker, operation or
+// identity change refuses.
+//
+// A reversal resumed after Kubernetes compacted that history (minutes on a
+// busy cluster) is proved without it only while the Application's generation
+// has not moved since planning (unchangedSincePlanning); otherwise it gets
+// ErrHistoryUnavailable, never a proof rebased onto a fresh baseline, and its
+// caller may plan the reversal again only when its journal proves nothing of
+// it can still reach the cluster.
+func (c *Client) BoundaryProof(ctx context.Context, intent Intent) (*ContinuityProof, error) {
+	state, err := NewContinuityState(intent)
+	if err != nil {
+		return nil, err
+	}
+	_, proof, err := c.CheckContinuity(ctx, intent, state)
+	if errors.Is(err, ErrHistoryUnavailable) {
+		return c.unchangedSincePlanning(ctx, intent)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return proof, nil
+}
+
+// unchangedSincePlanning proves, with no history, that only metadata changed
+// since intent was planned: the same UID, the exact generation, marker and
+// complete spec it was planned against, and an idle Application. Every spec
+// change advances the generation, which never decreases, so an edit made and
+// undone since planning cannot hide here. It is the strict fence a format 1
+// reversal's patch tested, so a history-backed reversal resumed after its
+// history is gone accepts at least what that fence accepted, such as a label
+// or annotation write by another controller. A moved generation keeps
+// ErrHistoryUnavailable: without the history, Argo's status writes and a real
+// edit undone since are indistinguishable.
+func (c *Client) unchangedSincePlanning(ctx context.Context, intent Intent) (*ContinuityProof, error) {
+	before, _, digest, err := intent.validate()
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := c.Read(ctx, intent.Target)
+	if err != nil {
+		return nil, err
+	}
+	meta := object(snapshot.object, "metadata")
+	generation, err := integer(meta["generation"])
+	if err != nil || marker(snapshot.object) != intent.BeforeMarker || !equalJSON(object(snapshot.object, "spec"), before) {
+		return nil, ErrChanged
+	}
+	if generation != intent.BeforeGeneration {
+		return nil, ErrHistoryUnavailable
+	}
+	if err := idle(snapshot.object); err != nil {
+		return nil, err
+	}
+	return &ContinuityProof{digest, stringAt(meta, "resourceVersion"), generation, time.Now()}, nil
+}
+
+// Admit checks, without writing, that Apply could accept intent now, and
+// returns the proof a history-backed intent's patch needs. A history-backed
+// intent is proved from its planning boundary (BoundaryProof). A format 1
+// intent must pass the same strict fence its patch tests: the exact UID,
+// generation, marker and spec it was planned against, and an idle
+// Application; any generation change, status-only or not, is ErrChanged. A
+// caller runs it before recording that it is about to write, so that a refusal
+// leaves nothing to account for.
+func (c *Client) Admit(ctx context.Context, intent Intent) (*ContinuityProof, error) {
+	if intent.FormatVersion == 2 {
+		return c.BoundaryProof(ctx, intent)
+	}
+	before, _, digest, err := intent.validate()
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := c.Read(ctx, intent.Target)
+	if err != nil {
+		return nil, err
+	}
+	obj := snapshot.object
+	if marker(obj) == digest {
+		return nil, nil // Already applied; Apply reconciles it without writing.
+	}
+	generation, err := integer(object(obj, "metadata")["generation"])
+	if err != nil || generation != intent.BeforeGeneration || marker(obj) != intent.BeforeMarker || !equalJSON(object(obj, "spec"), before) {
+		return nil, ErrChanged
+	}
+	return nil, idle(obj)
+}
+
+// Superseded reports whether a format 1 intent can never be applied and never
+// was: the Application still holds the intent's exact baseline (same UID,
+// marker and complete spec) while its generation has moved past the one the
+// intent's patch tests. Every request ever formed for the intent tested that
+// generation and the resourceVersion of its moment, so none can land now or
+// later; and none landed, or the Application would carry the intent's own
+// marker. A history-backed intent's patch tests the version its proof named,
+// which nothing retains, so this never reports one superseded.
+func (c *Client) Superseded(ctx context.Context, intent Intent) (bool, error) {
+	if intent.FormatVersion == 2 {
+		return false, nil
+	}
+	before, _, digest, err := intent.validate()
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := c.Read(ctx, intent.Target)
+	if err != nil {
+		return false, err
+	}
+	obj := snapshot.object
+	if err := unmanaged(obj); err != nil {
+		return false, err
+	}
+	generation, err := integer(object(obj, "metadata")["generation"])
+	return err == nil && generation > intent.BeforeGeneration && marker(obj) != digest &&
+		marker(obj) == intent.BeforeMarker && equalJSON(object(obj, "spec"), before), nil
+}
+
 func NewContinuityState(intent Intent) (ContinuityState, error) {
 	_, _, digest, err := intent.validate()
 	if err != nil || intent.FormatVersion != 2 {

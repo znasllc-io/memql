@@ -41,12 +41,20 @@ type rollbackPlan struct {
 }
 
 type rollbackRecord struct {
-	Applications       map[string]applicationObservation
-	ID                 string
-	Plan               rollbackPlan
-	Started            bool
+	Applications map[string]applicationObservation
+	ID           string
+	Plan         rollbackPlan
+	Started      bool
+	// StartedAt is when the reversal's start was committed; a deployment of
+	// the reversal's state in Argo's history counts only from then.
+	StartedAt          time.Time
 	ObservationVersion int64
 	Observation        *argocd.Facts
+	// Replanned holds, by member, a reversal planned again because the saved
+	// one could no longer be admitted and provably never reached the cluster
+	// (replanRollbackApplication). It supersedes the planned and any
+	// reconciled intent of that member.
+	Replanned map[string]argocd.Intent
 }
 
 func (p rollbackPlan) canonical(parent revisionRecord) ([]byte, string, error) {
@@ -134,10 +142,10 @@ func (p rollbackPlan) fresh() error {
 // further reverse write (close_journal.go).
 func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*rollbackRecord, error) {
 	var r rollbackRecord
-	var body, observation, members []byte
+	var body, observation, members, replanned []byte
 	var started sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT rollback_id,plan,started_at,observation_version,observation,application_observations FROM installation_revision_rollbacks WHERE parent_plan_id=$1 FOR UPDATE`, parent.ID).
-		Scan(&r.ID, &body, &started, &r.ObservationVersion, &observation, &members)
+	err := tx.QueryRowContext(ctx, `SELECT rollback_id,plan,started_at,observation_version,observation,application_observations,replanned_intents FROM installation_revision_rollbacks WHERE parent_plan_id=$1 FOR UPDATE`, parent.ID).
+		Scan(&r.ID, &body, &started, &r.ObservationVersion, &observation, &members, &replanned)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -152,7 +160,7 @@ func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*roll
 	if err != nil || encodingErr != nil || key != r.ID || string(actual) != string(expected) {
 		return nil, errors.New("installation rollback identity is inconsistent")
 	}
-	r.Started = started.Valid
+	r.Started, r.StartedAt = started.Valid, started.Time
 	if r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) || (len(observation) != 0 && !r.Started) {
 		return nil, errors.New("installation rollback effect markers are inconsistent")
 	}
@@ -173,33 +181,100 @@ func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*roll
 	if err != nil {
 		return nil, err
 	}
+	if r.Replanned, err = decodeReplannedIntents(replanned, r, parent.Plan); err != nil {
+		return nil, err
+	}
 	return &r, nil
+}
+
+// decodeReplannedIntents reads a reversal's replanned members strictly. Each
+// must be a member of this reversal, started at the reversal level, and an
+// exact reversal of that member's forward intent.
+func decodeReplannedIntents(body []byte, r rollbackRecord, parent preparedPlan) (map[string]argocd.Intent, error) {
+	if len(body) == 0 {
+		return nil, nil
+	}
+	var raw map[string]json.RawMessage
+	if receiverJSON(body, &raw) != nil || len(raw) == 0 || len(raw) > len(parent.applicationMembers()) || !r.Started {
+		return nil, errors.New("installation replanned reversals are malformed")
+	}
+	allowed := map[string]bool{}
+	for _, app := range r.Plan.Applications {
+		allowed[app.Key] = true
+	}
+	if r.Plan.FormatVersion != 2 {
+		allowed[""] = true
+	}
+	out := map[string]argocd.Intent{}
+	for key, encoded := range raw {
+		intent, err := argocd.DecodeIntent(encoded)
+		if err != nil || !allowed[key] {
+			return nil, errors.New("installation replanned reversal is outside this reversal")
+		}
+		forward, err := parent.application(key)
+		if err != nil || argocd.ValidateRollback(forward.Intent, intent) != nil {
+			return nil, errors.New("installation replanned reversal does not reverse its exact forward intent")
+		}
+		out[key] = intent
+	}
+	return out, nil
 }
 
 // reserveRollback is a journal operation, not a live verifier. The private
 // host supplies one admitted plan before any Argo write. Once stored, even a
-// not-yet-started rollback fences the forward workflow permanently.
+// not-yet-started rollback fences the forward workflow permanently; for a
+// restoration of a completed update, until withdrawRestoration returns a
+// reversal that wrote nothing.
 func (j *revisionJournal) reserveRollback(ctx context.Context, installation, key string, plan rollbackPlan) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, parent *revisionRecord, actor string) error {
-		if !parent.rollbackActive() || actor != parent.Plan.RequestedBy {
-			return errors.New("rollback requires the active installation's requester")
-		}
-		body, rollbackID, err := plan.canonical(*parent)
-		if err != nil {
-			return err
-		}
-		if parent.Rollback != nil {
-			if parent.Rollback.ID != rollbackID {
-				return errChanged
-			}
+		return insertRollback(ctx, tx, key, *parent, actor, plan, false)
+	})
+}
+
+// replaceUnstartedRollback stores a freshly admitted reversal in place of one
+// that was reserved but never started (no beginRollback). No member of a
+// reversal can start, and no reverse write can be sent, before that start, so
+// the replaced reversal never reached the cluster. A reserved reversal used to
+// be kept as planned: one planned long before it was resumed carried a history
+// boundary Kubernetes had since compacted, or, planned by engines up to
+// 0.31.28, a strict generation fence Argo's status writes had already passed,
+// and it then refused on every resume. The restoration's every check ran again
+// in this pass, so the replacement is bound to fresh evidence. A started
+// reversal is never replaced here (errChanged), and an identical one is a lost
+// reply.
+func (j *revisionJournal) replaceUnstartedRollback(ctx context.Context, installation, key string, plan rollbackPlan) (revisionRecord, error) {
+	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, parent *revisionRecord, actor string) error {
+		return insertRollback(ctx, tx, key, *parent, actor, plan, true)
+	})
+}
+
+// insertRollback stores one admitted reversal for an active parent, under the
+// head and parent locks its caller holds. replaceUnstarted admits replacing an
+// existing reversal that has no start.
+func insertRollback(ctx context.Context, tx *sql.Tx, key string, parent revisionRecord, actor string, plan rollbackPlan, replaceUnstarted bool) error {
+	if !parent.rollbackActive() || actor != parent.Plan.RequestedBy {
+		return errors.New("rollback requires the active installation's requester")
+	}
+	body, rollbackID, err := plan.canonical(parent)
+	if err != nil {
+		return err
+	}
+	if parent.Rollback != nil {
+		if parent.Rollback.ID == rollbackID {
 			return nil // Recover a lost journal reply without renewing evidence.
 		}
-		if err := plan.fresh(); err != nil {
+		if !replaceUnstarted || parent.Rollback.Started {
+			return errChanged
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM installation_revision_rollbacks WHERE parent_plan_id=$1 AND started_at IS NULL`, key); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO installation_revision_rollbacks(parent_plan_id,rollback_id,plan) VALUES($1,$2,$3::jsonb)`, key, rollbackID, string(body))
+	}
+	if err := plan.fresh(); err != nil {
 		return err
-	})
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO installation_revision_rollbacks(parent_plan_id,rollback_id,plan) VALUES($1,$2,$3::jsonb)`, key, rollbackID, string(body))
+	return err
 }
 
 func (j *revisionJournal) beginRollback(ctx context.Context, installation, key, workflow string) (revisionRecord, error) {

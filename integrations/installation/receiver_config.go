@@ -173,21 +173,27 @@ type receiverConfiguration struct {
 type receiverSnapshot struct {
 	healthCredential, healthRoots string
 	configuration                 receiverConfiguration
-	digest                        string
-	invariantDigest               string
-	observed                      time.Time
-	applications                  []receiverApplicationSnapshot
-	application                   argocd.Snapshot
-	applicationTarget             argocd.Target
-	render                        argocd.RenderSpec
-	catalog                       Catalog
-	registries                    []ociregistry.Target
-	bindings                      []imageBinding
-	dependencies                  []pipelines.ReleaseDependency
-	protected                     []resourceIdentity
-	pullCredential                string
-	rendererAddress               string
-	rendererTLS                   *tls.Config
+	// digest and invariantDigest are this engine's (receiving-configuration-v2);
+	// the legacy pair is the v1 form engines up to 0.31.28 saved, kept only so
+	// such a plan still verifies (matchesInvariant).
+	digest, invariantDigest             string
+	legacyDigest, legacyInvariantDigest string
+	// own is the receiver's own configuration ConfigMap and its content, which
+	// a candidate must not change (ownConfigurationUnchanged).
+	own               receiverOwnConfiguration
+	observed          time.Time
+	applications      []receiverApplicationSnapshot
+	application       argocd.Snapshot
+	applicationTarget argocd.Target
+	render            argocd.RenderSpec
+	catalog           Catalog
+	registries        []ociregistry.Target
+	bindings          []imageBinding
+	dependencies      []pipelines.ReleaseDependency
+	protected         []resourceIdentity
+	pullCredential    string
+	rendererAddress   string
+	rendererTLS       *tls.Config
 }
 
 func (s *receiverSnapshot) String() string {
@@ -249,7 +255,7 @@ func readReceiverGroupInputs(ctx context.Context, api argocd.API, namespace, nam
 	if cfg.FormatVersion == 2 {
 		cfg.Application = receiverNamed{apps[0].Namespace, apps[0].Name}
 	}
-	s := &receiverSnapshot{configuration: cfg, observed: time.Now().UTC()}
+	s := &receiverSnapshot{configuration: cfg, observed: time.Now().UTC(), own: receiverOwnConfiguration{namespace: namespace, name: name, content: receiverConfigMapContent(cm)}}
 	if cfg.Health != nil {
 		var err error
 		s.healthCredential, err = r.secret(ctx, namespace, cfg.Health.Credential)
@@ -267,6 +273,7 @@ func readReceiverGroupInputs(ctx context.Context, api argocd.API, namespace, nam
 	if err != nil {
 		return nil, err
 	}
+	r.useBindingKey(token)
 	roots := ""
 	if cfg.Catalog.RootCA != nil {
 		roots, err = r.secret(ctx, namespace, *cfg.Catalog.RootCA)
@@ -385,19 +392,48 @@ func readReceiverGroupInputs(ctx context.Context, api argocd.API, namespace, nam
 	if err := s.observeRenderer(ctx, r); err != nil {
 		return nil, err
 	}
-	s.digest, err = r.finish(ctx)
+	digests, err := r.configuration(ctx)
 	if err != nil {
 		return nil, err
 	}
+	s.digest, s.legacyDigest = digests.current, digests.legacy
 	names := make([]receiverNamed, len(apps))
 	for i, app := range apps {
 		names[i] = receiverNamed{app.Namespace, app.Name}
 	}
-	s.invariantDigest, err = r.configurationInvariant(names...)
+	invariants, err := r.configurationInvariant(names...)
 	if err != nil {
 		return nil, err
 	}
+	s.invariantDigest, s.legacyInvariantDigest = invariants.current, invariants.legacy
 	return s, nil
+}
+
+// matchesInvariant reports whether a configuration invariant saved at
+// preparation describes this observation, in the format of the engine that
+// prepared it. A plan prepared by an engine up to 0.31.28 holds the v1 form:
+// its saved digest keeps v1's strictness here, so the update that installs this
+// engine, prepared and applied by the previous one, can still complete or be
+// restored when nothing it binds changed. When churn has moved what v1 binds
+// (renderer Pods, resourceVersions, discovery), such a plan refuses as it did
+// before, and its operator closes it (CloseSelected). The live checks are this
+// engine's for every plan: the renderer's TLS handshake trusts its Secret's
+// anchors, not the leaf v1 pinned. The two forms use different digest domains,
+// so neither can stand in for the other.
+func (s *receiverSnapshot) matchesInvariant(saved string) bool {
+	return s != nil && internalDigest.MatchString(saved) && (saved == s.invariantDigest || saved == s.legacyInvariantDigest)
+}
+
+// matchesPreparation also requires the full configuration digest of a single
+// Application plan, in the same format as its invariant.
+func (s *receiverSnapshot) matchesPreparation(plan preparedPlan) bool {
+	if s == nil || plan.Preparation == nil {
+		return false
+	}
+	saved := plan.Preparation
+	current := saved.ConfigurationInvariantDigest == s.invariantDigest && (plan.FormatVersion == 2 || saved.ConfigurationDigest == s.digest)
+	legacy := s.legacyInvariantDigest != "" && saved.ConfigurationInvariantDigest == s.legacyInvariantDigest && (plan.FormatVersion == 2 || saved.ConfigurationDigest == s.legacyDigest)
+	return internalDigest.MatchString(saved.ConfigurationInvariantDigest) && (current || legacy)
 }
 
 // Every failure is content-free, including upstream configuration/Secret errors.

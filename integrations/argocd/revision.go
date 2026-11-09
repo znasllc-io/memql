@@ -72,6 +72,16 @@ type Snapshot struct {
 
 // Facts report an observation, never a completed installation verdict. Even an
 // Argo sync that succeeded still needs workload, traffic and cleanup evidence.
+//
+// OperationPhase and OperationSucceeded describe the intent's OWN operation.
+// They are read from status.operationState while Argo still holds that
+// operation there. After a later sync replaced it, they come from the caller's
+// evidence for this exact intent, while the Application still holds the intent
+// unchanged and that later sync also Succeeded (see observe): the journal's
+// record that the operation was once observed Succeeded (WithRecordedSuccess),
+// or for a reversal Argo's own deployment history (WithDeploymentHistory).
+// SuccessEvidence names which ("" when operationState itself showed it); it is
+// never persisted, so a journal can keep only successes it saw itself.
 type Facts struct {
 	IntentObserved     bool
 	OperationPending   bool
@@ -80,6 +90,110 @@ type Facts struct {
 	RevisionObserved   bool
 	Healthy            bool
 	Synced             bool
+	SuccessEvidence    string `json:"-"`
+}
+
+const (
+	// SuccessRecorded marks success taken from the caller's journal record.
+	SuccessRecorded = "recorded"
+	// SuccessDeployed marks success taken from Argo's deployment history.
+	SuccessDeployed = "deployed"
+)
+
+// successEvidence is what a caller vouches for about one intent's own
+// operation: that its journal recorded the operation as observed Succeeded,
+// and from when a deployment in Argo's history of exactly the intent's
+// revision and source can stand for it.
+type successEvidence struct {
+	recorded bool
+	deployed time.Time
+}
+
+type successEvidenceKey struct{}
+
+func withSuccessEvidence(ctx context.Context, intents []Intent, apply func(*successEvidence)) (context.Context, error) {
+	if len(intents) == 0 {
+		return ctx, nil
+	}
+	merged := map[string]successEvidence{}
+	for digest, evidence := range successEvidenceIn(ctx) {
+		merged[digest] = evidence
+	}
+	for _, intent := range intents {
+		_, _, digest, err := intent.validate()
+		if err != nil {
+			return ctx, err
+		}
+		evidence := merged[digest]
+		apply(&evidence)
+		merged[digest] = evidence
+	}
+	return context.WithValue(ctx, successEvidenceKey{}, merged), nil
+}
+
+func successEvidenceIn(ctx context.Context) map[string]successEvidence {
+	evidence, _ := ctx.Value(successEvidenceKey{}).(map[string]successEvidence)
+	return evidence
+}
+
+// WithRecordedSuccess returns a context carrying the caller's durable record
+// that each intent's own operation was observed finishing Succeeded. It exists
+// because Argo keeps only the LAST operation in status.operationState: one
+// later sync of the Application (a hand sync of a manual-sync Application, or
+// self-heal) replaces the intent's operation there, and an observer that can
+// see success only in operationState then refuses the intent forever, although
+// the Application still runs exactly the intent's revision and spec.
+//
+// The record is evidence about the past, never authority: Observe and
+// PlanRollback still require the Application to hold the intent's marker and
+// desired spec, no pending operation, its sync to compare the intent's revision
+// with the intent's source, and the later sync to have Succeeded at that same
+// revision and source (observe). Only a native journal that persisted the
+// observation calls this; serialized DSL input never reaches it. The values
+// travel in the context because the receiving configuration reader observes
+// intents through code that has no journal of its own
+// (installation.readSelectedReceiver); the evidence must be the same wherever
+// an intent is observed in one call.
+func WithRecordedSuccess(ctx context.Context, intents ...Intent) (context.Context, error) {
+	return withSuccessEvidence(ctx, intents, func(e *successEvidence) { e.recorded = true })
+}
+
+// WithDeploymentHistory lets each intent's success be read from Argo's
+// status.history when no record exists: the newest deployment there must be of
+// exactly the intent's revision and source and no older than since, the time
+// the caller's journal durably started the intent. Argo appends a history
+// entry only for a sync that Succeeded, with the source the Application held.
+//
+// The installation journal passes it for a restoration's reversal intents only.
+// A reversal whose own sync Succeeded and was then replaced by a hand sync
+// before any read observed it otherwise held the installation forever: it can
+// neither complete nor be closed, because its writes reached the cluster. The
+// history proves less than the operation's own state: that the newest
+// successful deployment, after the reversal's start, applied exactly the
+// reversal's revision and source to an Application still carrying the
+// reversal's marker and spec, which only the reversal's own patch sets. A
+// pre-update deployment of the same revision is excluded by since. Observe
+// still requires every other condition of the recorded fallback, and
+// completion still requires Synced, Healthy and fresh workload evidence.
+func WithDeploymentHistory(ctx context.Context, since time.Time, intents ...Intent) (context.Context, error) {
+	if since.IsZero() {
+		return ctx, errors.New("deployment history needs the intent's durable start time")
+	}
+	return withSuccessEvidence(ctx, intents, func(e *successEvidence) { e.deployed = since })
+}
+
+// Synced returns the revision and canonical source an intent's own successful
+// sync applies: what a journal records beside an observed owned success.
+func (i Intent) Synced() (string, json.RawMessage, error) {
+	_, after, _, err := i.validate()
+	if err != nil {
+		return "", nil, err
+	}
+	source, err := canonical(object(after, "source"))
+	if err != nil {
+		return "", nil, err
+	}
+	return i.Revision, source, nil
 }
 
 type Client struct{ api API }
@@ -268,7 +382,7 @@ func (c *Client) apply(ctx context.Context, intent Intent, proof *ContinuityProo
 	}
 	obj := snapshot.object
 	if marker(obj) == digest {
-		return observe(snapshot, intent, after, digest)
+		return observe(snapshot, intent, after, digest, successEvidenceIn(ctx)[digest])
 	}
 	meta := object(obj, "metadata")
 	generation, err := integer(meta["generation"])
@@ -326,9 +440,13 @@ func (c *Client) apply(ctx context.Context, intent Intent, proof *ContinuityProo
 	if err != nil {
 		return Facts{}, fmt.Errorf("ArgoCD revision reply is unconfirmed; reconcile the same intent: %w", err)
 	}
-	return observe(applied, intent, after, digest)
+	return observe(applied, intent, after, digest, successEvidenceIn(ctx)[digest])
 }
 
+// Observe reads the intent's current controller facts. Evidence supplied with
+// WithRecordedSuccess or WithDeploymentHistory for this exact intent lets them
+// report its own operation as Succeeded after a later sync replaced it in
+// status.operationState; see observe for what the Application must still show.
 func (c *Client) Observe(ctx context.Context, intent Intent) (Facts, error) {
 	_, after, digest, err := intent.validate()
 	if err != nil {
@@ -338,10 +456,10 @@ func (c *Client) Observe(ctx context.Context, intent Intent) (Facts, error) {
 	if err != nil {
 		return Facts{}, err
 	}
-	return observe(snapshot, intent, after, digest)
+	return observe(snapshot, intent, after, digest, successEvidenceIn(ctx)[digest])
 }
 
-func observe(snapshot Snapshot, intent Intent, after map[string]any, digest string) (Facts, error) {
+func observe(snapshot Snapshot, intent Intent, after map[string]any, digest string, evidence successEvidence) (Facts, error) {
 	obj := snapshot.object
 	if err := unmanaged(obj); err != nil {
 		return Facts{}, err
@@ -367,8 +485,67 @@ func observe(snapshot Snapshot, intent Intent, after map[string]any, digest stri
 		facts.OperationPhase = stringAt(state, "phase")
 		result := object(state, "syncResult")
 		facts.OperationSucceeded = op == nil && facts.OperationPhase == "Succeeded" && stringAt(result, "revision") == intent.Revision && equalJSON(object(result, "source"), object(after, "source"))
+	} else if op == nil && revisionObserved && laterSyncSucceededAt(state, intent, after) {
+		// A later sync has replaced the intent's own operation in
+		// operationState; Argo keeps only the last operation, so without this
+		// a manual-sync Application synced once more by hand, or a self-heal,
+		// leaves completion and restoration refusing forever. Evidence that
+		// the intent's own operation Succeeded must come from the caller. It
+		// counts only while the marker and complete desired spec still match
+		// (checked above), nothing is pending, Argo compares the intent's
+		// revision with the intent's source, and the later sync itself
+		// Succeeded with exactly that revision and source. A later sync to
+		// another revision (a spec change, or a one-off sync to another
+		// commit), a different source, or one that failed or still runs
+		// therefore still refuses, as does anything not Synced and Healthy
+		// where the caller requires them.
+		switch {
+		case evidence.recorded:
+			facts.OperationPhase, facts.OperationSucceeded, facts.SuccessEvidence = "Succeeded", true, SuccessRecorded
+		case !evidence.deployed.IsZero() && newestDeploymentIs(status, intent, after, evidence.deployed):
+			facts.OperationPhase, facts.OperationSucceeded, facts.SuccessEvidence = "Succeeded", true, SuccessDeployed
+		}
 	}
 	return facts, nil
+}
+
+// laterSyncSucceededAt reports whether the operation Argo last recorded
+// Succeeded and synced exactly the intent's revision and source. Accepting a
+// later operation that Failed, or one still running, would report the
+// intent's success over an Application whose last sync did not complete.
+func laterSyncSucceededAt(state map[string]any, intent Intent, after map[string]any) bool {
+	result := object(state, "syncResult")
+	return stringAt(state, "phase") == "Succeeded" && result != nil &&
+		stringAt(result, "revision") == intent.Revision && equalJSON(object(result, "source"), object(after, "source"))
+}
+
+// newestDeploymentIs reports whether the newest entry in status.history (the
+// highest id; Argo appends one per sync that Succeeded) deployed exactly the
+// intent's revision and source no earlier than since. Seconds precision is all
+// Argo records, so since is compared to the second.
+func newestDeploymentIs(status map[string]any, intent Intent, after map[string]any, since time.Time) bool {
+	history, ok := status["history"].([]any)
+	if !ok || len(history) == 0 {
+		return false
+	}
+	var newest map[string]any
+	newestID := int64(-1)
+	for _, raw := range history {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		id, err := integer(entry["id"])
+		if err != nil {
+			return false
+		}
+		if id > newestID {
+			newestID, newest = id, entry
+		}
+	}
+	deployed, err := time.Parse(time.RFC3339, stringAt(newest, "deployedAt"))
+	return err == nil && !deployed.Before(since.Truncate(time.Second)) &&
+		stringAt(newest, "revision") == intent.Revision && equalJSON(object(newest, "source"), object(after, "source"))
 }
 
 func syncRequest(intent Intent, spec map[string]any) map[string]any {

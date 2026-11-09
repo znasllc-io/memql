@@ -823,6 +823,58 @@ no longer available after a pause, cancel the unfinished preparation and prepare
 again. A started installation must be reconciled from its saved intent; missing
 history never authorizes replacing an uncertain operation.
 
+The receiving configuration an update saves at preparation records what each
+input means, not when it was last written, so routine cluster activity between
+preparation, Apply, **Check progress** and **Restore previous release** no
+longer stops an update:
+
+- Argo CD's repository server restarting (with `kubectl rollout restart` or
+  Argo CD's restart action), being rescheduled or briefly becoming unready.
+  Every step instead checks that each serving pod belongs to the configured
+  Deployment's current revision, runs its template, image, service account and
+  network settings with no debugging container attached, and is ready. A
+  debugging container stays in its pod until the pod is replaced, so restart
+  the repository server after debugging it.
+- Its TLS certificate renewed under the same certificate authority, before or
+  after the repository server restarts to load it.
+- A Kubernetes patch release, a different API server address, or a custom
+  resource definition installed or upgraded for something else, as long as
+  every API group's discovery still answers: one that does not still stops each
+  step until it does.
+- A write that changes only the labels or annotations of a ConfigMap or Secret
+  the update reads, such as a credential's expiry annotation. The one exception
+  is the `app.kubernetes.io/part-of` label of Argo CD's `argocd-cm`, which Argo
+  CD needs in order to read it.
+
+A real change still refuses the update: a rotated password or token, edited
+configuration data, a repository server running another template or image, or
+restarted by a tool that changes its template, a certificate from another
+authority, a Kubernetes minor upgrade, or a removed or rescoped API that the
+installation reads or that the release applies.
+
+A self-signed repository server certificate is its own authority, so **a
+self-signed certificate whose key changes at renewal is a new authority and
+still stops every update started before the renewal**; such an update must be
+closed. cert-manager changes the key at each renewal by default. A self-signed
+certificate survives renewal only when cert-manager keeps its private key
+(`privateKey.rotationPolicy: Never`), and even then a step that renders refuses
+until the repository server restarts to load the renewed certificate. Issue it
+from a CA issuer to renew it freely.
+
+A release that would change the installation's own update configuration, the
+ConfigMap that holds `installation.json`, is refused at preparation: every later
+step is checked against that configuration, so the update could never be
+verified. The preparation still holds the installation, so cancel it, deploy
+that change by hand, then prepare the update again. Changing only that
+ConfigMap's labels or annotations is allowed.
+
+An update prepared by engine 0.31.28 or earlier keeps that engine's stricter
+checks. If one of the routine changes above happens while it is started, it can
+no longer be verified, and its operator ends it with **Close without
+verification**. Engines released before this change cannot verify an update
+prepared with these checks, so an update that installs such an engine is closed
+rather than verified.
+
 Protected-resource evidence likewise tolerates routine controller updates to
 the owner of a protected Secret, such as an External Secrets refresh rewriting
 its ExternalSecret's status every hour. An owner's fingerprint covers its
@@ -858,6 +910,40 @@ It refuses pending or foreign controller operations, changed migrations,
 unverifiable original access, conflicting application ownership, and missing
 artifact or preservation evidence. It never downgrades the database. The
 original forward completion receipt remains in history.
+
+Restoring a completed update makes every one of those checks before it takes
+the installation back. When one refuses, the update stays completed and
+verified, the installation stays free for another preparation, and **Restore
+previous release** can be tried again once the cause is fixed. Each
+application's change is then preceded by a recorded start, taken only after
+that application's own checks pass. A restoration refused before its first
+recorded start also returns the update to its completed state, and the refusal
+says so. Once a restoration has recorded a start for any application it holds
+the installation until it is resumed and verified.
+
+Routine events no longer stop an update or a restoration:
+
+- Syncing an application again by hand at the same revision after the
+  update's or restoration's own sync succeeded. Argo CD keeps only its latest
+  sync, so MemQL records each success it sees: at **Check progress**, and
+  whenever **Resume restoration** reads the applications. A sync to another
+  revision, or a change to the application, still stops verification. For an
+  update being applied, a sync made before MemQL saw the update's own success
+  leaves that success unproven; close the update. A restoration in that
+  position is verified from Argo CD's deployment history instead: the
+  application's newest deployment must be the restored revision and source,
+  deployed no earlier than the restoration's start.
+- Argo CD refreshing an application's status between a restoration's planning
+  and its change. Any other change to the application in that time still
+  refuses the restoration.
+- Resuming a restoration after Kubernetes stopped keeping the application's
+  change history from when it was planned, usually a few minutes on a busy
+  cluster. An application the restoration has not yet changed continues, and is
+  planned again from its current state when Argo CD has written to it since,
+  after every check runs again. The same applies to a restoration started by
+  engine 0.31.28 or earlier whose change was refused because Argo CD refreshed
+  the application's status first: MemQL plans that change again once the
+  application shows it can never be applied.
 
 **Resume restoration** continues an interrupted recorded reversal. **Check
 progress** observes it and verifies completion; it cannot apply missing steps.
@@ -907,16 +993,27 @@ running, including a restoration's reverse sync, because that sync would then
 finish with nothing tracking it. The applications need not still be at the
 update's revision: a hand deploy may have moved them on, or the update's change
 may never have reached them. An application that cannot be read refuses the
-close. A restoration of an update that had completed cannot be closed.
+close.
+
+A restoration of an update that had completed can be closed only while it has
+recorded no start for any application, so nothing of it can have reached the
+cluster. Its operator then sees **Stop restoration** instead: stopping it
+records who stopped the restoration, when and why, and returns the update to
+its completed and verified state, so the installation is free and the update
+can be restored again later. Once the restoration has recorded a start, it
+cannot be closed; resume it instead.
 
 | Builtin | Effect |
 |---|---|
-| `releaseCloseInstallation(installationId, planId, reason)` | Close that exact started plan without completion proof. The reason is one line of at most 500 characters |
+| `releaseCloseInstallation(installationId, planId, reason)` | Close that exact started plan without completion proof, or stop a restoration of a completed update that has recorded no start. The reason is one line of at most 500 characters |
 
 `canClose` in `releaseInstallationStatus()` means the original operator may
-request a close; the request still refuses while the update's own sync runs. A
-closed plan reads `state: "closed"` with `closedAt` and `closeReason`, and is
-reported as `latest` until a newer update finishes.
+request a close: of an update being applied, or of a restoration
+(`direction: "rollback"`) that has recorded no start. The request still
+refuses while the update's own sync runs. A closed plan reads
+`state: "closed"` with `closedAt` and `closeReason`, and is reported as
+`latest` until a newer update finishes; a stopped restoration reads
+`state: "complete"` again.
 
 ## Propose a complete installation update
 

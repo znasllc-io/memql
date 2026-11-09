@@ -430,6 +430,11 @@ func (s *preparationWorkflowScope) verifyResources(ctx context.Context, args map
 	}
 	s.resources, s.artifacts = resourceEvidence{}, nil
 	cfg := s.configuration
+	// Before any image or registry read: a candidate that rewrites the
+	// receiver's own configuration can never complete, so no plan is promoted.
+	if err := cfg.ownConfigurationUnchanged(s.inventory("rollback"), s.inventory("candidate")); err != nil {
+		return nil, err
+	}
 	evidence, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.inventory("rollback"), s.inventory("candidate"), cfg.configuration.Platform, cfg.bindings)
 	if err != nil {
 		return nil, err

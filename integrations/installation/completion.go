@@ -80,6 +80,17 @@ func (p *Preparer) completeSelected(ctx context.Context, installationID, planID 
 	}
 	return journal.get(ctx, installationID, planID)
 }
+
+// read observes every member's own operation for this attempt's direction and
+// records the facts. A member whose own operation is seen Succeeded is also
+// recorded durably (recordOwnedSuccess) before its facts, and every
+// observation honours the records already kept (recordedSuccessContext): a
+// later sync of the same Application, which replaces the plan's operation in
+// Argo's operationState, then still counts as this plan's success while the
+// Application holds exactly the plan's intent, revision and source, and is
+// Synced and Healthy (completedController). One later sync to another revision
+// or spec still refuses. A success never observed before Argo replaced it is
+// not invented; that plan keeps refusing and its operator can close it.
 func (s *completionScope) read(ctx context.Context, args map[string]any) (any, error) {
 	if err := noRevisionArguments(args); err != nil {
 		return nil, err
@@ -102,15 +113,21 @@ func (s *completionScope) read(ctx context.Context, args map[string]any) (any, e
 		s.converged = r.Rollback.Started && ((r.Rollback.Observation != nil && completedController(*r.Rollback.Observation)) || r.Rollback.noStartedApplications())
 		return map[string]any{"converged": s.converged}, nil
 	}
+	evidence := recordedSuccessContext(ctx, r)
 	if r.Plan.FormatVersion == 2 {
 		for _, app := range r.Plan.Applications {
 			prior := r.Applications[app.Key]
 			if !prior.Started {
 				return nil, errors.New("completion requires every application start")
 			}
-			facts, err := s.revision.client.Observe(ctx, app.Intent)
+			facts, err := s.revision.client.Observe(evidence, app.Intent)
 			if err != nil {
 				return nil, err
+			}
+			if observedSuccess(facts) {
+				if r, err = s.revision.journal.recordOwnedSuccess(ctx, r.Plan.InstallationID, r.ID, app.Key, app.Intent); err != nil {
+					return nil, err
+				}
 			}
 			r, err = s.revision.journal.observeApplication(ctx, r.Plan.InstallationID, r.ID, app.Key, prior.Version, facts)
 			if err != nil {
@@ -122,11 +139,19 @@ func (s *completionScope) read(ctx context.Context, args map[string]any) (any, e
 		s.converged = r.Observation != nil && completedController(*r.Observation)
 		return map[string]any{"converged": s.converged}, nil
 	}
-	facts, err := s.revision.client.Observe(ctx, r.Plan.Intent)
+	// The version is captured before the external read, so a late observer
+	// cannot overwrite newer facts (revisionJournal.observe).
+	version := r.ObservationVersion
+	facts, err := s.revision.client.Observe(evidence, r.Plan.Intent)
 	if err != nil {
 		return nil, err
 	}
-	r, err = s.revision.journal.observe(ctx, r.Plan.InstallationID, r.ID, r.ObservationVersion, facts)
+	if observedSuccess(facts) {
+		if r, err = s.revision.journal.recordOwnedSuccess(ctx, r.Plan.InstallationID, r.ID, "", r.Plan.Intent); err != nil {
+			return nil, err
+		}
+	}
+	r, err = s.revision.journal.observe(ctx, r.Plan.InstallationID, r.ID, version, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +171,9 @@ func (s *completionScope) configuration(ctx context.Context, args map[string]any
 		return nil, errors.New("completion requires the exact converged controller intent")
 	}
 	h := s.revision.host
+	// The receiving configuration reader requires each active intent's own
+	// operation; the recorded successes stand in for one a later sync replaced.
+	ctx = recordedSuccessContext(ctx, s.record)
 	if s.record.Plan.FormatVersion == 2 || s.record.Rollback != nil {
 		snapshot, err := readSelectedReceiver(ctx, h, s.record)
 		if err != nil {
@@ -211,6 +239,7 @@ func (s *completionScope) reobserve(ctx context.Context, args map[string]any) (a
 	}
 	r := s.revision
 	h := r.host
+	ctx = recordedSuccessContext(ctx, s.record)
 	if s.record.Plan.FormatVersion == 2 || s.record.Rollback != nil {
 		snapshot, err := readSelectedReceiver(ctx, h, s.record)
 		if err != nil {

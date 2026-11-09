@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -107,6 +108,13 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads, ac
 	if err != nil {
 		return err
 	}
+	// Argo CD's settings manager reads this ConfigMap only while it is labelled
+	// app.kubernetes.io/part-of=argocd; without it Argo stops applying the
+	// settings this receiver renders with, so that one label is bound with the
+	// content. No other label is, because labels are otherwise bookkeeping.
+	if cmPath, err := receiverPath("v1", "configmaps", cfg.Application.Namespace, cfg.Renderer.ConfigMap); err == nil {
+		r.bindLabel(cmPath, "app.kubernetes.io/part-of")
+	}
 	data := resourceMap(cm, "data")
 	// These defaults are the qualified Argo 2.13.3 protocol defaults, never a
 	// transport fallback. Values explicitly present in the live CM win.
@@ -166,8 +174,9 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads, ac
 // It proves neither unique credential selection nor a global binding's absence.
 // Native rendering uses its independently minted repository-scoped CloneToken;
 // no credential field from this Secret is used or returned by this observation.
-// The existing read set binds the named Secret's UID/RV, checks it again before
-// admission, and invalidates recovery on rotation or replacement.
+// The read set binds the named Secret's UID and keyed content, checks it again
+// before admission, and invalidates recovery on rotation or replacement; an
+// annotation-only write does not.
 // Pinned resolver: https://github.com/argoproj/argo-cd/blob/v2.13.3/util/db/repository_secrets.go#L430-L460
 func (r *receiverReads) namedRepositoryProject(ctx context.Context, ref receiverNamed, project, repository string) (string, error) {
 	if !receiverDNS.MatchString(project) || len(project) > 63 {
@@ -189,6 +198,12 @@ func (r *receiverReads) namedRepositoryProject(ctx context.Context, ref receiver
 	}
 	return project, nil
 }
+
+// discovery reads the cluster's complete API discovery, for the renderer's
+// KubeVersion and APIVersions (the same full surface Argo itself passes), and
+// leaves in the saved digest only the contract the receiver depends on
+// (receiverDiscoveryContract). Every document stays exact within this one
+// observation (reobserve).
 func (r *receiverReads) discovery(ctx context.Context) (string, []string, error) {
 	version, err := r.get(ctx, "version")
 	if err != nil {
@@ -210,6 +225,8 @@ func (r *receiverReads) discovery(ctx context.Context) (string, []string, error)
 	if err != nil {
 		return "", nil, err
 	}
+	lists := map[string]map[string]any{}
+	discoveryPaths := []string{"version", "api", "apis"}
 	entries, ok := groups["groups"].([]any)
 	if !ok || len(entries) > 128 {
 		return "", nil, errors.New("receiving API discovery exceeds its bound")
@@ -258,6 +275,8 @@ func (r *receiverReads) discovery(ctx context.Context) (string, []string, error)
 		if !ok || len(items) > 4096 {
 			return "", nil, errors.New("receiving API resources are invalid")
 		}
+		lists[version] = resource
+		discoveryPaths = append(discoveryPaths, path)
 		out[version] = true
 		for _, item := range items {
 			value, ok := item.(map[string]any)
@@ -279,7 +298,100 @@ func (r *receiverReads) discovery(ctx context.Context) (string, []string, error)
 		result = append(result, value)
 	}
 	sort.Strings(result)
+	for _, path := range discoveryPaths {
+		r.fresh(path)
+	}
+	r.contract = receiverDiscoveryContract(kube, lists)
 	return kube, result, nil
+}
+
+// receiverAPIContract is every resource the receiver itself reads or writes,
+// with the verbs it uses: configuration and credentials, the renderer it
+// authenticates, the Applications it applies (get, Apply's patch, and the
+// history guard's name-filtered list and watch) and their projects.
+var receiverAPIContract = []struct {
+	groupVersion, resource string
+	verbs                  []string
+}{
+	{"v1", "configmaps", []string{"get"}},
+	{"v1", "pods", []string{"get"}},
+	{"v1", "secrets", []string{"get", "list"}},
+	{"v1", "services", []string{"get"}},
+	{"apps/v1", "deployments", []string{"get"}},
+	{"apps/v1", "replicasets", []string{"get"}},
+	{"discovery.k8s.io/v1", "endpointslices", []string{"list"}},
+	{"argoproj.io/v1alpha1", "applications", []string{"get", "list", "patch", "watch"}},
+	{"argoproj.io/v1alpha1", "appprojects", []string{"get"}},
+}
+
+var receiverKubernetesRelease = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[0-9]`)
+
+// receiverDiscoveryContract is the discovery surface a saved plan depends on.
+// The full surface stranded every started plan whenever anything around it
+// moved: an AKS control-plane patch rewrites /version's build fields, every
+// added or upgraded CRD (External Secrets, CloudNativePG, Kueue, cert-manager,
+// AKS add-ons) rewrites /apis and adds a group version, and /api reports the
+// API server's current address. None of that changes how this receiver reads
+// or what the plan's render applies.
+//
+// Bound: the Kubernetes major and minor version, and for each resource in
+// receiverAPIContract whether its group version is served and each matching
+// entry's kind, scope and the verbs the receiver needs (in the canonical entry
+// order, as for receiverDiscoveryIdentity). A minor upgrade, or a removed or
+// rescoped resource the receiver reads, still refuses.
+//
+// Not bound here, because each call checks it from live discovery instead:
+// every API the plan's own render uses. Resource evidence (verifyImagesAndDiff)
+// resolves each rendered object's kind, scope and path through fresh discovery
+// at Apply, completion and rollback, and that resolution belongs to the
+// ResourceDiffDigest they compare with the plan; a kind the render uses that is
+// no longer served refuses there. The configuration is observed before any
+// render exists, so it could not bind those APIs itself.
+//
+// Leaving the full API list unbound is sound only because the qualified profile
+// cannot consume it: the renderer admits Git/Kustomize sources only and no
+// build option but `--load-restrictor LoadRestrictionsNone`, so no Helm
+// inflation reads KubeVersion or APIVersions. A profile that admits Helm must
+// bind the whole list, because Argo's sync would render with live values while
+// Apply re-renders from the spec captured at preparation
+// (TestReceiverRenderProfileCannotConsumeDiscovery pins the restriction).
+// Regressions: TestReceiverDiscoveryBindsOnlyTheContractTheReceiverUses and
+// TestReceiverDiscoveryLeavesTheRenderedAPIsToResourceEvidence.
+func receiverDiscoveryContract(gitVersion string, lists map[string]map[string]any) any {
+	release := "unparsed:" + gitVersion // stricter, never looser, for a version this does not recognize
+	if match := receiverKubernetesRelease.FindStringSubmatch(gitVersion); match != nil {
+		release = match[1] + "." + match[2]
+	}
+	resources := make([]any, 0, len(receiverAPIContract))
+	for _, want := range receiverAPIContract {
+		list, served := lists[want.groupVersion]
+		entries := []string{}
+		items, _ := list["resources"].([]any)
+		for _, raw := range items {
+			item, _ := raw.(map[string]any)
+			if resourceText(item, "name") != want.resource {
+				continue
+			}
+			offered := map[string]bool{}
+			verbs, _ := item["verbs"].([]any)
+			for _, verb := range verbs {
+				if name, ok := verb.(string); ok {
+					offered[name] = true
+				}
+			}
+			used := []string{}
+			for _, verb := range want.verbs {
+				if offered[verb] {
+					used = append(used, verb)
+				}
+			}
+			entry, _ := json.Marshal(map[string]any{"kind": item["kind"], "namespaced": item["namespaced"], "verbs": used})
+			entries = append(entries, string(entry))
+		}
+		sort.Strings(entries)
+		resources = append(resources, []any{want.groupVersion, want.resource, served, entries})
+	}
+	return map[string]any{"kubernetes": release, "resources": resources}
 }
 
 // Argo's repository clone/cache scope comes from its registered repository,
@@ -329,11 +441,15 @@ func (r *receiverReads) repositoryProject(ctx context.Context, namespace, projec
 		}
 		found[string(scope)] = true
 	}
-	// Secret contents are deliberately excluded from the durable digest.
+	// v1 bound each registration's version; v2 binds each one's name, uid and
+	// keyed content, so a rewrite that leaves the registration unchanged (an
+	// annotation, a label) no longer strands a plan and a changed URL, project or
+	// credential still refuses. No value or unkeyed hash of one is saved.
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].([]string)[0] < bindings[j].([]string)[0] })
 	read := r.reads[path]
-	read.stable = bindings
+	read.legacy = bindings
 	r.reads[path] = read
+	r.contentList(path)
 	if found[project] {
 		return project, nil
 	}

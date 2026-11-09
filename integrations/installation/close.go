@@ -31,6 +31,16 @@ import (
 // close; the controller's next status write moves the Application's
 // resourceVersion, after which that request's compare-and-swap refuses.
 // Regression tests: TestInstallationCloseSelected* in close_db_test.go.
+//
+// A restoration of a completed update (reverting) is closed differently: when
+// no reverse write has a durable start, nothing of it reached the cluster, so
+// the close returns the attempt to its verified completed state with the
+// operator, time and reason recorded (withdrawRestoration). It reads no
+// Application, because none was written and the forward operations finished
+// before completion. Before this, a restoration left reverting by a refused
+// check held the installation with no way to end it. A restoration that has
+// recorded any reverse start may have reached the cluster and is not closable.
+// Regression tests: TestInstallationRestoration* in restore_lifecycle_db_test.go.
 func (p *Preparer) CloseSelected(ctx context.Context, installationID, planID, reason string) (SelectionResult, error) {
 	ctx, err := p.selectionContext(ctx)
 	if err != nil {
@@ -62,8 +72,12 @@ func (p *Preparer) CloseSelected(ctx context.Context, installationID, planID, re
 		if r.State == "closed" {
 			return r, nil
 		}
+		if r.State == "reverting" || (r.State == "complete" && r.lastWithdrawalClosed()) {
+			// The second form recovers a lost reply to this same close.
+			return journal.withdrawRestoration(ctx, installationID, planID, withdrawalClosed, reason)
+		}
 		if r.State != "applying" {
-			return nil, errors.New("only an installation that is still being applied can be closed")
+			return nil, errors.New("only an installation that is still being applied, or a restoration that has changed no application, can be closed")
 		}
 		intents, err := r.dispatchedIntents()
 		if err != nil {

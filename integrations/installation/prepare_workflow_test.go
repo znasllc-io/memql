@@ -2,6 +2,7 @@ package installation
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"sync"
@@ -96,10 +97,20 @@ func TestPreparationWorkflowFreshHostRecoversSameStartedCapture(t *testing.T) {
 	require.ErrorContains(t, err, "changed inputs")
 	require.Len(t, executor.requests, 2)
 	request.OverlayRevision = strings.Repeat("b", 40)
-	resourceMap(receiver.objects["api/v1/namespaces/memql/secrets/catalog"], "metadata")["resourceVersion"] = "rotated"
+	// An annotation-only write leaves the credential unchanged, so the saved
+	// preparation still resumes; it only recovers the same capture.
+	catalog := receiver.objects["api/v1/namespaces/memql/secrets/catalog"]
+	resourceMap(catalog, "metadata")["resourceVersion"] = "annotated"
+	resourceMap(catalog, "metadata")["annotations"] = map[string]any{"memql.io/credential-expires-at": "2027-02-01T00:00:00Z"}
+	_, err = fresh.prepare(ctx, request)
+	require.ErrorContains(t, err, "no confirmed outcome")
+	require.Len(t, executor.requests, 3)
+	require.True(t, executor.requests[2].RecoverOnly)
+	resourceMap(catalog, "metadata")["resourceVersion"] = "rotated"
+	resourceMap(catalog, "data")["token"] = base64.StdEncoding.EncodeToString([]byte("private-rotated-token"))
 	_, err = fresh.prepare(ctx, request)
 	require.ErrorContains(t, err, "configuration changed")
-	require.Len(t, executor.requests, 2)
+	require.Len(t, executor.requests, 3)
 }
 
 func TestPreparationRecipeCannotAssertOrIgnoreMissingEvidence(t *testing.T) {

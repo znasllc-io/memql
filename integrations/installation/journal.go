@@ -31,7 +31,16 @@ type revisionRecord struct {
 	Completion         *completionReceipt
 	RollbackCompletion *completionReceipt
 	Closure            *revisionClosure
-	RollbackEligible   bool
+	// OwnedSuccesses records, by intent digest, each of this attempt's own Argo
+	// operations observed finishing Succeeded (completion_journal.go). Argo
+	// keeps only the last operation, so this is the evidence that survives a
+	// later sync of the same Application.
+	OwnedSuccesses map[string]ownedSuccessRecord
+	// WithdrawnRestorations lists restorations of this completed update that
+	// wrote no Argo intent and were returned to the completed attempt
+	// (completed_rollback.go), with who, when and why.
+	WithdrawnRestorations []withdrawnRestoration
+	RollbackEligible      bool
 }
 
 // revisionClosure is an operator's record that a started attempt ended without
@@ -70,8 +79,10 @@ func (j *revisionJournal) database() (*sql.DB, error) {
 
 // reserve persists the complete reviewed native scope before any Argo write.
 // All replicas serialize on one installation head, including the first insert.
-// A started attempt keeps that head until a future verified completion/rollback
-// operation releases it; timeouts, process death and Healthy/Synced do not.
+// A started attempt keeps that head until a verified completion or rollback
+// releases it, its operator closes it (close_journal.go), or a restoration of
+// a completed update is withdrawn before it wrote anything (completed_rollback.go);
+// timeouts, process death and Healthy/Synced do not.
 func (j *revisionJournal) reserve(ctx context.Context, plan preparedPlan) (revisionRecord, error) {
 	actor, err := installationActor(ctx)
 	if err != nil {
@@ -158,13 +169,13 @@ func lockHead(ctx context.Context, tx *sql.Tx, installation string) (string, int
 
 func readRevision(ctx context.Context, tx *sql.Tx, installation, key string) (revisionRecord, error) {
 	r := revisionRecord{ID: key}
-	var plan, observation, completion, rollbackCompletion, members []byte
+	var plan, observation, completion, rollbackCompletion, members, owned, withdrawn []byte
 	var requester string
 	var started, completed, rollbackCompleted, closed sql.NullTime
 	var closedBy, closeReason sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at,application_observations,rollback_completion_receipt,rollback_completed_at,closed_at,closed_by,close_reason
+	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at,application_observations,rollback_completion_receipt,rollback_completed_at,closed_at,closed_by,close_reason,owned_successes,withdrawn_restorations
 FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR UPDATE`, installation, key).
-		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed, &members, &rollbackCompletion, &rollbackCompleted, &closed, &closedBy, &closeReason)
+		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed, &members, &rollbackCompletion, &rollbackCompleted, &closed, &closedBy, &closeReason, &owned, &withdrawn)
 	if err != nil {
 		return revisionRecord{}, err
 	}
@@ -230,10 +241,21 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 		return revisionRecord{}, errors.New("unstarted group has application effects")
 	}
 	r.Rollback, err = readRollback(ctx, tx, r)
-	if err == nil && r.State == "rolled_back" && r.Rollback == nil {
+	if err != nil {
+		return r, err
+	}
+	if r.State == "rolled_back" && r.Rollback == nil {
 		return revisionRecord{}, errors.New("rolled-back installation has no durable reversal")
 	}
-	return r, err
+	// Both records name what the rows above contain (started intents, the
+	// completion receipt), so they are validated against them last.
+	if r.OwnedSuccesses, err = decodeOwnedSuccesses(owned, r); err != nil {
+		return revisionRecord{}, err
+	}
+	if r.WithdrawnRestorations, err = decodeWithdrawnRestorations(withdrawn, r); err != nil {
+		return revisionRecord{}, err
+	}
+	return r, nil
 }
 
 // withRecord always locks head then attempt, including reads. A historical

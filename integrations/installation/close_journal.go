@@ -31,23 +31,31 @@ func validCloseReason(reason string) error {
 	return nil
 }
 
-// dispatchedIntents names, once each, every controller intent this attempt may
-// have written: the forward intent once started (in a group, each started
-// member), and for a recorded restoration each started member's planned
-// reversal and any reconciled replacement of it. An unstarted member or
-// reversal was never written, because every Apply commits its durable start
-// first, under the same effect lock a close holds.
-func (r revisionRecord) dispatchedIntents() ([]argocd.Intent, error) {
-	out := []argocd.Intent{}
+// startedIntent is one controller intent this attempt durably started, with
+// the member it belongs to ("" for a single-Application plan).
+type startedIntent struct {
+	application string
+	digest      string
+	intent      argocd.Intent
+}
+
+// startedIntentList names, once each and in member order, every controller
+// intent this attempt may have written: the forward intent once started (in a
+// group, each started member), and for a recorded restoration each started
+// member's planned reversal and any reconciled or replanned replacement of it.
+// An unstarted member or reversal was never written, because every Apply
+// commits its durable start first, under the same effect lock a close holds.
+func (r revisionRecord) startedIntentList() ([]startedIntent, error) {
+	out := []startedIntent{}
 	seen := map[string]bool{}
-	add := func(intent argocd.Intent) error {
+	add := func(application string, intent argocd.Intent) error {
 		digest, err := intent.Digest()
 		if err != nil {
 			return err
 		}
 		if !seen[digest] {
 			seen[digest] = true
-			out = append(out, intent)
+			out = append(out, startedIntent{application: application, digest: digest, intent: intent})
 		}
 		return nil
 	}
@@ -58,7 +66,7 @@ func (r revisionRecord) dispatchedIntents() ([]argocd.Intent, error) {
 			forward = r.Applications[app.Key].Started
 		}
 		if forward {
-			if err := add(app.Intent); err != nil {
+			if err := add(app.Key, app.Intent); err != nil {
 				return nil, err
 			}
 		}
@@ -74,12 +82,44 @@ func (r revisionRecord) dispatchedIntents() ([]argocd.Intent, error) {
 				}
 			}
 		}
-		if err := add(planned); err != nil {
+		if err := add(app.Key, planned); err != nil {
 			return nil, err
 		}
-		if err := add(reverse.Intent); err != nil {
+		if saved := r.Rollback.Applications[app.Key].ReconciledIntent; saved != nil {
+			if err := add(app.Key, *saved); err != nil {
+				return nil, err
+			}
+		}
+		if err := add(app.Key, reverse.Intent); err != nil {
 			return nil, err
 		}
+	}
+	return out, nil
+}
+
+// startedIntents indexes startedIntentList by intent digest. A plan whose
+// stored intents no longer validate has none.
+func (r revisionRecord) startedIntents() map[string]startedIntent {
+	list, err := r.startedIntentList()
+	out := map[string]startedIntent{}
+	if err != nil {
+		return out
+	}
+	for _, item := range list {
+		out[item.digest] = item
+	}
+	return out
+}
+
+// dispatchedIntents is startedIntentList's intents, the set a close examines.
+func (r revisionRecord) dispatchedIntents() ([]argocd.Intent, error) {
+	list, err := r.startedIntentList()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]argocd.Intent, 0, len(list))
+	for _, item := range list {
+		out = append(out, item.intent)
 	}
 	return out, nil
 }
@@ -106,9 +146,11 @@ func intentDigests(intents []argocd.Intent) ([]string, error) {
 // installation head and the group's Application claims, so a new preparation
 // can begin.
 //
-// Only applying can be closed. A prepared plan is cancelled instead, and a
-// restoration of a completed update (reverting) is outside this close: its
-// forward completion was proven, and nothing has yet needed to end it unproven.
+// Only applying is closed here. A prepared plan is cancelled instead. A
+// restoration of a completed update (reverting) is not closed into this state:
+// its forward completion was proven, so a restoration that wrote no Argo intent
+// returns to that completed attempt instead (withdrawRestoration, reached from
+// CloseSelected), and one that wrote anything cannot be closed at all.
 //
 // The caller holds the plan's effect lock and has found every intent in settled
 // with no controller operation of its own still waiting or running. The lock

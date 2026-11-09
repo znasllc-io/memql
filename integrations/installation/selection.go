@@ -93,8 +93,12 @@ type SelectionResult struct {
 	CanManage               bool                   `json:"canManage"`
 	CanRollback             bool                   `json:"canRollback"`
 	// CanClose offers CloseSelected to the original operator of an applying
-	// plan. Like CanRollback it permits a request, never the outcome: the close
-	// still refuses while the plan's own controller operation is running.
+	// plan, and of a restoration of a completed update that has recorded no
+	// reverse start, which the close returns to its verified completed state
+	// (Direction "rollback" tells the two apart). Like CanRollback it permits
+	// a request, never the outcome: the close of an applying plan still
+	// refuses while the plan's own controller operation is running, and the
+	// close of a restoration refuses once it has recorded a reverse start.
 	CanClose bool `json:"canClose"`
 	// A closed plan ended without completion proof. ClosedAt and CloseReason
 	// are the operator's record of that, never verification.
@@ -153,8 +157,9 @@ func selectionResult(ctx context.Context, r revisionRecord) SelectionResult {
 	out.CanManage = err == nil && actor == r.Plan.RequestedBy
 	out.CanRollback = out.CanManage && r.RollbackEligible
 	// The raw state: selectedResult reports a restoring completed update
-	// (reverting) as applying too, and that one cannot be closed.
-	out.CanClose = out.CanManage && r.State == "applying"
+	// (reverting) as applying too. That one is closable only while nothing of
+	// its restoration can have reached the cluster (restorationUnwritten).
+	out.CanClose = out.CanManage && (r.State == "applying" || r.restorationUnwritten())
 	return out
 }
 

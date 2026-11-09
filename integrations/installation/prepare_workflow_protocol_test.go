@@ -379,18 +379,41 @@ func testPreparationWorkflowProtocolRecovery(t *testing.T, publicRecovery bool) 
 	appPath := "apis/argoproj.io/v1alpha1/namespaces/argocd/applications/memql"
 	appBytes, err := json.Marshal(receiver.objects[appPath])
 	require.NoError(t, err)
+	// Routine writes that change nothing the receiver relies on leave the
+	// started plan verifiable: an annotation-only rewrite of a credential or of
+	// Argo's configuration, and a Kubernetes patch release.
+	for _, churn := range []string{"catalog credential annotated", "renderer config annotated", "Kubernetes patch"} {
+		t.Run("continuation/"+churn, func(t *testing.T) {
+			var actual map[string]any
+			require.NoError(t, json.Unmarshal(appBytes, &actual))
+			receiver.objects[appPath] = actual
+			restore := snapshotReceiverObjects(t, receiver, "api/v1/namespaces/memql/secrets/catalog", "api/v1/namespaces/argocd/configmaps/argocd-cm", "version")
+			t.Cleanup(restore)
+			switch churn {
+			case "catalog credential annotated":
+				meta := resourceMap(receiver.objects["api/v1/namespaces/memql/secrets/catalog"], "metadata")
+				meta["resourceVersion"], meta["annotations"] = "99", map[string]any{"memql.io/credential-expires-at": "2027-02-01T00:00:00Z"}
+			case "renderer config annotated":
+				meta := resourceMap(receiver.objects["api/v1/namespaces/argocd/configmaps/argocd-cm"], "metadata")
+				meta["resourceVersion"], meta["annotations"] = "99", map[string]any{"kubectl.kubernetes.io/last-applied-configuration": "{}"}
+			case "Kubernetes patch":
+				receiver.objects["version"]["gitVersion"] = "v1.35.9"
+			}
+			evidence, err := readReceiverContinuation(ctx, receiver, "memql", "receiver", factory, current.Plan, current.Plan.Intent)
+			require.NoError(t, err)
+			require.NoError(t, evidence.require(current.Plan, current.Plan.Intent))
+		})
+	}
 	for _, fault := range []string{"target replaced", "foreign spec", "foreign marker", "foreign operation", "missing operation", "Application ABA", "catalog credential rotated", "renderer config rotated", "invariant substituted"} {
 		t.Run("continuation/"+fault, func(t *testing.T) {
 			var actual map[string]any
 			require.NoError(t, json.Unmarshal(appBytes, &actual))
 			receiver.objects[appPath] = actual
 			oldBefore := receiver.before
-			catalogMeta := resourceMap(receiver.objects["api/v1/namespaces/memql/secrets/catalog"], "metadata")
-			configMeta := resourceMap(receiver.objects["api/v1/namespaces/argocd/configmaps/argocd-cm"], "metadata")
-			catalogVersion, configVersion := catalogMeta["resourceVersion"], configMeta["resourceVersion"]
+			restore := snapshotReceiverObjects(t, receiver, "api/v1/namespaces/memql/secrets/catalog", "api/v1/namespaces/argocd/configmaps/argocd-cm")
 			t.Cleanup(func() {
 				receiver.before = oldBefore
-				catalogMeta["resourceVersion"], configMeta["resourceVersion"] = catalogVersion, configVersion
+				restore()
 			})
 			plan := current.Plan
 			switch fault {
@@ -412,9 +435,13 @@ func testPreparationWorkflowProtocolRecovery(t *testing.T, publicRecovery bool) 
 					}
 				}
 			case "catalog credential rotated":
-				catalogMeta["resourceVersion"] = "99"
+				catalog := receiver.objects["api/v1/namespaces/memql/secrets/catalog"]
+				resourceMap(catalog, "metadata")["resourceVersion"] = "99"
+				resourceMap(catalog, "data")["token"] = base64.StdEncoding.EncodeToString([]byte("private-rotated-token"))
 			case "renderer config rotated":
-				configMeta["resourceVersion"] = "99"
+				config := receiver.objects["api/v1/namespaces/argocd/configmaps/argocd-cm"]
+				resourceMap(config, "metadata")["resourceVersion"] = "99"
+				resourceMap(config, "data")["timeout.reconciliation"] = "60s"
 			case "invariant substituted":
 				binding := *plan.Preparation
 				binding.ConfigurationInvariantDigest = plan.WorkflowDigest

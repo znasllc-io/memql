@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,12 @@ type groupProtocolAPI struct {
 }
 
 func (a groupProtocolAPI) Do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	// Reversals are planned and proved from the name-filtered Application list
+	// (argocd.ReadPlanning); once a controller double owns its Application, the
+	// list must show that double's object, not the receiver's original copy.
+	if c := controlledListTarget(a.controllers, method, path); c != nil {
+		return controllerList(c)
+	}
 	if c := a.controllers[path]; c != nil && (method != http.MethodGet || c.hasWritten()) {
 		if method == http.MethodPatch {
 			r, err := (&revisionJournal{db: func() *sql.DB { return c.db }}).get(ctx, a.receiver.config.InstallationID, c.key)
@@ -60,6 +67,29 @@ func (a groupProtocolAPI) Do(ctx context.Context, method, path, contentType stri
 	}
 	return a.receiver.Do(ctx, method, path, contentType, body)
 }
+
+// controlledListTarget returns the controller double that answers a
+// name-filtered Application list once it owns that Application's writes.
+func controlledListTarget(controllers map[string]*revisionControllerFixture, method, path string) *revisionControllerFixture {
+	u, err := url.Parse(path)
+	if err != nil || method != http.MethodGet || !strings.HasSuffix(u.Path, "/applications") || u.Query().Get("watch") != "" {
+		return nil
+	}
+	name := strings.TrimPrefix(u.Query().Get("fieldSelector"), "metadata.name=")
+	if c := controllers[u.Path+"/"+name]; c != nil && c.hasWritten() {
+		return c
+	}
+	return nil
+}
+
+// controllerList is the list Kubernetes returns for that one Application.
+func controllerList(c *revisionControllerFixture) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	version := resourceText(resourceMap(c.object, "metadata"), "resourceVersion")
+	return json.Marshal(map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "ApplicationList", "metadata": map[string]any{"resourceVersion": "controller-head-" + version}, "items": []any{c.object}})
+}
+
 func groupRuntimeWorkloads(t *testing.T, receiver *receiverFixture, manifests []string) {
 	t.Helper()
 	pods, sets := []any{}, []any{}

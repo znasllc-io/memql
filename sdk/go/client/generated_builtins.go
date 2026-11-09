@@ -7171,7 +7171,7 @@ func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
 	return b.String()
 }
 
-// ReleaseCloseInstallation -- Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. The reason, one line of at most 500 characters, is kept with the closed plan.
+// ReleaseCloseInstallation -- Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. A restoration of a completed update that has recorded no reverse start returns to that completed update instead; once it has recorded one it cannot be closed. The reason, one line of at most 500 characters, is kept with the record.
 type ReleaseCloseInstallationArgs struct {
 	InstallationId string
 	PlanId         string

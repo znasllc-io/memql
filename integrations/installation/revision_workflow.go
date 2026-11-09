@@ -610,7 +610,7 @@ func (s *revisionWorkflowScope) reobserveConfiguration(ctx context.Context, args
 	if s.host.rendererAddressOverride != "" {
 		fresh.rendererAddress = s.host.rendererAddressOverride
 	}
-	if fresh.digest != s.configuration.digest || fresh.invariantDigest != r.Plan.Preparation.ConfigurationInvariantDigest {
+	if fresh.digest != s.configuration.digest || !fresh.matchesInvariant(r.Plan.Preparation.ConfigurationInvariantDigest) {
 		return nil, errors.New("installation configuration changed during revision admission")
 	}
 	intent, err := argocd.PlanRevision(fresh.application, r.Plan.Intent.RequestID, r.Plan.Intent.Revision, r.Plan.Intent.Prune)
@@ -634,7 +634,7 @@ func freshArtifactObservation(observed, expires, now time.Time) bool {
 func (s *revisionWorkflowScope) freshWriteEvidence(r revisionRecord) (revisionWriteAdmission, error) {
 	binding := r.Plan.Preparation
 	if binding == nil || s.configuration == nil || !s.preflightComplete || !s.reobserved || (!s.rollbackExecution && !configurationMatchesPlan(s.configuration, r.Plan)) ||
-		s.configuration.invariantDigest != binding.ConfigurationInvariantDigest || binding.ArtifactWorkflowDigest != s.workflow.artifacts.digest || !freshConfigurationObservation(s.configuration.observed, time.Now()) {
+		!s.configuration.matchesInvariant(binding.ConfigurationInvariantDigest) || binding.ArtifactWorkflowDigest != s.workflow.artifacts.digest || !freshConfigurationObservation(s.configuration.observed, time.Now()) {
 		return revisionWriteAdmission{}, errors.New("installation write requires freshly authenticated receiving configuration and completed admission")
 	}
 	if s.artifacts == nil || s.artifacts.workflow != s.workflow.artifacts.digest || s.artifacts.operator != s.operator ||
@@ -687,6 +687,11 @@ func (s *revisionWorkflowScope) begin(ctx context.Context, args map[string]any) 
 	}
 	admission, err := s.freshWriteEvidence(r)
 	if err != nil {
+		return nil, err
+	}
+	// Preparation refuses this case; an engine up to 0.31.28 did not check it,
+	// so a plan it prepared is checked once more before its first durable start.
+	if err := s.configuration.ownConfigurationUnchanged(s.inventory("rollback"), s.inventory("candidate")); err != nil {
 		return nil, err
 	}
 	_, err = s.journal.beginAdmitted(ctx, s.installation, s.key, s.workflow.digest, admission)

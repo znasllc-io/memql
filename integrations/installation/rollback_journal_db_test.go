@@ -17,7 +17,7 @@ import (
 	"github.com/znasllc-io/memql/integrations/argocd"
 )
 
-func rollbackJournalFixture(t *testing.T) (context.Context, *revisionJournal, *revisionJournal, revisionRecord, rollbackPlan, *revisionControllerFixture) {
+func rollbackJournalFixture(t *testing.T) (context.Context, *revisionJournal, *revisionJournal, revisionRecord, rollbackPlan, *historyController) {
 	t.Helper()
 	db, peerDB := journalDB(t)
 	preparations := preparationConnection(db)
@@ -27,7 +27,7 @@ func rollbackJournalFixture(t *testing.T) (context.Context, *revisionJournal, *r
 	j, peer := &revisionJournal{db: func() *sql.DB { return db }}, &revisionJournal{db: func() *sql.DB { return peerDB }}
 	r, err = j.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
-	api := newRevisionControllerFixture(t, db, r)
+	api := newHistoryController(t, db, r)
 	client, err := argocd.New(api)
 	require.NoError(t, err)
 	_, err = client.Apply(ctx, r.Plan.Intent)
@@ -112,13 +112,14 @@ func TestRollbackJournalAcrossReplicasRecoversLostEffectsAndRetainsHead(t *testi
 	client, err := argocd.New(checked)
 	require.NoError(t, err)
 	api.loseReply = true
-	_, err = client.Apply(ctx, current.Rollback.Plan.Intent)
+	_, err = applyReversalIntent(ctx, client, current.Rollback.Plan.Intent)
 	require.Error(t, err, "the remote reversal committed but its response was lost")
+	require.Equal(t, 2, api.writes)
 	current, err = peer.get(ctx, parent.Plan.InstallationID, parent.ID)
 	require.NoError(t, err)
 	fresh, err := argocd.New(checked)
 	require.NoError(t, err)
-	facts, err := fresh.Apply(ctx, current.Rollback.Plan.Intent)
+	facts, err := applyReversalIntent(ctx, fresh, current.Rollback.Plan.Intent)
 	require.NoError(t, err)
 	require.True(t, facts.IntentObserved)
 	require.Equal(t, 2, api.writes)

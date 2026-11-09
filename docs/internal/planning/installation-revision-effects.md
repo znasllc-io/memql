@@ -59,8 +59,11 @@ same plan returns the same intent; a different plan cannot take an active slot.
 The native start operation commits `applying` before any external write.
 Cancellation is allowed only from `prepared`, is permanent for that plan, and
 cannot release a successor's slot. A timeout, crash or uncertain external reply
-does not release a started attempt; only a terminal receipt or its operator's
-explicit close does ([Closing without completion proof](#closing-without-completion-proof)).
+does not release a started attempt; only a terminal receipt, its operator's
+explicit close ([Closing without completion proof](#closing-without-completion-proof)),
+or the withdrawal of a restoration of a completed update that wrote nothing
+([Restoration admission, later syncs and status writes](#restoration-admission-later-syncs-and-status-writes))
+does.
 
 Each authority read recomputes the plan identity and rejects unexpected fields
 or changed bindings. The current resolved developer/admin/owner role is checked
@@ -121,7 +124,11 @@ external request, and observations have their own monotonic version. Another
 replica recovers the same intent after a lost response; a late observer cannot
 replace newer facts. Failed and successful reverse syncs both retain the head
 until independent continuity and cleanup verification. Schema rollback refuses
-to erase reversal history.
+to erase reversal history. A restoration of a completed update is reserved
+together with its head only after every check passed, and one that wrote
+nothing returns to the completed attempt; reversals are history-backed and the
+terminal outcome survives a later sync
+([Restoration admission, later syncs and status writes](#restoration-admission-later-syncs-and-status-writes)).
 
 Required-database race tests cover concurrent reservations through independent
 connections, the durable start before the controller PATCH, lost committed
@@ -144,12 +151,18 @@ forever: production's 0.31.27 plan of 2026-11-09 was saved under the
 whole-object owner fingerprint that engine `b74ef4f3a` replaced. The terminal
 state `closed` (migration `20261109150000_installation_revision_close`) lets
 that plan's original operator end it without proof
-(`integrations/installation/close.go`, `close_journal.go`).
+(`integrations/installation/close.go`, `close_journal.go`). The same applies to
+a plan whose saved `-v1` configuration invariant a routine change has moved
+past ([Receiving configuration after an owned revision change](#receiving-configuration-after-an-owned-revision-change));
+the close itself never consults that invariant.
 
 - **What it admits.** Only the plan's `RequestedBy`, and only from `applying`,
   including an applying plan with a recorded restoration. A prepared plan is
-  cancelled instead. A restoration of a completed update (`reverting`) is not
-  closable: its forward completion was proven, and no case has yet needed it.
+  cancelled instead. A restoration of a completed update (`reverting`) never
+  becomes `closed`, because its forward completion was proven: while it has
+  recorded no reverse start the same request returns it to `complete` with the
+  operator's reason recorded (`withdrawRestoration`), and once it has, it is not
+  closable ([Restoration admission, later syncs and status writes](#restoration-admission-later-syncs-and-status-writes)).
 - **What it waits for.** Under the plan's effect lock, `CloseSelected` reads
   every intent the plan may have written (`dispatchedIntents`: the forward
   intent once started, each started group member, each started reversal and
@@ -182,6 +195,197 @@ have to accept a recorded re-baseline, and the resulting receipt would claim a
 preservation check that compared against a digest the operator chose. A close
 claims nothing. Regression tests: `close_db_test.go` and
 `integrations/argocd/settled_test.go`.
+
+### Restoration admission, later syncs and status writes
+
+An audit of 2026-11-09 found three ways a healthy cluster still stranded a plan
+and held the installation head for good. All three are fixed here; migration
+`20261109200000_installation_restore_lifecycle` adds the three records they
+need (`owned_successes` and `withdrawn_restorations` on the attempt,
+`replanned_intents` on its reversal).
+
+**A refused Restore no longer holds the installation.** Restore previous
+release used to reclaim the head and mark a completed plan `reverting` before
+any check ran (`reacquireRollback`, which only the tests keep now, to reproduce
+the state it left). A check that then refused (the configuration invariant, the
+storage or protected-resource digests, migrations the candidate ran, the plan's
+own finished Argo operation, planning a reversal) left a `reverting` plan that
+close, cancellation and completion all refuse.
+
+- *Checks first.* `RollbackSelected` runs the saved rollback recipe against the
+  completed attempt (`rollbackWorkflowScope.qualifying`). Every operation admits
+  the `complete` record only while it stays eligible. Retained sources are
+  reopened through `reopenCompletedCapture`, which fences both sides of the read
+  by a free head, an unchanged slot epoch and continued eligibility, the
+  completed-plan equivalent of the active-head fence `reopenPromotedCapture`
+  uses. `installationRollbackReserve` is the first write: one transaction
+  rechecks eligibility, reclaims the head and every Application claim, marks the
+  plan `reverting` and stores the reversal (`reserveCompletedRollback`). A
+  refusal before it changes nothing of the attempt, not even its `updated_at`.
+  The receiving configuration read may still advance the promoted preparation's
+  application history cursor (`applicationProof`), as every read of a selected
+  plan does; that cursor grants nothing.
+- *Withdrawal.* After the reservation, a restoration can still refuse before any
+  reverse write: `begin`, or the configuration, migration or history checks of
+  a member's apply. Every reverse Apply commits that member's durable start
+  first, after every check its apply makes (`beginRollbackApplication`), in a
+  group and for a single Application alike (`rollbackRecord.perApplyStarts`), so
+  a restoration with no member start (`restorationUnwritten`) has written
+  nothing. A single-Application reversal's only start used to be the reversal's
+  own, which `begin` commits ahead of those checks; one whose format-1 intent an
+  engine up to 0.31.28 may have written still counts that start as a possible
+  write. `RollbackSelected` answers any refusal by returning such a restoration
+  to `complete` under the plan's effect lock (`withdrawRefusedRestoration`): the
+  reserved reversal row is deleted (a completed attempt carries none), the head
+  and claims are released, and `withdrawn_restorations` records the requester,
+  the time and the reversal's identity. The original forward receipt is
+  untouched. A withdrawal that fails is logged, and the reply reads the attempt
+  again so it reports the state the attempt is in.
+- *Close.* `CloseSelected` admits a `reverting` attempt in the same condition
+  and returns it to `complete` the same way, with the operator's one-line
+  reason; a lost reply recovers the stored close. It reads no Application: the
+  forward operations finished before completion, and the restoration wrote
+  nothing. `selectionResult` sets `canClose` for it, and Cluster > Updates
+  offers it as **Stop restoration**, worded as stopping because the update stays
+  verified and restorable. This also ends an attempt an earlier engine left
+  `reverting` by taking the head first. A restoration with any recorded reverse
+  start may have reached the cluster and stays unclosable, as before.
+- *Across requests.* A refusal cannot tell which request reserved the reversal,
+  so it also withdraws another request's reservation that has not begun; that
+  request's next step then refuses because the attempt is complete again. A
+  Restore that reserves while another's reservation has not begun replaces it
+  instead of refusing. A preparation started while a Restore qualifies pre-empts
+  the Restore at reservation.
+
+The alternative was to keep the head-first order and only withdraw on refusal.
+It reaches the same end state for a refusal in the same request, but a process
+that dies mid-check leaves the installation held until someone acts; the
+ordering leaves a completed plan untouched in that case. The cost is a second
+retained-source reader for the completed state.
+
+**A later sync no longer strands completion or restoration.** Argo keeps only
+the last operation in `status.operationState`. Completion counted success only
+from the plan's own operation there (`argocd.observe`), and so did the
+receiving configuration reader (`observeArgo`) and reversal planning
+(`argocd.PlanRollback`). One later sync of the same Application (any hand sync
+of a manual-sync Application in production; self-heal elsewhere) replaced it,
+and all three then refused forever although the Application still ran exactly
+the plan's revision.
+
+- *Record.* Every read that sees an intent's own success records it
+  (`recordOwnedSuccess`): completion's controller read (`completionScope.read`),
+  and for a restoration the rollback recipe's first read (the start of **Resume
+  restoration**), its apply's check of a member already applied, and its
+  observation. The record is `owned_successes`, keyed by intent digest, with the
+  member and the revision and canonical source that sync applied, only for an
+  intent the attempt durably started, only while the attempt is active, never
+  removed. It is a new column rather than a field in an existing JSON column,
+  because every existing column is decoded strictly and an engine predating the
+  field must still read the row (a release rolled back by hand). Persisted
+  controller facts could not serve: every observer overwrites them.
+- *Use.* Each call passes the records to the controller adapter
+  (`argocd.WithRecordedSuccess`, `recordedSuccessContext`). They travel in the
+  call's context because `readSelectedReceiver` observes intents through code
+  with no journal of its own. For an update that completed, its forward
+  completion receipt is the record for every member, because completion required
+  each member's own operation to have succeeded; this covers updates completed
+  before records were kept, such as production's.
+- *Conditions.* A record counts only while the Application holds the plan's
+  marker and complete desired spec, nothing is pending, the last operation is in
+  a terminal phase, Argo compares the plan's revision with the plan's source,
+  and the last operation, if a later one, Succeeded and synced that same
+  revision and source. Completion still requires Synced and Healthy and every
+  fresh workload, continuity and preservation proof. A later sync to another
+  revision, by a spec change or a one-off sync to another commit, still refuses.
+- *A success no read saw.* A forward plan whose own operation was replaced
+  before any read saw it has no record and keeps refusing; its operator closes
+  it. A restoration in that state cannot be closed, because its writes reached
+  the cluster, so each started reversal member may instead be proved from Argo's
+  `status.history` (`argocd.WithDeploymentHistory`, added by
+  `recordedSuccessContext`): the newest entry by `id` must name the reversal's
+  exact revision and source and be `deployedAt` no earlier than the reversal's
+  start (`started_at`, compared to the second, which is all Argo records). Argo
+  appends an entry only for a sync that succeeded. The entries carry no
+  operation marker, which is why forward intents never use them; the proof
+  counts only under `argocd.Observe`'s other conditions (the Application carries
+  the reversal's own marker and exact spec, nothing pending, Argo comparing the
+  reversal's revision and source), and a deployment of exactly that revision and
+  source since the reverse start is the state completion verifies. It is read
+  again at every check and never recorded (`observedSuccess`). It compares
+  Argo's clock with PostgreSQL's: an Argo controller clock running behind the
+  database's by more than the start's sub-second part leaves the proof
+  unavailable, which fails closed.
+
+**Restore's writes no longer refuse after one status write.** Reversal intents
+were planned from a plain read and bound to the exact generation, saved once
+and never planned again. Argo's status writes advance an Application's
+generation on a CRD without a status subresource
+([Application status and retained change history](../ops/installation-groups.md#application-status-and-retained-change-history)),
+so one such write before a member's patch refused it on every retry, and the
+window was longer for a group's second member.
+
+- `argocd.PlanRollback` and the baseline read for a fence use the name-filtered
+  list (`ReadPlanning`), so each new reversal is an intent-format-2 intent with
+  a watch boundary.
+- The rollback apply admits each reversal with `argocd.Admit`: a format-2 one
+  with `argocd.BoundaryProof`, `CheckContinuity` from the reversal's own
+  planning boundary. No cursor is persisted; each check rereads the whole window
+  from that boundary, so an edit seen once is seen again while Kubernetes
+  retains the history. Once that history is gone, the proof holds only while
+  the generation has not moved since planning (`unchangedSincePlanning`): every
+  spec change advances it, so only metadata can have changed, which the format-1
+  fence accepted too. A format-1 one is checked against its strict fence. The
+  admission is made before the member's durable reverse start, so a real edit
+  refuses while the restoration can still be withdrawn, and again for the exact
+  object right before the patch, as `ApplyWithContinuity` requires.
+- Status-only generation advances pass. A spec, marker, operation or identity
+  change by another writer still refuses.
+- *Planning again.* A reversal's history window can close before it is resumed
+  (Kubernetes' watch cache keeps minutes on a busy cluster), and a reversal
+  stored by an engine up to 0.31.28 carries the strict format-1 fence one
+  status write passes. Neither may hold the installation for good, so
+  `rollbackWorkflowScope.replan` plans a member's reversal again, after every
+  check of the pass and through `PlanRollback`'s own checks, when nothing of it
+  can still reach the cluster: the member has no reverse start and its saved
+  intent is history-backed with its history gone (`ErrHistoryUnavailable`) or
+  is format 1 and fails its fence; or the member started but its format-1
+  intent is dead (`argocd.Superseded`: the Application holds the intent's exact
+  baseline at a later generation, so no request formed for it can pass its
+  fence, and none landed). The new intent is stored in `replanned_intents`
+  (`replanRollbackApplication`), another additive column for the same reason
+  as `owned_successes`, and supersedes the member's planned and reconciled
+  intents. A started history-backed member is never planned again, because the
+  resource version its in-flight request tested is not retained. A reversal
+  reserved but never begun is planned again and replaced whole at reservation
+  (`replaceUnstartedRollback`). The alternative, persisting and advancing a
+  cursor for each reversal as forward intents do, still strands a reversal
+  resumed after its cursor's window closes.
+- *Limits.* Classifying a fence's baseline as untouched still compares the
+  generation with the forward intent's (`PlanUnappliedRollback`), so a status
+  write since the forward intent was planned falls back to `PlanRollback`. An
+  engine up to 0.31.28 that resumes a history-backed reversal takes the member's
+  start and cannot prove it; that restoration waits for a current engine to
+  resume it. A history-backed member whose start was recorded but whose patch
+  never landed (the process stopped between the two, or the patch was refused
+  or timed out) and that is resumed only after its history is gone and its
+  generation has moved can be neither proved nor planned again, so its
+  restoration stays held. Recording the generation each reverse patch tests
+  before sending it would let a current generation beyond every recorded one
+  prove that no request can land, as `argocd.Superseded` does for format 1; it
+  is not built.
+
+Regression tests: `restore_lifecycle_db_test.go` (the installed recipes on a
+two-Application group and a single Application: refusals before and after the
+reservation, closing a stranded restoration and the `canClose` it is offered,
+refusing to close a written one, completion and restoration after later syncs
+of the same and of another revision, a restoration's own completion after a
+later sync, a status write or a spec edit before a reversal's patch, a resume
+after history compaction, a resume of a reversal stored as an engine up to
+0.31.28 left it, and a restoration proved from deployment history),
+`integrations/argocd/revision_recorded_test.go`, `rollback_history_test.go` and
+the OS panel's `installationUpdates.test.tsx`. They use protocol doubles for
+Argo and the cluster; production proof is a Cluster > Updates update completed
+after a hand sync, and a restoration, each with their receipts.
 
 ### Preparation before source dispatch
 
@@ -686,9 +890,12 @@ baseline spec, UID, generation and previous intent marker, and changes only
 `source.targetRevision`. A fresh read verifies that baseline. The patch tests
 UID, resource version, generation and spec atomically before replacing the
 revision and starting the identified sync. A deleting or controller-owned
-Application is refused, as is another active operation. Status-only generation
-changes can invalidate preparation; callers must refresh and reassess instead
-of weakening the comparison.
+Application is refused, as is another active operation. A format-1 intent
+refuses any generation change, status-only ones included. The history-backed
+intents preparation and restoration now plan accept a status-only generation
+change only with complete history since they were planned, and still refuse
+every spec, marker, operation or identity change
+([Restoration admission, later syncs and status writes](#restoration-admission-later-syncs-and-status-writes)).
 
 Argo's typed status encoding omits optional empty/false source fields. This
 initial adapter refuses those explicit values before starting, including
@@ -727,8 +934,13 @@ explicit rollback path.
 
 Observation binds the marker, operation revision, full desired spec, sync
 result source and revision, and the revision/source Argo actually compared.
-It does not borrow a previous successful sync. Inline manifests, selective
-resource lists or a substituted operation source cannot establish success.
+It does not borrow another operation's success. When a later sync has replaced
+the plan's own operation in `status.operationState`, only the journal's record
+that the plan's own operation was observed Succeeded can stand in for it, under
+the conditions in
+[Restoration admission, later syncs and status writes](#restoration-admission-later-syncs-and-status-writes).
+Inline manifests, selective resource lists or a substituted operation source
+cannot establish success.
 Workload readiness, authenticated sessions, subscriptions, website traffic,
 migration compatibility and cleanup remain separate evidence.
 
@@ -794,18 +1006,50 @@ renderer EndpointSlice discovery and repository Secret selection need bounded
 namespace LISTs. Repository selection observes the registered repository/cache
 project independently of the Application project, following the pinned
 [Argo repository selection](https://github.com/argoproj/argo-cd/blob/v2.13.3/util/db/repository_secrets.go); a complete empty inventory
-permits the public repository default. Only Secret identities and versions enter
-that durable binding. API/version
+permits the public repository default. Only each registration's name, UID and
+keyed content digest enter that durable binding. API/version
 and resource discovery are read-only. The reader never seeds these resources,
 writes credentials, changes RBAC or alters the serving cluster.
 
-Configuration and Secret UIDs/resourceVersions bind change-away-and-back and
-credential rotation without saving credential values or their hashes. Every
-read set is reobserved before it is accepted. Application, Deployment and Pod
-status-only RV churn does not alter persistent configuration identity; their
-identity, spec and generation remain bound, and ready state and the actual
-runtime image are freshly checked. EndpointSlice list RVs can advance because
-of unrelated writes, so their complete ordered contents bind the inventory.
+Every read set is reobserved before it is accepted, and any `resourceVersion`
+that moved during that one observation refuses it. What a plan saves across
+observations (`receiving-configuration-v2`, `receiver_reads.go`) binds what each
+input means rather than its version, because a healthy cluster rewrote those
+versions under every started plan:
+
+- ConfigMaps and Secrets bind their UID and an HMAC of their type,
+  immutability and data (for `argocd-cm`, also its `app.kubernetes.io/part-of`
+  label, which decides whether Argo reads it). The HMAC key derives from the
+  catalog credential, so no value and no unkeyed, guessable digest of one is
+  saved; the key is only as strong as that credential. A rotated value or a
+  replaced object refuses; any other label, annotation or no-op write does not.
+- The renderer Deployment binds its UID, selector and pod template, less the
+  `kubectl.kubernetes.io/restartedAt` restart marker (other restart markers
+  change the template and refuse). Its Pods, ReplicaSets and EndpointSlices are
+  not saved: every call proves each ready endpoint addresses a Pod of that
+  Deployment's current revision, whose ReplicaSet (read by name) has the
+  Deployment's pod template apart from `pod-template-hash` and whose own hash
+  label matches, running the template's containers, init containers, volumes
+  and pinned image with the template's service account, security context, host
+  namespaces, host aliases, DNS and runtime class, with no ephemeral container,
+  one per wanted replica. A restart, reschedule or readiness flap therefore
+  changes nothing saved; a changed template, image or Deployment does, and an
+  older revision's Pod, a Pod an admission webhook altered or a debug container
+  refuses the call. An ephemeral container cannot be removed from its Pod, so
+  a repo-server restart is what clears one.
+- The renderer Service and Argo projects bind UID and spec.
+- Discovery binds the Kubernetes major and minor version and, for each resource
+  the receiver reads, whether it is served and its kind, scope and the verbs the
+  receiver uses. Patch build fields, `/api` addresses and unrelated groups are
+  not saved. The APIs a plan's render applies are resolved from fresh discovery
+  by resource evidence at every call and bound in `ResourceDiffDigest`.
+
+Engines up to 0.31.28 saved `receiving-configuration-v1`, which bound every
+`resourceVersion`, each renderer Pod, ReplicaSet and EndpointSlice, and the whole
+discovery surface. The receiver still computes it from the same reads, so a plan
+saved in that form is compared with that strictness (`matchesInvariant`); the
+live checks, including the TLS trust below, are this engine's for every plan.
+No Kubernetes request was added, so no RBAC changes.
 Missing/truncated collections, replacements and inconsistent endpoints refuse.
 
 The renderer must be fully ready, with service endpoints addressing Pods owned
@@ -824,10 +1068,21 @@ the main container's literal `ARGOCD_EXEC_TIMEOUT`; other init environment,
 indirect values and changed commands remain unqualified.
 
 The native connection verifies the renderer's certificate chain and service
-DNS identity and additionally pins the exact leaf from its named Secret. It
-never inherits Argo's permissive default TLS behavior. The configured
-certificate must actually be mounted and served; Argo 2.13 requires repo-server
-restart after certificate changes ([Argo TLS configuration](https://argo-cd.readthedocs.io/en/release-2.13/operator-manual/tls/)).
+DNS identity against the trust anchors of its named Secret: `ca.crt`, or the top
+of the `tls.crt` chain. It never inherits Argo's permissive default TLS behavior
+or the system roots. The configured certificate must actually be mounted;
+Argo 2.13 requires a repo-server restart after certificate changes
+([Argo TLS configuration](https://argo-cd.readthedocs.io/en/release-2.13/operator-manual/tls/)),
+so between a renewal and that restart it serves the previous leaf. The receiver
+used to pin the exact leaf, which refused every started plan at each
+cert-manager renewal (about every 75 days). It now binds the anchors' names and
+public keys: a leaf renewed under the same CA verifies before and after the
+restart, and a different CA refuses. A self-signed leaf is its own anchor, so a
+self-signed leaf whose key rotates at renewal (cert-manager's default) is a new
+trust anchor and still refuses every plan started before the renewal. It keeps
+its anchor only when cert-manager keeps its key (`privateKey.rotationPolicy:
+Never`), and even then its old leaf no longer verifies until the repo-server
+restarts; a leaf issued by a long-lived CA avoids both.
 The catalog port freezes one authenticated source using the existing SDK and
 signed-envelope reader; it does not introduce another transport or treat
 browser-supplied release fields as evidence.
@@ -899,11 +1154,33 @@ The opt-in test requires `MEMQL_INSTALLATION_RENDERER_TEST_KUBECONFIG`,
 ### Receiving configuration after an owned revision change
 
 Preparation binds both the full baseline configuration digest and a separate
-configuration invariant digest. The latter retains every configuration, Secret,
-renderer, project, repository and discovery binding, while binding the
-Application's authenticated name, namespace and UID separately from its mutable
-spec, generation and operation. Both digests originate from the same reobserved
-read set and are carried through the durable preparation and promotion.
+configuration invariant digest. The latter binds what every configuration,
+Secret, renderer, project, repository and discovery input means (not its
+version, nor the renderer's individual Pods), while binding the Application's
+authenticated name, namespace and UID separately from its mutable spec,
+generation and operation. Both digests originate from the same reobserved
+read set and are carried through the durable preparation and promotion, in the
+`-v2` form described under
+[Receiving configuration and preparation composition](#receiving-configuration-and-preparation-composition).
+A plan saved by an engine up to 0.31.28 holds the `-v1` form and is compared
+with it; a `-v1` plan that churn has moved past refuses as before and its
+operator closes it ([Closing without completion proof](#closing-without-completion-proof)).
+An engine older than this one cannot verify a `-v2` plan, so an update to such
+an engine cannot complete and must be closed.
+
+The receiver's own configuration ConfigMap is rendered by an Application a plan
+syncs, so a candidate that changes its content would rewrite, mid-plan, the
+input every later step compares with preparation. Preparation refuses such a
+candidate before any image or cluster read (`ownConfigurationUnchanged`), as it
+does one that stops declaring the ConfigMap or whose current release declares
+other content than the live one, and the revision start fence checks a plan
+from an older engine again before its first write. The preparation's
+reservation still holds the installation, so the reason tells the operator to
+cancel the preparation, deploy the configuration change by hand and prepare
+again. A candidate that changes another input the receiver reads (a rendered
+Secret or AppProject, or the rendered `MEMQL_INSTALLATION_CONFIG_NAME`) is not
+refused here; the invariant refuses its later steps, which strands the plan
+until it is closed but never skips a check.
 
 The private continuation reader observes the actual current Application. It
 requires the native Argo verifier to match the complete desired spec, exact

@@ -2,7 +2,10 @@ package installation
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -61,6 +64,12 @@ func TestReceivingRendererThroughInstalledArgo(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	reads := newReceiverReads(installedRendererAPI{kubeconfig: kubeconfig})
+	// This check saves nothing, so a per-run key stands in for the catalog
+	// credential that keys a real receiver's content digests.
+	key := make([]byte, 32)
+	_, err = rand.Read(key)
+	require.NoError(t, err)
+	reads.useBindingKey(hex.EncodeToString(key))
 	snapshot := &receiverSnapshot{configuration: receiverConfiguration{
 		Application: receiverNamed{Namespace: "argocd"},
 		Renderer: receiverRenderer{Profile: "argocd-2.13.3-kustomize-5.4.3",
@@ -70,11 +79,11 @@ func TestReceivingRendererThroughInstalledArgo(t *testing.T) {
 	require.NoError(t, snapshot.observeRenderer(ctx, reads))
 	require.Equal(t, "argocd-repo-server.argocd.svc:8081", snapshot.rendererAddress)
 	probe, err := (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: snapshot.rendererTLS}).DialContext(ctx, "tcp", address)
-	require.NoError(t, err, "verify the live TLS leaf against the authenticated named Secret")
+	require.NoError(t, err, "verify the served certificate chains to the named Secret's trust anchors")
 	require.NoError(t, probe.Close())
-	digest, err := reads.finish(ctx)
+	digests, err := reads.configuration(ctx)
 	require.NoError(t, err, "all authenticated renderer inputs must remain unchanged during qualification")
-	t.Logf("installed renderer inputs=%d digest=%s; pinned runtime image and TLS identity verified", len(reads.reads), digest)
+	t.Logf("installed renderer inputs=%d digest=%s; pinned runtime image and TLS trust anchors verified", len(reads.reads), digests.current)
 }
 
 type installedDiscoveryAPI struct{ kubeconfig string }
@@ -107,7 +116,9 @@ func TestReceivingDiscoveryThroughInstalledKubernetes(t *testing.T) {
 	reads := newReceiverReads(installedDiscoveryAPI{kubeconfig: kubeconfig})
 	version, resources, err := reads.discovery(ctx)
 	require.NoError(t, err)
-	_, err = reads.finish(ctx)
+	_, err = reads.configuration(ctx)
 	require.NoError(t, err, "discovery must retain every resource contract while tolerating reordered inventories")
-	t.Logf("installed Kubernetes %s: %d authenticated discovery inputs and %d renderer API entries verified", version, len(reads.reads), len(resources))
+	contract, err := json.Marshal(reads.contract)
+	require.NoError(t, err)
+	t.Logf("installed Kubernetes %s: %d authenticated discovery inputs and %d renderer API entries verified; saved contract %s", version, len(reads.reads), len(resources), contract)
 }

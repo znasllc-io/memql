@@ -65,6 +65,11 @@ func TestReceiverNamedRepositoryAcrossReplicasAndRotation(t *testing.T) {
 	require.Equal(t, 4, f.reads[namedRepositoryFixturePath], "each replica must independently read and reobserve the named Secret")
 	meta := resourceMap(f.objects[namedRepositoryFixturePath], "metadata")
 	meta["resourceVersion"] = "12"
+	meta["annotations"] = map[string]any{"managed-by": "argocd-repo-credentials"}
+	rewritten := observe()
+	require.Equal(t, first.invariantDigest, rewritten.invariantDigest, "a write that leaves the registration's values unchanged means nothing new")
+	meta["resourceVersion"] = "13"
+	resourceMap(f.objects[namedRepositoryFixturePath], "data")["password"] = base64.StdEncoding.EncodeToString([]byte("must-not-be-used-or-returned-rotated"))
 	rotated := observe()
 	require.NotEqual(t, first.digest, rotated.digest)
 	require.NotEqual(t, first.invariantDigest, rotated.invariantDigest, "a saved preparation cannot recover across unseen credential rotation")

@@ -40,8 +40,10 @@ func readReceiverContinuation(ctx context.Context, api argocd.API, namespace, na
 	if err != nil {
 		return nil, err
 	}
+	// The evidence carries the invariant the plan saved, in whichever format
+	// prepared it; require checks this observation reproduces it.
 	evidence := &receiverContinuationEvidence{snapshot: snapshot, planDigest: planDigest,
-		invariantDigest: snapshot.invariantDigest, intentDigest: intentDigest,
+		invariantDigest: plan.Preparation.ConfigurationInvariantDigest, intentDigest: intentDigest,
 		target: snapshot.applicationTarget, observed: snapshot.observed}
 	if err := evidence.require(plan, active); err != nil {
 		return nil, err
@@ -58,7 +60,7 @@ func (e *receiverContinuationEvidence) require(plan preparedPlan, active argocd.
 	if e == nil || e.snapshot == nil || planErr != nil || intentErr != nil || plan.Preparation == nil ||
 		e.planDigest != planDigest || e.intentDigest != intentDigest || e.target != active.Target || active.Target != plan.Intent.Target ||
 		e.snapshot.applicationTarget != e.target || e.snapshot.configuration.InstallationID != plan.InstallationID ||
-		!internalDigest.MatchString(e.invariantDigest) || e.snapshot.invariantDigest != e.invariantDigest ||
+		!internalDigest.MatchString(e.invariantDigest) || !e.snapshot.matchesInvariant(e.invariantDigest) ||
 		plan.Preparation.ConfigurationInvariantDigest != e.invariantDigest ||
 		e.observed.IsZero() || e.observed.After(time.Now()) || time.Since(e.observed) > time.Minute || e.snapshot.observed != e.observed {
 		return errors.New("installation continuation evidence is absent, expired or bound to different authority")

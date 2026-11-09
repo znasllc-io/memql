@@ -439,6 +439,58 @@ describe("closing a started update without verification", () => {
   });
 });
 
+describe("stopping a restoration that has changed no application", () => {
+  useFakeDate();
+  const reason = "The restore check refused; keeping the new release";
+  // A restoration of a completed update reports as applying with direction
+  // "rollback"; the server offers its close only while it has recorded no
+  // reverse start, and the close returns the update to complete.
+  function stopFixture(canClose = true) {
+    let active: Record<string, unknown> | null = { ...plan, state: "applying", direction: "rollback", canRollback: true, canClose, canManage: true };
+    let latest: Record<string, unknown> | null = null;
+    const executeNamed = vi.fn(async (name: string) => {
+      if (name === "releaseInstallationStatus") return answer({ installationId: plan.installationId, currentRevision: candidate.overlayRevision, choices: [candidate], active, latest });
+      if (name === "releaseCloseInstallation") {
+        latest = { ...plan, state: "complete", canRollback: true, canClose: false };
+        active = null;
+        return answer(latest);
+      }
+      throw new Error("Unexpected installation effect");
+    });
+    return { executeNamed };
+  }
+  const closes = (query: ReturnType<typeof stopFixture>) => (query.executeNamed.mock.calls as unknown as string[][]).filter(c => c[0] === "releaseCloseInstallation");
+
+  it("stops it with a reason and leaves the update verified and restorable", async () => {
+    const query = stopFixture();
+    render(<InstallationUpdates query={query} connected />);
+    await screen.findByText(/has not changed any application yet/);
+    expect(screen.queryByRole("button", { name: "Close without verification" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop restoration" }));
+    await screen.findByText("Stop restoring the previous release?");
+    expect(screen.queryByText(/can no longer be restored/)).toBeNull();
+    const field = screen.getByRole("textbox", { name: "Reason for stopping this restoration" });
+    expect(document.activeElement).toBe(field);
+    expect((screen.getByRole("button", { name: "Stop restoration" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(field, { target: { value: reason } });
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Stop restoration" }));
+    await screen.findByText("The selected release is installed and verified.");
+    expect(closes(query)).toHaveLength(1);
+    expect(closes(query)[0]?.[1]).toBe(`builtin releaseCloseInstallation(installationId: "installation-one", planId: "plan-one", reason: "${reason}")`);
+    expect(screen.queryByText("This update was closed without verification.")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Restore previous release" })).toBeTruthy();
+    expect(query.executeNamed.mock.calls.some(c => ["releaseRollbackInstallation", "releaseObserveInstallation", "releaseApplyInstallation"].includes(c[0]))).toBe(false);
+  });
+
+  it("offers no stop once the restoration has started changing an application", async () => {
+    render(<InstallationUpdates query={stopFixture(false)} connected />);
+    await screen.findByText(/previous release is being restored/);
+    expect(screen.getByRole("button", { name: "Resume restoration" })).toBeTruthy();
+    for (const name of ["Stop restoration", "Close without verification"]) expect(screen.queryByRole("button", { name })).toBeNull();
+  });
+});
+
 describe("owner-push installation proposals", () => {
   useFakeDate();
   it("lands exact pins only after confirmation, then leaves applying separate", async () => {

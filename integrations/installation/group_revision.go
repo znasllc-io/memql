@@ -50,7 +50,7 @@ func readSelectedReceiver(ctx context.Context, h *preparationHost, r revisionRec
 	if err != nil {
 		return nil, err
 	}
-	if snapshot.configuration.InstallationID != r.Plan.InstallationID || r.Plan.Preparation == nil || snapshot.invariantDigest != r.Plan.Preparation.ConfigurationInvariantDigest || len(snapshot.applicationMembers()) != len(r.Plan.applicationMembers()) {
+	if snapshot.configuration.InstallationID != r.Plan.InstallationID || r.Plan.Preparation == nil || !snapshot.matchesInvariant(r.Plan.Preparation.ConfigurationInvariantDigest) || len(snapshot.applicationMembers()) != len(r.Plan.applicationMembers()) {
 		return nil, errors.New("installation configuration or membership changed")
 	}
 	for _, app := range r.Plan.applicationMembers() {
@@ -201,9 +201,11 @@ func (s *revisionWorkflowScope) observeGroup(ctx context.Context, r revisionReco
 	return map[string]any{"operationSucceeded": facts.OperationSucceeded, "healthy": facts.Healthy, "synced": facts.Synced}, nil
 }
 
+// configurationMatchesPlan compares a fresh observation with the configuration
+// bound at preparation, in either saved format (matchesPreparation).
 func configurationMatchesPlan(snapshot *receiverSnapshot, plan preparedPlan) bool {
 	if snapshot == nil || plan.Preparation == nil {
 		return false
 	}
-	return snapshot.invariantDigest == plan.Preparation.ConfigurationInvariantDigest && (plan.FormatVersion == 2 || snapshot.digest == plan.Preparation.ConfigurationDigest) && freshConfigurationObservation(snapshot.observed, time.Now())
+	return snapshot.matchesPreparation(plan) && freshConfigurationObservation(snapshot.observed, time.Now())
 }

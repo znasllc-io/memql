@@ -98,7 +98,8 @@ func newReceiverFixture(t *testing.T) *receiverFixture {
 	f.put("v1", "Secret", "secrets", "memql", "catalog", map[string]any{"data": map[string]any{"token": base64.StdEncoding.EncodeToString([]byte("private-catalog-token"))}})
 	f.put("argoproj.io/v1alpha1", "Application", "applications", "argocd", "memql", map[string]any{"spec": map[string]any{"project": "default", "source": map[string]any{"repoURL": "https://github.com/acme/platform.git", "path": "deploy", "targetRevision": strings.Repeat("a", 40)}, "destination": map[string]any{"server": "https://kubernetes.default.svc", "namespace": "memql"}}, "status": map[string]any{"sync": map[string]any{"status": "Synced", "revision": strings.Repeat("a", 40)}, "health": map[string]any{"status": "Healthy"}}})
 	f.put("argoproj.io/v1alpha1", "AppProject", "appprojects", "argocd", "default", map[string]any{"spec": map[string]any{"sourceRepos": []any{"https://github.com/acme/platform.git"}, "destinations": []any{map[string]any{"namespace": "memql", "server": "https://kubernetes.default.svc"}}}})
-	f.put("v1", "ConfigMap", "configmaps", "argocd", "argocd-cm", map[string]any{"data": map[string]any{"application.resourceTrackingMethod": "annotation"}})
+	argoConfig := f.put("v1", "ConfigMap", "configmaps", "argocd", "argocd-cm", map[string]any{"data": map[string]any{"application.resourceTrackingMethod": "annotation"}})
+	resourceMap(argoConfig, "metadata")["labels"] = map[string]any{"app.kubernetes.io/name": "argocd-cm", "app.kubernetes.io/part-of": "argocd"}
 	f.objects["api/v1/namespaces/argocd/secrets?labelSelector=argocd.argoproj.io%2Fsecret-type%3Drepository&limit=257"] = map[string]any{"apiVersion": "v1", "kind": "SecretList", "metadata": map[string]any{"resourceVersion": "10"}, "items": []any{}}
 	f.objects["version"] = map[string]any{"gitVersion": "v1.35.0"}
 	f.objects["api"] = map[string]any{"versions": []any{"v1"}}
@@ -126,7 +127,39 @@ func newReceiverFixture(t *testing.T) *receiverFixture {
 	f.certificate = tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	f.put("v1", "Secret", "secrets", "argocd", "renderer-tls", map[string]any{"data": map[string]any{"tls.crt": base64.StdEncoding.EncodeToString(certPEM), "tls.key": base64.StdEncoding.EncodeToString([]byte("private-key-never-output"))}})
+	useRendererTemplateHash(f, "renderer-rs", "renderer-pod")
 	return f
+}
+
+// rendererTemplateHash is the fixture's pod-template-hash value.
+const rendererTemplateHash = "5d8f7c9b6d"
+
+// useRendererTemplateHash gives a renderer ReplicaSet and its Pod what the
+// Deployment controller writes: the ReplicaSet's labels, selector and pod
+// template are the Deployment's plus pod-template-hash, and its Pods carry the
+// hash. The template's spec stays the fixture's shared Pod spec. The
+// receiver's v1 golden digests (TestReceiverLegacyDigestsReproduceTheV1Engine)
+// were taken from engine 4d4464a6c on HEAD's fixture with exactly this applied.
+func useRendererTemplateHash(f *receiverFixture, set, pod string) {
+	deployment := resourceMap(f.objects["apis/apps/v1/namespaces/argocd/deployments/renderer"], "spec")
+	template := resourceMap(deployment, "template")
+	hashed := func(labels map[string]any) map[string]any {
+		out := map[string]any{"pod-template-hash": rendererTemplateHash}
+		for key, value := range labels {
+			out[key] = value
+		}
+		return out
+	}
+	rs := f.objects["apis/apps/v1/namespaces/argocd/replicasets/"+set]
+	rsTemplate := map[string]any{"metadata": map[string]any{"labels": hashed(resourceMap(resourceMap(template, "metadata"), "labels"))}, "spec": resourceMap(template, "spec")}
+	if annotations := resourceMap(resourceMap(template, "metadata"), "annotations"); annotations != nil {
+		resourceMap(rsTemplate, "metadata")["annotations"] = annotations
+	}
+	resourceMap(rs, "metadata")["labels"] = hashed(resourceMap(resourceMap(template, "metadata"), "labels"))
+	resourceMap(rs, "spec")["selector"] = map[string]any{"matchLabels": hashed(resourceMap(resourceMap(deployment, "selector"), "matchLabels"))}
+	resourceMap(rs, "spec")["template"] = rsTemplate
+	podMeta := resourceMap(f.objects["api/v1/namespaces/argocd/pods/"+pod], "metadata")
+	podMeta["labels"] = hashed(resourceMap(podMeta, "labels"))
 }
 func TestReceiverIndependentAuthenticatedReadsBindRotationWithoutSecrets(t *testing.T) {
 	f := newReceiverFixture(t)
@@ -155,10 +188,24 @@ func TestReceiverIndependentAuthenticatedReadsBindRotationWithoutSecrets(t *test
 	c, err := readReceiver(ctx, api, "memql", "receiver", f.factory(t))
 	require.NoError(t, err)
 	require.Equal(t, a.digest, c.digest, "status-only RV churn must not invalidate recovery")
-	resourceMap(f.objects["api/v1/namespaces/memql/secrets/catalog"], "metadata")["resourceVersion"] = "12"
+	// A write that leaves the credential's bytes unchanged (an annotation, a
+	// label, a controller's re-apply) means nothing new: it no longer strands a
+	// saved plan. The v1 binding, kept for plans older engines saved, still
+	// moved with the resourceVersion.
+	catalog := f.objects["api/v1/namespaces/memql/secrets/catalog"]
+	resourceMap(catalog, "metadata")["resourceVersion"] = "12"
+	resourceMap(catalog, "metadata")["annotations"] = map[string]any{"memql.io/credential-expires-at": "2027-02-01T00:00:00Z"}
 	d, err := readReceiver(ctx, api, "memql", "receiver", f.factory(t))
 	require.NoError(t, err)
-	require.NotEqual(t, a.digest, d.digest, "rotation invalidates prior configuration even if credential bytes match")
+	require.Equal(t, a.digest, d.digest, "an annotation-only write changes no credential")
+	require.Equal(t, a.invariantDigest, d.invariantDigest)
+	require.NotEqual(t, a.legacyInvariantDigest, d.legacyInvariantDigest)
+	// Changed configuration data still refuses.
+	resourceMap(f.objects["api/v1/namespaces/argocd/configmaps/argocd-cm"], "data")["application.instanceLabelKey"] = "argocd.argoproj.io/instance"
+	e, err := readReceiver(ctx, api, "memql", "receiver", f.factory(t))
+	require.NoError(t, err)
+	require.NotEqual(t, a.digest, e.digest, "a changed configuration value refuses")
+	require.NotEqual(t, a.invariantDigest, e.invariantDigest)
 	formatted := fmt.Sprintf("%+v %#v", a, a)
 	require.NotContains(t, formatted, "private-catalog-token")
 	require.NotContains(t, formatted, "private-key-never-output")
@@ -349,17 +396,31 @@ func TestReceiverRepositoryScopeAndCollectionVersions(t *testing.T) {
 	again, err := readReceiver(ctx, f, "memql", "receiver", f.factory(t))
 	require.NoError(t, err)
 	require.Equal(t, first.digest, again.digest, "unrelated collection writes do not change repository or endpoint identities")
+	resourceMap(secret, "metadata")["resourceVersion"] = "relabelled"
+	resourceMap(secret, "metadata")["labels"].(map[string]any)["app.kubernetes.io/part-of"] = "argocd"
+	relabelled, err := readReceiver(ctx, f, "memql", "receiver", f.factory(t))
+	require.NoError(t, err)
+	require.Equal(t, first.invariantDigest, relabelled.invariantDigest, "a registration rewritten without a changed value means nothing new")
+	require.NotEqual(t, first.legacyInvariantDigest, relabelled.legacyInvariantDigest)
 	resourceMap(secret, "metadata")["resourceVersion"] = "rotated"
+	resourceMap(secret, "data")["password"] = base64.StdEncoding.EncodeToString([]byte("private-rotated-password"))
 	changed, err := readReceiver(ctx, f, "memql", "receiver", f.factory(t))
 	require.NoError(t, err)
 	require.NotEqual(t, first.digest, changed.digest)
+	require.NotEqual(t, first.invariantDigest, changed.invariantDigest, "a rotated repository credential refuses")
 	r := newReceiverReads(f)
+	r.useBindingKey("private-catalog-token")
 	_, err = r.repositoryProject(ctx, "argocd", "default", "https://github.com/acme/platform.git")
 	require.NoError(t, err)
-	encoded, err := json.Marshal(r.reads[path].stable)
+	current, bound, err := r.currentBinding(r.reads[path])
 	require.NoError(t, err)
-	require.NotContains(t, string(encoded), "private-repository-password")
-	require.NotContains(t, string(encoded), resourceMap(secret, "data")["password"])
+	require.True(t, bound)
+	for _, binding := range []any{r.reads[path].legacy, current} {
+		encoded, err := json.Marshal(binding)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "private-")
+		require.NotContains(t, string(encoded), resourceMap(secret, "data")["password"])
+	}
 	list["items"] = []any{secret, secret}
 	_, err = readReceiver(ctx, f, "memql", "receiver", f.factory(t))
 	require.ErrorContains(t, err, "ambiguous")

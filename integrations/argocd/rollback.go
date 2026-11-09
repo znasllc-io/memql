@@ -9,16 +9,31 @@ import (
 // owned, terminal operation. It grants no authority and performs no write. The
 // installation journal must admit and persist this new intent before Apply.
 // An uncertain/pending operation cannot be replaced by a guessed rollback.
+//
+// The terminal outcome is read from status.operationState, or, after a later
+// sync replaced it there, from the caller's evidence that the operation
+// Succeeded (WithRecordedSuccess), under observe's conditions.
+//
+// The read is the name-filtered list ReadPlanning makes, so the reversal is a
+// history-backed (format 2) intent bound to a global watch boundary. Argo's
+// status writes advance an Application's generation on CRDs without a status
+// subresource; a reversal bound to the exact generation it was planned at
+// refused its patch after one such write, on every retry. Applying this intent
+// instead needs a ContinuityProof (Admit, BoundaryProof, ApplyWithContinuity)
+// that accepts status-only generation advances and still refuses any spec,
+// marker, operation or identity change since this read. When that history is
+// no longer available, a caller whose journal proves nothing of the reversal
+// was written plans it again here rather than strand it.
 func (c *Client) PlanRollback(ctx context.Context, prior Intent, request string) (Intent, error) {
 	before, after, digest, err := prior.validate()
 	if err != nil {
 		return Intent{}, err
 	}
-	snapshot, err := c.Read(ctx, prior.Target)
+	snapshot, err := c.ReadPlanning(ctx, prior.Target)
 	if err != nil {
 		return Intent{}, err
 	}
-	facts, err := observe(snapshot, prior, after, digest)
+	facts, err := observe(snapshot, prior, after, digest, successEvidenceIn(ctx)[digest])
 	if err != nil {
 		return Intent{}, err
 	}
@@ -71,10 +86,15 @@ func PlanUnappliedRollback(snapshot Snapshot, prior Intent, request string) (Int
 	if err != nil {
 		return Intent{}, err
 	}
-	// A retained history-backed forward intent and this fresh GET use different
-	// intent formats. Compare their actual baseline, not their encoding. This
-	// reversal deliberately retains the strict generation fence: a changed
-	// baseline cannot be adopted without separately admitted reversal evidence.
+	// A retained history-backed forward intent and this fresh read may use
+	// different intent formats. Compare their actual baseline, not their
+	// encoding. Classifying the baseline as untouched deliberately keeps the
+	// strict generation comparison with the forward intent: a changed baseline
+	// cannot be adopted without separately admitted reversal evidence, so a
+	// status-driven generation advance since the forward intent was planned
+	// classifies it as touched and the caller needs PlanRollback instead.
+	// Given a ReadPlanning snapshot, the fence itself is history-backed for
+	// its own patch (PlanRevision), like every other reversal.
 	if expected.Target != prior.Target || expected.BeforeGeneration != prior.BeforeGeneration ||
 		expected.BeforeMarker != prior.BeforeMarker || !equalJSON(object(snapshot.object, "spec"), before) {
 		return Intent{}, ErrChanged

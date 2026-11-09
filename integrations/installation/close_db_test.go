@@ -177,9 +177,14 @@ func TestInstallationCloseSelectedCoversARecordedRestoration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = j.beginRollback(ctx, parent.Plan.InstallationID, parent.ID, reversal.WorkflowDigest)
 	require.NoError(t, err)
+	// A history-backed single-Application reversal records its own start
+	// immediately before the write (perApplyStarts), as the rollback apply does.
+	admission := revisionWriteAdmission{planID: parent.ID, workflow: parent.Plan.ExecutionWorkflowDigest, freshUntil: time.Now().Add(time.Minute)}
+	_, err = j.beginRollbackApplication(ctx, parent.Plan.InstallationID, parent.ID, "", reversal.WorkflowDigest, admission)
+	require.NoError(t, err)
 	client, err := argocd.New(api)
 	require.NoError(t, err)
-	_, err = client.Apply(ctx, reversal.Intent)
+	_, err = applyReversalIntent(ctx, client, reversal.Intent)
 	require.NoError(t, err)
 	_, err = public.CloseSelected(owner, parent.Plan.InstallationID, parent.ID, closeReasonFixture)
 	require.ErrorContains(t, err, "still running")

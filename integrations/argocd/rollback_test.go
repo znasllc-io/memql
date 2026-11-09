@@ -9,6 +9,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// historyClient serves the name-filtered list and watch PlanRollback and
+// BoundaryProof read, over the same Application double.
+func historyClient(t *testing.T, app *apiFixture) (*continuityFixture, *Client) {
+	t.Helper()
+	f := &continuityFixture{t: t, delegate: app.client(t).api, application: app, cursor: "100"}
+	c, err := New(f)
+	require.NoError(t, err)
+	return f, c
+}
+
 func rollbackFixture(t *testing.T) (*apiFixture, *Client, Intent) {
 	t.Helper()
 	f := newFixture(t)
@@ -19,7 +29,21 @@ func rollbackFixture(t *testing.T) (*apiFixture, *Client, Intent) {
 	prior := fixtureIntent(t, c)
 	_, err := c.Apply(context.Background(), prior)
 	require.NoError(t, err)
-	return f, c, prior
+	_, history := historyClient(t, f)
+	return f, history, prior
+}
+
+// applyReversal sends a reversal the way the installation journal does: a
+// history-backed reversal with a fresh proof from its own planning boundary.
+func applyReversal(c *Client, reversal Intent) (Facts, error) {
+	var proof *ContinuityProof
+	if reversal.FormatVersion == 2 {
+		var err error
+		if proof, err = c.BoundaryProof(context.Background(), reversal); err != nil {
+			return Facts{}, err
+		}
+	}
+	return c.ApplyWithContinuity(context.Background(), reversal, proof)
 }
 
 func TestRollbackPlansExactTerminalReversalAndRecoversLostReply(t *testing.T) {
@@ -31,10 +55,12 @@ func TestRollbackPlansExactTerminalReversalAndRecoversLostReply(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, ValidateRollback(prior, rollback))
 			require.Equal(t, strings.Repeat("b", 40), rollback.Revision)
+			require.Equal(t, 2, rollback.FormatVersion, "a reversal is planned against a history boundary")
 			require.Equal(t, 1, f.writeCount(), "planning must not write")
 			f.configure(true, false)
-			_, err = c.Apply(context.Background(), rollback)
+			_, err = applyReversal(c, rollback)
 			require.Error(t, err)
+			require.Equal(t, 2, f.writeCount(), "the patch landed; only its reply was lost")
 			body, err := json.Marshal(rollback)
 			require.NoError(t, err)
 			restored, err := DecodeIntent(body)

@@ -1,10 +1,12 @@
 package installation
 
 import (
-	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -151,6 +153,13 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	if err != nil {
 		return err
 	}
+	// Every restart, reschedule or readiness flap rewrites the EndpointSlices
+	// (resourceVersion, generation, endpoint trigger time). The checks below
+	// run at every call, so they are proof enough and stay out of the saved
+	// digest, like the Pods and ReplicaSets they lead to (receiverObjectBinding):
+	// each ready endpoint must address a Pod of the bound Deployment that runs
+	// its current template and image, and there must be as many as it wants.
+	r.fresh(endpointPath)
 	items, ok := collection["items"].([]any)
 	if !ok || len(items) == 0 || len(items) > 128 || resourceText(resourceMap(collection, "metadata"), "continue") != "" || resourceMap(collection, "metadata")["remainingItemCount"] != nil {
 		return errors.New("installation renderer endpoints are missing or truncated")
@@ -232,38 +241,113 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	if int64(len(seen)) != desired {
 		return errors.New("installation renderer endpoint inventory differs from its replicas")
 	}
-	// The exact certificate comes from the named Secret via the authenticated API.
-	// Pin the leaf as well as validating its chain/SAN; rotation to another leaf
-	// under the same CA cannot silently reuse the previous configuration scope.
+	// The renderer's certificate comes from the named Secret via the
+	// authenticated API. The receiver trusts the Secret's issuing authority, not
+	// one leaf: cert-manager reissues the leaf about every 75 days and Argo 2.13
+	// serves the old one until the repo-server restarts, so pinning the leaf
+	// stranded every started plan at each renewal. The trust anchors are the
+	// Secret's ca.crt, which cert-manager writes, or else the top of its tls.crt
+	// chain. Each call verifies that the Secret's leaf, and the certificate the
+	// repo-server presents in the TLS handshake, chain to those anchors and name
+	// the Service; the anchors' names and public keys are bound, so a different
+	// CA refuses. A self-signed leaf is its own anchor: it survives renewal only
+	// when its key is kept (cert-manager privateKey.rotationPolicy: Never), and
+	// until the repo-server restarts its old leaf no longer verifies, as before.
+	// Regressions: TestReceiverRendererTrustAnchorSurvivesRenewalButNotANewCA and
+	// TestReceiverSelfSignedRendererAnchorIsItsKey.
+	tlsPath, err := receiverPath("v1", "secrets", namespace, cfg.TLSSecret)
+	if err != nil {
+		return err
+	}
 	pemBody, err := r.secret(ctx, namespace, receiverSecret{Name: cfg.TLSSecret, Key: "tls.crt"})
 	if err != nil {
 		return err
 	}
-	block, _ := pem.Decode([]byte(pemBody))
-	if block == nil || block.Type != "CERTIFICATE" {
-		return errors.New("installation renderer TLS certificate is invalid")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
+	chain, err := receiverCertificates([]byte(pemBody))
 	if err != nil {
 		return errors.New("installation renderer TLS certificate is invalid")
 	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM([]byte(pemBody)) {
-		return errors.New("installation renderer TLS trust is invalid")
+	anchors := chain[len(chain)-1:]
+	tlsRead := r.reads[tlsPath]
+	if authority := resourceText(resourceMap(tlsRead.body, "data"), "ca.crt"); authority != "" {
+		decoded, err := base64.StdEncoding.Strict().DecodeString(authority)
+		if err != nil {
+			return errors.New("installation renderer TLS trust is invalid")
+		}
+		if anchors, err = receiverCertificates(decoded); err != nil {
+			return errors.New("installation renderer TLS trust is invalid")
+		}
+	}
+	roots, intermediates := x509.NewCertPool(), x509.NewCertPool()
+	for _, anchor := range anchors {
+		roots.AddCert(anchor)
+	}
+	for _, certificate := range chain[1:] {
+		intermediates.AddCert(certificate)
 	}
 	serverName := cfg.Service + "." + namespace + ".svc"
-	if _, err := cert.Verify(x509.VerifyOptions{DNSName: serverName, Roots: roots}); err != nil {
+	if _, err := chain[0].Verify(x509.VerifyOptions{DNSName: serverName, Roots: roots, Intermediates: intermediates}); err != nil {
 		return errors.New("installation renderer TLS certificate is expired or has a different identity")
 	}
-	pinned := append([]byte(nil), cert.Raw...)
-	s.rendererTLS = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName, RootCAs: roots, VerifyConnection: func(state tls.ConnectionState) error {
-		if len(state.PeerCertificates) == 0 || !bytes.Equal(state.PeerCertificates[0].Raw, pinned) {
-			return errors.New("installation renderer certificate changed")
+	// The anchors replace this Secret's content binding, which is right only
+	// while nothing reads another of its keys as configuration (an environment
+	// secretKeyRef, say): that value would silently stop being bound.
+	for key := range tlsRead.keys {
+		if key != "tls.crt" {
+			return errors.New("installation renderer TLS Secret is also read as other configuration")
 		}
-		return nil
-	}}
+	}
+	// Standard verification of the served chain against only these anchors, with
+	// the Service's DNS name: no system roots and no permissive Argo default.
+	s.rendererTLS = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName, RootCAs: roots}
+	r.bind(tlsPath, []any{"v1", "Secret", namespace, cfg.TLSSecret, tlsRead.uid, "trust-anchors-v1", receiverTrustAnchors(anchors)})
 	s.rendererAddress = net.JoinHostPort(serverName, strconv.FormatInt(servicePort, 10))
 	return nil
+}
+
+// receiverCertificates parses every certificate of a PEM bundle, in order. Any
+// other block refuses, as the previous single-certificate parser did.
+func receiverCertificates(body []byte) ([]*x509.Certificate, error) {
+	var out []*x509.Certificate
+	for len(body) > 0 {
+		block, rest := pem.Decode(body)
+		if block == nil {
+			break
+		}
+		body = rest
+		if block.Type != "CERTIFICATE" {
+			return nil, errors.New("installation renderer TLS bundle holds something other than certificates")
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, certificate)
+		if len(out) > 16 {
+			return nil, errors.New("installation renderer TLS bundle exceeds its bound")
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("installation renderer TLS bundle has no certificate")
+	}
+	return out, nil
+}
+
+// A trust anchor is a name and a public key (RFC 5280, section 6.1.1): a CA
+// certificate reissued under the same name and key is the same anchor.
+func receiverTrustAnchors(anchors []*x509.Certificate) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, anchor := range anchors {
+		name, key := sha256.Sum256(anchor.RawSubject), sha256.Sum256(anchor.RawSubjectPublicKeyInfo)
+		value := hex.EncodeToString(name[:]) + ":" + hex.EncodeToString(key[:])
+		if !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *receiverSnapshot) rendererPod(ctx context.Context, r *receiverReads, pod, deployment, podSpec, selector map[string]any) error {
@@ -287,6 +371,13 @@ func (s *receiverSnapshot) rendererPod(ctx context.Context, r *receiverReads, po
 	if !receiverController(pod, "ReplicaSet", resourceText(owner, "name"), resourceText(resourceMap(rs, "metadata"), "uid")) || !receiverController(rs, "Deployment", cfg.Deployment, resourceText(resourceMap(deployment, "metadata"), "uid")) {
 		return errors.New("installation renderer Pod is not owned by its Deployment")
 	}
+	// The Pods are verified fresh at every call instead of being saved
+	// (receiverObjectBinding), so this check is what proves a serving Pod runs
+	// the bound Deployment's current template; Deployment status counters alone
+	// can lag a controller sync or be written by anyone with deployments/status.
+	if err := receiverCurrentRevision(pod, rs, deployment); err != nil {
+		return err
+	}
 	// Admission-injected defaults are expected, but executable inputs must equal
 	// the observed deployment template. No new command, env or mount is ignored.
 	actual := resourceMap(pod, "spec")
@@ -294,6 +385,20 @@ func (s *receiverSnapshot) rendererPod(ctx context.Context, r *receiverReads, po
 		if !sameJSON(actual[field], podSpec[field]) {
 			return errors.New("installation renderer Pod executable configuration differs from its Deployment")
 		}
+	}
+	// A debug container attached with `kubectl debug` shares the renderer's
+	// network and process namespaces and can read its serving key, yet appears
+	// in no template. v1 refused it by binding each Pod's whole spec; v2 saves no
+	// Pod, so the live Pod is refused here, attached before or after preparation.
+	if receiverListed(actual["ephemeralContainers"]) || receiverListed(resourceMap(pod, "status")["ephemeralContainerStatuses"]) {
+		return errors.New("installation renderer Pod has an attached ephemeral container")
+	}
+	// What the Pod runs as and how it reaches its sources, beyond its containers
+	// and volumes: a mutating webhook could change these on the next restart
+	// (hostAliases or dnsConfig redirecting the Git host, another service
+	// account), and every restart is now accepted by design.
+	if !sameJSON(receiverPodContext(actual), receiverPodContext(podSpec)) {
+		return errors.New("installation renderer Pod runs with another identity or host context than its Deployment template")
 	}
 	states, _ := resourceMap(pod, "status")["containerStatuses"].([]any)
 	if len(states) != 1 {
@@ -309,6 +414,95 @@ func (s *receiverSnapshot) rendererPod(ctx context.Context, r *receiverReads, po
 		return errors.New("installation renderer runtime image is not the configured immutable image")
 	}
 	return nil
+}
+
+// receiverTemplateHash is the label the Deployment controller adds to each
+// revision's ReplicaSet, its pod template and its Pods.
+const receiverTemplateHash = "pod-template-hash"
+
+// receiverCurrentRevision proves a renderer Pod belongs to its Deployment's
+// current revision, from the ReplicaSet already read by name: the ReplicaSet's
+// pod template equals the Deployment's ignoring the hash label (the
+// controller's own EqualIgnoreHash test for the current revision), and the Pod
+// carries that ReplicaSet's hash. A Pod of an older ReplicaSet of the same
+// Deployment refuses, however its status counters read.
+func receiverCurrentRevision(pod, rs, deployment map[string]any) error {
+	template := resourceMap(resourceMap(rs, "spec"), "template")
+	hash := resourceText(resourceMap(resourceMap(template, "metadata"), "labels"), receiverTemplateHash)
+	if hash == "" || resourceText(resourceMap(resourceMap(pod, "metadata"), "labels"), receiverTemplateHash) != hash {
+		return errors.New("installation renderer Pod is not of its ReplicaSet's pod template")
+	}
+	if !sameJSON(receiverWithoutTemplateHash(template), receiverWithoutTemplateHash(resourceMap(resourceMap(deployment, "spec"), "template"))) {
+		return errors.New("installation renderer Pod is not of its Deployment's current revision")
+	}
+	return nil
+}
+
+// receiverWithoutTemplateHash copies a pod template without the hash label;
+// the read bodies are reobserved and must never be mutated.
+func receiverWithoutTemplateHash(template map[string]any) map[string]any {
+	meta := resourceMap(template, "metadata")
+	labels := resourceMap(meta, "labels")
+	if _, present := labels[receiverTemplateHash]; !present {
+		return template
+	}
+	out, outMeta, outLabels := map[string]any{}, map[string]any{}, map[string]any{}
+	for key, value := range template {
+		out[key] = value
+	}
+	for key, value := range meta {
+		outMeta[key] = value
+	}
+	for key, value := range labels {
+		if key != receiverTemplateHash {
+			outLabels[key] = value
+		}
+	}
+	outMeta["labels"] = outLabels
+	out["metadata"] = outMeta
+	return out
+}
+
+func receiverListed(value any) bool {
+	list, ok := value.([]any)
+	return value != nil && (!ok || len(list) > 0)
+}
+
+// receiverPodContext is what decides a Pod's identity and host context beyond
+// its containers and volumes. The API server defaults a Pod, and not its
+// template, with enableServiceLinks true, and the ServiceAccount admission
+// plugin names "default" when the template names no service account, so those
+// two compare normalized; the qualified profile admits nothing that sets the
+// rest. Scheduling fields admission does set on Pods (tolerations, priority,
+// overhead, nodeName) are left out: they decide where a Pod runs, not what.
+func receiverPodContext(spec map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, field := range []string{"automountServiceAccountToken", "hostUsers", "runtimeClassName", "hostAliases", "dnsConfig", "os"} {
+		out[field] = spec[field]
+	}
+	for _, field := range []string{"hostNetwork", "hostPID", "hostIPC", "shareProcessNamespace"} {
+		out[field] = spec[field] == true
+	}
+	security := resourceMap(spec, "securityContext")
+	if security == nil {
+		security = map[string]any{}
+	}
+	out["securityContext"] = security
+	account := resourceText(spec, "serviceAccountName")
+	if account == "" {
+		account = resourceText(spec, "serviceAccount")
+	}
+	if account == "" {
+		account = "default"
+	}
+	out["serviceAccountName"] = account
+	dns := resourceText(spec, "dnsPolicy")
+	if dns == "" {
+		dns = "ClusterFirst"
+	}
+	out["dnsPolicy"] = dns
+	out["enableServiceLinks"] = spec["enableServiceLinks"] != false
+	return out
 }
 
 // Names are the executable inputs in the qualified upstream deployment. New
