@@ -7,6 +7,6 @@ export { TimeChart, type ChartPoint } from "./TimeChart";
 export { StatFigures, type StatFigure } from "./StatFigures";
 export { RankedList, type RankedRow } from "./RankedList";
 export { PeriodControl } from "./PeriodControl";
-export { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, isPeriod, periodLabel, type Bucket, type Period } from "./period";
+export { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, bucketMoment, isPeriod, periodLabel, previousComparable, type Bucket, type Period } from "./period";
 export { niceMax, timeTickIndexes, valueTicks } from "./scale";
 export { changeLabel, changeOf, type Change } from "../measure";

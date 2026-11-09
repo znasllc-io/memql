@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, bucketMoment, isPeriod, periodLabel } from "../../../src/kit/statistics/period";
+import { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, bucketMoment, isPeriod, periodLabel, previousComparable } from "../../../src/kit/statistics/period";
 
 // The periods a statistics read offers, and the words a page says for them.
 // Days are UTC everywhere in these statistics (spec D5), so a bucket's label
@@ -83,5 +83,23 @@ describe("a bucket named on its own", () => {
     expect(bucketMoment("2026-11-08T00:00:00Z", "day")).toBe("Nov 8");
     expect(bucketMoment("2026-11-01T00:00:00Z", "month")).toBe("Nov 2026");
     expect(bucketMoment("not a date", "hour")).toBe("not a date");
+  });
+});
+
+describe("a previous period a change may be drawn against", () => {
+  it("is one that began on or after the first measured day", () => {
+    expect(previousComparable("2026-11-01T00:00:00Z", "2026-11-01")).toBe(true);
+    expect(previousComparable("2026-11-02T00:00:00Z", "2026-11-01")).toBe(true);
+  });
+
+  it("is not one that began before measurement, whose unmeasured days would count as nothing", () => {
+    expect(previousComparable("2026-10-31T00:00:00Z", "2026-11-01")).toBe(false);
+  });
+
+  it("is not there at all without a previous period (twelve months) or without anything measured", () => {
+    expect(previousComparable(null, "2026-11-01")).toBe(false);
+    expect(previousComparable("2026-11-01T00:00:00Z", null)).toBe(false);
+    expect(previousComparable(undefined, undefined)).toBe(false);
+    expect(previousComparable("not a date", "2026-11-01")).toBe(false);
   });
 });

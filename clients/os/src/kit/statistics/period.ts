@@ -88,3 +88,22 @@ export function bucketMoment(at: string, bucket: Bucket): string {
   if (bucket !== "hour" || Number.isNaN(Date.parse(at))) return bucketLabel(at, bucket);
   return `${bucketLabel(at, "day")}, ${bucketLabel(at, "hour")}`;
 }
+
+/**
+ * Whether a previous period can be compared with: it exists and began on or
+ * after the first measured day (`measuredSince`, "YYYY-MM-DD", UTC).
+ *
+ * A previous period that began before measurement holds days nothing counted,
+ * and those add up as nothing, so a change against it would overstate growth
+ * (a week that is half unmeasured looks like half the traffic). Absent is not
+ * zero: the page shows no change rather than a change against a partial
+ * period. Both reads answer `prevStart` and `measuredSince`; twelve months
+ * answer no `prevStart` and so never compare (spec D4).
+ */
+export function previousComparable(prevStart: string | null | undefined, measuredSince: string | null | undefined): boolean {
+  if (!prevStart || !measuredSince) return false;
+  const previous = Date.parse(prevStart);
+  const measured = Date.parse(measuredSince);
+  if (Number.isNaN(previous) || Number.isNaN(measured)) return false;
+  return previous >= measured;
+}
