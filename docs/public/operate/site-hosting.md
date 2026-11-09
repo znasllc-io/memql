@@ -852,9 +852,10 @@ The edge answers two exact paths on the site's own origin for this
 - **Every ping is answered `204`,** whether it counted or not, so the route says
   nothing about why one was refused. A refused ping is still a request the edge
   answered, and counts under health.
-- **Nothing is forwarded and no cookie is read,** whatever the site's `apiProxy`
-  says. A ping from a page an operator is previewing is not a page view, as the
-  navigation that opened it is not.
+- **Nothing is forwarded,** whatever the site's `apiProxy` says, **and no
+  visitor cookie is read.** The one cookie the edge looks at is an operator's
+  preview grant: a ping from a page an operator is previewing is not a page
+  view, as the navigation that opened it is not.
 
 What a page view records, and what is never stored, is in
 [Statistics and health](deployables.md#statistics-and-health).
@@ -1192,29 +1193,44 @@ see [The prerender budget](#the-prerender-budget).
 ## What the edge records about a request
 
 Every request the edge serves for a site is recorded once -- which
-deployable, the status answered, the bytes, the duration, and what the edge
-did with it (an asset, an HTML document, the SPA fallback, a proxied call,
-the runtime-config document, or nothing at all for a paused or draft site).
-That log is what a deployable's traffic figure is folded from; the figure and
-the log cannot disagree, because the figure is the log folded by the
-database.
+deployable, which replica, the status answered, the bytes, the duration, what
+the edge did with it (an asset, an HTML document, the SPA fallback, a proxied
+call, its own runtime-config document or scripts, a page-change ping, or
+nothing at all for a paused or draft site), and whether a bot asked. A page
+view also records the page's path, where the visitor arrived from, their
+country, device, browser and operating system, and a visitor id that lasts one
+UTC day. The database folds the log into per-minute and per-hour request
+counts, which therefore cannot disagree with it, and a rollup every five
+minutes folds it into each deployable's hourly and daily website statistics.
 
-Three things about it are worth knowing while reading this page:
+Worth knowing while reading this page:
 
-- **Nothing about a visitor is recorded.** No address, no user agent, no path
-  and no referrer.
+- **The address and the user agent are never stored.** The edge reads them
+  while serving, only to derive a page view's country, device, browser,
+  operating system and visitor id, and neither is a field of the record. The
+  query string, the fragment and the referring URL are not kept either: the
+  path is normalized, and a source is a `utm_source` or a referring host.
+- **The address is the front door's**: the right-most `X-Forwarded-For` entry,
+  which a caller cannot choose, else the connection's peer. Behind a CDN or
+  another proxy in front of the front door it is the proxy's, so every visitor
+  behind one of its addresses counts as one visitor, placed in the proxy's
+  country.
 - **System-owned sites are excluded**, by their own row field rather than by
-  name: MemQL OS never writes a request line, so its traffic
-  reads as unmeasured forever and a third system-owned surface added later is
-  excluded by the same line.
+  name: MemQL OS never writes a request line, so its traffic reads as
+  unmeasured forever and a third system-owned surface added later is excluded
+  by the same line. So are the cluster's own health probe of a home page and
+  the version checks open pages make.
+- **Neither a bot's request nor one served under a preview grant is ever a
+  page view.** Both are still recorded for health.
 - **The write is off the request path.** It is a non-blocking hand-off to a
   batching writer that drops and counts under pressure; nothing a visitor
   waits for touches the database. `MEMQL_EDGE_REQUEST_LOG_ENABLED=false`
-  switches it off on a replica, and the aggregate is then short by exactly
-  that replica's share -- which reads as a low figure, not as an error.
+  switches it off on a replica, and every figure then misses what that replica
+  served -- which reads as a low figure, not as an error.
 
-The window, the buckets, the retention and how "unmeasured" differs from zero
-are in [deployables.md](deployables.md#traffic-and-health).
+What counts as a page view, how a visitor is counted without a cookie, the
+retention of each tier and how "unmeasured" differs from zero are in
+[Statistics and health](deployables.md#statistics-and-health).
 
 ---
 

@@ -859,79 +859,429 @@ bound to one store get that store's values.
 
 ---
 
-## Traffic and health
+## Statistics and health
 
-Is anybody using this deployable, and is it healthy. Both are read from what
-the edge actually served, never from a guess.
+How many people use a deployable, what they read, where they arrive from, and
+whether it is healthy. Every figure is read from what the edge actually served,
+never from a guess, and nothing has to be added to a site's build to get them.
+In MemQL OS, a deployable's Statistics page and the Websites section of the
+Deployables Overview draw these figures.
 
-**What is measured.** The edge writes one row per served request into its own
-`edge_request` log -- the deployable it resolved to, the status it answered,
-the bytes, how long it took, and what it did with the request (an asset, an
-HTML document, the SPA fallback, a proxied call, the runtime-config document,
-or nothing at all for a deployable that is paused or in draft). TimescaleDB
-folds those rows into per-minute and per-hour aggregates. The figure and the
-raw log cannot disagree, because the figure IS the log, folded.
+### What the edge records
 
-**What is not measured.** Nothing that identifies a visitor: no address, no
-user agent, no path, no referrer. The question this exists to answer needs
-counts and outcomes and nothing about who.
+The edge writes one row per request it answers for a deployable into its own
+`edge_request` log. Every row carries the deployable, the replica that served
+it, when, the status, the bytes, how long it took, what the edge did with the
+request -- an asset, an HTML document, the SPA fallback, a proxied call, its own
+runtime-config document or scripts, a page-change ping, or nothing at all for a
+deployable that is paused or in draft or a path that matched nothing -- and
+whether a bot asked. A **page view** also carries:
 
-**The buckets.** A window of an hour reads minute buckets; a day or a week
-reads hour buckets, because a week of minute buckets is ten thousand rows to
-draw one line. Both are kept for `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS`
-(default 30, clamped 1..365) -- the raw rows and both aggregates on the same
-schedule, so "unmeasured" means the same thing at every horizon.
+| Field | What it holds |
+|---|---|
+| path | The page's path with no query string or fragment, no trailing slash except at the root, at most 256 bytes. |
+| source | Where a navigation arrived from (below). Empty for a navigation inside the site and for every ping. |
+| country | An ISO 3166-1 alpha-2 code from the country database, or empty. |
+| device, browser, OS | Members of closed sets read from the user agent (below). |
+| visitor | The day's visitor id (below), or empty when the replica held no secret for that day. |
 
-**Unmeasured is not zero.** A window with no rows answers *unmeasured* and
-says so in words; a window with requests and no errors answers zero errors.
-Read them as different facts: one means nobody visited, the other means
-nothing was recording, and they send you to different places. Three things
-make a window unmeasured:
+Rows written before these fields existed read as *not measured* for everything
+about visitors, and keep counting for health.
 
-- nobody visited;
-- `MEMQL_EDGE_REQUEST_LOG_ENABLED` is `false` on the replica that served
-  (the aggregate is then short by that replica's share);
-- the deployable is **system-owned**. MemQL OS and the VS Code landing page
-  are excluded by construction, so they are always unmeasured -- measuring
-  the console somebody reads a figure in would be measuring the act of
-  looking.
+**Not recorded at all:** a request for a hostname that resolves to no
+deployable; every request to a **system-owned** deployable (MemQL OS and the
+VS Code landing page, excluded by the row field, so a third one added later is
+excluded the same way -- measuring the console somebody reads a figure in would
+be measuring the act of looking); the cluster's own health probe of a home page
+(`GET /` with the user agent `MemQL-Site-Health/1.0`); and the version checks
+open pages make (`HEAD /runtime-config.json`).
 
-**Errors and not-found are counted apart.** 5xx is the deployable failing;
-4xx is somebody asking for a page it does not have. Folding them together
-makes a healthy site with a broken inbound link look unhealthy.
+### What is never stored
 
-**Who can read it.** Whoever can read the deployable: the read resolves each
-id through `siteById` / `sitesAll` under the caller's own actor, so a
-deployable you cannot read contributes no rows -- the same answer one with no
-traffic gives, which is what keeps the call from telling you whether somebody
-else's id exists.
+- **The IP address and the user agent.** The edge reads them on the serving
+  path only to derive a page view's country, device, browser, operating system
+  and visitor id. They are not fields of the record, so nothing the record
+  reaches -- the writer, the table, a log line -- can hold them.
+- **No query string, fragment or referring URL.** A path is normalized, and a
+  source is a `utm_source` or a referring host.
+- **No cookie.** Counting reads no cookie of the visitor's and stores nothing
+  in the browser: a visitor is counted without either.
 
-**The cost to a visitor.** None that is measurable. The write is a
-non-blocking hand-off to a batching writer that drops and counts under
-pressure rather than making anybody wait on Postgres; serving a bundle asset
-measured 3139-3202 ns/op without the log and 3000-3188 ns/op with it, at one
-extra 32-byte allocation. Drops are on `memql_site_traffic_dropped_total`
+**The visitor id** is HMAC-SHA256 over the deployable's id, the visitor's
+address and their user agent, under a random secret that exists for one UTC
+day, truncated to its first 16 bytes and stored as hex. An IPv4 address is used
+whole and an IPv6 address by its /64, because one connection is routinely
+handed a whole /64. The secret is a row of `edge_visitor_secret`, shared by
+every edge replica so that they hash one visitor alike. At each UTC midnight a
+replica makes the new day's secret current (the first to get there creates it,
+the others read it back) and deletes every earlier day's, repeating the delete
+on an hourly check until it succeeds. Once a day's secret is deleted, nothing
+stored can link that day's ids back to an address, and because the deployable's
+id is hashed in, one person on two deployables is two unrelated ids. A replica
+that holds no secret for the request's day records the page view with no
+visitor, so visitors read low rather than one person being linked across two
+days.
+
+### What counts
+
+**A page view** is a person opening a page. The rule is `IsPageView` in
+`component/edge/visit`, and it trusts the browser: a `GET` answered 200 or 304,
+not a prefetch or prerender, that the browser marks as a top-level navigation to
+a document (`Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`); or, from
+a browser that sends no Fetch Metadata, one that accepts HTML and was answered
+with an HTML document or the SPA fallback. Because the browser's word wins, a
+navigation the edge proxies -- an identity page served on the site's own
+origin, say -- counts as well. An accepted page-change ping is a page view too
+([below](#the-page-change-ping)).
+
+**Never a page view**, though still recorded for health:
+
+- **a bot's request**: an empty user agent, or one naming a crawler, a
+  link-preview fetcher, a monitor, browser automation, or an HTTP client
+  library or command-line tool, from the closed list in
+  `component/edge/visit/agent.go`. Bot requests count under health. A bot
+  that imitates a browser is counted as a visitor.
+- **a request served under a preview grant**: an operator exercising a
+  candidate version, or a storefront's testing origin, which serves only under
+  one. That includes the pings such a page sends.
+
+**Sources** are recorded on a navigation, in this order: the landing URL's
+`utm_source` (lowercased, at most 64 bytes); else the `Referer` host, with
+`www.` removed and a few names folded (`l.facebook.com` and `m.facebook.com` to
+`facebook.com`, `t.co` to `x.com`, and a Google domain such as `google.com`
+or `google.co.uk` to `google`); else `direct`. A `Referer` naming the host the
+request was made to, or the deployable's own hostname, is a navigation inside
+the site and is no source, and neither is a ping, so the Sources list counts
+arrivals rather than clicks between pages. Only those two hosts are the site's
+own: a `Referer` from another of the deployable's custom domains is a source.
+
+**Devices, browsers and systems** come from the user agent, into closed sets:
+desktop, mobile or tablet; Chrome, Safari, Firefox, Edge, Opera, Samsung
+Internet or Other; Windows, macOS, iOS, iPadOS, Android, Linux, ChromeOS or
+Other.
+
+**Countries** are the ISO 3166-1 alpha-2 code of the visitor's address in the
+cluster's copy of DB-IP's country database ([below](#the-country-database)). A
+page view it cannot place, or one recorded while no database was loaded, counts
+under `(unknown)`.
+
+**Visits.** A visit is one visitor's page views with no gap over 30 minutes;
+exactly 30 is still the same visit. It is counted in the hour and the UTC day
+it started, so hourly visits add up to the day's, and it never crosses midnight
+UTC: the visitor id changes there, and the day bounds a visit besides. A
+**bounce** is a visit of one page view. **Views per visit** is page views
+divided by visits and **bounce rate** is bounces divided by visits, each worked
+out from a period's sums. In the top lists a visit counts under the page it
+started on, the first source among its page views, and its first page view's
+country, device, browser and operating system.
+
+**Visitors are counted per day.** A person who comes on three days is three
+visitors in a week, and one whose visit crosses midnight makes two visits.
+People behind one address with the same browser are one visitor, and one person
+on two networks is two. The address is the front door's: the right-most
+`X-Forwarded-For` entry, else the connection's peer (`visit.ClientAddress`, the
+rule the access-code limits use). Behind a CDN or another proxy in front of the
+front door, every visitor behind one of its addresses is therefore one visitor,
+placed in the proxy's country.
+
+Days are UTC throughout: the visitor secret, the daily rows and every period's
+days turn over at 00:00 UTC.
+
+### Retention, tier by tier
+
+| What | Where | Kept |
+|---|---|---|
+| Every request, with each page view's fields | `edge_request` | `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS`: default 30 days, clamped to 1..365 |
+| Per-minute and per-hour request counts | `edge_request_1m`, `edge_request_1h` | the same as the requests |
+| Hourly statistics | `edge_stats_hourly` | 30 days |
+| Daily statistics, and each day's top lists | `edge_stats_daily`, `edge_stats_daily_top` | 400 days |
+| Which days are final (below) | `edge_stats_final` | 400 days, as long as the day's figures |
+| The visitor secret | `edge_visitor_secret` | its own UTC day |
+| The country database | `edge_geo_country` | one row, replaced by the next release |
+
+An edge replica applies the request log's retention to the TimescaleDB
+retention policies of the log and its two aggregates when its log starts. The
+rollup deletes the statistics rows past their retention on every run, so those
+tables keep the same retention on a database without TimescaleDB.
+
+**Set `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` to the same value on every node,
+not only on the edge.** The rollup reads it on whichever node holds the cron
+lead, as how far back it recomputes a day that is not yet final, while the edge
+applies it to the log. If the rollup's value is the wider, a day the log has
+already dropped and that is still open is recomputed from no rows, which erases
+its figures; if it is the narrower, the older days of an outage stay open
+beyond the rollup's reach.
+
+### The rollup, every five minutes
+
+`siteStatisticsRollupSweep` runs `builtin siteStatisticsRollup` every five
+minutes on the cluster's cron leader, so while runs succeed a figure is at most
+five minutes behind the traffic it counts. A run:
+
+1. recomputes today, and every hour of it, from `edge_request`. Every hour,
+   because a visit is cut from the whole day's page views: a page view now can
+   turn a one-page visit that began in the previous hour into a longer one, and
+   that hour's bounces fall;
+2. recomputes every earlier day of the request log's retention window (at most
+   400 days back) that is not yet **final**, newest first, with its hours where
+   the hourly table still keeps them;
+3. records a day final when it recomputes it at or after 02:00 UTC the day
+   after, by when every request served that day has long been written. A final
+   day is not recomputed again, so a request recorded for it later is not
+   counted;
+4. deletes the rows past each table's retention.
+
+A recompute replaces its period's rows, so running twice changes nothing. Each
+day is one transaction, every statement bounded at 60 seconds. A day that fails
+is logged by name (`Site statistics for a day were not written; the next run
+recomputes it`) and costs only itself: the run carries on with the other days.
+
+**An outage heals on the next run that succeeds.** While the cron leader is
+down or runs keep failing, days stay open, and the first run that succeeds
+recomputes them with every request that arrived meanwhile, as far back as the
+request log reaches. A day whose requests left the log before it became final
+keeps the figures last written for it. The first run after an upgrade finds
+nothing final and recomputes every day the log holds; days recorded before the
+edge classified requests come out with health figures and no visitors.
+
+A routine run logs at Debug. A run that recomputed a day before yesterday, or
+deleted rows past retention, logs `Site statistics rolled up` at Info, with
+`days`, `hours`, `backfilled` and `deleted`.
+
+### The page-change ping
+
+A single-page app navigates once and changes pages with `history.pushState`
+after that, which the edge never sees. So the edge inserts
+`<script src="/_memql/view.js" defer></script>` right after `<head>`, beside its
+version monitor, into every HTML document a live, non-system-owned deployable
+serves from its own origin, and adds a `view-v1` marker to the document's ETag,
+so that a copy cached without the tag is answered in full rather than
+revalidated. The script wraps `history.pushState` and listens for `popstate`;
+when `location.pathname` changes it sends the new path with
+`navigator.sendBeacon` to `POST /_memql/view`. It never reports the first load,
+which the navigation already counted, and on a site whose every page is a
+navigation it never fires. It reads no cookie and stores nothing in the browser.
+
+The edge answers both routes itself and forwards neither, whatever the
+deployable's `apiProxy` says. A ping is a page view only when:
+
+- it is a `POST` from the site's own origin: its `Origin` names the host it was
+  sent to, or, when `Origin` is absent or the `null` a page with a
+  `no-referrer` policy sends, `Sec-Fetch-Site` says `same-origin`;
+- its address has budget left: 120 pings a minute per address per deployable,
+  on each replica;
+- its body, at most 1 KiB, decodes to a path.
+
+Every ping to a live deployable is answered `204` with no body, counted or not,
+so the route says nothing about why one was refused. A refused ping is still
+recorded for health, under the path class `view`.
+[Counting a single-page app's pages](site-hosting.md#counting-a-single-page-apps-pages)
+has the routes as a site sees them.
+
+### Reading the statistics
+
+```
+builtin siteStatistics(siteIds: ["abc"], period: "30d")
+```
+
+`siteStatistics` answers one `integration:siteTraffic:statistics` row for
+deployables the caller may read. Leave `siteIds` out to read every one of them
+added together, and add `accountIds` to keep that to some organizations.
+
+- **Periods.** `24h` is the 24 hours ending with the hour under way, in hourly
+  buckets. `7d`, `30d` and `90d` end with today, in daily buckets. `12m` is the
+  current month and the twelve before it, in 13 monthly buckets, so this month
+  stands beside the same month last year. The bucket under way is always
+  included. `period` is required, and any other value is refused with a
+  sentence naming these.
+- **The previous period.** Every period but `12m` comes with the one of the
+  same length just before it: `previous` holds its totals and `previousSeries`
+  its buckets, aligned by offset with `series` so the two can be drawn one
+  under the other. Twelve months have none -- `hasPrevious` is false, and
+  `previous`, `previousSeries`, `prevStart` and `prevEnd` are `null` -- because
+  the thirteen months before them are past the 400 days the daily rows are kept.
+- **What it answers.** The period's `start`, `end` and `bucket`; `totals`, with
+  visitors, visits, bounces, page views, views per visit, bounce rate,
+  requests, errors (5xx), not found (4xx), bytes, bot requests and the median
+  and 95th-percentile response time in milliseconds; `series`, one point per
+  bucket with visitors, visits, bounces, page views, requests, errors, not
+  found and the 95th-percentile response time; `top`, the 50 leading pages,
+  sources, countries, devices, browsers and systems, each value with its
+  visitors, visits and page views, and an `(other)` remainder last; `sites`,
+  each deployable with figures in the period and its own visitors, visits and
+  page views, most visitors first; and `measuredSince`, the first day any of
+  them has visitor figures.
+- **A figure nothing measured is `null`, never 0**: the visitor figures before
+  visitor counting began, every bucket before these deployables' first day of
+  statistics, everything in a period with no rows at all, and a rate with no
+  visit to divide by. Inside a period that has rows, a bucket with none is one
+  nobody was served in, and reads 0.
+- **Visitors over a period.** For `24h` they are counted distinct from the
+  request log itself, so one person seen in two hours is one visitor, though
+  one seen either side of midnight is two, since the id changes there. The
+  other periods add up each day's visitors, so a person who came on three days
+  counts three times.
+- **Response times** are merged from a 64-bucket log-scale histogram on every
+  hourly and daily row (four buckets per doubling from 0.5 ms), which reads a
+  percentile of any range to within about 10%; anything slower than about 33
+  seconds is counted in the last bucket.
+- **Top lists** over days are summed from each day's hundred leading values per
+  list, the rest of that day folded into its `(other)`, so a value that seldom
+  makes a day's hundred reads low over a long period. For `24h` they are
+  counted from the request log.
+
+**Narrowed under the caller.** `siteIds` names at most 200 deployables, as bare
+ids. With none, the read covers every deployable the caller may read, kept to
+the organizations `accountIds` names, if it names any; `accountIds` is ignored
+when `siteIds` names deployables. Either way the deployables come from
+`sitesAll` under the caller's own actor, every page of it, and, for named ids
+it did not return (an archived deployable, say), from at most 16 `siteById`
+lookups. An id or an organization the caller cannot read is dropped, not
+refused, so naming another client's deployable or organization gets the answer
+a deployable with no traffic gets and confirms nothing; a list of blank ids
+names nothing and is answered the same way. System-owned deployables are never
+in an answer. The read is refused rather than answered short for more than 200
+named deployables, and for a caller who may read more than 20,000. One read is
+one snapshot of the tables, every statement bounded at 30 seconds, so its
+totals, series, lists and per-deployable rows always agree.
+
+### Request counts for a list
+
+The older read answers from the per-minute and per-hour request counts:
+
+```
+builtin siteTrafficInWindow(siteIds: ["abc"], bucket: "1h", windowStart: "2026-09-02T00:00:00Z", windowEnd: "2026-09-03T00:00:00Z")
+```
+
+It answers `v1:observability:siteTraffic` rows -- requests, errors, client
+errors, bytes and when the deployable last served -- one per bucket, or with
+`summary: true` one per deployable for the whole window, which is what a list
+needs to say "last served" for twenty deployables without pulling twenty
+series. `1m` buckets suit a window of an hour and `1h` buckets a day or a week,
+because a week of minute buckets is ten thousand rows to draw one line.
+`siteIds` is required and holds at most 200 deployables, refused past that
+rather than truncated: a silently short answer would read as "those have no
+traffic". It is narrowed through `sitesAll` and `siteById` under the caller's
+actor too, and a deployable with no rows in the window gets no row.
+
+### The country database
+
+Countries come from DB-IP's IP-to-Country Lite database, which the cluster
+downloads itself once a month: DB-IP serves only the current and the previous
+month's file, so a download pinned in an image would stop answering within
+about two months.
+
+`geoCountryRefreshSweep` runs `builtin geoCountryRefresh` daily at 04:10 UTC on
+the cron leader. While the stored release is the current month it makes no
+request at all. Otherwise it downloads
+
+```
+https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.mmdb.gz
+```
+
+for the current month, or for the previous month while DB-IP answers 404 for
+the current one (it is not published yet); each day's run then downloads the
+previous month again until the current one appears. A file over 32 MiB
+compressed or 64 MiB decompressed is refused, as is one that does not open as
+an MMDB country database, before anything is replaced; a good one replaces the
+single row of `edge_geo_country`. This is the only outbound call the statistics
+make.
+
+**A failed download changes nothing.** The stored database stays in use, and
+the run logs `Country database refresh failed; the stored release stays in use`
+and still succeeds, so a cluster with no route to `download.db-ip.com` does not
+fail every day. Every edge replica loads the database when it starts and checks
+the stored release hourly, swapping a newer one in without a restart.
+
+**Before the first download there are no countries.** A new cluster downloads
+at its first 04:10 UTC, and each edge replica loads the file within the hour
+after; until then every page view is recorded with no country and counts under
+`(unknown)`, and those page views stay there. A cluster that cannot reach
+`download.db-ip.com` records no country at all.
+
+**Attribution.** The database is licensed under CC BY 4.0, which requires
+attribution: show [IP Geolocation by DB-IP](https://db-ip.com) beside any
+countries you present from it, in a page or a report. The repository's
+`NOTICE` carries the same credit.
+
+### A paragraph for a privacy policy
+
+The paragraph below says what MemQL records for these statistics, for an
+operator to adapt into a hosted site's privacy policy. If you changed
+`MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS`, change how long the records of single
+requests are kept to match, and add what anything in front of the cluster
+records -- a CDN, a load balancer, the front door's own access logs -- which it
+does not cover.
+Whether a site needs more than this, consent included, is for that site's own
+legal review.
+
+> **Website statistics.** This website keeps statistics about how it is used.
+> When you open a page, we record the page's address without any query string,
+> the website you arrived from (its name only, or a campaign tag in the link
+> you followed), your country, which we look up from your IP address in DB-IP's
+> IP-to-Country database, the type of device, browser and operating system your
+> browser reports, and a visitor code. The visitor code is a one-way keyed hash
+> of your IP address and your browser's identification string, made with a
+> secret key that is replaced every day at 00:00 UTC and then deleted: it lets
+> us count visitors within one day, and afterwards it cannot be linked back to
+> you, to your visits on other days, or to your visits to other websites. Your
+> IP address and your browser's identification string are not stored. We set
+> no cookie and store nothing in your browser for these statistics; on pages
+> that change without reloading, a small script reports the new page's address.
+> For every request we also record its time, outcome, size and duration, to
+> keep the website healthy. The records of single requests and page views are
+> kept for 30 days, hourly totals for 30 days, and daily totals, with the day's
+> most visited pages and most common sources, countries, devices, browsers and
+> operating systems, for 400 days.
+
+### Reading a figure
+
+**Not measured is not zero.** Where nothing measured a figure, both reads say
+so -- `siteTrafficInWindow` with no row, `siteStatistics` with `null` -- and
+where something measured nothing, they say 0. Read them as different facts:
+one means nothing was recording, the other means nobody came, and they send
+you to different places. A figure is not measured when:
+
+- nothing at all was served in the period, which a read cannot tell apart from
+  nothing recording;
+- `MEMQL_EDGE_REQUEST_LOG_ENABLED` is `false` on the replica that served (a
+  figure is then short by what that replica served);
+- the deployable is system-owned, so never recorded;
+- for the visitor figures alone, the period comes before visitor counting
+  began, which `measuredSince` dates.
+
+**Errors and not found are counted apart.** 5xx is the deployable failing; 4xx
+is somebody asking for a page it does not have. Folding them together makes a
+healthy site with a broken inbound link look unhealthy.
+
+**The cost to a visitor.** Recording adds bounded in-memory work to a request
+and never a wait: string matching, one HMAC under a secret held in memory, one
+lookup in an in-memory country database, and a hand-off to a batching writer
+that drops and counts under pressure rather than making anybody wait on
+Postgres. A batch the database refuses is retried one row at a time, so only
+the rows it refuses again are lost.
+
+**When a figure looks low.** Drops are on `memql_site_traffic_dropped_total`
 (labelled `queue_full` / `write_failed`) and writes on
-`memql_site_traffic_written_total` -- read them together when a figure looks
-low, because the figure itself cannot say what is missing from it.
+`memql_site_traffic_written_total`: read them together, because the figure
+itself cannot say what is missing from it. Three other causes leave their own
+log lines:
 
-Read it on a deployable's Live stop in MemQL OS, or directly:
-
-```
-builtin siteTrafficInWindow(siteIds: ["v1:platform:site:abc"], bucket: "1h", windowStart: "2026-09-02T00:00:00Z", windowEnd: "2026-09-03T00:00:00Z")
-```
-
-`summary: true` folds the window into one row per deployable instead of one
-per bucket -- what a list needs to say "last served" for twenty of them
-without pulling twenty series. At most 200 deployables per call, refused past
-it rather than truncated: a silently short answer would read as "those have
-no traffic".
+- page views but few or no visitors: an edge replica could not read the day's
+  visitor secret (`could not rotate the visitor secret; unique visitors are not
+  counted until it succeeds`);
+- every country `(unknown)`: no country database has been downloaded yet (the
+  first run is at 04:10 UTC), or the download is failing (`Country database
+  refresh failed; the stored release stays in use`, on the cron leader);
+- figures that stop moving: rollup runs are failing (`Site statistics for a day
+  were not written; the next run recomputes it`, one line per day).
 
 ### What it is not
 
-No alerting, no uptime probing from outside the cluster, no per-path
-analytics and no geographic breakdown. Each is out of scope by decision
-rather than by omission.
+No cookie, and no visitor identity that outlives a UTC day; no live "visitors
+now" figure; no custom date ranges, per-site time zones, goals or conversions;
+no export or scheduled reports; no alerting and no uptime probing from outside
+the cluster. Each is out of scope by decision rather than by omission.
 
 ---
 

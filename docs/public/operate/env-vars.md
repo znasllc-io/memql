@@ -649,15 +649,16 @@ delivery).
 
 Registered `component: platform` and `component: edge`; all four optional
 with working defaults, so a cluster that sets none of them still serves every
-site, still carries runtime settings and still records traffic. Full context:
-[deployables.md](deployables.md#runtime-settings).
+site, still carries runtime settings and still records requests and website
+statistics. Full context: [Runtime settings](deployables.md#runtime-settings)
+and [Statistics and health](deployables.md#statistics-and-health).
 
 | Variable                                | Default | Purpose                                                                                  |
 |-----------------------------------------|---------|------------------------------------------------------------------------------------------|
 | `MEMQL_SITE_SETTINGS_MAX_KEYS`          | `64`    | How many runtime settings one deployable may carry. The cap is on the ROW because the edge serves the settings object on every page load and the document grows with it. Unparseable or non-positive falls back to the default rather than to zero -- a zero cap refuses every write and says nothing about the typo that caused it. |
 | `MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH`  | `2048`  | The longest a single setting's value may be, in characters. Same fallback rule.           |
-| `MEMQL_EDGE_REQUEST_LOG_ENABLED`        | `true`  | Whether this edge replica records one row per served request -- the source of a deployable's traffic figure. `false` switches it off HERE: the aggregate is then short by exactly this replica's share, and a window nothing recorded reads as unmeasured rather than as zero. System-owned sites are never recorded whatever this says. |
-| `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` | `30`    | How long the raw request rows and both traffic aggregates are kept, applied to the TimescaleDB retention policies at boot. Clamped to 1..365. All three move together, so "unmeasured" means the same thing at every horizon. |
+| `MEMQL_EDGE_REQUEST_LOG_ENABLED`        | `true`  | Whether this edge replica records one row per served request -- the source of a deployable's request counts and, through the five-minute rollup, of its website statistics. `false` switches it off HERE: every figure then misses what this replica served, and a period nothing recorded reads as unmeasured rather than as zero. System-owned sites are never recorded whatever this says. |
+| `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` | `30`    | How long the request log and its per-minute and per-hour request counts are kept, applied to their TimescaleDB retention policies by each edge replica when its log starts. Clamped to 1..365. The statistics rollup reads it too, on whichever node holds the cron lead, as how far back it recomputes a day that is not yet final, so **set the same value on every node**, not only the edge. The statistics tables keep their own retention: hourly rows 30 days, daily rows and top lists 400 days. |
 
 #### Streaming transcription (only if the STT path is used)
 

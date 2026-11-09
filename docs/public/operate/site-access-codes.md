@@ -647,6 +647,11 @@ on the address's bucket first, so one machine can take at most ten of the sixty.
 `Retry-After` is how long the refusing bucket takes to give one token back: 6
 seconds for an address that spent its ten unlocks, 1 otherwise.
 
+A deployable's website statistics read the same address, by the same rule
+(`component/edge/visit`), to count a visitor and place their country
+([Statistics and health](deployables.md#statistics-and-health)), so a proxy in
+front of the ingress groups the visitors behind it there as well.
+
 **These bound load, not guessing.** What stops guessing is 125 bits.
 
 ---
