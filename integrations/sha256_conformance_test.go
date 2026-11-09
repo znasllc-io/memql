@@ -133,6 +133,14 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"skills/runscript.go":                     "runScript addresses a script by content hash and verifies the far side against it; the value is compared with v1:library:file.sha256 and with sha256sum (memql#4970)",
 		"skills/runscript_test.go":                "computes the expected digest for the entry above",
 		"agent/worker/script_forward_hop_test.go": "the cross-node script hop's fixture computes the same digest the far side is verified against",
+
+		// The installation receiver's saved configuration digest holds
+		// values nobody must be able to reverse or forge, so both of these are
+		// cryptographic primitives over exact bytes rather than identifiers;
+		// core/id composes unkeyed, chained fingerprints and offers neither an
+		// HMAC nor a certificate key fingerprint.
+		"installation/receiver_reads.go":    "keys each ConfigMap and Secret content digest with HMAC-SHA256 under a key derived from the catalog credential, so a saved plan cannot be used to guess low-entropy Secret values; HMAC needs the raw hash function, and the result is never a shortId or cache key",
+		"installation/receiver_renderer.go": "identifies each renderer TLS trust anchor by the standard SHA-256 of its DER subject and SubjectPublicKeyInfo, the X.509 public-key fingerprint kubeadm and RFC 7469 also use; a key fingerprint compared in the saved digest, never a shortId or cache key",
 	}
 
 	type violation struct {

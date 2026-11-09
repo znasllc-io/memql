@@ -78,12 +78,18 @@ func TestReceivingRendererThroughInstalledArgo(t *testing.T) {
 	}}
 	require.NoError(t, snapshot.observeRenderer(ctx, reads))
 	require.Equal(t, "argocd-repo-server.argocd.svc:8081", snapshot.rendererAddress)
+	// The qualified repo-server consumes its TLS Secret only as its serving
+	// certificate, so its trust anchors stand in for the Secret's content and a
+	// renewal under the same anchor keeps a started update verifiable.
+	tlsPath, err := receiverPath("v1", "secrets", "argocd", "argocd-repo-server-tls")
+	require.NoError(t, err)
+	require.Equal(t, receiverBindValue, reads.reads[tlsPath].binding.kind, "the renderer TLS Secret must be bound by its trust anchors, not its content")
 	probe, err := (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: snapshot.rendererTLS}).DialContext(ctx, "tcp", address)
 	require.NoError(t, err, "verify the served certificate chains to the named Secret's trust anchors")
 	require.NoError(t, probe.Close())
 	digests, err := reads.configuration(ctx)
 	require.NoError(t, err, "all authenticated renderer inputs must remain unchanged during qualification")
-	t.Logf("installed renderer inputs=%d digest=%s; pinned runtime image and TLS trust anchors verified", len(reads.reads), digests.current)
+	t.Logf("installed renderer inputs=%d digest=%s; pinned runtime image and self-signed TLS trust anchors verified; TLS Secret bound by its trust anchors", len(reads.reads), digests.current)
 }
 
 type installedDiscoveryAPI struct{ kubeconfig string }

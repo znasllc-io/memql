@@ -1038,6 +1038,13 @@ versions under every started plan:
   refuses the call. An ephemeral container cannot be removed from its Pod, so
   a repo-server restart is what clears one.
 - The renderer Service and Argo projects bind UID and spec.
+- The renderer TLS Secret binds its UID and its trust anchors' names and public
+  keys in place of its content only while the repo-server reads it solely as
+  its serving certificate: one volume, mounted once at
+  `/app/config/reposerver/tls`, projecting no key beyond `tls.crt`, `tls.key`
+  and `ca.crt`, and named by no environment variable and no other input of the
+  receiver. Any other use keeps the keyed content binding above, so a renewal
+  then refuses like any changed Secret.
 - Discovery binds the Kubernetes major and minor version and, for each resource
   the receiver reads, whether it is served and its kind, scope and the verbs the
   receiver uses. Patch build fields, `/api` addresses and unrelated groups are
@@ -1069,14 +1076,19 @@ indirect values and changed commands remain unqualified.
 
 The native connection verifies the renderer's certificate chain and service
 DNS identity against the trust anchors of its named Secret: `ca.crt`, or the top
-of the `tls.crt` chain. It never inherits Argo's permissive default TLS behavior
+of the `tls.crt` chain. Each anchor must be self-signed (its issuer is itself
+and its own key verifies its signature): a root CA, or a self-signed leaf such
+as cert-manager's selfSigned issuer writes. An intermediate or an issued leaf
+there refuses every call, because nothing would check its own issuer or
+signature. It never inherits Argo's permissive default TLS behavior
 or the system roots. The configured certificate must actually be mounted;
 Argo 2.13 requires a repo-server restart after certificate changes
 ([Argo TLS configuration](https://argo-cd.readthedocs.io/en/release-2.13/operator-manual/tls/)),
 so between a renewal and that restart it serves the previous leaf. The receiver
 used to pin the exact leaf, which refused every started plan at each
 cert-manager renewal (about every 75 days). It now binds the anchors' names and
-public keys: a leaf renewed under the same CA verifies before and after the
+public keys, for a Secret the repo-server reads only as its serving certificate
+(above): a leaf renewed under the same CA verifies before and after the
 restart, and a different CA refuses. A self-signed leaf is its own anchor, so a
 self-signed leaf whose key rotates at renewal (cert-manager's default) is a new
 trust anchor and still refuses every plan started before the renewal. It keeps

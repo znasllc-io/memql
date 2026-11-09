@@ -445,10 +445,54 @@ func selfSignedRenderer(t *testing.T, key ed25519.PrivateKey, serial int64) tls.
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
+// intermediate returns a CA that a issues, as a CA issuer backed by an
+// intermediate would hold it.
+func (a rendererAuthority) intermediate(t *testing.T, name string) rendererAuthority {
+	t.Helper()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: name}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature, BasicConstraintsValid: true, IsCA: true}
+	der, err := x509.CreateCertificate(rand.Reader, template, a.certificate, pub, a.key)
+	require.NoError(t, err)
+	certificate, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	return rendererAuthority{certificate, key}
+}
+
+// servingSelfSigned returns the reference installation's kind of renderer
+// certificate: cert-manager's selfSigned issuer for a Certificate with DNS
+// names only, so no subject, not a CA, and server usages only.
+func servingSelfSigned(t *testing.T) tls.Certificate {
+	t.Helper()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	template := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), DNSNames: []string{"renderer", "renderer.argocd", "renderer.argocd.svc"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, key)
+	require.NoError(t, err)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// servingSignedAs returns a serving certificate under its own key whose issuer
+// is the given template, signed with signer: a certificate that only looks
+// self-signed (issuer named as itself, another key signed it) or only signs
+// itself (its own key, another issuer's name).
+func servingSignedAs(t *testing.T, issuer *x509.Certificate, signer ed25519.PrivateKey, own ed25519.PrivateKey) tls.Certificate {
+	t.Helper()
+	template := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: "renderer"}, DNSNames: []string{"renderer.argocd.svc"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true, IsCA: true}
+	der, err := x509.CreateCertificate(rand.Reader, template, issuer, own.Public(), signer)
+	require.NoError(t, err)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: own}
+}
+
 // useRendererCertificate writes the renderer TLS Secret as cert-manager does
-// on issue and renewal; authority is its ca.crt, absent when nil.
+// on issue and renewal: tls.crt holds leaf's whole chain, leaf first, and
+// authority is its ca.crt, absent when nil.
 func useRendererCertificate(f *receiverFixture, leaf tls.Certificate, authority []byte) {
-	data := map[string]any{"tls.crt": base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Certificate[0]})), "tls.key": base64.StdEncoding.EncodeToString([]byte("private-key-never-output"))}
+	var chain []byte
+	for _, der := range leaf.Certificate {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	data := map[string]any{"tls.crt": base64.StdEncoding.EncodeToString(chain), "tls.key": base64.StdEncoding.EncodeToString([]byte("private-key-never-output"))}
 	if authority != nil {
 		data["ca.crt"] = base64.StdEncoding.EncodeToString(authority)
 	}
@@ -548,15 +592,145 @@ func TestReceiverSelfSignedRendererAnchorIsItsKey(t *testing.T) {
 	require.False(t, newKey.matchesInvariant(prepared.invariantDigest))
 }
 
-// The renderer TLS Secret binds only its trust anchors, so a renderer that
-// also reads another key of it as configuration is refused rather than
-// silently unbound.
-func TestReceiverRendererTLSSecretIsOnlyTrust(t *testing.T) {
-	f := newReceiverFixture(t)
-	container := resourceMap(resourceMap(resourceMap(f.objects[rendererDeploymentPath], "spec"), "template"), "spec")["containers"].([]any)[0].(map[string]any)
-	container["env"] = []any{map[string]any{"name": "REDIS_PASSWORD", "valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": "renderer-tls", "key": "tls.key"}}}}
-	_, err := readReceiver(captureOperator(auth.RoleOwner, "operator"), f, "memql", "receiver", f.factory(t))
-	require.ErrorContains(t, err, "TLS Secret is also read as other configuration")
+// Only a self-signed certificate is a trust anchor. The anchors come from the
+// TLS Secret's ca.crt or, without one, the top of its tls.crt chain, so an
+// intermediate or an issued leaf there would otherwise become a root of trust
+// in its own right. The reference installation's self-signed leaf (with
+// itself as ca.crt, as cert-manager's selfSigned issuer writes it) and a
+// self-signed CA in ca.crt pass, and the chain each serves verifies.
+func TestReceiverRendererTrustAnchorMustBeSelfSigned(t *testing.T) {
+	root := newRendererAuthority(t, "memql-installation-root")
+	intermediate := root.intermediate(t, "memql-installation-intermediate")
+	chain := func(leaf tls.Certificate, issuers ...rendererAuthority) tls.Certificate {
+		out := tls.Certificate{Certificate: append([][]byte(nil), leaf.Certificate...), PrivateKey: leaf.PrivateKey}
+		for _, issuer := range issuers {
+			out.Certificate = append(out.Certificate, issuer.certificate.Raw)
+		}
+		return out
+	}
+	viaIntermediate := chain(intermediate.issue(t, 5), intermediate)
+	reference := servingSelfSigned(t)
+	_, own, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	namedLikeItself := newRendererAuthority(t, "renderer")
+	otherIssuer := &x509.Certificate{Subject: pkix.Name{CommonName: "another-issuer"}, PublicKey: own.Public()}
+	cases := []struct {
+		name      string
+		serving   tls.Certificate
+		authority []byte
+		refuse    bool
+	}{
+		{"self-signed leaf with itself as ca.crt", reference, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: reference.Certificate[0]}), false},
+		{"self-signed leaf without ca.crt", reference, nil, false},
+		{"self-signed CA in ca.crt", root.issue(t, 6), root.pem(), false},
+		{"self-signed root at the top of tls.crt", chain(viaIntermediate, root), nil, false},
+		{"intermediate at the top of tls.crt", viaIntermediate, nil, true},
+		{"intermediate in ca.crt", viaIntermediate, intermediate.pem(), true},
+		{"issued leaf with no ca.crt", root.issue(t, 7), nil, true},
+		{"names itself as issuer, another key signed it", servingSignedAs(t, namedLikeItself.certificate, namedLikeItself.key, own), nil, true},
+		{"signed by its own key under another issuer", servingSignedAs(t, otherIssuer, own, own), nil, true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			f := newReceiverFixture(t)
+			useRendererCertificate(f, test.serving, test.authority)
+			snapshot, err := readReceiver(captureOperator(auth.RoleOwner, "operator"), f, "memql", "receiver", f.factory(t))
+			if test.refuse {
+				require.ErrorContains(t, err, "trust anchor is not self-signed")
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, dialRenderer(snapshot, serveRenderer(t, test.serving)), "the chain the repo-server serves verifies against the anchors")
+		})
+	}
+}
+
+// The trust anchors stand in for the TLS Secret's content only while the
+// repo-server consumes that Secret exactly as the qualified profile does: one
+// volume, mounted once, at /app/config/reposerver/tls, projecting no key
+// beyond tls.crt, tls.key and ca.crt, and no other reader of the Secret.
+// Anything else keeps the keyed content binding every Secret gets, so a
+// changed value of any key refuses. The probe is a changed tls.key, which the
+// anchors do not cover.
+func TestReceiverRendererTLSSecretNarrowsOnlyForItsQualifiedMount(t *testing.T) {
+	podSpec := func(f *receiverFixture) map[string]any {
+		return resourceMap(resourceMap(resourceMap(f.objects[rendererDeploymentPath], "spec"), "template"), "spec")
+	}
+	container := func(f *receiverFixture) map[string]any { return podSpec(f)["containers"].([]any)[0].(map[string]any) }
+	mount := func(f *receiverFixture, volume, path string) {
+		c := container(f)
+		c["volumeMounts"] = append(c["volumeMounts"].([]any), map[string]any{"name": volume, "mountPath": path})
+	}
+	project := func(f *receiverFixture, keys ...string) {
+		items := []any{}
+		for _, key := range keys {
+			items = append(items, map[string]any{"key": key, "path": key})
+		}
+		volume := podSpec(f)["volumes"].([]any)[0].(map[string]any)
+		resourceMap(volume, "secret")["items"] = items
+	}
+	readThroughEnvironment := func(key string) func(*receiverFixture) {
+		return func(f *receiverFixture) {
+			container(f)["env"] = []any{map[string]any{"name": "REDIS_PASSWORD", "valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": "renderer-tls", "key": key}}}}
+		}
+	}
+	cases := []struct {
+		name   string
+		change func(*receiverFixture)
+		narrow bool
+	}{
+		{"whole Secret holding only serving keys", func(*receiverFixture) {}, true},
+		{"upstream projection", func(f *receiverFixture) { project(f, "tls.crt", "tls.key", "ca.crt") }, true},
+		{"mounted a second time", func(f *receiverFixture) {
+			spec := podSpec(f)
+			spec["volumes"] = append(spec["volumes"].([]any), map[string]any{"name": "tls-copy", "secret": map[string]any{"secretName": "renderer-tls"}})
+			mount(f, "tls-copy", "/app/config/tls")
+		}, false},
+		{"declared as a second volume", func(f *receiverFixture) {
+			spec := podSpec(f)
+			spec["volumes"] = append(spec["volumes"].([]any), map[string]any{"name": "tls-spare", "secret": map[string]any{"secretName": "renderer-tls"}})
+		}, false},
+		{"also mounted elsewhere", func(f *receiverFixture) { mount(f, "tls", "/app/config/tls") }, false},
+		{"mounted by the init container", func(f *receiverFixture) {
+			podSpec(f)["initContainers"] = []any{map[string]any{"name": "copyutil", "image": oldImage, "command": []any{"/bin/cp", "-n", "/usr/local/bin/argocd", "/var/run/argocd/argocd-cmp-server"}, "volumeMounts": []any{map[string]any{"name": "tls", "mountPath": "/var/run/argocd"}}}}
+		}, false},
+		{"projects another key", func(f *receiverFixture) { project(f, "tls.crt", "tls.key", "keystore.p12") }, false},
+		{"whole Secret holding another key", func(f *receiverFixture) {
+			resourceMap(f.objects[rendererTLSPath], "data")["keystore.p12"] = base64.StdEncoding.EncodeToString([]byte("keystore"))
+		}, false},
+		{"another key read through the environment", readThroughEnvironment("tls.key"), false},
+		{"its certificate read through the environment", readThroughEnvironment("tls.crt"), false},
+		{"also another input's Secret", func(f *receiverFixture) {
+			// The projection is the upstream one, so only the other reader decides.
+			project(f, "tls.crt", "tls.key", "ca.crt")
+			f.config.RepositoryScope = &receiverRepositoryScope{Profile: namedProjectRepositoryProfile, Bindings: []receiverRepositoryBinding{{Application: receiverNamed{"argocd", "memql"}, Secret: receiverNamed{"argocd", "renderer-tls"}}}}
+			secret := f.objects[rendererTLSPath]
+			data := resourceMap(secret, "data")
+			data["url"] = base64.StdEncoding.EncodeToString([]byte("https://github.com/acme/platform.git"))
+			data["project"] = base64.StdEncoding.EncodeToString([]byte("default"))
+			resourceMap(secret, "metadata")["labels"] = map[string]any{"argocd.argoproj.io/secret-type": "repository"}
+			delete(f.objects, repositoryInventoryFixturePath)
+			f.saveConfig()
+		}, false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			f := newReceiverFixture(t)
+			test.change(f)
+			prepared := observeReceiver(t, f)
+			secret := f.objects[rendererTLSPath]
+			resourceMap(secret, "data")["tls.key"] = base64.StdEncoding.EncodeToString([]byte("private-key-rotated"))
+			meta := resourceMap(secret, "metadata")
+			meta["resourceVersion"] = fmt.Sprintf("%v-rotated", meta["resourceVersion"])
+			changed := observeReceiver(t, f)
+			if test.narrow {
+				require.Equal(t, prepared.invariantDigest, changed.invariantDigest, "the trust anchors stand in for the Secret")
+				return
+			}
+			require.NotEqual(t, prepared.invariantDigest, changed.invariantDigest, "any changed value of the Secret refuses")
+			require.False(t, changed.matchesInvariant(prepared.invariantDigest))
+		})
+	}
 }
 
 // A plan an engine up to 0.31.28 saved holds the v1 digests. These golden

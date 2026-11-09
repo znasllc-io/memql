@@ -185,7 +185,7 @@ input means, so routine cluster activity no longer strands a started update:
 |---|---|---|
 | ConfigMaps and Secrets the receiver reads | UID and an HMAC of their type, immutability and data, keyed from the catalog credential; for Argo's renderer ConfigMap (`argocd-cm`) also its `app.kubernetes.io/part-of` label, without which Argo stops reading it | Other labels, annotations and `resourceVersion` are not bound |
 | Repo-server Deployment | UID, selector and pod template, without the `kubectl.kubernetes.io/restartedAt` annotation | Its Pods, ReplicaSets and EndpointSlices: every endpoint ready and addressing a Pod of the Deployment's current revision (the Pod's ReplicaSet, read by name, has the Deployment's pod template apart from `pod-template-hash`, and the Pod carries that hash), with the template's containers, init containers, volumes and pinned runtime image, the template's service account, security context, host namespaces, host aliases, DNS and runtime class, and no ephemeral container; one per wanted replica |
-| Repo-server TLS Secret | UID and its trust anchors (name and public key of `ca.crt`, else of the top of the `tls.crt` chain) | The Secret's leaf and the certificate the repo-server serves both chain to those anchors and name the Service |
+| Repo-server TLS Secret | UID and its trust anchors (name and public key of `ca.crt`, else of the top of the `tls.crt` chain; each must be self-signed), only while the repo-server reads the Secret solely as its serving certificate: one volume, mounted once at `/app/config/reposerver/tls`, projecting no key beyond `tls.crt`, `tls.key` and `ca.crt`, and named by no environment variable and no other input of the receiver. Otherwise UID and the keyed HMAC of its content, like any other Secret | The Secret's leaf and the certificate the repo-server serves both chain to those anchors and name the Service |
 | Repo-server Service, Argo projects | UID and spec | Status and metadata are not bound |
 | Kubernetes discovery | Major and minor version; whether each resource the receiver reads is served, with its kind, scope and the verbs it uses | Patch build fields, `/api` addresses and every other group, version or resource are not bound. The APIs the plan's own render applies are resolved from fresh discovery by resource evidence at every call and compared through `ResourceDiffDigest` |
 
@@ -221,6 +221,18 @@ catalog credential the receiver reads at every call and never persists. The key
 is only as strong as that credential: the reference installation's is a minted
 PAT, while a short or guessable token there would weaken the HMAC. Rotating it
 re-keys every digest and refuses, as any rotation does.
+
+A trust anchor must be self-signed: its issuer is itself and its own key
+verifies its signature, as for a root CA or the self-signed leaf
+cert-manager's selfSigned issuer writes (with itself as `ca.crt`). An
+intermediate in `ca.crt`, or an intermediate or issued leaf at the top of a
+`tls.crt` whose root was left out, refuses every call ("trust anchor is not
+self-signed"), because nothing would check that anchor's own issuer or
+signature. The narrowed binding in the table is what lets a renewal under the
+same anchor pass; a repo-server that also reads its TLS Secret any other way
+(a second volume or mount, another projected key, an environment reference)
+keeps that Secret's full keyed content bound, so its renewals refuse a started
+update like any other changed Secret.
 
 A self-signed renderer certificate (no CA) is its own trust anchor, so **a
 self-signed leaf whose key rotates on renewal is a new trust anchor and still
@@ -264,7 +276,8 @@ refused at preparation; the invariant then refuses every later step and the plan
 is closed. That strands but never bypasses a check.
 
 Regression tests: `receiver_churn_test.go` (restart, current revision, Pod
-identity, ephemeral containers, content, keyed digest, TLS anchors, legacy golden
+identity, ephemeral containers, content, keyed digest, TLS anchors and their
+self-signed rule, the narrowed TLS binding and its fallback, legacy golden
 digests, the preparation refusal), `receiver_discovery_test.go` (the discovery
 contract and the render profile that makes it safe),
 `receiver_own_configuration_db_test.go` (the start-fence re-check) and

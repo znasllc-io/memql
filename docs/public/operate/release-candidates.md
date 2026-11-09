@@ -836,7 +836,10 @@ longer stops an update:
   debugging container stays in its pod until the pod is replaced, so restart
   the repository server after debugging it.
 - Its TLS certificate renewed under the same certificate authority, before or
-  after the repository server restarts to load it.
+  after the repository server restarts to load it, when the repository server
+  reads that certificate's Secret only as its serving certificate, as Argo
+  CD's standard manifests do. A server that also mounts or reads that Secret
+  another way has every key of it checked, so a renewal stops the update.
 - A Kubernetes patch release, a different API server address, or a custom
   resource definition installed or upgraded for something else, as long as
   every API group's discovery still answers: one that does not still stops each
@@ -851,6 +854,12 @@ configuration data, a repository server running another template or image, or
 restarted by a tool that changes its template, a certificate from another
 authority, a Kubernetes minor upgrade, or a removed or rescoped API that the
 installation reads or that the release applies.
+
+Every step also checks that the certificate authority it trusts is
+self-signed: the Secret's `ca.crt`, or the last certificate of its `tls.crt`
+when it has no `ca.crt`, must be a root certificate authority or a self-signed
+certificate. An intermediate there stops every step until the Secret names its
+root.
 
 A self-signed repository server certificate is its own authority, so **a
 self-signed certificate whose key changes at renewal is a new authority and

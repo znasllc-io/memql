@@ -40,8 +40,6 @@ type receiverRead struct {
 	legacy any
 	// binding is what v2 hashes for this read.
 	binding receiverBinding
-	// keys are the Secret keys read as values (receiverReads.secret).
-	keys map[string]bool
 }
 
 // receiverBindingKind says how a read enters the v2 digest. Every saved object
@@ -422,18 +420,6 @@ func (r *receiverReads) secret(ctx context.Context, namespace string, ref receiv
 	body, err := r.object(ctx, "v1", "Secret", "secrets", namespace, ref.Name)
 	if err != nil {
 		return "", err
-	}
-	// Record which keys were read as values, so a reader that narrows this
-	// Secret's binding (the renderer TLS trust) can refuse a Secret also used
-	// for something else.
-	if path, err := receiverPath("v1", "secrets", namespace, ref.Name); err == nil {
-		read := r.reads[path]
-		keys := map[string]bool{ref.Key: true}
-		for key := range read.keys {
-			keys[key] = true
-		}
-		read.keys = keys
-		r.reads[path] = read
 	}
 	value, err := base64.StdEncoding.Strict().DecodeString(resourceText(resourceMap(body, "data"), ref.Key))
 	if err != nil || len(value) == 0 || len(value) > 64<<10 {

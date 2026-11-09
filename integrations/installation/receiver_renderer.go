@@ -1,6 +1,7 @@
 package installation
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -86,6 +87,14 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	if _, err := immutableImage(cfg.Image); err != nil {
 		return errors.New("installation renderer image must be pinned by digest")
 	}
+	tlsPath, err := receiverPath("v1", "secrets", namespace, cfg.TLSSecret)
+	if err != nil {
+		return err
+	}
+	// Every other input is read before the renderer's, so a TLS Secret already
+	// read here is also another input (a named repository credential, say),
+	// whose content its trust anchors must not stand in for.
+	_, tlsShared := r.reads[tlsPath]
 	deployment, err := r.object(ctx, "apps/v1", "Deployment", "deployments", namespace, cfg.Deployment)
 	if err != nil {
 		return err
@@ -115,7 +124,8 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	if resourceText(container, "name") != cfg.Container || resourceText(container, "image") != cfg.Image {
 		return errors.New("installation renderer differs from its pinned image")
 	}
-	if err := r.rendererInputs(ctx, namespace, podSpec, container, cfg); err != nil {
+	servingOnly, err := r.rendererInputs(ctx, namespace, podSpec, container, cfg)
+	if err != nil {
 		return err
 	}
 	service, err := r.object(ctx, "v1", "Service", "services", namespace, cfg.Service)
@@ -247,18 +257,17 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	// serves the old one until the repo-server restarts, so pinning the leaf
 	// stranded every started plan at each renewal. The trust anchors are the
 	// Secret's ca.crt, which cert-manager writes, or else the top of its tls.crt
-	// chain. Each call verifies that the Secret's leaf, and the certificate the
-	// repo-server presents in the TLS handshake, chain to those anchors and name
-	// the Service; the anchors' names and public keys are bound, so a different
-	// CA refuses. A self-signed leaf is its own anchor: it survives renewal only
-	// when its key is kept (cert-manager privateKey.rotationPolicy: Never), and
-	// until the repo-server restarts its old leaf no longer verifies, as before.
+	// chain, and each must be self-signed. Each call verifies that the Secret's
+	// leaf, and the certificate the repo-server presents in the TLS handshake,
+	// chain to those anchors and name the Service; the anchors' names and public
+	// keys are bound in place of the Secret's content when the repo-server reads
+	// it only as its serving certificate, so a different CA refuses and a
+	// renewal under the same one does not. A self-signed leaf is its own anchor:
+	// it survives renewal only when its key is kept (cert-manager
+	// privateKey.rotationPolicy: Never), and until the repo-server restarts its
+	// old leaf no longer verifies, as before.
 	// Regressions: TestReceiverRendererTrustAnchorSurvivesRenewalButNotANewCA and
 	// TestReceiverSelfSignedRendererAnchorIsItsKey.
-	tlsPath, err := receiverPath("v1", "secrets", namespace, cfg.TLSSecret)
-	if err != nil {
-		return err
-	}
 	pemBody, err := r.secret(ctx, namespace, receiverSecret{Name: cfg.TLSSecret, Key: "tls.crt"})
 	if err != nil {
 		return err
@@ -278,6 +287,18 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 			return errors.New("installation renderer TLS trust is invalid")
 		}
 	}
+	// Only a self-signed certificate is a trust anchor: a CA's root, or a
+	// self-signed leaf such as cert-manager's selfSigned issuer writes (with
+	// itself as ca.crt). Go's verifier checks neither an anchor's signature nor
+	// who issued it, so an intermediate in ca.crt, or an intermediate or issued
+	// leaf at the top of a tls.crt whose root was left out, would be trusted on
+	// its face, its own issuer, validity and signature unchecked.
+	// Regression: TestReceiverRendererTrustAnchorMustBeSelfSigned.
+	for _, anchor := range anchors {
+		if !receiverSelfSigned(anchor) {
+			return errors.New("installation renderer TLS trust anchor is not self-signed: the Secret's ca.crt, or the top of its tls.crt chain when it has no ca.crt, must be a root CA or a self-signed certificate")
+		}
+	}
 	roots, intermediates := x509.NewCertPool(), x509.NewCertPool()
 	for _, anchor := range anchors {
 		roots.AddCert(anchor)
@@ -289,18 +310,20 @@ func (s *receiverSnapshot) observeRenderer(ctx context.Context, r *receiverReads
 	if _, err := chain[0].Verify(x509.VerifyOptions{DNSName: serverName, Roots: roots, Intermediates: intermediates}); err != nil {
 		return errors.New("installation renderer TLS certificate is expired or has a different identity")
 	}
-	// The anchors replace this Secret's content binding, which is right only
-	// while nothing reads another of its keys as configuration (an environment
-	// secretKeyRef, say): that value would silently stop being bound.
-	for key := range tlsRead.keys {
-		if key != "tls.crt" {
-			return errors.New("installation renderer TLS Secret is also read as other configuration")
-		}
-	}
 	// Standard verification of the served chain against only these anchors, with
 	// the Service's DNS name: no system roots and no permissive Argo default.
 	s.rendererTLS = &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName, RootCAs: roots}
-	r.bind(tlsPath, []any{"v1", "Secret", namespace, cfg.TLSSecret, tlsRead.uid, "trust-anchors-v1", receiverTrustAnchors(anchors)})
+	// The anchors stand in for this Secret's content only while the repo-server
+	// consumes it solely as its serving certificate (rendererInputs) and no other
+	// input is this Secret: then a renewal under the same anchor changes nothing
+	// a render depends on. Anything else (a second volume or mount, another
+	// projected key, an environment reference, a repository credential kept
+	// here) leaves the keyed content binding every Secret read gets
+	// (receiverObjectBinding), so any changed value refuses.
+	// Regression: TestReceiverRendererTLSSecretNarrowsOnlyForItsQualifiedMount.
+	if servingOnly && !tlsShared {
+		r.bind(tlsPath, []any{"v1", "Secret", namespace, cfg.TLSSecret, tlsRead.uid, "trust-anchors-v1", receiverTrustAnchors(anchors)})
+	}
 	s.rendererAddress = net.JoinHostPort(serverName, strconv.FormatInt(servicePort, 10))
 	return nil
 }
@@ -331,6 +354,15 @@ func receiverCertificates(body []byte) ([]*x509.Certificate, error) {
 		return nil, errors.New("installation renderer TLS bundle has no certificate")
 	}
 	return out, nil
+}
+
+// receiverSelfSigned reports whether a certificate can be a trust anchor: it
+// names itself as its issuer and its own key verifies its signature. The
+// signature is checked directly, not with CheckSignatureFrom, which also
+// requires a CA certificate: a self-signed serving leaf is not one.
+func receiverSelfSigned(certificate *x509.Certificate) bool {
+	return bytes.Equal(certificate.RawSubject, certificate.RawIssuer) &&
+		certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature) == nil
 }
 
 // A trust anchor is a name and a public key (RFC 5280, section 6.1.1): a CA
@@ -551,102 +583,153 @@ func receiverCopyInitEnvironment(init, container map[string]any) bool {
 	return false
 }
 
-func (r *receiverReads) rendererInputs(ctx context.Context, namespace string, pod, container map[string]any, cfg receiverRenderer) error {
+// receiverRendererTLSMount is where the qualified repo-server reads its
+// serving certificate and key.
+const receiverRendererTLSMount = "/app/config/reposerver/tls"
+
+// receiverServingFiles are the keys the qualified repo-server volume projects
+// into receiverRendererTLSMount: its serving certificate, key and CA bundle.
+var receiverServingFiles = map[string]bool{"tls.crt": true, "tls.key": true, "ca.crt": true}
+
+// receiverServingProjection reports whether a TLS Secret volume projects only
+// the serving files: its items name no other key or, with no items, the
+// Secret holds no other key, since every key then becomes a file.
+func receiverServingProjection(source, secret map[string]any) bool {
+	items, ok := source["items"].([]any)
+	if source["items"] != nil && !ok {
+		return false
+	}
+	if len(items) == 0 {
+		for key := range resourceMap(secret, "data") {
+			if !receiverServingFiles[key] {
+				return false
+			}
+		}
+		return true
+	}
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if !receiverServingFiles[resourceText(item, "key")] {
+			return false
+		}
+	}
+	return true
+}
+
+// rendererInputs reads and qualifies everything the renderer template
+// consumes. It reports whether the repo-server consumes its TLS Secret solely
+// as its serving certificate: one volume, mounted once, by the repo-server
+// container at receiverRendererTLSMount, projecting only the serving files,
+// and read through no environment variable. Only then may observeRenderer
+// bind that Secret by its trust anchors instead of its content.
+func (r *receiverReads) rendererInputs(ctx context.Context, namespace string, pod, container map[string]any, cfg receiverRenderer) (bool, error) {
 	args, _ := receiverStringList(container["args"])
 	command, _ := receiverStringList(container["command"])
 	wanted := []string{"/usr/local/bin/argocd-repo-server"}
 	if !(len(command) == 0 && sameJSON(args, wanted)) && !(len(args) == 0 && sameJSON(command, wanted)) {
-		return errors.New("installation renderer command requires a qualified profile")
+		return false, errors.New("installation renderer command requires a qualified profile")
 	}
 	if container["envFrom"] != nil || pod["ephemeralContainers"] != nil {
-		return errors.New("installation renderer has unqualified executable inputs")
+		return false, errors.New("installation renderer has unqualified executable inputs")
 	}
+	servingOnly := true
+	inits, _ := pod["initContainers"].([]any)
 	if raw, found := pod["initContainers"]; found {
 		values, ok := raw.([]any)
 		if !ok || len(values) > 1 {
-			return errors.New("installation renderer init containers require qualification")
+			return false, errors.New("installation renderer init containers require qualification")
 		}
 		for _, raw := range values {
 			init, _ := raw.(map[string]any)
 			command, _ := receiverStringList(init["command"])
 			if resourceText(init, "image") != cfg.Image || !sameJSON(command, []string{"/bin/cp", "-n", "/usr/local/bin/argocd", "/var/run/argocd/argocd-cmp-server"}) || init["args"] != nil || !receiverCopyInitEnvironment(init, container) || init["envFrom"] != nil {
-				return errors.New("installation renderer init container requires qualification")
+				return false, errors.New("installation renderer init container requires qualification")
 			}
 		}
 	}
 	env, _ := container["env"].([]any)
 	if len(env) > 128 {
-		return errors.New("installation renderer environment exceeds its bound")
+		return false, errors.New("installation renderer environment exceeds its bound")
 	}
 	names := map[string]bool{}
 	for _, raw := range env {
 		item, ok := raw.(map[string]any)
 		if !ok {
-			return errors.New("installation renderer environment is invalid")
+			return false, errors.New("installation renderer environment is invalid")
 		}
 		name := resourceText(item, "name")
 		if names[name] || !receiverRendererEnvironment[name] {
-			return errors.New("installation renderer environment requires a qualified profile")
+			return false, errors.New("installation renderer environment requires a qualified profile")
 		}
 		names[name] = true
 		if (name == "REDIS_PASSWORD" || name == "ARGOCD_REPO_SERVER_OTLP_HEADERS") && item["value"] != nil {
-			return errors.New("installation renderer credentials require a versioned reference")
+			return false, errors.New("installation renderer credentials require a versioned reference")
 		}
 		value := resourceText(item, "value")
 		if from := resourceMap(item, "valueFrom"); from != nil {
 			if len(from) != 1 || item["value"] != nil {
-				return errors.New("installation renderer environment source is ambiguous")
+				return false, errors.New("installation renderer environment source is ambiguous")
 			}
 			var obj map[string]any
 			var err error
 			if ref := resourceMap(from, "configMapKeyRef"); ref != nil {
 				obj, err = r.object(ctx, "v1", "ConfigMap", "configmaps", namespace, resourceText(ref, "name"))
 				if err != nil {
-					return err
+					return false, err
 				}
 				value = resourceText(resourceMap(obj, "data"), resourceText(ref, "key"))
 			} else if ref := resourceMap(from, "secretKeyRef"); ref != nil {
+				// Any key of the TLS Secret in the environment, tls.crt included,
+				// is configuration its trust anchors do not cover.
+				if resourceText(ref, "name") == cfg.TLSSecret {
+					servingOnly = false
+				}
 				value, err = r.secret(ctx, namespace, receiverSecret{Name: resourceText(ref, "name"), Key: resourceText(ref, "key")})
 				if err != nil {
-					return err
+					return false, err
 				}
 			} else {
-				return errors.New("installation renderer environment source is unsupported")
+				return false, errors.New("installation renderer environment source is unsupported")
 			}
 		}
 		if name == "ARGOCD_REPO_SERVER_DISABLE_TLS" && value != "" && value != "false" {
-			return errors.New("installation renderer TLS is disabled")
+			return false, errors.New("installation renderer TLS is disabled")
 		}
 	}
 	volumes, _ := pod["volumes"].([]any)
 	if len(volumes) > 32 {
-		return errors.New("installation renderer volumes exceed their bound")
+		return false, errors.New("installation renderer volumes exceed their bound")
 	}
-	tlsVolume := ""
+	tlsVolumes := map[string]bool{}
 	for _, raw := range volumes {
 		volume, ok := raw.(map[string]any)
 		if !ok {
-			return errors.New("installation renderer volume is invalid")
+			return false, errors.New("installation renderer volume is invalid")
 		}
 		switch {
 		case volume["configMap"] != nil:
 			ref := resourceMap(volume, "configMap")
 			if _, err := r.object(ctx, "v1", "ConfigMap", "configmaps", namespace, resourceText(ref, "name")); err != nil {
-				return err
+				return false, err
 			}
 		case volume["secret"] != nil:
 			ref := resourceMap(volume, "secret")
 			name := resourceText(ref, "secretName")
-			if _, err := r.object(ctx, "v1", "Secret", "secrets", namespace, name); err != nil {
-				return err
+			secret, err := r.object(ctx, "v1", "Secret", "secrets", namespace, name)
+			if err != nil {
+				return false, err
 			}
 			if name == cfg.TLSSecret {
-				tlsVolume = resourceText(volume, "name")
+				tlsVolumes[resourceText(volume, "name")] = true
+				servingOnly = servingOnly && receiverServingProjection(ref, secret)
 			}
 		case volume["emptyDir"] != nil:
 		default:
-			return errors.New("installation renderer volume type requires qualification")
+			return false, errors.New("installation renderer volume type requires qualification")
 		}
+	}
+	if len(tlsVolumes) != 1 {
+		servingOnly = false
 	}
 	mounts, _ := container["volumeMounts"].([]any)
 	tlsMounted := false
@@ -655,18 +738,36 @@ func (r *receiverReads) rendererInputs(ctx context.Context, namespace string, po
 		path := resourceText(mount, "mountPath")
 		// The qualified image supplies all executables; shared volumes cannot
 		// replace them. Existing config, scratch and plugin socket paths are scoped.
-		allowed := map[string]bool{"/app/config/ssh": true, "/app/config/tls": true, "/app/config/gpg/source": true, "/app/config/gpg/keys": true, "/app/config/reposerver/tls": true, "/tmp": true, "/helm-working-dir": true, "/home/argocd/cmp-server/plugins": true}
+		allowed := map[string]bool{"/app/config/ssh": true, "/app/config/tls": true, "/app/config/gpg/source": true, "/app/config/gpg/keys": true, receiverRendererTLSMount: true, "/tmp": true, "/helm-working-dir": true, "/home/argocd/cmp-server/plugins": true}
 		if !allowed[path] || mount["subPath"] != nil || mount["subPathExpr"] != nil {
-			return errors.New("installation renderer mount requires qualification")
+			return false, errors.New("installation renderer mount requires qualification")
 		}
-		if path == "/app/config/reposerver/tls" && resourceText(mount, "name") == tlsVolume && tlsVolume != "" {
-			tlsMounted = true
+		if tlsVolumes[resourceText(mount, "name")] {
+			if path == receiverRendererTLSMount {
+				tlsMounted = true
+			} else {
+				// /app/config/tls, for one, is where Argo reads the CAs it trusts
+				// for Git hosts.
+				servingOnly = false
+			}
+		}
+	}
+	// The copy helper's mounts are not otherwise scoped: any mount of the TLS
+	// Secret there is another consumer.
+	for _, raw := range inits {
+		init, _ := raw.(map[string]any)
+		initMounts, _ := init["volumeMounts"].([]any)
+		for _, raw := range initMounts {
+			mount, _ := raw.(map[string]any)
+			if tlsVolumes[resourceText(mount, "name")] {
+				servingOnly = false
+			}
 		}
 	}
 	if !tlsMounted {
-		return errors.New("installation renderer does not mount its configured TLS Secret")
+		return false, errors.New("installation renderer does not mount its configured TLS Secret")
 	}
-	return nil
+	return servingOnly, nil
 }
 
 // Render opens only the snapshot's verified TLS endpoint. Upstream errors never
