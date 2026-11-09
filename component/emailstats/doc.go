@@ -24,7 +24,11 @@
 // spellings and the row admission live in the engine. The walk asks five
 // @serverOnly queries under the rollup's maintenance principal and internal
 // origin, and only this package's own two tables are written with SQL
-// (rollup.go).
+// (rollup.go). Each of the five projects only what the facts read -- no
+// address, no address digest, no owner; the one reference to a recipient is
+// the id a subscription change is counted under -- because the walk reads
+// every organization's recipients and a figure needs none of the rest
+// (TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse).
 //
 // # One fact per source record and kind
 //

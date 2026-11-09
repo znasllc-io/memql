@@ -522,6 +522,51 @@ shape campaign providerCounterCampaign {
   row.createdAt
 }
 
+/// What the email statistics count of a delivery and nothing else (the 2026-11-08 statistics design,
+/// D10): its outcome, when it happened, and what it belongs to. No address and no person: the
+/// statistics walk reads every organization's deliveries, and a figure needs neither.
+@row
+shape delivery deliveryStatRef {
+  row.id
+  accountId
+  campaignId
+  emailRuleId
+  requestId
+  status
+  skipReason
+  sentAt
+  providerStatus
+  providerAt
+  row.createdAt
+}
+
+/// What the email statistics count of an open or a click and nothing else (the 2026-11-08 statistics
+/// design, D10). No destination url and no owner: a figure needs neither.
+@row
+shape engagementEvent engagementStatRef {
+  row.id
+  accountId
+  campaignId
+  deliveryId
+  kind
+  occurredAt
+  row.createdAt
+}
+
+/// What the email statistics count of a consent event and nothing else (the 2026-11-08 statistics
+/// design, D10 and D18): its kind, when, what it belongs to, and the recipient whose audience a
+/// subscribe or an unsubscribe counts under. No address digest, source, reason or owner.
+@row
+shape consentEvent consentStatRef {
+  row.id
+  accountId
+  campaignId
+  recipientId
+  kind
+  occurredAt
+  row.createdAt
+}
+
 /// An enrollment's journey and nothing else, for counting a journey's sends under it (the 2026-11-08
 /// statistics design, D18).
 @row

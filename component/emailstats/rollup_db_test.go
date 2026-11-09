@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -901,6 +902,82 @@ func TestEveryReadIsInternalFreshAndRootsOnly(t *testing.T) {
 	}
 	if f := wantFact(t, facts, kindSubscribe, suffix+"-c"); f.AudienceID != suffix+"-a" {
 		t.Errorf("the subscribe counts under audience %q, want %s-a", f.AudienceID, suffix)
+	}
+}
+
+// recordingEngine answers from the real engine and keeps every row each
+// construct answered, so a test can see what the walk was handed.
+type recordingEngine struct {
+	inner Engine
+	rows  map[string][]map[string]any
+}
+
+func (e *recordingEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	res, err := e.inner.Execute(ctx, query)
+	if m := queryName.FindStringSubmatch(query); m != nil && err == nil {
+		e.rows[m[1]] = append(e.rows[m[1]], memql.MaterializeRows(res)...)
+	}
+	return res, err
+}
+
+// The walk is handed what the facts read and nothing else. Least data is the
+// rule for anything about a recipient: no address and no address digest,
+// and no other field the facts do not use, reaches the rollup from any of the
+// five reads -- so a field added to one of their shapes has to be argued here.
+func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
+	f := newFixture(t)
+	walkFrom(t, f.db, time.Now())
+
+	member := f.recipient(f.audience)
+	_, enrollment := f.journeyWithEnrollment(member)
+	f.deliver(member, map[string]any{"requestId": "journey-" + enrollment + "-welcome", "status": "sent", "sentAt": stamp(time.Now())})
+	sent := f.deliver(f.recipient(f.audience), map[string]any{"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now())})
+	f.engage(sent, "click", time.Now())
+	f.consent("recordConsentGrant", member, time.Now())
+
+	recorder := &recordingEngine{inner: f.eng, rows: map[string][]map[string]any{}}
+	if _, err := runRollup(principalCtx(t), recorder, f.db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	read := map[string][]string{
+		"deliveriesWrittenSince":       {"id", "accountId", "campaignId", "emailRuleId", "requestId", "status", "skipReason", "sentAt", "providerStatus", "providerAt", "createdAt"},
+		"engagementEventsWrittenSince": {"id", "accountId", "campaignId", "deliveryId", "kind", "occurredAt", "createdAt"},
+		"consentEventsWrittenSince":    {"id", "accountId", "campaignId", "recipientId", "kind", "occurredAt", "createdAt"},
+		"journeyEnrollmentsByIds":      {"id", "journeyId"},
+		"recipientAudiencesByIds":      {"id", "audienceId"},
+	}
+	for construct, fields := range read {
+		rows := recorder.rows[construct]
+		if len(rows) == 0 {
+			t.Errorf("%s answered no rows, so this test proves nothing about it", construct)
+			continue
+		}
+		allowed := map[string]bool{}
+		for _, field := range fields {
+			allowed[field] = true
+		}
+		extra := map[string]bool{}
+		for _, row := range rows {
+			for key := range row {
+				if !allowed[key] {
+					extra[key] = true
+				}
+			}
+		}
+		for _, address := range []string{"email", "emailDigest"} {
+			if extra[address] {
+				t.Errorf("%s handed the walk the recipient's %s", construct, address)
+			}
+		}
+		if len(extra) > 0 {
+			keys := make([]string, 0, len(extra))
+			for key := range extra {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			t.Errorf("%s handed the walk %v, which no fact reads", construct, keys)
+		}
 	}
 }
 

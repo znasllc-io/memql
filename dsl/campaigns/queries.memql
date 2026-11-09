@@ -1094,7 +1094,11 @@ query delivery providerCounterLedger {
 // order, the rows written since a watermark less a five-minute overlap, at each
 // row's latest version, so a delivery whose outcome changed is read again. The
 // two lookups attribute a page's facts to their journey and audience in one
-// batched read each.
+// batched read each. Every one of the five projects only what the facts read
+// (deliveryStatRef, engagementStatRef, consentStatRef and the two refs): no
+// address, no address digest and no owner, because the walk reads every
+// organization's recipients and a figure needs none of them. The one reference
+// to a recipient is the id a subscribe or an unsubscribe is counted under.
 
 /// Internal statistics walk across every organization's deliveries. actor.userId scoping would count only one person's sends; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
 @actor
@@ -1105,7 +1109,7 @@ query delivery deliveriesWrittenSince {
   filter row => actor.isClusterOwner == true && row.createdAt >= args.since
   sort "row.createdAt", "asc"
   paginate 500
-  shape deliveryFull
+  shape deliveryStatRef
 }
 
 /// Internal statistics walk across every organization's opens and clicks. actor.userId scoping would count only one person's campaigns; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
@@ -1117,7 +1121,7 @@ query engagementEvent engagementEventsWrittenSince {
   filter row => actor.isClusterOwner == true && row.createdAt >= args.since
   sort "row.createdAt", "asc"
   paginate 500
-  shape engagementEventFull
+  shape engagementStatRef
 }
 
 /// Internal statistics walk across every organization's consent events. actor.userId scoping would count only one person's subscribers; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
@@ -1129,7 +1133,7 @@ query consentEvent consentEventsWrittenSince {
   filter row => actor.isClusterOwner == true && row.createdAt >= args.since
   sort "row.createdAt", "asc"
   paginate 500
-  shape consentEventFull
+  shape consentStatRef
 }
 
 /// Internal attribution of journey sends to their journeys, by the enrollments their request ids name. actor.userId scoping would miss every other owner's automations; the clusterOwner predicate and internal origin are both mandatory, and bare ids resolve inbound.
