@@ -4,6 +4,37 @@
  * facts, fields, the wizard and the action bar. What lives here is only what the
  * kit has no word for, and it grows only when a surface needs it. */
 
+/* ---- Email -> Overview ---------------------------------------------------- */
+
+/* A subject of the period under its own heading -- Delivery problems, Audience
+ * growth, Automations -- spaced as the kit's ranked list spaces its own heading
+ * and rows, so the subjects beside it read as one kind of thing. */
+.email-overview-section {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* A fact under a subject's chart (Delivered) stands as far below it as the
+ * page's own facts stand below theirs, and the next subject keeps its gap. */
+.email-overview-section > .os-facts {
+  margin: 8px 0 0;
+}
+
+/* A chart's place while its read is on its way: the content shape, in the
+ * height the kit's TimeChart draws at its default (a 160px plot with its
+ * readout line and time axis, 208px), so nothing below moves when it lands. */
+.email-overview-chart-shape {
+  min-height: 208px;
+}
+
+/* One part of a row's quiet line ("1,204 subscribed"): a narrow window wraps
+ * the line at its separators, never between a figure and its word. */
+.email-overview-part {
+  white-space: nowrap;
+}
+
 /* ---- Email -> Settings ---------------------------------------------------- */
 
 /* A FIELD KEEPS A FIELD'S WIDTH (DESIGN.md rule 9). The page takes the window,

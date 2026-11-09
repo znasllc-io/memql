@@ -1,53 +1,95 @@
-import { useEmailCatalogs } from "../catalogs";
-import { journeyFromRow } from "../rows";
-import { useMemo } from "react";
-import { Send } from "lucide-react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Send, Users, Workflow, Zap } from "lucide-react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { AutoRefresh, Button, EmptyState, Notice, useNow } from "../../../kit";
+import { AutoRefresh, Button, Caption, EmptyState, Fact, Facts, HeadNote, Measure, Notice, RecordList, RecordRow, Subhead } from "../../../kit";
+import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { formatCount } from "../../../kit/format";
+import { absent, figureOf, type AbsentFigure } from "../../../kit/measure";
 import { Overview, OverviewBreakdown } from "../../../kit/Overview";
-import type { AbsentFigure } from "../../../kit/measure";
+import { PageHelp } from "../../../kit/pageHelp";
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
+import { EMAIL_PERIODS, PeriodControl, RankedList, StatFigures, TimeChart, type RankedRow } from "../../../kit/statistics";
 import { feedIsBehind } from "../../../live/useLiveCollection";
+import { useClientScope } from "../../accounts/clientScope";
+import { accountName, untitledAccountName } from "../../accounts/rows";
+import { ScopeControl } from "../../accounts/ScopeControl";
+import { useAccountOptionsFeed } from "../../accounts/tie";
+import { useEmailCatalogs } from "../catalogs";
 import { useOpenRecord } from "../openRequest";
-import { audienceIsArchived, audienceProjection, campaignFromRow, emailRuleFromRow } from "../rows";
-import { useCampaignStatsFor, useSubscriberCounts, type EmailFeeds } from "../useEmail";
-import { campaignDistribution, overviewMetrics, refusalOf, statsWanted, type OverviewInputs } from "./figures";
+import { audienceIsArchived, audienceName, audienceProjection, campaignFromRow, campaignName, emailRuleFromRow, journeyFromRow, journeyName, ruleName } from "../rows";
+import type { EmailSettings } from "../settings";
+import { useSubscriberCounts, type EmailFeeds } from "../useEmail";
+import {
+  DELIVERY_FIGURES,
+  EMAIL_FIGURES,
+  activeAutomationsFact,
+  automationLine,
+  campaignDistribution,
+  campaignLine,
+  chartPoints,
+  clientLine,
+  formatOf,
+  growthLine,
+  listsMeasured,
+  previousPoints,
+  providerReportsOutcomes,
+  refusalOf,
+  statFigures,
+  subscriptionsFact,
+  type FactReading,
+  type FigureSpec,
+} from "./figures";
+import { STATISTICS_REFRESH_MS, useEmailStatistics, type EmailStatistics } from "./statistics";
 
-// OVERVIEW: what was sent, who it can reach, and what runs on its own
-// (memql#6033, Ruling 22).
+// OVERVIEW: the email statistics of a period, for one client or every client in
+// scope (spec 9, D13, D18), read from `emailStatistics`.
 //
-// FIVE MEASURED FIGURES AND THE SHAPE OF THE CAMPAIGNS, and nothing else: no
-// activity history (no time series exists to draw one from) and no standing
-// advice about setup (a decision that needs one is made on the page it is made
-// on). Every number comes from a read the app already makes, and `figures.ts`
-// is where each one is worked out.
+// THE SHAPE OF THE PAGE, top to bottom: the Head with the client (only when
+// there is a choice, D13) and the period; five figures, the one pressed drawn
+// as the chart beneath them; what is true NOW -- Subscriptions and Active
+// automations -- as facts, because they are about now, not the period; then
+// the period's subjects: Delivery problems (its own figures and chart, and
+// Delivered only where the provider reports outcomes), Audience growth, Top
+// campaigns, Automations; the campaigns by state; and Clients when the read
+// covers more than one. Each row of a list opens the record it names.
 //
-// A FIGURE IS A NUMBER, A REASON THERE IS NONE, OR A SHAPE. While a read is on
-// its way the figure is the shape of a figure, never a warning about nothing
-// being wrong; a read the cluster refused with nothing to fall back on is a dash
-// with the engine's own sentence beneath the figures; and a count of nothing is
-// a zero only when the cluster said there was nothing.
+// THE FIGURES SAY WHAT THE READ SAID. While it is on its way, every figure, the
+// chart's place and every list is its shape, never a word. Refused with nothing
+// to show, the figures are dashes carrying the engine's sentence, said once in
+// the chart's place, and nothing else of the period is drawn. A period nothing
+// counted (no `measuredSince`) is dashes that say why and a chart that says
+// "Not measured", and no lists: a list of what happened in a period nobody
+// counted would be a claim about it. The read lists only what it measured, so
+// a list that arrives empty says "Nothing in this period." only where its
+// figures were counted through the period, and "Not measured." otherwise
+// (`listsMeasured`).
 //
-// A REFUSED REFRESH IS NOT A REFUSAL WHILE THE LAST ANSWER IS HELD. A feed that
-// holds rows and could not read them again, a breakdown or a count that has been
-// read before and was refused this time: each keeps its last value, and the page
-// tells ONE story, in one notice, with the engine's sentence in it -- updates are
-// interrupted, these are the last figures received. It never dashes a figure it
-// can still draw, and it never says "this cluster did not return" beside a
-// number it is showing.
+// A REFUSED REFRESH IS NOT A REFUSAL WHILE THE LAST ANSWER IS HELD. A read that
+// could not be made again keeps its last answer (`useReading`, the feeds), and
+// the page says so ONCE, on the heading's line (kit `HeadNote`, DESIGN.md "A
+// feed that falls behind"): updates are interrupted, these are the last figures
+// received. A block above the content would move the page under the pointer.
 //
-// IT READS ONCE A MINUTE, NOT ON THE CAMPAIGNS' FIVE SECONDS. This is the tab the
-// app opens on, so its cost is paid by everybody every time. What must be live
-// (what was sent, what is switched on) is live through the root's feeds; the
-// breakdowns and subscriber counts have no subscription to follow and move over
-// hours and days, so a minute is as fresh as they can be said to be. The
-// `AutoRefresh` below reads them only while this pane is seen: a parked tab, a
-// hidden browser tab and an offline window stop reading.
+// CAMPAIGN AND CLIENT ROWS COUNT OPENS BY SEND COHORT, while nothing on the page
+// totals unique opens, so no row is laid out as a part of a figure above it.
+//
+// TWO CADENCES. The statistics are read again every fifteen minutes
+// (`STATISTICS_REFRESH_MS`, spec 7): a day's figures move over hours. What is
+// true now -- the subscriber counts -- is read again each minute, as before;
+// it has no subscription to follow. Both stop while the pane is not seen. The
+// lists' names come from the root's feeds, which are live.
 
-/** How often the breakdowns and subscriber counts are read again while this pane is seen. */
+/** How often the subscriber counts are read again while this pane is seen. */
 export const OVERVIEW_REFRESH_MS = 60_000;
 
-/** Whether a feed has something true to count: it answered, or it holds the last answer it had. */
+/** What a list says once the read has answered with nothing for it, its figures counted. */
+const NOTHING_IN_THE_PERIOD = "Nothing in this period.";
+
+/** What a list says when its figures were not counted through the period, so the read could not list it. */
+const NOT_MEASURED = "Not measured.";
+
+/** Whether a feed has something true to say: it answered, or it holds the last answer it had. */
 function answered(snapshot: LiveSnapshot<Row>): boolean {
   return snapshot.state === "live" || snapshot.state === "degraded" || (snapshot.state === "disconnected" && snapshot.rows.length > 0);
 }
@@ -61,94 +103,223 @@ function story(snapshot: LiveSnapshot<Row>): { refusal: string; kept: string } {
   return { refusal: refusalOf(snapshot.error, snapshot.rows.length), kept: snapshot.rows.length > 0 ? snapshot.error : "" };
 }
 
-export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
-  const openRecord = useOpenRecord();
-  // One clock for the 30-day window. A minute is the finest it can matter at.
-  const now = useNow(60_000);
+/** Whether a record belongs to the client in scope: every record for All, else the chosen organization's. */
+function inScope(accountIds: readonly string[], accountId: string): boolean {
+  return accountIds.length === 0 || accountIds.includes(accountId);
+}
 
-  useEmailCatalogs(["campaigns", "audiences", "rules", "journeys"]);
-  const campaignRows = feeds.campaigns.snapshot.rows;
-  const campaigns = useMemo(() => campaignRows.map(campaignFromRow).filter((campaign) => campaign.id !== ""), [campaignRows]);
-  const audienceRows = feeds.audiences.snapshot.rows;
-  const activeAudiences = useMemo(
-    () => audienceProjection(audienceRows).filter((audience) => !audienceIsArchived(audience)).map((audience) => audience.id),
-    [audienceRows],
+function factValue(fact: FactReading, label: string): ReactNode {
+  return fact.loading ? <InlineSkeleton label={`Loading ${label.toLowerCase()}`} /> : <Measure figure={fact.figure} format={formatCount} />;
+}
+
+/** The spec a figure row has chosen, or its first when the choice is not one of its own. */
+function chosen(specs: readonly FigureSpec[], id: string): FigureSpec {
+  return specs.find((spec) => spec.id === id) ?? specs[0]!;
+}
+
+/** A chart of one figure, its shape while the read is on its way, and nothing without an answer to draw. */
+function FigureChart({ spec, stats, reading }: { spec: FigureSpec; stats: EmailStatistics | null; reading: boolean }) {
+  // The chart has no reading state of its own (kit TimeChart), so its place
+  // holds the content shape, in the chart's own height.
+  if (reading) return <div className="email-overview-chart-shape"><ContentSkeleton label="Loading the chart" /></div>;
+  if (stats === null) return null;
+  return <TimeChart label={spec.label} bucket={stats.bucket} points={chartPoints(stats.series, spec.id)} previous={previousPoints(stats, spec.id)} format={formatOf(spec)} />;
+}
+
+/**
+ * A row's quiet line, each part kept whole: in a narrow window it wraps at a
+ * separator, never between a figure and its word ("1,204" over "subscribed").
+ */
+function Parts({ line }: { line: string }) {
+  return (
+    <>
+      {line.split(" · ").map((part, index) => (
+        <span key={index}>
+          {index > 0 ? " · " : null}
+          <span className="email-overview-part">{part}</span>
+        </span>
+      ))}
+    </>
   );
-  const ruleRows = feeds.rules.snapshot.rows;
-  const rules = useMemo(() => ruleRows.map(emailRuleFromRow).filter((rule) => rule.id !== ""), [ruleRows]);
+}
 
-  // The breakdowns of the campaigns a rate can be made of, and the subscribers
-  // of the audiences that can be mailed, both counted by the engine. A
-  // subscriber count that reached its window comes back a floor and is drawn as
-  // one. A rate reads only a breakdown's unique figures, which the engine
-  // withholds at their bound rather than truncates; the breakdown's count
-  // buckets are the ones that can stop at the window unflagged, and they are
-  // drawn on the campaign page, not here (useCampaignStats).
-  const wanted = useMemo(() => statsWanted(campaigns, now).map((campaign) => campaign.id), [campaigns, now]);
-  const { stats, reload: reloadStats } = useCampaignStatsFor(wanted);
-  const { counts, refusals: countRefusals, reload: reloadCounts } = useSubscriberCounts(activeAudiences);
+/** A subject of the period under its own heading, named to assistive technology as it reads. */
+function Subject({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="email-overview-section" aria-label={title}>
+      <Subhead>{title}</Subhead>
+      {children}
+    </section>
+  );
+}
+
+export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds; settings: EmailSettings; update: (patch: Partial<EmailSettings>) => void }) {
+  const openRecord = useOpenRecord();
+  useEmailCatalogs(["campaigns", "audiences", "rules", "journeys"]);
+
+  // WHOSE MAIL: the client the person chose, remembered in Email's settings,
+  // and offered only when there is a choice (D13). What a read sends is the
+  // scope's own `accountIds`, as it is.
+  const scope = useClientScope(settings.statisticsScope, (value) => update({ statisticsScope: value }));
+  const accountIds = scope.accountIds;
+  const period = settings.statisticsPeriod;
+  const stats = useEmailStatistics({ accountIds, period });
+  const value = stats.value;
+  const reading = value === null && (stats.state === "idle" || stats.state === "loading");
+  const measured = value !== null && value.measuredSince !== null;
+  const accounts = useAccountOptionsFeed();
+
+  const campaignRows = feeds.campaigns.snapshot.rows;
+  const allCampaigns = useMemo(() => campaignRows.map(campaignFromRow).filter((campaign) => campaign.id !== ""), [campaignRows]);
+  const audienceRows = feeds.audiences.snapshot.rows;
+  const allAudiences = useMemo(() => audienceProjection(audienceRows), [audienceRows]);
+  const ruleRows = feeds.rules.snapshot.rows;
+  const allRules = useMemo(() => ruleRows.map(emailRuleFromRow).filter((rule) => rule.id !== ""), [ruleRows]);
+  const journeyRows = feeds.journeys.snapshot.rows;
+  const allJourneys = useMemo(() => journeyRows.map(journeyFromRow).filter((journey) => journey.id !== ""), [journeyRows]);
+
+  // `accountIds` keeps its identity until the scope changes (useClientScope memoizes it).
+  const campaigns = useMemo(() => allCampaigns.filter((campaign) => inScope(accountIds, campaign.accountId)), [allCampaigns, accountIds]);
+  const subscribed = useMemo(
+    () => allAudiences.filter((audience) => !audienceIsArchived(audience) && inScope(accountIds, audience.accountId)).map((audience) => audience.id),
+    [allAudiences, accountIds],
+  );
+  const activeCount =
+    allRules.filter((rule) => rule.status === "active" && inScope(accountIds, rule.accountId)).length +
+    allJourneys.filter((journey) => journey.status === "active" && inScope(accountIds, journey.accountId)).length;
+
+  // THE AUDIENCES WHOSE SIZE IS ASKED: the active ones in scope (Subscriptions),
+  // and the ones the growth list names that the audiences list holds (an
+  // audience it does not hold is not asked about). The growth list's are the
+  // LAST ANSWER's, kept while a new period or client is read, so the counts are
+  // not read again for a set that only blinked.
+  const named = useRef<readonly string[]>([]);
+  if (value !== null) named.current = value.audiences.map((audience) => audience.id);
+  const known = new Set(allAudiences.map((audience) => audience.id));
+  const counted = [...new Set([...subscribed, ...named.current.filter((id) => known.has(id))])];
+  const { counts, refusals: countRefusals, reload: reloadCounts } = useSubscriberCounts(counted);
 
   const campaignsStory = story(feeds.campaigns.snapshot);
   const audiencesStory = story(feeds.audiences.snapshot);
   const rulesStory = story(feeds.rules.snapshot);
+  const journeysStory = story(feeds.journeys.snapshot);
 
-  const inputs: OverviewInputs = {
-    campaigns: { rows: campaigns, settled: answered(feeds.campaigns.snapshot), error: campaignsStory.refusal },
-    stats,
-    subscribers: counts,
-    audiencesSettled: answered(feeds.audiences.snapshot),
-    audiencesError: audiencesStory.refusal,
-    activeAutomations: {
-      count: rules.filter((rule) => rule.status === "active").length + feeds.journeys.snapshot.rows.map(journeyFromRow).filter(row => row.status === "active").length,
-      settled: answered(feeds.rules.snapshot) && answered(feeds.journeys.snapshot),
-      error: rulesStory.refusal || story(feeds.journeys.snapshot).refusal,
-    },
-    now,
-  };
-  const metrics = overviewMetrics(inputs);
+  const subscriptions = subscriptionsFact({ settled: answered(feeds.audiences.snapshot), error: audiencesStory.refusal, counts, audienceIds: subscribed });
+  const active = activeAutomationsFact({
+    count: activeCount,
+    settled: answered(feeds.rules.snapshot) && answered(feeds.journeys.snapshot),
+    error: rulesStory.refusal || journeysStory.refusal,
+  });
 
-  // WHAT THE CLUSTER REFUSED THAT LEFT A FIGURE NOTHING TO SHOW: its sentence, in
-  // the engine's own words, once however many breakdowns or counts were refused
-  // (the dashes carry it on hover too).
-  const statsRefusal = [...stats.values()].find((reading) => reading.state === "error" && reading.value === null)?.error ?? "";
+  // THE FIGURES, and the one each row's chart draws.
+  const [selected, setSelected] = useState<string>("sent");
+  const [problem, setProblem] = useState<string>("bounces");
+  const figures = statFigures(EMAIL_FIGURES, stats);
+  const problems = statFigures(DELIVERY_FIGURES, stats);
+  const refused = value === null && stats.state === "error" ? stats.error : "";
+
+  // WHAT THE CLUSTER REFUSED THAT LEFT SOMETHING NOTHING TO SHOW: its sentence,
+  // in the engine's own words, once. The statistics' stands in the chart's
+  // place, under the figures it explains; the lists' stand under the facts.
   const refusedCount = [...counts.values()].find((figure): figure is AbsentFigure => figure.kind === "absent" && figure.reason === "failed");
   const refusalNotices = [
     { sentence: "This cluster did not return your campaigns.", detail: campaignsStory.refusal },
-    { sentence: "This cluster did not return the opens and clicks.", detail: statsRefusal },
     { sentence: "This cluster did not return your subscriptions.", detail: audiencesStory.refusal || (refusedCount?.detail ?? "") },
-    { sentence: "This cluster did not return your automations.", detail: rulesStory.refusal },
+    { sentence: "This cluster did not return your automations.", detail: rulesStory.refusal || journeysStory.refusal },
   ].filter((notice) => notice.detail !== "");
 
-  // WHAT THE CLUSTER REFUSED WHILE THE LAST FIGURES WERE HELD: the sentences,
-  // each said once, for the one notice below.
-  const feedsKept = [campaignsStory.kept, audiencesStory.kept, rulesStory.kept].filter((sentence) => sentence !== "");
-  const statsKept = [...stats.values()].filter((reading) => reading.state === "error" && reading.value !== null).map((reading) => reading.error);
+  // WHAT STOPPED ARRIVING WHILE THE LAST FIGURES ARE HELD: said once, on the
+  // heading's line, with the engine's sentences on hover.
+  const feedsKept = [campaignsStory.kept, audiencesStory.kept, rulesStory.kept, journeysStory.kept].filter((sentence) => sentence !== "");
+  const statsKept = value !== null && stats.state === "error" ? [stats.error] : [];
   const countsKept = [...countRefusals].filter(([id]) => counts.get(id)?.kind === "measured").map(([, sentence]) => sentence);
-  const kept = [...new Set([...feedsKept, ...statsKept, ...countsKept])];
-
-  const behind = [feeds.campaigns, feeds.audiences, feeds.rules].filter((feed) => feedIsBehind(feed.snapshot.state));
-  const interrupted = behind.length > 0 || kept.length > 0;
-  // Figures are on screen if a feed that is behind holds its rows, or a refresh was refused over a value.
+  const kept = [...new Set([...statsKept, ...feedsKept, ...countsKept])];
+  const behind = [feeds.campaigns, feeds.audiences, feeds.rules, feeds.journeys].filter((feed) => feedIsBehind(feed.snapshot.state));
   const showing = kept.length > 0 || behind.some((feed) => feed.snapshot.rows.length > 0);
-  // Reconnecting is claimed only where it is true: the connection is what stopped,
-  // and the SDK reconnects and reads again. A feed's refusal is not retried by anything.
+  // Reconnecting is claimed only where it is true: the connection is what
+  // stopped, and the SDK reconnects and reads again. A refusal is not retried
+  // by anything but the next refresh.
   const reconnecting = behind.length > 0 && feedsKept.length === 0;
   const next = showing ? `Showing the last figures received.${reconnecting ? " Reconnecting automatically." : ""}` : "Reconnecting automatically.";
+  const interrupted = kept.length > 0 || behind.length > 0;
 
   // FIRST USE is only ever said once the cluster has answered every list: a
   // cluster that could not say what it holds has not said it holds nothing.
   const everyListAnswered = [feeds.campaigns, feeds.audiences, feeds.rules].every((feed) => answered(feed.snapshot) && feed.snapshot.error === "");
-  const firstUse = everyListAnswered && campaigns.length === 0 && rules.length === 0;
+  const firstUse = everyListAnswered && allCampaigns.length === 0 && allRules.length === 0;
+  // The period's subjects: their shapes while the read is on its way, and drawn
+  // once it answered for a period something counted.
+  const subjects = !firstUse && (reading || measured);
 
-  // A FIRST USE SAYS WHY THERE IS NO RATE ONCE, in its one sentence below: the
-  // same reason is not repeated under each dash.
-  const shown = firstUse ? metrics.map(({ detail: _detail, ...metric }) => metric) : metrics;
+  // THE LISTS' NAMES come from the feeds; a row waits for its feed's answer, and
+  // one the feed does not hold is unavailable and opens nothing.
+  const campaignNames = useMemo(() => new Map(allCampaigns.map((campaign) => [campaign.id, campaignName(campaign)])), [allCampaigns]);
+  const audienceNames = useMemo(() => new Map(allAudiences.map((audience) => [audience.id, audienceName(audience)])), [allAudiences]);
+  const automationNames = useMemo(
+    () => new Map([...allRules.map((rule) => [`rule:${rule.id}`, ruleName(rule)] as const), ...allJourneys.map((journey) => [`journey:${journey.id}`, journeyName(journey)] as const)]),
+    [allRules, allJourneys],
+  );
+  // An empty list is "nothing in this period" only where the read counted the
+  // figures its rows carry; otherwise it could not list them (`listsMeasured`).
+  const listed = value === null ? null : listsMeasured(value.totals);
+  const emptyWords = (measuredList: boolean | undefined) => (measuredList === false ? NOT_MEASURED : NOTHING_IN_THE_PERIOD);
+  const growth = value?.audiences ?? [];
+  const growthReading = reading || (growth.length > 0 && !answered(feeds.audiences.snapshot));
+  const top = value?.campaigns ?? [];
+  const topReading = reading || (top.length > 0 && !answered(feeds.campaigns.snapshot));
+  const automations = value?.automations ?? [];
+  const automationsReading = reading || (automations.length > 0 && !(answered(feeds.rules.snapshot) && answered(feeds.journeys.snapshot)));
+
+  const topRows: RankedRow[] = topReading ? [] : top.map((row) => {
+    const name = campaignNames.get(row.id);
+    return {
+      key: row.id,
+      label: name ?? "Unavailable campaign",
+      value: row.uniqueOpens,
+      secondary: campaignLine(row),
+      onOpen: name === undefined ? undefined : () => openRecord("campaigns", { id: row.id }),
+    };
+  });
+
+  // THE CLIENTS, named as the client control names them, then as the account
+  // list does; they wait for that list, which is what names them for staff.
+  const clients = value !== null && value.accounts.length > 1 ? value.accounts : [];
+  const accountsAnswered = accounts.state === "live" || accounts.state === "degraded" || accounts.accounts.length > 0;
+  const clientName = (id: string): string => {
+    const option = scope.options.find((candidate) => candidate.value === id && candidate.value !== "");
+    if (option !== undefined) return option.label;
+    const account = accounts.accounts.find((candidate) => candidate.id === id);
+    return account === undefined ? untitledAccountName(id) : accountName(account);
+  };
+  const clientRows: RankedRow[] = accountsAnswered ? clients.map((row) => ({ key: row.id, label: clientName(row.id), value: row.sent, secondary: clientLine(row) })) : [];
+
+  const mainSpec = chosen(EMAIL_FIGURES, selected);
+  const problemSpec = chosen(DELIVERY_FIGURES, problem);
+  const delivered = value !== null && providerReportsOutcomes(value.totals) ? value.totals.delivered : null;
 
   return (
-    <Overview metrics={shown}>
-      {interrupted ? <Notice tone="warn" sentence="Updates are interrupted." next={next} detail={kept.join(" ")} /> : null}
+    <Overview
+      // In first use there is no chart for a figure to choose, so none is a choice.
+      figures={<StatFigures label="Email figures" figures={figures} selected={selected} onSelect={firstUse ? undefined : setSelected} />}
+      actions={
+        <>
+          <ScopeControl id="email-overview-client" scope={scope} />
+          <PeriodControl id="email-overview-period" value={period} periods={EMAIL_PERIODS} onChange={(next) => update({ statisticsPeriod: next })} />
+        </>
+      }
+      note={interrupted ? <HeadNote sentence="Updates are interrupted." next={next} detail={kept.join(" ")} /> : undefined}
+    >
+      {refused !== "" ? (
+        <Notice tone="error" sentence="This cluster did not return the email statistics." detail={refused} />
+      ) : firstUse ? null : (
+        <FigureChart spec={mainSpec} stats={value} reading={reading} />
+      )}
+      <Facts>
+        <Fact label="Subscriptions" value={factValue(subscriptions, "Subscriptions")} />
+        <Fact label="Active automations" value={factValue(active, "Active automations")} />
+      </Facts>
       {refusalNotices.map((notice) => (
-        <Notice key={`${notice.sentence}|${notice.detail}`} tone="error" sentence={notice.sentence} detail={notice.detail} />
+        <Notice key={notice.sentence} tone="error" sentence={notice.sentence} detail={notice.detail} />
       ))}
       {firstUse ? (
         <EmptyState
@@ -159,10 +330,77 @@ export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
           Add a campaign to send a template to an audience.
         </EmptyState>
       ) : null}
-      {inputs.campaigns.settled && inputs.campaigns.error === "" ? (
+      {subjects ? (
+        <>
+          <Subject title="Delivery problems">
+            <StatFigures label="Delivery problem figures" figures={problems} selected={problem} onSelect={setProblem} />
+            <FigureChart spec={problemSpec} stats={value} reading={reading} />
+            {delivered !== null ? (
+              <Facts>
+                <Fact label="Delivered" value={<Measure figure={figureOf(delivered)} format={formatCount} />} />
+              </Facts>
+            ) : null}
+          </Subject>
+          <Subject title="Audience growth">
+            {growthReading ? (
+              <RecordListSkeleton label="Loading audience growth" rows={3} />
+            ) : growth.length === 0 ? (
+              <Caption>{emptyWords(listed?.audiences)}</Caption>
+            ) : (
+              <RecordList as="ul">
+                {growth.map((row) => {
+                  const name = audienceNames.get(row.id);
+                  return (
+                    <RecordRow
+                      key={row.id}
+                      icon={<Users size={16} aria-hidden />}
+                      name={name ?? "Unavailable audience"}
+                      secondary={<Parts line={growthLine(row, counts.get(row.id) ?? absent("unread"))} />}
+                      onOpen={name === undefined ? undefined : () => openRecord("audiences", { id: row.id })}
+                    />
+                  );
+                })}
+              </RecordList>
+            )}
+          </Subject>
+          <RankedList title="Top campaigns" rows={topRows} loading={topReading} empty={emptyWords(listed?.campaigns)} />
+          <Subject title="Automations">
+            {automationsReading ? (
+              <RecordListSkeleton label="Loading automations" rows={3} />
+            ) : automations.length === 0 ? (
+              <Caption>{emptyWords(listed?.automations)}</Caption>
+            ) : (
+              <RecordList as="ul">
+                {automations.map((row) => {
+                  const name = automationNames.get(`${row.kind}:${row.id}`);
+                  return (
+                    <RecordRow
+                      key={`${row.kind}:${row.id}`}
+                      icon={row.kind === "journey" ? <Workflow size={16} aria-hidden /> : <Zap size={16} aria-hidden />}
+                      name={name ?? "Unavailable automation"}
+                      secondary={<Parts line={automationLine(row)} />}
+                      onOpen={name === undefined ? undefined : () => openRecord("automations", { id: row.id })}
+                    />
+                  );
+                })}
+              </RecordList>
+            )}
+          </Subject>
+        </>
+      ) : null}
+      {!firstUse && answered(feeds.campaigns.snapshot) && campaignsStory.refusal === "" ? (
         <OverviewBreakdown title="Campaigns" segments={campaignDistribution(campaigns)} />
       ) : null}
-      <AutoRefresh onRefresh={() => Promise.all([reloadStats(), reloadCounts()])} intervalMs={OVERVIEW_REFRESH_MS} />
+      {subjects && clients.length > 0 ? <RankedList title="Clients" rows={clientRows} loading={!accountsAnswered} /> : null}
+      <PageHelp title="Overview">
+        <p>A rate is the share of the campaign messages sent in the period that have been opened or clicked.</p>
+        <p>Automations show no opens or clicks, because automated mail is not tracked for them.</p>
+        <p>A recipient counts once per campaign, however often they open or click it.</p>
+        <p>Mail privacy proxies open messages before their readers do, so opens are an upper bound.</p>
+        <p>Days are counted in UTC.</p>
+      </PageHelp>
+      <AutoRefresh onRefresh={stats.reload} intervalMs={STATISTICS_REFRESH_MS} />
+      <AutoRefresh onRefresh={reloadCounts} intervalMs={OVERVIEW_REFRESH_MS} />
     </Overview>
   );
 }

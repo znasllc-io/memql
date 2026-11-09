@@ -3,6 +3,8 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { chooseOption, openSelect, selectedLabel } from "../../selectControl";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 vi.mock("../../../src/live/connection", () => ({
@@ -18,22 +20,27 @@ vi.mock("../../../src/auth/context", () => ({
 const { EmailApp } = await import("../../../src/apps/email/EmailApp");
 const { EmailNavigationContext } = await import("../../../src/apps/email/openRequest");
 const { OVERVIEW_REFRESH_MS, OverviewSection } = await import("../../../src/apps/email/overview/OverviewSection");
-const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
+const { STATISTICS_REFRESH_MS } = await import("../../../src/apps/email/overview/statistics");
+const { DEFAULT_EMAIL_SETTINGS, LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
 const { useEmailFeeds } = await import("../../../src/apps/email/useEmail");
 const {
   audienceRow,
   campaignRow,
   fakeConnection,
   peakSubscriptions,
-  rowsResult,
   ruleRow,
+  statisticsRow,
+  twelveMonthsStatisticsRow,
+  unmeasuredStatisticsRow,
   withSession,
 } = await import("../harness");
 
+import type { EmailSettings } from "../../../src/apps/email/settings";
 import type { EmailFeeds } from "../../../src/apps/email/useEmail";
 import type { FakeSeed } from "../harness";
 
 type Conn = ReturnType<typeof fakeConnection>;
+type Session = Parameters<typeof withSession>[1];
 
 afterEach(() => {
   cleanup();
@@ -41,31 +48,45 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// THE OVERVIEW AS A PERSON MEETS IT (memql#6033, Ruling 22).
+// THE OVERVIEW AS A PERSON MEETS IT (spec 9): the period's email statistics for
+// one client or every client in scope, read from `emailStatistics`.
 //
-// Five measured figures and the shape of the campaigns, drawn from reads the
-// app already makes. What these tests keep honest is what the page does with a
-// read that has not answered (a shape, never a warning), one that was refused
-// (the engine's sentence, never a zero) and one that found nothing (a real
-// zero, and an offer to start).
+// Five figures and the chart of the one pressed; what is true now (who can be
+// mailed, what runs on its own); delivery problems with their own figures and
+// chart; how each audience grew; the campaigns most opened; each automation's
+// mail; the campaigns by state; and, over several clients, the clients. What
+// these tests keep honest is what the page does with a read that has not
+// answered (a shape, never a word), one that was refused (the engine's
+// sentence, never a zero) and a period nothing counted (a dash that says so,
+// never a zero) -- and that a person sees only the clients they reach.
 
-const DAY = 86_400_000;
-const daysAgo = (days: number) => new Date(Date.now() - days * DAY).toISOString();
 const DASH = "—";
 
-function memoryStore() {
+const ACCOUNTS = [
+  { id: "self", name: "Operator organization", status: "active" },
+  { id: "acct-a", name: "Acme", status: "active" },
+  { id: "acct-b", name: "Borden Ltd", status: "active" },
+];
+
+function journeyRow(over: Partial<Row> & { id: string }): Row {
+  return { accountId: "self", name: "Welcome series", description: "", status: "draft", trigger: { kind: "joined", audienceId: "a-news" }, steps: [], createdAt: "2026-08-01T00:00:00Z", ...over };
+}
+
+function memoryStore(over: Partial<EmailSettings> = {}) {
   const bag = new Map<string, string>();
-  return new LocalEmailSettingsStore({
+  const store = new LocalEmailSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
+  if (Object.keys(over).length > 0) store.save({ ...store.load(), ...over });
+  return store;
 }
 
 /** The Email window as a shell holds it: `navigate` moves it, so what a press on the Overview opens can be looked at. */
-function mountWindow(connection: Conn, section = "overview") {
+function mountWindow(connection: Conn, { section = "overview", settings = {}, session = {} }: { section?: string; settings?: Partial<EmailSettings>; session?: Session } = {}) {
   h.connection = connection;
   const navigate = vi.fn();
-  const store = memoryStore();
+  const store = memoryStore(settings);
   function Window() {
     const [current, setCurrent] = useState(section);
     return withSession(
@@ -79,29 +100,11 @@ function mountWindow(connection: Conn, section = "overview") {
         store={store}
         uploads={{ upload: vi.fn() }}
       />,
+      session,
     );
   }
   const view = render(<Window />);
-  return { view, navigate };
-}
-
-function pane(id: string): HTMLElement {
-  const node = document.querySelector<HTMLElement>(`[data-email-section="${id}"]`);
-  if (node === null) throw new Error(`the ${id} section is not mounted`);
-  return node;
-}
-
-/** One figure's cell: its label, its value and what is said beneath. */
-function cell(label: string) {
-  const node = document.querySelector<HTMLElement>(`[data-overview-metric="${label}"]`);
-  if (node === null) throw new Error(`no figure named ${label}`);
-  return {
-    value: node.querySelector("dd")?.textContent ?? "",
-    note: node.querySelector("small")?.textContent ?? null,
-    shaped: node.querySelector("dd [role='status']") !== null,
-    /** What the dash says on hover. */
-    hover: node.querySelector(".os-figure-absent")?.getAttribute("title") ?? null,
-  };
+  return { view, navigate, store };
 }
 
 /** The Overview on its own over the root's feeds, with the feeds in hand: what a test needs to make one of them fail. */
@@ -111,300 +114,567 @@ function standalone(conn: Conn) {
   const navigation = { openRecord: vi.fn(), openSettings: vi.fn(), openInbox: vi.fn() };
   function Page() {
     const feeds = useEmailFeeds();
+    const [settings, setSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS);
     held.feeds = feeds;
     return (
       <EmailNavigationContext.Provider value={navigation}>
-        <OverviewSection feeds={feeds} />
+        <OverviewSection feeds={feeds} settings={settings} update={(patch) => setSettings((now) => ({ ...now, ...patch }))} />
       </EmailNavigationContext.Provider>
     );
   }
-  render(<Page />);
+  render(withSession(<Page />));
   return held;
+}
+
+function pane(id: string): HTMLElement {
+  const node = document.querySelector<HTMLElement>(`[data-email-section="${id}"]`);
+  if (node === null) throw new Error(`the ${id} section is not mounted`);
+  return node;
+}
+
+/** One figure of a figure row: what it says, and whether it is a shape, or the one its chart draws. */
+function figure(id: string) {
+  const node = document.querySelector<HTMLElement>(`[data-stat-figure="${id}"]`);
+  if (node === null) throw new Error(`no figure ${id}`);
+  return {
+    node,
+    label: node.querySelector(".os-stat-figure-label")?.textContent ?? "",
+    value: node.querySelector(".os-stat-figure-value")?.textContent ?? "",
+    change: node.querySelector(".os-stat-figure-change")?.textContent ?? "",
+    shaped: node.querySelector(".os-stat-figure-value [role='status']") !== null,
+    /** What the dash says on hover. */
+    hover: node.querySelector(".os-figure-absent")?.getAttribute("title") ?? null,
+    checked: node.getAttribute("aria-checked"),
+  };
+}
+
+/** A chart: what it draws, its one sentence, whether a previous period is drawn under it, and what an empty plot says. */
+function chart(node: Element | null) {
+  if (node === null) throw new Error("no chart");
+  const plot = node.querySelector("[aria-roledescription='chart']");
+  return {
+    label: plot?.getAttribute("aria-label") ?? "",
+    summary: node.querySelector("figcaption")?.textContent ?? "",
+    previous: node.querySelector("[data-series='previous']") !== null,
+    empty: node.querySelector(".os-time-chart-empty")?.textContent ?? "",
+  };
+}
+
+/** The page's own chart, directly under its figures. */
+const mainChart = () => chart(document.querySelector(".os-overview > .os-time-chart"));
+
+/** A fact of the page: its value as read. */
+function fact(label: string, within: ParentNode = document): string {
+  const row = [...within.querySelectorAll(".os-fact")].find((node) => node.querySelector("dt")?.textContent === label);
+  if (row === undefined) throw new Error(`no fact ${label}`);
+  return row.querySelector("dd")?.textContent ?? "";
+}
+
+/** A record list's rows as read: the name, then its quiet line. */
+function records(section: HTMLElement): string[] {
+  return [...section.querySelectorAll(".os-record-row")].map((row) =>
+    [row.querySelector(".os-row-name")?.textContent ?? "", row.querySelector(".os-record-secondary")?.textContent ?? ""].filter(Boolean).join(" "),
+  );
+}
+
+/** A ranked list's rows as read: label, quiet line, value. */
+function ranked(section: HTMLElement): string[] {
+  return [...section.querySelectorAll(".os-ranked-row")].map((row) =>
+    [row.querySelector(".os-ranked-label")?.textContent, row.querySelector(".os-ranked-secondary")?.textContent, row.querySelector(".os-ranked-value")?.textContent].filter(Boolean).join(" | "),
+  );
 }
 
 /** The notices on the page: how many stories it tells. */
 const notices = () => [...document.querySelectorAll<HTMLElement>(".os-notice")].map((node) => node.textContent ?? "");
 
-/** `campaignStats` answering per campaign, as the engine does. */
-function statsAre(conn: Conn, byCampaign: Record<string, Row>) {
-  conn.query.campaignStats.mockImplementation(async (args) => {
-    const row = byCampaign[(args as { campaignId?: string }).campaignId ?? ""];
-    return rowsResult(row === undefined ? [] : [row]);
-  });
-}
+/** What the heading's line says has stopped arriving. */
+const headNote = () => document.querySelector<HTMLElement>(".os-overview > .os-head .os-head-note");
 
 /** A cluster with a month of mail on it. */
 function seeded(over: FakeSeed = {}) {
-  const conn = fakeConnection({
+  return fakeConnection({
+    accounts: ACCOUNTS,
     campaigns: [
-      campaignRow({ id: "a", name: "July update", status: "sent", startedAt: daysAgo(3), recipientCount: 1000, sentCount: 1000 }),
-      campaignRow({ id: "b", name: "August update", status: "sending", startedAt: daysAgo(0), recipientCount: 600, sentCount: 500 }),
-      campaignRow({ id: "old", name: "Spring sale", status: "sent", startedAt: daysAgo(60), recipientCount: 9000, sentCount: 9000 }),
-      campaignRow({ id: "draft", name: "Autumn sale" }),
+      campaignRow({ id: "c-winter", name: "Winter launch", status: "sent", startedAt: "2026-10-20T09:00:00Z", recipientCount: 600, sentCount: 600 }),
+      campaignRow({ id: "c-restock", name: "Restock alert", status: "sending", startedAt: "2026-11-07T09:00:00Z", recipientCount: 700, sentCount: 604 }),
+      campaignRow({ id: "c-draft", name: "Autumn sale" }),
+      campaignRow({ id: "c-borden", name: "Borden spring", accountId: "acct-b" }),
     ],
     audiences: [
-      audienceRow({ id: "a1", name: "Newsletter" }),
-      audienceRow({ id: "a2", name: "Signups" }),
-      audienceRow({ id: "a3", name: "Old list", status: "archived" }),
+      audienceRow({ id: "a-news", name: "Newsletter" }),
+      audienceRow({ id: "a-signups", name: "Signups" }),
+      audienceRow({ id: "a-old", name: "Old list", status: "archived" }),
+      audienceRow({ id: "a-borden", name: "Borden customers", accountId: "acct-b" }),
     ],
-    subscriberCounts: { a1: 1204, a2: 86, a3: 500 },
+    subscriberCounts: { "a-news": 1204, "a-signups": 86, "a-old": 500, "a-borden": 40 },
     emailRules: [
-      ruleRow({ id: "r1", name: "Welcome admins", status: "active" }),
-      ruleRow({ id: "r2", name: "Tell the owner", status: "active" }),
-      ruleRow({ id: "r3", name: "Old rule", status: "paused" }),
+      ruleRow({ id: "r-welcome", name: "Welcome admins", status: "active" }),
+      ruleRow({ id: "r-paused", name: "Old rule", status: "paused" }),
+      ruleRow({ id: "r-borden", name: "Borden receipts", status: "active", accountId: "acct-b" }),
     ],
+    journeys: [journeyRow({ id: "j-series", name: "Welcome series", status: "active" })],
+    emailStatistics: [statisticsRow()],
     ...over,
   });
-  // A caller that seeds the breakdowns itself (or a refusal of them) is not overridden.
-  if (over.campaignStats === undefined) {
-    statsAre(conn, {
-      a: { sent: 1000, opens: { unique: 300, total: 420 }, clicks: { unique: 50, total: 60 } },
-      b: { sent: 500, opens: { unique: 100, total: 130 }, clicks: { unique: 25, total: 30 } },
-    });
-  }
-  return conn;
 }
 
-/** Hold the three lists back until the test lets them go. */
-function gated(conn: Conn) {
+/** Hold the statistics read back until the test lets it go. */
+function gatedStatistics(conn: Conn) {
   let release!: () => void;
   const gate = new Promise<void>((done) => { release = done; });
-  for (const read of [conn.query.campaigns, conn.query.audiences, conn.query.emailRules]) {
-    const answer = read.getMockImplementation()!;
-    read.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
-  }
+  const answer = conn.query.emailStatistics.getMockImplementation()!;
+  conn.query.emailStatistics.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
   return release;
 }
 
-describe("what the Overview measures", () => {
-  it("measures what was sent and who is subscribed", async () => {
+/** The last arguments the statistics read was called with. */
+const lastAsked = (conn: Conn) => conn.query.emailStatistics.mock.calls.at(-1)?.[0];
+
+describe("the period's figures", () => {
+  it("shows the period's figures from the read", async () => {
+    const conn = seeded();
+    mountWindow(conn);
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect([...document.querySelectorAll(".os-overview > .os-stat-figures [data-stat-figure]")].map((node) => node.querySelector(".os-stat-figure-label")?.textContent)).toEqual([
+      "Sent",
+      "Open rate",
+      "Click rate",
+      "Unsubscribes",
+      "New subscribers",
+    ]);
+    // Each against the thirty days before, which were counted throughout.
+    expect(figure("sent").change).toBe("+12%");
+    expect(figure("openRate")).toMatchObject({ value: "42%", change: "+5%" });
+    expect(figure("clickRate")).toMatchObject({ value: "3.1%", change: "No change" });
+    expect(figure("unsubscribes")).toMatchObject({ value: "38", change: "−25%" });
+    expect(figure("subscribes")).toMatchObject({ value: "212", change: "New" });
+
+    // Read for the last thirty days, for every client in scope: no client named.
+    expect(conn.query.emailStatistics).toHaveBeenCalledTimes(1);
+    expect(lastAsked(conn)).toEqual({ accountIds: [], period: "30d" });
+
+    // What is true now, beneath: the active audiences' subscriptions and what is switched on.
+    await waitFor(() => expect(fact("Subscriptions")).toBe("1,330"));
+    expect(fact("Active automations")).toBe("3");
+    expect(screen.getByRole("heading", { level: 3, name: "Overview" })).toBeTruthy();
+    expect(selectedLabel(screen.getByLabelText("Period"))).toBe("Last 30 days");
+  });
+
+  it("states a rate from the campaign mail the read counted, not from the period's opens", async () => {
+    // 900 messages were first opened in the period: 75% of the 1,204 sent. The
+    // open rate is of the campaign messages sent in it, opened on any day: 42%.
     mountWindow(seeded());
 
-    // 1,000 + 500 sent in the last 30 days, not the 9,000 of two months ago.
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("1,500"));
-    // (300 + 100) of 1,500 opened; (50 + 25) of 1,500 clicked.
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-    expect(cell("Click rate").value).toBe("5.0%");
-    // The archived audience is not counted.
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
-    // Two rules are On, one is paused.
-    expect(cell("Active automations").value).toBe("2");
-    expect(screen.getByRole("heading", { level: 3, name: "Overview" })).toBeTruthy();
-    // The page measures; it no longer instructs. The old setup panel is gone.
-    expect(screen.queryByText("Sending preparation")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Review sending setup" })).toBeNull();
+    await waitFor(() => expect(figure("openRate").value).toBe("42%"));
+    expect(figure("openRate").value).not.toBe("75%");
+    expect(figure("clickRate").value).toBe("3.1%");
   });
 
-  it("reads a breakdown only for a campaign that can have a rate", async () => {
+  it("charts the figure pressed, against the previous period", async () => {
+    mountWindow(seeded());
+
+    await waitFor(() => expect(mainChart().label).toBe("Sent"));
+    expect(figure("sent").checked).toBe("true");
+    expect(mainChart().summary).toBe("Sent: 30 points from Oct 10 to Nov 8; highest 64 on Oct 15.");
+    expect(mainChart().previous).toBe(true);
+
+    fireEvent.click(figure("openRate").node);
+    expect(figure("openRate").checked).toBe("true");
+    expect(figure("sent").checked).toBe("false");
+    expect(mainChart().label).toBe("Open rate");
+    expect(mainChart().summary).toBe("Open rate: 30 points from Oct 10 to Nov 8; highest 55% on Oct 30.");
+
+    // The figures are one choice: the arrow keys move it.
+    fireEvent.keyDown(figure("openRate").node, { key: "ArrowRight" });
+    expect(mainChart().label).toBe("Click rate");
+    expect(document.activeElement).toBe(figure("clickRate").node);
+  });
+
+  it("draws shapes while it reads, never a word", async () => {
     const conn = seeded();
-    // Counting nothing, sending nothing, and a month old: none of them can.
-    conn.query.campaigns.mockResolvedValue(rowsResult([
-      campaignRow({ id: "a", status: "sent", startedAt: daysAgo(3), sentCount: 10, recipientCount: 10 }),
-      campaignRow({ id: "untracked", status: "sent", startedAt: daysAgo(3), sentCount: 10, recipientCount: 10, trackOpens: false, trackClicks: false }),
-      campaignRow({ id: "silent", status: "sending", startedAt: daysAgo(0), sentCount: 0, recipientCount: 10 }),
-      campaignRow({ id: "old", status: "sent", startedAt: daysAgo(45), sentCount: 10, recipientCount: 10 }),
-      campaignRow({ id: "draft" }),
-    ]));
-    statsAre(conn, { a: { sent: 10, opens: { unique: 3, total: 3 }, clicks: { unique: 1, total: 1 } } });
+    const release = gatedStatistics(conn);
     mountWindow(conn);
 
-    await waitFor(() => expect(cell("Open rate").value).toBe("30%"));
-    const asked = conn.query.campaignStats.mock.calls.map(([args]) => (args as { campaignId: string }).campaignId);
-    expect(asked).toEqual(["a"]);
-  });
+    await waitFor(() => expect(figure("sent").shaped).toBe(true));
+    for (const id of ["sent", "openRate", "clickRate", "unsubscribes", "subscribes", "bounces", "complaints", "failed", "suppressed"]) {
+      expect(figure(id).shaped).toBe(true);
+      expect(figure(id).value).not.toContain(DASH);
+    }
+    // The chart's place holds a shape too: the chart itself has no reading of its own.
+    expect(document.querySelector(".os-time-chart")).toBeNull();
+    expect(within(pane("overview")).getAllByRole("status").map((node) => node.textContent)).toEqual(
+      expect.arrayContaining(["Loading sent", "Loading the chart", "Loading audience growth", "Loading top campaigns", "Loading automations"]),
+    );
+    expect(pane("overview").querySelector(".os-notice")).toBeNull();
+    expect(screen.queryByText("Nothing sent yet")).toBeNull();
 
-  it("counts each active audience's subscribers once, and nothing for a cluster with none", async () => {
-    const conn = seeded();
-    mountWindow(conn);
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
-    const counted = conn.query.audienceSubscriberCount.mock.calls.map(([args]) => (args as { audienceId: string }).audienceId).sort();
-    expect(counted).toEqual(["a1", "a2"]);
-  });
-
-  it("says a sum that includes a count stopped at the engine's window is at least that", async () => {
-    // Newsletter is larger than the engine's window: 5,000 is where its count
-    // stopped, so the total is a floor too -- never 5,086 as if it were exact.
-    mountWindow(seeded({ subscriberCounts: { a1: { atLeast: 5000 }, a2: 86, a3: 500 } }));
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("5,086 or more"));
-  });
-
-  it("draws the campaign distribution", async () => {
-    const campaigns = [
-      campaignRow({ id: "d1", status: "draft" }),
-      campaignRow({ id: "d2", status: "draft" }),
-      campaignRow({ id: "s1", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
-      campaignRow({ id: "g1", status: "sending", startedAt: daysAgo(0), recipientCount: 10, sentCount: 4 }),
-      campaignRow({ id: "x1", status: "sent", startedAt: daysAgo(2), sentCount: 5, recipientCount: 5 }),
-      campaignRow({ id: "x2", status: "sent", startedAt: daysAgo(40), sentCount: 5, recipientCount: 5 }),
-      campaignRow({ id: "x3", status: "sent", startedAt: daysAgo(50), sentCount: 5, recipientCount: 5 }),
-      campaignRow({ id: "p1", status: "paused", startedAt: daysAgo(1), sentCount: 1, recipientCount: 5 }),
-      campaignRow({ id: "f1", status: "failed" }),
-    ];
-    mountWindow(seeded({ campaigns }));
-
-    const breakdown = await screen.findByRole("region", { name: "Campaigns" });
-    // Every campaign the cluster has, not the last 30 days'.
-    expect(within(breakdown).getByRole("heading", { level: 4, name: "Campaigns" })).toBeTruthy();
-    expect(within(breakdown).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-      "Draft2",
-      "Scheduled1",
-      "Sending1",
-      "Sent3",
-      "Other2",
-    ]);
+    await act(async () => release());
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(figure("sent").shaped).toBe(false);
+    expect(mainChart().label).toBe("Sent");
   });
 });
 
-describe("a read that has not answered", () => {
-  it("draws shapes while reading, not a warning", async () => {
-    const conn = seeded();
-    const release = gated(conn);
-    mountWindow(conn);
+describe("delivery problems", () => {
+  it("charts delivery problems from their own figures", async () => {
+    mountWindow(seeded());
 
-    // Every figure is the shape of a figure.
-    await waitFor(() => expect(cell("Sent, 30 days").shaped).toBe(true));
-    for (const label of ["Sent, 30 days", "Open rate", "Click rate", "Subscriptions", "Active automations"]) {
-      expect(cell(label).shaped).toBe(true);
-      expect(cell(label).value).not.toContain(DASH);
-    }
-    expect(within(pane("overview")).getAllByRole("status").map((node) => node.textContent)).toEqual(
-      expect.arrayContaining(["Loading sent, 30 days", "Loading open rate", "Loading click rate", "Loading subscriptions", "Loading active automations"]),
-    );
-    // No warning about nothing being wrong, and no offer to start while the answer is unknown.
-    expect(pane("overview").querySelector(".os-notice")).toBeNull();
-    expect(screen.queryByText(/not current/i)).toBeNull();
-    expect(screen.queryByText("Nothing sent yet")).toBeNull();
-    expect(screen.queryByRole("region", { name: "Campaigns" })).toBeNull();
+    const section = await screen.findByRole("region", { name: "Delivery problems" });
+    await waitFor(() => expect(figure("bounces").value).toBe("7"));
+    expect(within(section).getByRole("radiogroup").querySelectorAll("[data-stat-figure]").length).toBe(4);
+    expect([...within(section).getAllByRole("radio")].map((node) => node.getAttribute("data-stat-figure"))).toEqual(["bounces", "complaints", "failed", "suppressed"]);
+    expect(figure("bounces")).toMatchObject({ label: "Bounces", change: "No change" });
+    expect(figure("complaints")).toMatchObject({ label: "Complaints", value: "1", change: "New" });
+    expect(figure("failed")).toMatchObject({ label: "Failed", value: "3", change: "−50%" });
+    expect(figure("suppressed")).toMatchObject({ label: "Suppressed", value: "4", change: "No change" });
 
-    await act(async () => release());
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("1,500"));
-    expect(cell("Sent, 30 days").shaped).toBe(false);
+    const own = () => chart(section.querySelector(".os-time-chart"));
+    expect(own().label).toBe("Bounces");
+    expect(own().summary).toBe("Bounces: 30 points from Oct 10 to Nov 8; highest 2 on Oct 13.");
+
+    fireEvent.click(figure("complaints").node);
+    expect(own().label).toBe("Complaints");
+    // The page's own figure and chart are not moved by it.
+    expect(figure("sent").checked).toBe("true");
+    expect(mainChart().label).toBe("Sent");
   });
 
-  it("shows a rate's shape until every breakdown it is made of has answered", async () => {
+  it("says how many were delivered only where the provider reports outcomes", async () => {
+    const reported = mountWindow(seeded({ emailStatistics: [statisticsRow({ totals: { delivered: 1180, undelivered: 9 } })] }));
+    const section = await screen.findByRole("region", { name: "Delivery problems" });
+    await waitFor(() => expect(fact("Delivered", section)).toBe("1,180"));
+    reported.view.unmount();
+
+    // None delivered and four refused is still the provider reporting.
+    const refused = mountWindow(seeded({ emailStatistics: [statisticsRow({ totals: { delivered: 0, undelivered: 4 } })] }));
+    await waitFor(() => expect(fact("Delivered", screen.getByRole("region", { name: "Delivery problems" }))).toBe("0"));
+    refused.view.unmount();
+
+    // No delivered or undelivered fact in the period: the provider reports no outcomes, and Delivered is not said at all.
+    mountWindow(seeded());
+    await waitFor(() => expect(figure("bounces").value).toBe("7"));
+    expect(within(screen.getByRole("region", { name: "Delivery problems" })).queryByText("Delivered")).toBeNull();
+    expect([...document.querySelectorAll(".os-fact dt")].map((node) => node.textContent)).not.toContain("Delivered");
+  });
+});
+
+describe("the period's lists", () => {
+  it("lists each audience's growth, and a row opens the audience", async () => {
+    const { navigate } = mountWindow(seeded());
+
+    const section = await screen.findByRole("region", { name: "Audience growth" });
+    await waitFor(() => expect(records(section)).toEqual([
+      "Newsletter 12 new · 3 unsubscribed · +9 net · 1,204 subscribed",
+      "Signups 2 new · 5 unsubscribed · −3 net · 86 subscribed",
+    ]));
+
+    fireEvent.click(within(section).getByRole("button", { name: /^Newsletter/ }));
+    expect(navigate).toHaveBeenCalledWith("audiences", { fromContent: true });
+    expect(await screen.findByRole("heading", { level: 3, name: "Newsletter" })).toBeTruthy();
+    expect(pane("overview").hidden).toBe(true);
+  });
+
+  it("leaves an audience's size out until it has been counted", async () => {
     const conn = seeded();
     let release!: () => void;
     const gate = new Promise<void>((done) => { release = done; });
-    const answer = conn.query.campaignStats.getMockImplementation()!;
-    conn.query.campaignStats.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    const count = conn.query.audienceSubscriberCount.getMockImplementation()!;
+    conn.query.audienceSubscriberCount.mockImplementation(async (args, opts) => { await gate; return count(args, opts); });
     mountWindow(conn);
 
-    // What does not depend on a breakdown is already there.
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("1,500"));
-    expect(cell("Open rate").shaped).toBe(true);
-    expect(cell("Click rate").shaped).toBe(true);
-    expect(pane("overview").querySelector(".os-notice")).toBeNull();
+    const section = await screen.findByRole("region", { name: "Audience growth" });
+    await waitFor(() => expect(records(section)[0]).toBe("Newsletter 12 new · 3 unsubscribed · +9 net"));
+    expect(section.textContent).not.toContain("0 subscribed");
 
     await act(async () => release());
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-    expect(cell("Open rate").shaped).toBe(false);
+    await waitFor(() => expect(records(section)[0]).toBe("Newsletter 12 new · 3 unsubscribed · +9 net · 1,204 subscribed"));
+  });
+
+  it("ranks the top campaigns by unique opens in the read's order, and a row opens the campaign", async () => {
+    const { navigate } = mountWindow(seeded());
+
+    const list = await screen.findByRole("region", { name: "Top campaigns" });
+    // The read's order, valued by unique opens: Restock alert sent more and was opened less.
+    await waitFor(() => expect(ranked(list)).toEqual([
+      "Winter launch | 50% opened · 5.7% clicked | 300",
+      "Restock alert | 33% opened · 3.2% clicked | 200",
+    ]));
+
+    fireEvent.click(within(list).getByRole("button", { name: /Winter launch/ }));
+    expect(navigate).toHaveBeenCalledWith("campaigns", { fromContent: true });
+    expect(await screen.findByRole("heading", { level: 3, name: "Winter launch" })).toBeTruthy();
+  });
+
+  it("lists each automation's sent, failed and suppressed, and a row opens its page", async () => {
+    const { navigate } = mountWindow(seeded());
+
+    const section = await screen.findByRole("region", { name: "Automations" });
+    await waitFor(() => expect(records(section)).toEqual([
+      "Welcome admins 120 sent · 2 failed · 1 suppressed",
+      "Welcome series 40 sent · 0 failed · 0 suppressed",
+    ]));
+
+    fireEvent.click(within(section).getByRole("button", { name: /^Welcome admins/ }));
+    expect(navigate).toHaveBeenCalledWith("automations", { fromContent: true });
+    expect(await screen.findByRole("heading", { level: 3, name: "Welcome admins" })).toBeTruthy();
+  });
+
+  it("names a record the lists do not hold as unavailable, and does not offer to open it", async () => {
+    mountWindow(seeded({
+      emailStatistics: [statisticsRow({
+        campaigns: [{ id: "c-gone", sent: 10, uniqueOpens: 4, uniqueClicks: 1, openRate: 0.4, clickRate: 0.1 }],
+        audiences: [{ id: "a-gone", subscribes: 1, unsubscribes: 0, net: 1 }],
+        automations: [{ id: "r-gone", kind: "rule", sent: 5, failed: 0, suppressed: 0 }],
+      })],
+    }));
+
+    const campaigns = await screen.findByRole("region", { name: "Top campaigns" });
+    await waitFor(() => expect(ranked(campaigns)).toEqual(["Unavailable campaign | 40% opened · 10% clicked | 4"]));
+    expect(within(campaigns).queryByRole("button")).toBeNull();
+    const growth = screen.getByRole("region", { name: "Audience growth" });
+    expect(records(growth)).toEqual(["Unavailable audience 1 new · 0 unsubscribed · +1 net"]);
+    expect(within(growth).queryByRole("button")).toBeNull();
+    expect(records(screen.getByRole("region", { name: "Automations" }))).toEqual(["Unavailable automation 5 sent · 0 failed · 0 suppressed"]);
+  });
+
+  it("says a list is empty only once the read has answered", async () => {
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ campaigns: [], audiences: [], automations: [] })] }));
+
+    for (const name of ["Audience growth", "Top campaigns", "Automations"]) {
+      const section = await screen.findByRole("region", { name });
+      await waitFor(() => expect(section.textContent).toContain("Nothing in this period."));
+    }
+  });
+
+  it("says a list was not measured, rather than empty, where its figures were not counted", async () => {
+    // The rollup has walked the sends, not yet the subscription changes or the opens:
+    // their figures are null and their lists arrive empty, which is not "nothing happened".
+    mountWindow(seeded({
+      emailStatistics: [statisticsRow({
+        totals: { subscribes: null, unsubscribes: null, bounces: null, complaints: null, opens: null, clicks: null, uniqueOpens: null, uniqueClicks: null, openRate: null, clickRate: null },
+        campaigns: [],
+        audiences: [],
+        automations: [],
+      })],
+    }));
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(screen.getByRole("region", { name: "Audience growth" }).textContent).toContain("Not measured.");
+    expect(screen.getByRole("region", { name: "Top campaigns" }).textContent).toContain("Not measured.");
+    // The sends were counted: no automation sent mail.
+    expect(screen.getByRole("region", { name: "Automations" }).textContent).toContain("Nothing in this period.");
+    expect(pane("overview").textContent).not.toContain("No campaign mail was sent in this period.");
+    expect(figure("openRate").value).toBe(DASH);
+    expect(figure("subscribes").value).toBe(DASH);
+  });
+
+  it("keeps the campaigns by state", async () => {
+    mountWindow(seeded());
+
+    const breakdown = await screen.findByRole("region", { name: "Campaigns" });
+    // The client in scope's campaigns: every client's, here.
+    expect(within(breakdown).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Draft2", "Sending1", "Sent1"]);
+  });
+});
+
+describe("a period with nothing to compare", () => {
+  it("shows no comparison for twelve months", async () => {
+    const conn = seeded({ emailStatistics: [twelveMonthsStatisticsRow()] });
+    mountWindow(conn, { settings: { statisticsPeriod: "12m" } });
+
+    await waitFor(() => expect(figure("sent").value).toBe("14,020"));
+    expect(lastAsked(conn)).toEqual({ accountIds: [], period: "12m" });
+    expect(selectedLabel(screen.getByLabelText("Period"))).toBe("Last 12 months");
+    // No change on any figure, and no previous line on any chart.
+    const changes = [...document.querySelectorAll(".os-stat-figure-change")].map((node) => node.textContent);
+    expect(changes.length).toBe(9);
+    expect(changes.every((text) => text === "")).toBe(true);
+    expect(document.querySelector("[data-series='previous']")).toBeNull();
+    // The current month and the twelve before it.
+    expect(mainChart().summary).toMatch(/^Sent: 13 points from Nov 2025 to Nov 2026; /);
+  });
+
+  it("shows no change against a previous period that began before counting did", async () => {
+    // Counting began on Sep 20; the thirty days before began on Sep 10, ten of them uncounted.
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ measuredSince: "2026-09-20" })] }));
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect([...document.querySelectorAll(".os-stat-figure-change")].every((node) => node.textContent === "")).toBe(true);
+    expect(document.querySelector("[data-series='previous']")).toBeNull();
+  });
+});
+
+describe("whose mail", () => {
+  it("lets staff choose among every client, and lists the clients", async () => {
+    mountWindow(seeded({
+      emailStatistics: [statisticsRow({
+        accounts: [
+          { id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 },
+          { id: "acct-b", sent: 304, uniqueOpens: 0, uniqueClicks: 0, openRate: null, clickRate: null },
+        ],
+      })],
+    }));
+
+    const control = await screen.findByLabelText("Client");
+    expect(selectedLabel(control)).toBe("All clients");
+    await waitFor(() => expect(within(openSelect(control)).getAllByRole("option").map((option) => option.textContent)).toEqual(["All clients", "Acme", "Borden Ltd", "Operator organization"]));
+    chooseOption(control, "All clients");
+
+    const clients = await screen.findByRole("region", { name: "Clients" });
+    // By sent, each with its open rate; a client that sent no campaign mail has none to state.
+    await waitFor(() => expect(ranked(clients)).toEqual(["Acme | 45% opened | 900", "Borden Ltd | 304"]));
+  });
+
+  it("lists no clients when the read covers one", async () => {
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: [{ id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 }] })] }));
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(screen.queryByRole("region", { name: "Clients" })).toBeNull();
+  });
+
+  it("shows a member of one client no client control and no other client", async () => {
+    const conn = seeded();
+    mountWindow(conn, { session: { role: "user", everyAccount: false, accountIds: ["acct-a"] } });
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Clients" })).toBeNull();
+    // Their scope is their organization: the read names none, and the server narrows it.
+    expect(lastAsked(conn)).toEqual({ accountIds: [], period: "30d" });
+    for (const name of ["Borden Ltd", "Operator organization", "All clients", "All my clients"]) {
+      expect(document.body.textContent).not.toContain(name);
+    }
+  });
+
+  it("sends the chosen client and period to the read, and remembers both", async () => {
+    const conn = seeded();
+    const { store } = mountWindow(conn);
+
+    const control = await screen.findByLabelText("Client");
+    await waitFor(() => expect(within(openSelect(control)).getAllByRole("option")).toHaveLength(4));
+    chooseOption(control, "Borden Ltd");
+
+    await waitFor(() => expect(lastAsked(conn)).toEqual({ accountIds: ["acct-b"], period: "30d" }));
+    expect(store.load().statisticsScope).toBe("acct-b");
+
+    // Email offers its own periods: no 24 hours, because its facts are counted by the day.
+    const period = screen.getByLabelText("Period");
+    expect(within(openSelect(period)).getAllByRole("option").map((option) => option.textContent)).toEqual(["Last 7 days", "Last 30 days", "Last 90 days", "Last 12 months"]);
+    chooseOption(period, "Last 7 days");
+    await waitFor(() => expect(lastAsked(conn)).toEqual({ accountIds: ["acct-b"], period: "7d" }));
+    expect(store.load().statisticsPeriod).toBe("7d");
+  });
+
+  it("reads under the remembered client from the first read", async () => {
+    const conn = seeded();
+    mountWindow(conn, { settings: { statisticsScope: "acct-b", statisticsPeriod: "90d" } });
+
+    await waitFor(() => expect(conn.query.emailStatistics).toHaveBeenCalled());
+    expect(conn.query.emailStatistics.mock.calls[0]?.[0]).toEqual({ accountIds: ["acct-b"], period: "90d" });
+  });
+
+  it("counts what is true now over the chosen client's audiences and automations", async () => {
+    mountWindow(seeded(), { settings: { statisticsScope: "acct-b" } });
+
+    await waitFor(() => expect(fact("Subscriptions")).toBe("40"));
+    expect(fact("Active automations")).toBe("1");
+    const breakdown = await screen.findByRole("region", { name: "Campaigns" });
+    expect(within(breakdown).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Draft1"]);
+  });
+});
+
+describe("a period nothing counted", () => {
+  it("says nothing was measured, never zero", async () => {
+    mountWindow(seeded({ emailStatistics: [unmeasuredStatisticsRow()] }));
+
+    await waitFor(() => expect(figure("sent").shaped).toBe(false));
+    for (const id of ["sent", "openRate", "clickRate", "unsubscribes", "subscribes"]) {
+      expect(figure(id).value).toBe(DASH);
+      expect(figure(id).hover).toBe("Nothing has been recorded yet.");
+      expect(figure(id).change).toBe("");
+    }
+    // The chart says it once; the lists of what happened are not drawn over a period nothing counted.
+    expect(mainChart().empty).toBe("Not measured");
+    for (const name of ["Delivery problems", "Audience growth", "Top campaigns", "Automations", "Clients"]) {
+      expect(screen.queryByRole("region", { name })).toBeNull();
+    }
+    expect(pane("overview").textContent).not.toMatch(/(^|[^\d.,])0%/);
+    // What is true now is still said: it was counted.
+    await waitFor(() => expect(fact("Subscriptions")).toBe("1,330"));
   });
 });
 
 describe("a read that was refused", () => {
   it("says what the engine said, never a zero", async () => {
-    const conn = seeded({
-      campaignStats: new Error("Reading the breakdown is not yours to do."),
-      subscriberCounts: { a1: new Error("Counting subscribers is not yours to do."), a2: 86 },
-    });
-    conn.query.emailRules.mockRejectedValue(new Error("Reading automations is not yours to do."));
-    mountWindow(conn);
+    mountWindow(seeded({ emailStatistics: new Error("Email statistics are not yours to read.") }));
 
-    await waitFor(() => expect(cell("Open rate").value).toBe(DASH));
-    expect(cell("Click rate").value).toBe(DASH);
-    expect(cell("Subscriptions").value).toBe(DASH);
-    expect(cell("Active automations").value).toBe(DASH);
-    // What did answer is still a number.
-    expect(cell("Sent, 30 days").value).toBe("1,500");
-
-    // Each refusal once, in the engine's own words.
-    const text = pane("overview").textContent ?? "";
-    for (const sentence of [
-      "Reading the breakdown is not yours to do.",
-      "Counting subscribers is not yours to do.",
-      "Reading automations is not yours to do.",
-    ]) {
-      expect(text.split(sentence).length - 1).toBe(1);
+    await waitFor(() => expect(figure("sent").value).toBe(DASH));
+    for (const id of ["sent", "openRate", "clickRate", "unsubscribes", "subscribes"]) {
+      expect(figure(id).value).toBe(DASH);
+      expect(figure(id).hover).toBe("Email statistics are not yours to read.");
     }
-    expect(text).not.toMatch(/(^|[^\d.])0%/);
+    expect(notices()).toEqual(["This cluster did not return the email statistics.Email statistics are not yours to read."]);
+    // No chart of a read that did not come back, and no figure to choose for one.
+    expect(document.querySelector(".os-time-chart")).toBeNull();
+    expect(document.querySelector("[role='radio']")).toBeNull();
+    expect(pane("overview").textContent).not.toMatch(/(^|[^\d.,])0%/);
+    // What did answer still does.
+    await waitFor(() => expect(fact("Subscriptions")).toBe("1,330"));
   });
 
-  it("is not a first use: a cluster that could not say what it has is not told it has nothing", async () => {
-    const conn = fakeConnection();
-    conn.query.campaigns.mockRejectedValue(new Error("Campaigns are not yours to read."));
-    mountWindow(conn);
+  it("keeps the last figures through a refused refresh, and says on the heading's line that updates are interrupted", async () => {
+    const conn = seeded();
+    standalone(conn);
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(headNote()).toBeNull();
 
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe(DASH));
-    expect(screen.getByText("Campaigns are not yours to read.")).toBeTruthy();
+    conn.query.emailStatistics.mockRejectedValue(new Error("The cluster did not answer in time."));
+    // Coming back to the window reads the statistics again, and the cluster refuses.
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+
+    await waitFor(() => expect(headNote()?.textContent).toBe("Updates are interrupted. Showing the last figures received."));
+    expect(headNote()?.getAttribute("title")).toBe("The cluster did not answer in time.");
+    expect(figure("sent").value).toBe("1,204");
+    expect(mainChart().label).toBe("Sent");
+    expect(notices()).toEqual([]);
+  });
+
+  it("says it is reconnecting, and claims no figures, when a list stopped before it answered", async () => {
+    const conn = seeded();
+    // The lists are held back, so nothing of theirs was ever received.
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    for (const read of [conn.query.campaigns, conn.query.audiences, conn.query.emailRules, conn.query.journeys]) {
+      const answer = read.getMockImplementation()!;
+      read.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    }
+    const held = standalone(conn);
+    await act(async () => {});
+
+    act(() => (held.feeds!.campaigns.source as unknown as { markDisconnected: () => void }).markDisconnected());
+
+    await waitFor(() => expect(headNote()?.textContent).toBe("Updates are interrupted. Reconnecting automatically."));
+    // Nothing has been counted, so nothing is claimed: no first-use offer either.
     expect(screen.queryByText("Nothing sent yet")).toBeNull();
-    // Nor a zero where no number could be had.
-    expect(cell("Sent, 30 days").value).not.toBe("0");
-  });
-
-  it("a refused audiences list leaves Subscriptions a dash with the sentence, never a zero", async () => {
-    const conn = seeded();
-    conn.query.audiences.mockRejectedValue(new Error("Audiences are not yours to read."));
-    mountWindow(conn);
-
-    await waitFor(() => expect(cell("Subscriptions").value).toBe(DASH));
-    expect(screen.getByText("This cluster did not return your subscriptions.")).toBeTruthy();
-    expect(screen.getByText("Audiences are not yours to read.")).toBeTruthy();
-    expect(cell("Subscriptions").value).not.toBe("0");
-    expect(cell("Subscriptions").hover).toBe("Audiences are not yours to read.");
-    // There is no audience to count when the list could not be read.
-    expect(conn.query.audienceSubscriberCount).not.toHaveBeenCalled();
-    // The rest of the page still answers.
-    expect(cell("Sent, 30 days").value).toBe("1,500");
-  });
-
-  it("leaves a rate it cannot state absent, with the reason beneath it", async () => {
-    const conn = seeded();
-    statsAre(conn, {
-      // The distinct openers were too many to count exactly.
-      a: { sent: 1000, opens: { total: 420 }, clicks: { unique: 50, total: 60 } },
-      b: { sent: 500, opens: { unique: 100, total: 130 }, clicks: { unique: 25, total: 30 } },
-    });
-    mountWindow(conn);
-
-    await waitFor(() => expect(cell("Click rate").value).toBe("5.0%"));
-    expect(cell("Open rate").value).toBe(DASH);
-    expect(cell("Open rate").note).toBe("Too many recorded events to count distinct recipients exactly, so this is left unstated rather than guessed.");
-    // A reason is not a failure: nothing was refused.
-    expect(pane("overview").querySelector(".os-notice")).toBeNull();
-  });
-
-  it("says why there is no rate when nothing counted opens or clicks", async () => {
-    const conn = seeded({
-      campaigns: [campaignRow({ id: "u", status: "sent", startedAt: daysAgo(2), sentCount: 40, recipientCount: 40, trackOpens: false, trackClicks: false })],
-    });
-    mountWindow(conn);
-
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("40"));
-    expect(cell("Open rate").value).toBe(DASH);
-    // Said once, under the first of the two it is true of. The second keeps its
-    // dash, and the reason on hover.
-    expect(cell("Open rate").note).toBe("No tracked campaign in the last 30 days.");
-    expect(cell("Click rate").value).toBe(DASH);
-    expect(cell("Click rate").note).toBeNull();
-    expect(cell("Click rate").hover).toBe("No tracked campaign in the last 30 days.");
-    expect(pane("overview").textContent?.split("No tracked campaign in the last 30 days.").length).toBe(2);
-    expect(conn.query.campaignStats).not.toHaveBeenCalled();
+    expect(notices()).toEqual([]);
+    await act(async () => release());
   });
 });
 
 describe("first use", () => {
   it("first use offers Add a campaign", async () => {
-    const { navigate } = mountWindow(fakeConnection());
+    const { navigate } = mountWindow(fakeConnection({ emailStatistics: [unmeasuredStatisticsRow()] }));
 
     expect(await screen.findByRole("heading", { level: 4, name: "Nothing sent yet" })).toBeTruthy();
     expect(screen.getByText("Add a campaign to send a template to an audience.")).toBeTruthy();
-    // Nothing has been sent and nobody is subscribed: real zeros, said by the page's one sentence.
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("0"));
-    expect(cell("Subscriptions").value).toBe("0");
-    expect(cell("Active automations").value).toBe("0");
-    // Why there is no rate is said by "Nothing sent yet", not under each dash as well.
-    expect(cell("Open rate").note).toBeNull();
-    expect(cell("Click rate").note).toBeNull();
+    // Nobody is subscribed and nothing runs on its own: real zeros. Nothing was counted, so the figures are dashes.
+    await waitFor(() => expect(fact("Subscriptions")).toBe("0"));
+    expect(fact("Active automations")).toBe("0");
+    await waitFor(() => expect(figure("sent").value).toBe(DASH));
+    // "Nothing sent yet" says it: no chart of an empty period, no lists, no breakdown.
+    expect(document.querySelector(".os-time-chart")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Delivery problems" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Campaigns" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Add a campaign" }));
@@ -416,159 +686,36 @@ describe("first use", () => {
   });
 
   it("is not offered once there is a campaign, or an automation, to speak of", async () => {
-    const withCampaign = mountWindow(fakeConnection({ campaigns: [campaignRow({ id: "d" })] }));
+    const withCampaign = mountWindow(fakeConnection({ campaigns: [campaignRow({ id: "d" })], emailStatistics: [statisticsRow()] }));
     await waitFor(() => expect(screen.getByRole("region", { name: "Campaigns" })).toBeTruthy());
     expect(screen.queryByText("Nothing sent yet")).toBeNull();
     withCampaign.view.unmount();
 
     // A paused automation is still an automation.
-    mountWindow(fakeConnection({ emailRules: [ruleRow({ id: "r", status: "paused" })] }));
-    await waitFor(() => expect(cell("Sent, 30 days").value).toBe("0"));
+    mountWindow(fakeConnection({ emailRules: [ruleRow({ id: "r", status: "paused" })], emailStatistics: [statisticsRow()] }));
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
     expect(screen.queryByText("Nothing sent yet")).toBeNull();
   });
 });
 
-describe("when updates stop", () => {
-  type Stoppable = { markDisconnected: () => void };
+describe("the page's help", () => {
+  it("says what a rate is of and what is not counted, once, without repeating the figures", async () => {
+    mountWindow(seeded());
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
 
-  it("keeps the last figures and says updates are interrupted", async () => {
-    const held = standalone(seeded());
-    await waitFor(() => expect(document.querySelector("[data-overview-metric='Sent, 30 days'] dd")?.textContent).toBe("1,500"));
-    expect(document.querySelector(".os-notice")).toBeNull();
-
-    act(() => (held.feeds!.campaigns.source as unknown as Stoppable).markDisconnected());
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    expect(screen.getByText("Showing the last figures received. Reconnecting automatically.")).toBeTruthy();
-    expect(document.querySelector("[data-overview-metric='Sent, 30 days'] dd")?.textContent).toBe("1,500");
-  });
-
-  it("says it is reconnecting, and claims no figures, when nothing had been received", async () => {
-    const conn = seeded();
-    gated(conn);
-    const held = standalone(conn);
-    await act(async () => {});
-
-    act(() => (held.feeds!.campaigns.source as unknown as Stoppable).markDisconnected());
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    expect(screen.getByText("Reconnecting automatically.")).toBeTruthy();
-    expect(screen.queryByText(/Showing the last figures/)).toBeNull();
-    // Nothing has been counted, so nothing is claimed: no zero, no first-use offer.
-    expect(document.querySelector("[data-overview-metric='Sent, 30 days'] dd")?.textContent).not.toBe("0");
-    expect(screen.queryByText("Nothing sent yet")).toBeNull();
-  });
-});
-
-// A REFUSED REFRESH IS NOT A REFUSAL WHEN THE LAST ANSWER IS STILL HELD. A feed
-// that holds rows and could not read them again (the SDK keeps rows and the error
-// together, in the state `degraded`) keeps its figures, and the page tells the one
-// story once: updates are interrupted, these are the last figures, and what the
-// cluster said. It does not dash a figure it can still compute, and it does not
-// say "this cluster did not return" beside a number it is showing.
-describe("a refresh the cluster refused", () => {
-  const SENTENCE = "The cluster did not answer in time.";
-
-  /** The one story: a single notice, with the engine's sentence in it and no claim that anything is reconnecting. */
-  function expectOneStory(sentence: string) {
-    const told = notices();
-    expect(told).toHaveLength(1);
-    expect(told[0]).toContain("Updates are interrupted.");
-    expect(told[0]).toContain("Showing the last figures received.");
-    expect(told[0]).toContain(sentence);
-    expect(told[0]).not.toContain("Reconnecting automatically");
-    expect(screen.queryByText(/^This cluster did not return/)).toBeNull();
-  }
-
-  it.each([
-    ["campaigns", "Sent, 30 days", "1,500"],
-    ["audiences", "Subscriptions", "1,290"],
-    ["rules", "Active automations", "2"],
-  ] as const)("keeps its figures and tells one story when the %s refresh is refused", async (feed, label, value) => {
-    const conn = seeded();
-    const held = standalone(conn);
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
-    expect(notices()).toEqual([]);
-
-    const read = feed === "campaigns" ? conn.query.campaigns : feed === "audiences" ? conn.query.audiences : conn.query.emailRules;
-    read.mockRejectedValue(new Error(SENTENCE));
-    await act(async () => { held.feeds![feed].reseed(); });
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    // Every figure keeps the value it had: a refused refresh is not a dash, and not a zero.
-    expect(cell(label).value).toBe(value);
-    expect(cell("Sent, 30 days").value).toBe("1,500");
-    expect(cell("Open rate").value).toBe("27%");
-    expect(cell("Click rate").value).toBe("5.0%");
-    expect(cell("Subscriptions").value).toBe("1,290");
-    expect(cell("Active automations").value).toBe("2");
-    expectOneStory(SENTENCE);
-  });
-
-  it("keeps the subscriber count it measured through a refused refresh", async () => {
-    const conn = seeded();
-    standalone(conn);
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
-
-    conn.query.audienceSubscriberCount.mockRejectedValue(new Error("Counting subscribers is not yours to do."));
-    // Coming back to the window reads the counts again, and the cluster refuses.
-    await act(async () => { window.dispatchEvent(new Event("focus")); });
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    expect(cell("Subscriptions").value).toBe("1,290");
-    expect(cell("Open rate").value).toBe("27%");
-    expectOneStory("Counting subscribers is not yours to do.");
-  });
-
-  it("keeps the rates it measured through a refused refresh of the breakdowns", async () => {
-    const conn = seeded();
-    standalone(conn);
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-
-    conn.query.campaignStats.mockRejectedValue(new Error("Reading the breakdown is not yours to do."));
-    await act(async () => { window.dispatchEvent(new Event("focus")); });
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    expect(cell("Open rate").value).toBe("27%");
-    expect(cell("Click rate").value).toBe("5.0%");
-    expectOneStory("Reading the breakdown is not yours to do.");
-  });
-
-  it("says one sentence once when several refreshes are refused for the same reason", async () => {
-    const conn = seeded();
-    const held = standalone(conn);
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-
-    for (const read of [conn.query.campaigns, conn.query.audiences, conn.query.emailRules, conn.query.campaignStats, conn.query.audienceSubscriberCount]) {
-      read.mockRejectedValue(new Error(SENTENCE));
+    const help = pane("overview").querySelector(".os-page-help-inline");
+    expect(help?.querySelector("summary")?.textContent).toBe("Overview");
+    const said = [...(help?.querySelectorAll("p") ?? [])].map((node) => node.textContent ?? "");
+    expect(said).toEqual([
+      "A rate is the share of the campaign messages sent in the period that have been opened or clicked.",
+      "Automations show no opens or clicks, because automated mail is not tracked for them.",
+      "A recipient counts once per campaign, however often they open or click it.",
+      "Mail privacy proxies open messages before their readers do, so opens are an upper bound.",
+      "Days are counted in UTC.",
+    ]);
+    for (const label of ["Sent", "Open rate", "Click rate", "Unsubscribes", "New subscribers", "Bounces", "Complaints", "Failed", "Suppressed"]) {
+      expect(said.join(" ")).not.toContain(label);
     }
-    await act(async () => {
-      held.feeds!.campaigns.reseed();
-      held.feeds!.audiences.reseed();
-      held.feeds!.rules.reseed();
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
-    expectOneStory(SENTENCE);
-    expect((notices()[0] ?? "").split(SENTENCE).length - 1).toBe(1);
-    // Everything is still the last answer.
-    expect(cell("Sent, 30 days").value).toBe("1,500");
-    expect(cell("Subscriptions").value).toBe("1,290");
-    expect(cell("Active automations").value).toBe("2");
-    expect(cell("Open rate").value).toBe("27%");
-  });
-
-  it("still shows a first refusal as a refusal: with nothing held there is no last figure to keep", async () => {
-    const conn = seeded();
-    conn.query.emailRules.mockRejectedValue(new Error("Reading automations is not yours to do."));
-    standalone(conn);
-
-    await waitFor(() => expect(cell("Active automations").value).toBe(DASH));
-    expect(notices().join("|")).toContain("This cluster did not return your automations.");
-    expect(notices().join("|")).toContain("Reading automations is not yours to do.");
-    expect(notices().join("|")).not.toContain("Updates are interrupted.");
   });
 });
 
@@ -576,13 +723,13 @@ describe("how the Overview reads", () => {
   it("adds no subscription of its own", async () => {
     const conn = seeded();
     mountWindow(conn);
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
     for (const [concept, peak] of peakSubscriptions(conn)) expect(peak, concept).toBeLessThanOrEqual(1);
   });
 
-  it("reads again once a minute while it is seen, and stops when another tab is", async () => {
-    // The default landing tab: its rates move over hours and days, and what has to
-    // be live (what was sent, what is switched on) is live through the feeds.
+  it("reads the statistics again every fifteen minutes while it is seen, and stops when another tab is", async () => {
+    expect(STATISTICS_REFRESH_MS).toBe(900_000);
+    // What is true now is counted again each minute, as before.
     expect(OVERVIEW_REFRESH_MS).toBe(60_000);
     const conn = seeded();
     h.connection = conn;
@@ -590,34 +737,32 @@ describe("how the Overview reads", () => {
     const app = (section: string) =>
       withSession(<EmailApp sectionId={section} navigate={() => {}} askContext={() => {}} store={store} uploads={{ upload: vi.fn() }} />);
     const view = render(app("overview"));
-    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
     await act(async () => {});
 
-    const reads = () => conn.query.campaignStats.mock.calls.length + conn.query.audienceSubscriberCount.mock.calls.length;
+    const reads = () => conn.query.emailStatistics.mock.calls.length;
     vi.useFakeTimers();
     // Coming back to the window arms the refresher on the clock this test holds.
     await act(async () => window.dispatchEvent(new Event("focus")));
     const armed = reads();
 
-    // Not on the five-second beat the campaign page keeps, nor any time before the minute is up.
-    await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS - 1_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(STATISTICS_REFRESH_MS - 1_000); });
     expect(reads()).toBe(armed);
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(reads()).toBeGreaterThan(armed);
+    expect(reads()).toBe(armed + 1);
 
     // The person goes to Campaigns. The Overview stays mounted behind it, and stops reading.
     view.rerender(app("campaigns"));
     expect(pane("overview").hidden).toBe(true);
     const left = reads();
-    await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS * 3); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(STATISTICS_REFRESH_MS * 3); });
     expect(reads()).toBe(left);
   });
 
-  it("stops reading when the window closes: an unmount aborts the breakdowns it was waiting for", async () => {
+  it("stops reading when the window closes: an unmount aborts the read it was waiting for", async () => {
     const conn = seeded();
     const signals: AbortSignal[] = [];
-    conn.query.campaignStats.mockImplementation(async (_args, opts) => {
+    conn.query.emailStatistics.mockImplementation(async (_args, opts) => {
       signals.push((opts as { signal: AbortSignal }).signal);
       return new Promise<never>(() => {});
     });

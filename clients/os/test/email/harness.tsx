@@ -127,6 +127,8 @@ export interface FakeSeed {
   deliveriesForCampaign?: Row[] | Error;
   recipientsForAudience?: Row[] | Error;
   campaignStats?: Row[] | Error;
+  /** `emailStatistics`' answer, whatever it is asked (`statisticsRow` builds one). Absent is an answer with no row in it. */
+  emailStatistics?: Row[] | Error;
   campaignsForAccount?: Row[] | Error;
   /**
    * The `clusterSettingsCurrent` reply. Absent = a cluster whose authored
@@ -342,6 +344,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
         return rowsResult([{ count: answer ?? 0, atLeast: false }]);
       }),
       campaignStats: reader(seed.campaignStats),
+      emailStatistics: reader(seed.emailStatistics),
       campaignsForAccount: reader(seed.campaignsForAccount),
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),
       campaignSendingReadiness: vi.fn(async (args?: { senderIdentityId?: string }, _opts?: unknown) => {
@@ -627,4 +630,143 @@ export function deliveryRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-08-02T09:00:00Z",
     ...over,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The email statistics read (`builtin emailStatistics`)
+// ---------------------------------------------------------------------------
+//
+// THE PAYLOAD AS THE SERVER WRITES IT (component/emailstats/statistics.go,
+// `Payload`): lowerCamel keys, instants in RFC3339, `measuredSince` as a UTC
+// day, and every figure nothing measured PRESENT AND NULL. The builders below
+// are the answers a test asks for: a measured month (`statisticsRow`), a
+// cluster that has recorded nothing (`unmeasuredStatisticsRow`) and twelve
+// months, which have no previous period (`twelveMonthsStatisticsRow`).
+
+type Figures = Record<string, number | null>;
+
+const TOTAL_KEYS = ["sent", "delivered", "undelivered", "failed", "skipped", "suppressed", "opens", "clicks", "uniqueOpens", "uniqueClicks", "unsubscribes", "bounces", "complaints", "subscribes", "openRate", "clickRate"] as const;
+const POINT_KEYS = ["sent", "uniqueOpens", "uniqueClicks", "unsubscribes", "subscribes", "bounces", "complaints", "failed", "suppressed", "openRate", "clickRate"] as const;
+
+const nothing = (keys: readonly string[]): Figures => Object.fromEntries(keys.map((key) => [key, null]));
+
+/**
+ * The thirty days `statisticsRow` answers for. 900 messages were first opened
+ * in them, which would read as 75% of the 1,204 sent; the open rate is the
+ * cohort's, 42% of the campaign messages sent in the period.
+ */
+export const STATISTICS_TOTALS: Figures = {
+  sent: 1204, delivered: 0, undelivered: 0, failed: 3, skipped: 10, suppressed: 4,
+  opens: 1310, clicks: 120, uniqueOpens: 900, uniqueClicks: 41,
+  unsubscribes: 38, bounces: 7, complaints: 1, subscribes: 212,
+  openRate: 0.42, clickRate: 0.031,
+};
+
+/** The thirty days before them: Sent rises 12%, new subscribers are new, bounces hold. */
+export const STATISTICS_PREVIOUS: Figures = {
+  sent: 1075, delivered: 0, undelivered: 0, failed: 6, skipped: 8, suppressed: 4,
+  opens: 1100, clicks: 100, uniqueOpens: 800, uniqueClicks: 33,
+  unsubscribes: 51, bounces: 7, complaints: 0, subscribes: 0,
+  openRate: 0.4, clickRate: 0.031,
+};
+
+/** One point per bucket from `start` ("2026-10-10", or "2025-11" by the month). */
+function statisticsPoints(start: string, count: number, bucket: "day" | "month", figures: (index: number) => Figures): Row[] {
+  const [year = 2026, month = 1, day = 1] = start.split("-").map(Number);
+  return Array.from({ length: count }, (_, index) => {
+    const at = bucket === "day" ? new Date(Date.UTC(year, month - 1, day + index)) : new Date(Date.UTC(year, month - 1 + index, 1));
+    return { at: at.toISOString().replace(".000Z", "Z"), ...nothing(POINT_KEYS), ...figures(index) };
+  });
+}
+
+/** A day of the measured month: the most sent on Oct 15, the best open rate on Oct 30. */
+function measuredDay(index: number): Figures {
+  return {
+    sent: index === 5 ? 64 : 40, uniqueOpens: 16, uniqueClicks: 2, unsubscribes: 1, subscribes: 7,
+    bounces: index === 3 ? 2 : 0, complaints: index === 7 ? 1 : 0, failed: index === 9 ? 3 : 0, suppressed: index === 11 ? 4 : 0,
+    openRate: index === 20 ? 0.55 : 0.4, clickRate: 0.03,
+  };
+}
+
+/** A day of the thirty before them. */
+function previousDay(): Figures {
+  return { sent: 35, uniqueOpens: 14, uniqueClicks: 1, unsubscribes: 2, subscribes: 0, bounces: 0, complaints: 0, failed: 0, suppressed: 0, openRate: 0.38, clickRate: 0.03 };
+}
+
+export type StatisticsOver = Omit<Row, "totals" | "previous"> & { totals?: Figures; previous?: Figures | null };
+
+/**
+ * `emailStatistics`' answer for the last thirty days of a cluster that has
+ * counted its mail since Sep 1, so the thirty days before them can be compared
+ * with (kit `previousComparable`). `totals` and `previous` are merged into the
+ * figures above; every other key replaces its own.
+ */
+export function statisticsRow(over: StatisticsOver = {}): Row {
+  const { totals, previous, ...rest } = over;
+  return {
+    period: "30d",
+    bucket: "day",
+    start: "2026-10-10T00:00:00Z",
+    end: "2026-11-09T00:00:00Z",
+    hasPrevious: true,
+    prevStart: "2026-09-10T00:00:00Z",
+    prevEnd: "2026-10-10T00:00:00Z",
+    measuredSince: "2026-09-01",
+    totals: { ...STATISTICS_TOTALS, ...totals },
+    previous: previous === null ? null : { ...STATISTICS_PREVIOUS, ...previous },
+    series: statisticsPoints("2026-10-10", 30, "day", measuredDay),
+    previousSeries: statisticsPoints("2026-09-10", 30, "day", previousDay),
+    // The read's order: most unique opens first, then unique clicks -- not most sent.
+    campaigns: [
+      { id: "c-winter", sent: 600, uniqueOpens: 300, uniqueClicks: 34, openRate: 0.5, clickRate: 0.057 },
+      { id: "c-restock", sent: 604, uniqueOpens: 200, uniqueClicks: 19, openRate: 0.33, clickRate: 0.032 },
+    ],
+    automations: [
+      { id: "r-welcome", kind: "rule", sent: 120, failed: 2, suppressed: 1 },
+      { id: "j-series", kind: "journey", sent: 40, failed: 0, suppressed: 0 },
+    ],
+    audiences: [
+      { id: "a-news", subscribes: 12, unsubscribes: 3, net: 9 },
+      { id: "a-signups", subscribes: 2, unsubscribes: 5, net: -3 },
+    ],
+    accounts: [],
+    ...rest,
+  };
+}
+
+/**
+ * The answer on a cluster that has recorded no email -- or to somebody who
+ * reaches no organization: the bounds, every figure null, a null point for
+ * every bucket, no lists, and no `measuredSince`.
+ */
+export function unmeasuredStatisticsRow(): Row {
+  return {
+    ...statisticsRow(),
+    measuredSince: null,
+    totals: nothing(TOTAL_KEYS),
+    previous: nothing(TOTAL_KEYS),
+    series: statisticsPoints("2026-10-10", 30, "day", () => ({})),
+    previousSeries: statisticsPoints("2026-09-10", 30, "day", () => ({})),
+    campaigns: [],
+    automations: [],
+    audiences: [],
+    accounts: [],
+  };
+}
+
+/** Twelve months: the current month and the twelve before it, by the month, with no previous period (spec D4). */
+export function twelveMonthsStatisticsRow(): Row {
+  return statisticsRow({
+    period: "12m",
+    bucket: "month",
+    start: "2025-11-01T00:00:00Z",
+    end: "2026-12-01T00:00:00Z",
+    hasPrevious: false,
+    prevStart: null,
+    prevEnd: null,
+    totals: { sent: 14020 },
+    previous: null,
+    series: statisticsPoints("2025-11", 13, "month", (index) => ({ ...measuredDay(index), sent: 1000 + index * 20 })),
+    previousSeries: null,
+  });
 }

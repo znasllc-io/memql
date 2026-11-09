@@ -224,7 +224,7 @@ function EmailSections({
   function section(id: string, active: boolean): ReactNode {
     switch (id) {
       case "overview":
-        return <OverviewSection feeds={feeds} />;
+        return <OverviewSection feeds={feeds} settings={settings} update={updateSettings} />;
       case "inbox":
         return <InboxSection />;
       case "settings":

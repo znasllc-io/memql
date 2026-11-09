@@ -2,305 +2,262 @@ import { describe, expect, it } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
-  NO_TRACKED_CAMPAIGN,
+  DELIVERY_FIGURES,
+  EMAIL_FIGURES,
+  NOTHING_RECORDED,
+  NO_CAMPAIGN_MAIL,
+  activeAutomationsFact,
+  automationLine,
   campaignDistribution,
-  overviewMetrics,
+  campaignLine,
+  chartPoints,
+  clientLine,
+  growthLine,
+  listsMeasured,
+  previousPoints,
+  providerReportsOutcomes,
   refusalOf,
-  startedInWindow,
-  statsWanted,
-  type OverviewInputs,
+  statFigures,
+  subscriptionsFact,
 } from "../../../src/apps/email/overview/figures";
-import { formatRate } from "../../../src/kit/format";
-import { campaignFromRow, statsFromPayload, type CampaignStats } from "../../../src/apps/email/rows";
+import { parseEmailStatistics, type EmailStatistics } from "../../../src/apps/email/overview/statistics";
+import { campaignFromRow } from "../../../src/apps/email/rows";
 import type { Reading } from "../../../src/apps/email/useEmail";
 import { absent, figureOf } from "../../../src/kit/measure";
-import { campaignRow } from "../harness";
+import { campaignRow, statisticsRow, twelveMonthsStatisticsRow, unmeasuredStatisticsRow, type StatisticsOver } from "../harness";
 
-// WHAT THE OVERVIEW MEASURES, AS PURE FUNCTIONS (memql#6033, Ruling 22).
+// WHAT THE OVERVIEW DRAWS FROM THE STATISTICS READ, AS PURE FUNCTIONS (spec 9).
 //
-// Five figures and a distribution are functions of what the app's reads have
-// answered, so "absent is never zero" and "a rate is of what was sent" are
-// properties of a function, asserted with no DOM. A figure is one of three
-// things -- a number, a reason there is none, or a read still on its way -- and
-// each test below pins which.
-
-const NOW = new Date("2026-10-12T12:00:00Z");
-const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
-
-/** A campaign as the list projects it. */
-function campaign(over: Partial<Row> & { id: string }) {
-  return campaignFromRow(campaignRow(over));
-}
-
-/** A campaign that went out `days` ago, having sent `sent`. */
-function sentCampaign(id: string, days: number, sent: number, over: Partial<Row> = {}) {
-  return campaign({ id, status: "sent", startedAt: daysAgo(days), recipientCount: sent, sentCount: sent, ...over });
-}
+// A figure is one of three things -- a number, a reason there is none, or a
+// read still on its way -- and drawing one as another is the failure this file
+// refuses: "0% opened" is a thing people act on, and a period nothing counted
+// did not measure it. A change is drawn only against a previous period that
+// was measured throughout (kit `previousComparable`).
 
 const reload = async () => {};
 
-/** What `campaignStats` answered for a campaign. */
-function answered(payload: Row): Reading<CampaignStats | null> {
-  return { value: statsFromPayload(payload), state: "ready", error: "", readAt: "2026-10-12T12:00:00Z", reload };
-}
-const waiting: Reading<CampaignStats | null> = { value: null, state: "loading", error: "", readAt: "", reload };
-const refused = (error: string): Reading<CampaignStats | null> => ({ value: null, state: "error", error, readAt: "", reload });
-
-function inputs(over: Partial<OverviewInputs> = {}): OverviewInputs {
-  return {
-    campaigns: { rows: [], settled: true, error: "" },
-    stats: new Map(),
-    subscribers: new Map(),
-    audiencesSettled: true,
-    activeAutomations: { count: 0, settled: true, error: "" },
-    now: NOW,
-    ...over,
-  };
+/** The statistics read, answered. */
+function answered(over: StatisticsOver = {}): Reading<EmailStatistics | null> {
+  return { value: parseEmailStatistics(statisticsRow(over)), state: "ready", error: "", readAt: "2026-11-08T12:00:00Z", reload };
 }
 
-function metric(i: OverviewInputs, label: string) {
-  const found = overviewMetrics(i).find((m) => m.label === label);
-  if (found === undefined) throw new Error(`no metric named ${label}`);
+function answeredWith(row: Row): Reading<EmailStatistics | null> {
+  return { value: parseEmailStatistics(row), state: "ready", error: "", readAt: "2026-11-08T12:00:00Z", reload };
+}
+
+const reading: Reading<EmailStatistics | null> = { value: null, state: "loading", error: "", readAt: "", reload };
+
+function figure(read: Reading<EmailStatistics | null>, id: string) {
+  const found = [...statFigures(EMAIL_FIGURES, read), ...statFigures(DELIVERY_FIGURES, read)].find((candidate) => candidate.id === id);
+  if (found === undefined) throw new Error(`no figure ${id}`);
   return found;
 }
 
-describe("the five figures", () => {
-  it("are named exactly, in this order", () => {
-    expect(overviewMetrics(inputs()).map((m) => m.label)).toEqual([
-      "Sent, 30 days",
-      "Open rate",
-      "Click rate",
-      "Subscriptions",
-      "Active automations",
-    ]);
-  });
-});
-
-describe("Sent, 30 days", () => {
-  it("counts only campaigns started in the last 30 days", () => {
-    const rows = [
-      sentCampaign("recent", 3, 100),
-      sentCampaign("edge", 29, 50),
-      sentCampaign("old", 31, 1000),
-      // Never started: a draft and a scheduled campaign have sent nothing and have no start.
-      campaign({ id: "draft", status: "draft" }),
-      campaign({ id: "scheduled", status: "scheduled", scheduledAt: "2026-10-20T16:00:00Z" }),
-      // A send in flight counts what it has sent so far.
-      campaign({ id: "now", status: "sending", startedAt: daysAgo(0), recipientCount: 400, sentCount: 40 }),
-    ];
-    const sent = metric(inputs({ campaigns: { rows, settled: true, error: "" } }), "Sent, 30 days");
-    expect(sent.figure).toEqual(figureOf(190));
-    expect(sent.loading).toBeFalsy();
-    expect(sent.format?.(1204)).toBe("1,204");
+describe("the figures", () => {
+  it("are named exactly, in this order, for the period and for its delivery problems", () => {
+    expect(EMAIL_FIGURES.map((spec) => spec.label)).toEqual(["Sent", "Open rate", "Click rate", "Unsubscribes", "New subscribers"]);
+    expect(DELIVERY_FIGURES.map((spec) => spec.label)).toEqual(["Bounces", "Complaints", "Failed", "Suppressed"]);
+    expect(statFigures(EMAIL_FIGURES, answered()).map((stat) => stat.id)).toEqual(["sent", "openRate", "clickRate", "unsubscribes", "subscribes"]);
   });
 
-  it("is a real zero when nothing went out", () => {
-    expect(metric(inputs(), "Sent, 30 days").figure).toEqual(figureOf(0));
+  it("are the period's totals, every one of them chartable, the rates written as rates", () => {
+    const read = answered();
+    expect(figure(read, "sent")).toMatchObject({ label: "Sent", figure: figureOf(1204), previous: figureOf(1075), chartable: true });
+    expect(figure(read, "sent").format?.(1204)).toBe("1,204");
+    // The open rate is the read's cohort rate, not the period's first opens over its sends.
+    expect(figure(read, "openRate").figure).toEqual(figureOf(0.42));
+    expect(figure(read, "openRate").format?.(0.42)).toBe("42%");
+    expect(figure(read, "clickRate").format?.(0.031)).toBe("3.1%");
+    expect(figure(read, "subscribes")).toMatchObject({ figure: figureOf(212), previous: figureOf(0) });
+    expect(figure(read, "bounces")).toMatchObject({ label: "Bounces", figure: figureOf(7), chartable: true });
+    expect(statFigures(DELIVERY_FIGURES, read).every((stat) => stat.chartable === true)).toBe(true);
   });
 
-  it("tells a start inside the window from one outside it, and ignores a start it cannot read", () => {
-    expect(startedInWindow(sentCampaign("a", 29.5, 1), NOW)).toBe(true);
-    expect(startedInWindow(sentCampaign("b", 30.5, 1), NOW)).toBe(false);
-    expect(startedInWindow(campaign({ id: "c", startedAt: "" }), NOW)).toBe(false);
-    expect(startedInWindow(campaign({ id: "d", startedAt: "yesterday" }), NOW)).toBe(false);
-    // A clock a little ahead of this one wrote the start: still in the window.
-    expect(startedInWindow(campaign({ id: "e", startedAt: new Date(NOW.getTime() + 60_000).toISOString() }), NOW)).toBe(true);
+  it("are their shapes while the read is on its way, never a number or a dash", () => {
+    for (const stat of statFigures(EMAIL_FIGURES, reading)) {
+      expect(stat.loading).toBe(true);
+      expect(stat.figure.kind).toBe("absent");
+    }
+    // Not asked yet (no connection) is still not an answer.
+    expect(statFigures(EMAIL_FIGURES, { ...reading, state: "idle" }).every((stat) => stat.loading === true)).toBe(true);
   });
 
-  it("shows its shape while the campaigns are read, and the sentence when they are refused", () => {
-    const reading = metric(inputs({ campaigns: { rows: [], settled: false, error: "" } }), "Sent, 30 days");
-    expect(reading.loading).toBe(true);
-    expect(reading.figure.kind).toBe("absent");
-
-    const failed = metric(inputs({ campaigns: { rows: [], settled: true, error: "Campaigns are not yours to read." } }), "Sent, 30 days");
-    expect(failed.loading).toBeFalsy();
-    expect(failed.figure).toEqual(absent("failed", "Campaigns are not yours to read."));
-  });
-});
-
-describe("Open rate and Click rate", () => {
-  const A = sentCampaign("a", 2, 1000);
-  const B = sentCampaign("b", 5, 500);
-
-  it("a rate is of sent, over campaigns that tracked it", () => {
-    // B counted opens and not clicks; C sent ten thousand and counted neither.
-    const opensOnly = sentCampaign("b", 5, 500, { trackClicks: false });
-    const untracked = sentCampaign("c", 6, 10_000, { trackOpens: false, trackClicks: false });
-    const i = inputs({
-      campaigns: { rows: [A, opensOnly, untracked], settled: true, error: "" },
-      stats: new Map([
-        ["a", answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 } })],
-        // Whatever B's clicks were, nobody asked for them to be counted.
-        ["b", answered({ sent: 500, opens: { unique: 100, total: 150 }, clicks: { unique: 400, total: 400 } })],
-        ["c", answered({ sent: 10_000, opens: { unique: 9_999, total: 9_999 }, clicks: { unique: 9_999, total: 9_999 } })],
-      ]),
-    });
-
-    const opens = metric(i, "Open rate");
-    expect(opens.figure.kind).toBe("measured");
-    // (300 + 100) of (1000 + 500) sent, not of the 11,500 sent in all.
-    expect(opens.figure.kind === "measured" && opens.figure.value).toBeCloseTo(400 / 1500, 10);
-    expect(opens.format?.(400 / 1500)).toBe(formatRate(400 / 1500));
-    expect(opens.format?.(400 / 1500)).toBe("27%");
-
-    // 50 of A's 1000: B did not count clicks and C counted nothing.
-    const clicks = metric(i, "Click rate");
-    expect(clicks.figure.kind === "measured" && clicks.figure.value).toBeCloseTo(50 / 1000, 10);
-    expect(clicks.format?.(50 / 1000)).toBe("5.0%");
-  });
-
-  it("is a rate of accepted sends, never of the audience", () => {
-    // 4,000 were meant to receive it; 1,000 were sent. The rate is over the 1,000.
-    const sized = campaign({ id: "s", status: "sent", startedAt: daysAgo(1), recipientCount: 4000, sentCount: 1000 });
-    const i = inputs({
-      campaigns: { rows: [sized], settled: true, error: "" },
-      stats: new Map([["s", answered({ sent: 1000, opens: { unique: 250, total: 300 }, clicks: { unique: 10, total: 10 } })]]),
-    });
-    const opens = metric(i, "Open rate").figure;
-    expect(opens.kind === "measured" && opens.value).toBeCloseTo(0.25, 10);
-  });
-
-  it("uses reconciled transport acceptance from the same stats response", () => {
-    const i = inputs({
-      campaigns: { rows: [A], settled: true, error: "" },
-      stats: new Map([["a", answered({ sent: 1200, opens: { unique: 300, total: 400 }, clicks: { unique: 60, total: 70 } })]]),
-    });
-    expect(metric(i, "Open rate").figure).toEqual(figureOf(0.25));
-    expect(metric(i, "Click rate").figure).toEqual(figureOf(0.05));
-  });
-
-  it("withholds rates with a bounded numerator or denominator or an absent denominator", () => {
-    for (const extra of [{ atLeast: { sent: true } }, { atLeast: { "opens.unique": true, "clicks.unique": true } }, { sent: undefined }]) {
-      const i = inputs({
-        campaigns: { rows: [A], settled: true, error: "" },
-        stats: new Map([["a", answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 }, ...extra })]]),
-      });
-      expect(metric(i, "Open rate").figure.kind).toBe("absent");
-      expect(metric(i, "Click rate").figure.kind).toBe("absent");
+  it("carry the engine's sentence when the read was refused with nothing to show, and choose no chart", () => {
+    const refused = statFigures(EMAIL_FIGURES, { value: null, state: "error", error: "Email statistics are not yours to read." });
+    for (const stat of refused) {
+      expect(stat.loading).toBeFalsy();
+      expect(stat.figure).toEqual(absent("failed", "Email statistics are not yours to read."));
+      expect(stat.chartable).toBeFalsy();
+      expect(stat.previous).toBeUndefined();
     }
   });
 
-  it("an unmeasured unique figure makes the rate absent with its reason", () => {
-    // B's distinct openers were too many to count exactly; A's were counted.
-    // Adding A alone would be a rate for part of the sending that reads as all of it.
-    const i = inputs({
-      campaigns: { rows: [A, B], settled: true, error: "" },
-      stats: new Map([
-        ["a", answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 } })],
-        ["b", answered({ sent: 500, opens: { total: 150 }, clicks: { unique: 20, total: 25 } })],
-      ]),
-    });
-
-    const opens = metric(i, "Open rate");
-    expect(opens.loading).toBeFalsy();
-    expect(opens.figure.kind).toBe("absent");
-    expect(opens.figure).toMatchObject({
-      kind: "absent",
-      reason: "unmeasured",
-      detail: "Too many recorded events to count distinct recipients exactly, so this is left unstated rather than guessed.",
-    });
-    // The click figures were all measured, so clicks still have a rate.
-    expect(metric(i, "Click rate").figure.kind).toBe("measured");
+  it("keep the last answer through a refused refresh", () => {
+    const kept: Reading<EmailStatistics | null> = { ...answered(), state: "error", error: "The cluster did not answer in time." };
+    expect(figure(kept, "sent").figure).toEqual(figureOf(1204));
   });
 
-  it("no tracked campaign is absent, never zero", () => {
-    const reason = "No tracked campaign in the last 30 days.";
-    expect(NO_TRACKED_CAMPAIGN).toBe(reason);
-
-    // No campaign at all.
-    expect(metric(inputs(), "Open rate").figure).toEqual(absent("unmeasured", reason));
-    expect(metric(inputs(), "Click rate").figure).toEqual(absent("unmeasured", reason));
-
-    // Campaigns, none of which counted opens or clicks.
-    const untracked = [
-      sentCampaign("u1", 2, 800, { trackOpens: false, trackClicks: false }),
-      sentCampaign("u2", 4, 200, { trackOpens: false, trackClicks: false }),
-    ];
-    const i = inputs({ campaigns: { rows: untracked, settled: true, error: "" } });
-    expect(metric(i, "Open rate").figure).toEqual(absent("unmeasured", reason));
-    expect(metric(i, "Click rate").figure).toEqual(absent("unmeasured", reason));
-
-    // A tracked campaign that went out before the window is not in it.
-    const old = inputs({ campaigns: { rows: [sentCampaign("o", 40, 900)], settled: true, error: "" } });
-    expect(metric(old, "Open rate").figure).toEqual(absent("unmeasured", reason));
-
-    // A tracked campaign that has sent nothing has no rate to report.
-    const nothing = inputs({ campaigns: { rows: [campaign({ id: "n", status: "sending", startedAt: daysAgo(0), recipientCount: 10, sentCount: 0 })], settled: true, error: "" } });
-    expect(metric(nothing, "Open rate").figure).toEqual(absent("unmeasured", reason));
+  it("are a dash that says why when nothing was recorded, never zero", () => {
+    const read = answeredWith(unmeasuredStatisticsRow());
+    for (const stat of [...statFigures(EMAIL_FIGURES, read), ...statFigures(DELIVERY_FIGURES, read)]) {
+      expect(stat.figure).toEqual(absent("unmeasured", NOTHING_RECORDED));
+      // Nothing measured before is no change, not a fall to nothing.
+      expect(stat.previous === undefined || stat.previous.kind === "absent").toBe(true);
+    }
+    expect(NOTHING_RECORDED).toBe("Nothing has been recorded yet.");
+    // An answer with no row in it has nothing to say for itself either way.
+    const empty = statFigures(EMAIL_FIGURES, { value: null, state: "ready", error: "" });
+    expect(empty.every((stat) => stat.figure.kind === "absent" && !stat.loading && !stat.chartable)).toBe(true);
   });
 
-  it("a measured zero is a zero: it was counted and nobody opened", () => {
-    const i = inputs({
-      campaigns: { rows: [A], settled: true, error: "" },
-      stats: new Map([["a", answered({ sent: 1000, opens: { unique: 0, total: 0 }, clicks: { unique: 0, total: 0 } })]]),
-    });
-    expect(metric(i, "Open rate").figure).toEqual(figureOf(0));
-    expect(metric(i, "Open rate").format?.(0)).toBe("0%");
+  it("leave a rate unstated when no campaign mail was sent, and say so", () => {
+    // Rule and journey mail went out; no campaign did, so there is nothing for a rate to be a share of.
+    const read = answered({ totals: { sent: 160, openRate: null, clickRate: null } });
+    expect(figure(read, "sent").figure).toEqual(figureOf(160));
+    expect(figure(read, "openRate").figure).toEqual(absent("unmeasured", NO_CAMPAIGN_MAIL));
+    expect(figure(read, "clickRate").figure).toEqual(absent("unmeasured", NO_CAMPAIGN_MAIL));
+    expect(NO_CAMPAIGN_MAIL).toBe("No campaign mail was sent in this period.");
   });
 
-  it("waits for every campaign's breakdown, and shows its shape meanwhile", () => {
-    const i = inputs({
-      campaigns: { rows: [A, B], settled: true, error: "" },
-      stats: new Map([["a", answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 } })], ["b", waiting]]),
-    });
-    expect(metric(i, "Open rate")).toMatchObject({ loading: true });
-    expect(metric(i, "Click rate")).toMatchObject({ loading: true });
-
-    // A breakdown nobody has asked for yet is a breakdown still to come.
-    const unasked = inputs({ campaigns: { rows: [A], settled: true, error: "" } });
-    expect(metric(unasked, "Open rate")).toMatchObject({ loading: true });
+  it("never say no campaign mail was sent when the opens were not counted through the period", () => {
+    // The rollup has walked the sends and not yet the opens: the rate is unmeasured, not a rate of nothing.
+    const read = answered({ totals: { uniqueOpens: null, uniqueClicks: null, opens: null, clicks: null, openRate: null, clickRate: null } });
+    expect(figure(read, "sent").figure).toEqual(figureOf(1204));
+    expect(figure(read, "openRate").figure).toEqual(absent("unmeasured"));
+    expect(figure(read, "clickRate").figure).toEqual(absent("unmeasured"));
   });
 
-  it("says the engine's sentence when a breakdown is refused, whatever else is still on its way", () => {
-    const i = inputs({
-      campaigns: { rows: [A, B], settled: true, error: "" },
-      stats: new Map([["a", refused("Breakdowns are not yours to read.")], ["b", waiting]]),
-    });
-    const opens = metric(i, "Open rate");
-    expect(opens.loading).toBeFalsy();
-    expect(opens.figure).toEqual(absent("failed", "Breakdowns are not yours to read."));
+  it("compare only with a previous period that was counted from its first day", () => {
+    // Counting began on Sep 20; the thirty days before began on Sep 10, ten of them uncounted.
+    const partial = answered({ measuredSince: "2026-09-20" });
+    expect(figure(partial, "sent").figure).toEqual(figureOf(1204));
+    expect(figure(partial, "sent").previous).toBeUndefined();
+    expect(previousPoints(partial.value!, "sent")).toBeUndefined();
+
+    // Counting began on the previous period's first day: it is compared with.
+    const whole = answered({ measuredSince: "2026-09-10" });
+    expect(figure(whole, "sent").previous).toEqual(figureOf(1075));
+    expect(previousPoints(whole.value!, "sent")).toHaveLength(30);
+
+    // Twelve months have no previous period at all.
+    const year = answeredWith(twelveMonthsStatisticsRow());
+    expect(statFigures(EMAIL_FIGURES, year).every((stat) => stat.previous === undefined)).toBe(true);
+    expect(previousPoints(year.value!, "sent")).toBeUndefined();
   });
 
-  it("keeps a rate it has read while a later read of one campaign is refused", () => {
-    // `useReading` keeps the last answer through a failure; so does the figure.
-    const stale: Reading<CampaignStats | null> = { ...answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 } }), state: "error", error: "Connection interrupted" };
-    const i = inputs({ campaigns: { rows: [A], settled: true, error: "" }, stats: new Map([["a", stale]]) });
-    expect(metric(i, "Open rate").figure).toEqual(figureOf(0.3));
+  it("chart a figure bucket by bucket, an unmeasured bucket as a gap", () => {
+    const stats = parseEmailStatistics(statisticsRow());
+    const sent = chartPoints(stats.series, "sent");
+    expect(sent).toHaveLength(30);
+    expect(sent[5]).toEqual({ at: "2026-10-15T00:00:00Z", value: 64 });
+    expect(chartPoints(stats.series, "openRate")[20]).toEqual({ at: "2026-10-30T00:00:00Z", value: 0.55 });
+    const unmeasured = parseEmailStatistics(unmeasuredStatisticsRow());
+    expect(chartPoints(unmeasured.series, "sent").every((point) => point.value === null)).toBe(true);
+  });
+});
+
+describe("a row's quiet line", () => {
+  it("says an audience's growth, and its size once it has been counted", () => {
+    const audience = { id: "a-news", subscribes: 12, unsubscribes: 3, net: 9 };
+    expect(growthLine(audience, figureOf(1204))).toBe("12 new · 3 unsubscribed · +9 net · 1,204 subscribed");
+    // Not counted yet, or not countable: the size is left out, never a zero.
+    expect(growthLine(audience, absent("unread"))).toBe("12 new · 3 unsubscribed · +9 net");
+    expect(growthLine(audience, absent("failed", "Counting subscribers is not yours to do."))).toBe("12 new · 3 unsubscribed · +9 net");
+    expect(growthLine(audience, undefined)).toBe("12 new · 3 unsubscribed · +9 net");
+    // A shrinking audience reads with a true minus; a count that stopped at the engine's window is a floor.
+    expect(growthLine({ id: "a", subscribes: 2, unsubscribes: 5, net: -3 }, figureOf(5000, true))).toBe("2 new · 5 unsubscribed · −3 net · 5,000 or more subscribed");
+    expect(growthLine({ id: "a", subscribes: 4, unsubscribes: 4, net: 0 }, figureOf(1_340))).toBe("4 new · 4 unsubscribed · 0 net · 1,340 subscribed");
   });
 
-  it("is absent with the sentence when the campaigns themselves are refused, and shaped while they are read", () => {
-    const refusedCampaigns = inputs({ campaigns: { rows: [], settled: true, error: "Campaigns are not yours to read." } });
-    expect(metric(refusedCampaigns, "Open rate").figure).toEqual(absent("failed", "Campaigns are not yours to read."));
-    const reading = inputs({ campaigns: { rows: [], settled: false, error: "" } });
-    expect(metric(reading, "Click rate")).toMatchObject({ loading: true });
+  it("says a campaign's rates, leaving out the one it cannot state", () => {
+    const row = { id: "c", sent: 600, uniqueOpens: 300, uniqueClicks: 34, openRate: 0.42, clickRate: 0.031 };
+    expect(campaignLine(row)).toBe("42% opened · 3.1% clicked");
+    expect(campaignLine({ ...row, clickRate: null })).toBe("42% opened");
+    expect(campaignLine({ ...row, openRate: null })).toBe("3.1% clicked");
+    expect(campaignLine({ ...row, openRate: null, clickRate: null })).toBeUndefined();
   });
 
-  it("an answer with no breakdown in it is a rate nobody can state", () => {
-    const empty: Reading<CampaignStats | null> = { value: null, state: "ready", error: "", readAt: "2026-10-12T12:00:00Z", reload };
-    const i = inputs({ campaigns: { rows: [A], settled: true, error: "" }, stats: new Map([["a", empty]]) });
-    const opens = metric(i, "Open rate");
-    expect(opens.loading).toBeFalsy();
-    // Said of the campaign it is about: nothing on this page comes before "one of these".
-    expect(opens.figure).toEqual(absent("unmeasured", "No breakdown was returned for “August update”."));
-    expect(opens.detail).toBe("No breakdown was returned for “August update”.");
+  it("says an automation's sent, failed and suppressed", () => {
+    expect(automationLine({ id: "r", kind: "rule", sent: 1204, failed: 2, suppressed: 1 })).toBe("1,204 sent · 2 failed · 1 suppressed");
+    expect(automationLine({ id: "j", kind: "journey", sent: 40, failed: 0, suppressed: 0 })).toBe("40 sent · 0 failed · 0 suppressed");
   });
 
-  it("says a reason both rates share once, and leaves the second figure its dash", () => {
-    const untracked = inputs({ campaigns: { rows: [sentCampaign("u", 2, 100, { trackOpens: false, trackClicks: false })], settled: true, error: "" } });
-    const [, opens, clicks] = overviewMetrics(untracked);
-    expect(opens!.detail).toBe(NO_TRACKED_CAMPAIGN);
-    expect(clicks!.detail).toBeUndefined();
-    // Both figures still carry it, for the dash's own hover.
-    expect(clicks!.figure).toEqual(absent("unmeasured", NO_TRACKED_CAMPAIGN));
+  it("says a client's open rate, and nothing for a client that sent no campaign mail", () => {
+    const row = { id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 };
+    expect(clientLine(row)).toBe("45% opened");
+    expect(clientLine({ ...row, openRate: null, clickRate: null })).toBeUndefined();
+  });
+});
 
-    // Two different reasons are two sentences: each is said under its own figure.
-    const different = inputs({
-      campaigns: { rows: [sentCampaign("a", 2, 1000, { trackClicks: false })], settled: true, error: "" },
-      stats: new Map([["a", answered({ sent: 1000, opens: { total: 400 } })]]),
-    });
-    const [, opensOnly, clicksNone] = overviewMetrics(different);
-    expect(opensOnly!.detail).toMatch(/^Too many recorded events/);
-    expect(clicksNone!.detail).toBe(NO_TRACKED_CAMPAIGN);
+// A LIST IS READ ONLY WHERE EVERY FIGURE ITS ROWS CARRY IS MEASURED
+// (component/emailstats, "Absent is never zero"), and otherwise arrives empty --
+// so an empty list is "nothing in the period" only where its figures were counted.
+describe("whether a list was measured", () => {
+  const totals = (over: Record<string, number | null>) => parseEmailStatistics(statisticsRow({ totals: over })).totals;
+
+  it("is whether the figures its rows carry were counted through the period", () => {
+    expect(listsMeasured(totals({}))).toEqual({ audiences: true, automations: true, campaigns: true });
+    // Subscription changes not walked: audiences cannot be listed.
+    expect(listsMeasured(totals({ subscribes: null, unsubscribes: null }))).toEqual({ audiences: false, automations: true, campaigns: true });
+    // Opens not walked: a campaign's row carries its opens, so campaigns cannot be listed; automations can.
+    expect(listsMeasured(totals({ uniqueOpens: null, uniqueClicks: null }))).toEqual({ audiences: true, automations: true, campaigns: false });
+    // Sends not walked: neither.
+    expect(listsMeasured(totals({ sent: null }))).toEqual({ audiences: true, automations: false, campaigns: false });
+    expect(listsMeasured(parseEmailStatistics(unmeasuredStatisticsRow()).totals)).toEqual({ audiences: false, automations: false, campaigns: false });
+  });
+});
+
+describe("whether the provider reports outcomes", () => {
+  it("is whether the period holds a delivered or an undelivered fact", () => {
+    const totals = (delivered: number | null, undelivered: number | null) => parseEmailStatistics(statisticsRow({ totals: { delivered, undelivered } })).totals;
+    expect(providerReportsOutcomes(totals(1180, 9))).toBe(true);
+    // None delivered and some refused is still an outcome reported.
+    expect(providerReportsOutcomes(totals(0, 4))).toBe(true);
+    expect(providerReportsOutcomes(totals(0, 0))).toBe(false);
+    expect(providerReportsOutcomes(totals(null, null))).toBe(false);
+  });
+});
+
+// A SUBSCRIPTION, NOT A SUBSCRIBER: the fact adds up what each active audience
+// in scope can mail now, so a person on two audiences is counted twice.
+describe("Subscriptions", () => {
+  const settled = { settled: true, error: "" };
+
+  it("sums the audiences it is given, and waits for every count", () => {
+    const counts = new Map([["a1", figureOf(1204)], ["a2", figureOf(86)], ["other", figureOf(500)]]);
+    expect(subscriptionsFact({ ...settled, counts, audienceIds: ["a1", "a2"] })).toEqual({ figure: figureOf(1290), loading: false });
+
+    // One audience not counted yet: a partial sum would read as the whole.
+    const partial = new Map([["a1", figureOf(1204)], ["a2", absent("unread")]]);
+    expect(subscriptionsFact({ ...settled, counts: partial, audienceIds: ["a1", "a2"] }).loading).toBe(true);
+    // A count nobody has asked for yet is still on its way.
+    expect(subscriptionsFact({ ...settled, counts: new Map(), audienceIds: ["a1"] }).loading).toBe(true);
+    // The audiences themselves not read yet.
+    expect(subscriptionsFact({ settled: false, error: "", counts, audienceIds: [] }).loading).toBe(true);
+  });
+
+  it("is at least the sum when a count stopped at the engine's window", () => {
+    const counts = new Map([["a1", figureOf(5000, true)], ["a2", figureOf(1204)]]);
+    expect(subscriptionsFact({ ...settled, counts, audienceIds: ["a1", "a2"] }).figure).toEqual(figureOf(6204, true));
+  });
+
+  it("is a real zero when there is no active audience to count", () => {
+    expect(subscriptionsFact({ ...settled, counts: new Map(), audienceIds: [] })).toEqual({ figure: figureOf(0), loading: false });
+  });
+
+  it("is absent with the engine's sentence when a count or the audiences are refused, never the sum of the rest", () => {
+    const counts = new Map([["a1", figureOf(1204)], ["a2", absent("failed", "Counting subscribers is not yours to do.")], ["a3", absent("unread")]]);
+    expect(subscriptionsFact({ ...settled, counts, audienceIds: ["a1", "a2", "a3"] })).toEqual({ figure: absent("failed", "Counting subscribers is not yours to do."), loading: false });
+    expect(subscriptionsFact({ settled: true, error: "Audiences are not yours to read.", counts, audienceIds: [] })).toEqual({ figure: absent("failed", "Audiences are not yours to read."), loading: false });
+  });
+});
+
+describe("Active automations", () => {
+  it("is the count once its reads have settled, its shape before, and the sentence when refused", () => {
+    expect(activeAutomationsFact({ count: 3, settled: true, error: "" })).toEqual({ figure: figureOf(3), loading: false });
+    expect(activeAutomationsFact({ count: 0, settled: true, error: "" }).figure).toEqual(figureOf(0));
+    expect(activeAutomationsFact({ count: 0, settled: false, error: "" }).loading).toBe(true);
+    expect(activeAutomationsFact({ count: 0, settled: true, error: "Rules are not yours to read." })).toEqual({ figure: absent("failed", "Rules are not yours to read."), loading: false });
   });
 });
 
@@ -313,87 +270,11 @@ describe("a read's refusal", () => {
   });
 });
 
-describe("which breakdowns are read", () => {
-  it("are those of campaigns started in the window that counted opens or clicks and sent something", () => {
-    const rows = [
-      sentCampaign("keep", 2, 100),
-      sentCampaign("opens-only", 3, 100, { trackClicks: false }),
-      sentCampaign("clicks-only", 3, 100, { trackOpens: false }),
-      sentCampaign("untracked", 3, 100, { trackOpens: false, trackClicks: false }),
-      sentCampaign("old", 45, 100),
-      campaign({ id: "silent", status: "sending", startedAt: daysAgo(0), sentCount: 0 }),
-      campaign({ id: "draft" }),
-    ];
-    expect(statsWanted(rows, NOW).map((c) => c.id)).toEqual(["keep", "opens-only", "clicks-only"]);
-  });
-});
-
-// A SUBSCRIPTION, NOT A SUBSCRIBER: the figure adds up what each active audience can
-// mail, so a person who is on two audiences is counted twice.
-describe("Subscriptions", () => {
-  it("sum active audiences and wait for every count", () => {
-    const counted = new Map([["a1", figureOf(1204)], ["a2", figureOf(86)]]);
-    const done = metric(inputs({ subscribers: counted }), "Subscriptions");
-    expect(done.figure).toEqual(figureOf(1290));
-    expect(done.loading).toBeFalsy();
-    expect(done.format?.(1290)).toBe("1,290");
-
-    // One audience not counted yet: a partial sum would read as the whole.
-    const partial = new Map([["a1", figureOf(1204)], ["a2", absent("unread")]]);
-    const waiting = metric(inputs({ subscribers: partial }), "Subscriptions");
-    expect(waiting.loading).toBe(true);
-
-    // The audiences themselves not read yet.
-    expect(metric(inputs({ audiencesSettled: false }), "Subscriptions").loading).toBe(true);
-  });
-
-  it("are at least their sum when a count stopped at the engine's window", () => {
-    // 5,000 is the engine's window, not the audience: the sum is a floor too.
-    const counted = new Map([["a1", figureOf(5000, true)], ["a2", figureOf(1204)]]);
-    expect(metric(inputs({ subscribers: counted }), "Subscriptions").figure).toEqual(figureOf(6204, true));
-  });
-
-  it("are a real zero when there is no active audience to count", () => {
-    expect(metric(inputs({ subscribers: new Map() }), "Subscriptions").figure).toEqual(figureOf(0));
-  });
-
-  it("are absent with the engine's sentence when one count is refused, not a sum of the rest", () => {
-    const subscribers = new Map([["a1", figureOf(1204)], ["a2", absent("failed", "Counting subscribers is not yours to do.")], ["a3", absent("unread")]]);
-    const refusedCount = metric(inputs({ subscribers }), "Subscriptions");
-    expect(refusedCount.loading).toBeFalsy();
-    expect(refusedCount.figure).toEqual(absent("failed", "Counting subscribers is not yours to do."));
-  });
-
-  it("are absent when the audiences cannot be read", () => {
-    const refusedAudiences = metric(inputs({ audiencesSettled: true, audiencesError: "Audiences are not yours to read." }), "Subscriptions");
-    expect(refusedAudiences.loading).toBeFalsy();
-    expect(refusedAudiences.figure).toEqual(absent("failed", "Audiences are not yours to read."));
-  });
-});
-
-describe("Active automations", () => {
-  it("is the count it is given once its read has settled", () => {
-    const active = metric(inputs({ activeAutomations: { count: 3, settled: true, error: "" } }), "Active automations");
-    expect(active.figure).toEqual(figureOf(3));
-    expect(metric(inputs(), "Active automations").figure).toEqual(figureOf(0));
-  });
-
-  it("shows its shape while read, and the sentence when refused", () => {
-    expect(metric(inputs({ activeAutomations: { count: 0, settled: false, error: "" } }), "Active automations")).toMatchObject({ loading: true });
-    const refusedRules = metric(inputs({ activeAutomations: { count: 0, settled: true, error: "Rules are not yours to read." } }), "Active automations");
-    expect(refusedRules.loading).toBeFalsy();
-    expect(refusedRules.figure).toEqual(absent("failed", "Rules are not yours to read."));
-  });
-});
-
 describe("the campaign distribution", () => {
-  const states = (...statuses: string[]) => statuses.map((status, n) => campaign({ id: `c${n}`, status }));
+  const states = (...statuses: string[]) => statuses.map((status, n) => campaignFromRow(campaignRow({ id: `c${n}`, status })));
 
   it("divides campaigns into draft, scheduled, sending, sent and other", () => {
-    const segments = campaignDistribution(
-      states("draft", "draft", "scheduled", "sending", "sent", "sent", "sent", "paused", "cancelled", "failed", ""),
-    );
-    expect(segments).toEqual([
+    expect(campaignDistribution(states("draft", "draft", "scheduled", "sending", "sent", "sent", "sent", "paused", "cancelled", "failed", ""))).toEqual([
       { label: "Draft", count: 2 },
       { label: "Scheduled", count: 1 },
       { label: "Sending", count: 1, tone: "good" },

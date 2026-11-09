@@ -5,6 +5,9 @@
 // version it does not know, so folding per-app preferences into it would mean
 // a person loses their desks because an app learned a checkbox.
 
+// The period vocabulary from its own module, not the statistics barrel: this
+// file is read by the manifest, which has no reason to pull the chart in.
+import { EMAIL_PERIODS, isPeriod, type Period } from "../../kit/statistics/period";
 import type { ModuleId } from "../../system/modules";
 import type { OsAppSection } from "../../system/registry";
 
@@ -16,9 +19,11 @@ import type { OsAppSection } from "../../system/registry";
  * section the manifest does not declare leaves the window on the first
  * section with the nav highlighting nothing.
  *
- * Overview opens with the figures: what was sent in the last 30 days, how
- * many people can be mailed and what runs on its own, and the campaigns by
- * state. Resource lists and guided authoring keep their own destinations.
+ * Overview opens with the email statistics of a period, for one client or
+ * every client in scope (spec 9): what was sent and how it was opened, what
+ * went wrong in delivery, how the audiences grew, the leading campaigns and
+ * each automation's mail. Resource lists and guided authoring keep their own
+ * destinations.
  *
  * THE TABS ARE THE APP'S NOUNS (DESIGN.md, "A tab is a different kind of
  * thing"): campaigns, automations, audiences, templates. A sender is not one
@@ -90,6 +95,19 @@ export interface EmailSettings {
    * `createCampaign` defaults both to true, which is what this matches.
    */
   trackByDefault: boolean;
+  /**
+   * The period the Overview's statistics read (kit `PeriodControl`), one of
+   * `EMAIL_PERIODS`: Email's facts are counted by the day, so it has no 24
+   * hours. Remembered per browser, as every app's chosen period is.
+   */
+  statisticsPeriod: Period;
+  /**
+   * The client the Overview's statistics read under (accounts `useClientScope`):
+   * an organization's id, or "" for every client in scope. PRESENTATION, NOT
+   * PERMISSION -- the read narrows to what the person reaches on the server
+   * (spec D11), and an id that is no longer among the choices reads as "".
+   */
+  statisticsScope: string;
 }
 
 export const EMAIL_SETTINGS_KEY = "memql-os-email-v1";
@@ -102,6 +120,8 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   defaultSection: "overview",
   includeArchived: false,
   trackByDefault: true,
+  statisticsPeriod: "30d",
+  statisticsScope: "",
 };
 
 /**
@@ -135,6 +155,12 @@ export function sanitizeEmailSettings(raw: unknown): EmailSettings {
       typeof doc.trackByDefault === "boolean"
         ? doc.trackByDefault
         : DEFAULT_EMAIL_SETTINGS.trackByDefault,
+    // Against Email's OWN periods: "24h" is a period, and a website's, and
+    // Email's read refuses it.
+    statisticsPeriod: isPeriod(doc.statisticsPeriod, EMAIL_PERIODS) ? doc.statisticsPeriod : DEFAULT_EMAIL_SETTINGS.statisticsPeriod,
+    // Any string: whether it is still a client this person may choose is the
+    // client scope's to say, against the organizations it can see.
+    statisticsScope: typeof doc.statisticsScope === "string" ? doc.statisticsScope : DEFAULT_EMAIL_SETTINGS.statisticsScope,
   };
 }
 

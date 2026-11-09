@@ -103,6 +103,35 @@ describe("one Email app", () => {
     expect(sanitizeEmailSettings({ version: 1, defaultSection: "inbox", includeArchived: false, trackByDefault: true }).defaultSection).toBe("inbox");
   });
 
+  it("remembers the Overview's period and client, each repaired on its own", () => {
+    // Thirty days for every client in scope, until somebody chooses otherwise.
+    expect(DEFAULT_EMAIL_SETTINGS.statisticsPeriod).toBe("30d");
+    expect(DEFAULT_EMAIL_SETTINGS.statisticsScope).toBe("");
+
+    const doc = { version: 1, defaultSection: "campaigns", includeArchived: true, trackByDefault: false };
+    expect(sanitizeEmailSettings({ ...doc, statisticsPeriod: "90d", statisticsScope: "acct-b" })).toMatchObject({
+      ...doc,
+      statisticsPeriod: "90d",
+      statisticsScope: "acct-b",
+    });
+    for (const period of ["7d", "30d", "90d", "12m"]) {
+      expect(sanitizeEmailSettings({ ...doc, statisticsPeriod: period }).statisticsPeriod).toBe(period);
+    }
+
+    // A period Email does not offer -- a website's 24 hours, a word nobody wrote -- falls back alone.
+    for (const period of ["24h", "week", 30, null]) {
+      const repaired = sanitizeEmailSettings({ ...doc, statisticsPeriod: period, statisticsScope: "acct-b" });
+      expect(repaired.statisticsPeriod).toBe("30d");
+      expect(repaired.statisticsScope).toBe("acct-b");
+      expect(repaired.trackByDefault).toBe(false);
+    }
+    // A client that is not a string falls back to every client alone.
+    const scope = sanitizeEmailSettings({ ...doc, statisticsPeriod: "7d", statisticsScope: 42 });
+    expect(scope).toMatchObject({ statisticsPeriod: "7d", statisticsScope: "", defaultSection: "campaigns" });
+    // A document written before either existed reads both as their defaults.
+    expect(sanitizeEmailSettings(doc)).toMatchObject({ statisticsPeriod: "30d", statisticsScope: "" });
+  });
+
   it("does not read a preference saved under a name it no longer has", () => {
     // Pre-release: nothing is migrated, so the old name is simply not there.
     const read = sanitizeEmailSettings({ version: 1, defaultSection: "overview", showFiled: true, trackByDefault: true });

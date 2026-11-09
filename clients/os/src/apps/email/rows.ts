@@ -1450,4 +1450,8 @@ export function journeyFromRow(row: Row): JourneyRow {
   const flat = flatten(row);
   return { id: rowString(flat, "id"), accountId: rowString(flat, "accountId"), ownerUserId: rowString(flat, "ownerUserId"), name: rowString(flat, "name"), description: rowString(flat, "description"), trigger: (flat.trigger && typeof flat.trigger === "object" ? flat.trigger : { kind: "joined", audienceId: "" }) as Trigger, steps: Array.isArray(flat.steps) ? flat.steps as FlowStep[] : [], status: rowString(flat, "status"), activatedAt: rowString(flat, "activatedAt"), lastError: rowString(flat, "lastError"), createdAt: rowString(flat, "createdAt") };
 }
+/** The name to show, never blank: a journey is an automation to the person reading it. */
+export function journeyName(journey: JourneyRow): string {
+  return orUntitled(journey.name, journey.id, "automation");
+}
 export function journeyFingerprint(journey: JourneyRow): string { return JSON.stringify([journey.name, journey.description, journey.status, journey.trigger, journey.steps, journey.lastError]); }

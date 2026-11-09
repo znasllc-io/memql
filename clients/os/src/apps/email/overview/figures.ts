@@ -1,49 +1,245 @@
-import { formatRate } from "../../../kit/format";
+import { formatCount, formatRate } from "../../../kit/format";
 import { absent, figureOf, type Figure } from "../../../kit/measure";
-import type { OverviewMetric, OverviewSegment } from "../../../kit/Overview";
-import { campaignName, type CampaignRow, type CampaignStats } from "../rows";
+import type { OverviewSegment } from "../../../kit/Overview";
+import type { ChartPoint, StatFigure } from "../../../kit/statistics";
+import { previousComparable } from "../../../kit/statistics/period";
+import type { CampaignRow } from "../rows";
 import type { Reading } from "../useEmail";
 import { WORDS } from "../words";
+import type { AudienceFigures, AutomationFigures, CampaignFigures, EmailPoint, EmailStatistics, EmailTotals } from "./statistics";
 
-// WHAT THE OVERVIEW MEASURES (memql#6033, Ruling 22): five figures and the shape
-// of the campaigns, as pure functions of what the app's reads have answered.
+// WHAT THE OVERVIEW DRAWS (spec 9), as pure functions of what its reads have
+// answered: the statistics read for the period, and the feeds and subscriber
+// counts for what is true now.
 //
 // PURE, so the three things a figure can be stay three things and are checked
 // without a DOM: a NUMBER, a REASON there is none, or a read still ON ITS WAY.
 // Rendering a missing number as `0` is the failure this file exists to refuse --
-// "0% opened" is a thing operators act on, and nothing here measured it.
+// "0% opened" is a thing people act on, and a period nothing counted did not
+// measure it.
 //
 // ===========================================================================
 // WHERE EACH NUMBER COMES FROM
 // ===========================================================================
-//   Sent, 30 days       the campaigns' own `sentCount`, over those started in the
-//                       window. The counters are the drain worker's own
-//                       tallies, and the campaigns feed walks every page.
-//   Open / Click rate   unique openers (clickers) over accepted sends from the
-//                       same campaignStats response, summed across campaigns
-//                       that tracked them. Missing or bounded counts withhold
-//                       the rate. Provider reports can repair an uncertain send
-//                       before the campaign's own progress counters catch up.
-//   Subscriptions       the engine's `audienceSubscriberCount` per active audience,
-//                       added up: a person on two audiences is two subscriptions,
-//                       so it is not called subscribers. A count that reached
-//                       the engine's window is a floor, and so is a sum with one
-//                       in it ("5,086 or more").
-//   Active automations  the rules that are On.
-//
-// A RATE IS OF WHAT WAS SENT, over the campaigns that asked to be counted. A
-// campaign that never tracked opens has no opens to report, and adding its
-// 10,000 sends to the denominator would punish every campaign that did.
+//   Sent ... Suppressed  the statistics read's totals for the period, each
+//                        against the period before it -- only when that period
+//                        was counted from its first day (kit
+//                        `previousComparable`; twelve months have none).
+//   Open / Click rate    the read's, of the campaign messages sent in the
+//                        period, opened or clicked on any day (a send-day
+//                        cohort). Not the period's first opens over its sends:
+//                        those count a message sent before the period.
+//   The lists            the read's rows: each campaign, rule, journey,
+//                        audience and client. A campaign's and a client's
+//                        opens are by cohort too, so the rows are not parts of
+//                        any total on the page and are never laid out as such.
+//                        The read lists only what it measured: an empty list
+//                        is "nothing" only where its figures were counted
+//                        (`listsMeasured`).
+//   Subscriptions        the engine's `audienceSubscriberCount` per active
+//                        audience in scope, added up: a person on two
+//                        audiences is two subscriptions, so it is not called
+//                        subscribers. A count that reached the engine's window
+//                        is a floor, and so is a sum with one in it.
+//   Active automations   the rules and journeys in scope that are switched on.
 
-/** The window "Sent, 30 days" and the rates look back over. */
-export const OVERVIEW_WINDOW_DAYS = 30;
-const DAY_MS = 86_400_000;
+/** A figure the series carries per bucket: the totals and the points name it alike. */
+export type ChartKey = Exclude<keyof EmailPoint, "at">;
 
-/** Why there is no rate when no campaign in the window counted it. */
-export const NO_TRACKED_CAMPAIGN = `No tracked campaign in the last ${OVERVIEW_WINDOW_DAYS} days.`;
+export interface FigureSpec {
+  id: ChartKey;
+  label: string;
+  /** A share, written as one ("42%"); a count otherwise ("1,204"). */
+  rate?: true;
+}
 
-/** Why a rate cannot be stated when the engine had no breakdown for a campaign sent in the window: said of that campaign. */
-const noBreakdown = (campaign: string): string => `No breakdown was returned for “${campaign}”.`;
+/** The period's figures, labelled exactly as the page reads them. */
+export const EMAIL_FIGURES: readonly FigureSpec[] = Object.freeze([
+  { id: "sent", label: "Sent" },
+  { id: "openRate", label: "Open rate", rate: true },
+  { id: "clickRate", label: "Click rate", rate: true },
+  { id: "unsubscribes", label: "Unsubscribes" },
+  { id: "subscribes", label: "New subscribers" },
+]);
+
+/** What went wrong in delivery, a figure row of its own under its own heading. */
+export const DELIVERY_FIGURES: readonly FigureSpec[] = Object.freeze([
+  { id: "bounces", label: "Bounces" },
+  { id: "complaints", label: "Complaints" },
+  { id: "failed", label: "Failed" },
+  { id: "suppressed", label: "Suppressed" },
+]);
+
+/** Why every figure is a dash when the cluster has recorded no email -- or the person reaches none. */
+export const NOTHING_RECORDED = "Nothing has been recorded yet.";
+
+/** Why a rate is a dash when only automated mail went out: a rate is of campaign mail. */
+export const NO_CAMPAIGN_MAIL = "No campaign mail was sent in this period.";
+
+export function formatOf(spec: FigureSpec): (value: number) => string {
+  return spec.rate === true ? formatRate : formatCount;
+}
+
+type StatisticsReading = Pick<Reading<EmailStatistics | null>, "value" | "state" | "error">;
+
+/**
+ * Which of the read's lists were read, judged by the totals.
+ *
+ * THE READ LISTS ONLY WHAT IT MEASURED (component/emailstats, "Absent is never
+ * zero"): a list is read only where every figure its rows carry was counted
+ * through the period -- a campaign's sends AND its opens, an automation's
+ * sends, an audience's subscription changes -- and otherwise arrives EMPTY,
+ * which on the wire looks exactly like a period in which nothing happened. The
+ * totals carry the same judgement, each null exactly where its source was not
+ * walked through the period: sends (`sent`), opens and clicks (`uniqueOpens`),
+ * subscription changes (`subscribes`). So an empty list says "nothing in this
+ * period" only where they are measured, and "not measured" otherwise.
+ */
+export function listsMeasured(totals: EmailTotals): { audiences: boolean; automations: boolean; campaigns: boolean } {
+  return {
+    audiences: totals.subscribes !== null,
+    automations: totals.sent !== null,
+    campaigns: totals.sent !== null && totals.uniqueOpens !== null,
+  };
+}
+
+function absentReason(stats: EmailStatistics, spec: FigureSpec): string {
+  if (stats.measuredSince === null) return NOTHING_RECORDED;
+  // A rate is null either because no campaign mail was sent or because its
+  // sends or opens were not counted through the period. Only the first is a
+  // fact about the mail, and it is said only where both were counted.
+  if (spec.rate === true && listsMeasured(stats.totals).campaigns) return NO_CAMPAIGN_MAIL;
+  return "";
+}
+
+function figureFrom(value: number | null, reason = ""): Figure {
+  return value === null ? absent("unmeasured", reason) : figureOf(value);
+}
+
+/**
+ * A figure row from the statistics read.
+ *
+ * WITH NO ANSWER TO DRAW there is nothing to chart, so no figure is a choice:
+ * while the read is on its way each figure is its shape (and stays a choice, so
+ * the row does not change kind when the answer lands); refused, each carries
+ * the engine's sentence; an answer with no row in it says nothing either way.
+ * A refused REFRESH is none of these: `useReading` keeps the last answer, and
+ * the figures go on drawing it.
+ */
+export function statFigures(specs: readonly FigureSpec[], read: StatisticsReading): StatFigure[] {
+  const stats = read.value;
+  if (stats === null) {
+    if (read.state === "idle" || read.state === "loading") {
+      return specs.map((spec) => ({ id: spec.id, label: spec.label, figure: absent("unread"), format: formatOf(spec), chartable: true, loading: true }));
+    }
+    const nothing = read.state === "error" ? absent("failed", read.error) : absent("unmeasured");
+    return specs.map((spec) => ({ id: spec.id, label: spec.label, figure: nothing, format: formatOf(spec) }));
+  }
+  const comparable = previousComparable(stats.prevStart, stats.measuredSince);
+  return specs.map((spec) => {
+    const stat: StatFigure = { id: spec.id, label: spec.label, figure: figureFrom(stats.totals[spec.id], absentReason(stats, spec)), format: formatOf(spec), chartable: true };
+    // No previous figure at all unless the period before was counted throughout:
+    // a change against part of a period overstates growth (kit `previousComparable`).
+    if (comparable && stats.previous !== null) stat.previous = figureFrom(stats.previous[spec.id]);
+    return stat;
+  });
+}
+
+/** A figure bucket by bucket. A bucket nothing measured is a gap in the chart, never a zero. */
+export function chartPoints(series: readonly EmailPoint[], id: ChartKey): ChartPoint[] {
+  return series.map((point) => ({ at: point.at, value: point[id] }));
+}
+
+/** The previous period under the current one, only when it can be compared with; none for twelve months. */
+export function previousPoints(stats: EmailStatistics, id: ChartKey): ChartPoint[] | undefined {
+  if (stats.previousSeries === null || !previousComparable(stats.prevStart, stats.measuredSince)) return undefined;
+  return chartPoints(stats.previousSeries, id);
+}
+
+/** A net change with its sign: "+9", "−3" (a true minus, as the kit's changes read) or "0". */
+function signedCount(value: number): string {
+  if (value > 0) return `+${formatCount(value)}`;
+  if (value < 0) return `−${formatCount(-value)}`;
+  return formatCount(0);
+}
+
+/**
+ * An audience's quiet line: "12 new · 3 unsubscribed · +9 net · 1,204 subscribed".
+ * The size is how many it can mail now, once counted; until then, or when it
+ * cannot be counted, it is left out rather than said as nothing.
+ */
+export function growthLine(audience: AudienceFigures, size: Figure | undefined): string {
+  const parts = [`${formatCount(audience.subscribes)} new`, `${formatCount(audience.unsubscribes)} unsubscribed`, `${signedCount(audience.net)} net`];
+  if (size?.kind === "measured") parts.push(`${formatCount(size.value)}${size.atLeast ? " or more" : ""} subscribed`);
+  return parts.join(" · ");
+}
+
+/** A campaign's quiet line: "42% opened · 3.1% clicked", leaving out a rate it cannot state. */
+export function campaignLine(row: CampaignFigures): string | undefined {
+  const parts = [row.openRate === null ? "" : `${formatRate(row.openRate)} opened`, row.clickRate === null ? "" : `${formatRate(row.clickRate)} clicked`].filter((part) => part !== "");
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+/** An automation's quiet line: "120 sent · 2 failed · 1 suppressed". */
+export function automationLine(row: AutomationFigures): string {
+  return `${formatCount(row.sent)} sent · ${formatCount(row.failed)} failed · ${formatCount(row.suppressed)} suppressed`;
+}
+
+/** A client's quiet line: its open rate, or nothing for a client that sent no campaign mail. */
+export function clientLine(row: CampaignFigures): string | undefined {
+  return row.openRate === null ? undefined : `${formatRate(row.openRate)} opened`;
+}
+
+/**
+ * Whether the provider reports delivery outcomes for this period: some
+ * delivered or undelivered fact is in it. Where none is, "Delivered" is not
+ * said at all -- a provider that never answers is not one that delivered
+ * nothing.
+ */
+export function providerReportsOutcomes(totals: EmailTotals): boolean {
+  return (totals.delivered ?? 0) > 0 || (totals.undelivered ?? 0) > 0;
+}
+
+/** A fact of what is true now: its figure, or its shape while its reads are on their way. */
+export interface FactReading {
+  figure: Figure;
+  loading: boolean;
+}
+
+const factReading = (): FactReading => ({ figure: absent("unread"), loading: true });
+
+/**
+ * Subscriptions: the active audiences in scope, each counted by the engine,
+ * added up. A count that cannot be had makes the sum something nobody can
+ * state, and a partial sum would read as the whole.
+ */
+export function subscriptionsFact(i: { settled: boolean; error: string; counts: ReadonlyMap<string, Figure>; audienceIds: readonly string[] }): FactReading {
+  if (i.error !== "") return { figure: absent("failed", i.error), loading: false };
+  if (!i.settled) return factReading();
+  let total = 0;
+  let floor = false;
+  let waiting = false;
+  let failure: Figure | null = null;
+  for (const id of i.audienceIds) {
+    const count = i.counts.get(id) ?? absent("unread");
+    if (count.kind === "measured") {
+      total += count.value;
+      // A count the engine stopped at its window makes the sum a floor too: "N or more".
+      floor ||= count.atLeast === true;
+    } else if (count.reason === "unread") waiting = true;
+    else failure ??= count;
+  }
+  if (failure !== null) return { figure: failure, loading: false };
+  if (waiting) return factReading();
+  return { figure: figureOf(total, floor), loading: false };
+}
+
+/** Active automations: the rules and journeys in scope that are switched on. */
+export function activeAutomationsFact(i: { count: number; settled: boolean; error: string }): FactReading {
+  if (i.error !== "") return { figure: absent("failed", i.error), loading: false };
+  if (!i.settled) return factReading();
+  return { figure: figureOf(i.count), loading: false };
+}
 
 /**
  * A read's refusal: the engine's sentence when it left NOTHING TO SHOW, "" when
@@ -53,180 +249,16 @@ const noBreakdown = (campaign: string): string => `No breakdown was returned for
  * holds the two together, in the state `degraded`), so its figures are still
  * true as of the last read and are drawn. Only a read with nothing to fall back
  * on is a refusal -- a dash, and "this cluster did not return" -- and what a
- * kept figure's refresh was told is said once, by the page, beside the figures it
- * kept. The page hands every `error` below through this.
+ * kept figure's refresh was told is said once, on the heading's line.
  */
 export function refusalOf(error: string, held: number): string {
   return held > 0 ? "" : error;
 }
 
 /**
- * What the Overview is made from. Each read says whether it has answered and,
- * when it was refused with nothing to show, why (`refusalOf`).
- */
-export interface OverviewInputs {
-  campaigns: { rows: CampaignRow[]; settled: boolean; error: string };
-  /** campaignId -> its breakdown, for the campaigns `statsWanted` names. */
-  stats: ReadonlyMap<string, Reading<CampaignStats | null>>;
-  /** Active audiences only: audienceId -> how many people it can mail now. */
-  subscribers: ReadonlyMap<string, Figure>;
-  audiencesSettled: boolean;
-  /** The audiences list was refused: the subscribers cannot be added up, and nothing says it is zero. */
-  audiencesError?: string;
-  /** Rules that are On now; rules and journeys once journeys exist. */
-  activeAutomations: { count: number; settled: boolean; error: string };
-  now: Date;
-}
-
-const count = (value: number): string => value.toLocaleString("en-US");
-
-/** A figure whose read is still on its way: the shape of a figure, never a caption. */
-const reading = (label: string): OverviewMetric => ({ label, figure: absent("unread"), loading: true });
-
-/** A figure whose read was refused: an em dash, and the engine's sentence on it. */
-const refused = (label: string, sentence: string): OverviewMetric => ({ label, figure: absent("failed", sentence) });
-
-/** A figure that has no number and says why, under the dash. */
-const unmeasured = (label: string, reason: string): OverviewMetric => ({
-  label,
-  figure: absent("unmeasured", reason),
-  detail: reason,
-});
-
-/** Whether a campaign went out inside the window. A start nobody can read, or no start at all (a draft), did not. */
-export function startedInWindow(campaign: CampaignRow, now: Date): boolean {
-  const started = Date.parse(campaign.startedAt);
-  if (!Number.isFinite(started)) return false;
-  // No upper bound: a clock a little ahead of this one may have written the
-  // start, and a send under way should not leave the figure for that.
-  return started >= now.getTime() - OVERVIEW_WINDOW_DAYS * DAY_MS;
-}
-
-/**
- * The campaigns whose breakdown the Overview reads: started in the window,
- * counting opens or clicks, with something sent. Anything else cannot add to a
- * rate, so reading it would be a request for nothing -- and the figures and the
- * reads ask this one question, so they cannot disagree about who is in them.
- */
-export function statsWanted(campaigns: readonly CampaignRow[], now: Date): CampaignRow[] {
-  return campaigns.filter(
-    (campaign) => campaign.id !== "" && startedInWindow(campaign, now) && (campaign.trackOpens || campaign.trackClicks) && campaign.sentCount > 0,
-  );
-}
-
-function sentMetric(i: OverviewInputs): OverviewMetric {
-  const label = "Sent, 30 days";
-  if (i.campaigns.error !== "") return refused(label, i.campaigns.error);
-  if (!i.campaigns.settled) return reading(label);
-  const sent = i.campaigns.rows.filter((campaign) => startedInWindow(campaign, i.now)).reduce((sum, campaign) => sum + campaign.sentCount, 0);
-  return { label, figure: figureOf(sent), format: count };
-}
-
-/** Unique openers (clickers) over what was sent, across the campaigns that counted them. */
-function rateMetric(label: string, kind: "opens" | "clicks", i: OverviewInputs): OverviewMetric {
-  if (i.campaigns.error !== "") return refused(label, i.campaigns.error);
-  if (!i.campaigns.settled) return reading(label);
-
-  const counted = statsWanted(i.campaigns.rows, i.now).filter((campaign) => (kind === "opens" ? campaign.trackOpens : campaign.trackClicks));
-  if (counted.length === 0) return unmeasured(label, NO_TRACKED_CAMPAIGN);
-
-  let unique = 0;
-  let sent = 0;
-  let waiting = false;
-  let refusal = "";
-  let reason = "";
-  for (const campaign of counted) {
-    const breakdown = i.stats.get(campaign.id);
-    const stats = breakdown?.value ?? null;
-    if (stats === null) {
-      if (breakdown === undefined || breakdown.state === "loading" || breakdown.state === "idle") waiting = true;
-      else if (breakdown.state === "error") refusal ||= breakdown.error;
-      else reason ||= noBreakdown(campaignName(campaign));
-      continue;
-    }
-    const figure = kind === "opens" ? stats.opensUnique : stats.clicksUnique;
-    if (figure.value === null) {
-      reason ||= figure.absentBecause;
-      continue;
-    }
-    if (figure.atLeast || stats.sent.atLeast || stats.sent.value === null) {
-      reason ||= "The recorded counts are incomplete, so this rate cannot be stated exactly.";
-      continue;
-    }
-    unique += figure.value;
-    sent += stats.sent.value;
-  }
-
-  // WHAT IS KNOWN TO BE ABSENT OUTRANKS WHAT IS STILL ARRIVING: a rate that one
-  // campaign makes impossible to state does not wait for the others, and a
-  // skeleton must never conceal a refusal.
-  if (refusal !== "") return refused(label, refusal);
-  if (reason !== "") return unmeasured(label, reason);
-  if (waiting) return reading(label);
-  if (sent <= 0) return unmeasured(label, "No accepted sends were recorded for these campaigns.");
-  return { label, figure: figureOf(unique / sent), format: formatRate };
-}
-
-function subscriptionsMetric(i: OverviewInputs): OverviewMetric {
-  const label = "Subscriptions";
-  if (i.audiencesError !== undefined && i.audiencesError !== "") return refused(label, i.audiencesError);
-  if (!i.audiencesSettled) return reading(label);
-  let total = 0;
-  let floor = false;
-  let waiting = false;
-  let failure: Figure | null = null;
-  for (const figure of i.subscribers.values()) {
-    if (figure.kind === "measured") {
-      total += figure.value;
-      // A count the engine stopped at its window makes the sum a floor too: "N or more".
-      floor ||= figure.atLeast === true;
-    } else if (figure.reason === "unread") waiting = true;
-    else failure ??= figure;
-  }
-  // A count that cannot be had makes the sum something nobody can state; the
-  // sum of the others would read as the whole.
-  if (failure !== null) return { label, figure: failure };
-  if (waiting) return reading(label);
-  return { label, figure: figureOf(total, floor), format: count };
-}
-
-function automationsMetric(i: OverviewInputs): OverviewMetric {
-  const label = "Active automations";
-  if (i.activeAutomations.error !== "") return refused(label, i.activeAutomations.error);
-  if (!i.activeAutomations.settled) return reading(label);
-  return { label, figure: figureOf(i.activeAutomations.count), format: count };
-}
-
-/**
- * A reason is said once. Two figures that give the same one (neither rate has a
- * tracked campaign to be made of) keep their dashes, and the reason stands under
- * the first; it stays on the second's hover, in the figure itself.
- */
-function saidOnce(metrics: OverviewMetric[]): OverviewMetric[] {
-  const said = new Set<string>();
-  return metrics.map(({ detail, ...metric }) => {
-    if (detail === undefined || said.has(detail)) return metric;
-    said.add(detail);
-    return { ...metric, detail };
-  });
-}
-
-/** The five figures, labelled exactly as the page reads them. */
-export function overviewMetrics(i: OverviewInputs): OverviewMetric[] {
-  return saidOnce([
-    sentMetric(i),
-    rateMetric("Open rate", "opens", i),
-    rateMetric("Click rate", "clicks", i),
-    subscriptionsMetric(i),
-    automationsMetric(i),
-  ]);
-}
-
-/**
- * Every campaign the cluster has, divided by where it is: a current
- * distribution, not an activity history (nothing here is a time series). A
- * campaign that is paused, cancelled, failed or in a state this build does not
- * know is Other.
+ * The campaigns in scope, divided by where they are: a current distribution,
+ * not an activity history. A campaign that is paused, cancelled, failed or in a
+ * state this build does not know is Other.
  */
 export function campaignDistribution(rows: readonly CampaignRow[]): OverviewSegment[] {
   const tally = (status: string) => rows.filter((campaign) => campaign.status === status).length;
