@@ -68,6 +68,7 @@ func (w *Worker) handleRetryEnrollments(ctx context.Context, args map[string]any
 		cursor = next
 	}
 	retried := 0
+	reasons := map[string]bool{}
 	for _, scanned := range failed {
 		ok, err := w.retryEnrollment(ctx, system, j, scanned)
 		if err != nil {
@@ -75,9 +76,43 @@ func (w *Worker) handleRetryEnrollments(ctx context.Context, args map[string]any
 		}
 		if ok {
 			retried++
+			reasons[str(scanned, "lastError")] = true
+		}
+	}
+	if retried > 0 {
+		if err = w.clearRetriedJourneyError(ctx, system, j.ID, reasons); err != nil {
+			return nil, err
 		}
 	}
 	return resultNode("campaignRetryEnrollments", map[string]any{"retried": retried})
+}
+
+// clearRetriedJourneyError clears the automation's error once a retry has
+// restarted the runs it describes and none is failed any more. The drain clears
+// it when an email goes out, but a restarted run can also leave without one (the
+// person unsubscribed), and then nothing would. A failed run's error and the
+// automation's are the same text; an error that is not a restarted run's own
+// (why sends wait, say) is the drain's to keep, and a run that fails again notes
+// its reason again. It reads the automation and its failed runs under the
+// journey gate the drain notes the error under.
+func (w *Worker) clearRetriedJourneyError(ctx, system context.Context, id string, reasons map[string]bool) error {
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), journeyLock(id))
+	if err != nil {
+		return err
+	}
+	defer hold.Release()
+	row, err := w.newsletterRow(system, "journeyById", "journeyId", id)
+	if err != nil || row == nil {
+		return err
+	}
+	if said := str(row, "lastError"); said == "" || !reasons[said] {
+		return nil
+	}
+	left, _, err := w.store.rowsPage(system, "", call("query", "failedEnrollmentsForJourney", arg{"journeyId", id}))
+	if err != nil || len(left) > 0 {
+		return err
+	}
+	return w.journeyWrite(system, hold, "recordJourneyDrain", map[string]any{"journeyId": id, "lastError": "", "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
 }
 
 // retryEnrollmentIDs is the enrollments an operator named, bare. Nothing named

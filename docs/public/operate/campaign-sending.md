@@ -555,7 +555,9 @@ address under a different display name. An automation that sends as such a
 sender cannot be turned on, and one already on fails those sends. Once the
 sender is fixed, an automation people join can retry its failed runs from its
 page; an automation that something in MemQL starts does not send failed emails
-again.
+again. Once a retry leaves none of its runs failed, the automation stops showing
+the error those runs had, even when a retried run ends without an email (the
+person unsubscribed); a run that fails again shows its reason again.
 
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display

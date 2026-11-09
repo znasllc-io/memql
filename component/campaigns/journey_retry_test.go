@@ -118,6 +118,41 @@ func TestRetryEnrollmentsDoesNotSendToAnUnsubscribedPerson(t *testing.T) {
 	}
 }
 
+// The automation's error says why its runs failed. A retry that leaves none of
+// them failed clears it. Otherwise only the next email that goes out clears it,
+// and a retried run that leaves without a send (the person unsubscribed) would
+// keep a failure that is over on the automation's page.
+func TestARetryThatLeavesNothingFailedClearsTheAutomationsError(t *testing.T) {
+	a := newAutomation(t, newDigestFixture(t), "journey-retry-clears", oneEmail)
+	a.unconfirmable(t)
+	if str(a.journey(t), "lastError") == "" {
+		t.Fatal("the failed send left no error on the automation")
+	}
+	// Naming a run that is not failed restarts nothing, and the failure stands.
+	if got := a.retry(t, "no-such-enrollment"); got != 0 {
+		t.Fatalf("retried %d enrollments that were not named", got)
+	}
+	if str(a.journey(t), "lastError") == "" {
+		t.Fatal("a retry that restarted nothing cleared the automation's error")
+	}
+	if err := a.store.SetRecipientSubscription(a.owner, a.suffix+"-member", "unsubscribed", a.now); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.retry(t); got != 1 {
+		t.Fatalf("retried %d, want 1", got)
+	}
+	if got := str(a.journey(t), "lastError"); got != "" {
+		t.Fatalf("the automation still says %q with nothing failed", got)
+	}
+	a.drain(t)
+	if row := a.enrollment(t, a.member); str(row, "status") != "exited" || a.azure.submissions() != 0 {
+		t.Fatalf("the retried run is %v after %d submissions, want it exited and nothing sent", row, a.azure.submissions())
+	}
+	if got := str(a.journey(t), "lastError"); got != "" {
+		t.Fatalf("the automation says %q after its last failed run left", got)
+	}
+}
+
 func TestRetryEnrollmentsRefusesAnotherOrganizationsJourney(t *testing.T) {
 	f := newDigestFixture(t)
 	a := newAutomation(t, f, "journey-retry-mine", oneEmail)
