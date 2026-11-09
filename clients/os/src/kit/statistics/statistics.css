@@ -50,6 +50,7 @@
 .os-time-chart-point,
 .os-time-chart-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--os-accent); box-shadow: 0 0 0 2px var(--os-plate); transform: translate(-50%, -50%); pointer-events: none; }
 .os-time-chart-point { width: 6px; height: 6px; box-shadow: none; }
+.os-time-chart-point[data-series="previous"],
 .os-time-chart-dot[data-series="previous"] { background: var(--os-muted); }
 .os-time-chart-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--os-rail); transform: translateX(-50%); pointer-events: none; }
 .os-time-chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--os-muted); font-size: var(--os-text-sm); pointer-events: none; }
@@ -69,17 +70,15 @@
 /* ---- StatFigures ------------------------------------------------------ */
 
 /* The Overview's own metrics row, as a choice: the same label, the same 28px
- * figure, the same columns (DESIGN.md "App overviews": four in a row then
- * two; five in a row then three then two). The row is its own container, so
- * its columns follow the room it has wherever it stands. Each figure carries
- * the gutter as its own padding, pulled back out of the row by its margin, so
- * the first figure's text keeps the page's left edge while its hover and its
- * selection mark have room around it. */
-.os-stat-figures { container: stat-figures / inline-size; min-width: 0; }
-.os-stat-figures-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 0; margin: 0 -10px; }
-.os-stat-figures-grid[data-count="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-@container stat-figures (max-width: 760px) { .os-stat-figures-grid[data-count="5"] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@container stat-figures (max-width: 420px) { .os-stat-figures-grid, .os-stat-figures-grid[data-count="5"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+ * figure. Its COLUMNS are the Overview metrics' own (DESIGN.md "App
+ * overviews": four in a row then two; five in a row then three then two),
+ * written once in styles/index.css beside them, and laid out against this
+ * wrapper, which is a container so the row follows the room it has wherever
+ * it stands. Each figure carries the gutter as its own padding, pulled back
+ * out of the row by its margin, so the first figure's text keeps the page's
+ * left edge while its hover and its selection mark have room around it. */
+.os-stat-figures { container-type: inline-size; min-width: 0; }
+.os-stat-figures-grid { display: grid; gap: 4px 0; margin: 0 -10px; }
 
 .os-stat-figure { display: grid; align-content: start; gap: 6px; min-width: 0; margin: 0; padding: 10px 10px 12px; border: 0; border-radius: var(--os-selection-radius); background: none; color: var(--os-ink); font: inherit; text-align: left; }
 button.os-stat-figure { cursor: pointer; }
@@ -100,9 +99,6 @@ button.os-stat-figure:hover { background: var(--os-hover); }
 .os-ranked-list > .os-head,
 .os-ranked-list > .os-subhead { min-height: var(--os-control-h); margin: 0; }
 .os-ranked-list > .os-subhead { display: flex; align-items: center; }
-/* Its act is a quiet word on the heading line, like the period control. */
-.os-ranked-list > .os-head .os-button { border-color: transparent; background: transparent; color: var(--os-muted); }
-.os-ranked-list > .os-head .os-button:hover:not(:disabled) { border-color: transparent; background: var(--os-raised); color: var(--os-ink); }
 
 .os-ranked-rows { display: grid; gap: 2px; margin: 0 -8px; padding: 0; list-style: none; }
 .os-ranked-rows > li { min-width: 0; }
@@ -121,5 +117,3 @@ button.os-ranked-row:hover { background: var(--os-hover); }
 .os-ranked-footer { color: var(--os-muted); font-size: var(--os-text-xs); }
 .os-ranked-footer a { color: inherit; }
 .os-ranked-footer a:hover { color: var(--os-ink); }
-/* While reading, the record list's shape at a ranked row's height. */
-.os-ranked-list .os-record-skeleton .os-row.os-record-row { padding-block: 8px; }

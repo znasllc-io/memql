@@ -10,7 +10,9 @@ import {
   accountName,
   accountNameFrom,
   needsFirstRun,
+  selectableOrganizations,
   SELF_ACCOUNT_ID,
+  untitledAccountName,
 } from "../../src/apps/accounts/rows";
 
 // The pure layer, checked without a browser, a cluster or React -- the reason
@@ -139,6 +141,25 @@ describe("accountName", () => {
     const nameless = accountFromRow({ id: "v1:accounts:account:a1" });
     expect(accountName(nameless)).toContain("a1");
     expect(accountName(nameless).trim()).not.toBe("");
+  });
+
+  it("names an unnamed account the same way from its id alone, for a surface that holds no row", () => {
+    expect(untitledAccountName("v1:accounts:account:a1")).toBe(accountName(accountFromRow({ id: "v1:accounts:account:a1" })));
+    expect(untitledAccountName("acct-q")).toBe("Untitled account (acct-q)");
+    expect(untitledAccountName("")).toBe("Untitled account");
+  });
+});
+
+describe("selectableOrganizations", () => {
+  it("offers the active organizations the person can read, never an archived one or a row with no id", () => {
+    const accounts = [
+      accountFromRow({ id: "self", name: "Operator organization", status: "active" }),
+      accountFromRow({ id: "acme", name: "Acme", status: "active" }),
+      accountFromRow({ id: "old", name: "Old client", status: "archived" }),
+      accountFromRow({ id: "", name: "Mid-write", status: "active" }),
+    ];
+    expect(selectableOrganizations(accounts).map((account) => account.id)).toEqual(["self", "acme"]);
+    expect(selectableOrganizations([])).toEqual([]);
   });
 });
 

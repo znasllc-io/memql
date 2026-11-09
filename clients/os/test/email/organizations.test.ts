@@ -4,13 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import type { AccountRow } from "../../src/apps/accounts/rows";
 import { SELF_ACCOUNT_ID } from "../../src/apps/accounts/rows";
-import { isOperatorOrganization, organizationName, selectableOrganizations } from "../../src/apps/email/organizations";
+import { isOperatorOrganization, organizationName } from "../../src/apps/email/organizations";
 import { WORDS } from "../../src/apps/email/words";
 
 // WHOSE EMAIL IT IS. Email names an organization in a handful of places and the
-// cluster's own organization in one: this file pins the three small answers
-// every one of them asks, and the one sentence for "this organization cannot
-// send yet".
+// cluster's own organization in one: this file pins the small answers every
+// one of them asks, and the one sentence for "this organization cannot send
+// yet". Which organizations can be chosen between is the account concept's
+// answer now (selectableOrganizations, test/accounts/rows.test.ts).
 
 function account(over: Partial<AccountRow> & { id: string }): AccountRow {
   return {
@@ -44,11 +45,6 @@ describe("organizations", () => {
     account({ id: "old", name: "Old client", status: "archived" }),
     account({ id: "", name: "Mid-write" }),
   ];
-
-  it("offers the active organizations the person can read, never an archived one or a row with no id", () => {
-    expect(selectableOrganizations(accounts).map((a) => a.id)).toEqual(["self", "acme"]);
-    expect(selectableOrganizations([])).toEqual([]);
-  });
 
   it("names an organization from the list the page already holds, and keeps an id it cannot resolve", () => {
     expect(organizationName(accounts, "acme")).toBe("Acme");

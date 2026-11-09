@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
 const { clientScopeFor, useClientScope } = await import("../../src/apps/accounts/clientScope");
 const { ScopeControl } = await import("../../src/apps/accounts/ScopeControl");
 const { accountFromRow } = await import("../../src/apps/accounts/rows");
-const { accountRow, fakeConnection, withSession } = await import("./harness");
+const { accountRow, fakeConnection, rowsResult, withSession } = await import("./harness");
 
 afterEach(cleanup);
 
@@ -54,6 +54,17 @@ function Page({ stored, onStore }: { stored: string; onStore: (value: string) =>
 
 function inSession(children: ReactNode, session: Parameters<typeof withSession>[1]) {
   return withSession(children, session);
+}
+
+/** A connection whose account list read has not answered yet, and the way to answer it. */
+function pendingAccountList() {
+  let answer: (rows: ReturnType<typeof accountRow>[]) => void = () => {};
+  const connection = fakeConnection({});
+  connection.query.clientAccountsAll = vi.fn(() => new Promise<ReturnType<typeof rowsResult>>((resolve) => {
+    answer = (rows) => resolve(rowsResult(rows));
+  }));
+  h.connection = connection;
+  return { answer: (rows: ReturnType<typeof accountRow>[]) => answer(rows) };
 }
 
 describe("the client scope", () => {
@@ -94,13 +105,25 @@ describe("the client scope", () => {
       { value: "acct-c", label: "Client Three" },
     ]);
     expect(clientScopeFor(member, ACCOUNTS, "acct-c")).toMatchObject({ value: "acct-c", accountIds: ["acct-c"] });
-    // An organization nothing names keeps its id rather than going blank,
-    // and takes its place in the order by it.
+    // An organization nothing names is named as the Accounts app names an
+    // unnamed account, which keeps its id in sight.
     expect(clientScopeFor(access({ accountIds: ["acct-a", "acct-q"] }), ACCOUNTS, "").options).toEqual([
       { value: "", label: "All my clients" },
-      { value: "acct-q", label: "acct-q" },
       { value: "acct-a", label: "Acme" },
+      { value: "acct-q", label: "Untitled account (acct-q)" },
     ]);
+  });
+
+  it("names an unnamed organization the same way for staff and for members", () => {
+    const unnamed = account("acct-n", "");
+    const forStaff = clientScopeFor(STAFF, [unnamed], "").options.find((option) => option.value === "acct-n");
+    const forMember = clientScopeFor(access({ accountIds: ["acct-n", "acct-a"] }), [unnamed], "").options.find((option) => option.value === "acct-n");
+    expect(forStaff?.label).toBe("Untitled account (acct-n)");
+    expect(forMember?.label).toBe(forStaff?.label);
+    // A group that names it names it for both.
+    const named = { ...GROUP, accountId: "acct-n", accountName: "Named by its group" };
+    expect(clientScopeFor({ ...STAFF, groups: [named] }, [unnamed], "").options.find((option) => option.value === "acct-n")?.label).toBe("Named by its group");
+    expect(clientScopeFor(access({ accountIds: ["acct-n", "acct-a"], groups: [named] }), [unnamed], "").options.find((option) => option.value === "acct-n")?.label).toBe("Named by its group");
   });
 
   it("a member of two sees only theirs in the control, and no other client's name", async () => {
@@ -147,5 +170,52 @@ describe("the client scope", () => {
     expect(onStore).toHaveBeenLastCalledWith("acct-a");
     act(() => result.current.set("acct-elsewhere"));
     expect(onStore).toHaveBeenLastCalledWith("");
+  });
+});
+
+// ===========================================================================
+// A STAFF MEMBER'S CHOICE SURVIVES THE COLD OPEN
+// ===========================================================================
+// Staff choose among every organization, and only the account list names
+// them. Until that read answers, the list holds at most the organizations
+// their own groups name, so validating the stored choice against it would
+// drop the choice and the page's FIRST read would ask for every client, the
+// one its person chose not to look at. The stored choice is kept, with no
+// control, until the list has answered; the reads narrow on the server
+// whatever is sent (D11), so a stale id costs an empty answer, never another
+// client's figures.
+
+describe("before the account list has answered", () => {
+  it("keeps a staff member's stored client from the very first scope", async () => {
+    const list = pendingAccountList();
+    const { result } = renderHook(() => useClientScope("acct-b", () => {}), {
+      wrapper: ({ children }) => inSession(children, { role: "developer", everyAccount: true }),
+    });
+    // The first scope a page reads under is already the stored client.
+    expect(result.current).toMatchObject({ showControl: false, value: "acct-b", accountIds: ["acct-b"] });
+
+    await act(async () => list.answer([accountRow({ id: "acct-a", name: "Acme" }), accountRow({ id: "acct-b", name: "Borden Ltd" })]));
+    await waitFor(() => expect(result.current.showControl).toBe(true));
+    expect(result.current).toMatchObject({ value: "acct-b", accountIds: ["acct-b"] });
+  });
+
+  it("drops the stored client once the account list answers without it", async () => {
+    const list = pendingAccountList();
+    const { result } = renderHook(() => useClientScope("acct-gone", () => {}), {
+      wrapper: ({ children }) => inSession(children, { role: "developer", everyAccount: true }),
+    });
+    expect(result.current).toMatchObject({ value: "acct-gone", accountIds: ["acct-gone"] });
+
+    await act(async () => list.answer([accountRow({ id: "acct-a", name: "Acme" }), accountRow({ id: "acct-b", name: "Borden Ltd" })]));
+    await waitFor(() => expect(result.current.showControl).toBe(true));
+    expect(result.current).toMatchObject({ value: "", accountIds: [] });
+  });
+
+  it("is the stored choice, or All, with no control, for the pure rule too", () => {
+    expect(clientScopeFor(STAFF, [], "acct-b", false)).toEqual({ showControl: false, value: "acct-b", options: [], accountIds: ["acct-b"] });
+    expect(clientScopeFor(STAFF, [], "", false)).toEqual({ showControl: false, value: "", options: [], accountIds: [] });
+    // A member's choices come from who they are, not from the list, so a
+    // member is answered at once.
+    expect(clientScopeFor(access({ accountIds: ["acct-a", "acct-c"], groups: [GROUP] }), [], "acct-c", false)).toMatchObject({ showControl: true, value: "acct-c" });
   });
 });

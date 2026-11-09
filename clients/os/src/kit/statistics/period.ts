@@ -75,3 +75,16 @@ export function bucketLabel(at: string, bucket: Bucket): string {
   if (bucket === "day") return `${month} ${instant.getUTCDate()}`;
   return `${month} ${instant.getUTCFullYear()}`;
 }
+
+/**
+ * A bucket named on its own, away from the axis that places it: an hour
+ * carries its day ("Nov 8, 15:00"), a day and a month read as `bucketLabel`.
+ *
+ * The axis can say "15:00" because its neighbours say which day; a readout or
+ * a one-sentence summary cannot. Twenty-four hours start and end on the same
+ * hour, so a summary in hours alone reads "from 15:00 to 15:00".
+ */
+export function bucketMoment(at: string, bucket: Bucket): string {
+  if (bucket !== "hour" || Number.isNaN(Date.parse(at))) return bucketLabel(at, bucket);
+  return `${bucketLabel(at, "day")}, ${bucketLabel(at, "hour")}`;
+}

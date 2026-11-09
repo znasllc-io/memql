@@ -1,7 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { useWidth } from "../useWide";
-import { bucketLabel, type Bucket } from "./period";
+import { bucketLabel, bucketMoment, type Bucket } from "./period";
 import { niceMax, timeTickIndexes, valueTicks } from "./scale";
 import "./statistics.css";
 
@@ -24,7 +24,9 @@ import "./statistics.css";
 //     bucket, its value (or "Not measured"), and the previous period's value
 //     beside it. It sits ABOVE the plot rather than floating over it, so it
 //     never covers the data it describes, and it keeps its line while empty
-//     so nothing moves when it fills.
+//     so nothing moves when it fills. It names an hour with its day
+//     (`bucketMoment`), as the summary does; the axis says "15:00" because its
+//     neighbours say which day, and a readout has no neighbours.
 //   - THE WHOLE SERIES IN ONE SENTENCE for a screen reader (the figcaption),
 //     and the arrow keys for reading it point by point. The plot is an
 //     `application` the way kit/MapCanvas is, so the arrow keys reach it with
@@ -85,9 +87,13 @@ function coordinate(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-/** The line: one `M` per run, then an `L` per bucket after the first. */
+/**
+ * The line: one `M` per run of two or more buckets, then an `L` per bucket
+ * after the first. A lone bucket has no stroke to draw; it is a dot (below).
+ */
 function linePath(values: readonly (number | null)[], runs: readonly Run[], x: (index: number) => number, y: (value: number) => number): string {
   return runs
+    .filter((run) => run.to > run.from)
     .map((run) => {
       const steps: string[] = [];
       for (let index = run.from; index <= run.to; index += 1) {
@@ -116,13 +122,14 @@ function areaPath(values: readonly (number | null)[], runs: readonly Run[], x: (
 /**
  * The series in one sentence: "Visitors: 30 points from Oct 10 to Nov 8;
  * highest 1,204 on Nov 6; 3 not measured." The highest is left out when
- * nothing was measured, and the unmeasured when everything was.
+ * nothing was measured, and the unmeasured when everything was. An hour is
+ * named with its day ("from Nov 7, 15:00 to Nov 8, 15:00").
  */
 function summaryOf(label: string, bucket: Bucket, points: readonly ChartPoint[], values: readonly (number | null)[], format: (value: number) => string): string {
   const count = points.length;
   if (count === 0) return `${label}: no points.`;
-  const first = bucketLabel(points[0]?.at ?? "", bucket);
-  const last = bucketLabel(points[count - 1]?.at ?? "", bucket);
+  const first = bucketMoment(points[0]?.at ?? "", bucket);
+  const last = bucketMoment(points[count - 1]?.at ?? "", bucket);
   const parts = [count === 1 ? `${label}: 1 point on ${first}` : `${label}: ${count} points from ${first} to ${last}`];
   let highest: number | null = null;
   let highestAt = -1;
@@ -135,7 +142,7 @@ function summaryOf(label: string, bucket: Bucket, points: readonly ChartPoint[],
       highestAt = index;
     }
   }
-  if (highest !== null) parts.push(`highest ${format(highest)} on ${bucketLabel(points[highestAt]?.at ?? "", bucket)}`);
+  if (highest !== null) parts.push(`highest ${format(highest)} on ${bucketMoment(points[highestAt]?.at ?? "", bucket)}`);
   if (unmeasured > 0) parts.push(`${unmeasured} not measured`);
   return `${parts.join("; ")}.`;
 }
@@ -180,11 +187,24 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
   const runs = runsOf(current);
   const line = linePath(current, runs, x, y);
   const area = areaPath(current, runs, x, y, height);
-  const priorLine = prior === null ? "" : linePath(prior, runsOf(prior), x, y);
+  const priorRuns = prior === null ? [] : runsOf(prior);
+  const priorLine = prior === null ? "" : linePath(prior, priorRuns, x, y);
   // A measured bucket with a gap either side is a run of one, which a line
-  // cannot show: it gets a dot of its own.
+  // cannot show: it gets a dot of its own, in either period.
   const lone = runs.filter((run) => run.from === run.to).map((run) => run.from);
+  const priorLone = priorRuns.filter((run) => run.from === run.to).map((run) => run.from);
+  const priorDrawn = priorLine !== "" || priorLone.length > 0;
   const timeTicks = timeTickIndexes(count, Math.floor((width ?? VIEW_WIDTH) / TIME_LABEL_ROOM));
+
+  // THE VALUE AXIS'S STEPS, labelled in the gutter and ruled across the plot.
+  // No scale is offered for nothing (0, 0.5 and 1 over an empty plot would be
+  // a claim about values nobody measured), so then only the baseline is
+  // ruled. A series of whole numbers drops a fractional middle step
+  // (`valueTicks`). And while the current period says "Not measured" in the
+  // middle of the plot, the middle step gives way, so no rule crosses it.
+  const steps = measured.length === 0 ? [] : valueTicks(largest, measured.every(Number.isInteger));
+  const ticks = runs.length === 0 ? steps.filter((tick) => tick === 0 || tick === top) : steps;
+  const rules = ticks.length === 0 ? [height] : ticks.map(y);
 
   // Clamped at render: a shorter series arriving under a held index reads its
   // last bucket rather than nothing.
@@ -226,7 +246,7 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
         <p className="os-time-chart-readout" role="status">
           {at === null ? null : (
             <>
-              <span className="os-time-chart-when">{bucketLabel(points[at]?.at ?? "", bucket)}</span>
+              <span className="os-time-chart-when">{bucketMoment(points[at]?.at ?? "", bucket)}</span>
               <span className="os-sr-only">: </span>
               <span className="os-time-chart-now">
                 <Swatch series="current" />
@@ -244,10 +264,10 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
             </>
           )}
         </p>
-        {/* Two lines need saying once which is which; the readout carries the
+        {/* Two series need saying once which is which; the readout carries the
             same keys while it is showing a bucket, so the legend gives way.
-            A previous period with nothing measured draws no line to explain. */}
-        {priorLine !== "" && at === null ? (
+            A previous period with nothing drawn has nothing to explain. */}
+        {priorDrawn && at === null ? (
           <p className="os-time-chart-legend" aria-hidden="true">
             <span><Swatch series="current" />{label}</span>
             <span><Swatch series="previous" />Previous period</span>
@@ -256,9 +276,7 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
       </div>
       <div className="os-time-chart-body">
         <div className="os-time-chart-values" aria-hidden="true" style={{ height }}>
-          {/* No scale is offered for nothing: 0, 0.5 and 1 over an empty plot
-              would be a claim about values nobody measured. */}
-          {measured.length === 0 ? null : [...valueTicks(largest)].reverse().map((tick) => <span key={tick}>{format(tick)}</span>)}
+          {[...ticks].reverse().map((tick) => <span key={tick}>{format(tick)}</span>)}
         </div>
         <div
           ref={plotRef}
@@ -285,16 +303,18 @@ export function TimeChart({ label, bucket, points, previous, format, height = DE
           onKeyDown={onKeyDown}
         >
           <svg viewBox={`0 0 ${VIEW_WIDTH} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-            {/* The gridlines mark the value axis's steps, so with no scale only the baseline is drawn. */}
-            {(measured.length === 0 ? [height] : [0, height / 2, height]).map((gridY) => (
+            {rules.map((gridY) => (
               <line key={gridY} className="os-time-chart-grid" x1={0} x2={VIEW_WIDTH} y1={gridY} y2={gridY} vectorEffect="non-scaling-stroke" shapeRendering="crispEdges" />
             ))}
             {area === "" ? null : <path className="os-time-chart-area" data-area="current" d={area} />}
             {priorLine === "" ? null : <path className="os-time-chart-previous" data-series="previous" d={priorLine} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />}
             {line === "" ? null : <path className="os-time-chart-line" data-series="current" d={line} vectorEffect="non-scaling-stroke" />}
           </svg>
+          {priorLone.map((index) => (
+            <span key={`previous:${index}`} className="os-time-chart-point" data-series="previous" aria-hidden="true" style={{ left: leftOf(index), top: topOf(prior?.[index] ?? 0) }} />
+          ))}
           {lone.map((index) => (
-            <span key={index} className="os-time-chart-point" aria-hidden="true" style={{ left: leftOf(index), top: topOf(current[index] ?? 0) }} />
+            <span key={`current:${index}`} className="os-time-chart-point" data-series="current" aria-hidden="true" style={{ left: leftOf(index), top: topOf(current[index] ?? 0) }} />
           ))}
           {runs.length === 0 ? <span className="os-time-chart-empty" aria-hidden="true">Not measured</span> : null}
           {at === null ? null : (

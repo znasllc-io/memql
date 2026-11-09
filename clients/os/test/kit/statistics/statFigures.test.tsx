@@ -15,6 +15,7 @@ afterEach(cleanup);
 // a plain figure, because a control that does nothing is not a control.
 
 const CSS = readFileSync(join(__dirname, "..", "..", "..", "src", "kit", "statistics", "statistics.css"), "utf8");
+const SHELL = readFileSync(join(__dirname, "..", "..", "..", "src", "styles", "index.css"), "utf8");
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
 const FIGURES: StatFigure[] = [
@@ -137,17 +138,18 @@ describe("a figure's change", () => {
 });
 
 describe("its layout", () => {
-  it("stands four in a row then two, and five in a row then three then two", () => {
-    const { container, rerender } = render(<StatFigures label="Website figures" figures={FIGURES} />);
-    expect(container.querySelector(".os-stat-figures-grid")?.getAttribute("data-count")).toBe("5");
-    rerender(<StatFigures label="Health" figures={FIGURES.slice(0, 4)} />);
-    expect(container.querySelector(".os-stat-figures-grid")?.getAttribute("data-count")).toBe("4");
-
-    expect(CSS).toMatch(/\.os-stat-figures \{[^}]*container: stat-figures \/ inline-size;/);
-    expect(CSS).toMatch(/\.os-stat-figures-grid \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/);
-    expect(CSS).toMatch(/\.os-stat-figures-grid\[data-count="5"\] \{ grid-template-columns: repeat\(5, minmax\(0, 1fr\)\); \}/);
-    expect(CSS).toMatch(/@container stat-figures \(max-width: 760px\) \{ \.os-stat-figures-grid\[data-count="5"\] \{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); \} \}/);
-    expect(CSS).toMatch(/@container stat-figures \(max-width: 420px\) \{ \.os-stat-figures-grid, \.os-stat-figures-grid\[data-count="5"\] \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \} \}/);
+  it("stands in the Overview metrics' own columns, from the one definition both share", () => {
+    // Four in a row then two; five in a row then three then two (DESIGN.md
+    // "App overviews"), written once for the Overview's metrics and this row.
+    const one = (selector: string) => `.os-overview-metrics${selector}, .os-stat-figures-grid${selector}`;
+    expect(SHELL).toContain(`${one("")} { grid-template-columns: repeat(4,minmax(0,1fr)); }`);
+    expect(SHELL).toContain(`${one(":has(> :nth-child(5):last-child)")} { grid-template-columns: repeat(5,minmax(0,1fr)); }`);
+    expect(SHELL).toContain(`@container (max-width: 760px) { ${one(":has(> :nth-child(5):last-child)")} { grid-template-columns: repeat(3,minmax(0,1fr)); } }`);
+    expect(SHELL).toContain("@container (max-width: 420px) { .os-overview-metrics, .os-overview-metrics:has(> :nth-child(5):last-child), .os-stat-figures-grid, .os-stat-figures-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(2,minmax(0,1fr)); } }");
+    // ...and nowhere else: no second copy of the columns in the kit's sheet.
+    expect(CSS).not.toMatch(/grid-template-columns: repeat\(/);
+    // The row is a container, so its columns follow the room it has wherever it stands.
+    expect(CSS).toMatch(/\.os-stat-figures \{[^}]*container-type: inline-size;/);
   });
 
   it("marks the selected figure with the accent, on straight edges", () => {

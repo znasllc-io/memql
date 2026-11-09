@@ -39,6 +39,17 @@ describe("the top of a value axis", () => {
     expect(valueTicks(0.42)).toEqual([0, 0.25, 0.5]);
     expect(valueTicks(0)).toEqual([0, 0.5, 1]);
   });
+
+  it("never labels half of a count, so a small count's axis is zero and its top", () => {
+    // Nobody was half a visitor.
+    expect(valueTicks(3, true)).toEqual([0, 5]);
+    expect(valueTicks(1, true)).toEqual([0, 1]);
+    expect(valueTicks(24, true)).toEqual([0, 25]);
+    // A whole-number middle stays, and so does a rate's fractional one.
+    expect(valueTicks(2, true)).toEqual([0, 1, 2]);
+    expect(valueTicks(230, true)).toEqual([0, 125, 250]);
+    expect(valueTicks(3)).toEqual([0, 2.5, 5]);
+  });
 });
 
 describe("the labelled buckets of a time axis", () => {

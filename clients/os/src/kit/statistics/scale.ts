@@ -29,10 +29,18 @@ function scaled(step: number, exponent: number): number {
   return exponent >= 0 ? step * 10 ** exponent : step / 10 ** -exponent;
 }
 
-/** The value axis's three labelled steps: zero, half the top, and the top. */
-export function valueTicks(max: number): number[] {
+/**
+ * The value axis's labelled steps: zero, half the top, and the top.
+ *
+ * For a series of whole numbers -- visitors, sends -- the middle step is left
+ * out when it is not a whole number itself: an axis of 5 reads "0, 5", never
+ * "0, 2.5, 5", because nobody was half a visitor. A rate or an average passes
+ * `wholeNumbers` false and keeps its middle step.
+ */
+export function valueTicks(max: number, wholeNumbers = false): number[] {
   const top = niceMax(max);
-  return [0, top / 2, top];
+  const half = top / 2;
+  return wholeNumbers && !Number.isInteger(half) ? [0, top] : [0, half, top];
 }
 
 /**

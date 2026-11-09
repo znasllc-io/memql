@@ -24,12 +24,12 @@ import type { Stop } from "../../../kit/Rail";
 import { Wizard, type WizardStatus } from "../../../kit/Wizard";
 import { accessAdmits } from "../../../system/registry";
 import { useDefaultOrganization } from "../../accounts/organization";
-import { accountName } from "../../accounts/rows";
+import { accountName, selectableOrganizations } from "../../accounts/rows";
 import { useAccountOptionsFeed } from "../../accounts/tie";
 import { useCreateCampaign, useSendControls, useSeriesControls, useTestSend, useUpdateCampaign, type CampaignFacts } from "../actions";
 import { toKitActs, type ActSpec } from "../acts";
 import { recordNamed, useOpenInbox, useOpenRecord, useOpenSettings } from "../openRequest";
-import { isOperatorOrganization, organizationName, selectableOrganizations } from "../organizations";
+import { isOperatorOrganization, organizationName } from "../organizations";
 import {
   audienceIsArchived,
   audienceName,

@@ -296,8 +296,9 @@ The full app inventory and inspected exceptions are in [list-coverage.md](list-c
 fixtures, before any page reads a figure: `view=page` (a website's figure row,
 its chart, ranked lists side by side and Health), `view=overview` (an Overview
 whose figures are statistics), `view=charts` (hours, twelve months with no
-previous period, a rate with a gap, the first day counted, nothing measured)
-and `view=states` (reading and empty). Hover the chart, then Tab into it and
+previous period, a rate with a gap, the first day counted, a small count, a
+previous period of lone days, this period unmeasured beside a measured
+previous one, nothing measured) and `view=states` (reading and empty). Hover the chart, then Tab into it and
 use the arrow keys: one readout above the plot follows both. Check `mode=light`
 and `mode=dark`, and `width=narrow`, where five figures stand two to a row.
 

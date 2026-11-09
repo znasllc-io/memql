@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, isPeriod, periodLabel } from "../../../src/kit/statistics/period";
+import { EMAIL_PERIODS, SITE_PERIODS, bucketLabel, bucketMoment, isPeriod, periodLabel } from "../../../src/kit/statistics/period";
 
 // The periods a statistics read offers, and the words a page says for them.
 // Days are UTC everywhere in these statistics (spec D5), so a bucket's label
@@ -68,5 +68,20 @@ describe("a bucket's label", () => {
 
   it("leaves an instant it cannot read as it was written, rather than inventing a date", () => {
     expect(bucketLabel("not a date", "day")).toBe("not a date");
+  });
+});
+
+describe("a bucket named on its own", () => {
+  it("carries the day with an hour, because nothing beside it says which day", () => {
+    // Twenty-four hours start and end on the same hour.
+    expect(bucketMoment("2026-11-07T15:00:00Z", "hour")).toBe("Nov 7, 15:00");
+    expect(bucketMoment("2026-11-08T15:00:00Z", "hour")).toBe("Nov 8, 15:00");
+    expect(bucketMoment("2026-11-09T01:30:00+02:00", "hour")).toBe("Nov 8, 23:30");
+  });
+
+  it("is the axis's own label for a day and a month", () => {
+    expect(bucketMoment("2026-11-08T00:00:00Z", "day")).toBe("Nov 8");
+    expect(bucketMoment("2026-11-01T00:00:00Z", "month")).toBe("Nov 2026");
+    expect(bucketMoment("not a date", "hour")).toBe("not a date");
   });
 });

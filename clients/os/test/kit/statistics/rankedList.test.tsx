@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -120,5 +122,15 @@ describe("its states", () => {
     expect(credit.closest(".os-ranked-footer")).not.toBeNull();
     rerender(<RankedList title="Countries" rows={[]} footer={footer} />);
     expect(screen.queryByRole("link", { name: "IP Geolocation by DB-IP" })).toBeNull();
+  });
+});
+
+describe("its look", () => {
+  it("uses the kit's pieces as they are: a heading's Button and the record list's loading shape", () => {
+    // "All pages" looks like every other act on a Subhead, and the loading
+    // shape is the record list's own, so neither is restyled from here.
+    const css = readFileSync(join(__dirname, "..", "..", "..", "src", "kit", "statistics", "statistics.css"), "utf8");
+    expect(css).not.toMatch(/\.os-button/);
+    expect(css).not.toMatch(/os-record-skeleton|os-record-row/);
   });
 });

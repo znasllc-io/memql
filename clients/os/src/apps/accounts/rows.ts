@@ -215,8 +215,27 @@ export function accountFingerprint(account: AccountRow): string {
 export function accountName(account: AccountRow): string {
   const name = account.name.trim();
   if (name !== "") return name;
-  const tail = account.id.split(":").pop() ?? "";
+  return untitledAccountName(account.id);
+}
+
+/** How an account with no name is named, from its id alone: one spelling for every surface that names one. */
+export function untitledAccountName(accountId: string): string {
+  const tail = accountId.split(":").pop() ?? "";
   return tail === "" ? "Untitled account" : `Untitled account (${tail})`;
+}
+
+/**
+ * The organizations a person can choose between: the active ones in the list
+ * they were handed. The list is what `useAccountOptions()` reads, which is
+ * already bounded by what this person may read, so this adds only "not filed
+ * away" and "has an id" (a row mid-write has none).
+ *
+ * HERE, WITH THE ACCOUNT CONCEPT, because every app that offers a choice of
+ * organization asks it (Email's pickers, the statistics pages' client scope);
+ * it was born in apps/email when Email was the only one.
+ */
+export function selectableOrganizations(accounts: readonly AccountRow[]): AccountRow[] {
+  return accounts.filter((account) => account.id !== "" && !accountIsArchived(account));
 }
 
 // ---------------------------------------------------------------------------

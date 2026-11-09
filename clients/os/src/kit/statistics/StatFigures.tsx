@@ -24,8 +24,10 @@ import "./statistics.css";
 //
 // THE ROW LOOKS LIKE THE OVERVIEW'S OWN METRICS -- the same label, the same
 // 28px figure, the same columns (DESIGN.md, "App overviews": four in a row
-// then two; five in a row then three then two) -- so an app whose Overview is
-// its statistics draws one figure row, not a second kind of one.
+// then two; five in a row then three then two, one definition in
+// styles/index.css for both) -- so an app whose Overview is its statistics
+// draws one figure row, not a second kind of one. Given to an Overview as its
+// `figures`, it stands on the metrics' own strip, hairline included.
 
 export interface StatFigure {
   id: string;
@@ -93,7 +95,7 @@ export function StatFigures({ label, figures, selected, onSelect }: {
 
   return (
     <div className="os-stat-figures">
-      <div className="os-stat-figures-grid" role={choices.length > 0 ? "radiogroup" : "group"} aria-label={label} data-count={figures.length}>
+      <div className="os-stat-figures-grid" role={choices.length > 0 ? "radiogroup" : "group"} aria-label={label}>
         {figures.map((figure) =>
           choices.includes(figure) ? (
             <button

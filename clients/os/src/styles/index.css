@@ -14717,7 +14717,14 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-page:has(> .os-overview) { padding-block: 18px; }
 .os-overview > .os-head .os-head-actions { width: auto; margin-left: auto; }
 .os-overview > .os-head { margin-bottom: 4px; }
-.os-overview-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 20px; margin: 0 0 10px; padding: 12px 0 22px; border-bottom: 1px solid var(--os-line); }
+.os-overview-metrics { display: grid; gap: 20px; padding: 12px 0 22px; }
+/* THE STRIP the Overview's figures stand on, its spacing and its hairline:
+ * for its own metrics, and for a statistics figure row given in their place
+ * (Overview `figures`, kit/statistics StatFigures). The figure row carries
+ * 10px of its own around each figure for its hover and selection mark, so its
+ * strip pads that much less and its text stands where the metrics' does. */
+.os-overview-metrics, .os-overview > .os-stat-figures { margin: 0 0 10px; border-bottom: 1px solid var(--os-line); }
+.os-overview > .os-stat-figures { padding: 2px 0 10px; }
 .os-overview-metrics > div { min-width: 0; }
 .os-overview-metrics dt { color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-overview-metrics dd { margin: 8px 0 4px; font-size: 28px; line-height: 1.15; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -14736,13 +14743,19 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-overview-distribution [data-tone="unknown"] { background: repeating-linear-gradient(45deg, var(--os-rail-hover) 0 2px, transparent 2px 4px); }
 .os-overview-breakdown li[data-tone="unknown"] > span { background: transparent; box-shadow: inset 0 0 0 1px var(--os-muted); }
 .os-overview-breakdown strong { color: var(--os-ink); font-variant-numeric: tabular-nums; }
-@container overview (max-width: 420px) { .os-overview-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; } }
-/* Five figures (Email's Overview) stand in one row while each label has room to
- * stay on one line, then in three and two. Four columns left the fifth on a row
- * of its own, where it read as a different kind of figure. */
-.os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5,minmax(0,1fr)); }
-@container overview (max-width: 760px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(3,minmax(0,1fr)); } }
-@container overview (max-width: 420px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+/* THE FIGURE ROW'S COLUMNS (DESIGN.md "App overviews"), written once for the
+ * Overview's own metrics and for the statistics figure row
+ * (kit/statistics StatFigures) wherever it stands. Four figures stand in one
+ * row, then two. Five stand in one row while each label has room to stay on
+ * one line, then in three and two: four columns left the fifth on a row of
+ * its own, where it read as a different kind of figure. Each row follows its
+ * nearest container's width -- the Overview for its metrics, the figure row's
+ * own wrapper for the statistics row -- so the queries name no container. */
+.os-overview-metrics, .os-stat-figures-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.os-overview-metrics:has(> :nth-child(5):last-child), .os-stat-figures-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5,minmax(0,1fr)); }
+@container (max-width: 760px) { .os-overview-metrics:has(> :nth-child(5):last-child), .os-stat-figures-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@container (max-width: 420px) { .os-overview-metrics, .os-overview-metrics:has(> :nth-child(5):last-child), .os-stat-figures-grid, .os-stat-figures-grid:has(> :nth-child(5):last-child) { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@container (max-width: 420px) { .os-overview-metrics { gap: 18px; } }
 .fleet-map-connection { fill: none; stroke: var(--os-line); stroke-width: 2; stroke-dasharray: 5 5; }
 .fleet-map-connection[data-online] { stroke: var(--os-accent); stroke-dasharray: none; }
 .fleet-map-node rect { fill: var(--os-plate); stroke: var(--os-line); }

@@ -1,4 +1,4 @@
-import { SELF_ACCOUNT_ID, accountIsArchived, accountNameFrom, type AccountRow } from "../accounts/rows";
+import { SELF_ACCOUNT_ID, accountNameFrom, type AccountRow } from "../accounts/rows";
 
 // WHOSE EMAIL IT IS (memql#6033).
 //
@@ -7,17 +7,9 @@ import { SELF_ACCOUNT_ID, accountIsArchived, accountNameFrom, type AccountRow } 
 // handful of places, and each used to answer the same three questions for
 // itself -- which ones can I choose between, what is this one called, is this
 // the cluster's own -- and the last of them as a bare `"self"` in six files.
-// They are answered here once.
-
-/**
- * The organizations a person can choose between: the active ones the list they
- * were handed holds. The list is what `useAccountOptions()` reads, which is
- * already bounded by what this person may read, so this adds only "not filed
- * away" and "has an id" (a row mid-write has none).
- */
-export function selectableOrganizations(accounts: readonly AccountRow[]): AccountRow[] {
-  return accounts.filter((account) => account.id !== "" && !accountIsArchived(account));
-}
+// The last two are answered here once. Which ones can be chosen between is
+// `selectableOrganizations` in apps/accounts/rows.ts, because the statistics
+// pages' client scope asks it too.
 
 /**
  * An organization's name, from a list the page already holds. An id the list

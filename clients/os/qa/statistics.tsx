@@ -162,6 +162,12 @@ function Charts() {
     <TimeChart label="Bounce rate" bucket="day" points={rate} format={percent} />
     <Subhead>The first day counted</Subhead>
     <TimeChart label="Visitors" bucket="day" points={series("2026-11-02T00:00:00Z", 7, DAY, (index) => (index === 6 ? 31 : null))} format={count} />
+    <Subhead>A small count, never half a visitor</Subhead>
+    <TimeChart label="Visitors" bucket="day" points={series("2026-11-02T00:00:00Z", 7, DAY, (index) => [1, 3, 0, 2, 4, 1, 3][index] ?? null)} format={count} />
+    <Subhead>A previous period of lone days</Subhead>
+    <TimeChart label="Visitors" bucket="day" points={series("2026-11-02T00:00:00Z", 7, DAY, (index) => 20 + index * 3)} previous={series("2026-10-26T00:00:00Z", 7, DAY, (index) => (index % 2 === 1 ? 18 + index : null))} format={count} />
+    <Subhead>This period not measured, the previous one measured</Subhead>
+    <TimeChart label="Visitors" bucket="day" points={series("2026-11-02T00:00:00Z", 7, DAY, () => null)} previous={series("2026-10-26T00:00:00Z", 7, DAY, (index) => 20 + index * 4)} format={count} />
     <Subhead>Nothing measured</Subhead>
     <TimeChart label="Visitors" bucket="day" points={series("2026-11-02T00:00:00Z", 7, DAY, () => null)} format={count} />
   </>;

@@ -10,7 +10,8 @@ import { listCount } from "../../../kit/RecordRow";
 import { useLiveView } from "../../../live/liveView";
 import { useAccountOptionsFeed } from "../../accounts/tie";
 import { recordNamed, useOpenRequest, type OpenRequest } from "../openRequest";
-import { organizationName, selectableOrganizations } from "../organizations";
+import { selectableOrganizations } from "../../accounts/rows";
+import { organizationName } from "../organizations";
 import {
   emailRuleFromRow,
   isWriting,

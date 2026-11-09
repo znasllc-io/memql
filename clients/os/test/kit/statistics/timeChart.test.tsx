@@ -100,9 +100,41 @@ describe("the previous period", () => {
     );
     expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["50", "25", "0"]);
   });
+
+  it("draws a previous bucket with a gap either side as a dot, and says what it is", () => {
+    // A previous period made only of lone buckets has no stroke to draw.
+    const { container } = render(
+      <TimeChart label="Visitors" bucket="day" points={days([3, 5, 4])} previous={days([null, 4, null], "2026-10-30")} format={count} />,
+    );
+    expect(seriesPath(container, "previous")).toBeNull();
+    expect(container.querySelectorAll('.os-time-chart-point[data-series="previous"]')).toHaveLength(1);
+    expect(container.querySelector(".os-time-chart-legend")?.textContent).toBe("VisitorsPrevious period");
+  });
 });
 
 describe("the axes", () => {
+  it("never labels half of a count", () => {
+    // A small count of visitors: zero and the top, never "2.5".
+    const { container, rerender } = render(<TimeChart label="Visitors" bucket="day" points={days([1, 3, 2])} format={count} />);
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["5", "0"]);
+    expect(container.querySelectorAll(".os-time-chart-grid")).toHaveLength(2);
+    // A rate keeps its middle step.
+    const percent = (value: number) => `${Math.round(value * 1000) / 10}%`;
+    rerender(<TimeChart label="Click rate" bucket="day" points={days([0.01, 0.03, 0.02])} format={percent} />);
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["5%", "2.5%", "0%"]);
+  });
+
+  it("rules no line across the words when this period was not measured and the previous one was", () => {
+    const { container } = render(
+      <TimeChart label="Visitors" bucket="day" points={days([null, null, null])} previous={days([20, 40, 30], "2026-10-30")} format={count} />,
+    );
+    expect(container.querySelector(".os-time-chart-empty")?.textContent).toBe("Not measured");
+    // The top and the baseline only: the middle rule would run through the words.
+    const rules = [...container.querySelectorAll(".os-time-chart-grid")].map((line) => Number(line.getAttribute("y1")));
+    expect(rules.sort((a, b) => a - b)).toEqual([0, 160]);
+    expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["50", "0"]);
+  });
+
   it("labels the value axis in three steps, through the page's format", () => {
     const { container, rerender } = render(<TimeChart label="Visitors" bucket="day" points={days([120, 230, 90])} format={count} />);
     expect([...container.querySelectorAll(".os-time-chart-values > span")].map((span) => span.textContent)).toEqual(["250", "125", "0"]);
@@ -119,10 +151,17 @@ describe("the axes", () => {
     expect(labels).toHaveLength(7);
   });
 
-  it("labels hours by the hour", () => {
-    const hours = Array.from({ length: 3 }, (_, index) => ({ at: `2026-11-08T1${index}:00:00Z`, value: index }));
-    const { container } = render(<TimeChart label="Visitors" bucket="hour" points={hours} format={count} />);
-    expect([...container.querySelectorAll(".os-time-chart-times > span")].map((span) => span.textContent)).toEqual(["10:00", "11:00", "12:00"]);
+  it("labels hours by the hour, and names their day wherever there is no axis beside them", () => {
+    // Twenty-four hours from 15:00 yesterday to 15:00 today.
+    const hours = Array.from({ length: 25 }, (_, index) => ({ at: new Date(Date.parse("2026-11-07T15:00:00Z") + index * 3_600_000).toISOString(), value: index === 12 ? 70 : 10 }));
+    const { container } = render(<TimeChart label="Page views" bucket="hour" points={hours} format={count} />);
+    const axis = [...container.querySelectorAll(".os-time-chart-times > span")].map((span) => span.textContent);
+    expect(axis[0]).toBe("15:00");
+    expect(axis.at(-1)).toBe("15:00");
+    expect(container.querySelector("figcaption")?.textContent).toBe("Page views: 25 points from Nov 7, 15:00 to Nov 8, 15:00; highest 70 on Nov 8, 03:00.");
+    const plot = screen.getByRole("application", { name: "Page views" });
+    act(() => plot.focus());
+    expect(screen.getByRole("status").textContent).toBe("Nov 8, 15:00: 10");
   });
 });
 

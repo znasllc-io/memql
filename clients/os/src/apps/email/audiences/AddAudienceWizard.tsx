@@ -6,7 +6,8 @@ import { Wizard } from "../../../kit/Wizard";
 import type { Stop } from "../../../kit/Rail";
 import { useAccountOptionsFeed } from "../../accounts/tie";
 import { useDefaultOrganization } from "../../accounts/organization";
-import { organizationName, selectableOrganizations } from "../organizations";
+import { selectableOrganizations } from "../../accounts/rows";
+import { organizationName } from "../organizations";
 import type { CampaignWrites } from "../actions";
 
 /** What each step is, under its name on the rail. */

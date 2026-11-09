@@ -10,7 +10,8 @@ import { useAccountOptionsFeed } from "../../accounts/tie";
 import { seriesSaveNeeded, useEditCampaign, useSendControls, useSeriesControls, type CampaignChanges } from "../actions";
 import { toKitActs, type ActSpec } from "../acts";
 import { useOpenSettings } from "../openRequest";
-import { isOperatorOrganization, organizationName, selectableOrganizations } from "../organizations";
+import { selectableOrganizations } from "../../accounts/rows";
+import { isOperatorOrganization, organizationName } from "../organizations";
 import {
   audienceIsArchived,
   audienceName,

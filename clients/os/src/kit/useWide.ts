@@ -15,18 +15,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
  * arrangement that needs no room.
  */
 export function useWide(ref: RefObject<HTMLElement | null>, min: number): boolean {
-  const [wide, setWide] = useState(false);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const read = () => setWide(el.getBoundingClientRect().width >= min);
-    read();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(read);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [ref, min]);
-  return wide;
+  return useMeasuredWidth(ref, (width) => width >= min, false, min);
 }
 
 /**
@@ -39,19 +28,33 @@ export function useWide(ref: RefObject<HTMLElement | null>, min: number): boolea
  * caller falls back to the size it would draw at.
  */
 export function useWidth(ref: RefObject<HTMLElement | null>): number | null {
-  const [width, setWidth] = useState<number | null>(null);
+  return useMeasuredWidth<number | null>(ref, (width) => (width > 0 ? width : null), null, 0);
+}
+
+/**
+ * The one measurement both hooks above read: the element's laid-out width,
+ * turned by `answer` into what the caller needs, observed with one
+ * ResizeObserver.
+ *
+ * A CALLER RE-RENDERS ONLY WHEN ITS ANSWER CHANGES. `useWide` answers a
+ * boolean, so a wizard laid out by it renders when the window crosses the
+ * threshold rather than on every pixel of a resize; deriving it from
+ * `useWidth`'s number would have rendered it on every one. `answer` is built
+ * afresh on each render, and `key` names the one thing it depends on, so a
+ * new threshold re-measures.
+ */
+function useMeasuredWidth<T>(ref: RefObject<HTMLElement | null>, answer: (width: number) => T, initial: T, key: number): T {
+  const [value, setValue] = useState<T>(initial);
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    const read = () => {
-      const measured = el.getBoundingClientRect().width;
-      setWidth(measured > 0 ? measured : null);
-    };
+    const read = () => setValue(answer(el.getBoundingClientRect().width));
     read();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(read);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref]);
-  return width;
+    // `answer` is rebuilt every render; what it computes depends only on `key`.
+  }, [ref, key]);
+  return value;
 }
