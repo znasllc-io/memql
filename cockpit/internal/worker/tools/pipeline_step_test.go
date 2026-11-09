@@ -597,10 +597,19 @@ func TestPipelineStepInheritsTheMachineEnvironment(t *testing.T) {
 	}
 }
 
+// The policy maximum is five seconds, not one, because a step's deadline
+// covers its checkout as well as its command. On a loaded build node the
+// checkout alone used the whole second: main's db01cbdf5 push run
+// (2026-11-09) logged "checked out", then "stopped: the step ran past its 1s
+// timeout", and never "started", so the command never ran and the
+// mid-command assertion failed with nothing wrong. The step was correctly
+// stopped at its clamped deadline; only the test's budget was too small.
+// Five seconds leaves the command time to start, and the 20-second bound
+// still tells a request clamped from 600s apart from one that was not.
 func TestPipelineStepTimeoutIsClampedToThePolicyMaximum(t *testing.T) {
 	allowLocalClones(t)
 	fx := newPipelineFixture(t)
-	p, root := pipelineTestPolicy(t, "  max_timeout_sec: 1\n")
+	p, root := pipelineTestPolicy(t, "  max_timeout_sec: 5\n")
 	out := &recordedOutput{}
 	started := time.Now()
 	success, fail := runPipelineStep(context.Background(), "",
@@ -609,8 +618,8 @@ func TestPipelineStepTimeoutIsClampedToThePolicyMaximum(t *testing.T) {
 	if success != nil || fail == nil || fail.GetErrorCode() != "timeout" {
 		t.Fatalf("a step past its clamped timeout must fail with timeout; got success=%v failure=%+v", success, fail)
 	}
-	if elapsed > 15*time.Second {
-		t.Errorf("the step was stopped after %s: the request's 600s was not clamped to max_timeout_sec 1", elapsed)
+	if elapsed > 20*time.Second {
+		t.Errorf("the step was stopped after %s: the request's 600s was not clamped to max_timeout_sec 5", elapsed)
 	}
 	if !strings.Contains(out.text(false), "started") || strings.Contains(out.text(false), "never") {
 		t.Errorf("output does not show a step stopped mid-command:\n%s", out.all())
