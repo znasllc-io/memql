@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -48,18 +49,42 @@ import (
 // The visit figures read 0 only from MeasuredSince, the first day with visitor
 // figures, for the same reason. A rate with nothing to divide by is null.
 //
-// # Why the 24-hour period reads the request log
+// # The 24-hour period
 //
 // Its series is the hourly table's, and so are its visits, bounces and page
 // views: a visit is counted in the hour it started, so the hours add up. Its
 // VISITORS cannot be added up from the hours -- one person seen in two hours
-// is one visitor -- so they are counted distinct from edge_request itself, and
-// so are its top lists, for which there is no hourly table; their visits come
-// from the rollup's own visit segmentation (visitSegmentation), never a second
-// copy. The other periods read the daily tables, whose visitors are each
-// day's, summed: the visitor hash changes at midnight (D1), so a person who
-// came on three days counts three times in a week, which the page says once,
-// and one seen either side of midnight is two even in 24 hours.
+// is one visitor. Its window is hour-aligned and 24 hours long, so it is the
+// end of one UTC day and the start of the next (windowParts), and the visitor
+// hash changes at midnight (D1), so nobody is in both parts: the window's
+// visitors are the first day's visitors LAST seen in its part plus the second
+// day's FIRST seen in its part, each read off the day's row, which carries its
+// visitors by the hour of their first and of their last page view
+// (readWindowVisitors). Its top lists are the rollup's for the window, per
+// deployable (edge_stats_window_top, publish.go), summed over the
+// deployables. So the period reads a few rows per deployable and never the
+// request log: until 2026-11-09 it counted both from edge_request itself, and
+// at ten million requests a day over fifty sites its first statement outlasted
+// the request pool's 8 s limit, so the period could not be read at all.
+//
+// What it reads is what the last run published, five minutes old at most;
+// a deployable's first requests count from the run after them. The other
+// periods read the daily tables, whose visitors are each day's, summed: a
+// person who came on three days counts three times in a week, which the page
+// says once, and one seen either side of midnight is two even in 24 hours.
+//
+// # Whole months
+//
+// A period's top lists sum the daily top rows of its days, at about six
+// hundred rows per deployable and day; a staff read of twelve months over two
+// hundred deployables summed 44 million of them and took 7.6 s of the 8 s
+// limit. So each month a period covers whole is read from its monthly top
+// lists instead (edge_stats_monthly_top, folded by the rollup from the
+// month's final days), and only the days no monthly row covers -- today, the
+// days of a month the period starts or ends inside -- from their daily rows
+// (dailyTopSQL). A month keeps a hundred values per dimension, as a day does,
+// and the read keeps fifty, so a value can drop out of a list at the month's
+// fold as it can at a day's.
 //
 // # Twelve months have no previous period (D4)
 //
@@ -72,8 +97,8 @@ import (
 // Every statement of a read runs in one read-only REPEATABLE READ transaction,
 // so the totals, the series, the top lists and the per-site rows agree with
 // each other even while a rollup replaces a day underneath. A rollup's
-// transaction replaces a day's rows at once, so the snapshot sees all of a
-// recompute or none of it.
+// transaction replaces a day's rows at once, and a month's top lists with the
+// days they cover, so the snapshot sees all of a publication or none of it.
 
 // StatisticsQuery is one statistics read.
 type StatisticsQuery struct {
@@ -191,8 +216,7 @@ func (r *Reader) Statistics(ctx context.Context, q StatisticsQuery) (Statistics,
 		// answer a deployable with no traffic gets, and nothing is read.
 		return out, nil
 	}
-	// The 24-hour period reads the request log; see statisticsTx.
-	err = statisticsTx(ctx, r.db, b.Bucket == statsperiod.BucketHour, func(ctx context.Context, tx bun.Tx) error {
+	err = statisticsTx(ctx, r.db, func(ctx context.Context, tx bun.Tx) error {
 		return fillStatistics(ctx, tx, sites, b, &out)
 	})
 	if err != nil {
@@ -265,34 +289,19 @@ func nullPoints(starts []time.Time) []Point {
 // 30 s SET LOCAL for staff summing every deployable of a large cluster over
 // ninety days, buys nothing: the client still stops listening at 10 s with an
 // i/o timeout, and the scan runs on unheard for up to 20 s more, holding its
-// snapshot (and, for 24 hours, the request log's lock below), on every refresh
-// of every Statistics page -- the orphan the pool's limit exists to prevent. A
-// local limit below the pool's was the other choice, and is not taken: it
-// would second-guess the operator's setting, lowering a raised one and raising
-// a lowered one, where following the pool keeps one serving limit for the whole
-// cluster. A read slower than the limit answers the server's statement-timeout
-// error, which is the honest refusal
-// (TestTheStatisticsReadStaysInsideThePoolsStatementLimit).
-//
-// HOLDING THE REQUEST LOG, for a read of it, is the rollup's lesson
-// (recomputeDay): TimescaleDB compresses a chunk by moving its rows and
-// truncating it, which is not MVCC-safe, so a snapshot fixed before that
-// commit can read the chunk as empty afterwards -- here, the previous 24 hours
-// would read as nobody. ACCESS SHARE on the hypertable, taken before the first
-// query fixes the snapshot, puts the snapshot after any compression that
-// already holds a chunk; it does not conflict with the edge's inserts, and a
-// compression reaching its exclusive step waits for this read to end. A read
-// of the daily tables alone never touches the log and takes no lock.
-func statisticsTx(ctx context.Context, db *bun.DB, holdRequestLog bool, fn func(context.Context, bun.Tx) error) error {
+// snapshot, on every refresh of every Statistics page -- the orphan the pool's
+// limit exists to prevent. A local limit below the pool's was the other
+// choice, and is not taken: it would second-guess the operator's setting,
+// lowering a raised one and raising a lowered one, where following the pool
+// keeps one serving limit for the whole cluster. A read slower than the limit
+// answers the server's statement-timeout error, which is the honest refusal
+// (TestTheStatisticsReadStaysInsideThePoolsStatementLimit). What keeps a read
+// inside it is what it reads: the rollup's tables, whole months from their
+// monthly rows, and never the request log (TestStaffReadsAtScaleEvidence,
+// statistics_scale_test.go).
+func statisticsTx(ctx context.Context, db *bun.DB, fn func(context.Context, bun.Tx) error) error {
 	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
-	return db.RunInTx(ctx, opts, func(ctx context.Context, tx bun.Tx) error {
-		if holdRequestLog {
-			if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
-				return fmt.Errorf("hold the request log: %w", err)
-			}
-		}
-		return fn(ctx, tx)
-	})
+	return db.RunInTx(ctx, opts, fn)
 }
 
 // fillStatistics reads the tables into out, for sites over b.
@@ -324,15 +333,13 @@ func fillStatistics(ctx context.Context, tx bun.Tx, sites []string, b statsperio
 	}
 	var top []topRow
 	if b.Bucket == statsperiod.BucketHour {
-		visitors, err := readRequestVisitors(ctx, tx, sites, b.Start, b.End)
+		visitors, err := readWindowVisitors(ctx, tx, sites, b.Start, b.End)
 		if err != nil {
 			return err
 		}
 		out.Totals.Visitors = visitors.total()
-		// Each deployable's visitors are the log's too, never its hours' sum:
-		// one whose requests the log no longer holds has none to count, and
-		// reads null rather than an overcount. And one whose requests are not
-		// yet rolled up -- its first minutes -- is listed with its visitors.
+		// Each deployable's visitors are the window's too, never its hours'
+		// sum, which counts a person seen in two hours twice.
 		for site, entry := range perSite {
 			entry.Visitors = visitors[site]
 		}
@@ -342,15 +349,15 @@ func fillStatistics(ctx context.Context, tx bun.Tx, sites []string, b statsperio
 			}
 		}
 		if b.HasPrevious {
-			previous, err := readRequestVisitors(ctx, tx, sites, b.PrevStart, b.PrevEnd)
+			previous, err := readWindowVisitors(ctx, tx, sites, b.PrevStart, b.PrevEnd)
 			if err != nil {
 				return err
 			}
 			out.Previous.Visitors = previous.total()
 		}
-		q, args := requestTopSQL(sites, b.Start, b.End)
+		q, args := windowTopSQL(sites, b.End)
 		if err := tx.NewRaw(q, args...).Scan(ctx, &top); err != nil {
-			return fmt.Errorf("read the top lists from the request log: %w", err)
+			return fmt.Errorf("read the window's top lists: %w", err)
 		}
 	} else {
 		q, args := dailyTopSQL(sites, b.Start, b.End)
@@ -586,8 +593,8 @@ type siteRow struct {
 }
 
 // readSiteTotals reads each deployable's own figures over the period, from the
-// period's table. For 24 hours the visitors are replaced from the request log
-// by the caller.
+// period's table. For 24 hours the visitors are replaced from the window's
+// days by the caller (readWindowVisitors).
 func readSiteTotals(ctx context.Context, tx bun.Tx, sites []string, b statsperiod.Bounds) (map[string]*SiteTotals, error) {
 	table, _, where, args := statsSource(b.Bucket, b.Start, b.End)
 	q := fmt.Sprintf(`
@@ -643,7 +650,7 @@ func compareCounts(a, b *int64) int {
 }
 
 // requestVisitors are each deployable's distinct visitors over a range, nil
-// for a deployable none of whose requests in it the edge classified.
+// for a deployable none of whose days in it carries visitor figures.
 type requestVisitors map[string]*int64
 
 // total adds the deployables' visitors up. The visitor hash is keyed by the
@@ -657,23 +664,35 @@ func (v requestVisitors) total() *int64 {
 	return sum
 }
 
-// readRequestVisitors counts each deployable's visitors over [from, to) from
-// edge_request: distinct over the page views with a visitor id, NULL when no
-// request in the range was measured.
-func readRequestVisitors(ctx context.Context, tx bun.Tx, sites []string, from, to time.Time) (requestVisitors, error) {
+// readWindowVisitors counts each deployable's visitors over the hour-aligned
+// 24-hour window [from, to) from the daily rows of its days: in the first
+// day's part, the visitors whose last page view of that day is in it; in the
+// second's, those whose first is (see "The 24-hour period"). A deployable is
+// measured when one of its days in the window carries the hours' visitors.
+func readWindowVisitors(ctx context.Context, tx bun.Tx, sites []string, from, to time.Time) (requestVisitors, error) {
+	var parts []string
+	var args []any
+	for _, p := range windowParts(from, to) {
+		column, slice := "first_hour_visitors", "[1:?]"
+		bound := p.hour
+		if p.suffix {
+			column, slice, bound = "last_hour_visitors", "[?:24]", p.hour+1
+		}
+		parts = append(parts, fmt.Sprintf(`SELECT site_id, %[1]s IS NOT NULL AS measured,
+       coalesce((SELECT sum(n) FROM unnest(%[1]s%[2]s) n), 0) AS visitors
+  FROM edge_stats_daily WHERE site_id IN (?) AND day = ?::date`, column, slice))
+		args = append(args, bound, bun.In(sites), dateArg(p.day))
+	}
 	var rows []struct {
 		SiteId   string `bun:"site_id"`
 		Measured bool   `bun:"measured"`
 		Visitors int64  `bun:"visitors"`
 	}
-	q := `
-SELECT site_id, bool_or(measured) AS measured,
-       count(DISTINCT visitor) FILTER (WHERE page_view AND visitor <> '') AS visitors
-  FROM edge_request
- WHERE site_id IN (?) AND served_at >= ? AND served_at < ?
+	q := `SELECT site_id, bool_or(measured) AS measured, sum(visitors) FILTER (WHERE measured)::bigint AS visitors
+  FROM (` + strings.Join(parts, "\nUNION ALL\n") + `) p
  GROUP BY site_id`
-	if err := tx.NewRaw(q, bun.In(sites), from.UTC(), to.UTC()).Scan(ctx, &rows); err != nil {
-		return nil, fmt.Errorf("count the visitors in the request log: %w", err)
+	if err := tx.NewRaw(q, args...).Scan(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("count the window's visitors: %w", err)
 	}
 	out := make(requestVisitors, len(rows))
 	for _, r := range rows {
@@ -719,69 +738,63 @@ SELECT dimension,
  GROUP BY 1, 2`, topOther, topEntriesKept)
 }
 
-// dailyTopSQL sums the daily top lists over [from, to) and the deployables.
-// The visitors of a value are summed over its days, as the period's are.
+// dailyTopSQL sums the top lists over [from, to) and the deployables: each
+// month the range covers whole from its monthly rows, and every day those do
+// not cover from its daily rows (see "Whole months"). The visitors of a value
+// are summed over its days, as the period's are.
+//
+// The days a month's rows cover are the ones edge_stats_month_day records
+// with them, so a day is never read twice and never missed, whatever the
+// rollup has folded so far. The uncovered days are listed first, so the
+// daily rows are reached through the day's index for those days alone, not
+// scanned for the range and thrown away.
 func dailyTopSQL(sites []string, from, to time.Time) (string, []any) {
+	q := `
+WITH months AS (
+    SELECT m::date AS month
+      FROM generate_series(date_trunc('month', ?::date::timestamp), ?::date::timestamp, interval '1 month') m
+     WHERE m::date >= ?::date AND (m + interval '1 month')::date <= ?::date
+),
+covered AS (
+    SELECT c.day FROM edge_stats_month_day c
+      JOIN months m ON c.day >= m.month AND c.day < (m.month + interval '1 month')::date
+),
+uncovered AS (
+    SELECT d::date AS day
+      FROM generate_series(?::date::timestamp, ?::date::timestamp - interval '1 day', interval '1 day') d
+     WHERE NOT EXISTS (SELECT 1 FROM covered c WHERE c.day = d::date)
+),
+summed AS (
+    SELECT dimension, value,
+           sum(visitors)::bigint AS visitors, sum(visits)::bigint AS visits, sum(page_views)::bigint AS page_views
+      FROM (SELECT dimension, value, visitors, visits, page_views FROM edge_stats_monthly_top
+             WHERE site_id IN (?) AND month IN (SELECT month FROM months)
+            UNION ALL
+            SELECT dimension, value, visitors, visits, page_views FROM edge_stats_daily_top
+             WHERE site_id IN (?) AND day IN (SELECT day FROM uncovered)) x
+     GROUP BY 1, 2
+)` + topFoldSQL()
+	f, t := dateArg(from), dateArg(to)
+	return q, []any{f, t, f, t, f, t, bun.In(sites), bun.In(sites)}
+}
+
+// windowTopSQL sums the 24-hour window's top lists over the deployables: the
+// window ending at end, or when no run has published it yet -- the first
+// seconds of an hour -- the one an hour before it. One older than that is not
+// the last 24 hours: with the rollup stopped for hours, the read answers no
+// list rather than an old one under the period's name
+// (TestATwentyFourHourListOlderThanAnHourIsNotRead).
+func windowTopSQL(sites []string, end time.Time) (string, []any) {
 	q := `
 WITH summed AS (
     SELECT dimension, value,
            sum(visitors)::bigint AS visitors, sum(visits)::bigint AS visits, sum(page_views)::bigint AS page_views
-      FROM edge_stats_daily_top
-     WHERE site_id IN (?) AND day >= ?::date AND day < ?::date
+      FROM edge_stats_window_top
+     WHERE site_id IN (?)
+       AND window_end = (SELECT max(window_end) FROM edge_stats_window_top WHERE window_end <= ? AND window_end >= ?)
      GROUP BY 1, 2
 )` + topFoldSQL()
-	return q, []any{bun.In(sites), dateArg(from), dateArg(to)}
-}
-
-// requestTopSQL counts the top lists over [from, to) from edge_request, for
-// the 24-hour period: a value's visitors distinct over its page views, its
-// page views counted, and its visits the visits that STARTED in the range
-// under it, from the rollup's segmentation. The dimension expressions are the
-// rollup's (topDimensions), so a value reads the same in both.
-//
-// A FULL join where the rollup's day has a LEFT one. Within a day every row
-// of a visit is in the day, so every value a visit entered under was also
-// viewed. A range that ends mid-day can cut a visit after its first row, and
-// its entry source -- the first of its rows with a source -- may come after
-// the range; that visit still started in the range and is counted.
-func requestTopSQL(sites []string, from, to time.Time) (string, []any) {
-	visits, args := visitSegmentation(from, to)
-	q := fmt.Sprintf(`
-WITH visits AS (%s),
-views AS (
-    SELECT site_id, visitor, path, source, country, device, browser, os
-      FROM edge_request
-     WHERE site_id IN (?) AND served_at >= ? AND served_at < ? AND page_view
-),
-viewed AS (
-    SELECT d.dimension, d.value,
-           count(DISTINCT (site_id, visitor)) FILTER (WHERE visitor <> '') AS visitors,
-           count(*) AS page_views
-      FROM views
-     CROSS JOIN LATERAL (VALUES %s) AS d(dimension, value)
-     WHERE d.value IS NOT NULL
-     GROUP BY 1, 2
-),
-entered AS (
-    SELECT d.dimension, d.value, count(*) AS visits
-      FROM visits
-     CROSS JOIN LATERAL (VALUES %s) AS d(dimension, value)
-     WHERE visits.site_id IN (?) AND d.value IS NOT NULL
-     GROUP BY 1, 2
-),
-summed AS (
-    SELECT coalesce(v.dimension, e.dimension) AS dimension, coalesce(v.value, e.value) AS value,
-           coalesce(v.visitors, 0) AS visitors, coalesce(e.visits, 0) AS visits,
-           coalesce(v.page_views, 0) AS page_views
-      FROM viewed v
-      FULL JOIN entered e ON e.dimension = v.dimension AND e.value = v.value
-)%s`,
-		visits,
-		dimensionValues(func(_, viewed, _ string) string { return viewed }),
-		dimensionValues(func(_, _, entered string) string { return entered }),
-		topFoldSQL())
-	args = append(args, bun.In(sites), from.UTC(), to.UTC(), bun.In(sites))
-	return q, args
+	return q, []any{bun.In(sites), end.UTC(), end.Add(-time.Hour).UTC()}
 }
 
 // topListsOf groups the folded rows by dimension, every dimension present: the

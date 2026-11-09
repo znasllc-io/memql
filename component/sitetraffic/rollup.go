@@ -19,45 +19,72 @@ import (
 // builtin siteStatisticsRollup runs it every five minutes on the cron leader,
 // under its own maintenance principal (integration.go, handleRollup).
 //
-// # Why a scheduled recompute and not a continuous aggregate (D6)
+// # Why a scheduled job and not a continuous aggregate (D6)
 //
-// The two figures that matter most cannot be folded incrementally. Visitors
-// are COUNT(DISTINCT visitor), which a TimescaleDB continuous aggregate cannot
-// maintain, and a visit is a window over each visitor's page views. So each run
-// recomputes a whole period from edge_request and replaces that period's rows:
-// a recompute is the entire computation for its period, which is what makes
-// running it twice change nothing, and what lets a run that died part way be
-// repaired by the next one.
+// The two figures that matter most cannot be kept by a continuous aggregate.
+// Visitors are COUNT(DISTINCT visitor), which a TimescaleDB continuous
+// aggregate cannot maintain, and a visit is a window over each visitor's page
+// views. So the rollup keeps its own state of each open day, per visitor, and
+// folds the request log into it (fold.go).
 //
-// # Why every hour of today, not only the latest
+// # Incremental, with a two-hour tail
 //
-// A visit is segmented over the whole day's page views and counted in the hour
-// it started (D17), so a page view arriving now can change an EARLIER hour: the
-// one-page visit that began at 09:50 stops being a bounce when its second page
-// arrives at 10:05, and 09:00's bounces fall. Recomputing only the current hour
-// would freeze 09:00's bounce at its first answer.
+// Until 2026-11-09 every run recomputed today, and yesterday until 02:00, from
+// the whole request log. Measured at ten million requests a day over fifty
+// sites, on a database sized like the mid preset (2 CPUs, 8 GiB, 2 GB shared
+// buffers, 8 MB work_mem): each of a day's three statements took 47 to 52 s,
+// against the 60 s bound below, and a run spent two and a half minutes of
+// database time every five -- twice that before 02:00 (the measurement:
+// TestRollupAtScaleEvidence, rollup_scale_test.go).
+//
+// Now a request is read into its day's figures in two ways:
+//
+//   - SETTLED, once. A run folds every request of an open day served more than
+//     finalAfter (two hours) before its clock into the day's settled state
+//     (settle, fold.go) and moves the day's progress past it
+//     (edge_stats_progress); no later run reads it again. The state is the
+//     day's figures per hour and per value, and one row per visitor
+//     (migrations 20261109090100).
+//   - THE TAIL, every run. The requests after the day's progress -- the last
+//     two hours -- are folded against the settled state again on every run
+//     (publish.go), and what the run publishes is the settled state with the
+//     tail added. Nothing of the tail is kept.
+//
+// So a run reads the last two hours of requests, whatever the day's size, and
+// what a run writes is the whole of the day as it stands: running twice
+// changes nothing, and a run that dies part way loses nothing but its own
+// work. The two hours are the late-request horizon the recompute had: a
+// request written within two hours of being served still counts, as it did
+// until its day's 02:00, and one written later than that does not
+// (TestARequestIsFoldedOnceAndOnlyTheLastTwoHoursAreReadAgain). The edge's
+// sink writes a request within seconds or drops it (sink.go), so the horizon
+// is a margin, not a feature: what it must outlast is a replica whose clock
+// lags the cron leader's.
+//
+// The settled fold reads its range in windows of at most foldRows requests
+// (foldEnd), each its own transaction with its own progress, so a day of any
+// size is folded in statements of a bounded size, and a day that does not
+// finish in one run's budget carries on from its progress in the next.
 //
 // # When a day is final
 //
-// A day is recomputed by every run until it is FINAL. It becomes final when a
-// run recomputes it at or after 02:00 UTC the day after: that run records it in
-// edge_stats_final, in the same transaction as the recompute, and no run
-// touches the day again. Two hours past midnight, every request served that day
-// has long been written (the edge's sink flushes every second), so the last
-// recompute counts them all. A run before 02:00 recomputes yesterday without
-// closing it.
+// A day is FINAL when its settled fold reaches its end: at or after 02:00 UTC
+// the day after, when the horizon has passed it. The window that reaches its
+// end publishes it from the settled state alone, records it in
+// edge_stats_final and deletes its state, in one transaction (finishDay);
+// no run touches the day again. Today is never final.
 //
-// So which days a run recomputes is read off the record, not off the clock:
-// today, and every day of the request log's retention window (the configured
+// So which days a run reads is read off the record, not off the clock: today,
+// and every day of the request log's retention window (the configured
 // MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS, capped at 400; see planRollup)
 // through yesterday that has no record. That one rule does three jobs.
-// Yesterday is recomputed until the first run at or after 02:00 finalizes it.
-// On the first run nothing is final, so every day of the window is recomputed:
-// the backfill. And an outage of any length -- the cron leader down, every run
-// failing -- leaves its days open, so the next run that succeeds recomputes
-// them, with every request that arrived meanwhile. The bound is the request
-// log's retention: a day whose requests are gone cannot be recomputed and
-// keeps the figures last written for it
+// Yesterday is read until the first run at or after 02:00 finalizes it. On the
+// first run nothing is final, so every day of the window is folded: the
+// backfill. And an outage of any length -- the cron leader down, every run
+// failing -- leaves its days open, so the next run that succeeds folds them,
+// with every request that arrived meanwhile. The bound is the request log's
+// retention: a day whose requests are gone cannot be folded and keeps the
+// figures last written for it
 // (TestAnOutageAcrossTwoAMHealsOnTheNextRun, TestAFinalDayIsNotRecomputed).
 //
 // A record lives as long as its daily row, 400 days, and so a final day stays
@@ -65,10 +92,17 @@ import (
 // dropped the day: the day comes back into the window if the retention is
 // raised again, and a request dated on it can still turn up -- an edge replica
 // whose clock lags, rows restored to the log. A day without a record would
-// then be reopened and rewritten from what is left of it
+// then be reopened and folded from what is left of it
 // (TestAStrayRawRowCannotReopenAFinalDay). A day that never became final
 // before its requests aged out has no record to protect it; its figures were
 // short of the day already.
+//
+// ONE EXCEPTION, for the 24-hour read: a final day of the last two that was
+// published before the daily rows carried each visitor's first and last hour
+// -- by the recompute this replaced -- is folded once more from its requests,
+// so the 24-hour window that reaches into it can count its visitors
+// (planRollup). Only while the request log holds the day: folded without its
+// requests, a day would be published empty.
 //
 // # Why every expression names UTC
 //
@@ -79,14 +113,12 @@ import (
 // is passed in as an instant or a 'YYYY-MM-DD' date: nothing depends on the
 // connection's setting (TestDaysAndHoursAreUTCWhateverTheSessionTimeZone).
 //
-// # One statement per period, over every site
+// # One statement per step, over every site
 //
 // Each statement covers all sites at once; there is no per-site loop. The bound
-// is the statement timeout, which the server enforces (below): a period whose
+// is the statement timeout, which the server enforces (below): a step whose
 // statement does not finish within it fails, is logged by the caller, and is
-// recomputed on the next run, and a run as a whole stops at rollupRunBudget. A
-// very large cluster's day therefore degrades to "retried every five minutes"
-// rather than to a run that never ends.
+// tried again on the next run, and a run as a whole stops at rollupRunBudget.
 //
 // # Where the statements run: one maintenance session per run
 //
@@ -117,25 +149,26 @@ import (
 
 // RollupReport says what one run of the rollup did.
 type RollupReport struct {
-	// Hours is how many hour periods were recomputed: for every recomputed
+	// Hours is how many hour periods were published: for every published
 	// day, its hours from the first one the hourly table still keeps through
 	// the one under way.
 	Hours int `json:"hours"`
-	// Days is how many UTC days were recomputed, today among them.
+	// Days is how many UTC days were published, today among them.
 	Days int `json:"days"`
-	// Backfilled is true when the run recomputed a day before yesterday:
-	// every logged day on the first run, or the days an outage or a failure
-	// left without a finalization record.
+	// Backfilled is true when the run read a day before yesterday: every
+	// logged day on the first run, or the days an outage or a failure left
+	// without a finalization record.
 	Backfilled bool `json:"backfilled"`
 	// Deleted is how many statistics rows retention removed -- hourly, daily
-	// and top rows. The finalization records it removes are not counted.
+	// and top rows. The finalization records and the state it removes are
+	// not counted.
 	Deleted int64 `json:"deleted"`
 }
 
 const (
 	// rollupStatementTimeout bounds every statement of a run at the server,
 	// which cancels an overrun and rolls it back: the rollup's bound on the work
-	// of one period (see "One statement per period" above).
+	// of one step (see "One statement per step" above).
 	rollupStatementTimeout = 60 * time.Second
 
 	// rollupStatementGrace is how long past the server's bound the client keeps
@@ -143,9 +176,8 @@ const (
 	// client's own deadline is for a connection that has gone silent.
 	rollupStatementGrace = 15 * time.Second
 
-	// rollupRunBudget bounds a whole run. Longer than the longest a day's
-	// transaction can take -- ten statements, COMMIT among them, each at most
-	// rollupStatementTimeout -- so today, which every run recomputes first,
+	// rollupRunBudget bounds a whole run. Long enough that today, which every
+	// run reads first -- after an open yesterday, at most a day's folding --
 	// always has room; short enough that a long backfill does not hold today's
 	// figures back for hours behind the per-process single flight
 	// (handleRollup). A run that reaches it stops between statements, and the
@@ -153,15 +185,16 @@ const (
 	rollupRunBudget = 15 * time.Minute
 
 	// hourlyRetention is how long edge_stats_hourly keeps a row: the request
-	// log's own default, so the last thirty days can always be recomputed.
+	// log's own default, so the last thirty days' hours can always be folded.
 	hourlyRetention = 30 * 24 * time.Hour
 
 	// dailyRetentionDays is how long edge_stats_daily and edge_stats_daily_top
 	// keep a row: thirteen months of daily totals (D4).
 	dailyRetentionDays = 400
 
-	// finalAfter is how long after a day ends it is recomputed one last time:
-	// a run at or after 02:00 UTC the next day records the day final.
+	// finalAfter is the late-request horizon: a request is folded into its
+	// day's settled state once it is this old, and a day is final once the
+	// horizon has passed its end, at 02:00 UTC the day after.
 	finalAfter = 2 * time.Hour
 
 	// topValuesKept is how many values a day's top list keeps per dimension
@@ -172,21 +205,27 @@ const (
 	topUnknown = "(unknown)"
 )
 
-// Rollup recomputes the statistics tables from edge_request as of now.
+// foldRows is the most requests one settled window folds: what bounds the
+// statements of a backfill or a catch-up whatever a day holds. A variable so
+// a test can fold a few requests across many windows.
+var foldRows = 400_000
+
+// Rollup brings the statistics tables up to date with edge_request as of now.
 //
-// It recomputes today and every hour of it, then every day from the oldest one
-// still in the request log through yesterday that is not yet final, newest
-// first, with the hours of each that the hourly table keeps. A day recomputed
-// at or after 02:00 UTC the day after it is recorded final in the same
-// transaction. Then it deletes the rows past retention: hourly rows older than
-// now-30d, and daily rows, top rows and finalization records older than
-// today-400d.
+// It reads today -- after yesterday, while yesterday is open -- then every day
+// from the oldest one still in the request log through yesterday that is not
+// yet final, newest first. Each day's settled
+// fold is carried to the horizon, window by window; a day whose fold reaches
+// its end is published final, and a day still open to late requests is
+// published with its tail. Today's publication also writes the 24-hour
+// window's top lists. Then it deletes the rows past retention, and folds each
+// month whose final days changed into its monthly top lists.
 //
-// Every day is its own transaction, so a day that fails costs only that day:
-// it is not recorded final, so the next run recomputes it, and this run
-// carries on with every other open day. Each failed day is a *dayFailure in the
-// returned error, joined with any other failure, so the caller can log each by
-// name.
+// Every transaction is its own: a day that fails costs only that day -- it is
+// not recorded final, so the next run carries it on from its progress -- and
+// this run carries on with every other open day. Each failed day is a
+// *dayFailure in the returned error, joined with any other failure, so the
+// caller can log each by name.
 //
 // Every statement runs on a session that open opens, and on nothing else (see
 // "Where the statements run" above); with no open at all, the run refuses.
@@ -222,10 +261,14 @@ func Rollup(ctx context.Context, open MaintenanceSession, now time.Time) (Rollup
 			failures = append(failures, err)
 			break
 		}
-		if d.backfill {
+		r, err := rollupDayAt(ctx, s, d, now)
+		if r.read && d.backfill {
 			rep.Backfilled = true
 		}
-		hours, err := recomputeDay(ctx, s, d.day, now, d.final)
+		if r.published {
+			rep.Days++
+			rep.Hours += r.hours
+		}
 		if err != nil {
 			// Carry on with the other days. They are independent of each
 			// other, so one that fails -- a statement timeout, a row the
@@ -235,10 +278,7 @@ func Rollup(ctx context.Context, open MaintenanceSession, now time.Time) (Rollup
 			// per-process single flight in handleRollup keeps a slow run from
 			// overlapping the next.
 			failures = append(failures, &dayFailure{Day: d.day, Err: err})
-			continue
 		}
-		rep.Days++
-		rep.Hours += hours
 	}
 
 	deleted, err := deletePastRetention(ctx, s, now)
@@ -246,6 +286,9 @@ func Rollup(ctx context.Context, open MaintenanceSession, now time.Time) (Rollup
 		failures = append(failures, fmt.Errorf("site statistics retention: %w", err))
 	}
 	rep.Deleted = deleted
+	if err := foldMonths(ctx, s, now); err != nil {
+		failures = append(failures, fmt.Errorf("site statistics months: %w", err))
+	}
 	return rep, errors.Join(failures...)
 }
 
@@ -263,44 +306,46 @@ func (f *dayFailure) Error() string {
 
 func (f *dayFailure) Unwrap() error { return f.Err }
 
-// rollupDay is one UTC day a run recomputes.
+// rollupDay is one UTC day a run reads.
 type rollupDay struct {
 	day time.Time
-	// final marks a day this recompute records final: the run is at or after
-	// 02:00 UTC the day after it. Today is never final.
-	final bool
 	// backfill marks a day before yesterday: history on a first run, or a day
 	// an outage or a failure left open.
 	backfill bool
+	// refold marks a final day the run folds again: see "ONE EXCEPTION" above.
+	refold bool
 }
 
-// planRollup lists the days to recompute: today, then every day of the request
+// planRollup lists the days to read: today, then every day of the request
 // log's retention window through yesterday that has no finalization record,
-// newest first.
+// newest first -- an open yesterday before today (below).
 //
 // THE WINDOW IS THE CONFIGURED RETENTION (openFrom, RetentionDays), not the
 // oldest row the log holds. The oldest rows sit in a compressed chunk -- the
 // log compresses every chunk older than a day -- so asking for the first of them
 // would decompress it on every run, every five minutes. The configuration says
 // the same thing for free: the log keeps exactly that many days. A day in the
-// window with no request recomputes to nothing, in an empty range, and is
-// recorded final like any other, so it is asked once.
+// window with no request folds to nothing, in an empty range, and is recorded
+// final like any other, so it is asked once.
 //
 // RetentionDays reads MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS on whichever node
 // runs the rollup, while the edge applies the same variable to the log's
 // retention policy; the window and the policy agree only if both nodes see
 // the same value. A window wider than the policy reaches days the log has
-// dropped; it recomputes them to nothing only if they are not final, which a
-// day is the morning after it ends. A narrower one leaves the older days of an
+// dropped; it folds them to nothing only if they are not final, which a day
+// is the morning after it ends. A narrower one leaves the older days of an
 // outage open beyond its reach.
 //
-// The plan reads only the finalization record. Today is answered even when
-// that read fails, with the error beside it.
+// It also lists, as refold, the final days of the last two whose measured
+// daily rows carry no first- and last-hour visitors: see "ONE EXCEPTION"
+// above. Today is answered even when the plan's reads fail, with the error
+// beside it.
 func planRollup(ctx context.Context, s *rollupSession, now time.Time) ([]rollupDay, error) {
 	today := utcMidnight(now)
 	days := []rollupDay{{day: today}}
 	from := openFrom(today, RetentionDays())
 	final := map[string]bool{} // by date: time.Time's == also compares location and monotonic reading
+	refold := map[string]bool{}
 	err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
 		recorded, err := tx.column(ctx, `SELECT day::text FROM edge_stats_final WHERE day >= ?::date AND day < ?::date`,
 			dateArg(from), dateArg(today))
@@ -310,6 +355,21 @@ func planRollup(ctx context.Context, s *rollupSession, now time.Time) ([]rollupD
 		for _, d := range recorded {
 			final[d] = true
 		}
+		// Only a day whose requests the log still holds: folded again
+		// without them, a day would be published empty, its figures wiped
+		// (TestAClosedDayIsFoldedAgainOnlyFromItsRequests).
+		stale, err := tx.column(ctx, `SELECT DISTINCT d.day::text FROM edge_stats_daily d
+			WHERE d.day >= ?::date AND d.day < ?::date AND d.visitors IS NOT NULL AND d.first_hour_visitors IS NULL
+			  AND EXISTS (SELECT 1 FROM edge_request r
+			               WHERE r.served_at >= d.day::timestamp AT TIME ZONE 'UTC'
+			                 AND r.served_at < (d.day + 1)::timestamp AT TIME ZONE 'UTC')`,
+			dateArg(today.AddDate(0, 0, -2)), dateArg(today))
+		if err != nil {
+			return fmt.Errorf("read the days published without their hours' visitors: %w", err)
+		}
+		for _, d := range stale {
+			refold[d] = true
+		}
 		return nil
 	})
 	if err != nil {
@@ -317,125 +377,267 @@ func planRollup(ctx context.Context, s *rollupSession, now time.Time) ([]rollupD
 	}
 	yesterday := today.AddDate(0, 0, -1)
 	for d := yesterday; !d.Before(from); d = d.AddDate(0, 0, -1) {
-		if final[dateArg(d)] {
+		date := dateArg(d)
+		if final[date] && !refold[date] {
 			continue
 		}
-		days = append(days, rollupDay{
-			day:      d,
-			final:    !now.Before(d.AddDate(0, 0, 1).Add(finalAfter)),
-			backfill: d.Before(yesterday),
-		})
+		days = append(days, rollupDay{day: d, backfill: d.Before(yesterday), refold: final[date]})
+	}
+	// An open yesterday is read BEFORE today: today's publication writes the
+	// 24-hour window's top lists, whose first part is yesterday's, and a
+	// yesterday not yet folded -- on a first run, after an outage -- would
+	// leave it out until the next run. Open, yesterday is two hours of
+	// folding at most, until 02:00; past an outage, one day's.
+	if len(days) > 1 && days[1].day.Equal(yesterday) {
+		days[0], days[1] = days[1], days[0]
 	}
 	return days, nil
 }
 
-// recomputeDay replaces one UTC day's rows -- its hours still inside the
-// hourly table's thirty days, its daily row and its top rows -- with what
-// edge_request holds, in one transaction. It returns the hour periods covered.
-//
-// With final, the same transaction records the day final, so a day is final
-// only if the recompute that closed it was written: a recompute that fails
-// leaves the day open for the next run. ON CONFLICT DO NOTHING keeps the first
-// record, should two runs ever close one day.
-//
-// ONE SNAPSHOT. The transaction is REPEATABLE READ, so the hours, the day and
-// the top lists are computed from the same rows and always agree with each
-// other, whatever the edge writes meanwhile.
+// dayResult is what reading one day did.
+type dayResult struct {
+	// read is true when the run folded some of the day or published it.
+	read bool
+	// published is true when the day's rows were written; hours is how many
+	// hour periods.
+	published bool
+	hours     int
+}
+
+// rollupDayAt reads one day: it carries the day's settled fold to the
+// horizon, one window per transaction, publishing the day final in the window
+// that reaches its end; and a day the horizon has not passed -- today, or
+// yesterday before 02:00 -- it then publishes with its tail. A day whose fold
+// is not carried to the horizon in this run, its budget spent, is not
+// published: the next run carries it on.
 //
 // ONE WRITER. Two runs can overlap -- a leader change mid-run, a run slower
-// than the schedule on another replica -- and two recomputes of one day would
-// each delete, then collide inserting. The table lock serializes them, and it
-// is taken BEFORE the first query on purpose: a repeatable-read snapshot is
-// fixed by the first query, not by BEGIN or a lock, so the run that waited
-// sees the rows the other committed and replaces them, rather than failing on
-// them. SHARE ROW EXCLUSIVE conflicts with itself and with writers, never with
-// a reader, so the Statistics page is not held up by a run.
-func recomputeDay(ctx context.Context, s *rollupSession, day, now time.Time, final bool) (int, error) {
+// than the schedule on another replica -- and both would fold the same
+// requests. Every transaction takes the rollup's table lock before it reads
+// anything, and reads the day's progress and record under it, so the run
+// that waited folds from where the other left off, and finds a day the other
+// closed closed (TestTwoRollupsAtOnceBothFinish). SHARE ROW EXCLUSIVE
+// conflicts with itself and with writers, never with a reader, so the
+// Statistics page is not held up by a run.
+func rollupDayAt(ctx context.Context, s *rollupSession, d rollupDay, now time.Time) (dayResult, error) {
+	var res dayResult
+	day := d.day
 	dayEnd := day.AddDate(0, 0, 1)
-	// The hours the hourly table keeps: retention removes every hour before
-	// hourlyFloor, so writing one would be work thrown away the same run.
-	hourStart := hourlyFloor(now)
-	if hourStart.Before(day) {
-		hourStart = day
+	settleTo := now.Add(-finalAfter)
+	if settleTo.After(dayEnd) {
+		settleTo = dayEnd
 	}
-	withHours := hourStart.Before(dayEnd)
-	date := dateArg(day)
-
+	for {
+		if _, err := statementBound(ctx); err != nil {
+			return res, err
+		}
+		var done bool
+		err := s.inTx(ctx, "BEGIN ISOLATION LEVEL REPEATABLE READ", func(tx *rollupTx) error {
+			st, err := openDay(ctx, tx, d)
+			if err != nil || st.closed {
+				done = true
+				return err
+			}
+			if !st.progress.Before(settleTo) {
+				done = true
+				return nil
+			}
+			end, err := foldEnd(ctx, tx, st.progress, settleTo)
+			if err != nil {
+				return err
+			}
+			ft := foldTablesFor("s")
+			if err := fold(ctx, tx, ft, day, st.progress, end); err != nil {
+				return err
+			}
+			if err := settle(ctx, tx, ft, day, end); err != nil {
+				return err
+			}
+			res.read = true
+			if !end.Before(dayEnd) {
+				// The window that reaches the day's end closes it.
+				hours, err := finishDay(ctx, tx, day, now)
+				if err != nil {
+					return err
+				}
+				res.published, res.hours, done = true, hours, true
+			}
+			return nil
+		})
+		if err != nil {
+			return res, err
+		}
+		if done {
+			break
+		}
+	}
+	if res.published || !settleTo.Before(dayEnd) {
+		return res, nil
+	}
 	err := s.inTx(ctx, "BEGIN ISOLATION LEVEL REPEATABLE READ", func(tx *rollupTx) error {
-		if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
-			return fmt.Errorf("take the rollup lock: %w", err)
+		st, err := openDay(ctx, tx, d)
+		if err != nil || st.closed || st.progress.Before(settleTo) {
+			return err
 		}
-		// Hold the request log still while this day is read. TimescaleDB
-		// compresses a chunk under an ACCESS EXCLUSIVE lock, moving its
-		// rows and truncating the chunk, and a truncate is not MVCC-safe:
-		// what a snapshot fixed before that commit reads afterwards depends
-		// on how the moved rows were written. On the CI image (TimescaleDB
-		// 2.29) a first compression's rows stay visible to it; nothing
-		// promises that of a recompression or another version, and a day
-		// read as empty would be written empty and recorded final. ACCESS
-		// SHARE on the hypertable locks every chunk too, and it is taken
-		// here, before the first query fixes the snapshot, so the snapshot
-		// always comes after any compression or retention drop that already
-		// holds a chunk. It does not conflict with the edge's inserts (ROW
-		// EXCLUSIVE). The cost runs the other way: a compression or a drop
-		// that reaches its exclusive step while this transaction holds the
-		// lock waits for it to end, which the statement bound limits to the
-		// statements of one day's recompute, each ended by the server at
-		// rollupStatementTimeout (TestTheSnapshotIsTakenAfterALockOnTheDaysChunk).
-		if _, err := tx.exec(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
-			return fmt.Errorf("hold the request log: %w", err)
+		tails := map[string]*foldTables{}
+		ft := foldTablesFor("t")
+		if err := fold(ctx, tx, ft, day, st.progress, dayEnd); err != nil {
+			return err
 		}
-		if withHours {
-			if _, err := tx.exec(ctx, `DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?`, hourStart, dayEnd); err != nil {
-				return fmt.Errorf("clear the hours: %w", err)
+		tails[dateArg(day)] = &ft
+		hours, err := publishDay(ctx, tx, day, now, &ft)
+		if err != nil {
+			return err
+		}
+		res.read, res.published, res.hours = true, true, hours
+		if !day.Equal(utcMidnight(now)) {
+			return nil
+		}
+		// Today's publication writes the 24-hour window's top lists too,
+		// from today with its tail and from yesterday, which until 02:00 has
+		// a tail of its own: the requests after its progress, two hours and
+		// a run's worth. A yesterday whose fold is further behind than that
+		// -- not yet folded at all, on the first run after this rollup came
+		// to be -- is left at its settled part for this run, rather than
+		// folding a day inside today's transaction; its own reading, later
+		// in the run, catches it up for the next.
+		yesterday := day.AddDate(0, 0, -1)
+		if y, err := dayProgress(ctx, tx, yesterday); err != nil {
+			return err
+		} else if y.open && day.Sub(y.progress) <= finalAfter+time.Hour {
+			yt := foldTablesFor("y")
+			if err := fold(ctx, tx, yt, yesterday, y.progress, day); err != nil {
+				return err
 			}
+			tails[dateArg(yesterday)] = &yt
 		}
-		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_daily WHERE day = ?::date`, date); err != nil {
-			return fmt.Errorf("clear the day: %w", err)
-		}
-		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_daily_top WHERE day = ?::date`, date); err != nil {
-			return fmt.Errorf("clear the top lists: %w", err)
-		}
-		if withHours {
-			q, args := bucketStatsInsert("edge_stats_hourly", "hour", hourOf, hourStart, dayEnd)
-			if _, err := tx.exec(ctx, q, args...); err != nil {
-				return fmt.Errorf("write the hours: %w", err)
-			}
-		}
-		q, args := bucketStatsInsert("edge_stats_daily", "day", dayOf, day, dayEnd)
-		if _, err := tx.exec(ctx, q, args...); err != nil {
-			return fmt.Errorf("write the day: %w", err)
-		}
-		q, args = topInsert(day, dayEnd)
-		if _, err := tx.exec(ctx, q, args...); err != nil {
-			return fmt.Errorf("write the top lists: %w", err)
-		}
-		if final {
-			if _, err := tx.exec(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)
-				ON CONFLICT (day) DO NOTHING`, date, now); err != nil {
-				return fmt.Errorf("record the day final: %w", err)
-			}
-		}
-		return nil
+		return publishWindow(ctx, tx, now, tails)
 	})
-	if err != nil || !withHours {
-		return 0, err
+	return res, err
+}
+
+// dayState is where one day stands, read under the rollup's lock.
+type dayState struct {
+	// closed is true when the day is final and the run has nothing to do.
+	closed bool
+	// progress is how far the day's settled fold has read: its midnight
+	// when it has not begun.
+	progress time.Time
+}
+
+// openDay takes the rollup's lock and reads where d stands. The two locks are
+// taken BEFORE the first query on purpose: a repeatable-read snapshot is
+// fixed by the first query, not by BEGIN or a lock.
+//
+//   - The rollup's own lock serializes the rollup's writers (rollupDayAt,
+//     "ONE WRITER"), so the run that waited sees what the other committed.
+//   - Hold the request log still while this day is read. TimescaleDB
+//     compresses a chunk under an ACCESS EXCLUSIVE lock, moving its rows and
+//     truncating the chunk, and a truncate is not MVCC-safe: what a snapshot
+//     fixed before that commit reads afterwards depends on how the moved rows
+//     were written. On the CI image (TimescaleDB 2.29) a first compression's
+//     rows stay visible to it; nothing promises that of a recompression or
+//     another version, and a range read as empty would be folded empty and
+//     recorded settled. ACCESS SHARE on the hypertable locks every chunk too,
+//     and it is taken here, before the first query fixes the snapshot, so the
+//     snapshot always comes after any compression or retention drop that
+//     already holds a chunk. It does not conflict with the edge's inserts (ROW
+//     EXCLUSIVE). The cost runs the other way: a compression or a drop that
+//     reaches its exclusive step while this transaction holds the lock waits
+//     for it to end, which the statement bound limits to the statements of one
+//     window, each ended by the server at rollupStatementTimeout
+//     (TestTheSnapshotIsTakenAfterALockOnTheDaysChunk).
+//
+// A day is closed when it is final, unless the run folds it again (refold)
+// and it still lacks what the fold adds (refoldStale).
+func openDay(ctx context.Context, tx *rollupTx, d rollupDay) (dayState, error) {
+	if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+		return dayState{}, fmt.Errorf("take the rollup lock: %w", err)
 	}
-	// Counted through the hour under way; the hours after it are cleared and
-	// empty, not recomputed.
-	through := now.Truncate(time.Hour).Add(time.Hour)
-	if through.After(dayEnd) {
-		through = dayEnd
+	if _, err := tx.exec(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
+		return dayState{}, fmt.Errorf("hold the request log: %w", err)
 	}
-	if !through.After(hourStart) {
-		return 0, nil
+	p, err := dayProgress(ctx, tx, d.day)
+	if err != nil {
+		return dayState{}, err
 	}
-	return int(through.Sub(hourStart) / time.Hour), nil
+	if !p.open {
+		if !d.refold {
+			return dayState{closed: true}, nil
+		}
+		stale, err := tx.column(ctx, `SELECT 1 FROM edge_stats_daily
+			WHERE day = ?::date AND visitors IS NOT NULL AND first_hour_visitors IS NULL LIMIT 1`, dateArg(d.day))
+		if err != nil {
+			return dayState{}, fmt.Errorf("read whether the day still lacks its hours' visitors: %w", err)
+		}
+		if len(stale) == 0 && p.progress.Equal(d.day) {
+			return dayState{closed: true}, nil
+		}
+	}
+	return dayState{progress: p.progress}, nil
+}
+
+// progress is one day's record: open is false once it is final, and progress
+// is how far its settled fold has read, its midnight when it has not begun.
+type progress struct {
+	open     bool
+	progress time.Time
+}
+
+// dayProgress reads one day's record and progress, rendered in UTC whatever
+// the session's time zone.
+func dayProgress(ctx context.Context, tx *rollupTx, day time.Time) (progress, error) {
+	rows, err := tx.column(ctx, `SELECT coalesce((SELECT 'final' FROM edge_stats_final WHERE day = ?::date), 'open') || ' ' ||
+		coalesce((SELECT to_char(settled_through AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+		            FROM edge_stats_progress WHERE day = ?::date), '')`, dateArg(day), dateArg(day))
+	if err != nil {
+		return progress{}, fmt.Errorf("read the day's progress: %w", err)
+	}
+	if len(rows) != 1 {
+		return progress{}, fmt.Errorf("read the day's progress: %d rows", len(rows))
+	}
+	state, at, _ := strings.Cut(rows[0], " ")
+	p := progress{open: state == "open", progress: day}
+	if at != "" {
+		t, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return progress{}, fmt.Errorf("read the day's progress %q: %w", at, err)
+		}
+		p.progress = t.UTC()
+	}
+	return p, nil
+}
+
+// foldEnd is where a settled window that starts at from ends: at the
+// foldRows-th request after from, or at to when fewer are left. The probe
+// walks the request log's (served_at, id) index, so it costs the window it
+// measures.
+func foldEnd(ctx context.Context, tx *rollupTx, from, to time.Time) (time.Time, error) {
+	rows, err := tx.column(ctx, `SELECT to_char(served_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+		FROM edge_request WHERE served_at >= ? AND served_at < ? ORDER BY served_at LIMIT 1 OFFSET ?`,
+		from.UTC(), to.UTC(), foldRows)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("measure the next window: %w", err)
+	}
+	if len(rows) == 0 {
+		return to, nil
+	}
+	end, err := time.Parse(time.RFC3339Nano, rows[0])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("measure the next window %q: %w", rows[0], err)
+	}
+	// More requests than a window holds share from's microsecond: they are
+	// folded together, rather than not at all.
+	if !end.After(from) {
+		end = from.Add(time.Microsecond)
+	}
+	return end, nil
 }
 
 // deletePastRetention removes hourly rows older than now-30d and daily and top
-// rows older than today-400d, and answers how many went. It takes the rollup
-// lock like a recompute, so it never deletes under a day being written.
+// rows older than today-400d, and answers how many went; and with them what
+// the rollup keeps beside them that has aged out. It takes the rollup lock
+// like a day's transaction, so it never deletes under a day being written.
 //
 // A day's finalization record goes WITH ITS DAILY ROW, after the same 400 days,
 // and not when the request log loses the day. Kept that long, a final day stays
@@ -445,9 +647,21 @@ func recomputeDay(ctx context.Context, s *rollupSession, day, now time.Time, fin
 // from the few rows there (TestAStrayRawRowCannotReopenAFinalDay). The cost is
 // at most one small row per day the daily table keeps. The records are not
 // counted in the answer.
+//
+// THE STATE: a final day's value hours go once the 24-hour window cannot reach
+// the day, the day before yesterday; and an open day's state goes once the day
+// has left the window a run reads (a retention lowered under an outage), since
+// no run will fold it again.
+//
+// THE MONTHS: a month wholly before the cutoff goes. The month the cutoff
+// falls in loses days, so its record of the days it covers goes whole when
+// one of them is past the cutoff, and foldMonths folds the month again from
+// the days it has left.
 func deletePastRetention(ctx context.Context, s *rollupSession, now time.Time) (int64, error) {
 	var deleted int64
-	cutoff := dateArg(dailyCutoff(utcMidnight(now)))
+	today := utcMidnight(now)
+	cutoff := dateArg(dailyCutoff(today))
+	open := dateArg(openFrom(today, RetentionDays()))
 	err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
 		deleted = 0
 		if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
@@ -471,8 +685,27 @@ func deletePastRetention(ctx context.Context, s *rollupSession, now time.Time) (
 			}
 			deleted += n
 		}
-		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, cutoff); err != nil {
-			return fmt.Errorf("delete the finalization records past retention: %w", err)
+		for _, d := range []struct {
+			what  string
+			query string
+			args  []any
+		}{
+			{"the finalization records", `DELETE FROM edge_stats_final WHERE day < ?::date`, []any{cutoff}},
+			{"the value hours the 24-hour window no longer reaches", `DELETE FROM edge_stats_value_hour v
+				WHERE v.day < ?::date AND EXISTS (SELECT 1 FROM edge_stats_final f WHERE f.day = v.day)`, []any{dateArg(today.AddDate(0, 0, -1))}},
+			{"the state of days no run folds", `DELETE FROM edge_stats_value_hour WHERE day < ?::date`, []any{open}},
+			{"the visitors of days no run folds", `DELETE FROM edge_stats_visitor WHERE day < ?::date`, []any{open}},
+			{"the hours of days no run folds", `DELETE FROM edge_stats_settled_hour WHERE day < ?::date`, []any{open}},
+			{"the progress of days no run folds", `DELETE FROM edge_stats_progress WHERE day < ?::date`, []any{open}},
+			{"the months past retention", `DELETE FROM edge_stats_monthly_top WHERE month < date_trunc('month', ?::date)::date`, []any{cutoff}},
+			{"the record of the month the cutoff falls in", `DELETE FROM edge_stats_month_day
+				WHERE date_trunc('month', day) = date_trunc('month', ?::date)
+				  AND EXISTS (SELECT 1 FROM edge_stats_month_day WHERE day < ?::date)`, []any{cutoff, cutoff}},
+			{"the month days past retention", `DELETE FROM edge_stats_month_day WHERE day < ?::date`, []any{cutoff}},
+		} {
+			if _, err := tx.exec(ctx, d.query, d.args...); err != nil {
+				return fmt.Errorf("delete %s past retention: %w", d.what, err)
+			}
 		}
 		return nil
 	})
@@ -480,6 +713,40 @@ func deletePastRetention(ctx context.Context, s *rollupSession, now time.Time) (
 		return 0, err
 	}
 	return deleted, nil
+}
+
+// foldMonths folds every month whose final days changed into its monthly top
+// lists (publish.go, staleMonths and buildMonth), newest first, a month to a
+// transaction: once a day after a day becomes final, and every kept month on
+// the first run after the monthly top lists came to be. A month that fails is
+// folded again by the next run, and until then a read takes its days from the
+// daily rows (statistics.go, "Whole months").
+func foldMonths(ctx context.Context, s *rollupSession, now time.Time) error {
+	cutoff := dailyCutoff(utcMidnight(now))
+	var months []time.Time
+	err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
+		var err error
+		months, err = staleMonths(ctx, tx, cutoff)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, m := range months {
+		if _, err := statementBound(ctx); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
+			if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+				return fmt.Errorf("take the rollup lock: %w", err)
+			}
+			return buildMonth(ctx, tx, m, cutoff)
+		}); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // MaintenanceSession opens the dedicated session a run's statements run on:
@@ -491,7 +758,7 @@ type MaintenanceSession func(ctx context.Context) (*sql.Conn, func(), error)
 // plug-in contract (memql.PluginContext.OpenMaintenanceSession) has a plug-in
 // that needs the session refuse rather than fall back to the request pool, and
 // the pool is exactly what the session replaces here.
-var errNoMaintenanceSession = errors.New("site statistics rollup: this node offers no maintenance session, and the rollup does not run on the request pool instead, whose statement timeout and 10 s read deadline end a day's recompute part-way")
+var errNoMaintenanceSession = errors.New("site statistics rollup: this node offers no maintenance session, and the rollup does not run on the request pool instead, whose statement timeout and 10 s read deadline end a day's fold part-way")
 
 // queryGen formats a statement's ? placeholders as bun formats them for the
 // request pool, whose bun.DB is built over pgdialect.New() (component/database).
@@ -643,7 +910,7 @@ func (t *rollupTx) column(ctx context.Context, query string, args ...any) ([]str
 // SET LOCAL to statementContext's limit, unless the transaction's last SET
 // already says it, and the client waits under statementContext's deadline. SET
 // takes no snapshot, so it may come before the lock a REPEATABLE READ
-// recompute takes ahead of its first query (recomputeDay).
+// day's transaction takes ahead of its first query (openDay).
 func (t *rollupTx) prepare(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	sctx, limit, cancel, err := statementContext(ctx)
 	if err != nil {
@@ -693,147 +960,6 @@ func statementBound(ctx context.Context) (time.Duration, error) {
 	return limit, nil
 }
 
-// The visit segmentation (spec D17): THE definition of a visit in SQL, built
-// once and used by every figure that counts visits -- the rollup's hours, days
-// and top lists here, and the 24-hour period's top lists the siteStatistics
-// read computes from raw rows.
-//
-// A visit is one visitor's page views with no gap over thirty minutes. Read
-// per site, per UTC day and per visitor from the measured page views that have
-// a visitor id, in (served_at, id) order:
-//
-//   - a row starts a visit when it is the visitor's first that day, or comes
-//     more than thirty minutes after their previous one -- exactly thirty is
-//     the same visit;
-//   - a running sum of those starts numbers the visits;
-//   - a visit's start is its first row's served_at, and it is counted in the
-//     hour and the day of that start, so hourly visits add up to the day's;
-//   - its entry page, country, device, browser and OS are its first row's, and
-//     its entry source is the first of its rows with a source at all -- a
-//     visit that resumes after a pause on an inner page has no source on its
-//     first row;
-//   - it is a bounce when it holds exactly one row.
-//
-// The UTC day partitions every window and groups every visit, so a visit never
-// crosses midnight. The visitor hash changes at midnight in any case (D1); the
-// day key makes the split a property of the definition rather than of the
-// hash, which matters to a window that spans midnight, such as the 24-hour
-// read's (TestTheVisitSegmentationAnswersTheVisitsThatStartedInAWindow).
-//
-// The SELECT answers one row per visit with the columns site_id, day, visitor,
-// started_at, views, entry_page, entry_source (NULL when none of its rows has
-// a source), country, device, browser and os, in the placeholder order
-// visitSegmentation returns. It covers every site. A read narrowed to some
-// sites filters the result on site_id: site_id partitions every window and
-// groups the result, so the planner pushes such a predicate down to the scan
-// of edge_request (checked with EXPLAIN on the CI TimescaleDB image, 2.29: an
-// outer `site_id IN (...)` becomes the index condition on the chunk scan).
-const visitSegmentationSQL = `
-SELECT site_id, day, visitor,
-       min(served_at) AS started_at,
-       count(*) AS views,
-       (array_agg(path ORDER BY served_at, id))[1] AS entry_page,
-       (array_agg(source ORDER BY served_at, id) FILTER (WHERE source <> ''))[1] AS entry_source,
-       (array_agg(country ORDER BY served_at, id))[1] AS country,
-       (array_agg(device ORDER BY served_at, id))[1] AS device,
-       (array_agg(browser ORDER BY served_at, id))[1] AS browser,
-       (array_agg(os ORDER BY served_at, id))[1] AS os
-  FROM (
-        SELECT pv.*,
-               sum(CASE WHEN previous IS NULL OR served_at - previous > interval '30 minutes' THEN 1 ELSE 0 END)
-                   OVER (PARTITION BY site_id, day, visitor ORDER BY served_at, id ROWS UNBOUNDED PRECEDING) AS visit
-          FROM (
-                SELECT site_id, (served_at AT TIME ZONE 'UTC')::date AS day, visitor, served_at, id,
-                       path, source, country, device, browser, os,
-                       lag(served_at) OVER (PARTITION BY site_id, (served_at AT TIME ZONE 'UTC')::date, visitor
-                                            ORDER BY served_at, id) AS previous
-                  FROM edge_request
-                 WHERE served_at >= ? AND served_at < ? AND page_view AND visitor <> ''
-               ) pv
-       ) numbered
- GROUP BY site_id, day, visitor, visit
-HAVING min(served_at) >= ? AND min(served_at) < ?`
-
-// visitSegmentation answers the visits that STARTED in [from, to), and the
-// arguments for visitSegmentationSQL's placeholders, in order. A caller embeds
-// the query as a CTE and appends its own arguments after these.
-//
-// It reads page views from the UTC midnight at or before from, so a row just
-// after from is known to continue a visit begun earlier that day rather than
-// to start one, and up to the UTC midnight at or after to, so every visit
-// counted is complete: its page views, and so whether it bounced, include the
-// rows after to, since no visit crosses midnight.
-func visitSegmentation(from, to time.Time) (string, []any) {
-	readFrom := utcMidnight(from)
-	readTo := utcMidnight(to)
-	if readTo.Before(to) {
-		readTo = readTo.AddDate(0, 0, 1)
-	}
-	return visitSegmentationSQL, []any{readFrom, readTo, from.UTC(), to.UTC()}
-}
-
-// hourOf and dayOf are the UTC hour and day of a timestamptz expression.
-func hourOf(column string) string {
-	return "date_trunc('hour', " + column + " AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
-}
-
-func dayOf(column string) string {
-	return "(" + column + " AT TIME ZONE 'UTC')::date"
-}
-
-// bucketStatsInsert is the INSERT of one table's buckets -- hours or days --
-// over [from, to), with its arguments.
-//
-// ABSENT IS NOT ZERO. visitors, visits, bounces and page_views are NULL for a
-// bucket none of whose rows the edge classified -- every bucket recorded
-// before it did -- so a reader says "not measured" instead of "nobody". A
-// bucket with a measured row and no page view says 0. A visit begins on a
-// measured page view, so every bucket a visit starts in has a measured row and
-// the join loses none.
-func bucketStatsInsert(table, column string, bucketOf func(string) string, from, to time.Time) (string, []any) {
-	visits, args := visitSegmentation(from, to)
-	q := fmt.Sprintf(`
-WITH visits AS (%s),
-started AS (
-    SELECT site_id, %s AS bucket,
-           count(*) AS visits,
-           count(*) FILTER (WHERE views = 1) AS bounces
-      FROM visits
-     GROUP BY 1, 2
-),
-served AS (
-    SELECT site_id, %s AS bucket,
-           bool_or(measured) AS measured,
-           count(DISTINCT visitor) FILTER (WHERE page_view AND visitor <> '') AS visitors,
-           count(*) FILTER (WHERE page_view) AS page_views,
-           count(*) AS requests,
-           count(*) FILTER (WHERE status >= 500) AS errors,
-           count(*) FILTER (WHERE status >= 400 AND status < 500) AS not_found,
-           coalesce(sum(bytes), 0)::bigint AS bytes,
-           count(*) FILTER (WHERE bot) AS bot_requests,
-           %s AS duration_hist
-      FROM (SELECT site_id, served_at, status, bytes, measured, page_view, bot, visitor,
-                   %s AS duration_bucket
-              FROM edge_request
-             WHERE served_at >= ? AND served_at < ?) r
-     GROUP BY 1, 2
-)
-INSERT INTO %s (site_id, %s, visitors, visits, bounces, page_views,
-                requests, errors, not_found, bytes, bot_requests, duration_hist)
-SELECT s.site_id, s.bucket,
-       CASE WHEN s.measured THEN s.visitors END,
-       CASE WHEN s.measured THEN coalesce(v.visits, 0) END,
-       CASE WHEN s.measured THEN coalesce(v.bounces, 0) END,
-       CASE WHEN s.measured THEN s.page_views END,
-       s.requests, s.errors, s.not_found, s.bytes, s.bot_requests, s.duration_hist
-  FROM served s
-  LEFT JOIN started v ON v.site_id = s.site_id AND v.bucket = s.bucket`,
-		visits, bucketOf("started_at"), bucketOf("served_at"),
-		histogramCountsSQL("duration_bucket"), histogramBucketSQL("duration_ns"),
-		table, column)
-	return q, append(args, from.UTC(), to.UTC())
-}
-
 // histogramCountsSQL is the 64-element count array of a bucket column, as one
 // aggregate expression: a single pass over the rows, where building the array
 // from a second GROUP BY on the bucket would scan them twice.
@@ -877,62 +1003,6 @@ func dimensionValues(pick func(name, viewed, entered string) string) string {
 		parts[i] = fmt.Sprintf("('%s', %s)", d.name, pick(d.name, d.viewed, d.entered))
 	}
 	return strings.Join(parts, ", ")
-}
-
-// topInsert is the INSERT of one day's top lists, with its arguments.
-//
-// Each list keeps the hundred values with the most visitors, ties broken by
-// page views and then by value in byte order (COLLATE "C", so the cut is the
-// same on every database), and folds the rest into (other), summing their
-// visitors, visits and page views. The fold groups by the label, so a real
-// value that happens to read "(other)" -- a utm_source is the client's to
-// write -- joins the fold instead of colliding with it on the primary key and
-// failing the whole day for every site.
-func topInsert(from, to time.Time) (string, []any) {
-	visits, args := visitSegmentation(from, to)
-	q := fmt.Sprintf(`
-WITH visits AS (%s),
-views AS (
-    SELECT site_id, (served_at AT TIME ZONE 'UTC')::date AS day,
-           visitor, path, source, country, device, browser, os
-      FROM edge_request
-     WHERE served_at >= ? AND served_at < ? AND page_view
-),
-viewed AS (
-    SELECT site_id, day, d.dimension, d.value,
-           count(DISTINCT visitor) FILTER (WHERE visitor <> '') AS visitors,
-           count(*) AS page_views
-      FROM views
-     CROSS JOIN LATERAL (VALUES %s) AS d(dimension, value)
-     WHERE d.value IS NOT NULL
-     GROUP BY 1, 2, 3, 4
-),
-entered AS (
-    SELECT site_id, day, d.dimension, d.value, count(*) AS visits
-      FROM visits
-     CROSS JOIN LATERAL (VALUES %s) AS d(dimension, value)
-     WHERE d.value IS NOT NULL
-     GROUP BY 1, 2, 3, 4
-),
-ranked AS (
-    SELECT v.site_id, v.day, v.dimension, v.value, v.visitors, coalesce(e.visits, 0) AS visits, v.page_views,
-           row_number() OVER (PARTITION BY v.site_id, v.day, v.dimension
-                              ORDER BY v.visitors DESC, v.page_views DESC, v.value COLLATE "C" ASC) AS rank
-      FROM viewed v
-      LEFT JOIN entered e
-        ON e.site_id = v.site_id AND e.day = v.day AND e.dimension = v.dimension AND e.value = v.value
-)
-INSERT INTO edge_stats_daily_top (site_id, day, dimension, value, visitors, visits, page_views)
-SELECT site_id, day, dimension,
-       CASE WHEN rank <= %d THEN value ELSE '%s' END,
-       sum(visitors)::bigint, sum(visits)::bigint, sum(page_views)::bigint
-  FROM ranked
- GROUP BY 1, 2, 3, 4`,
-		visits,
-		dimensionValues(func(_, viewed, _ string) string { return viewed }),
-		dimensionValues(func(_, _, entered string) string { return entered }),
-		topValuesKept, topOther)
-	return q, append(args, from.UTC(), to.UTC())
 }
 
 // hourlyFloor is the first hour the hourly table keeps at now: the hour

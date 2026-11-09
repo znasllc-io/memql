@@ -107,9 +107,9 @@ import (
 // and skipping it is harmless, since the next run reads the same page again
 // (TestAFirstWalkThatCannotReadItsFirstPageStartsLater).
 //
-// THE KNOWN LIMIT. The remedy covers a first walk's first page; a walk that has
-// a watermark and whose later pages grow past the timeout stalls visibly, its
-// figures null and a Warn on every run.
+// The remedy covers a first walk's first page. A walk that has a watermark,
+// or a first walk past its first page, is bounded instead: see "A walk whose
+// pages outgrow a read".
 //
 // # Why the overlap
 //
@@ -163,6 +163,47 @@ import (
 // so a leader whose clock ran fast can leave the read counting as measured up
 // to the overlap, five minutes, past what any walk has read, and no more.
 //
+// # A walk whose pages outgrow a read
+//
+// A walk pays, for every page, for every version written since it started
+// (latestScanLowerBounds collapses the versions at or after since, whatever
+// the cursor), so a walk far enough behind -- the cron leader down for days, a
+// burst of writes -- has every page outlast the statement timeout. Its first
+// page fails, it writes no watermark past it, and the next run starts from
+// the same place: before 2026-11-09 such a walk stalled for good, its figures
+// null, a Warn on every run. Only a first walk's first page moved its start.
+//
+// So when any other page of a walk takes longer than a read may
+// (isPageTimeout, the same test as above), the next walk reads only as far as
+// half way from where it will start to the clock this page was asked by, and
+// reads the graph AS OF that instant (email_stat_watermark.read_until,
+// walkQuery). The engine bounds its latest-version collapse by an asOf
+// instant (`"createdAt" <= T` beside the lower bound, latestScanKeys), so
+// such a page costs the versions between the two instants and no more
+// (TestABoundedWalkReadsTheGraphAsOfItsEnd). As of an instant is exact for a
+// walk: each row is read at the version it had then, and a later version is
+// written later, so a later walk reads it. Each further timeout halves the
+// span again, down to readUntilFloor, a minute; past that a page that still
+// times out is the run's failure, as before. The walk that reads its last
+// page clears the bound, so the next one reads to the clock again, and is
+// bounded again only if that times out too. A move is a Warn naming the
+// source and the instant (plugin.go, logFailures). The bound overwrites:
+// every bound is one a timeout chose, and one at or before where the next walk
+// starts -- left by a run that finished behind another -- bounds nothing and
+// is read past (TestAWalkWhosePagesOutgrowAReadCarriesOnInBoundedWindows).
+//
+// A BOUNDED WALK THAT READS ITS LAST PAGE IS THROUGH ITS BOUND, not through the
+// clock, for "Walked, nothing there": nothing after the bound was read. Its
+// watermark moves to the bound too, once the bound is more than the overlap
+// behind the clock, though no row was read there: a backlog whose first
+// stretch holds no row would otherwise leave the walk nothing to resume from,
+// the next walk would read the same span to the clock, time out, and be
+// bounded to the same empty window, for good
+// (TestAnEmptyBoundedWindowStillMovesTheWalkOn). The watermark is otherwise
+// the writers' clock alone ("Never past the clock"); a bound is the leader's,
+// halved back towards the past, and more than the overlap behind the clock no
+// writer's clock is behind it.
+//
 // # Bounded runs that always advance
 //
 // A run reads at most maxPagesPerRun pages of a source past its watermark, so
@@ -171,10 +212,31 @@ import (
 // overlap, do not count against that bound: counting them would let a burst
 // of more than forty pages inside five minutes hold every later run on the
 // same rows, re-reading them and never reaching what came after. Those pages
-// are bounded too, by maxPagesReadPerRun, and a source that exceeds it, a
-// page with no way to continue, or a cursor that comes back unchanged is an
-// error for that source, never a quiet stop or a loop
-// (TestTheFirstRunWalksAtMostFortyPagesPerSource).
+// are bounded too, by maxPagesReadPerRun; a run that reaches it stops and says
+// the source is behind (see the next section). A page with no way to continue,
+// or a cursor that comes back unchanged, is an error for that source, never a
+// quiet stop or a loop (TestTheFirstRunWalksAtMostFortyPagesPerSource).
+//
+// # A burst the overlap cannot hold
+//
+// A burst of more rows inside five minutes than maxPagesReadPerRun pages hold
+// -- 200,000 at 500 a page -- used to stop every run at that bound for good: a
+// run that reaches it while still reading the overlap again has moved the
+// watermark nowhere, so the next run began the burst again from its start and
+// stopped at the same row, and nothing written after it was counted. Now that
+// run records how far it got (email_stat_watermark.reread_from, never past the
+// watermark) and reports the source behind, and the next walk starts there
+// rather than five minutes before the watermark: the burst is read in parts,
+// each run carrying on from the last
+// (TestABurstTheOverlapCannotHoldIsReadInPartsAcrossRuns). The first page that
+// moves the watermark on clears it, so the walk after reads the whole overlap
+// before the new watermark again.
+//
+// THE COST is the overlap's promise for that burst: a row stamped inside the
+// part of the burst an earlier run already read again, and committed only
+// after that run passed it, is missed. That is a row late by more than the
+// run's own time on the burst, which a writer committing within the five
+// minutes the overlap exists for is not.
 //
 // # Test runs are not statistics
 //
@@ -285,8 +347,10 @@ const (
 
 	// maxPagesReadPerRun bounds every page a run reads of one source, the
 	// overlap's included. Far past any rate this product writes at: a source
-	// that reaches it has more rows inside five minutes than ten runs' worth,
-	// and the run says so rather than reading on.
+	// that reaches it has more rows inside five minutes than ten runs' worth.
+	// The run stops behind, and one that stopped still reading the overlap
+	// again leaves the next where it got to: see "A burst the overlap cannot
+	// hold".
 	maxPagesReadPerRun = 10 * maxPagesPerRun
 
 	// lookupBatch is the most ids one attribution lookup names.
@@ -435,12 +499,18 @@ type walked struct {
 // later start an earlier first walk left (see "A first walk that cannot read
 // its first page"). testRuns is the run's answers about test runs, which the
 // walk adds to (attribute).
+//
+// Two instants an earlier walk can leave change where this one reads: where a
+// re-read stopped (see "A burst the overlap cannot hold") and how far a walk
+// whose pages outgrew a read may read (see "A walk whose pages outgrow a
+// read").
 func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, clock func() time.Time, horizon, firstFrom time.Time, testRuns map[string]bool) (walked, error) {
 	var w walked
-	from, found, err := readWatermark(ctx, db, src.name)
+	mark, err := readWalkMark(ctx, db, src.name)
 	if err != nil {
 		return w, err
 	}
+	from, found := mark.through, mark.found
 	// A watermark further ahead of the clock -- as it reads now, at the start
 	// of this source's walk -- than the overlap absorbs is dropped, and the
 	// walk starts over as a first run; one less far ahead is another run's
@@ -451,7 +521,9 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		if err := dropWatermarkAhead(ctx, db, src.name, tolerance); err != nil {
 			return w, err
 		}
-		from, found = time.Time{}, false
+		// The row goes with the watermark, and with it where a re-read
+		// stopped and how far a walk reads: both were about that watermark.
+		mark, from, found = walkMark{}, time.Time{}, false
 	}
 	if err := forgetWalkedAhead(ctx, db, src.name, tolerance); err != nil {
 		return w, err
@@ -463,6 +535,12 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		if s := from.Add(-watermarkOverlap); s.After(since) {
 			since = s
 		}
+		// A re-read that an earlier run stopped part way through carries on
+		// where it got to, never past the watermark: see "A burst the overlap
+		// cannot hold".
+		if r := mark.rereadFrom; r.After(since) && !r.After(from) {
+			since = r
+		}
 	} else {
 		since = firstFrom
 		start, moved, err := readWalkStart(ctx, db, src.name)
@@ -473,29 +551,73 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 			since = start
 		}
 	}
-	query := fmt.Sprintf(src.query, quoteInstant(since), walkPageSize)
+	// How far the walk reads: to the clock, or as of the bound an earlier
+	// walk's timeout left. A bound at or before since, or at or past the
+	// clock, bounds nothing, and the walk reads to the clock. See "A walk
+	// whose pages outgrow a read".
+	var until time.Time
+	if found && mark.readUntil.After(since) && mark.readUntil.Before(clock()) {
+		until = mark.readUntil
+	}
+	query := walkQuery(src, since, until)
 
 	cursor := ""
+	// newest is the newest row the walk has read, over every page; wrote is
+	// the newest watermark it has written. Both say where the next walk
+	// starts if this one stops.
+	var newest, wrote time.Time
 	for counted, read := 0, 0; ; {
 		if read >= maxPagesReadPerRun {
-			return w, fmt.Errorf("read %d pages without passing the rows written in the five minutes before the watermark (%s); the walk stops here rather than reading on", read, from.UTC().Format(time.RFC3339))
+			// The bound on every page a run reads, the overlap's included.
+			// A walk that passed its watermark this run moved it, and the next
+			// run starts from there. One still reading the overlap again
+			// records how far it got, and the next run carries on from there:
+			// see "A burst the overlap cannot hold".
+			if counted == 0 && found {
+				if !newest.After(since) {
+					return w, fmt.Errorf("read %d pages without passing the rows written at %s; the walk stops here rather than reading on", read, since.UTC().Format(time.RFC3339Nano))
+				}
+				if err := recordRereadFrom(ctx, db, src.name, newest); err != nil {
+					return w, err
+				}
+			}
+			w.behind = true
+			return w, nil
 		}
 		// The clock as this page is asked for: if it is the last page, the
 		// walk is through this instant. See "Walked, nothing there" above.
 		askedAt := clock()
 		res, err := engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
-		if err != nil && !found && read == 0 && ctx.Err() == nil && isPageTimeout(err) {
-			// The first page of a first walk took longer than a read may: start
-			// the next run's first walk later. Not when the run's own context
-			// ended -- the node stopping, the lead moving: a timeout that lands
-			// as the run stops is skipped, harmlessly, since the next run reads
-			// the same page again. See "A first walk that cannot read its first
-			// page".
-			next := laterStart(since, askedAt)
-			if serr := recordWalkStart(ctx, db, src.name, next); serr != nil {
-				return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
+		if err != nil && ctx.Err() == nil && isPageTimeout(err) {
+			if !found && read == 0 {
+				// The first page of a first walk took longer than a read may:
+				// start the next run's first walk later. Not when the run's own
+				// context ended -- the node stopping, the lead moving: a
+				// timeout that lands as the run stops is skipped, harmlessly,
+				// since the next run reads the same page again. See "A first
+				// walk that cannot read its first page".
+				next := laterStart(since, askedAt)
+				if serr := recordWalkStart(ctx, db, src.name, next); serr != nil {
+					return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
+				}
+				return w, &firstWalkMoved{Start: next, Err: fmt.Errorf("read a page: %w", err)}
 			}
-			return w, &firstWalkMoved{Start: next, Err: fmt.Errorf("read a page: %w", err)}
+			// Any other page of a walk: bound the next walk to half way. See
+			// "A walk whose pages outgrow a read".
+			start := since
+			if s := wrote.Add(-watermarkOverlap); s.After(start) {
+				start = s
+			}
+			end := askedAt
+			if !until.IsZero() {
+				end = until
+			}
+			if next, ok := narrowerRead(start, end); ok {
+				if serr := recordReadUntil(ctx, db, src.name, next); serr != nil {
+					return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
+				}
+				return w, &walkBounded{Until: next, Err: fmt.Errorf("read a page: %w", err)}
+			}
 		}
 		if err != nil {
 			return w, fmt.Errorf("read a page: %w", err)
@@ -513,15 +635,18 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		w.rows += len(page)
 		refs := newPageRefs()
 		var facts []Fact
-		var newest time.Time
+		var pageNewest time.Time
 		for _, row := range page {
-			if at, ok := instantOf(row["createdAt"]); ok && at.After(newest) {
-				newest = at
+			if at, ok := instantOf(row["createdAt"]); ok && at.After(pageNewest) {
+				pageNewest = at
 			}
 			facts = append(facts, src.facts(row)...)
 			if src.refs != nil {
 				src.refs(row, refs)
 			}
+		}
+		if pageNewest.After(newest) {
+			newest = pageNewest
 		}
 		// Asked after the page is read: see "Test runs are not statistics".
 		if facts, err = attribute(ctx, engine, uniqueFacts(facts), refs, testRuns); err != nil {
@@ -531,25 +656,41 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		// clock as it reads now. The clock only caps it, for a row dated past
 		// it; it never moves it past a row the walk read. See "Never past the
 		// clock".
-		through := newest
-		if now := clock(); through.After(now) {
+		through := pageNewest
+		now := clock()
+		if through.After(now) {
 			through = now
 		}
 		// How far the source is walked: as far, or for the last page the clock
 		// it was asked by, rows or none. See "Walked, nothing there". askedAt is
-		// never past the clock, so the cap above still holds.
+		// never past the clock, so the cap above still holds. A bounded walk
+		// read nothing after its bound, so its last page is through the bound,
+		// and so is its watermark, once the bound is more than the overlap
+		// behind the clock: see "A walk whose pages outgrow a read".
 		walkedThrough := through
-		if next == "" && askedAt.After(walkedThrough) {
-			walkedThrough = askedAt
+		if next == "" {
+			reached := askedAt
+			if !until.IsZero() {
+				reached = until
+				if until.After(through) && !until.After(now.Add(-watermarkOverlap)) {
+					through = until
+				}
+			}
+			if reached.After(walkedThrough) {
+				walkedThrough = reached
+			}
 		}
-		n, err := recordPage(ctx, db, src.name, facts, through, walkedThrough)
+		n, err := recordPage(ctx, db, src.name, facts, through, walkedThrough, next == "")
 		if err != nil {
 			return w, err
 		}
 		w.facts += n
+		if through.After(wrote) {
+			wrote = through
+		}
 		// A page that only re-reads rows at or before the watermark the run
 		// started from does not count: see "Bounded runs" above.
-		if !found || newest.After(from) {
+		if !found || pageNewest.After(from) {
 			counted++
 		}
 
@@ -565,6 +706,20 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		}
 		cursor = next
 	}
+}
+
+// walkQuery is a walk's statement: src's query from since, and, when until is
+// set, read as of until, so the engine collapses only the versions written
+// between the two (see "A walk whose pages outgrow a read"). asOf wraps the
+// whole paginated query, as component/memql's own time-travel reads write it
+// (work_outcome_format_receipt.go); the construct's name stays in the literal,
+// for test/dslconformance.
+func walkQuery(src source, since, until time.Time) string {
+	query := fmt.Sprintf(src.query, quoteInstant(since), walkPageSize)
+	if until.IsZero() {
+		return query
+	}
+	return fmt.Sprintf("asOf(%s, %s)", query, quoteInstant(until))
 }
 
 // quoteInstant is an instant as a query argument.
@@ -780,7 +935,14 @@ type factRow struct {
 // faster one got. Only dropWatermarkAhead and forgetWalkedAhead lower one. Its
 // statements run under the request pool's own statement timeout: see "The
 // request pool's statement timeout stands".
-func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through, walked time.Time) (int, error) {
+//
+// The two recovery instants go with it. A page that moves the watermark on
+// clears where a stopped re-read got to: the next walk's overlap is the five
+// minutes before the new watermark, read whole (see "A burst the overlap
+// cannot hold"). The last page of a walk, last, clears how far a walk reads:
+// the next walk reads to the clock again (see "A walk whose pages outgrow a
+// read").
+func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through, walked time.Time, last bool) (int, error) {
 	var inserted int64
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if len(facts) > 0 {
@@ -804,14 +966,72 @@ func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, th
 		if _, err := tx.NewRaw(`INSERT INTO email_stat_watermark (source, through, walked_through) VALUES (?, ?, ?)
 			ON CONFLICT (source) DO UPDATE SET
 				through = GREATEST(email_stat_watermark.through, EXCLUDED.through),
-				walked_through = GREATEST(email_stat_watermark.walked_through, EXCLUDED.walked_through)`,
-			source, instantOrNull(through), instantOrNull(walked)).Exec(ctx); err != nil {
+				walked_through = GREATEST(email_stat_watermark.walked_through, EXCLUDED.walked_through),
+				reread_from = CASE WHEN EXCLUDED.through > email_stat_watermark.through THEN NULL
+					ELSE email_stat_watermark.reread_from END,
+				read_until = CASE WHEN ? THEN NULL ELSE email_stat_watermark.read_until END`,
+			source, instantOrNull(through), instantOrNull(walked), last).Exec(ctx); err != nil {
 			return fmt.Errorf("move the watermark: %w", err)
 		}
 		return nil
 	})
 	return int(inserted), err
 }
+
+// recordRereadFrom records how far a walk got that stopped at
+// maxPagesReadPerRun while still reading the overlap again, so the next walk
+// carries on from there: see "A burst the overlap cannot hold". Never moved
+// back (GREATEST): of two runs that stopped in the same burst, the next walk
+// carries on from the further.
+func recordRereadFrom(ctx context.Context, db *bun.DB, source string, at time.Time) error {
+	if _, err := db.NewRaw(`UPDATE email_stat_watermark SET reread_from = GREATEST(reread_from, ?) WHERE source = ?`,
+		at.UTC(), source).Exec(ctx); err != nil {
+		return fmt.Errorf("record where the re-read stopped: %w", err)
+	}
+	return nil
+}
+
+// readUntilFloor is the shortest span a timeout bounds a walk to. Below it a
+// page that still times out is the run's failure, as before: a minute of
+// versions that outlasts the statement timeout is far past any rate this
+// product writes at.
+const readUntilFloor = time.Minute
+
+// narrowerRead is how far the next walk reads after a page of one starting at
+// start, and reading as far as end, timed out: half way from start to end,
+// and false when that span would be shorter than readUntilFloor.
+func narrowerRead(start, end time.Time) (time.Time, bool) {
+	half := end.Sub(start) / 2
+	if half < readUntilFloor {
+		return time.Time{}, false
+	}
+	return start.Add(half), true
+}
+
+// recordReadUntil records how far a source's next walk reads, as of that
+// instant: see "A walk whose pages outgrow a read". It overwrites: every
+// bound is one a timeout chose, and a stale one -- at or before where the
+// next walk starts, left by a run that finished behind another -- bounds
+// nothing and is read past.
+func recordReadUntil(ctx context.Context, db *bun.DB, source string, until time.Time) error {
+	if _, err := db.NewRaw(`UPDATE email_stat_watermark SET read_until = ? WHERE source = ?`, until.UTC(), source).Exec(ctx); err != nil {
+		return fmt.Errorf("record how far the next walk reads: %w", err)
+	}
+	return nil
+}
+
+// walkBounded is a page of a walk that timed out, and how far the next walk
+// reads as a result: see "A walk whose pages outgrow a read".
+type walkBounded struct {
+	Until time.Time
+	Err   error
+}
+
+func (b *walkBounded) Error() string {
+	return fmt.Sprintf("%v; the next walk reads as far as %s", b.Err, b.Until.UTC().Format(time.RFC3339))
+}
+
+func (b *walkBounded) Unwrap() error { return b.Err }
 
 // instantOrNull is an instant as a statement argument, and NULL for none.
 func instantOrNull(t time.Time) any {
@@ -821,19 +1041,43 @@ func instantOrNull(t time.Time) any {
 	return t.UTC()
 }
 
-// readWatermark answers a source's watermark, and false when it has none: a
-// source never walked, or walked with no row yet to resume from (a NULL
-// through; see "Walked, nothing there").
-func readWatermark(ctx context.Context, db *bun.DB, source string) (time.Time, bool, error) {
-	var through sql.NullTime
-	err := db.NewRaw(`SELECT through FROM email_stat_watermark WHERE source = ?`, source).Scan(ctx, &through)
+// walkMark is what a source's row of email_stat_watermark says about where
+// its next walk reads: the watermark, and the two instants a walk that could
+// not finish what it had to read leaves for the next.
+type walkMark struct {
+	// through is the watermark; found is false when there is none: a source
+	// never walked, or walked with no row yet to resume from (a NULL through;
+	// see "Walked, nothing there").
+	through time.Time
+	found   bool
+	// rereadFrom is how far a walk got that stopped at maxPagesReadPerRun
+	// while still reading the overlap again; zero when none did. See "A burst
+	// the overlap cannot hold".
+	rereadFrom time.Time
+	// readUntil is how far the next walk reads, as of that instant; zero
+	// when it reads to the clock. See "A walk whose pages outgrow a read".
+	readUntil time.Time
+}
+
+// readWalkMark answers a source's walkMark; a source with no row answers the
+// zero walkMark.
+func readWalkMark(ctx context.Context, db *bun.DB, source string) (walkMark, error) {
+	var row struct {
+		Through    sql.NullTime `bun:"through"`
+		RereadFrom sql.NullTime `bun:"reread_from"`
+		ReadUntil  sql.NullTime `bun:"read_until"`
+	}
+	err := db.NewRaw(`SELECT through, reread_from, read_until FROM email_stat_watermark WHERE source = ?`, source).Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, false, nil
+		return walkMark{}, nil
 	}
 	if err != nil {
-		return time.Time{}, false, fmt.Errorf("read the watermark: %w", err)
+		return walkMark{}, fmt.Errorf("read the watermark: %w", err)
 	}
-	return through.Time, through.Valid, nil
+	return walkMark{
+		through: row.Through.Time, found: row.Through.Valid,
+		rereadFrom: row.RereadFrom.Time, readUntil: row.ReadUntil.Time,
+	}, nil
 }
 
 // firstWalkMoved is a first walk whose first page ended at the statement

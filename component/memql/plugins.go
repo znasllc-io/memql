@@ -106,7 +106,7 @@ type PluginContext struct {
 	// maintenance statements that legitimately run for minutes -- the
 	// closed-chunk compaction's reorder_chunk and the heap scan that measures a
 	// chunk (component/retention/compact.go), and the website statistics
-	// rollup's recompute of a UTC day (component/sitetraffic/rollup.go). It has no server
+	// rollup's fold of a UTC day (component/sitetraffic/rollup.go). It has no server
 	// statement_timeout and no client read deadline beyond the caller's
 	// context, and it opens on the direct endpoint when one is configured
 	// (component/database/maintenance_session.go). The caller owns it and calls

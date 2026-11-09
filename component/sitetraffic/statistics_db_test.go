@@ -71,6 +71,9 @@ func clearStatisticsBand(t *testing.T, db *bun.DB) {
 		{"DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?", []any{statsBandStart, statsBandEnd}},
 		{"DELETE FROM edge_stats_daily WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 		{"DELETE FROM edge_stats_daily_top WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_window_top WHERE window_end >= ? AND window_end <= ?", []any{statsBandStart, statsBandEnd}},
+		{"DELETE FROM edge_stats_monthly_top WHERE month >= ?::date AND month < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_month_day WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 	} {
 		if _, err := db.ExecContext(ctx, q.sql, q.args...); err != nil {
 			t.Fatalf("clear the statistics tests' band (%s): %v", q.sql, err)
@@ -88,10 +91,33 @@ func inStatsBand(t *testing.T, when time.Time) {
 }
 
 // figures is one hourly or daily row as the rollup would have written it.
+// firstHours and lastHours are a daily row's visitors by the hour of their
+// first and of their last page view, written only when set.
 type figures struct {
 	visitors, visits, bounces, pageViews    *int64
 	requests, errors, notFound, bytes, bots int64
 	hist                                    []int64
+	firstHours, lastHours                   []int64
+}
+
+// seenIn is f with its visitors seen, by first and last hour, as given: one
+// {first, last} pair per visitor.
+func (f figures) seenIn(visitors ...[2]int) figures {
+	f.firstHours, f.lastHours = make([]int64, 24), make([]int64, 24)
+	for _, v := range visitors {
+		f.firstHours[v[0]]++
+		f.lastHours[v[1]]++
+	}
+	return f
+}
+
+// hoursOrNull is a daily row's hour counts as a statement argument, NULL when
+// unset.
+func hoursOrNull(h []int64) any {
+	if h == nil {
+		return nil
+	}
+	return pgdialect.Array(h)
 }
 
 // measured is a row the edge classified, so its visit figures are numbers.
@@ -125,10 +151,12 @@ func seedDailyStats(t *testing.T, db *bun.DB, site string, day time.Time, f figu
 	t.Helper()
 	inStatsBand(t, day)
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO edge_stats_daily
-		(site_id, day, visitors, visits, bounces, page_views, requests, errors, not_found, bytes, bot_requests, duration_hist)
-		VALUES (?, ?::date, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(site_id, day, visitors, visits, bounces, page_views, requests, errors, not_found, bytes, bot_requests, duration_hist,
+		 first_hour_visitors, last_hour_visitors)
+		VALUES (?, ?::date, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		site, dateArg(day), f.visitors, f.visits, f.bounces, f.pageViews,
-		f.requests, f.errors, f.notFound, f.bytes, f.bots, pgdialect.Array(f.hist)); err != nil {
+		f.requests, f.errors, f.notFound, f.bytes, f.bots, pgdialect.Array(f.hist),
+		hoursOrNull(f.firstHours), hoursOrNull(f.lastHours)); err != nil {
 		t.Fatalf("seed the daily row of %s on %s: %v", site, dateArg(day), err)
 	}
 }
@@ -152,6 +180,18 @@ func seedTopStats(t *testing.T, db *bun.DB, site string, day time.Time, dimensio
 		(site_id, day, dimension, value, visitors, visits, page_views) VALUES (?, ?::date, ?, ?, ?, ?, ?)`,
 		site, dateArg(day), dimension, value, visitors, visits, pageViews); err != nil {
 		t.Fatalf("seed the %s %q top row of %s on %s: %v", dimension, value, site, dateArg(day), err)
+	}
+}
+
+// seedWindowTop writes one row of the 24-hour window's top lists that ends at
+// end, as the rollup writes them.
+func seedWindowTop(t *testing.T, db *bun.DB, site string, end time.Time, dimension, value string, visitors, visits, pageViews int64) {
+	t.Helper()
+	inStatsBand(t, end)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO edge_stats_window_top
+		(site_id, window_end, dimension, value, visitors, visits, page_views) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		site, end.UTC(), dimension, value, visitors, visits, pageViews); err != nil {
+		t.Fatalf("seed the %s %q window row of %s: %v", dimension, value, site, err)
 	}
 }
 
@@ -517,29 +557,27 @@ func TestStatisticsForOneSiteOverSevenDays(t *testing.T) {
 	}
 }
 
-// 24 HOURS COUNTS VISITORS FROM THE REQUESTS. A visitor seen in two hours is
-// one visitor in the period, which adding up the hourly rows cannot say; the
-// visits, bounces and page views add up from the hours, and the top lists are
-// counted from the requests, with visits from the rollup's own segmentation.
-func TestStatisticsForTwentyFourHoursCountDistinctVisitorsFromRequests(t *testing.T) {
+// 24 HOURS COUNTS VISITORS DISTINCT OVER THE WINDOW. A visitor seen in two
+// hours is one visitor in the period, which adding up the hourly rows cannot
+// say: the window is the end of one day and the start of the next, and its
+// visitors are the first day's last seen in its part and the second day's
+// first seen in its part, off the days' rows. The visits, bounces and page
+// views add up from the hours, and the top lists are the rollup's for the
+// window (the rollup's side: rollup_incremental_db_test.go).
+func TestStatisticsForTwentyFourHoursCountDistinctVisitors(t *testing.T) {
 	eng, db := statisticsTest(t)
 	sfx := suffix(t)
 	owner := "user-stats-" + sfx
 	site := seedDeployable(t, eng, owner, sfx)
 	now := time.Date(2037, 7, 20, 10, 17, 0, 0, time.UTC) // the period is [07-19 11:00, 07-20 11:00)
 	d18, d19, d20 := utcDay(2037, 7, 18), utcDay(2037, 7, 19), utcDay(2037, 7, 20)
-	sourced := func(r Row, source string) Row { r.Source = source; return r }
 
-	seedBandRequests(t, db, site,
-		pageViewRow(dayAt(d19, 10, 50), "v-d", "/d1"), // d's visit starts in the previous 24 hours...
-		pageViewRow(dayAt(d19, 11, 10), "v-d", "/d2"), // ...and continues into this one: a visitor and a page view here, not a visit
-		sourced(pageViewRow(dayAt(d19, 12, 0), "v-a", "/a"), "direct"),
-		requestRow(dayAt(d19, 12, 1), 200, 512, 1_000_000), // an asset: a request, not a page view
-		pageViewRow(dayAt(d19, 13, 30), "v-a", "/b"),       // ninety minutes on: a's second visit
-		sourced(pageViewRow(dayAt(d20, 9, 0), "v-b", "/a"), "news.example"),
-		pageViewRow(dayAt(d18, 15, 0), "v-c", "/p"),     // the previous 24 hours
-		pageViewRow(dayAt(d20, 11, 30), "v-x", "/late"), // past End
-	)
+	// The requests these rows stand for, as the rollup reads them:
+	//   07-18 15:00 c /p                    (the previous 24 hours)
+	//   07-19 10:50 d /d1, 11:10 d /d2      (d's visit starts before the period and continues into it)
+	//   07-19 12:00 a /a direct, 12:01 an asset, 13:30 a /b (ninety minutes on: a's second visit)
+	//   07-20 09:00 b /a news.example
+	//   07-20 11:30 x /late                 (past End)
 	// The hours as the rollup writes them: each visit counted in the hour it
 	// started, each hour's visitors distinct within the hour.
 	for _, h := range []struct {
@@ -556,22 +594,41 @@ func TestStatisticsForTwentyFourHoursCountDistinctVisitorsFromRequests(t *testin
 	} {
 		seedHourlyStats(t, db, site, h.at, h.f)
 	}
-	seedDailyStats(t, db, site, d18, measured(1, 1, 1, 1, 1))
-	seedDailyStats(t, db, site, d19, measured(2, 3, 2, 4, 5))
-	seedDailyStats(t, db, site, d20, measured(2, 2, 2, 2, 2))
+	// The days, with each visitor's first and last hour: c 15-15; d 10-11
+	// and a 12-13; b 09-09 and x 11-11.
+	seedDailyStats(t, db, site, d18, measured(1, 1, 1, 1, 1).seenIn([2]int{15, 15}))
+	seedDailyStats(t, db, site, d19, measured(2, 3, 2, 4, 5).seenIn([2]int{10, 11}, [2]int{12, 13}))
+	seedDailyStats(t, db, site, d20, measured(2, 2, 2, 2, 2).seenIn([2]int{9, 9}, [2]int{11, 11}))
+	// The window's top lists, as the rollup writes them: d's visit began
+	// before the period, so /d2 is viewed here and entered nowhere; a entered
+	// on /a and then on /b, b on /a.
+	end := dayAt(d20, 11, 0)
+	for _, r := range []struct {
+		dimension, value         string
+		visitors, visits, viewed int64
+	}{
+		{"page", "/a", 2, 2, 2}, {"page", "/b", 1, 1, 1}, {"page", "/d2", 1, 0, 1},
+		{"source", "direct", 1, 1, 1}, {"source", "news.example", 1, 1, 1},
+		{"country", "NL", 3, 3, 4}, {"device", "desktop", 3, 3, 4}, {"browser", "Firefox", 3, 3, 4}, {"os", "Linux", 3, 3, 4},
+	} {
+		seedWindowTop(t, db, site, end, r.dimension, r.value, r.visitors, r.visits, r.viewed)
+	}
+	// An older window's rows, which a read of this one never sums.
+	seedWindowTop(t, db, site, end.Add(-time.Hour), "page", "/stale", 9, 9, 9)
 
 	got := readStatistics(t, userCtx(owner), eng, db, StatisticsQuery{SiteIds: []string{site}, Period: statsperiod.Last24Hours, Now: now})
 
 	if got.Bucket != statsperiod.BucketHour || !got.Start.Equal(dayAt(d19, 11, 0)) || !got.End.Equal(dayAt(d20, 11, 0)) {
 		t.Errorf("bucket %q [%s, %s), want hour [07-19 11:00, 07-20 11:00)", got.Bucket, got.Start, got.End)
 	}
-	// Three visitors -- d, a and b -- where the four hours they were seen in
-	// add up to four.
+	// Three visitors -- d and a last seen on 07-19 from 11:00, b first seen
+	// on 07-20 before it -- where the four hours they were seen in add up to
+	// four.
 	if line, want := totalsLine(got.Totals), "visitors=3 visits=3 bounces=3 pageViews=4 requests=5 errors=0 notFound=0 bytes=500 botRequests=0"; line != want {
 		t.Errorf("totals:\n  got  %s\n  want %s", line, want)
 	}
-	// The previous 24 hours hold c, and d's first page: two visitors, counted
-	// from the requests as well.
+	// The previous 24 hours hold c, last seen on 07-18 at 15:00, and d, first
+	// seen on 07-19 at 10:00: two visitors.
 	if line, want := totalsLine(got.Previous), "visitors=2 visits=2 bounces=1 pageViews=2 requests=2 errors=0 notFound=0 bytes=200 botRequests=0"; line != want {
 		t.Errorf("previous:\n  got  %s\n  want %s", line, want)
 	}
@@ -593,8 +650,6 @@ func TestStatisticsForTwentyFourHoursCountDistinctVisitorsFromRequests(t *testin
 	prev[23] = "2037-07-19T10:00:00Z visitors=1 visits=1 bounces=0 pageViews=1 requests=1 errors=0 notFound=0"
 	wantSeries(t, "previousSeries", got.PreviousSeries, prev)
 
-	// d's visit began before the period, so /d2 is viewed here and entered
-	// nowhere; a entered on /a and then on /b, b on /a.
 	for dim, want := range map[string]string{
 		"page":    "/a 2/2/2; /b 1/1/1; /d2 1/0/1",
 		"source":  "direct 1/1/1; news.example 1/1/1",
@@ -609,6 +664,28 @@ func TestStatisticsForTwentyFourHoursCountDistinctVisitorsFromRequests(t *testin
 	}
 	if line, want := sitesLine(got.Sites), site+" 3/3/4"; line != want {
 		t.Errorf("sites = %s, want %s: a deployable's own visitors are distinct too", line, want)
+	}
+}
+
+// A 24-HOUR LIST IS THE WINDOW'S, OR THE ONE JUST BEFORE IT. In the first
+// seconds of an hour the rollup has not yet published the window that ends at
+// the next one, and the read takes the window an hour earlier; a list older
+// than that -- the rollup has not run for hours -- is not the last 24 hours,
+// and the read answers no list rather than present it as them.
+func TestATwentyFourHourListOlderThanAnHourIsNotRead(t *testing.T) {
+	eng, db := statisticsTest(t)
+	sfx := suffix(t)
+	owner := "user-stats-" + sfx
+	site := seedDeployable(t, eng, owner, sfx)
+	now := time.Date(2038, 2, 3, 10, 0, 5, 0, time.UTC) // the window ends at 11:00
+	seedWindowTop(t, db, site, dayAt(utcDay(2038, 2, 3), 10, 0), "page", "/an-hour-old", 1, 1, 1)
+	got := readStatistics(t, userCtx(owner), eng, db, StatisticsQuery{SiteIds: []string{site}, Period: statsperiod.Last24Hours, Now: now})
+	if line := topLine(got.Top["page"]); line != "/an-hour-old 1/1/1" {
+		t.Errorf("in the first seconds of the hour the pages read %q, want the window an hour earlier's", line)
+	}
+	got = readStatistics(t, userCtx(owner), eng, db, StatisticsQuery{SiteIds: []string{site}, Period: statsperiod.Last24Hours, Now: now.Add(2 * time.Hour)})
+	if line := topLine(got.Top["page"]); line != "" {
+		t.Errorf("three hours on, the pages read %q, want none: that list is not the last 24 hours", line)
 	}
 }
 
@@ -872,8 +949,8 @@ func TestTopListsKeepFiftyValuesAndFoldTheRest(t *testing.T) {
 }
 
 // 24 hours never adds hourly visitors up, for the period or for a deployable:
-// with none of its requests in the log there is nobody to count distinct, and
-// the figure is null rather than the hours' overcount.
+// with no first and last hours on its days there is nobody to count distinct,
+// and the figure is null rather than the hours' overcount.
 func TestTwentyFourHoursNeverAddsUpHourlyVisitors(t *testing.T) {
 	eng, db := statisticsTest(t)
 	sfx := suffix(t)
@@ -887,7 +964,7 @@ func TestTwentyFourHoursNeverAddsUpHourlyVisitors(t *testing.T) {
 	got := readStatistics(t, userCtx(owner), eng, db, StatisticsQuery{SiteIds: []string{site}, Period: statsperiod.Last24Hours, Now: dayAt(day, 10, 0)})
 
 	if got.Totals.Visitors != nil {
-		t.Errorf("totals visitors = %s, want null: the log holds none of these requests", num(got.Totals.Visitors))
+		t.Errorf("totals visitors = %s, want null: the day carries no visitors by hour", num(got.Totals.Visitors))
 	}
 	if line, want := sitesLine(got.Sites), site+" null/2/2"; line != want {
 		t.Errorf("sites = %s, want %s -- its visits and page views from the hours, and no visitors", line, want)
@@ -1253,8 +1330,8 @@ func TestTheStatisticsBuiltinAnswersOneNode(t *testing.T) {
 // bought nothing, since the client still gives up at 10 s, and left a slow scan
 // running unheard for up to 20 s more, holding its snapshot, on every refresh of
 // every Statistics page. Asked under the shipped limit and under an operator's
-// lower one, with and without the request log held: the read follows the pool's
-// limit, whatever it is, and is never unbounded.
+// lower one: the read follows the pool's limit, whatever it is, and is never
+// unbounded.
 func TestTheStatisticsReadStaysInsideThePoolsStatementLimit(t *testing.T) {
 	ctx := context.Background()
 	for _, poolMs := range []int64{8000, 3000} {
@@ -1266,17 +1343,15 @@ func TestTheStatisticsReadStaysInsideThePoolsStatementLimit(t *testing.T) {
 		if pool != poolMs {
 			t.Fatalf("the pool's sessions run under a statement_timeout of %d ms, want %d: the test would prove nothing", pool, poolMs)
 		}
-		for _, holdRequestLog := range []bool{false, true} {
-			var inside int64
-			if err := statisticsTx(ctx, db, holdRequestLog, func(ctx context.Context, tx bun.Tx) error {
-				return tx.NewRaw(statementTimeoutSetting).Scan(ctx, &inside)
-			}); err != nil {
-				t.Fatalf("the read's transaction (holding the request log: %v): %v", holdRequestLog, err)
-			}
-			if inside <= 0 || inside > pool {
-				t.Errorf("under a pool limit of %d ms the read (holding the request log: %v) runs its statements under %d ms, want the pool's limit or less, and some limit",
-					pool, holdRequestLog, inside)
-			}
+		var inside int64
+		if err := statisticsTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
+			return tx.NewRaw(statementTimeoutSetting).Scan(ctx, &inside)
+		}); err != nil {
+			t.Fatalf("the read's transaction: %v", err)
+		}
+		if inside <= 0 || inside > pool {
+			t.Errorf("under a pool limit of %d ms the read runs its statements under %d ms, want the pool's limit or less, and some limit",
+				pool, inside)
 		}
 	}
 }

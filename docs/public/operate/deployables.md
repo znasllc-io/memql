@@ -912,8 +912,11 @@ address (an IPv4 address whole, an IPv6 address by its /64) and their user
 agent, under a random secret for one UTC day, truncated to 16 bytes and stored
 as hex. The secret is a row of `edge_visitor_secret` that every edge replica
 shares, so they hash one visitor alike. At each UTC midnight a replica makes the
-new day's secret current and deletes every earlier day's, retrying the delete
-hourly until it succeeds. Once a day's secret is gone, nothing stored can link
+new day's secret current and deletes every earlier day's, and checks both
+hourly. A rotation or delete that fails, a database blip say, is tried again
+after 30 seconds, then after twice as long each time, back up to the hour, so
+a replica that missed the day's secret goes without visitors for under a
+minute rather than until the next hourly check. Once a day's secret is gone, nothing stored can link
 that day's ids back to an address, and because the deployable's id is hashed
 in, one person on two deployables is two unrelated ids. A replica that holds no
 secret for the day records page views with no visitor, so visitors read low
@@ -963,7 +966,7 @@ device, browser and operating system.
 seen either side of midnight is two visitors and their visit two visits. Over a
 period longer than a day, visitors are each day's added up, so a person who
 comes on three days is three visitors in a week; within `24h` they are counted
-distinct from the request log, so one person seen in two hours is one. People
+distinct over the window, so one person seen in two hours is one. People
 behind one address with the same browser are one visitor, and one person on two
 networks is two. The address is the front door's: the right-most
 `X-Forwarded-For` entry, else the connection's peer (`visit.ClientAddress`, the
@@ -979,7 +982,11 @@ the proxy's country.
 | Per-minute and per-hour request counts | `edge_request_1m`, `edge_request_1h` | the same as the requests |
 | Hourly statistics | `edge_stats_hourly` | 30 days |
 | Daily statistics and each day's top lists | `edge_stats_daily`, `edge_stats_daily_top` | 400 days |
+| Each month's top lists, folded from its final days, and the days they cover | `edge_stats_monthly_top`, `edge_stats_month_day` | 400 days |
+| The last 24 hours' top lists | `edge_stats_window_top` | the current window only |
 | Which days are final (below) | `edge_stats_final` | 400 days, as long as the day's figures |
+| An open day's rollup state: its progress, its hours, one row per visitor (the day's visitor id, the hours seen, the visit under way and hashes of what was viewed) | `edge_stats_progress`, `edge_stats_settled_hour`, `edge_stats_visitor` | until the day is final |
+| An open day's figures per value and hour | `edge_stats_value_hour` | until the day after the day is final |
 | The visitor secret | `edge_visitor_secret` | its own UTC day |
 
 An edge replica applies the request log's retention to the TimescaleDB policies
@@ -989,9 +996,9 @@ database without TimescaleDB as well.
 
 **Set `MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS` to the same value on every node,
 not only on the edge.** The rollup reads it on whichever node holds the cron
-lead, as how far back it recomputes a day that is not yet final, while the edge
+lead, as how far back it reads a day that is not yet final, while the edge
 applies it to the log. If the rollup's value is the wider, a day the log has
-already dropped that is still open is recomputed from no rows, which erases its
+already dropped that is still open is folded from no rows, which erases its
 figures; if it is the narrower, the older days of an outage stay open beyond
 the rollup's reach.
 
@@ -999,14 +1006,52 @@ the rollup's reach.
 
 `siteStatisticsRollupSweep` runs `builtin siteStatisticsRollup` every five
 minutes on the cluster's cron leader, so while runs succeed a figure is at most
-five minutes behind. A run recomputes today and every earlier day that is not
-yet **final**. A day becomes final when a run recomputes it at or after 02:00
-UTC the next day, and is not recomputed after that, so a request recorded for it
-later is not counted. **An outage heals on the next run that succeeds**: the
-days it left open are recomputed with every request that arrived meanwhile, as
-far back as the request log's retention reaches. A day whose requests left the
-log first keeps the figures last written for it.
+five minutes behind. Each request is read into the figures twice at most:
 
+- **Once two hours old, it is folded** into its UTC day's state for good, and
+  no later run reads it again. The state is the day's figures per hour and per
+  page, source, country, device, browser and system, and a row per visitor of
+  the day (the tables in the retention table above).
+- **Until then, every run reads it again**, with the rest of the last two
+  hours, and publishes the day's state with those two hours added. Nothing of
+  them is kept.
+
+So a request written up to two hours after it was served still counts, and
+one written later than that does not. The edge writes a request within seconds
+or drops it, so the two hours are a margin for a replica whose clock lags the
+cron leader's, not a delay: what a run publishes includes every request
+written before it. A day becomes **final** once its fold reaches its end, at
+02:00 UTC the next day, and is not read after that; today never is. **An outage
+heals on the next run that succeeds**: the days it left open are folded with
+every request that arrived meanwhile, as far back as the request log's
+retention reaches, a few hundred thousand requests to a statement. A day whose
+requests left the log first keeps the figures last written for it.
+
+**What a run costs** is the last two hours of requests, whatever the day
+holds. Measured at ten million requests a day over fifty deployables, on a
+database sized like the mid preset (2 CPUs, 8 GiB, `shared_buffers` 2 GB,
+`work_mem` 8 MB): a run took 8 s during the day and 10 to 20 s between 00:00
+and 02:00, when yesterday's last two hours are read too, and under a second
+once yesterday is final, with no statement over 2.5 s against the rollup's
+60 s bound. The run that first folded a day of nine million requests took two
+minutes, four with fourteen months of top lists to fold beside it, inside one
+run's fifteen. Before this rollup was incremental,
+each run recomputed the whole of today, and of yesterday until 02:00: at the
+same size each of a day's three statements took 47 to 52 s against that bound,
+two and a half minutes of database time every five minutes, twice that before
+02:00. `TestRollupAtScaleEvidence` (`component/sitetraffic`) repeats the
+measurement on a disposable database.
+
+**What stays a limit.** A run's cost grows with the traffic of two hours. By a
+straight-line estimate from the measurement, not a measurement itself, the
+slowest statement would reach the 60 s bound at about twenty times that
+traffic, some 200 million requests a day. A day's first fold, and the fold
+after a long outage, is spread over runs once it no longer fits in one run's
+fifteen minutes, and the day's figures are published when it is caught up.
+One statement folds at most 400,000 requests, so only a single microsecond
+holding more than that would be folded in one larger statement.
+
+### The page-change ping
 ### The page-change ping
 
 A single-page app changes pages with `history.pushState`, which the edge never
@@ -1026,7 +1071,14 @@ view only when:
   sent to, or, when `Origin` is absent or the `null` a page with a
   `no-referrer` policy sends, `Sec-Fetch-Site` says `same-origin`;
 - its address has budget left: 120 pings a minute per address per deployable on
-  each replica, a budget held in memory only;
+  each replica, a budget held in memory only. A replica holds the budgets of at
+  most 10,000 addresses at once, and forgets an address's once it has refilled,
+  a minute after its last ping. Past that bound, a flood of more addresses than
+  it holds in one minute, a new address is refused until budgets refill, and
+  every address already held keeps the budget it has: no flood resets anybody's
+  budget. A person whose address first arrives during such a flood has their
+  page changes uncounted on that replica until it passes. The access codes'
+  and the shopper forms' limits work the same way;
 - its body, at most 1 KiB, decodes to a path.
 
 Every ping to a live deployable is answered `204` with no body, counted or not,
@@ -1074,8 +1126,31 @@ organizations with `accountIds`.
   33 s lands in the last bucket.
 - **Top lists** over days are summed from each day's hundred leading values per
   list, the rest of each day folded into its `(other)`, so a value that seldom
-  makes a day's hundred reads low over a long period; for `24h` they are
-  counted from the request log.
+  makes a day's hundred reads low over a long period. A month the period covers
+  whole is read from that month's own hundred leading values, folded from its
+  final days, which is what keeps twelve months cheap; a value can drop out at
+  a month's fold as at a day's. For `24h` they are the rollup's list for the
+  window, per deployable, a hundred values each.
+- **`24h` reads the rollup, never the request log.** Its window is the end of
+  one UTC day and the start of the next, and its visitors are the first day's
+  visitors last seen in the window plus the second day's first seen in it, from
+  each day's visitors by the hour of their first and last page view. So it is
+  what the last run published, five minutes old at most, and a deployable's
+  first requests count from the run after them.
+- **What a read costs.** Measured under the request pool's 8 s statement limit,
+  on the database the rollup was measured on: a staff read of 200 deployables
+  with 400 days of rows and about 600 top rows per deployable and day took
+  0.5 to 0.8 s for `7d`, 1.4 to 1.6 s for `30d`, 1.7 to 1.9 s for `90d` and
+  1.1 s for `12m`, and a `24h` read of the 50 deployables serving ten million
+  requests a day 13 to 25 ms.
+  Before the monthly lists, `12m` took 7.6 s of the 8 s; before `24h` read the
+  rollup, it could not be answered at that size at all. Reads are not cached:
+  the engine answers a top-level builtin before its result cache, and the
+  Statistics page reads again every five minutes for `24h` and fifteen
+  otherwise. `TestStaffReadsAtScaleEvidence` repeats the measurement. What
+  stays a limit: a period's days outside whole months are read from their
+  daily rows, so `30d` and `90d` grow with the deployables a read covers, about
+  a second per hundred deployables at these sizes.
 
 **Narrowed under the caller.** An id or an organization the caller cannot read
 is dropped, not refused, so naming another client's deployable or organization
@@ -1121,7 +1196,8 @@ the only outbound call the statistics make. A failed download keeps the stored
 database in use and the run still succeeds, so a cluster with no route to
 `download.db-ip.com` does not fail every day. Every edge replica loads the
 database when it starts and checks the stored release hourly, swapping a newer
-one in without a restart.
+one in without a restart. A load that fails is tried again after 30 seconds,
+then after twice as long each time, back up to the hour.
 
 **Before the first download there are no countries.** A new cluster downloads at
 its first 04:10 UTC, and each edge replica loads the file within the hour; until

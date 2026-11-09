@@ -290,6 +290,17 @@ func (i *Integration) logFailures(err error) {
 					"error", moved.Err)
 				continue
 			}
+			// A later page timed out, and the next walk reads only as far
+			// as half way (rollup.go, "A walk whose pages outgrow a read"):
+			// the Warn names the source and that instant.
+			var bounded *walkBounded
+			if errors.As(src.Err, &bounded) {
+				i.logger.Warn(fmt.Sprintf("email statistics for %s are read as far as %s next: a page of a longer walk timed out",
+					src.Source, bounded.Until.UTC().Format(time.RFC3339)),
+					"component", "emailstats", "source", src.Source, "readUntil", bounded.Until.UTC().Format(time.RFC3339),
+					"error", bounded.Err)
+				continue
+			}
 			i.logger.Warn("Email statistics for a source were not folded; the next run carries on from its watermark",
 				"component", "emailstats", "source", src.Source, "error", src.Err)
 			continue

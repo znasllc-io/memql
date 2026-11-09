@@ -122,9 +122,11 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   connection only long enough to be refused the lock
   ([closed-chunk compaction](database-platform.md#closed-chunk-compaction)).
   The website statistics rollup holds one for each five-minute run, a second or
-  so on a quiet cluster and never more than fifteen minutes, because a day's
-  recompute can outlast the request pool's statement timeout and pgdriver's
-  10 s read deadline ([the rollup](deployables.md#the-rollup)); it runs on the
+  so on a quiet cluster, seconds on a busy one (measured: 8 s at ten million
+  requests a day) and never more than fifteen minutes, because a day's first
+  fold, or the fold after an outage, can outlast the request pool's statement
+  timeout and pgdriver's 10 s read deadline
+  ([the rollup](deployables.md#the-rollup)); it runs on the
   cron leader, so a second rollup session is open only while a change of leader
   overlaps two runs. Count them per **installation**, not per process, under
   separate jobs and monitors: two at once, since the nightly pass overlaps

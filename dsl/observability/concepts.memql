@@ -116,9 +116,8 @@ concept logLine {
 /// REQUESTS AND OUTCOMES, NOT VISITORS. The request log also records page views and the fields a
 /// deployable's website statistics are counted by, and none of them is here: visitors, visits,
 /// pages, sources and countries are read through `siteStatistics`, which answers one
-/// integration:siteTraffic:statistics row from the hourly and daily rollup tables (and, for a
-/// 24-hour period, the request log itself), because a count of distinct visitors is not something
-/// a continuous aggregate can fold. This is the cheap read a list needs: how many requests a
+/// integration:siteTraffic:statistics row from the rollup's tables, because a count of distinct
+/// visitors is not something a continuous aggregate can fold. This is the cheap read a list needs: how many requests a
 /// deployable answered, how many failed, and when it last served.
 ///
 /// AN ABSENT ROW IS THE UNMEASURED ANSWER. A window nothing recorded produces NO ROW for that

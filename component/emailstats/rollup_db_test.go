@@ -406,12 +406,15 @@ func (f *fixture) journeyWithEnrollment(recipient string) (journey, enrollment s
 
 // walkFrom sets every source's watermark to at, and records each walked
 // through it, so the next run walks from five minutes before it -- the rows
-// this test is about, and at most a few minutes of the tests before it.
+// this test is about, and at most a few minutes of the tests before it. It
+// clears where a stopped re-read got to and how far a bounded walk reads,
+// which another test's walk may have left (rollup_recovery_db_test.go).
 func walkFrom(t *testing.T, db *bun.DB, at time.Time) {
 	t.Helper()
 	for _, s := range sources {
 		if _, err := db.NewRaw(`INSERT INTO email_stat_watermark (source, through, walked_through) VALUES (?, ?, ?)
-			ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through, walked_through = EXCLUDED.walked_through`,
+			ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through, walked_through = EXCLUDED.walked_through,
+				reread_from = NULL, read_until = NULL`,
 			s.name, at.UTC(), at.UTC()).Exec(context.Background()); err != nil {
 			t.Fatalf("set the %s watermark: %v", s.name, err)
 		}

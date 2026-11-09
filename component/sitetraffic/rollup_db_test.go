@@ -66,6 +66,16 @@ func clearRollupBand(t *testing.T, db *bun.DB) {
 		{"DELETE FROM edge_stats_daily WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 		{"DELETE FROM edge_stats_daily_top WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 		{"DELETE FROM edge_stats_final WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		// The rollup's state and what it publishes beside the three tables:
+		// a day's progress is the whole day's, every site's, so one left
+		// behind would have the next test's fold start past its requests.
+		{"DELETE FROM edge_stats_progress WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_settled_hour WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_visitor WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_value_hour WHERE day >= ?::date AND day < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_window_top WHERE window_end >= ? AND window_end <= ?", []any{rollupBandStart, rollupBandEnd}},
+		{"DELETE FROM edge_stats_monthly_top WHERE month >= ?::date AND month < ?::date", []any{from, to}},
+		{"DELETE FROM edge_stats_month_day WHERE day >= ?::date AND day < ?::date", []any{from, to}},
 	} {
 		if _, err := db.ExecContext(ctx, q.sql, q.args...); err != nil {
 			t.Fatalf("clear the rollup tests' band (%s): %v", q.sql, err)
@@ -1592,10 +1602,12 @@ func waitForLockWaiter(t *testing.T, db *bun.DB, relation string) {
 	}
 }
 
-// THE SEGMENTATION'S CONTRACT over a window that is not one UTC day, which is
-// how the 24-hour read calls it. The rollup's own windows are whole days, so
-// none of the three properties below is visible through Rollup: a day window
-// cannot cut a visit at midnight, start inside a visit, or end inside one.
+// THE REFERENCE SEGMENTATION'S CONTRACT over a window that is not one UTC day,
+// which is how the request-log read the 24-hour period replaced called it
+// (rollup_reference_test.go). TestTheTwentyFourHourReadAgreesWithTheRequestLog
+// holds today's read to that reference, so the reference has to be right where
+// a window cuts a day: none of the three properties below is visible through a
+// whole day.
 //
 //   - It answers the visits that STARTED in the window: one begun before it
 //     and running into it is not counted again where the window cuts it.

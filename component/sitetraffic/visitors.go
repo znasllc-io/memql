@@ -45,8 +45,9 @@ func visitorHash(secret []byte, siteID, addressKey, userAgent string) string {
 // unique-visitor count agree across a cluster.
 //
 // The request path only does an atomic load. All database work happens in
-// Start, at each UTC midnight and on a periodic safety check, so a slow or
-// absent database can never delay a response.
+// Start, at each UTC midnight and on an hourly safety check -- sooner after a
+// check that failed (retry.go) -- so a slow or absent database can never
+// delay a response.
 //
 // FAIL CLOSED: a keeper that cannot read today's secret yields no visitor. It
 // never falls back to an older secret, which would link a person across days
@@ -61,8 +62,11 @@ type VisitorSecrets struct {
 	// deleteEarlier removes secrets of days before day. A field so a test can
 	// make it fail once; production uses purgeSQL.
 	deleteEarlier func(ctx context.Context, db *bun.DB, day time.Time) error
-	running       atomic.Bool
-	readyCh       chan struct{}
+	// newTimer starts the loop's wait for its next check, answering the
+	// channel that fires and a stop. A field so a test can watch the waits.
+	newTimer func(d time.Duration) (<-chan time.Time, func() bool)
+	running  atomic.Bool
+	readyCh  chan struct{}
 
 	mu     sync.Mutex // guards closed
 	stop   chan struct{}
@@ -87,6 +91,7 @@ func NewVisitorSecrets(logger *slog.Logger, provider func() *bun.DB, now func() 
 		stop:     make(chan struct{}),
 
 		deleteEarlier: purgeSQL,
+		newTimer:      systemTimer,
 	}
 }
 
@@ -160,31 +165,38 @@ func (v *VisitorSecrets) Start(ctx context.Context) {
 	for i := 0; i < 10 && v.provider() == nil; i++ {
 		time.Sleep(100 * time.Millisecond)
 	}
-	v.tick(ctx)
+	failures := 0
+	if v.tick(ctx) != nil {
+		failures = 1
+	}
 	v.running.Store(true)
-	go v.loop(ctx)
+	go v.loop(ctx, failures)
 }
 
 // loop rotates at each UTC midnight and re-checks hourly, so a replica whose
-// midnight rotation or purge failed (database blip) recovers within the hour
-// instead of going without visitors, or keeping a stale secret, for a day.
-func (v *VisitorSecrets) loop(ctx context.Context) {
+// midnight rotation or purge failed (database blip) recovers instead of going
+// without visitors, or keeping a stale secret, for a day. After a failed check
+// the next one comes sooner: retryWait's thirty seconds, doubling up to the
+// hour, and never past midnight (retry.go). failures is how many checks in a
+// row have failed, Start's among them.
+func (v *VisitorSecrets) loop(ctx context.Context, failures int) {
 	for {
 		now := v.now()
 		next := utcMidnight(now).Add(24 * time.Hour)
-		wait := next.Sub(now)
-		if wait > time.Hour {
-			wait = time.Hour
-		}
-		t := time.NewTimer(wait)
+		wait := min(next.Sub(now), retryWait(failures, time.Hour))
+		fired, stop := v.newTimer(wait)
 		select {
-		case <-t.C:
-			v.tick(ctx)
+		case <-fired:
+			if v.tick(ctx) != nil {
+				failures++
+			} else {
+				failures = 0
+			}
 		case <-v.stop:
-			t.Stop()
+			stop()
 			return
 		case <-ctx.Done():
-			t.Stop()
+			stop()
 			return
 		}
 	}
@@ -192,8 +204,10 @@ func (v *VisitorSecrets) loop(ctx context.Context) {
 
 // tick rotates when the held secret is not today's, and otherwise re-runs the
 // purge: the promise is that after midnight no stored secret outlives its day,
-// and a delete that failed at rotation would otherwise wait a full day.
-func (v *VisitorSecrets) tick(ctx context.Context) {
+// and a delete that failed at rotation would otherwise wait a full day. It
+// answers the check's failure, which loop retries sooner; a failed purge is
+// one too, since a secret it leaves stored outlives its day.
+func (v *VisitorSecrets) tick(ctx context.Context) error {
 	day := utcMidnight(v.now())
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -201,7 +215,7 @@ func (v *VisitorSecrets) tick(ctx context.Context) {
 	if cur := v.current.Load(); cur != nil && cur.day.Equal(day) {
 		db := v.provider()
 		if db == nil {
-			return
+			return fmt.Errorf("no database handle")
 		}
 		err = v.purge(rctx, db, day)
 	} else {
@@ -214,6 +228,7 @@ func (v *VisitorSecrets) tick(ctx context.Context) {
 	default:
 		v.logger.Warn("could not rotate the visitor secret; unique visitors are not counted until it succeeds", "err", err)
 	}
+	return err
 }
 
 func (v *VisitorSecrets) Stop(ctx context.Context) {

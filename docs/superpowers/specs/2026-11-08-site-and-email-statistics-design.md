@@ -576,3 +576,50 @@ Nothing here needs a new routing rule: no new event-bus topic is introduced.
 Scheduled or emailed reports, export, custom date ranges, per-site time zones,
 goals and conversions, a live "visitors now" figure, and open and click
 tracking for automated mail (an owner-agreed follow-up).
+
+## 16. Scale review (2026-11-09)
+
+The limits the epic's reviews deferred were measured on synthetic data at the
+sizes they named, on the CI TimescaleDB image sized like the mid preset (2 CPUs,
+8 GiB, `shared_buffers` 2 GB, `work_mem` 8 MB). What did not hold was changed;
+what stays a limit is in the runbooks (`deployables.md`, "Statistics and
+health"; `campaign-sending.md`, "How the facts are recorded").
+
+- **The website rollup (section 5) is incremental.** At ten million requests a
+  day over fifty sites, each of a day's three recompute statements took 47 to
+  52 s against the 60 s statement bound, and a run spent two and a half minutes
+  of database time every five, twice that before 02:00. Now a request is folded
+  into its day's state once it is two hours old (`component/sitetraffic`,
+  `fold.go`), and each run reads only the last two hours again, publishing the
+  state with them added (`publish.go`): 8 s a run during the day, 10 to 20 s
+  before 02:00, no statement over 2.5 s. The two hours keep the late-request
+  horizon the recompute had, so a day is still final at 02:00 the next day,
+  and every ruling of section 5 stands. "Every hour of today" and "a recompute
+  is the whole computation for its period" now describe what a run
+  *publishes*, not what it reads. The recompute's statements are kept as the
+  tests' reference, and the fold is held to them over generated traffic cut
+  into windows of any size.
+- **The 24-hour read (section 7) no longer reads the request log.** At ten
+  million requests a day it could not be answered inside the request pool's
+  8 s limit. Its visitors are now the first day's visitors last seen in the
+  window plus the second day's first seen in it, from per-day counts of
+  visitors by the hour of their first and last page view (exact: the visitor
+  hash changes at midnight), and its top lists are a per-site list the rollup
+  publishes for the current window. It reads 25 ms at that size.
+- **Whole months come from monthly top lists.** A staff read of twelve months
+  over 200 sites and 400 days, at about 600 top rows a day each, took 7.6 s of
+  the 8 s limit; the rollup now folds each month's final days into its own top
+  lists, and a period reads the months it covers whole from them: 1.1 s.
+  Reads stay uncached (section 7): measured, they did not need it.
+- **The email rollup recovers.** A burst of more than 200,000 rows inside the
+  five-minute overlap is read in parts across runs, each carrying on where the
+  last stopped (`email_stat_watermark.reread_from`); and a walk with a
+  watermark whose pages outgrow a read is bounded, as of an instant half way
+  to the clock, halving on each further timeout (`read_until`), which bounds
+  the engine's latest-version scan.
+- **The ping's rate limit is bounded per key** (section 11): a key is
+  forgotten once its budget has refilled, and past 10,000 keys a new key is
+  refused instead of the whole map being dropped, which had reset every
+  address's budget.
+- **The visitor-secret keeper and the country loader retry a failed check**
+  after 30 seconds, doubling back to the hour, instead of waiting an hour.

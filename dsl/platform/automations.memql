@@ -129,12 +129,13 @@ automation checkDeployableHealth {
 /// statistics design, section 5).
 ///
 /// EVERY FIVE MINUTES ON THE CRON LEADER, so while runs succeed a figure is at most five minutes
-/// behind the traffic it counts, and one replica writes each run. A run recomputes today -- every
-/// hour of it, because a visit is a window over the whole day's page views and a page view now can
-/// stop an earlier hour's one-page visit from being a bounce -- and every earlier day still in the
-/// request log that is not yet final. A day becomes final when a run recomputes it at or after
+/// behind the traffic it counts, and one replica writes each run. A run folds each request into
+/// its day's state once it is two hours old, reads the last two hours again, and publishes today
+/// -- every hour of it, because a visit is a window over the whole day's page views and a page view
+/// now can stop an earlier hour's one-page visit from being a bounce -- and every earlier day still
+/// in the request log that is not yet final. A day becomes final when its fold reaches its end, at
 /// 02:00 UTC the next day, so yesterday's late requests are counted, and the days an outage left
-/// open are recomputed by the next run that succeeds.
+/// open are folded by the next run that succeeds (component/sitetraffic/rollup.go).
 ///
 /// THE WORK IS A BUILTIN, builtin siteStatisticsRollup in component/sitetraffic, because none of it
 /// is graph work. It reads the edge_request log and writes plain rollup tables, none of them a

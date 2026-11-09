@@ -28,14 +28,20 @@ const countryRecheckEvery = time.Hour
 // Country is an atomic load plus an in-memory lookup, so it is safe on the
 // request path. The database is read only at Start and on an hourly check of
 // the stored release label (cheap: the blob is fetched only when the label
-// changed), so a monthly refresh reaches every replica without a restart.
-// No row or an unreadable one means no country, never a failed request.
+// changed), so a monthly refresh reaches every replica without a restart; a
+// check that fails is tried again sooner, from thirty seconds doubling back
+// up to the hour (retry.go). No row or an unreadable one means no country,
+// never a failed request.
 type CountryLoader struct {
 	logger   *slog.Logger
 	provider func() *bun.DB
 
 	reader  atomic.Pointer[geoip2.Reader]
 	release atomic.Value // string; the release the reader was built from
+
+	// newTimer starts the wait for the next check, answering the channel
+	// that fires and a stop. A field so a test can watch the waits.
+	newTimer func(d time.Duration) (<-chan time.Time, func() bool)
 
 	running atomic.Bool
 	readyCh chan struct{}
@@ -54,6 +60,7 @@ func NewCountryLoader(logger *slog.Logger, provider func() *bun.DB) *CountryLoad
 		provider: provider,
 		readyCh:  make(chan struct{}),
 		stop:     make(chan struct{}),
+		newTimer: systemTimer,
 	}
 }
 
@@ -115,30 +122,42 @@ func (c *CountryLoader) Start(ctx context.Context) {
 	for i := 0; i < 10 && c.provider() == nil; i++ {
 		time.Sleep(100 * time.Millisecond)
 	}
-	c.check(ctx)
+	failures := 0
+	if c.check(ctx) != nil {
+		failures = 1
+	}
 	c.running.Store(true)
 	go func() {
-		t := time.NewTicker(countryRecheckEvery)
-		defer t.Stop()
 		for {
+			fired, stop := c.newTimer(retryWait(failures, countryRecheckEvery))
 			select {
-			case <-t.C:
-				c.check(ctx)
+			case <-fired:
+				if c.check(ctx) != nil {
+					failures++
+				} else {
+					failures = 0
+				}
 			case <-c.stop:
+				stop()
 				return
 			case <-ctx.Done():
+				stop()
 				return
 			}
 		}
 	}()
 }
 
-func (c *CountryLoader) check(ctx context.Context) {
+// check refreshes the held database and answers the refresh's failure, which
+// Start's loop retries sooner.
+func (c *CountryLoader) check(ctx context.Context) error {
 	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := c.refresh(rctx); err != nil {
+	err := c.refresh(rctx)
+	if err != nil {
 		c.logger.Warn("could not load the country database; visits are recorded without a country until it loads", "err", err)
 	}
+	return err
 }
 
 func (c *CountryLoader) Stop(ctx context.Context) {

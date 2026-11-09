@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -246,6 +247,68 @@ func TestTheRateLimitIsPerSite(t *testing.T) {
 	// It refills.
 	if !b.allow("siteA|1.2.3.4", now.Add(time.Minute)) {
 		t.Fatal("the bucket must refill over a minute")
+	}
+}
+
+// A FLOOD OF NEW ADDRESSES RESETS NOBODY'S BUDGET. The bucket's keys carry a
+// client address, so a sender with many addresses -- an IPv6 block -- chooses
+// how many there are. Past the bound, the map used to be dropped whole, which
+// handed every address, the flood's own among them, a fresh burst. A spent
+// budget has to stay spent through any number of other keys.
+func TestAFloodOfNewAddressesLeavesASpentBudgetSpent(t *testing.T) {
+	b := newShopperBucket(2)
+	now := time.Now()
+	if !b.allow("site|spent", now) || !b.allow("site|spent", now) {
+		t.Fatal("the burst must be spendable")
+	}
+	for i := 0; i <= 2*b.maxSize; i++ {
+		b.allow(fmt.Sprintf("site|flood-%d", i), now)
+	}
+	if b.allow("site|spent", now) {
+		t.Fatal("a flood of new addresses gave a spent budget a fresh burst")
+	}
+	if got := b.size(); got > b.maxSize {
+		t.Fatalf("the bucket holds %d keys, past its bound of %d", got, b.maxSize)
+	}
+}
+
+// A KEY IS FORGOTTEN ONCE ITS BUCKET HAS REFILLED: a full bucket is what an
+// unseen key gets, so holding it bounds nothing. Every key of a flood a
+// minute old has refilled, so the bound is free again for new addresses.
+func TestAKeyThatHasRefilledIsForgotten(t *testing.T) {
+	b := newShopperBucket(2)
+	now := time.Now()
+	for i := 0; i < b.maxSize; i++ {
+		b.allow(fmt.Sprintf("site|old-%d", i), now)
+	}
+	later := now.Add(time.Minute)
+	if !b.allow("site|newcomer", later) {
+		t.Fatal("a new address was refused although every held key has refilled")
+	}
+	if got := b.size(); got != 1 {
+		t.Fatalf("the bucket holds %d keys a minute later, want only the newcomer's", got)
+	}
+}
+
+// AT THE BOUND, WITH EVERY HELD KEY STILL SPENDING, A NEW ADDRESS WAITS. That
+// is the price of keeping everyone else's budget: a flood of more addresses
+// than the bound within one refill is refused at the door, rather than
+// buying itself fresh bursts by pushing the oldest keys out. Addresses
+// already held keep the budget they have.
+func TestAtTheBoundANewAddressIsRefusedAndHeldOnesKeepTheirBudget(t *testing.T) {
+	b := newShopperBucket(2)
+	now := time.Now()
+	if !b.allow("site|held", now) {
+		t.Fatal("the first request must be allowed")
+	}
+	for i := 1; i < b.maxSize; i++ {
+		b.allow(fmt.Sprintf("site|flood-%d", i), now)
+	}
+	if b.allow("site|one-too-many", now.Add(time.Second)) {
+		t.Fatal("a new address was admitted past the bound while every held key was still spending")
+	}
+	if !b.allow("site|held", now.Add(time.Second)) {
+		t.Fatal("an address already held lost the budget it had left")
 	}
 }
 

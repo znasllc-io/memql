@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"container/list"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -141,18 +142,60 @@ func shopperRatePerMinute() int {
 // trade for a control whose job is to stop a flood rather than to meter
 // exactly. The number is small enough that the multiple does not matter and
 // this comment is here so nobody reads the knob as a cluster-wide promise.
+//
+// # Bounded per key, never by dropping the map
+//
+// A key carries a client address, so how many keys there are is the
+// sender's to choose: an IPv6 block holds more addresses than any bound.
+// The bucket therefore holds at most maxSize keys, and keeps that bound one
+// key at a time:
+//
+//   - A KEY IS FORGOTTEN ONCE ITS BUCKET HAS REFILLED. A full bucket is
+//     exactly what an unseen key gets, so holding it says nothing. Keys are
+//     kept in order of last use, and before a new key is admitted every key
+//     at the least recently used end whose bucket has refilled by now is
+//     dropped. A bucket refills completely in one minute (the burst is a
+//     minute's rate), so the bucket holds only the keys that spent tokens
+//     in the last minute.
+//   - AT THE BOUND, A NEW KEY IS REFUSED, and every held key keeps the budget
+//     it has. That is a flood of more addresses than the bound within one
+//     refill, and the flood pays for it: its next addresses wait at the door
+//     until held keys refill, as a person behind one of them would.
+//
+// The bound used to be kept by dropping the whole map past maxSize keys,
+// which handed every held key a fresh burst, the flood's own
+// spent addresses among them: a sender cycling through more addresses than
+// the bound was never limited at all. Pushing the least recently used key
+// out to admit a new one has the same flaw one key at a time -- cycling
+// addresses push each other out before they return -- so the newcomer is
+// refused instead (TestAFloodOfNewAddressesLeavesASpentBudgetSpent,
+// TestAtTheBoundANewAddressIsRefusedAndHeldOnesKeepTheirBudget). The price
+// is that a person whose address first arrives during such a flood is
+// refused too, on that replica, until the flood's keys refill: for the
+// page-change ping a page change not counted, for an access code or a form
+// a retry a minute later.
 type shopperBucket struct {
-	mu      sync.Mutex
-	tokens  map[string]float64
-	refill  map[string]time.Time
+	mu sync.Mutex
+	// keys holds each key's entry in order, most recently used at the
+	// front, and entries finds a key's place in it.
+	keys    *list.List
+	entries map[string]*list.Element
 	perMin  int
 	maxSize int
 }
 
+// bucketKey is one key's bucket: its tokens as of last, the instant it was
+// last asked about.
+type bucketKey struct {
+	key    string
+	tokens float64
+	last   time.Time
+}
+
 func newShopperBucket(perMinute int) *shopperBucket {
 	return &shopperBucket{
-		tokens:  map[string]float64{},
-		refill:  map[string]time.Time{},
+		keys:    list.New(),
+		entries: map[string]*list.Element{},
 		perMin:  perMinute,
 		maxSize: 10000,
 	}
@@ -164,32 +207,53 @@ func (b *shopperBucket) allow(key string, now time.Time) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// A BOUND ON THE MAP, because its key contains a client address and is
-	// therefore attacker-chosen. Dropping the whole map is right for the
-	// same reason it is right in previewCache: there is nothing here worth
-	// an eviction policy, and the worst outcome is that a flood in progress
-	// gets one more burst.
-	if len(b.tokens) > b.maxSize {
-		b.tokens = map[string]float64{}
-		b.refill = map[string]time.Time{}
-	}
-
-	burst := float64(b.perMin)
-	last, seen := b.refill[key]
-	tokens := burst
-	if seen {
-		tokens = b.tokens[key] + now.Sub(last).Minutes()*float64(b.perMin)
-		if tokens > burst {
-			tokens = burst
+	if el, held := b.entries[key]; held {
+		k := el.Value.(*bucketKey)
+		tokens := b.tokensAt(k, now)
+		k.last = now
+		b.keys.MoveToFront(el)
+		if tokens < 1 {
+			k.tokens = tokens
+			return false
 		}
+		k.tokens = tokens - 1
+		return true
 	}
-	b.refill[key] = now
-	if tokens < 1 {
-		b.tokens[key] = tokens
+	b.forgetRefilled(now)
+	if len(b.entries) >= b.maxSize {
 		return false
 	}
-	b.tokens[key] = tokens - 1
+	b.entries[key] = b.keys.PushFront(&bucketKey{key: key, tokens: float64(b.perMin) - 1, last: now})
 	return true
+}
+
+// tokensAt is what key's bucket holds at now: its tokens refilled at perMin a
+// minute since it was last asked about, never past the burst.
+func (b *shopperBucket) tokensAt(k *bucketKey, now time.Time) float64 {
+	burst := float64(b.perMin)
+	return min(burst, k.tokens+now.Sub(k.last).Minutes()*float64(b.perMin))
+}
+
+// forgetRefilled drops, from the least recently used end, every key whose
+// bucket has refilled by now, and stops at the first that has not. A key
+// that has refilled further in is left for later: it is dropped once the
+// keys used before it have refilled too, at most a minute on.
+func (b *shopperBucket) forgetRefilled(now time.Time) {
+	for el := b.keys.Back(); el != nil; el = b.keys.Back() {
+		k := el.Value.(*bucketKey)
+		if b.tokensAt(k, now) < float64(b.perMin) {
+			return
+		}
+		b.keys.Remove(el)
+		delete(b.entries, k.key)
+	}
+}
+
+// size is how many keys the bucket holds.
+func (b *shopperBucket) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.entries)
 }
 
 // shopperClientAddress is the address the rate limit keys on.

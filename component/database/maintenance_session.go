@@ -14,8 +14,8 @@ import (
 // compaction (component/retention/compact.go): a TimescaleDB reorder_chunk of
 // a multi-gigabyte chunk, and the heap scan that measures what a chunk would
 // give back. The second is the website statistics rollup
-// (component/sitetraffic/rollup.go), whose recompute of a busy UTC day can
-// outlast both limits below.
+// (component/sitetraffic/rollup.go), whose fold of a busy UTC day -- the
+// first, or the one after an outage -- can outlast both limits below.
 //
 // # Why not a pool the process already has
 //

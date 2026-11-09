@@ -1986,9 +1986,30 @@ driver's own ten-second read deadline ends such a page first, and moves the
 start the same way. Only those two deadlines move a start: any other failure,
 such as a statement an operator cancels or a connection reset or refused while
 the database switches over, leaves it where it was, and the next run tries the
-same walk again. A walk that has read a page and whose later
-pages outlast the timeout is not moved either: it stalls, with a Warn on every
-run, and the figures it feeds stay not measured.
+same walk again.
+
+**A walk too far behind for one page.** Every page of a walk costs every
+version the source wrote since the walk's start, so a walk far enough behind
+(the cron leader down for days, or a burst of writes) has every page outlast
+the timeout. When any page other than a first walk's first one does, the next
+walk reads only as far as halfway from its start to now, as the graph stood at
+that instant, which bounds what each page reads; each further timeout halves
+the span again, down to one minute, and the walk that reads its last page
+reads to now again. Each move is a Warn, `email statistics for <source> are
+read as far as <instant> next: a page of a longer walk timed out`. A bounded
+walk is walked only through its bound, so the days after it read *not
+measured* until a later walk reaches them. A walk whose one minute of versions
+still outlasts the timeout stops there, with a Warn on every run, as every
+walk did before this bound existed.
+
+**A burst inside five minutes.** Each walk reads the five minutes before where
+it resumes again, and a run reads at most 400 pages of a source in all, 200,000
+rows. A run that reaches that bound while still rereading those five minutes
+records how far it got, names the source in `behind`, and the next run carries
+on from there rather than from the start of the five minutes, so a burst of
+more than 200,000 rows in five minutes is read in parts over several runs. The
+cost: a row stamped inside the part of the burst an earlier run already reread,
+and written only after that run passed it, is not counted.
 
 **A source whose walk fails** is logged `Email statistics for a source were not
 folded; the next run carries on from its watermark`; the other sources still

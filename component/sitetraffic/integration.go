@@ -159,7 +159,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rollup",
-			Description: "Fold the edge's request log into hourly and daily website statistics: today and every hour of it, every earlier logged day not yet final (a day is final once recomputed at or after 02:00 UTC the next day), then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
+			Description: "Fold the edge's request log into hourly and daily website statistics: each request once it is two hours old, the last two hours on every run, today and every earlier logged day not yet final (a day is final once its fold reaches its end, at 02:00 UTC the next day), the 24-hour window's and each month's top lists, then retention. Admits only the siteStatisticsRollupSweep maintenance principal.",
 			Handler:     i.handleRollup,
 		},
 		{
@@ -183,7 +183,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 //
 // Every day the run could not write is logged here, one Warn naming the day,
 // and the run's error is returned, so the automation's run says it failed; the
-// next run recomputes those days (rollup.go).
+// next run carries those days on from their progress (rollup.go).
 //
 // NO MAINTENANCE SESSION, NO ROLLUP. The run's statements go to the database's
 // dedicated maintenance session (rollup.go, "Where the statements run"), so a
@@ -296,7 +296,7 @@ func (i *Integration) logRollupFailures(err error) {
 	for _, f := range failures {
 		var day *dayFailure
 		if errors.As(f, &day) {
-			i.logger.Warn("Site statistics for a day were not written; the next run recomputes it",
+			i.logger.Warn("Site statistics for a day were not written; the next run carries it on",
 				"component", "sitetraffic", "day", day.Day.Format(time.DateOnly), "error", day.Err)
 			continue
 		}
