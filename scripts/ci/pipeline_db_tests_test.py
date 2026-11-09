@@ -37,7 +37,7 @@ class DatabaseBudgets(unittest.TestCase):
         commands = runner.commands(selected, self.classes, self.parallelism)
         self.assertCountEqual([p for _, command in commands for p in command[6:]], selected)
         by_class = dict(commands)
-        for name, timeout in [("memql", "1200s"), ("packages", "300s"), ("work", "480s"), ("library", "300s"), ("release", "600s"), ("installation", "300s"), ("campaigns", "600s"), ("emailstats", "300s"), ("default", "180s")]:
+        for name, timeout in [("memql", "1200s"), ("packages", "300s"), ("work", "480s"), ("library", "300s"), ("release", "600s"), ("installation", "900s"), ("campaigns", "600s"), ("emailstats", "300s"), ("default", "180s")]:
             self.assertEqual(by_class[name][:6], ["go", "test", "-count=1", "-p=1", "-parallel=4", "-timeout=" + timeout])
 
     def test_shared_parallelism_is_bounded_and_not_inherited_from_cpu_count(self):

@@ -45,7 +45,14 @@ classes: |
   # The installation suite went from a median of 37s on 10-16..20 to 141s on
   # 11-02, with a worst pass of 162s of the default class's 180s. Give it its own
   # 300s; keep every test and its operation deadlines.
-  db      installation integrations/installation 300s serial 1
+  # 17168d044 and 7d88c9f3c (2026-11-09) added the restore-lifecycle and
+  # receiver-churn database suites, including end-to-end prepare, Apply,
+  # completion and Restore runs: the package now takes 236s-317s on a laptop
+  # and exhausted the 300s alarm on the bounded AKS runner (main's push runs for
+  # e1d22855f and 7d88c9f3c, db-tests#5, 301.9s), where slower packages run
+  # about 1.9 times their laptop time. 900s keeps 1.5 times an expected worst
+  # pass near 600s; keep every test and its operation deadlines.
+  db      installation integrations/installation 900s serial 1
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
   db      campaigns component/campaigns 600s     serial,uncached 1
