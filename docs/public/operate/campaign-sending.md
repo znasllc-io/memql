@@ -1960,9 +1960,10 @@ older than 400 days.
 **A first run catches up over many runs.** A source's first walk starts 400
 days back, and a run reads at most forty pages of 500 rows of each source past
 where it resumes: 20,000 rows of a source a run. At twelve runs an hour that is
-at most 240,000 rows of a source an hour, so a history of a million deliveries
-takes at least fifty runs, about four hours and ten minutes, to reach today.
-That is the walk's bound, not a measurement: a run whose pages the database
+at most 240,000 rows of a source an hour, so a history of 200,000 deliveries
+takes at least ten runs, about fifty minutes, to reach today. A much longer
+history may not fit its first page at all, and then begins later (the next
+paragraph). That is the walk's bound, not a measurement: a run whose pages the database
 answers slowly takes longer than five minutes, and a run that starts on a node
 while its last run there is still going does nothing. While a source is
 behind, each run logs `Email statistics rolled up` at Info and names it in
@@ -1978,7 +1979,8 @@ before now, so a very large history begins with its most recent part. Each move
 is a Warn naming the source and the day, `email statistics for <source> start
 from <day>: the first walk over a longer history timed out`. The start is
 stored in `email_stat_walk_start`, so a new cron leader carries on from it, and
-the days before it read *not measured* for that source's figures. Only that
+the days before it, and a twelve-month view's month that it falls inside, read
+*not measured* for that source's figures. Only that
 timeout moves a start: any other failure leaves it where it was, and the next
 run tries the same walk again. A walk that has read a page and whose later
 pages outlast the timeout is not moved either: it stalls, with a Warn on every

@@ -1277,12 +1277,13 @@ written to the audit log, never with the code.
 
 ## Where the surface is
 
-**MemQL OS, the Deployables app**, in three sections: **Map** (what serves
-where, and the window's default), **Deployables** (the list, and the page that
-composes, deploys and manages one), and **Settings** (the app's own
-preferences, plus the Sources group above). Composing is not a fourth section
-and not a modal: New deployable opens the same page in compose mode, in place,
-with a quiet Back to the list.
+**MemQL OS, the Deployables app**, in four sections: **Overview** (what serves
+where, the Websites statistics, and the window's default), **Deployables** (the
+list, and the page that composes, deploys and manages one), **Logs** (the app's
+slice of the cluster's logs, for a person who holds the part) and **Settings**
+(the app's own preferences, plus the Sources group above). Composing is not a
+section of its own and not a modal: New deployable opens the same page in
+compose mode, in place, with a quiet Back to the list.
 
 A package with two apps is **two rows sharing a source**, grouped under it --
 one row per thing that serves or will. On a deployable's page the head carries,

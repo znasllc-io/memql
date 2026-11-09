@@ -112,7 +112,7 @@ const CLIENTS_SHOWN = 8;
  * client read as all of them.
  */
 function busiestClientsOf(rows: readonly RankedRow[]): string | undefined {
-  return rows.length > CLIENTS_SHOWN ? `The ${CLIENTS_SHOWN} busiest of ${formatCount(rows.length)} clients.` : undefined;
+  return rows.length > CLIENTS_SHOWN ? `The ${CLIENTS_SHOWN} busiest of ${formatCount(rows.length)} clients that sent mail.` : undefined;
 }
 
 /** Whether a record belongs to the client in scope: every record for All, else the chosen organization's. */

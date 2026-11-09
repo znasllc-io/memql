@@ -554,7 +554,7 @@ describe("whose mail", () => {
     mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: many })] }));
     const clients = await screen.findByRole("region", { name: "Clients" });
     await waitFor(() => expect(within(clients).getAllByRole("listitem")).toHaveLength(8));
-    expect(within(clients).getByText("The 8 busiest of 10 clients.")).toBeTruthy();
+    expect(within(clients).getByText("The 8 busiest of 10 clients that sent mail.")).toBeTruthy();
   });
 
   it("lists the clients under All clients only, not once one client is chosen", async () => {
