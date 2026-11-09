@@ -554,15 +554,21 @@ func TestTheWatermarkOverlapCatchesALateWrite(t *testing.T) {
 // time somebody got wrong -- is counted, and does not carry the watermark with
 // it: if it did, every row written after it with a true time would sort
 // before the watermark less five minutes, and the walk would stop seeing them
-// until the clock caught up. And a watermark already ahead of the clock says
-// nothing true about how far the walk read, so the walk starts over.
+// until the clock caught up. And a watermark further ahead of the clock than
+// the overlap says nothing true about how far the walk read, so the walk
+// starts over.
+//
+// AN HOUR AHEAD, because the database is shared: every walk reads a row dated
+// ahead of its clock, so a row dated a year ahead would be read by every later
+// test's runs for a year. An hour later this one is behind every clock.
 func TestARowDatedAheadOfTheClockDoesNotHoldTheWalk(t *testing.T) {
 	f := newFixture(t)
+	t.Cleanup(func() { walkFrom(t, f.db, time.Now()) })
 	walkFrom(t, f.db, time.Now())
 
+	aheadAt := time.Now().UTC().Add(time.Hour)
 	ahead := f.deliver(f.recipient(f.audience), map[string]any{
-		"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now()),
-		"versionTime": stamp(time.Now().Add(400 * 24 * time.Hour)),
+		"campaignId": f.campaign, "status": "sent", "sentAt": stamp(aheadAt), "versionTime": stamp(aheadAt),
 	})
 	rollup(t, f.eng, f.db, time.Now())
 	if through, _ := watermarkOf(t, f.db, sourceDelivery); through.After(time.Now()) {
@@ -574,71 +580,178 @@ func TestARowDatedAheadOfTheClockDoesNotHoldTheWalk(t *testing.T) {
 	wantFact(t, facts, kindSent, ahead)
 	wantFact(t, facts, kindSent, present)
 
-	// A stored watermark far ahead of the run's clock. The clock is put four
-	// hundred days after start, so starting over walks from start: this
-	// test's rows and nothing older in this database.
-	start := time.Now().UTC().Truncate(time.Microsecond)
+	// A stored watermark two hours ahead of the run's clock is dropped, and the
+	// source walked again from the horizon -- a short one here, so the walk
+	// starts behind this test's own row rather than a year back, across every
+	// row this shared database holds.
+	saved := retention
+	retention = 2 * time.Hour
+	t.Cleanup(func() { retention = saved })
 	restarted := f.deliver(f.recipient(f.audience), map[string]any{"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now())})
-	now := start.Add(retentionDays * 24 * time.Hour)
-	walkFrom(t, f.db, now.Add(retentionDays*24*time.Hour))
-	rollup(t, f.eng, f.db, now)
+	walkFrom(t, f.db, time.Now().Add(2*time.Hour))
+	rollup(t, f.eng, f.db, time.Now())
 	wantFact(t, storedFacts(t, f.db, restarted), kindSent, restarted)
-	if through, ok := watermarkOf(t, f.db, sourceDelivery); !ok || through.After(now) {
-		t.Errorf("after starting over the watermark is %v (%v), want one at or before the run's clock", through, ok)
+	if through, ok := watermarkOf(t, f.db, sourceDelivery); !ok || through.After(time.Now()) {
+		t.Errorf("after starting over the watermark is %v (%v), want one at or before the clock", through, ok)
 	}
 }
 
-// The first run has no watermark and starts four hundred days back, so on a
-// cluster with history it is a backfill: forty pages a source per run, and
-// the next run carries on from where it stopped. Pages the next run only
-// reads again inside the overlap do not count against its forty, or a burst
-// of more than forty pages inside five minutes would hold the walk there for
-// good.
+// A run long enough to overlap the next one -- a backfill, the lead moving to
+// another node -- can find a watermark the other run moved past this run's own
+// start. That watermark is the other run's, true by the time this one reads
+// it, and is kept: dropping it would send this run back over the whole
+// history, and leave the watermark behind where the other run got.
+//
+// TIME IS COMPRESSED. This run spends a fifth of a second on its deliveries,
+// standing in for minutes of backfill, and meanwhile the other run leaves the
+// engagement watermark a tenth of a second past this run's start plus the
+// overlap. Judged by the run's start, that watermark is further ahead than the
+// overlap absorbs; judged by the clock as this run reaches the engagement
+// source, it is not. So the test fails if the drop is judged by the start, and
+// fails if it is judged by the clock without the overlap.
+func TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept(t *testing.T) {
+	_, db := statsEngine(t)
+	t.Cleanup(func() { walkFrom(t, db, time.Now()) })
+	runStart := time.Now().UTC().Truncate(time.Millisecond)
+	walkFrom(t, db, runStart.Add(-time.Hour))
+
+	const reading, past = 200 * time.Millisecond, 100 * time.Millisecond
+	theirs := runStart.Add(watermarkOverlap + past)
+	moved := false
+	engine := &scriptedEngine{
+		pages: map[string]map[string]scriptedPage{},
+		before: func(construct, _ string) {
+			if construct != "deliveriesWrittenSince" || moved {
+				return
+			}
+			moved = true
+			if _, err := db.NewRaw(`UPDATE email_stat_watermark SET through = ? WHERE source = ?`, theirs, sourceEngagement).Exec(context.Background()); err != nil {
+				t.Error(err)
+			}
+			time.Sleep(reading)
+		},
+	}
+	if _, err := runRollup(principalCtx(t), engine, db, runStart); err != nil {
+		t.Fatal(err)
+	}
+	if !moved {
+		t.Fatal("the delivery walk never ran, so nothing moved the engagement watermark")
+	}
+	if through, ok := watermarkOf(t, db, sourceEngagement); !ok || through.Before(theirs) {
+		t.Errorf("the other run's engagement watermark %v was dropped or moved back: it is %v (%v)", theirs, through, ok)
+	}
+	asked := false
+	for _, c := range engine.calls {
+		if c.construct != "engagementEventsWrittenSince" {
+			continue
+		}
+		asked = true
+		if since, want := sinceOf(t, c.query), theirs.Add(-watermarkOverlap); !since.Equal(want) {
+			t.Errorf("the engagement walk started at %v, want the other run's watermark less the overlap, %v", since, want)
+		}
+	}
+	if !asked {
+		t.Error("the run never read the engagement source")
+	}
+}
+
+var sinceArg = regexp.MustCompile(`since: "([^"]+)"`)
+
+// sinceOf reads the instant a walk query starts at.
+func sinceOf(t *testing.T, query string) time.Time {
+	t.Helper()
+	m := sinceArg.FindStringSubmatch(query)
+	if m == nil {
+		t.Fatalf("the walk query %q names no since", query)
+	}
+	since, err := time.Parse(time.RFC3339Nano, m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return since
+}
+
+// A request id is a string the sender chose, and the enrollment lookup runs as
+// the cluster: a send whose request id spells another organization's
+// enrollment is not counted under that organization's journey.
+func TestAJourneySendIsAttributedOnlyInItsOwnOrganization(t *testing.T) {
+	mine, theirs := newFixture(t), newFixture(t)
+	walkFrom(t, mine.db, time.Now())
+
+	member := theirs.recipient(theirs.audience)
+	_, enrollment := theirs.journeyWithEnrollment(member)
+	stray := mine.deliver(mine.recipient(mine.audience), map[string]any{
+		"requestId": "journey-" + enrollment + "-welcome", "status": "sent", "sentAt": stamp(time.Now()),
+	})
+	rollup(t, mine.eng, mine.db, time.Now())
+
+	if s := wantFact(t, storedFacts(t, mine.db, stray), kindSent, stray); s.JourneyID != "" || s.AccountID != mine.account {
+		t.Errorf("the send is %+v, want it in %s and under no journey: its request id names another organization's enrollment", s, mine.account)
+	}
+}
+
+// The first run has no watermark and starts at the horizon, so on a cluster
+// with history it is a backfill: forty pages a source per run, and the next
+// run carries on from where it stopped. Pages the next run only reads again
+// inside the overlap do not count against its forty, or a burst of more than
+// forty pages inside five minutes would hold the walk there for good.
+//
+// ITS RANGE STARTS AT ITS OWN FIRST ROW, so no row another test left can
+// change what it finds. The rows are dated three hours ahead and the horizon
+// is put on the first of them. Behind it are the rows this package's other
+// tests date by the clock or an hour ahead, the rows another package writes
+// beside it in CI, and this test's own from an earlier run of the suite, three
+// hours ahead of an earlier clock. A row another suite dates days ahead sorts
+// after this test's rows, which the second run's check allows for.
 func TestTheFirstRunWalksAtMostFortyPagesPerSource(t *testing.T) {
 	f := newFixture(t)
-	pageSize := walkPageSize
-	walkPageSize = 2
-	t.Cleanup(func() { walkPageSize = pageSize })
+	pageSize, saved := walkPageSize, retention
+	walkPageSize, retention = 2, 25*time.Hour
+	t.Cleanup(func() { walkPageSize, retention = pageSize, saved })
 
 	recipient := f.recipient(f.audience)
 	const extra = 5
 	n := maxPagesPerRun*walkPageSize + extra
-	start := time.Now().UTC().Truncate(time.Microsecond)
+	first := time.Now().UTC().Truncate(time.Millisecond).Add(3 * time.Hour)
 	ids := make([]string, 0, n)
 	for i := 0; i < n; i++ {
+		at := first.Add(time.Duration(i) * time.Millisecond)
 		ids = append(ids, f.deliver(recipient, map[string]any{
 			"emailRuleId": f.rule, "requestId": fmt.Sprintf("%s-page-%03d", f.suffix, i),
-			"status": "sent", "sentAt": stamp(time.Now()),
+			"status": "sent", "sentAt": stamp(at), "versionTime": stamp(at),
 		}))
 	}
 
 	if _, err := f.db.NewRaw(`DELETE FROM email_stat_watermark`).Exec(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// The first run's window opens four hundred days before now; a now four
-	// hundred days after start opens it at start, so the walk meets this
-	// test's rows first and nothing else this database holds. Its retention
-	// pass, at that now, deletes every fact dated before today: they are this
-	// package's own derived rows, and every test here writes the facts it reads.
-	now := start.Add(retentionDays * 24 * time.Hour)
+	t.Cleanup(func() { walkFrom(t, f.db, time.Now()) })
+	// The horizon is now less the retention: the first row, which the walk's
+	// row.createdAt >= since reads.
+	now := first.Add(retention)
 
-	first := rollup(t, f.eng, f.db, now)
-	if got := first.Rows[sourceDelivery]; got != maxPagesPerRun*walkPageSize {
+	firstRun := rollup(t, f.eng, f.db, now)
+	if got := firstRun.Rows[sourceDelivery]; got != maxPagesPerRun*walkPageSize {
 		t.Errorf("the first run read %d deliveries, want %d pages of %d", got, maxPagesPerRun, walkPageSize)
 	}
-	if !behind(first, sourceDelivery) {
-		t.Errorf("the first run stopped at its page bound without saying the deliveries are behind: %+v", first)
+	if !behind(firstRun, sourceDelivery) {
+		t.Errorf("the first run stopped at its page bound without saying the deliveries are behind: %+v", firstRun)
 	}
 	if got := len(storedFacts(t, f.db, ids...)); got != maxPagesPerRun*walkPageSize {
 		t.Errorf("the first run recorded %d sends, want %d", got, maxPagesPerRun*walkPageSize)
 	}
 
+	// The second run reads the first run's eighty rows again, inside the
+	// overlap, and carries on to the last five. Those eighty do not count
+	// against its forty pages, so it can stop behind only after forty pages
+	// past them: rows another suite dated days ahead sort after this test's
+	// own, and are not this test's to count.
 	second := rollup(t, f.eng, f.db, now)
-	if behind(second, sourceDelivery) {
-		t.Errorf("the second run is still behind: %+v", second)
-	}
 	if got := len(storedFacts(t, f.db, ids...)); got != n {
 		t.Errorf("after the second run %d of the %d sends are recorded, want every one", got, n)
+	}
+	if read := second.Rows[sourceDelivery]; behind(second, sourceDelivery) && read < 2*maxPagesPerRun*walkPageSize {
+		t.Errorf("the second run stopped at its page bound having read %d rows, eighty of them again: the pages it only read again were counted: %+v", read, second)
 	}
 }
 
@@ -734,6 +847,9 @@ func TestAConsentEventWithNoRecipientCountsOnlyInTotals(t *testing.T) {
 // asked with, so a test can make a page fail or a cursor repeat.
 type scriptedEngine struct {
 	pages map[string]map[string]scriptedPage
+	// before, when set, runs at the start of every call: what another run
+	// does while this one is between two reads.
+	before func(construct, cursor string)
 	// calls records, per call, the construct asked and how it was asked.
 	calls []scriptedCall
 }
@@ -745,7 +861,7 @@ type scriptedPage struct {
 }
 
 type scriptedCall struct {
-	construct                  string
+	construct, query           string
 	internal, fresh, rootsOnly bool
 }
 
@@ -756,8 +872,11 @@ func (e *scriptedEngine) Execute(ctx context.Context, query string) (*memql.Exec
 	if m == nil {
 		return nil, fmt.Errorf("unexpected statement %q", query)
 	}
+	if e.before != nil {
+		e.before(m[1], memql.CursorFromContext(ctx))
+	}
 	e.calls = append(e.calls, scriptedCall{
-		construct: m[1], internal: auth.OriginFromContext(ctx).IsInternal(),
+		construct: m[1], query: query, internal: auth.OriginFromContext(ctx).IsInternal(),
 		fresh: memql.FreshReadFromContext(ctx), rootsOnly: memql.RootsOnlyReadFromContext(ctx),
 	})
 	page, ok := e.pages[m[1]][memql.CursorFromContext(ctx)]
@@ -835,7 +954,7 @@ func TestAFailedPageLeavesTheWatermarkAtTheLastWrittenPage(t *testing.T) {
 
 	// A run that only reads rows older than the watermark -- the overlap, or
 	// a slower run on another replica finishing behind a faster one -- leaves
-	// the watermark where it was: it never moves back.
+	// the watermark where it was: a write never moves it back.
 	ahead := t3.Add(time.Hour)
 	walkFrom(t, db, ahead)
 	behindOnly := &scriptedEngine{pages: map[string]map[string]scriptedPage{
@@ -867,7 +986,7 @@ func TestEveryReadIsInternalFreshAndRootsOnly(t *testing.T) {
 	engine := &scriptedEngine{pages: map[string]map[string]scriptedPage{
 		"deliveriesWrittenSince": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:delivery:" + suffix + "-d", "status": "sent", "sentAt": stamp(at), "createdAt": at,
-			"requestId": "journey-" + enrollment + "-welcome",
+			"requestId": "journey-" + enrollment + "-welcome", "accountId": "v1:accounts:account:" + suffix + "-org",
 		}}}},
 		"consentEventsWrittenSince": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:consentEvent:" + suffix + "-c", "kind": "grant", "occurredAt": stamp(at), "createdAt": at,
@@ -875,6 +994,7 @@ func TestEveryReadIsInternalFreshAndRootsOnly(t *testing.T) {
 		}}}},
 		"journeyEnrollmentsByIds": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:journeyEnrollment:" + enrollment, "journeyId": "v1:campaigns:journey:" + suffix + "-j",
+			"accountId": "v1:accounts:account:" + suffix + "-org",
 		}}}},
 		"recipientAudiencesByIds": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:recipient:" + suffix + "-r", "audienceId": "v1:campaigns:audience:" + suffix + "-a",
@@ -944,7 +1064,7 @@ func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
 		"deliveriesWrittenSince":       {"id", "accountId", "campaignId", "emailRuleId", "requestId", "status", "skipReason", "sentAt", "providerStatus", "providerAt", "createdAt"},
 		"engagementEventsWrittenSince": {"id", "accountId", "campaignId", "deliveryId", "kind", "occurredAt", "createdAt"},
 		"consentEventsWrittenSince":    {"id", "accountId", "campaignId", "recipientId", "kind", "occurredAt", "createdAt"},
-		"journeyEnrollmentsByIds":      {"id", "journeyId"},
+		"journeyEnrollmentsByIds":      {"id", "accountId", "journeyId"},
 		"recipientAudiencesByIds":      {"id", "audienceId"},
 	}
 	for construct, fields := range read {

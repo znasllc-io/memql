@@ -51,8 +51,10 @@
 // # Attribution (D18)
 //
 // A rule's send carries its rule; a journey's send names its enrollment in its
-// request id, and the enrollment names the journey; a subscribe or an
-// unsubscribe names a recipient, whose audience it is counted under. The two
-// lookups run once per page through the engine, in batches. Opens and clicks
-// exist for campaign mail only, because only campaign mail is tracked.
+// request id, and the enrollment names the journey, which the send counts
+// under only when the enrollment is in the send's own organization -- a
+// request id is a string the sender chose (rollup.go, attribute); a subscribe
+// or an unsubscribe names a recipient, whose audience it is counted under.
+// The two lookups run once per page through the engine, in batches. Opens and
+// clicks exist for campaign mail only, because only campaign mail is tracked.
 package emailstats

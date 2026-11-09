@@ -48,18 +48,26 @@ import (
 //
 // # Never past the clock
 //
-// The opposite skew is worse, so the watermark is capped at the run's own
-// clock. A row dated AHEAD -- a writer whose clock runs fast, a version time
-// somebody got wrong -- would otherwise carry the watermark with it, every row
-// written afterwards with a true time would sort before the watermark less five
+// The opposite skew is worse, so the watermark is capped at the clock. A row
+// dated AHEAD -- a writer whose clock runs fast, a version time somebody got
+// wrong -- would otherwise carry the watermark with it, every row written
+// afterwards with a true time would sort before the watermark less five
 // minutes, and the source would stop being counted, silently, until the clock
 // caught up. Capped, the row is counted and read again on each run until the
-// clock passes it, which costs nothing. A watermark already ahead of the clock
-// -- which, with the cap, only a database restored from elsewhere or a run
-// from before it could leave -- cannot say how far the walk really read, so it
+// clock passes it, which costs nothing.
+//
+// The clock is the run's own `now` plus the time since the run began, so a run
+// long enough to overlap the next one judges by the time it reads, not the time
+// it started. A stored watermark further ahead of that clock than the overlap
+// absorbs -- which only a database restored from elsewhere, or a leader whose
+// clock ran fast, could leave -- cannot say how far the walk really read, so it
 // is dropped and the source is walked again from four hundred days back, as on
-// a first run; the keyed facts make the re-read count nothing twice
-// (TestARowDatedAheadOfTheClockDoesNotHoldTheWalk).
+// a first run; the keyed facts make the re-read count nothing twice. A
+// watermark less far ahead is kept: it is another run's, written a moment ago
+// by a node whose clock is a little ahead of this one, and dropping it would
+// send this run back over the whole history for nothing
+// (TestARowDatedAheadOfTheClockDoesNotHoldTheWalk,
+// TestAWatermarkAnotherRunMovedPastThisRunsStartIsKept).
 //
 // # Bounded runs that always advance
 //
@@ -86,10 +94,12 @@ import (
 // # Multi-node
 //
 // The run executes on whichever node holds the cron lead, and a lead that
-// moves mid-run can briefly leave two runs walking at once. Nothing here
-// needs a lock for that: the facts are keyed, and a watermark only ever moves
-// forward (GREATEST), so two runs over the same rows write each fact once and
-// leave the watermark where the further of them got.
+// moves mid-run can briefly leave two runs walking at once. Nothing here needs
+// a lock for that: the facts are keyed, and a watermark write never moves it
+// back (GREATEST), so two runs over the same rows write each fact once and
+// leave the watermark where the further of them got. The one write that does
+// lower a watermark is the drop above, of one further ahead of the clock than
+// any run could have written.
 
 // Engine is the narrow engine surface the rollup needs: the seam every Go
 // component in this tree uses to ask a named query.
@@ -112,7 +122,8 @@ type RollupReport struct {
 }
 
 const (
-	// watermarkOverlap is how far behind its watermark each walk starts; see
+	// watermarkOverlap is how far behind its watermark each walk starts, and
+	// how far ahead of the clock a watermark may be before it is dropped; see
 	// the file comment.
 	watermarkOverlap = 5 * time.Minute
 
@@ -141,6 +152,11 @@ const (
 	// statementTimeout bounds each statement on this package's own tables.
 	statementTimeout = "30s"
 )
+
+// retention is retentionDays as a duration: how long a fact is kept and how far
+// back a first walk starts. A variable so a test can put a first walk's start
+// where only its own rows are.
+var retention = retentionDays * 24 * time.Hour
 
 // walkPageSize is how many rows one page of a walk reads: the queries' own
 // `paginate 500`, the engine's per-query row cap. A variable so a test can
@@ -213,11 +229,15 @@ func runRollup(ctx context.Context, engine Engine, db *bun.DB, now time.Time) (R
 	// fresh read -- measured at 608 statements and 2.3 s for a page of 107
 	// deliveries, against 2 statements and 52 ms roots-only.
 	ctx = auth.ContextWithInternalOrigin(memql.ContextWithRootsOnlyRead(memql.ContextWithFreshRead(ctx)))
-	horizon := now.UTC().Add(-retentionDays * 24 * time.Hour)
+	// The clock the walk reads by: the run's now, moved on by the time the run
+	// has taken. See "Never past the clock" above.
+	began := time.Now()
+	clock := func() time.Time { return now.UTC().Add(time.Since(began)) }
+	horizon := now.UTC().Add(-retention)
 
 	var failures []error
 	for _, src := range sources {
-		w, err := walkSource(ctx, engine, db, src, now.UTC(), horizon)
+		w, err := walkSource(ctx, engine, db, src, clock, horizon)
 		rep.Rows[src.name] = w.rows
 		rep.Facts += w.facts
 		if w.behind {
@@ -243,16 +263,18 @@ type walked struct {
 
 // walkSource reads one source from its watermark, page by page, writing each
 // page's facts and moving the watermark past it before reading the next.
-func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, now, horizon time.Time) (walked, error) {
+func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, clock func() time.Time, horizon time.Time) (walked, error) {
 	var w walked
 	from, found, err := readWatermark(ctx, db, src.name)
 	if err != nil {
 		return w, err
 	}
-	// A watermark ahead of the clock is dropped, and the walk starts over as
-	// a first run: see "Never past the clock" above.
-	if found && from.After(now) {
-		if err := dropWatermarkAhead(ctx, db, src.name, now); err != nil {
+	// A watermark further ahead of the clock -- as it reads now, at the start
+	// of this source's walk -- than the overlap absorbs is dropped, and the
+	// walk starts over as a first run; one less far ahead is another run's
+	// and is kept. See "Never past the clock" above.
+	if tolerance := clock().Add(watermarkOverlap); found && from.After(tolerance) {
+		if err := dropWatermarkAhead(ctx, db, src.name, tolerance); err != nil {
 			return w, err
 		}
 		from, found = time.Time{}, false
@@ -265,7 +287,7 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, now,
 			since = s
 		}
 	}
-	query := fmt.Sprintf(src.query, langparser.QuoteString(since.UTC().Format(time.RFC3339Nano)), walkPageSize)
+	query := fmt.Sprintf(src.query, quoteInstant(since), walkPageSize)
 
 	cursor := ""
 	for counted, read := 0, 0; ; {
@@ -303,8 +325,9 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, now,
 		if err := attribute(ctx, engine, facts, refs.enrollmentOf, refs.audienceOf); err != nil {
 			return w, err
 		}
+		// Capped at the clock as it reads now: see "Never past the clock".
 		through := newest
-		if through.After(now) {
+		if now := clock(); through.After(now) {
 			through = now
 		}
 		n, err := recordPage(ctx, db, src.name, facts, through)
@@ -332,21 +355,37 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, now,
 	}
 }
 
+// quoteInstant is an instant as a query argument.
+func quoteInstant(t time.Time) string {
+	return langparser.QuoteString(t.UTC().Format(time.RFC3339Nano))
+}
+
 // attribute fills JourneyID and AudienceID (D18). enrollmentOf names, by a
 // delivery fact's SourceID, the journey enrollment the delivery's request id
 // names; audienceOf names, by a subscription change's SourceID, the recipient
 // it is about. Both are read through the engine in batches -- two lookups per
 // page at most, each of at most lookupBatch ids -- under the walk's context.
 //
+// A JOURNEY ONLY IN ITS OWN ORGANIZATION. A request id is a string the sender
+// chose -- an event automation names its own -- and the lookup runs as the
+// cluster, so a request id spelling another organization's enrollment would
+// otherwise count one organization's send under another's journey. A send is
+// attributed to the enrollment's journey only when the enrollment's
+// organization is the delivery's (TestAJourneySendIsAttributedOnlyInItsOwnOrganization).
+// A subscription change is not checked the same way because its recipient is
+// not a string anybody chose: it is a declared reference, which the campaigns
+// write path checks against the event's own organization when the event is
+// written.
+//
 // A record the lookup does not find leaves its facts unattributed: a send
 // whose request names no enrollment still counts in its organization's
 // totals, under no journey.
 func attribute(ctx context.Context, engine Engine, facts []Fact, enrollmentOf, audienceOf map[string]string) error {
-	journeys, err := lookup(ctx, engine, journeyLookup, enrollmentOf, "journeyId")
+	journeys, err := lookup(ctx, engine, journeyLookup, enrollmentOf)
 	if err != nil {
 		return fmt.Errorf("read the journeys of the page's journey sends: %w", err)
 	}
-	audiences, err := lookup(ctx, engine, audienceLookup, audienceOf, "audienceId")
+	audiences, err := lookup(ctx, engine, audienceLookup, audienceOf)
 	if err != nil {
 		return fmt.Errorf("read the audiences of the page's subscription changes: %w", err)
 	}
@@ -354,22 +393,29 @@ func attribute(ctx context.Context, engine Engine, facts []Fact, enrollmentOf, a
 		f := &facts[i]
 		switch f.Kind {
 		case kindSent, kindDelivered, kindUndelivered, kindFailed, kindSkipped, kindSuppressed:
-			if enrollment, ok := enrollmentOf[f.SourceID]; ok {
-				f.JourneyID = journeys[enrollment]
+			enrollmentID, named := enrollmentOf[f.SourceID]
+			enrollment, found := journeys[enrollmentID]
+			if !named || !found {
+				continue
+			}
+			if account := bareText(enrollment, "accountId"); account != "" && account == f.AccountID {
+				f.JourneyID = bareText(enrollment, "journeyId")
 			}
 		case kindSubscribe, kindUnsubscribe:
-			if recipient, ok := audienceOf[f.SourceID]; ok {
-				f.AudienceID = audiences[recipient]
+			recipientID, named := audienceOf[f.SourceID]
+			recipient, found := audiences[recipientID]
+			if named && found {
+				f.AudienceID = bareText(recipient, "audienceId")
 			}
 		}
 	}
 	return nil
 }
 
-// lookup answers field for each distinct record the refs name, keyed by the
+// lookup answers the row of each distinct record the refs name, keyed by the
 // record's bare id.
-func lookup(ctx context.Context, engine Engine, format string, refs map[string]string, field string) (map[string]string, error) {
-	out := map[string]string{}
+func lookup(ctx context.Context, engine Engine, format string, refs map[string]string) (map[string]map[string]any, error) {
+	out := map[string]map[string]any{}
 	ids := lookupIDs(refs)
 	for start := 0; start < len(ids); start += lookupBatch {
 		batch := ids[start:min(start+lookupBatch, len(ids))]
@@ -393,7 +439,7 @@ func lookup(ctx context.Context, engine Engine, format string, refs map[string]s
 			}
 			for _, row := range memql.MaterializeRows(res) {
 				if id := bareText(row, "id"); id != "" {
-					out[id] = bareText(row, field)
+					out[id] = row
 				}
 			}
 			if next == "" {
@@ -442,8 +488,10 @@ type factRow struct {
 }
 
 // recordPage writes one page's facts and moves the source's watermark to
-// through, the page's newest row capped at the clock, in one transaction, and
-// answers how many facts were new. The watermark only ever moves forward.
+// through -- the page's newest row, capped at the clock -- in one transaction,
+// and answers how many facts were new. The write never moves the watermark
+// back (GREATEST): a run finishing behind a faster one leaves it where the
+// faster one got. Only dropWatermarkAhead lowers one.
 func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through time.Time) (int, error) {
 	var inserted int64
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
@@ -491,11 +539,12 @@ func readWatermark(ctx context.Context, db *bun.DB, source string) (time.Time, b
 	return through, true, nil
 }
 
-// dropWatermarkAhead removes a source's watermark when it is ahead of now. The
+// dropWatermarkAhead removes a source's watermark when it is past tolerance,
+// the clock plus the overlap -- the one write that lowers a watermark. The
 // condition is in the statement, so a watermark another run has just written
 // at a true time is kept.
-func dropWatermarkAhead(ctx context.Context, db *bun.DB, source string, now time.Time) error {
-	if _, err := db.NewRaw(`DELETE FROM email_stat_watermark WHERE source = ? AND through > ?`, source, now.UTC()).Exec(ctx); err != nil {
+func dropWatermarkAhead(ctx context.Context, db *bun.DB, source string, tolerance time.Time) error {
+	if _, err := db.NewRaw(`DELETE FROM email_stat_watermark WHERE source = ? AND through > ?`, source, tolerance.UTC()).Exec(ctx); err != nil {
 		return fmt.Errorf("drop a watermark ahead of the clock: %w", err)
 	}
 	return nil

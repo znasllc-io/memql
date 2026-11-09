@@ -567,11 +567,13 @@ shape consentEvent consentStatRef {
   row.createdAt
 }
 
-/// An enrollment's journey and nothing else, for counting a journey's sends under it (the 2026-11-08
-/// statistics design, D18).
+/// An enrollment's journey and organization and nothing else, for counting a journey's sends under it
+/// (the 2026-11-08 statistics design, D18). The organization is there so a send is counted under a
+/// journey only when the two belong to one organization: a request id is a string a caller chose.
 @row
 shape journeyEnrollment enrollmentJourneyRef {
   row.id
+  accountId
   journeyId
 }
 

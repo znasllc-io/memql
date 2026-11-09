@@ -366,7 +366,7 @@ func (e *fakeEngine) Execute(_ context.Context, query string) (*memql.ExecuteRes
 		switch m[1] {
 		case "journeyEnrollmentsByIds":
 			if journey, ok := e.journeys[id]; ok {
-				rows = append(rows, map[string]any{"id": "v1:campaigns:journeyEnrollment:" + id, "journeyId": "v1:campaigns:journey:" + journey})
+				rows = append(rows, map[string]any{"id": "v1:campaigns:journeyEnrollment:" + id, "journeyId": "v1:campaigns:journey:" + journey, "accountId": "v1:accounts:account:org-1"})
 			}
 		case "recipientAudiencesByIds":
 			if audience, ok := e.audiences[id]; ok {
@@ -389,8 +389,10 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 		delivery := fmt.Sprintf("d%04d", i)
 		refs.enrollmentOf[delivery] = enrollment
 		engine.journeys[enrollment] = fmt.Sprintf("journey-%d", i%3)
-		facts = append(facts, Fact{Kind: kindSent, SourceID: delivery}, Fact{Kind: kindDelivered, SourceID: delivery})
+		facts = append(facts, Fact{Kind: kindSent, SourceID: delivery, AccountID: "org-1"}, Fact{Kind: kindDelivered, SourceID: delivery, AccountID: "org-1"})
 	}
+	refs.enrollmentOf["d-other-org"] = fmt.Sprintf("%064x", 7)
+	refs.enrollmentOf["d-no-org"] = fmt.Sprintf("%064x", 8)
 	refs.audienceOf["ce-grant"] = "rcp-1"
 	refs.audienceOf["ce-withdraw"] = "rcp-2"
 	refs.audienceOf["ce-bounce"] = "rcp-1"
@@ -400,7 +402,11 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 		Fact{Kind: kindSubscribe, SourceID: "ce-grant"},
 		Fact{Kind: kindUnsubscribe, SourceID: "ce-withdraw"},
 		Fact{Kind: kindBounce, SourceID: "ce-bounce"},
-		Fact{Kind: kindSent, SourceID: "d-no-journey"},
+		Fact{Kind: kindSent, SourceID: "d-no-journey", AccountID: "org-1"},
+		// A request id naming another organization's enrollment, and a send that
+		// belongs to no organization at all: neither is the journey's.
+		Fact{Kind: kindSent, SourceID: "d-other-org", AccountID: "org-2"},
+		Fact{Kind: kindSent, SourceID: "d-no-org"},
 		Fact{Kind: kindSubscribe, SourceID: "ce-no-recipient"},
 	)
 
@@ -437,6 +443,11 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 	}
 	if f := got[kindBounce+"|ce-bounce"]; f.AudienceID != "" {
 		t.Errorf("a bounce was given the audience %q; only a subscription change is attributed to one", f.AudienceID)
+	}
+	for _, source := range []string{"d-other-org", "d-no-org"} {
+		if f := got[kindSent+"|"+source]; f.JourneyID != "" {
+			t.Errorf("%s was attributed to journey %q, which belongs to another organization", source, f.JourneyID)
+		}
 	}
 	if f := got[kindSent+"|d-no-journey"]; f.JourneyID != "" {
 		t.Errorf("a send with no journey was given the journey %q", f.JourneyID)

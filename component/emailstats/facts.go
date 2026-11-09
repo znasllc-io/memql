@@ -29,6 +29,12 @@ import (
 // and a fact once written is never retracted, which is what lets every write
 // be a plain ON CONFLICT DO NOTHING.
 //
+// The provider's verdict has the same cost. A verdict that changes between two
+// readings -- expanded, then bounced -- leaves both a delivered and an
+// undelivered fact for the one send, so delivered and undelivered are not a
+// split of the sends: their sum can exceed them, and neither is the other's
+// complement. A reading that sees only the later verdict records only that.
+//
 // # Ids and days
 //
 // The engine answers an in-process caller with canonical ids

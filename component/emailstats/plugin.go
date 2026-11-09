@@ -49,14 +49,16 @@ type Integration struct {
 	bunDB  func() *bun.DB
 	logger *slog.Logger
 
-	// now is the rollup's clock; nil is time.Now. A field so a test runs the
-	// builtin at an instant of its own choosing.
+	// now is the rollup's clock at the start of a run, which the walk moves on
+	// by the time the run has taken; nil is time.Now. A field so a test runs
+	// the builtin at an instant of its own choosing.
 	now func() time.Time
 
 	// rollupRunning keeps one rollup per process: a run slower than the
 	// five-minute schedule must not have the next one queue up behind it and
-	// walk the same pages again. Two replicas need no such guard; see
-	// "Multi-node" in rollup.go.
+	// walk the same pages again. Two replicas need no such guard: the facts are
+	// keyed, and no watermark write moves a watermark back -- "Multi-node" in
+	// rollup.go, which also names the one write that lowers one.
 	rollupRunning atomic.Bool
 }
 
