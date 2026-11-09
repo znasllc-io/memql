@@ -216,8 +216,23 @@ func TestACallerBelowTheConstructFloorIsRefusedNotEmptied(t *testing.T) {
 // A post-filter-only implementation fills the scan window with rows the gate
 // then drops; a short page is read as EXHAUSTION by the cursor logic, the
 // cursor is withdrawn, and everything past it becomes unreachable. This seeds
-// a run of rows the reader must NOT see, followed by one they must, and
-// requires the visible one to come back.
+// a wall of rows the reader must NOT see, followed by one they must, and
+// requires paging to reach the visible one.
+//
+// THE WALL IS DEEPER THAN A PAGE, which is what lets this test fail. It used
+// to read the unpaginated query, whose page is MaxResults (500 rows), behind
+// a 25-row wall: a post-filter-only gate dropped 25 of 500 rows, still filled
+// most of the page, and the test passed against exactly the implementation it
+// exists to refuse. It did so from 2026-09-22 (87138fb3f0, the organization
+// boundary) to 2026-11-09, while no operator's rank term reached SQL. A test
+// database holding a few hundred leftover organizations exposed it: the wall
+// then fell inside the first 500-row window, the gate shortened that page,
+// and the admin's own account became unreachable.
+//
+// AND IT PAGES until the row arrives or the cursor ends. With the term pushed
+// down, earlier runs' accounts that this admin MAY see can still sort ahead of
+// this run's row on a reused database, so one page would measure how crowded
+// the database is rather than the trap.
 func TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	suffix := uniqueSuffix("rankpage4834")
@@ -227,27 +242,59 @@ func TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion(t *testing.T) {
 	seedPrincipal(t, eng, admin, auth.RoleAdmin)
 	seedPrincipal(t, eng, owner, auth.RoleOwner)
 
+	// An explicit page keeps the wall deeper than a page whatever the engine's
+	// configured MaxResults is, and keeps the seeding cheap.
+	const pageSize = 10
+	const wall = 25
+
 	// A wall of owner-owned rows the admin may not see. Named so they sort
 	// BEFORE the visible one under the query's `sort "name", "asc"`, which is
-	// what puts them in the first scan window.
-	for i := 0; i < 25; i++ {
-		seedAccountOwnedBy(t, eng, owner, auth.RoleOwner,
-			fmt.Sprintf("v1:accounts:account:aa%02d-%s", i, suffix),
-			fmt.Sprintf("AAA hidden %02d", i))
+	// what puts them in the first scan windows.
+	hidden := map[string]bool{}
+	for i := 0; i < wall; i++ {
+		id := fmt.Sprintf("v1:accounts:account:aa%02d-%s", i, suffix)
+		seedAccountOwnedBy(t, eng, owner, auth.RoleOwner, id, fmt.Sprintf("AAA hidden %02d", i))
+		hidden[BareShortId(id)] = true
 	}
-	visible := "v1:accounts:account:zz-" + suffix
-	seedAccountOwnedBy(t, eng, admin, auth.RoleAdmin, visible, "ZZZ visible")
+	// Directly behind the wall, so the first page past it must carry it.
+	visible := "v1:accounts:account:ab-" + suffix
+	seedAccountOwnedBy(t, eng, admin, auth.RoleAdmin, visible, "AAB visible")
 
-	got := accountsVisibleTo(t, eng, admin, auth.RoleAdmin)
-	if got == nil {
-		t.Fatal("the admin's read was refused")
+	call := fmt.Sprintf(`paginate(query clientAccountsAll(includeArchived: true), %d)`, pageSize)
+	ctx := rankActorCtx(admin, auth.RoleAdmin)
+	cursor, pages, rows, reached := "", 0, 0, false
+	for !reached {
+		// A bound, not an expectation: the row sorts directly behind the wall.
+		if pages == 500 {
+			t.Fatalf("paged %d times without reaching the admin's own account: the cursor is not "+
+				"advancing, or %d accounts this admin may read sort ahead of it", pages, pages*pageSize)
+		}
+		res, err := eng.Execute(ContextWithCursor(ctx, cursor), call)
+		if err != nil {
+			t.Fatalf("page %d of the admin's read: %v", pages+1, err)
+		}
+		pages++
+		for _, n := range res.Bundle.GetNodes() {
+			rows++
+			id := BareShortId(n.GetId())
+			if hidden[id] {
+				t.Fatalf("the admin read %s, an account owned above their rank", id)
+			}
+			if id == BareShortId(visible) {
+				reached = true
+			}
+		}
+		if cursor = res.GetMeta().Cursor; cursor == "" {
+			break
+		}
 	}
-	if !got[BareShortId(visible)] {
-		t.Fatalf("the admin's OWN account did not come back behind 25 rows they may not see.\n"+
-			"That is the pagination trap executor_filter.go documents: if the rank term were "+
-			"post-filtered rather than pushed down, the scan window would fill with the hidden "+
-			"rows, the short page would read as exhaustion, and everything past it -- including "+
-			"this row -- becomes unreachable. got %d row(s)", len(got))
+	if !reached {
+		t.Fatalf("the admin's OWN account did not come back behind %d rows they may not see: "+
+			"the read ended after %d page(s) of %d holding %d row(s).\n"+
+			"That is the pagination trap executor_filter.go documents: the rank term was "+
+			"post-filtered rather than pushed down, the scan window filled with the hidden rows, "+
+			"the short page read as exhaustion, and everything past it -- including this row -- "+
+			"became unreachable.", wall, pages, pageSize, rows)
 	}
 }
 

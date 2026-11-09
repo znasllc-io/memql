@@ -63,10 +63,10 @@ const (
 
 // AccountScopeExpression is the symbolic account-grant node.
 //
-// It carries the FIELD and nothing else. Whether that field holds one account
-// id or a list of them is a property of the CONCEPT, and the lowering answers
-// both with one jsonb expression, so there is nothing here to keep in step
-// with the declaration. (RankScopeExpression carries `Strict` because the read
+// It carries the FIELD and how to read it, never a resolved account. Whether
+// that field holds one account id or a list of them is a property of the
+// CONCEPT, and the lowering answers both with one jsonb expression, so there
+// is nothing here to keep in step with the declaration. (RankScopeExpression carries `Strict` because the read
 // and write rules genuinely differ; here they do not -- design D4 is that a
 // member who may read a tied row may write it if their role holds the verb.)
 type AccountScopeExpression struct {
@@ -77,6 +77,14 @@ type AccountScopeExpression struct {
 	RowID        bool
 	AllowUntied  bool
 	Resource     string
+	// NotOperator makes the node a fact about the CALLER rather than a row
+	// term: it lowers to true for a caller who is not an organization
+	// operator and to false for one who is, and the fields above are
+	// ignored. v1:accounts:account ORs it onto its declared tier so the tier
+	// binds operators only (enforceRowAuthzOnPlan). It asks
+	// organizationOperator, the predicate the row gate branches on, so the
+	// SQL half and the gate cannot disagree about who is an operator.
+	NotOperator bool
 }
 
 func (*AccountScopeExpression) isExpressionNode() {}
@@ -622,7 +630,13 @@ func treeHasAccountScope(expr ExpressionNode) bool {
 //	empty scope        -> false (matches nothing)
 //	a set of accounts  -> the field contains any of them
 //	every account      -> the field is present and non-empty
+//
+// A NotOperator node is not a row term and answers its caller constant
+// before any of them.
 func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScopeExpression) ExpressionNode {
+	if n.NotOperator {
+		return &constantBoolExpression{value: !organizationOperator(ctx)}
+	}
 	field := strings.TrimSpace(n.Field)
 	if n.Organization && organizationOperator(ctx) {
 		return &constantBoolExpression{value: e.GlobalDataCapable(ctx, auth.VerbRead)}

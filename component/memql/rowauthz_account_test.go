@@ -271,6 +271,80 @@ func TestAccountScopeLowersToTheThreeCases(t *testing.T) {
 	}
 }
 
+// v1:accounts:account's injected predicate must keep its declared tier for an
+// organization operator, because the row gate applies that tier to one
+// (rowAuthzAdmitsMode). From 87138fb3f0 the organization node REPLACED the
+// tier, so an operator's read carried no rank term into SQL and the gate
+// dropped rows after the scan window was cut: the short page read as
+// exhaustion (TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion is the
+// end-to-end case; this one needs no database, so `make test` sees it too).
+func TestAnAccountsReadCarriesTheTierForOperatorsOnly(t *testing.T) {
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("LoadUnifiedConcepts: %v", err)
+	}
+	if decl := rowAuthzDeclFor(conceptAccountsAccount); decl == nil || !decl.RankVisible {
+		t.Fatalf("%s resolved to %+v; this test is about its rank tier", conceptAccountsAccount, decl)
+	}
+	plan := &QueryPlan{Root: &constantBoolExpression{value: true}, BoundConcept: conceptAccountsAccount}
+	if err := enforceRowAuthzOnPlan(plan); err != nil {
+		t.Fatalf("enforceRowAuthzOnPlan: %v", err)
+	}
+	if !treeHasAccountScope(plan.Root) {
+		t.Fatal("the accounts read lost its organization boundary")
+	}
+	if !treeHasRankScope(plan.Root) {
+		t.Fatal("the accounts read carries no rank term, so an operator's SQL reads rows the row gate " +
+			"then drops: a short page reads as exhaustion and every account past it is unreachable")
+	}
+	if !holdsOperatorArmBesideTier(plan.Root) {
+		t.Fatal("the rank-bearing tier is not OR-ed with the NotOperator arm. Without the arm it " +
+			"narrows a member's read by rank, which the row gate never does to a member")
+	}
+
+	// The arm answers from organizationOperator, the predicate the row gate
+	// branches on. Both answers must occur, or the table measures one side only.
+	eng := &MemQLEngine{}
+	arm := &AccountScopeExpression{NotOperator: true}
+	seen := map[bool]bool{}
+	for _, access := range []*auth.AccessContext{
+		{UserId: "u", Role: auth.RoleAdmin},
+		{UserId: "u", Role: auth.RoleDeveloper},
+		{UserId: "u", Role: auth.RoleOwner},
+		{UserId: "u", Role: auth.RoleWriter},
+		{UserId: "u", Role: auth.RoleReader},
+		auth.MaintenanceActor("seedSelfAccount"),
+	} {
+		ctx := auth.ContextWithAccess(context.Background(), access)
+		operator := organizationOperator(ctx)
+		seen[operator] = true
+		lowered, ok := eng.accountScopeComparison(ctx, arm).(*constantBoolExpression)
+		if !ok {
+			t.Fatalf("%s: the NotOperator arm lowered to %T, want a constant", access.Role, eng.accountScopeComparison(ctx, arm))
+		}
+		if lowered.value == operator {
+			t.Fatalf("%s (operator=%v): the NotOperator arm lowered to %v", access.Role, operator, lowered.value)
+		}
+	}
+	if !seen[true] || !seen[false] {
+		t.Fatalf("the cases cover operator=%v only", seen)
+	}
+}
+
+// holdsOperatorArmBesideTier reports whether a tree holds a disjunction whose
+// one side is the NotOperator arm and whose other side carries the rank term.
+func holdsOperatorArmBesideTier(expr ExpressionNode) bool {
+	n, ok := expr.(*LogicalExpression)
+	if !ok {
+		return false
+	}
+	if n.Op == LogicalOr {
+		if arm, isArm := n.Right.(*AccountScopeExpression); isArm && arm.NotOperator && treeHasRankScope(n.Left) {
+			return true
+		}
+	}
+	return holdsOperatorArmBesideTier(n.Left) || holdsOperatorArmBesideTier(n.Right)
+}
+
 func TestAccountScopeSqlAndPostFilterAgree(t *testing.T) {
 	// They must, and the failure if they do not is quiet: a paginated read
 	// whose SQL admitted a row and whose post-filter dropped it looks

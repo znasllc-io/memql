@@ -273,7 +273,29 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 	if organizationOwnedConcept(conceptName) {
 		predicate = &LogicalExpression{Op: LogicalAnd, Left: predicate, Right: &AccountScopeExpression{Field: "accountId", Organization: true, AllowUntied: true, Resource: organizationApp(conceptName)}}
 	} else if conceptName == conceptAccountsAccount {
-		predicate = &AccountScopeExpression{Field: "id", Organization: true, RowID: true}
+		// THE DECLARED TIER STAYS IN THE PREDICATE, FOR OPERATORS. The row
+		// gate decides an account two ways (rowAuthzAdmitsMode): a member's
+		// by the organization boundary alone, an organization operator's
+		// (admin and up) by this tier -- owner, rank, unowned floor, cluster
+		// owner. The account node answers the first and lowers to a constant
+		// for an operator, so when it REPLACED the tier (87138fb3f0) no
+		// operator's rank term reached SQL. The gate then dropped
+		// higher-ranked rows after the scan window was cut, a short page read
+		// as exhaustion, and an admin lost every account past the first page
+		// whose window held one, their own included. The NotOperator arm is
+		// true for every non-operator, so the tier binds operators only and a
+		// member keeps the boundary's answer. Regressions:
+		// TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion (db) and
+		// TestAnAccountsReadCarriesTheTierForOperatorsOnly.
+		predicate = &LogicalExpression{
+			Op:   LogicalAnd,
+			Left: &AccountScopeExpression{Field: "id", Organization: true, RowID: true},
+			Right: &LogicalExpression{
+				Op:    LogicalOr,
+				Left:  predicate,
+				Right: &AccountScopeExpression{NotOperator: true},
+			},
+		}
 	}
 	stampRowAuthzConcept(predicate, conceptName)
 	plan.Root = &LogicalExpression{Op: LogicalAnd, Left: plan.Root, Right: predicate}
