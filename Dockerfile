@@ -40,7 +40,7 @@ ARG SPA_DIST_STAGE=spa-skip
 
 # Source topology is an ignored verification output, not an image input.
 # Native go-checks generates it strictly; role images need only platform.graph.
-FROM golang:1.27.3@sha256:957861185dbf29d93668ace41e011d091c6e779953d47f0316ef2cc58e28fe2b AS builder
+FROM golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS builder
 
 WORKDIR /app
 
@@ -394,7 +394,7 @@ FROM ${SPA_DIST_STAGE} AS spa-dist
 # go and read. The engine runs as root, so a build running as root could read
 # /proc/1/environ and take every secret the pod holds. It runs as uid 10001
 # instead, which cannot.
-FROM debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS workbench-runtime
+FROM debian:12-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS workbench-runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

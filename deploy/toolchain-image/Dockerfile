@@ -68,7 +68,7 @@
 # Go: the official 1.27.3 distribution. Only /usr/local/go is taken; its
 # binaries are statically linked, so they run on the bookworm base below
 # whatever Debian release the golang image itself is built on.
-FROM golang:1.27.3@sha256:957861185dbf29d93668ace41e011d091c6e779953d47f0316ef2cc58e28fe2b AS go-dist
+FROM golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS go-dist
 
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.
@@ -107,7 +107,7 @@ FROM docker:29.9.1-cli@sha256:6fae2214c3121a28d5aa639d09032f61310b7c9c75ffbad102
 # measured from the downloaded assets and matching the digests GitHub's
 # release API reports for them. Bumping PROTOC_VERSION means both: a stale
 # checksum fails `sha256sum -c` below, loudly.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS protoc-dist
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS protoc-dist
 
 ARG PROTOC_VERSION=33.4
 ARG PROTOC_SHA256_AMD64=c0040ea9aef08fdeb2c74ca609b18d5fdbfc44ea0042fcfbfb38860d35f7dd66
@@ -133,7 +133,7 @@ RUN set -eux; \
 # of downloading ~120 MB into every fresh checkout (memql#5816). Like protoc,
 # download on the build platform and verify the target architecture's release
 # asset against GitHub's published digest; no target execution is needed here.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS tailwind-dist
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS tailwind-dist
 
 ARG TAILWIND_VERSION=v4.1.11
 ARG TAILWIND_SHA256_AMD64=64805b84af4292e043ea6f86d242f191c0ac75359c1a498455dfe6c642afdbab
@@ -156,7 +156,7 @@ RUN set -eux; \
 # ------------------------------------------------------------------------------
 # The image.
 # ------------------------------------------------------------------------------
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 
 ARG TARGETARCH
 
