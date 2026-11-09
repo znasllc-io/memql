@@ -110,7 +110,13 @@ function optionsFor(access: ProfileAccess | null, accounts: readonly AccountRow[
  * that list has answered yet (see the comment at the top of this file).
  */
 export function clientScopeFor(access: ProfileAccess | null, accounts: readonly AccountRow[], stored: string, accountsAnswered = true): Omit<ClientScope, "set"> {
-  if (access?.everyAccount === true && !accountsAnswered) {
+  // Until it is known who this is (the session's access has not landed), or,
+  // for staff, which clients there are, the stored choice stands with no
+  // control, so the page's first read already asks for it rather than for
+  // everything and then again. Reads narrow on the server, so a choice that
+  // turns out stale answers nothing rather than another client's figures, and
+  // it becomes "" the moment the options are known.
+  if (access === null || (access.everyAccount === true && !accountsAnswered)) {
     return { showControl: false, value: stored, options: [], accountIds: stored === ALL ? [] : [stored] };
   }
   const options = optionsFor(access, accounts);

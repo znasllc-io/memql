@@ -211,6 +211,13 @@ describe("before the account list has answered", () => {
     expect(result.current).toMatchObject({ value: "", accountIds: [] });
   });
 
+  it("keeps the stored client while it is not yet known who this is", () => {
+    // The session's access has not landed: the first read still asks for the
+    // stored choice, not for everything and then again.
+    expect(clientScopeFor(null, ACCOUNTS, "acct-b")).toEqual({ showControl: false, value: "acct-b", options: [], accountIds: ["acct-b"] });
+    expect(clientScopeFor(null, ACCOUNTS, "")).toEqual({ showControl: false, value: "", options: [], accountIds: [] });
+  });
+
   it("is the stored choice, or All, with no control, for the pure rule too", () => {
     expect(clientScopeFor(STAFF, [], "acct-b", false)).toEqual({ showControl: false, value: "acct-b", options: [], accountIds: ["acct-b"] });
     expect(clientScopeFor(STAFF, [], "", false)).toEqual({ showControl: false, value: "", options: [], accountIds: [] });
