@@ -192,6 +192,9 @@ export function withSession(
     role?: string;
     /** The groups MyAccess reports for this caller (epic memql#5165, H). */
     groups?: { id: string; name: string; kind: string; accountId: string; accountName: string }[];
+    /** The organization scope the server resolved for this caller: every organization (staff), or these. */
+    everyAccount?: boolean;
+    accountIds?: string[];
   } = {},
 ) {
   const config: OsRuntimeConfig = { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" };
@@ -208,6 +211,9 @@ export function withSession(
           // type states: a harness constructing a session by hand is not
           // making a claim about anybody's groups.
           ...(overrides.groups === undefined ? {} : { groups: overrides.groups }),
+          // Absent unless asked for, for the same reason: absence grants nothing.
+          ...(overrides.everyAccount === undefined ? {} : { everyAccount: overrides.everyAccount }),
+          ...(overrides.accountIds === undefined ? {} : { accountIds: overrides.accountIds }),
         },
         config,
       }}

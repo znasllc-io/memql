@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { useState, type ReactNode } from "react";
 
+import { ScopeControl } from "../src/apps/accounts/ScopeControl";
 import { Head, Subhead } from "../src/kit";
 import { Overview } from "../src/kit/Overview";
 import { absent, figureOf } from "../src/kit/measure";
@@ -120,6 +121,16 @@ function Page() {
 
 function OverviewView() {
   const [selected, setSelected] = useState("sent");
+  const [client, setClient] = useState("");
+  // A staff member's scope (spec D13), built here rather than read: the
+  // control draws whatever scope it is handed.
+  const scope = {
+    showControl: true,
+    value: client,
+    options: [{ value: "", label: "All clients" }, { value: "a", label: "First client" }, { value: "b", label: "Second client" }],
+    accountIds: client === "" ? [] : [client],
+    set: setClient,
+  };
   const figures: StatFigure[] = [
     { id: "sent", label: "Sent", figure: figureOf(48_120), previous: figureOf(41_009), chartable: true },
     { id: "openRate", label: "Open rate", figure: figureOf(0.42), previous: figureOf(0.4), format: percent, chartable: true },
@@ -129,7 +140,7 @@ function OverviewView() {
   ];
   return <Overview
     figures={<StatFigures label="Email figures" figures={figures} selected={selected} onSelect={setSelected} />}
-    actions={<PeriodControl id="qa-email-period" value="30d" periods={["7d", "30d", "90d", "12m"]} onChange={() => {}} />}
+    actions={<><ScopeControl id="qa-scope" scope={scope} /><PeriodControl id="qa-email-period" value="30d" periods={["7d", "30d", "90d", "12m"]} onChange={() => {}} /></>}
   >
     <TimeChart label="Sent" bucket="day" points={SERIES["views"]!.points} previous={SERIES["views"]!.previous} format={count} />
     <RankedList title="Top campaigns" rows={CAMPAIGNS} />
