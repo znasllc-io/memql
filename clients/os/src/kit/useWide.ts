@@ -28,3 +28,30 @@ export function useWide(ref: RefObject<HTMLElement | null>, min: number): boolea
   }, [ref, min]);
   return wide;
 }
+
+/**
+ * An element's width in CSS pixels, kept current: `useWide`'s measurement for
+ * a layout that needs the number rather than a threshold (how many time labels
+ * a chart's axis has room for).
+ *
+ * NULL UNTIL SOMETHING HAS BEEN LAID OUT. A width of zero is a test's DOM or a
+ * pane nobody can see yet, not a measurement, so it reads as null too and the
+ * caller falls back to the size it would draw at.
+ */
+export function useWidth(ref: RefObject<HTMLElement | null>): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const read = () => {
+      const measured = el.getBoundingClientRect().width;
+      setWidth(measured > 0 ? measured : null);
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}

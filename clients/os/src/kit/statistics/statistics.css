@@ -1,0 +1,67 @@
+/*
+ * THE STATISTICS LANGUAGE (kit/statistics): one time-series chart, one figure
+ * row and one ranked list, imported by the components that draw them.
+ *
+ * Every colour is a theme token, so every built-in theme draws these in light
+ * and dark without a rule of its own, and nothing here defines a token. The
+ * data is the only loud thing: one accent for the line, the selected figure
+ * and the hover dot; the soft accent for the fill under the line and the bars
+ * behind a ranked row; muted ink for the previous period, the axes and every
+ * label; hairline rules for the grid.
+ */
+
+/* ---- TimeChart -------------------------------------------------------- */
+
+.os-time-chart { display: grid; gap: 10px; min-width: 0; margin: 0; }
+
+/* The readout and the legend share one line above the plot, which keeps its
+ * height while empty so nothing moves when a bucket is read. */
+.os-time-chart-head { display: flex; align-items: center; min-width: 0; min-height: 18px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 18px; }
+.os-time-chart-readout,
+.os-time-chart-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; min-width: 0; margin: 0; font-variant-numeric: tabular-nums; }
+.os-time-chart-when { color: var(--os-ink); }
+.os-time-chart-readout strong { color: var(--os-ink); font-weight: 600; }
+.os-time-chart-now,
+.os-time-chart-then,
+.os-time-chart-legend > span { display: inline-flex; align-items: center; white-space: nowrap; }
+.os-time-chart-then strong { margin-left: 4px; }
+/* A series' key is a short stroke in its line's own style, never a box. */
+.os-time-chart-swatch { flex: none; width: 16px; height: 2px; margin-right: 6px; border-radius: 1px; background: var(--os-accent); }
+.os-time-chart-swatch[data-series="previous"] { background: repeating-linear-gradient(90deg, var(--os-muted) 0 4px, transparent 4px 8px); }
+
+/* The value axis is a gutter the width of its longest label; each label
+ * centres on its gridline. The time axis sits under the plot only. */
+.os-time-chart-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; }
+.os-time-chart-values { display: grid; align-content: space-between; justify-items: end; color: var(--os-muted); font-size: var(--os-text-xs); line-height: 1; font-variant-numeric: tabular-nums; }
+.os-time-chart-values > span:first-child { transform: translateY(-50%); }
+.os-time-chart-values > span:last-child { transform: translateY(50%); }
+
+.os-time-chart-plot { position: relative; min-width: 0; touch-action: pan-y; }
+.os-time-chart-plot:focus { outline: none; }
+.os-time-chart-plot:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 4px; }
+.os-time-chart-plot > svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+.os-time-chart-grid { stroke: var(--os-line); stroke-width: 1; }
+.os-time-chart-area { fill: var(--os-accent-soft); stroke: none; }
+.os-time-chart-line { fill: none; stroke: var(--os-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.os-time-chart-previous { fill: none; stroke: var(--os-muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+
+/* Round marks are HTML over the drawing, which a stretch would make ellipses. */
+.os-time-chart-point,
+.os-time-chart-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--os-accent); box-shadow: 0 0 0 2px var(--os-plate); transform: translate(-50%, -50%); pointer-events: none; }
+.os-time-chart-point { width: 6px; height: 6px; box-shadow: none; }
+.os-time-chart-dot[data-series="previous"] { background: var(--os-muted); }
+.os-time-chart-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--os-rail); transform: translateX(-50%); pointer-events: none; }
+.os-time-chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--os-muted); font-size: var(--os-text-sm); pointer-events: none; }
+
+.os-time-chart-times { grid-column: 2; position: relative; height: 14px; color: var(--os-muted); font-size: var(--os-text-xs); line-height: 14px; font-variant-numeric: tabular-nums; }
+.os-time-chart-times > span { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
+.os-time-chart-times > span[data-edge="start"] { transform: none; }
+.os-time-chart-times > span[data-edge="end"] { transform: translateX(-100%); }
+
+.os-time-chart-guide,
+.os-time-chart-dot { transition: left var(--os-duration-fast) var(--os-ease), top var(--os-duration-fast) var(--os-ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  .os-time-chart-guide, .os-time-chart-dot { transition: none; }
+}
