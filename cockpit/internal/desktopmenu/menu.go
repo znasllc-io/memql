@@ -19,11 +19,12 @@ import (
 var icon []byte
 
 type Home struct {
-	ID      string `json:"id"`
-	Server  string `json:"server"`
-	OSURL   string `json:"os_url"`
-	Enabled bool   `json:"enabled"`
-	State   string `json:"state"`
+	ID         string `json:"id"`
+	Server     string `json:"server"`
+	OSURL      string `json:"os_url"`
+	Enabled    bool   `json:"enabled"`
+	AutoPaused bool   `json:"auto_paused"`
+	State      string `json:"state"`
 }
 type Status struct {
 	Version          string `json:"version"`
@@ -75,4 +76,17 @@ func summary(status *Status) string {
 		return "No servers configured"
 	}
 	return fmt.Sprintf("%d of %d servers connected", connected, len(status.Homes))
+}
+
+// An automatic pause is a failed connection episode, not a changed consent
+// choice. The explicit retry uses the same per-home control with enabled=true
+// so the worker clears that episode and starts a fresh bounded retry window.
+func homeConnectionAction(home Home) (label, detail string, enabled bool) {
+	if home.AutoPaused {
+		return "Try again", "No connection for 10 minutes.", true
+	}
+	if home.Enabled {
+		return "Pause connection", "", false
+	}
+	return "Allow connecting", "", true
 }

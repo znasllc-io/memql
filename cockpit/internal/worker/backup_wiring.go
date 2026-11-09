@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -89,7 +90,7 @@ func backupBaseURL(clusterURL string) string {
 // where the browser step is not slow -- it is a process blocked forever on a
 // window that will never open. The refresh path is unaffected and still rolls
 // an expired token forward silently; only the last resort differs, and it says
-// to run `memql login` here.
+// to explicitly sign in using the existing background file credential store.
 func backupBearer(clusterURL string, logger *slog.Logger) func(context.Context) (string, error) {
 	cluster, ok := clusterFor(clusterURL)
 	if !ok {
@@ -108,11 +109,24 @@ func backupBearer(clusterURL string, logger *slog.Logger) func(context.Context) 
 	}
 	return func(ctx context.Context) (string, error) {
 		token, err := auth.EnsureValidTokenNonInteractive(ctx, cluster, logger)
+		if errors.Is(err, auth.ErrLoginRequired) {
+			// The service deliberately never opens the OS keyring. Ordinary
+			// `memql login` may save there, so suggesting it here cannot repair
+			// the background sign-in. Name the existing explicit file-store
+			// opt-in without copying credentials or changing the active store.
+			return "", fmt.Errorf("backup: %w for cluster %q. To enable optional backups, explicitly use the background credential store: %s (stores credentials in owner-only files under ~/.memql/credentials)", auth.ErrLoginRequired, cluster.Name, backupLoginCommand(cluster.Name))
+		}
 		if err != nil {
 			return "", fmt.Errorf("backup: no usable sign-in for cluster %q: %w", cluster.Name, err)
 		}
 		return token, nil
 	}
+}
+
+func backupLoginCommand(cluster string) string {
+	// Cluster names are operator-supplied. Keep the displayed command literal
+	// even when a name contains spaces, quotes or shell substitutions.
+	return "MEMQL_COCKPIT_CRED_STORE=file memql login '" + strings.ReplaceAll(cluster, "'", "'\"'\"'") + "'"
 }
 
 // clusterFor finds the registered cluster this worker is pointed at.

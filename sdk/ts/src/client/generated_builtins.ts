@@ -1877,7 +1877,7 @@ QueryClient.prototype.editDocument = function (this: QueryClient, args: EditDocu
   return this.executeNamed("editDocument", buildEditDocument(args), opts);
 };
 
-/** What a PERSON can open, and why, or a GROUP's own grants: the read an operator decides access from. The caller holds a cluster role at admin rank or above (the grant reads' floor, applied by the handler because a builtin carries no @requiresRank), and nobody reads a person who outranks them. For a user, the engine's own resolver runs for that person: role, then group grants, then person grants, with an organization role's limits. One row per app door (`read app:<id>`), floored section (`read app:<id>/<section>`) and part (`execute app:<id>/<part>`) the role catalog or the person's grants name; a pair the engine decides PER ORGANIZATION (opening Email or Deployables, the data verbs, an organization's deployable parts) has one row per organization the person's scope reaches and no merged row, and every other pair one row with accountId empty. An operator has no per-organization rows, their scope reaching every organization alike: each app pair comes once with accountId empty, and no data verb has a row at all. The same holds for a person whose scope reaches no organization. For a group, one row per active grant it holds, held from its effect, accountId the group's own organization. Rows: {verb, resourceType, held, source, sourceId, accountId}. source is role, group, person, scoped-role-limit (an organization role's limit, which no grant lifts) or not-granted; sourceId is the role slug, the group's id or the person's id, empty for not-granted. A refusal is an error starting with its code: access_caller_not_permitted, access_subject_outranks_caller, access_unknown_subject, access_invalid or access_unavailable. */
+/** What a PERSON can open, and why, or a GROUP's own grants: the read an operator decides access from. The caller holds a cluster role at admin rank or above (the grant reads' floor, applied by the handler because a builtin carries no @requiresRank), and nobody reads a person who outranks them. For a user, the engine's own resolver runs for that person: role, then group grants, then person grants, with an organization role's limits. One row per app door (`read app:<id>`), floored section (`read app:<id>/<section>`) and part (`execute app:<id>/<part>`) the role catalog or the person's grants name; a pair the engine decides PER ORGANIZATION (opening Email, Deployables or Pipelines, the data verbs, an organization's deployable parts) has one row per organization the person's scope reaches and no merged row, and every other pair one row with accountId empty. An operator has no per-organization rows, their scope reaching every organization alike: each app pair comes once with accountId empty, and no data verb has a row at all. The same holds for a person whose scope reaches no organization. For a group, one row per active grant it holds, held from its effect, accountId the group's own organization. Rows: {verb, resourceType, held, source, sourceId, accountId}. source is role, group, person, scoped-role-limit (an organization role's limit, which no grant lifts) or not-granted; sourceId is the role slug, the group's id or the person's id, empty for not-granted. A refusal is an error starting with its code: access_caller_not_permitted, access_subject_outranks_caller, access_unknown_subject, access_invalid or access_unavailable. */
 export interface EffectiveAccessForSubjectArgs {
   /** `user` or `group`. */
   subjectKind: string;
@@ -5174,6 +5174,27 @@ QueryClient.prototype.releaseArchiveCandidate = function (this: QueryClient, arg
   return this.executeNamed("releaseArchiveCandidate", buildReleaseArchiveCandidate(args), opts);
 };
 
+/** Release the build inputs of an approved candidate that has no signed catalog. Every component it contains must have a later or equal release with one; every copy it published is read back first; and nothing it began may have changed for two hours. Nothing remote changes, and the candidate can never prepare, publish or be catalogued again. Owner only. */
+export interface ReleaseArchiveWithoutCatalogArgs {
+  candidateId: string;
+}
+
+export function buildReleaseArchiveWithoutCatalog(args: ReleaseArchiveWithoutCatalogArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseArchiveWithoutCatalog(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseArchiveWithoutCatalog(args: ReleaseArchiveWithoutCatalogArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseArchiveWithoutCatalog = function (this: QueryClient, args: ReleaseArchiveWithoutCatalogArgs = {} as ReleaseArchiveWithoutCatalogArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseArchiveWithoutCatalog", buildReleaseArchiveWithoutCatalog(args), opts);
+};
+
 /** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
 export interface ReleaseAssembleCandidateArgs {
   planName: string;
@@ -7353,8 +7374,8 @@ QueryClient.prototype.siteAccessCodeSetExpiry = function (this: QueryClient, arg
 
 /** The access codes of a deployable, for the Access codes panel (design record 2026-10-29-deployable-access-codes).
 IT IS A BUILTIN, NOT A QUERY, because the shared organization gate judges builtins and mutations and never a query: a client-callable list would let a person who held the part in one organization read the labels, hints and expiries of a site in another whose row tier admitted them. As a builtin it is judged against the site's organization exactly as minting is, and the handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's actor left untouched, so the tier still decides every row.
-EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last opened. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the code: the handler fills it from the newest session of the code's CURRENT generation (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
-Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}. */
+EVERY CODE, INCLUDING THE ENDED ONES, and the site's guest passes, one row each in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last opened. `guest` is true on a guest pass, a row that was never a code (design record 2026-11-08-deployable-guest-access), and absent on a code. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the code: the handler fills it from the newest session of the code's CURRENT generation (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
+Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, guest, createdAt}. */
 export interface SiteAccessCodesForSiteArgs {
   /** The deployable to list the codes of. */
   siteId: string;
@@ -7399,6 +7420,43 @@ declare module "./query.js" {
 
 QueryClient.prototype.siteAccessGates = function (this: QueryClient, args: SiteAccessGatesArgs = {} as SiteAccessGatesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("siteAccessGates", buildSiteAccessGates(args), opts);
+};
+
+/** Open one gate of a deployable to anyone, without a code (design record 2026-11-08-deployable-guest-access).
+A GUEST PASS IS A CODE ROW WITH NO CODE. It is a siteAccessCode marked guest whose digest is a fixed function of the site, so a visitor who asks at the guest route is let in to that one gate, and no typed code can ever match it. There is nothing to hand back but the row's id and its expiry.
+THE CHECKS ARE THE MINT'S, siteAccessCodeCreate's in every respect: the part, the organization, an owned deployable with a package deployable, a gate the deployable declares, the bounds on label, subject and expiry. A refusal at any of them has written nothing.
+Returns {codeId, expiresAt}. */
+export interface SiteAccessGuestPassCreateArgs {
+  /** The deployable the guest pass opens a part of. */
+  siteId: string;
+  /** The operator's name for the pass, 1 to 80 characters. Never sent to a visitor. */
+  label: string;
+  /** Which gate the pass opens: one the deployable declares with @accessGate. siteAccessGates lists them. */
+  gate: string;
+  /** Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone. */
+  subject?: string;
+  /** When the pass stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every pass expires; there is no 'never'. */
+  expiresAt: string;
+}
+
+export function buildSiteAccessGuestPassCreate(args: SiteAccessGuestPassCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("label: " + renderMemQLValue(args.label));
+  parts.push("gate: " + renderMemQLValue(args.gate));
+  if (args.subject !== undefined) parts.push("subject: " + renderMemQLValue(args.subject));
+  parts.push("expiresAt: " + renderMemQLValue(args.expiresAt));
+  return "builtin siteAccessGuestPassCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteAccessGuestPassCreate(args: SiteAccessGuestPassCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteAccessGuestPassCreate = function (this: QueryClient, args: SiteAccessGuestPassCreateArgs = {} as SiteAccessGuestPassCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteAccessGuestPassCreate", buildSiteAccessGuestPassCreate(args), opts);
 };
 
 /** Archive one of the caller's standalone deployables (epic memql#4794, D10). Refuses unless the site is already OFFLINE (disabled) -- archiving is the end of a lifecycle, not a shortcut past taking it offline -- and unless confirmHostname matches the site's NAME: its address label under the cluster's domain, or the whole hostname (2026-09-05 design, D9). A systemOwned site (the cluster's own portal and OS) is refused outright: those rows are exempt from the lifecycle entirely. An archived site stops serving (404), stays listed behind the Archived filter, and STILL HOLDS ITS NAME -- siteDelete is the rung that releases it. A source's app is never archived; it is deactivated (packageDeactivateDeployable). Returns {siteId, hostname, status}. Refusals carry stable codes. */
@@ -7981,6 +8039,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workRecordGoalEvaluation = function (this: QueryClient, args: WorkRecordGoalEvaluationArgs = {} as WorkRecordGoalEvaluationArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workRecordGoalEvaluation", buildWorkRecordGoalEvaluation(args), opts);
+};
+
+/** The nightly routing reviews the caller may decide: the pending ones, oldest first, or one by id whatever its decision. No person owns a routing review -- the evidence fold raises it as the cluster -- so the owner-scoped approval reads never list one. An owner or developer, the people who may change routing, sees them; anyone else gets no rows. */
+export interface WorkRoutingReviewsArgs {
+  /** One routing review by id, decided or not. Omit for every pending one. */
+  approvalId?: string;
+}
+
+export function buildWorkRoutingReviews(args: WorkRoutingReviewsArgs): string {
+  const parts: string[] = [];
+  if (args.approvalId !== undefined) parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin workRoutingReviews(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRoutingReviews(args: WorkRoutingReviewsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRoutingReviews = function (this: QueryClient, args: WorkRoutingReviewsArgs = {} as WorkRoutingReviewsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRoutingReviews", buildWorkRoutingReviews(args), opts);
 };
 
 /** Inspect the catalog and verify baseline content against installed seeds. */

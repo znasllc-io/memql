@@ -157,6 +157,19 @@ func AccessCodeDigest(raw string) string {
 	return hexSHA256(NormalizeAccessCode(raw))
 }
 
+// AccessGuestPassDigest is the codeHash of a site's guest pass: lowercase hex SHA-256 of
+// "guest:" and the site's bare id.
+//
+// A guest pass is a siteAccessCode row with no code behind it, so its digest has to be
+// something no typed code can produce, and it has to be findable by the same codeHash index
+// a typed code is. The preimage holds a colon and lowercase letters, and a code is
+// normalized to exactly 25 symbols of the alphabet before it is hashed, so no visitor input
+// and no minted code can land on this digest. It is fixed per site, bare or prefixed id
+// alike, so the row is found without a second column to search.
+func AccessGuestPassDigest(siteID string) string {
+	return hexSHA256("guest:" + BareShortId(siteID))
+}
+
 // AccessCodeWellFormed reports whether what a visitor typed could be a code at all:
 // exactly 25 symbols once it has been normalized.
 //
@@ -322,7 +335,7 @@ const (
 )
 
 // The routes of the access surface on the bff: the base its handler mounts under and
-// the four paths the edge forwards to.
+// the five paths the edge forwards to.
 //
 // HERE WITH THE STAMP'S NAMES, for the same reason. The edge forwards to these and the
 // bff answers them, neither can import the other, and each used to have its own table
@@ -346,6 +359,10 @@ const (
 
 	// AccessCallPath runs a construct the session's gate reaches.
 	AccessCallPath = AccessSurfacePathPrefix + "call"
+
+	// AccessGuestPath opens a gate through the site's guest pass, with no code. It is the
+	// bff's route; on the site's own origin the same act is AccessGuestInboundPath.
+	AccessGuestPath = AccessSurfacePathPrefix + "guest"
 )
 
 // What a visitor's browser sees of the surface, and the two caps on what it may send.
@@ -360,8 +377,13 @@ const (
 	// reserved namespace, and a bundle may not claim it and never could.
 	AccessInboundPath = "/_memql/access"
 
-	// AccessSmallBodyBytes caps unlock, leave and the session check. A code is 29
-	// characters and a leave says nothing, so 1 KiB is generous for all of them.
+	// AccessGuestInboundPath is the guest route on a deployable's own origin, beneath the
+	// same reserved path as unlock, so the edge maps it to AccessGuestPath.
+	AccessGuestInboundPath = AccessInboundPath + "/guest"
+
+	// AccessSmallBodyBytes caps unlock, leave, the session check and the guest open.
+	// A code is 29 characters and a leave or a guest open says nothing, so 1 KiB is
+	// generous for all of them.
 	AccessSmallBodyBytes int64 = 1 << 10
 
 	// AccessCallBodyBytes caps a call, which carries a construct's arguments.
@@ -369,7 +391,7 @@ const (
 )
 
 // AccessCookieName is the cookie a visitor's session token travels in. The edge reads
-// the name and never the value: it keeps the cookie to the four routes, and the bff
+// the name and never the value: it keeps the cookie to the five routes, and the bff
 // sets it and reads it.
 //
 // THE PREFIX IS A BROWSER RULE, AND IT IS THE POINT. Any site on a shared parent domain
@@ -382,7 +404,7 @@ const (
 //
 // THE COST IS Path=/, which the prefix requires. The cookie now reaches every path on the
 // origin, so the edge removes it from everything that leaves for an upstream except the
-// four routes (accessStripCookie, component/edge).
+// five routes (accessStripCookie, component/edge).
 const AccessCookieName = "__Host-memql_access"
 
 // hexSHA256 is how every digest in this file is spelled: lowercase hex, because

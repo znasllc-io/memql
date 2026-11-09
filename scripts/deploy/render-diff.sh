@@ -123,11 +123,26 @@ function validate_arguments() {
 # that is worse than not running, because it looks exactly like finding 1.
 #
 # Both are removed by the EXIT trap, which fires on cap_fail too, so an
-# interrupted run leaves nothing beside the operator's overlay.
+# interrupted run leaves nothing beside the operator's overlay. The trap is
+# _render_diff_on_exit, which composes the removal with capability.sh's result
+# guarantee: the bare `rm -rf` trap it replaced dropped the guarantee, so an
+# abort after this point reached the caller with nothing on stdout.
 function make_workdir() {
     WORK="$(mktemp -d)"
     RENDER_PARENT="$(cd "$(dirname "$OVERLAY_PATH")" && pwd)"
-    trap 'rm -rf "$WORK" "${RENDER_PARENT}"/.render-diff.$$.* 2>/dev/null || true' EXIT
+    trap _render_diff_on_exit EXIT
+}
+
+# _render_diff_on_exit -- the EXIT trap: removes the render copies, then runs
+# capability.sh's result guarantee with the status the script exited with.
+function _render_diff_on_exit() {
+    local rc=$?
+    # errexit off: `(exit "$rc")` is a failing command whenever rc is non-zero,
+    # and errexit would abandon the handler there, before the envelope.
+    set +e
+    rm -rf "$WORK" "${RENDER_PARENT}"/.render-diff.$$.* 2>/dev/null
+    (exit "$rc")
+    _cap_on_exit
 }
 
 # current_ref reads the ref the overlay pins today, so --fromRef is optional

@@ -45,7 +45,7 @@ import (
 // with the site's own ownerUserId once a digest has found a row and before anything is
 // delivered, and THAT IS WHAT CHECKS THE OWNER.
 // These reads answer for anybody who reaches them, which is why they are @serverOnly and
-// why a caller outside this package holds only the seven functions below. A test persona
+// why a caller outside this package holds only the eight functions below. A test persona
 // is judged under the caller, at the reads above, and only asked after that whether its
 // session is still live: see asCluster.
 //
@@ -96,6 +96,12 @@ type Code struct {
 	Generation                                  int
 	ExpiresAt                                   time.Time
 	Revoked                                     bool
+	// Guest is true for a site's guest pass: a row with no code behind it, whose digest
+	// is the site's guest digest (memql.AccessGuestPassDigest). A row that says nothing
+	// is a code, which is every row written before guest passes existed. It is here
+	// rather than only on the operator's view because the bff says it back in every reply
+	// about a session, so a page can tell a guest's from a code holder's.
+	Guest bool
 }
 
 // Session is one v1:platform:siteAccessSession as the access decision needs it.
@@ -253,6 +259,25 @@ func (s *GraphStore) CodeByHash(ctx context.Context, siteID, codeHash string) (*
 	return &code, nil
 }
 
+// GuestPassForSite finds a site's guest pass for the guest route: the one not removed, or
+// (nil, nil) when the site has none (design record 2026-11-08, section 6). A pass past its
+// end still answers, as an expired code does from CodeByHash: it lets nobody in, and which
+// reply that means is the handler's.
+//
+// IT IS livePassForSite, READ AND CHOICE, so the route a visitor opens and the mint that
+// refuses a second pass can never disagree about which pass stands. That is one read
+// through the digest index, by the site's guest digest, as the cluster acting, and it
+// checks no owner, for CodeByHash's reason. It is also the whole of what a guest open costs
+// when the site lets nobody in, so it stays one read.
+func (s *GraphStore) GuestPassForSite(ctx context.Context, siteID string) (*Code, error) {
+	pass, ok, err := s.livePassForSite(ctx, siteID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	code := pass.Code
+	return &code, nil
+}
+
 // CodeByID resolves the code a session was opened with. A miss is (nil, nil). It reads
 // as the cluster acting, for CodeByHash's reason.
 func (s *GraphStore) CodeByID(ctx context.Context, codeID string) (*Code, error) {
@@ -353,8 +378,8 @@ type siteView struct {
 }
 
 // codeView is a Code with what only the operator's surface reads: the row's own
-// words, as they were stored, and the version an act decides from. The label is
-// the Code's own, since the handler stamps it too.
+// words, as they were stored, and the version an act decides from. The label and
+// whether the row is a guest pass are the Code's own, since the handler needs both.
 type codeView struct {
 	Code
 	Hint      string
@@ -377,6 +402,7 @@ func codeFromRow(r map[string]any) codeView {
 			Generation: rowInt(r, "generation"),
 			ExpiresAt:  rowTime(r, "expiresAt"),
 			Revoked:    revokedAt != "",
+			Guest:      rowBool(r, "guest"),
 		},
 		Hint:      rowString(r, "codeHint"),
 		IssuedAt:  rowString(r, "issuedAt"),
@@ -454,6 +480,86 @@ func (s *GraphStore) codesForSite(ctx context.Context, siteID string) ([]codeVie
 	return out, nil
 }
 
+// guestPassRows is every row a site's guest digest finds (memql.AccessGuestPassDigest): its
+// guest passes, the removed ones included, because every pass a site ever has shares that
+// digest. A typed code never normalizes to it, so no code is among them.
+//
+// READ AS THE CLUSTER ACTING, for CodeByHash's reason and for one of the mint's own: how
+// many rows this finds names the site's next pass (guestPassID), so a pass the caller's
+// tier would hide from them, one minted before the site moved organization, must still be
+// counted, or the next pass is given an id that is already taken and every mint has to move
+// past it (mintGuestPass). A mint has authorized the person asking under their own actor
+// before it reads this.
+func (s *GraphStore) guestPassRows(ctx context.Context, siteID string) ([]codeView, error) {
+	siteID = memql.BareShortId(siteID)
+	call, err := langparser.RenderCall("siteAccessCodeByHash", map[string]any{
+		"siteId": siteID, "codeHash": memql.AccessGuestPassDigest(siteID),
+	})
+	rows, err := s.readAsCluster(ctx, "the deployable's guest passes", call, err)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]codeView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, codeFromRow(r))
+	}
+	return out, nil
+}
+
+// livePassForSite is the site's guest pass that has not been removed, read as
+// guestPassRows reads. None is (codeView{}, false, nil). A pass past its end date is still
+// the answer: it lets nobody in, and it is what stands in the way of a second one until it
+// is turned off, since changing its end date lets guests in again.
+func (s *GraphStore) livePassForSite(ctx context.Context, siteID string) (codeView, bool, error) {
+	rows, err := s.guestPassRows(ctx, siteID)
+	if err != nil {
+		return codeView{}, false, err
+	}
+	pass, ok := livePass(siteID, rows)
+	return pass, ok, nil
+}
+
+// livePass picks the site's pass that has not been removed out of what guestPassRows read.
+// A row of another site, or one that does not say it is a pass, is never the answer.
+//
+// MORE THAN ONE CANNOT HAPPEN WHILE THE FENCE HOLDS: two mints meet at the first id nobody
+// holds (mintGuestPass), and the write refuses a row that is already there (createCode). If
+// it happened anyway, the newest by issuedAt is the answer, the pass an operator turned on
+// last, and the row's latest write decides between two of one second.
+func livePass(siteID string, rows []codeView) (codeView, bool) {
+	siteID = memql.BareShortId(siteID)
+	var (
+		live  codeView
+		found bool
+	)
+	for _, row := range rows {
+		if row.SiteID != siteID || !row.Guest || row.Revoked {
+			continue
+		}
+		if !found || newerPass(row, live) {
+			live, found = row, true
+		}
+	}
+	return live, found
+}
+
+func newerPass(a, b codeView) bool {
+	issuedA, issuedB := issuedTime(a), issuedTime(b)
+	if !issuedA.Equal(issuedB) {
+		return issuedA.After(issuedB)
+	}
+	return a.Version.After(b.Version)
+}
+
+// issuedTime reads a row's issuedAt, or the zero time when it cannot be read.
+func issuedTime(c codeView) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(c.IssuedAt))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
 // lastOpened is when a generation of a code was last opened, as the text the session
 // stored, or "" when nobody has opened it. Read AS THE CLUSTER ACTING: the session's tier
 // has no account arm, so it would answer nothing to a member of the site's organization,
@@ -485,18 +591,40 @@ func witnessed(ctx context.Context, concept, rowID string, version time.Time) (c
 	return memql.ContextWithRowVersionFence(ctx, concept, rowID, version), nil
 }
 
+// witnessedAbsent adds to a write's context the requirement that a row not exist yet.
+//
+// IT IS THE ZERO VERSION THAT witnessed REFUSES. To witnessed's callers a zero is a read
+// that carried no version, which must not pass for a witness. To a create it is the whole
+// of what is known, that no row was there, and it is the witness wanted. The engine takes
+// a lock on the id inside the write's transaction and looks again, so of two creates at
+// one id the second finds the first's row and loses the fence. Without this it would land
+// on that row as a second version of it, because an insert at an existing id is an
+// update, and the engine's own witness is taken as the write starts, after the row is
+// there.
+func witnessedAbsent(ctx context.Context, concept, rowID string) context.Context {
+	return memql.ContextWithRowVersionFence(ctx, concept, rowID, time.Time{})
+}
+
 // newCode is what a mint writes. The digest and the hint are all that is left of
 // the code by the time it gets here: MintAccessCode hands them back together, and
-// no shape of this call can store the plain value.
+// no shape of this call can store the plain value. A guest pass has neither a code
+// nor a hint, and its digest is its site's (memql.AccessGuestPassDigest).
 type newCode struct {
 	ID, SiteID, AccountID, Label, Gate, Subject string
 	Digest, Hint, ChangedBy                     string
+	Guest                                       bool
 	IssuedAt, ExpiresAt                         time.Time
 }
 
-// createCode writes a minted code as the site's owner, with a witness of the SITE:
-// the account and the owner on this row were copied from the version of the site
-// the handler read, and a move that landed since has to refuse this write.
+// createCode writes a minted code as the site's owner, with two witnesses.
+//
+// THE SITE'S: the account and the owner on this row were copied from the version of
+// the site the handler read, and a move that landed since has to refuse this write.
+//
+// AND THE ROW'S OWN ABSENCE: a mint creates a row and never lands on one. For a code,
+// whose id is fresh, that is true already. For a guest pass it is what leaves one pass
+// and not two, because two mints that read the same passes ask for the same id
+// (guestPassID), and the site's witness cannot tell them apart: minting writes no site.
 func (s *GraphStore) createCode(ctx context.Context, owner string, c newCode, siteVersion time.Time) error {
 	owned, ok := asOwner(ctx, owner)
 	if !ok {
@@ -506,6 +634,7 @@ func (s *GraphStore) createCode(ctx context.Context, owner string, c newCode, si
 	if err != nil {
 		return err
 	}
+	guarded = witnessedAbsent(guarded, codeConcept, c.ID)
 	args := map[string]any{
 		"codeId":        c.ID,
 		"siteId":        c.SiteID,
@@ -524,6 +653,11 @@ func (s *GraphStore) createCode(ctx context.Context, owner string, c newCode, si
 	}
 	if c.Subject != "" {
 		args["subject"] = c.Subject
+	}
+	// Absent rather than false on a code, so that a code's row is what it was before
+	// guest passes existed, and the one way a row comes to say it is a pass is this.
+	if c.Guest {
+		args["guest"] = true
 	}
 	call, err := langparser.RenderCall("createSiteAccessCode", args)
 	return s.write(guarded, "the code", call, err)

@@ -158,3 +158,47 @@ func TestRoutingConfigurationRulesConsumeCustomPolicies(t *testing.T) {
 	_, ok = rules.Lookup("myChat")
 	require.False(t, ok)
 }
+
+// TestRoutingRuleSaveRefusesAPrecedenceTie: a saved rule is held to the
+// loader's own tie rule (RuleRegistry.Finalize) against every unlocked rule the
+// router would walk beside it -- another saved rule, or a product bundle's --
+// and a refused save leaves the configuration's revision where it was.
+// docs/public/operate/ai-routing.md promises this; the retired
+// routingRuleActivate never checked it.
+func TestRoutingRuleSaveRefusesAPrecedenceTie(t *testing.T) {
+	ctx := policyOwner()
+	store := &testPolicyStore{doc: PolicyDocument{Overrides: map[string]PolicyConfig{}}}
+	policies := policyFixture(store)
+	base := NewRuleRegistry()
+	require.NoError(t, base.Register(&RuleConfig{Name: "default", Policy: "localFirst", Precedence: 0, Locked: true}))
+	// An unlocked rule a product bundle declared: it loads beside the shipped
+	// set, so a saved rule can tie with it.
+	require.NoError(t, base.Register(&RuleConfig{Name: "productRule", Policy: "localFirst", Precedence: 30, SourceFile: "product/rules.memql"}))
+	require.NoError(t, base.Finalize())
+	engine := &MemQLEngine{policies: policies, rules: base}
+
+	save := func(name string, precedence int, revision int64) error {
+		_, err := engine.routingRuleSaveBuiltin(ctx, map[string]any{
+			"name": name, "policy": "localOnly", "precedence": precedence,
+			"expectedRevision": revision, "conditions": map[string]any{"tag": name},
+		}, 0)
+		return err
+	}
+
+	require.NoError(t, save("first", 40, 0))
+	require.EqualValues(t, 1, store.doc.Revision)
+
+	err := save("second", 40, 1)
+	require.Error(t, err, "a second custom rule at precedence 40 was saved")
+	require.Contains(t, err.Error(), `"first"`)
+	require.Contains(t, err.Error(), `"second"`)
+	require.Contains(t, err.Error(), "@precedence(40)")
+
+	err = save("third", 30, 1)
+	require.Error(t, err, "a custom rule tying with a product bundle's rule was saved")
+	require.Contains(t, err.Error(), `"productRule"`)
+
+	require.EqualValues(t, 1, store.doc.Revision, "a refused save moved the revision")
+	require.Len(t, store.doc.Rules, 1)
+	require.NoError(t, save("second", 41, 1), "a distinct precedence must still save")
+}

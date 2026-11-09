@@ -87,6 +87,53 @@ the executor can drive it and record its result without scraping human prose.
    **together**, which is the pairing whose absence let the original defect sit
    behind a green gate.
 
+   **`cap_flag` is not a boolean reader.** It returns the raw parsed value, and
+   `"false"` is a non-empty string, so a boolean read through it and tested
+   with `-n` takes `--x=false` as true. Thirteen scripts read booleans that
+   way (and `seed-secrets.sh` one through `cap_param`). Measured by the
+   regression tests: `normalize-node-ids.sh --apply=false
+   --confirm=normalize-node-ids` rewrote stored ids, `k3d/down.sh
+   --purge=false` purged, `--local=false` passed the gates of the three
+   credential scripts on to `kubectl`, against whatever context it pointed
+   at, and `verify-frontdoor.sh` waived strictness for `--report-only=false`,
+   the exact argv the capability step renders for `reportOnly: false`. Read
+   from the code: `bringup.sh --clean=false` took the clean-slate path that
+   deletes the cluster and its database. `cap_flag` reads no stdin either, so
+   the same param arriving in a JSON params object was silently ignored. It
+   answers one question: whether a VALUE param arrived as a flag (`--revision`
+   given explicitly), beside the `cap_param` read that resolves that param.
+
+   - **Declare a boolean as one.** Its `cap_spec_param` description says so in
+     a parenthetical: `"(flag)"`, `"(flag; default: report only)"`. A declared
+     flag is read only with `cap_bool` / `cap_bool_str`.
+   - **Hold a flag that feeds `-n` tests or a `${X:+--x}` pass-through as
+     `""` or `"1"`**: `if cap_bool purge; then purge=1; else purge=""; fi`.
+     The read runs in the script's own shell, so a refusal stops the script
+     there with its own message, and every existing emptiness test stays
+     correct. Read every boolean at the top of `main`, before any side
+     effect, so a mistyped value is refused before anything changes.
+   - **`cap_bool_str` is only ever the whole right-hand side of a plain
+     assignment.** `local X="$(cap_bool_str ...)"`, `export`, a `[[ ]]` test
+     and an argument position all discard the substitution's exit 2, so a
+     typo reads as false (measured on bash 3.2.57 and 5.3.15). Its value is
+     `"true"` or `"false"`, so it is compared, never tested for emptiness.
+     The refusal is also written to stderr, the one stream a substitution
+     does not capture.
+   - **A Makefile forwards a boolean variable's VALUE**, as
+     `$${PURGE:+--purge="$${PURGE}"}`, in every recipe that runs one of this
+     repo's scripts. A bare `$${PURGE:+--purge}` turned `make down PURGE=0`
+     into `--purge`, and `make release ALLOW_OVERWRITE=0` into permission to
+     overwrite a write-once release tag. A script that parses its own flags
+     (`scripts/release/release.sh`, `tag-submodules.sh`) reads the value with
+     `scripts/lib/bool_flag.sh`, which `TestBoolFlagAgreesWithCapBool` holds
+     to `cap_bool`'s answers, value for value.
+
+   `TestCapabilityScriptsReadBooleansWithCapBool` enforces the first three
+   (rules in `booleanReadFindings`, each with a fixture in
+   `TestBooleanReadFindingsCatchEachShape`), and
+   `TestRecipesForwardBooleanValues` the fourth. The library holds itself to
+   the same rule: `--params-stdin=false` reads no stdin.
+
 5. **Structured result out.** On **stdout**, the script emits **exactly one**
    JSON envelope (its result) and **nothing else**. All human-readable logging
    goes to **stderr**. This is the rule that lets one stream feed a machine and
@@ -202,7 +249,7 @@ function main() {
   cap_parse_flags "$@"          # --name=value / --name into CAP_ARG_*
   local cluster purge
   cluster="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
-  purge="$(cap_flag purge)"
+  if cap_bool purge; then purge=1; else purge=""; fi   # never cap_flag
 
   if cluster_exists "$cluster"; then
     delete_cluster "$cluster"   # logs go to stderr via cap_info
@@ -226,8 +273,10 @@ Key helpers (full reference in the file header):
 | `cap_spec_param <n> <d>`        | declare a param: the accepted flag surface + `--print-spec` / `--help` |
 | `cap_handle_meta "$@"`          | handle `--help` / `--print-spec` and exit                 |
 | `cap_parse_flags "$@"`          | parse `--k=v` / `--k` into `CAP_ARG_*`; undeclared flags exit 2; buffers stdin params once |
-| `cap_param <name> [default]`    | resolve a param (flag > stdin JSON > default)             |
-| `cap_flag <name>`               | the parsed `--name` flag value                            |
+| `cap_param <name> [default]`    | resolve a value param (flag > stdin JSON > default)       |
+| `cap_bool <name> [default]`     | branch on a boolean param; refuses a non-boolean (exit 2) |
+| `cap_bool_str <name> [default]` | a boolean as `true` / `false`, in a plain assignment only |
+| `cap_flag <name>`               | the RAW `--name` flag value: a presence probe for a value param, never a boolean |
 | `cap_require <name> <value>`    | fail (exit 2) when a required param is empty              |
 | `cap_confirm_or_die <got> <exp>`| non-interactive replacement for a `read -p` confirmation  |
 | `cap_info/cap_warn/cap_error`   | human logging — **to stderr**                            |
@@ -257,7 +306,11 @@ before calling `_cap_on_exit` (`_install_on_exit` in
 itself a failing command on every abort and errexit abandons the handler there.
 An inline `trap 'cleanup; _cap_on_exit' EXIT` hands `_cap_on_exit` cleanup's
 status instead. `_cap_on_exit` may exit, so nothing after it in a handler is
-sure to run.
+sure to run. Replacing the trap with a cleanup of its own
+(`trap 'rm -rf "$WORK"' EXIT`) or clearing it (`trap - EXIT`) drops the
+guarantee: from that line on, an abort reaches the caller with nothing on
+stdout. Only an `EXIT` handler may clear the trap, to stop itself running
+twice.
 
 ### Progress lines: `cap_progress`
 
@@ -341,8 +394,19 @@ source `capability.sh`):
   with exactly one failure envelope, under any bash, and so does a script
   killed by an expansion error under bash 3.2 where one is available (the
   `bash32-smoke` CI lane runs that case under the real interpreter);
-- an `EXIT` trap that composes `_cap_on_exit` with cleanup hands it the
-  script's own status, with errexit off.
+- every `EXIT` trap a capability script installs reaches `_cap_on_exit`: one
+  that composes it with cleanup hands it the script's own status, with errexit
+  off, and one that replaces or clears it is refused
+  (`TestCapabilityTrapsHandCapOnExitTheRealStatus`);
+- every boolean param is read with `cap_bool` / `cap_bool_str`: a declared
+  flag never through `cap_flag` or `cap_param`, `cap_flag` only as a presence
+  probe beside a `cap_param` read, `cap_bool_str` only in a plain assignment
+  and never tested for emptiness, `cap_bool` never inside a substitution
+  (`TestCapabilityScriptsReadBooleansWithCapBool`); a refused `cap_bool_str`
+  names the flag and value on stderr, and `--params-stdin=false` reads no
+  stdin (`TestCapBoolStrRefusalNamesTheValue`, `TestCapParamsStdinIsABoolean`);
+- a Makefile recipe forwards a boolean variable's value to a script, never a
+  bare flag (`scripts/make`, `TestRecipesForwardBooleanValues`).
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt

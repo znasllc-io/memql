@@ -677,6 +677,697 @@ func TestCreateCopiesOwnerAndAccountFromTheSite(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// a guest pass
+// ---------------------------------------------------------------------------
+
+// The refusals a guest pass adds, verbatim: the OS shows a refusal as written. The
+// conflict is the one a mint gives after losing the fence twice.
+const (
+	wantSecondPass         = "This deployable already lets guests in. Change when guest access ends, or turn it off first."
+	wantNoCodeToRegenerate = "Guest access has no code to regenerate. Change when it ends, or turn it off."
+	wantPassUnseen         = "Guest access is on for this deployable under a pass you cannot see, left from before it changed hands. A cluster operator has to turn it off."
+	wantGuestConflict      = "This deployable changed at the same moment, so guest access was not turned on. Reload the list and try again."
+)
+
+// guestArgs is a valid guest pass mint, named as the OS prefills it. A nil value in
+// `over` leaves the argument out.
+func (w *world) guestArgs(over map[string]any) map[string]any {
+	args := w.createArgs(over)
+	if _, named := over["label"]; !named {
+		args["label"] = "Guests"
+	}
+	return args
+}
+
+// allowGuests goes through the handler, so every pass a test starts from is one a
+// person could have.
+func (w *world) allowGuests(ctx context.Context, over map[string]any) string {
+	w.t.Helper()
+	nodes, err := w.in.handleGuestPassCreate(ctx, w.guestArgs(over), 0)
+	require.NoError(w.t, err)
+	passID, _ := onlyPayload(w.t, nodes)["codeId"].(string)
+	require.NotEmpty(w.t, passID)
+	return passID
+}
+
+// passesOn counts the guest passes a site has ever had, removed ones included, by the
+// digest they all share.
+func (w *world) passesOn(site string) int {
+	w.t.Helper()
+	var ids []string
+	require.NoError(w.t, w.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("DISTINCT id").
+		Where("concept = ?", codeConcept).Where("payload->>'siteId' = ?", siteConcept+":"+site).
+		Where("payload->>'codeHash' = ?", memql.AccessGuestPassDigest(site)).Scan(context.Background(), &ids))
+	return len(ids)
+}
+
+func TestGuestPassCreateRepliesWithNoCode(t *testing.T) {
+	w := newWorld(t, "guestreply")
+	operator := actorContext(w.operator, auth.RoleOwner)
+
+	// THROUGH THE DISPATCH, so what is asserted is the reply a person's call gets. It is
+	// the result node, its payload flattened beside the node's own fields, and the payload
+	// is the reply.
+	rows, err := w.builtin(operator, "siteAccessGuestPassCreate", w.guestArgs(map[string]any{"subject": "acme"}))
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	reply := rows[0]
+	raw, err := json.Marshal(reply["payload"])
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(raw, &payload), "the reply carries no payload: %v", reply)
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	require.Equal(t, []string{"codeId", "expiresAt"}, keys, "a guest pass's reply carries more than its id and its expiry")
+	_, handed := reply["code"]
+	require.False(t, handed, "a guest pass's reply carries a code")
+	passID := fmt.Sprint(reply["codeId"])
+	require.Equal(t, passID, payload["codeId"])
+	require.Equal(t, passID, memql.BareShortId(passID), "the reply's id is bare, as every client id is")
+	require.Equal(t, guestPassID(w.site, 1), passID, "a site's first pass does not have the first pass's id")
+	_, parseErr := time.Parse(time.RFC3339, fmt.Sprint(reply["expiresAt"]))
+	require.NoError(t, parseErr, "the reply carries the expiry")
+
+	stored := w.row(passID)
+	require.Equal(t, true, stored["guest"], "the row does not say it is a guest pass")
+	require.Equal(t, memql.AccessGuestPassDigest(w.site), stored["codeHash"], "the pass's digest is not its site's, the one no typed code reaches")
+	require.Equal(t, "", stored["codeHint"], "a pass carries a hint, and there is no code for it to tell apart")
+	require.EqualValues(t, 1, stored["generation"])
+	require.Equal(t, w.owner, bare(stored["ownerUserId"]), "the pass's owner is the site's, whoever asked")
+	require.Equal(t, w.account, bare(stored["accountId"]), "the pass's organization is the site's")
+	require.Equal(t, w.operator, bare(stored["lastChangedBy"]))
+	require.Equal(t, w.site, bare(stored["siteId"]))
+	require.Equal(t, "Guests", stored["label"])
+	require.Equal(t, "dashboard", stored["gate"])
+	require.Equal(t, "acme", stored["subject"])
+	require.Equal(t, reply["expiresAt"], stored["expiresAt"], "the reply's expiry is not the one stored")
+	_, revoked := stored["revokedAt"]
+	require.False(t, revoked, "a fresh pass reads as removed")
+
+	// THE AUDIT EVENT IS A MINT'S, and says which mint. There is no code to keep out of
+	// it, and the digest stays out as it does for a code.
+	events := w.events(passID)
+	require.Len(t, events, 1)
+	require.Equal(t, auditActionCreated, events[0]["action"])
+	require.Equal(t, "siteAccessCode", events[0]["targetType"])
+	detail, ok := events[0]["detail"].(map[string]any)
+	require.True(t, ok, "the event carries no detail: %v", events[0])
+	require.Equal(t, "guestPassCreate", detail["act"], "the event does not say it is a guest pass")
+	require.Equal(t, w.site, detail["siteId"])
+	require.Equal(t, "dashboard", detail["gate"])
+	blob, err := json.Marshal(events[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(blob), memql.AccessGuestPassDigest(w.site), "the audit event carries the pass's digest")
+}
+
+func TestGuestPassRefusedWhileOneStands(t *testing.T) {
+	w := newWorld(t, "guesttwice")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	args := w.guestArgs(nil)
+	rows, err := w.builtin(operator, "siteAccessGuestPassCreate", args)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	first := fmt.Sprint(rows[0]["codeId"])
+
+	// THE SAME STATEMENT AGAIN, as a double click sends it, through the dispatch where a
+	// cache would sit: answered from one, it would report a pass that was never written.
+	rows, err = w.builtin(operator, "siteAccessGuestPassCreate", args)
+	require.Nil(t, rows, "a second guest pass was minted while the first stands")
+	require.Equal(t, wantSecondPass, requireSentence(t, err))
+
+	nodes, err := w.in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"gate": "clients", "subject": "acme"}), 0)
+	require.Nil(t, nodes, "a second guest pass was minted for another gate")
+	require.Equal(t, wantSecondPass, requireSentence(t, err), "a pass for another gate is a second switch all the same")
+
+	// A PASS PAST ITS END STILL STANDS until it is turned off: changing its end date lets
+	// guests in again, so a second pass beside it would be a second switch.
+	w.moveExpiry(first, time.Now().Add(-time.Minute))
+	_, err = w.in.handleGuestPassCreate(operator, w.guestArgs(nil), 0)
+	require.Equal(t, wantSecondPass, requireSentence(t, err), "an ended pass that was never turned off")
+
+	require.Equal(t, 1, w.passesOn(w.site), "a refused mint wrote a pass")
+	require.Len(t, w.events(first), 1, "a refused mint was audited against the pass that stands")
+	require.Equal(t, 1, w.eventsOnSite(w.site), "a refused mint was audited")
+
+	// A CODE IS NOT A GUEST PASS, and a pass stands in the way of no code.
+	_, code := w.mint(operator, nil)
+	require.Regexp(t, codeFormat, code)
+}
+
+func TestGuestPassAllowedAgainAfterRemoval(t *testing.T) {
+	w := newWorld(t, "guestagain")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	background := context.Background()
+
+	first := w.allowGuests(operator, nil)
+	_, err := w.in.handleRemove(operator, map[string]any{"codeId": first}, 0)
+	require.NoError(t, err)
+	_, ok, err := store.livePassForSite(background, w.site)
+	require.NoError(t, err)
+	require.False(t, ok, "a removed pass still reads as the site's guest pass")
+
+	second := w.allowGuests(operator, map[string]any{"gate": "clients", "subject": "acme"})
+	require.NotEqual(t, first, second, "turning guest access on again reused the removed pass")
+	require.Equal(t, guestPassID(w.site, 2), second, "the site's second pass does not count its first")
+	require.Equal(t, 2, w.passesOn(w.site), "turning guest access off and on again is two rows")
+	require.NotEmpty(t, w.row(first)["revokedAt"], "the second pass brought the first back")
+
+	live, ok, err := store.livePassForSite(background, w.site)
+	require.NoError(t, err)
+	require.True(t, ok, "the pass that stands is not found")
+	require.Equal(t, second, live.ID, "the live pass is not the one turned on last: a removed one shares its digest")
+	require.True(t, live.Guest)
+	require.False(t, live.Revoked)
+	require.Equal(t, "clients", live.Gate)
+	require.Equal(t, "acme", live.Subject)
+	require.Equal(t, w.site, live.SiteID)
+
+	// AND A THIRD: every earlier pass is counted, so the next id is never one already taken.
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": second}, 0)
+	require.NoError(t, err)
+	third := w.allowGuests(operator, nil)
+	require.Equal(t, guestPassID(w.site, 3), third)
+	require.Equal(t, 3, w.passesOn(w.site))
+
+	// ANOTHER DEPLOYABLE'S PASS IS ITS OWN. The ids and the digests differ, and neither
+	// site's read finds the other's pass.
+	other := "ac-site-other-" + w.suffix
+	w.siteRow(other, nil)
+	theirs := w.allowGuests(operator, map[string]any{"siteId": other})
+	require.Equal(t, guestPassID(other, 1), theirs, "another site's first pass counted this site's")
+	live, ok, err = store.livePassForSite(background, w.site)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, third, live.ID, "this site's read found another site's pass")
+	live, ok, err = store.livePassForSite(background, other)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, theirs, live.ID)
+
+	// A SITE WITH CODES AND NO PASS HAS NO PASS.
+	plain := "ac-site-plain-" + w.suffix
+	w.siteRow(plain, nil)
+	w.mint(operator, map[string]any{"siteId": plain})
+	_, ok, err = store.livePassForSite(background, plain)
+	require.NoError(t, err)
+	require.False(t, ok, "a code read as a guest pass")
+}
+
+// THE GUEST ROUTE OPENS THE PASS THAT STANDS, NEVER THE FIRST ROW ITS DIGEST FINDS. A site that
+// turned guest access off and on again holds a row for each time, all under one digest, and
+// GuestPassForSite is what the bff asks (design record 2026-11-08, section 6). It is read as
+// the cluster, so no caller's tier decides which pass a visitor is let in on.
+func TestGuestTakesTheLivePassAmongRemovedOnes(t *testing.T) {
+	w := newWorld(t, "guestroute")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	background := context.Background()
+
+	pass, err := store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a deployable that never let guests in has a pass")
+
+	// CREATE, REMOVE, CREATE: two rows under the site's guest digest, the first removed.
+	first := w.allowGuests(operator, map[string]any{"gate": "clients", "label": "Earlier guests"})
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": first}, 0)
+	require.NoError(t, err)
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a pass that was turned off still opens a guest session")
+
+	second := w.allowGuests(operator, map[string]any{"subject": "acme"})
+	require.Equal(t, 2, w.passesOn(w.site), "the site does not hold both rows, so this proves nothing about choosing")
+
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.NotNil(t, pass, "the pass that stands is not found")
+	require.Equal(t, second, pass.ID, "the guest route took the removed pass: it shares the live one's digest")
+	require.True(t, pass.Guest, "the pass does not say it is one, so a guest's reply would call the session a code's")
+	require.False(t, pass.Revoked)
+	require.Equal(t, w.site, pass.SiteID, "the site comes back bare")
+	require.Equal(t, w.account, pass.AccountID, "the account comes back bare: the handler compares it with the site's")
+	require.Equal(t, "dashboard", pass.Gate)
+	require.Equal(t, "acme", pass.Subject)
+	require.Equal(t, "Guests", pass.Label, "a mutation that declares accessCodeLabel is stamped with this")
+	require.Equal(t, 1, pass.Generation)
+	require.WithinDuration(t, time.Now().Add(time.Hour), pass.ExpiresAt, time.Minute)
+
+	// A GUEST'S SESSION IS CHECKED AS A CODE'S, by the pass's id, and that read has to see the
+	// same row the guest route did, saying the same thing about it.
+	byID, err := store.CodeByID(background, second)
+	require.NoError(t, err)
+	require.Equal(t, pass, byID, "the guest route and the session check disagree about one pass")
+
+	// PAST ITS END IT STILL ANSWERS, as a code past its expiry does: which reply that is, is
+	// the handler's.
+	w.moveExpiry(second, time.Now().Add(-time.Minute))
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.NotNil(t, pass, "a pass past its end read as no pass")
+	require.Equal(t, second, pass.ID)
+	require.True(t, pass.ExpiresAt.Before(time.Now()), "the pass's end is not the one stored")
+
+	// TURNED OFF AGAIN, the site has no pass, though it holds two rows under the digest.
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": second}, 0)
+	require.NoError(t, err)
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a deployable with every pass turned off still lets guests in")
+
+	// ANOTHER DEPLOYABLE'S PASS IS ITS OWN, and a site with codes and no pass has none.
+	other := "ac-site-other-" + w.suffix
+	w.siteRow(other, nil)
+	theirs := w.allowGuests(operator, map[string]any{"siteId": other})
+	pass, err = store.GuestPassForSite(background, w.site)
+	require.NoError(t, err)
+	require.Nil(t, pass, "this site's read found another site's pass")
+	pass, err = store.GuestPassForSite(background, other)
+	require.NoError(t, err)
+	require.NotNil(t, pass)
+	require.Equal(t, theirs, pass.ID)
+	require.Equal(t, other, pass.SiteID)
+
+	plain := "ac-site-plain-" + w.suffix
+	w.siteRow(plain, nil)
+	w.mint(operator, map[string]any{"siteId": plain})
+	pass, err = store.GuestPassForSite(background, plain)
+	require.NoError(t, err)
+	require.Nil(t, pass, "a code read as a guest pass")
+}
+
+// TWO OPERATORS ALLOWING GUESTS AT ONCE LEAVE ONE PASS. Neither mint writes the site, so
+// the site's witness cannot tell them apart: both would find the site as they read it.
+// What does is the pass's id, the same for both because both read the same passes, and a
+// write that refuses a row already there.
+func TestConcurrentGuestPassCreatesLeaveOne(t *testing.T) {
+	t.Run("a create refuses a row that is already there", func(t *testing.T) {
+		// THE PRIMITIVE THE RACE STANDS ON, asked of the real engine directly: a second
+		// create at one id is refused, where without the fence it lands on the first
+		// row as a second version of it.
+		w := newWorld(t, "guestabsent")
+		store := NewGraphStore(liveEngine{w.eng})
+		site, ok, err := store.siteForCaller(actorContext(w.operator, auth.RoleOwner), w.site)
+		require.NoError(t, err)
+		require.True(t, ok)
+		now := time.Now()
+		row := newCode{
+			ID: guestPassID(w.site, 1), SiteID: w.site, AccountID: w.account, Label: "Guests", Gate: "dashboard",
+			Digest: memql.AccessGuestPassDigest(w.site), Guest: true, ChangedBy: w.operator, IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		}
+		require.NoError(t, store.createCode(context.Background(), w.owner, row, site.Version), "a create at a free id was refused")
+		row.Label = "Guests, again"
+		err = store.createCode(context.Background(), w.owner, row, site.Version)
+		require.True(t, errors.Is(err, memql.ErrRowVersionChanged), "a second create at one id was not refused: %v", err)
+		require.Equal(t, 1, w.versions(row.ID, 0), "the second create landed on the first one's row")
+		require.Equal(t, "Guests", w.row(row.ID)["label"])
+	})
+
+	// Each round holds both mints after they have read the site's passes, so both decide
+	// from the same read (none) and ask for the same id. How they are then let go is the
+	// two ways two operators overlap. TOGETHER, the two writes meet in the engine's lock.
+	// ONE AFTER THE OTHER HAS LANDED, the second writes from a read that is no longer true,
+	// and only the pass's absent witness refuses it: the engine's own witness, taken as the
+	// write starts, would find the first pass and land on it as a second version. Either
+	// way exactly one is told guests are in, and the other's retry reads again, finds the
+	// first one's pass and is told so by the sentence a second pass gets.
+	type result struct {
+		label string
+		nodes []memorynodes.MemoryNode
+		err   error
+	}
+	within := func(t *testing.T, ch <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("%s did not happen", what)
+		}
+	}
+	race := func(t *testing.T, oneAfterTheOther bool) {
+		w := newWorld(t, "guestrace")
+		caller := actorContext(w.operator, auth.RoleOwner)
+
+		var mu sync.Mutex
+		reads := 0
+		gates := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+		bothRead := make(chan struct{})
+		spy := &spyEngine{inner: &afterRead{inner: liveEngine{w.eng}, prefix: "query siteAccessCodeByHash(", onRead: func() {
+			mu.Lock()
+			reads++
+			n := reads
+			mu.Unlock()
+			if n > 2 {
+				return
+			}
+			if n == 2 {
+				close(bothRead)
+			}
+			<-gates[n-1]
+		}}}
+		in := NewIntegration(spy, discardLogger())
+
+		results := make(chan result, 2)
+		for _, label := range []string{"Guests from the first", "Guests from the second"} {
+			go func(label string) {
+				nodes, err := in.handleGuestPassCreate(caller, w.guestArgs(map[string]any{"label": label}), 0)
+				results <- result{label: label, nodes: nodes, err: err}
+			}(label)
+		}
+		next := func() result {
+			t.Helper()
+			select {
+			case r := <-results:
+				return r
+			case <-time.After(30 * time.Second):
+				t.Fatal("a mint did not finish")
+				return result{}
+			}
+		}
+		within(t, bothRead, "both mints reading the passes")
+		var got []result
+		if oneAfterTheOther {
+			close(gates[0])
+			got = append(got, next())
+			require.NoError(t, got[0].err, "the mint let go first was refused")
+			close(gates[1])
+			got = append(got, next())
+		} else {
+			close(gates[0])
+			close(gates[1])
+			got = append(got, next(), next())
+		}
+
+		var (
+			won     []string
+			winner  string
+			refused []error
+		)
+		for _, r := range got {
+			if r.err != nil {
+				refused = append(refused, r.err)
+				continue
+			}
+			won = append(won, fmt.Sprint(onlyPayload(t, r.nodes)["codeId"]))
+			winner = r.label
+		}
+		require.Len(t, won, 1, "two operators at once both let guests in")
+		require.Len(t, refused, 1)
+		require.Equal(t, wantSecondPass, requireSentence(t, refused[0]), "the one that lost is not told guests are already in")
+		require.False(t, errors.Is(refused[0], memql.ErrRowVersionChanged), "this is a decision, not a conflict")
+
+		// THE PREMISE: both reached the write, so the write is what told them apart, and
+		// the loser read again before it decided.
+		require.Len(t, spy.named("createSiteAccessCode"), 2, "the premise failed: one mint never reached the write, so the fence was not asked")
+		require.Len(t, spy.named("siteAccessCodeByHash"), 3, "the loser did not read the passes again, so it decided from the read that had gone stale")
+
+		require.Equal(t, guestPassID(w.site, 1), won[0])
+		require.Equal(t, 1, w.passesOn(w.site), "two operators at once left two passes")
+		require.Equal(t, 1, w.versions(won[0], 0), "the loser's write landed on the winner's row")
+		require.Equal(t, winner, w.row(won[0])["label"], "the pass is not the one its operator was told about")
+		live, ok, err := NewGraphStore(liveEngine{w.eng}).livePassForSite(context.Background(), w.site)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, won[0], live.ID)
+		require.Len(t, w.events(won[0]), 1, "one pass, one audit event")
+	}
+
+	t.Run("two mints let go together", func(t *testing.T) {
+		for round := 0; round < 3; round++ {
+			race(t, false)
+		}
+	})
+	t.Run("the second mint let go once the first has landed", func(t *testing.T) {
+		for round := 0; round < 3; round++ {
+			race(t, true)
+		}
+	})
+}
+
+// passIDsAsked is the ids a mint's writes asked for, in the order it asked.
+func passIDsAsked(spy *spyEngine) []string {
+	var ids []string
+	for _, call := range spy.named("createSiteAccessCode") {
+		if m := askedCodeID.FindStringSubmatch(call.query); m != nil {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
+}
+
+var askedCodeID = regexp.MustCompile(`codeId: "([^"]+)"`)
+
+// AN ID CAN BE TAKEN BY A ROW THE SITE'S PASSES DO NOT COUNT. The count names the next
+// pass's id, and it falls short in two ways: the read behind it returns at most the
+// engine's MaxResults rows whatever @unbounded asks for, and an older engine's
+// regenerate, run on a pass after a rollback, gave the pass a code's digest. Either way
+// the next id belongs to a row the read does not find, every mint asks for it, and the
+// write refuses it, so without a way past it guests could never be let in again.
+func TestAGuestPassMovesPastAnIDTakenByARowTheReadDoesNotCount(t *testing.T) {
+	t.Run("a taken id and no pass standing: the next free one", func(t *testing.T) {
+		w := newWorld(t, "guesttaken")
+		operator := actorContext(w.operator, auth.RoleOwner)
+		first := w.allowGuests(operator, nil)
+		require.Equal(t, guestPassID(w.site, 1), first)
+
+		// AS AN OLDER ENGINE'S REGENERATE WROTE IT, which knew nothing of passes: a code's
+		// digest on the pass's row. Then the pass is turned off, so none stands.
+		_, digest, hint, err := memql.MintAccessCode()
+		require.NoError(t, err)
+		w.mutate(w.asOwner(), "rotateSiteAccessCode", map[string]any{
+			"codeId": first, "codeHash": digest, "codeHint": hint, "generation": 2,
+			"issuedAt": stamp(time.Now()), "expiresAt": stamp(time.Now().Add(time.Hour)), "lastChangedBy": w.owner,
+		})
+		w.removeCode(first)
+		// THE MINT'S OWN READ, which takes each row's latest version: passesOn would count the
+		// first version, written with the guest digest.
+		counted, err := NewGraphStore(liveEngine{w.eng}).guestPassRows(context.Background(), w.site)
+		require.NoError(t, err)
+		require.Empty(t, counted, "the premise failed: the site's guest digest still finds the first pass, so its id is counted")
+		taken := w.versions(first, 0)
+
+		in, spy := w.spied()
+		nodes, err := in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"label": "Guests again"}), 0)
+		require.NoError(t, err, "an id taken by a row the read does not count wedged the mint")
+		second := fmt.Sprint(onlyPayload(t, nodes)["codeId"])
+		require.Equal(t, guestPassID(w.site, 2), second, "the mint did not move on to the next id")
+		require.Equal(t, []string{first, second}, passIDsAsked(spy), "the mint did not ask for the counted id first and then the next")
+
+		require.Equal(t, taken, w.versions(first, 0), "the write landed on the row that holds the taken id")
+		require.Equal(t, "Guests again", w.row(second)["label"])
+		require.Equal(t, true, w.row(second)["guest"])
+		live, ok, err := NewGraphStore(liveEngine{w.eng}).livePassForSite(context.Background(), w.site)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, second, live.ID)
+		require.Len(t, w.events(second), 1, "one pass, one audit event")
+	})
+
+	t.Run("it moves past eight taken ids, and a ninth is the conflict", func(t *testing.T) {
+		w := newWorld(t, "guestbound")
+		operator := actorContext(w.operator, auth.RoleOwner)
+		now := time.Now()
+		// A CODE AT EACH OF A SITE'S FIRST PASS IDS, which the site's guest digest never
+		// finds: the count says no pass was ever minted, and every id it names is taken.
+		takeFirst := func(site string, n int) {
+			for ordinal := 1; ordinal <= n; ordinal++ {
+				w.forgeCode(site, guestPassID(site, ordinal), w.account, now, now.Add(time.Hour))
+			}
+		}
+		takeFirst(w.site, 8)
+		far := "ac-site-far-" + w.suffix
+		w.siteRow(far, nil)
+		takeFirst(far, 9)
+
+		in, spy := w.spied()
+		nodes, err := in.handleGuestPassCreate(operator, w.guestArgs(nil), 0)
+		require.NoError(t, err, "eight taken ids stopped the mint")
+		require.Equal(t, guestPassID(w.site, 9), fmt.Sprint(onlyPayload(t, nodes)["codeId"]))
+
+		spy.reset()
+		nodes, err = in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"siteId": far}), 0)
+		require.Nil(t, nodes, "the mint wrote past the ids it may move past")
+		require.Equal(t, wantGuestConflict, requireSentence(t, err))
+		require.True(t, errors.Is(err, memql.ErrRowVersionChanged), "a caller cannot tell the conflict from any other failure: %v", err)
+		asked := map[string]bool{}
+		for _, id := range passIDsAsked(spy) {
+			asked[id] = true
+		}
+		want := map[string]bool{}
+		for ordinal := 1; ordinal <= 9; ordinal++ {
+			want[guestPassID(far, ordinal)] = true
+		}
+		require.Equal(t, want, asked, "the mint did not stop at the ninth taken id")
+		require.Zero(t, w.passesOn(far), "a mint that reported the conflict wrote a pass")
+		require.Zero(t, w.eventsOnSite(far), "a mint that reported the conflict was audited")
+		for ordinal := 1; ordinal <= 9; ordinal++ {
+			require.Equal(t, 1, w.versions(guestPassID(far, ordinal), 0), "a write landed on the code holding a taken id")
+		}
+	})
+}
+
+func TestRegenerateRefusesAGuestPass(t *testing.T) {
+	w := newWorld(t, "guestregen")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	pass := w.allowGuests(operator, nil)
+	before, versions := w.row(pass), w.versions(pass, 0)
+
+	in, spy := w.spied()
+	for name, args := range map[string]map[string]any{
+		"keeping the expiry":  {"codeId": pass},
+		"with a fresh expiry": {"codeId": pass, "expiresAt": after(2 * time.Hour)},
+	} {
+		spy.reset()
+		nodes, err := in.handleRegenerate(operator, args, 0)
+		require.Nil(t, nodes, "%s: a guest pass was handed a code", name)
+		require.Equal(t, wantNoCodeToRegenerate, requireSentence(t, err), name)
+		require.Empty(t, spy.named("rotateSiteAccessCode"), "%s: regenerating a guest pass reached the write", name)
+	}
+	rows, err := w.builtin(operator, "siteAccessCodeRegenerate", map[string]any{"codeId": pass})
+	require.Nil(t, rows, "a guest pass was handed a code through the dispatch")
+	require.Equal(t, wantNoCodeToRegenerate, requireSentence(t, err))
+
+	require.Equal(t, before, w.row(pass), "a refused regenerate changed the pass")
+	require.EqualValues(t, 1, w.row(pass)["generation"], "a refused regenerate moved the generation, and every guest would be taken out")
+	require.Equal(t, versions, w.versions(pass, 0), "a refused regenerate wrote a version")
+	require.Len(t, w.events(pass), 1, "a refused regenerate was audited")
+
+	// THE ACTS THAT DO APPLY TO A PASS STILL DO: changing when it ends, and turning it off.
+	to := after(3 * time.Hour)
+	_, err = w.in.handleSetExpiry(operator, map[string]any{"codeId": pass, "expiresAt": to}, 0)
+	require.NoError(t, err, "a guest pass's end date cannot be changed")
+	require.Equal(t, to, w.row(pass)["expiresAt"])
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": pass}, 0)
+	require.NoError(t, err, "guest access cannot be turned off")
+	require.NotEmpty(t, w.row(pass)["revokedAt"])
+
+	// AND NO STATE OF A PASS GIVES IT A CODE: a removed one is still refused as a pass.
+	_, err = w.in.handleRegenerate(operator, map[string]any{"codeId": pass}, 0)
+	require.Equal(t, wantNoCodeToRegenerate, requireSentence(t, err))
+}
+
+func TestListMarksTheGuestPass(t *testing.T) {
+	w := newWorld(t, "guestlist")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	store := NewGraphStore(liveEngine{w.eng})
+	codeID, _ := w.mint(operator, nil)
+	pass := w.allowGuests(operator, nil)
+	opened := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
+	require.NoError(t, store.CreateSession(context.Background(), w.owner, Session{
+		SiteID: w.site, CodeID: pass, Generation: 1, IssuedAt: opened,
+	}, memql.AccessSessionTokenDigest("guest-list-"+w.suffix)))
+
+	// THROUGH THE DISPATCH, so what is asserted is the row a person's list gets.
+	rows, err := w.builtin(operator, "siteAccessCodesForSite", map[string]any{"siteId": w.site})
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "the list does not carry the code and the pass")
+	byID := map[string]map[string]any{}
+	for _, row := range rows {
+		byID[fmt.Sprint(row["id"])] = row
+	}
+	require.Equal(t, true, byID[pass]["guest"], "the list does not say which row is the guest pass")
+	_, marked := byID[codeID]["guest"]
+	require.False(t, marked, "a code's row says something about guests: %v", byID[codeID])
+	require.Equal(t, "Guests", byID[pass]["label"])
+	require.Equal(t, stamp(opened), byID[pass]["lastOpenedAt"], "the pass does not say when a guest last came in")
+
+	blob, err := json.Marshal(rows)
+	require.NoError(t, err)
+	require.NotContains(t, string(blob), memql.AccessGuestPassDigest(w.site), "the list shows the pass's digest")
+	require.NotContains(t, string(blob), "codeHash", "the list has a digest field")
+}
+
+// EXACTLY AS A CODE WOULD BE: one set of checks stands in front of both mints, so each
+// refusal here is asked of the code mint as well, and the two sentences must be the same.
+// A run is the one exception, refused in words of its own because its reason differs.
+func TestGuestPassRefusedWhereACodeWouldBe(t *testing.T) {
+	w := newWorld(t, "guestrefusals")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	valid := func(site string, over map[string]any) map[string]any {
+		args := w.guestArgs(over)
+		args["siteId"] = site
+		return args
+	}
+
+	ownerless, systemOwned, unpackaged := "ac-ownerless-"+w.suffix, "ac-system-"+w.suffix, "ac-unpackaged-"+w.suffix
+	emptyPackage, nodomains := "ac-pkg-empty-"+w.suffix, "ac-nodomains-"+w.suffix
+	w.packageRow(emptyPackage, w.account, []string{})
+	w.siteRow(ownerless, map[string]any{"ownerUserId": nil})
+	w.siteRow(systemOwned, map[string]any{"systemOwned": true})
+	w.siteRow(unpackaged, map[string]any{"packageDeployableName": nil, "packageId": nil})
+	w.siteRow(nodomains, map[string]any{"packageId": "v1:platform:package:" + emptyPackage})
+
+	cases := []struct {
+		name   string
+		caller context.Context
+		args   map[string]any
+		says   string
+	}{
+		{"a caller who is nobody", context.Background(), valid(w.site, nil), "person"},
+		{"a site the caller cannot read", actorContext(w.stranger, auth.RoleWriter), valid(w.site, nil), "read"},
+		{"a site that does not exist", operator, valid("ac-nowhere-"+w.suffix, nil), "read"},
+		{"no site at all", operator, valid("", nil), "deployable"},
+		{"a site with no owner", operator, valid(ownerless, nil), "owner"},
+		{"a system-owned site", operator, valid(systemOwned, nil), "managed through"},
+		{"a site with no package deployable", operator, valid(unpackaged, nil), "package"},
+		{"a package with no list of domains", operator, valid(nodomains, nil), "no gates"},
+		{"a gate the deployable does not declare", operator, valid(w.site, map[string]any{"gate": "secrets"}), "dashboard"},
+		{"no gate", operator, valid(w.site, map[string]any{"gate": nil}), "clients"},
+		{"an empty label", operator, valid(w.site, map[string]any{"label": ""}), "name"},
+		{"no label", operator, valid(w.site, map[string]any{"label": nil}), "name"},
+		{"a label of 81 characters", operator, valid(w.site, map[string]any{"label": strings.Repeat("x", 81)}), "80"},
+		{"a subject of 121 characters", operator, valid(w.site, map[string]any{"subject": strings.Repeat("x", 121)}), "120"},
+		{"an expiry 30 seconds away", operator, valid(w.site, map[string]any{"expiresAt": after(30 * time.Second)}), "1 minute"},
+		{"an expiry in the past", operator, valid(w.site, map[string]any{"expiresAt": after(-time.Hour)}), "already passed"},
+		{"an expiry 400 days away", operator, valid(w.site, map[string]any{"expiresAt": after(400 * 24 * time.Hour)}), "366 days"},
+		{"an expiry that is not a date", operator, valid(w.site, map[string]any{"expiresAt": "next tuesday"}), "date"},
+		{"no expiry", operator, valid(w.site, map[string]any{"expiresAt": nil}), "expire"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodes, err := w.in.handleGuestPassCreate(tc.caller, tc.args, 0)
+			require.Nil(t, nodes, "a refused guest pass answered with a reply")
+			msg := requireSentence(t, err)
+			require.Contains(t, msg, tc.says, "refused, but not for this reason")
+			_, codeErr := w.in.handleCreate(tc.caller, tc.args, 0)
+			require.Error(t, codeErr, "the premise failed: a code would have been minted here")
+			require.Equal(t, codeErr.Error(), msg, "a guest pass is refused here in other words than a code")
+		})
+	}
+
+	t.Run("in a run, before anything is read, in words of its own", func(t *testing.T) {
+		// A pass has no code for a run's journal to keep, so that is not the reason. It is
+		// that letting guests in opens a deployable to anyone, which an operator decides.
+		inRun := common.ContextWithRun(operator, common.RunContext{RunId: "ac-run-" + w.suffix})
+		in, spy := w.spied()
+		nodes, err := in.handleGuestPassCreate(inRun, w.guestArgs(nil), 0)
+		require.Nil(t, nodes, "a run let guests in")
+		msg := requireSentence(t, err)
+		require.Contains(t, msg, "Deployables", "the refusal does not say where guests are let in")
+		require.Contains(t, msg, "operator", "the refusal does not say why")
+		require.NotContains(t, msg, "journal", "the refusal gives a code's reason, and a pass has no code")
+		require.Empty(t, spy.calls, "the refusal came after something was read or written")
+	})
+
+	// NOTHING WAS WRITTEN BY ANY OF THEM, on any of the sites, and nothing audited.
+	for _, site := range []string{w.site, ownerless, systemOwned, unpackaged, nodomains} {
+		require.Zero(t, w.codesOn(site), "a refused mint wrote a row on %s", site)
+		require.Zero(t, w.eventsOnSite(site), "a refused mint wrote an audit event on %s", site)
+	}
+
+	// THE REACHABLE POSITIVE, at the bounds: a table of refusals passes for the wrong
+	// reason if the fixture itself refuses everything.
+	pass := w.allowGuests(operator, map[string]any{
+		"gate": "clients", "label": strings.Repeat("é", 80), "subject": strings.Repeat("x", 120),
+		"expiresAt": after(366*24*time.Hour - time.Minute),
+	})
+	require.Equal(t, true, w.row(pass)["guest"])
+}
+
+// ---------------------------------------------------------------------------
 // regenerating
 // ---------------------------------------------------------------------------
 
@@ -1341,6 +2032,9 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 		"minting": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 			return w.in.handleCreate(ctx, w.createArgs(nil), 0)
 		},
+		"letting guests in": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+			return w.in.handleGuestPassCreate(ctx, w.guestArgs(nil), 0)
+		},
 		"regenerating": func(ctx context.Context) ([]memorynodes.MemoryNode, error) {
 			return w.in.handleRegenerate(ctx, map[string]any{"codeId": codeID}, 0)
 		},
@@ -1365,10 +2059,11 @@ func TestAnActBelongsToAPerson(t *testing.T) {
 	// holds every capability, the organization gate admits it, and it is the handler's
 	// question alone. It may still read, since a read records nobody.
 	for builtin, args := range map[string]map[string]any{
-		"siteAccessCodeCreate":     w.createArgs(nil),
-		"siteAccessCodeRegenerate": {"codeId": codeID},
-		"siteAccessCodeSetExpiry":  {"codeId": codeID, "expiresAt": after(2 * time.Hour)},
-		"siteAccessCodeRemove":     {"codeId": codeID},
+		"siteAccessCodeCreate":      w.createArgs(nil),
+		"siteAccessGuestPassCreate": w.guestArgs(nil),
+		"siteAccessCodeRegenerate":  {"codeId": codeID},
+		"siteAccessCodeSetExpiry":   {"codeId": codeID, "expiresAt": after(2 * time.Hour)},
+		"siteAccessCodeRemove":      {"codeId": codeID},
 	} {
 		t.Run(builtin+" with the operator credential, through the dispatch", func(t *testing.T) {
 			rows, err := w.builtin(operatorCredential(), builtin, args)
@@ -1525,6 +2220,10 @@ func TestATestPersonaIsJudgedWhereTheActIsAuthorized(t *testing.T) {
 		// in words that do not send them to try again.
 		nodes, err := w.in.handleCreate(developer, w.createArgs(nil), 0)
 		require.Nil(t, nodes, "a persona was handed a code for a site somebody else owns")
+		require.Contains(t, requireSentence(t, err), "test persona")
+		// A guest pass is a code's row stamped the same way, so it is refused the same way.
+		nodes, err = w.in.handleGuestPassCreate(developer, w.guestArgs(nil), 0)
+		require.Nil(t, nodes, "a persona let guests into a site somebody else owns")
 		require.Contains(t, requireSentence(t, err), "test persona")
 	})
 	require.Equal(t, before, w.row(theirs), "a refused persona changed the row")
@@ -1714,6 +2413,12 @@ func TestALogicCannotPutACodeInItsJournal(t *testing.T) {
   minted := builtin siteAccessCodeRegenerate(codeId: %s)
   return minted
 }`, stamp, langparser.QuoteString(codeID)),
+		// NOT FOR THE JOURNAL'S SAKE, since a pass has no code: a logic is DSL acting, and
+		// letting guests in is an operator's act and never DSL's.
+		"letting guests in": fmt.Sprintf(`logic allowGuestsFromALogic%d {
+  pass := builtin siteAccessGuestPassCreate(siteId: %s, label: "From a logic", gate: "dashboard", expiresAt: %s)
+  return pass
+}`, stamp, langparser.QuoteString(w.site), langparser.QuoteString(after(time.Hour))),
 	} {
 		t.Run(name, func(t *testing.T) {
 			logic := w.registerLogic(source)
@@ -1732,6 +2437,71 @@ func TestALogicCannotPutACodeInItsJournal(t *testing.T) {
 	require.Zero(t, held, "a v1:work row holds a plain code")
 	require.Equal(t, before, w.row(codeID), "a logic replaced a code's secret")
 	require.Equal(t, 1, w.codesOnSiteDistinct(w.site), "a logic minted a code")
+}
+
+// A RUN DOES NOT RE-TIME A GUEST PASS, for the reason it does not mint one: extending a
+// pass, or reviving one past its end, keeps a deployable open to anybody, and that is an
+// operator's act and never DSL's (G-D1). Through the real logic runner, beside the same
+// call on a code, which a run may still make, and beside removing the pass, which only
+// narrows who can get in and so stays a run's to do.
+func TestALogicCannotReTimeAGuestPass(t *testing.T) {
+	w := newWorld(t, "logicguest")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	pass := w.allowGuests(operator, nil)
+	codeID, _ := w.mint(operator, nil)
+	stamp := time.Now().UnixNano()
+	started := time.Now().Add(-time.Second)
+	t.Cleanup(func() {
+		_, _ = w.db.NewDelete().TableExpr(`"MemoryNodes"`).
+			Where("concept IN (?, ?)", "v1:work:run", "v1:work:step").Where(`"createdAt" >= ?`, started).
+			Where("payload::text LIKE ?", "%"+w.site+"%").Exec(context.Background())
+	})
+	run := func(name, call string) error {
+		t.Helper()
+		logic := w.registerLogic(fmt.Sprintf("logic %s%d {\n  done := builtin %s\n  return done\n}", name, stamp, call))
+		_, err := w.eng.Execute(operator, logic+"()")
+		return err
+	}
+	retime := func(name, id, to string) error {
+		t.Helper()
+		return run(name, fmt.Sprintf("siteAccessCodeSetExpiry(codeId: %s, expiresAt: %s)", langparser.QuoteString(id), langparser.QuoteString(to)))
+	}
+
+	t.Run("a guest pass is refused, and nothing changes", func(t *testing.T) {
+		for name, to := range map[string]string{
+			"extendGuestAccessFromALogic":  after(30 * 24 * time.Hour),
+			"shortenGuestAccessFromALogic": after(10 * time.Minute),
+		} {
+			before, versions, events := w.row(pass), w.versions(pass, 0), len(w.events(pass))
+			err := retime(name, pass, to)
+			require.Error(t, err, "%s: a logic changed when guest access ends", name)
+			require.Contains(t, err.Error(), "When guest access ends is changed only by a person in Deployables", "%s: refused, but not for this reason", name)
+			require.Equal(t, before, w.row(pass), "%s: a refused re-time changed the pass", name)
+			require.Equal(t, versions, w.versions(pass, 0), "%s: a refused re-time wrote a version", name)
+			require.Len(t, w.events(pass), events, "%s: a refused re-time was audited", name)
+		}
+	})
+
+	t.Run("nor is a pass past its end revived", func(t *testing.T) {
+		w.moveExpiry(pass, time.Now().Add(-time.Minute))
+		before := w.row(pass)
+		err := retime("reviveGuestAccessFromALogic", pass, after(time.Hour))
+		require.Error(t, err, "a logic let guests in again")
+		require.Contains(t, err.Error(), "When guest access ends is changed only by a person in Deployables", "refused, but not for this reason")
+		require.Equal(t, before, w.row(pass), "a logic revived guest access")
+	})
+
+	t.Run("a code is re-timed as before", func(t *testing.T) {
+		to := after(3 * time.Hour)
+		require.NoError(t, retime("retimeACodeFromALogic", codeID, to), "a logic can no longer re-time a code")
+		require.Equal(t, to, w.row(codeID)["expiresAt"])
+	})
+
+	t.Run("a guest pass can still be turned off", func(t *testing.T) {
+		require.NoError(t, run("turnOffGuestAccessFromALogic", fmt.Sprintf("siteAccessCodeRemove(codeId: %s)", langparser.QuoteString(pass))),
+			"a logic can no longer end guest access, which only narrows who can get in")
+		require.NotEmpty(t, w.row(pass)["revokedAt"])
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1911,6 +2681,54 @@ func TestASiteOnlyTransferLeavesItsCodesWorking(t *testing.T) {
 	require.Equal(t, w.owner, bare(row["ownerUserId"]), "removing moved the row's owner")
 }
 
+// A GUEST PASS LEFT FROM BEFORE A TRANSFER STILL STANDS, AND ITS NEW OWNER CANNOT SEE IT. On
+// an untied site a pass keeps the owner it was minted under, as a code does, so the new
+// owner's list leaves it out and their removal cannot reach it. The mint reads the passes as
+// the cluster and finds it all the same, and telling the new owner to turn it off first
+// would send them to an act they cannot take, so the refusal says who can.
+func TestAGuestPassLeftFromBeforeATransferIsForAClusterOperatorToEnd(t *testing.T) {
+	w := newWorld(t, "guesthands")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	heir := "ac-heir-" + w.suffix
+	w.principal(heir, auth.RoleWriter)
+	// THE NEW OWNER READS THE PACKAGE, as a member of the organization that ships it, so the
+	// mint gets as far as the passes: a refusal about gates would prove nothing here.
+	w.join(w.group, heir)
+	untied := "ac-untied-" + w.suffix
+	w.siteRow(untied, map[string]any{"accountId": nil})
+
+	pass := w.allowGuests(operator, map[string]any{"siteId": untied})
+	require.Equal(t, w.owner, bare(w.row(pass)["ownerUserId"]), "the premise failed: the pass is not stamped with the site's owner of the time")
+	w.transfer(seedContext(), map[string]any{
+		"fromUserId": w.owner, "toUserId": heir, "concept": siteConcept, "rowId": siteConcept + ":" + untied,
+	})
+	require.Equal(t, heir, w.siteOwner(untied), "the premise failed: the site did not change hands")
+
+	// THE PREMISE: the new owner's list leaves the pass out, and their removal cannot reach it.
+	newOwner := actorContext(heir, auth.RoleWriter)
+	listed, err := w.in.handleList(newOwner, map[string]any{"siteId": untied}, 0)
+	require.NoError(t, err)
+	require.Empty(t, listed, "the premise failed: the new owner can see the pass")
+	_, err = w.in.handleRemove(newOwner, map[string]any{"codeId": pass}, 0)
+	require.Error(t, err, "the premise failed: the new owner can turn the pass off")
+
+	nodes, err := w.in.handleGuestPassCreate(newOwner, w.guestArgs(map[string]any{"siteId": untied}), 0)
+	require.Nil(t, nodes, "a second guest pass was minted beside one that stands")
+	require.Equal(t, wantPassUnseen, requireSentence(t, err), "the new owner is sent to turn off a pass they cannot see")
+	require.Equal(t, 1, w.passesOn(untied), "a refused mint wrote a pass")
+	require.Len(t, w.events(pass), 1, "a refused mint was audited")
+
+	// A CLUSTER OPERATOR CAN SEE IT, so they are told what anybody who can see it is told,
+	// and once they have turned it off the new owner lets guests in under a pass of their own.
+	_, err = w.in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"siteId": untied}), 0)
+	require.Equal(t, wantSecondPass, requireSentence(t, err))
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": pass}, 0)
+	require.NoError(t, err)
+	second := w.allowGuests(newOwner, map[string]any{"siteId": untied})
+	require.Equal(t, guestPassID(untied, 2), second)
+	require.Equal(t, heir, bare(w.row(second)["ownerUserId"]), "the new pass is not the new owner's")
+}
+
 // ---------------------------------------------------------------------------
 // the audit event does not wait on the request
 // ---------------------------------------------------------------------------
@@ -2087,6 +2905,22 @@ func TestEachReadAndWriteRunsAsTheActorItMust(t *testing.T) {
 		expect(t, "createAuditEvent", w.operator, true)
 	})
 
+	t.Run("letting guests in", func(t *testing.T) {
+		spy.reset()
+		nodes, err := in.handleGuestPassCreate(caller, w.guestArgs(nil), 0)
+		require.NoError(t, err)
+		passID := fmt.Sprint(onlyPayload(t, nodes)["codeId"])
+		expect(t, "siteById", w.operator, false)
+		expect(t, "packageById", w.operator, false)
+		// AS THE CLUSTER, because the count of these rows names the next pass, and a pass
+		// the caller's tier hides from them still has its id.
+		expect(t, "siteAccessCodeByHash", theCluster, true)
+		write := expect(t, "createSiteAccessCode", w.owner, true)
+		require.True(t, memql.HasRowVersionFence(write.ctx, siteConcept, w.site), "a pass carries no witness of the site it copied from")
+		require.True(t, memql.HasRowVersionFence(write.ctx, codeConcept, passID), "a pass carries no witness that its row is not there yet")
+		expect(t, "createAuditEvent", w.operator, true)
+	})
+
 	acts := []struct {
 		name  string
 		write string
@@ -2191,6 +3025,17 @@ func TestAFenceLossIsRetriedOnceThenReported(t *testing.T) {
 			},
 			landed: func(t *testing.T, w *world, _ string, got outcome) bool {
 				return got.code != "" && w.codesOn(w.site) == 1
+			},
+		},
+		{
+			name: "letting guests in", write: "createSiteAccessCode", read: "siteAccessCodeByHash",
+			setup: func(w *world, _ context.Context) string { return w.site },
+			act: func(in *Integration, caller context.Context, w *world, _ string) (outcome, error) {
+				_, err := in.handleGuestPassCreate(caller, w.guestArgs(nil), 0)
+				return outcome{}, err
+			},
+			landed: func(t *testing.T, w *world, _ string, _ outcome) bool {
+				return w.passesOn(w.site) == 1
 			},
 		},
 		{
@@ -2487,14 +3332,21 @@ func TestTheAuditWriteIsNotFenced(t *testing.T) {
 	require.NoError(t, err)
 	_, err = in.handleRemove(caller, map[string]any{"codeId": codeID}, 0)
 	require.NoError(t, err)
+	// A PASS'S WITNESS IS THAT ITS ROW IS ABSENT, and the row is there by the time its
+	// event is written, so an event carrying it is refused every time.
+	nodes, err = in.handleGuestPassCreate(caller, w.guestArgs(nil), 0)
+	require.NoError(t, err)
+	passID := fmt.Sprint(onlyPayload(t, nodes)["codeId"])
 
 	audits := spy.named("createAuditEvent")
-	require.Len(t, audits, 4)
+	require.Len(t, audits, 5)
 	for _, call := range audits {
 		require.False(t, memql.HasRowVersionFence(call.ctx, codeConcept, codeID), "an audit write carries the code's witness")
+		require.False(t, memql.HasRowVersionFence(call.ctx, codeConcept, passID), "an audit write carries the pass's witness")
 		require.False(t, memql.HasRowVersionFence(call.ctx, siteConcept, w.site), "an audit write carries the site's witness")
 	}
 	require.Len(t, w.events(codeID), 4, "an act reported success and its audit event never landed")
+	require.Len(t, w.events(passID), 1, "guests were let in and the audit event never landed")
 }
 
 // ---------------------------------------------------------------------------
@@ -2539,6 +3391,7 @@ func TestAnActThroughAnotherOrganizationIsRefused(t *testing.T) {
 		args    map[string]any
 	}{
 		{"siteAccessCodeCreate", map[string]any{"siteId": betaSite, "label": "Probe", "gate": "dashboard", "expiresAt": after(time.Hour)}},
+		{"siteAccessGuestPassCreate", map[string]any{"siteId": betaSite, "label": "Probe", "gate": "dashboard", "expiresAt": after(time.Hour)}},
 		{"siteAccessCodesForSite", map[string]any{"siteId": betaSite}},
 		{"siteAccessGates", map[string]any{"siteId": betaSite}},
 		{"siteAccessCodeRegenerate", map[string]any{"codeId": betaCode}},
@@ -2585,6 +3438,11 @@ func TestAnActThroughAnotherOrganizationIsRefused(t *testing.T) {
 	_, err = w.builtin(caller, "siteAccessCodeRemove", map[string]any{"codeId": codeID})
 	require.NoError(t, err)
 	require.Len(t, w.events(codeID), 4)
+
+	rows, err = w.builtin(caller, "siteAccessGuestPassCreate", w.guestArgs(nil))
+	require.NoError(t, err, "the person could not let guests in, in the organization that granted the part")
+	require.Len(t, rows, 1)
+	require.Equal(t, true, w.row(fmt.Sprint(rows[0]["codeId"]))["guest"])
 }
 
 // ---------------------------------------------------------------------------
@@ -2711,6 +3569,7 @@ func TestTheStoreFindsCodesAndSessions(t *testing.T) {
 	require.Equal(t, "acme", got.Subject)
 	require.Equal(t, 1, got.Generation)
 	require.False(t, got.Revoked)
+	require.False(t, got.Guest, "a code reads as a guest pass, so its holder's replies would call the session a guest's")
 	require.WithinDuration(t, time.Now().Add(time.Hour), got.ExpiresAt, time.Minute)
 
 	byID, err := store.CodeByID(background, codeID)
@@ -2877,6 +3736,15 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		})
 	}
 
+	t.Run("a failed guest pass write", func(t *testing.T) {
+		in := NewIntegration(&failingEngine{inner: liveEngine{w.eng}, fail: "createSiteAccessCode"}, logger)
+		_, err := in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"label": "A label nobody logs", "subject": "a-subject-nobody-logs"}), 0)
+		clean(t, requireSentence(t, err))
+		silent(t, logged.String())
+		require.Contains(t, logged.String(), "siteaccess: an act on an access code failed", "the failure was not logged, so nobody can find out it happened")
+		logged.Reset()
+	})
+
 	t.Run("a failed audit write does not fail the act, and says so only in the log", func(t *testing.T) {
 		in := NewIntegration(&failingEngine{inner: liveEngine{w.eng}, fail: "createAuditEvent"}, logger)
 		nodes, err := in.handleRegenerate(operator, map[string]any{"codeId": codeID}, 0)
@@ -2904,6 +3772,10 @@ func TestNoFailureCarriesASecret(t *testing.T) {
 		_, err = store.SessionByTokenHash(context.Background(), token)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), token)
+		clean(t, err.Error())
+		_, err = store.GuestPassForSite(context.Background(), w.site)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), memql.AccessGuestPassDigest(w.site))
 		clean(t, err.Error())
 		err = store.CreateSession(context.Background(), w.owner, Session{SiteID: w.site, CodeID: codeID, Generation: 1, IssuedAt: time.Now()}, token)
 		require.Error(t, err)

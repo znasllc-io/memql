@@ -224,8 +224,13 @@ function remove_binary() {
 # must be genuinely empty, and the walk stops at $HOME, a filesystem root, or
 # any path shallower than two components. rmdir rather than rm -rf: it fails
 # rather than recurses if the directory turns out not to be empty.
+#
+# The flag is resolved once, in main(), before anything is removed: read here
+# with cap_flag it was an emptiness test, so --prune-empty-parents=false
+# pruned, and a mistyped value would have been refused only after the removal.
+_RA_PRUNE_EMPTY_PARENTS=""
 function prune_empty_parents() {
-    [[ -n "$(cap_flag prune-empty-parents)" ]] || return 0
+    [[ -n "$_RA_PRUNE_EMPTY_PARENTS" ]] || return 0
 
     local dir resolved_home level=0
     resolved_home="$(cd "$HOME" 2>/dev/null && pwd -P)" || return 0
@@ -649,6 +654,7 @@ function main() {
     cluster="$(cap_param cluster memql)"
     prefix="$(cap_param image-prefix memql)"
     _RA_PRE_EXISTING="$(cap_param pre-existing)"
+    if cap_bool prune-empty-parents; then _RA_PRUNE_EMPTY_PARENTS=1; else _RA_PRUNE_EMPTY_PARENTS=""; fi
 
     cap_require kind "$kind"
 

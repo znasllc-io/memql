@@ -82,6 +82,13 @@ async function openReviews(seed: FakeSeed = reviewsSeed()): Promise<FakeConnecti
 const bar = () => document.querySelector(".os-actbar") as HTMLElement;
 const barButtons = () => within(bar()).queryAllByRole("button").map((b) => (b.textContent ?? "").trim()).filter((t) => t !== "");
 
+/** One row of the review settings, by the name beside it. */
+function settingRow(label: string): HTMLElement {
+  const row = [...document.querySelectorAll(".os-setting-row")].find((r) => r.querySelector(".os-setting-name")?.textContent === label);
+  if (row === undefined) throw new Error(`no setting row named ${label}`);
+  return row as HTMLElement;
+}
+
 useFakeDate();
 
 beforeEach(() => {
@@ -157,7 +164,7 @@ describe("the queue", () => {
   });
 
   it("tells the cluster's operators they read the reviews and the store's people decide them", async () => {
-    const seed = reviewsSeed({ settings: { exists: true, settings: {}, may: { edit: true, nameApprover: true }, viewer: { moderates: false, approvesRemovals: false } } as unknown as Row });
+    const seed = reviewsSeed({ settings: { exists: true, settings: {}, may: { edit: true, nameApprover: true, nameSender: true }, viewer: { moderates: false, approvesRemovals: false } } as unknown as Row });
     await openReviews(seed);
     expect(await screen.findByText(/Its own people publish and decline them/)).toBeTruthy();
   });
@@ -296,13 +303,21 @@ describe("the settings", () => {
   });
 
   it("shows what is in force and saves only what changed", async () => {
-    const connection = await openReviews();
+    // Somebody can moderate the store, so a choice that is absent is absent
+    // because this viewer may not name the approver -- not because there is
+    // nobody to choose from.
+    const people = { storeId: "store-live", people: [{ userId: "u-owner", displayName: "Avery Owner", email: "avery@example.com", mayRemove: true }] } as unknown as Row;
+    const connection = await openReviews(reviewsSeed({ people }));
     await click(tab("Settings"));
     const lifetime = (await screen.findByLabelText("Days a review link stays open")) as HTMLInputElement;
     expect(lifetime.value).toBe("14");
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
     // Only the owner, or an operator, names who approves removals: to anybody
-    // else the choice is absent, never disabled.
+    // else the choice is absent, never disabled, and so is clearing it.
     expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Clear the approver/ })).toBeNull();
+    // Somebody is named, so who else may name someone is that owner or an operator.
+    expect(within(settingRow("Removal approver")).getByText(/Only that owner, or the cluster's operators, can name someone else\.$/)).toBeTruthy();
     expect(barButtons()).toEqual([]);
 
     await typeInto(lifetime, "21");
@@ -314,6 +329,20 @@ describe("the settings", () => {
     expect(call).toContain("linkLifetimeDays: 21");
     expect(call).not.toContain("notifyEmail");
     expect(call).not.toContain("publicDisplay");
+  });
+
+  it("sends a setting emptied as empty, never leaves it out", async () => {
+    // The engine changes only the settings a call names: an emptied address
+    // left out of the call would stay as it was.
+    const connection = await openReviews();
+    await click(tab("Settings"));
+    await typeInto((await screen.findByLabelText("Email when a review is waiting")) as HTMLInputElement, "");
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    const call = connection.callsNamed("reviewsUpdateSettings")[0];
+    expect(call).toContain('notifyEmail: ""');
+    expect(call).not.toContain("linkLifetimeDays");
   });
 
   it("lets only the cluster's operators name the mailbox requests leave from", async () => {
@@ -358,15 +387,34 @@ describe("who can moderate", () => {
       { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
     ],
   } as unknown as Row;
-  const APPROVER_SETTINGS = {
+  /**
+   * The settings as an operator reads them, with Avery named: they may name
+   * the approver and the sender, and approve nothing themselves -- the engine
+   * answers `approvesRemovals` only to the person named, and never to an
+   * operator (packs/reviewspack/reads.go, readSettings).
+   */
+  const OPERATOR_SETTINGS = {
     exists: true,
     settings: { linkLifetimeDays: 14, requestDelayDays: 14, notifyEmail: "support@example.com", removalApproverUserId: "u-owner" },
-    may: { edit: true, nameApprover: true },
-    viewer: { moderates: true, approvesRemovals: true },
+    may: { edit: true, nameApprover: true, nameSender: true },
+    viewer: { moderates: false, approvesRemovals: false },
   } as unknown as Row;
+  /** The first 100 people who can moderate, by what each is called: the list the engine cuts at. */
+  const FIRST_HUNDRED = Array.from({ length: 100 }, (_, n) => {
+    const at = String(n).padStart(3, "0");
+    return { userId: `u-${at}`, displayName: `Moderator ${at}`, email: `m${at}@example.com`, mayRemove: false };
+  });
+
+  /** Type into the approver picker, and what it shows. */
+  async function search(text: string): Promise<HTMLElement> {
+    const field = await screen.findByRole("combobox", { name: "Choose who approves removals" });
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: text } });
+    return screen.findByRole("listbox", { name: "People who can moderate" });
+  }
 
   it("review settings pick the approver from the people who can moderate", async () => {
-    const connection = await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE }));
+    const connection = await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: PEOPLE }));
     await click(tab("Settings"));
     const moderators = await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
     expect(connection.callsNamed("reviewsPeople")[0]).toContain('storeId: "store-live"');
@@ -377,6 +425,8 @@ describe("who can moderate", () => {
     expect(within(rows[0]!).getByText("Approves removals")).toBeTruthy();
     expect(within(rows[1]!).queryByText("Approves removals")).toBeNull();
     expect(within(rows[1]!).getByText("robin@example.com")).toBeTruthy();
+    // Everybody who can moderate is listed, so the list says nothing about a cut.
+    expect(within(settingRow("Who can moderate")).queryByText(/Only the first/)).toBeNull();
     // The address a waiting review is sent to stays a field.
     expect((screen.getByLabelText("Email when a review is waiting") as HTMLInputElement).value).toBe("support@example.com");
     expect(screen.getByText(/Avery Owner is the one person who can remove a published review/)).toBeTruthy();
@@ -400,7 +450,7 @@ describe("who can moderate", () => {
 
   it("say so when the engine refuses the approver chosen", async () => {
     const refusal = "reviews: Choose someone in this store's organization who can moderate reviews.";
-    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: PEOPLE, settingsError: refusal }));
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: PEOPLE, settingsError: refusal }));
     await click(tab("Settings"));
     fireEvent.focus(await screen.findByRole("combobox", { name: "Choose who approves removals" }));
     await click(within(await screen.findByRole("listbox", { name: "People who can moderate" })).getByRole("option", { name: "Robin Moderator" }));
@@ -410,11 +460,274 @@ describe("who can moderate", () => {
   });
 
   it("say nobody can moderate when the store's organization has nobody who can", async () => {
-    await openReviews(reviewsSeed({ settings: APPROVER_SETTINGS, people: { storeId: "store-live", people: [] } as unknown as Row }));
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: { storeId: "store-live", people: [] } as unknown as Row }));
     await click(tab("Settings"));
     expect(await screen.findByText(/Nobody in this store.s organization can moderate its reviews\./)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Who can moderate this store's reviews" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    // An approver is still named, and nobody is listed to point at.
+    const approver = settingRow("Removal approver");
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).getByText(/Someone this page cannot name is the one person who can remove a published review/)).toBeTruthy();
+  });
+
+  it("clear the approver, so Save names nobody", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    // A quiet kit button in the approver's row, named by the words it shows.
+    const clear = within(settingRow("Removal approver")).getByRole("button", { name: /Clear the approver/ });
+    expect(clear.textContent).toBe("Clear the approver");
+    expect(clear.classList.contains("os-button")).toBe(true);
+    expect(clear.getAttribute("data-tone")).toBe("quiet");
+
+    await click(clear);
+    expect(within(settingRow("Removal approver")).getByText(/Nobody can remove a published review until an owner is named\./)).toBeTruthy();
+    // Nobody is named now, so there is nobody to clear; somebody can still be chosen.
+    expect(screen.queryByRole("button", { name: /Clear the approver/ })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Choose who approves removals" })).toBeTruthy();
+
+    await readTheBar();
+    expect(barButtons()).toEqual(["Discard", "Save"]);
+    await click(within(bar()).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsUpdateSettings")).toHaveLength(1));
+    const call = connection.callsNamed("reviewsUpdateSettings")[0];
+    // Named as nobody, never left out: a setting that is not sent is not changed.
+    expect(call).toContain('removalApproverUserId: ""');
+    expect(call).not.toContain("notifyEmail");
+  });
+
+  it("say beside Clear, to the approver who is no operator, that clearing leaves the naming to the cluster's operators", async () => {
+    // Only the current approver or an operator names one (writeSettings): an
+    // approver who saves nobody can never name anybody again.
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-me" },
+      may: { edit: true, nameApprover: true, nameSender: false },
+      viewer: { moderates: true, approvesRemovals: true },
+    } as unknown as Row;
+    const people = {
+      storeId: "store-live",
+      people: [
+        { userId: "u-me", displayName: "Sam Me", email: "sam@example.com", mayRemove: true },
+        { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
+      ],
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    expect(within(approver).getByText(/^You are the one person who can remove a published review/)).toBeTruthy();
+    const clear = within(approver).getByRole("button", { name: "Clear the approver" });
+    const after = within(approver).getByText(/^Once you clear the approver and save, only the cluster.s operators can name someone\.$/);
+    expect(after.classList.contains("os-caption")).toBe(true);
+    // Beside the act it is about.
+    expect(clear.nextElementSibling).toBe(after);
+  });
+
+  it("keep saying, once Clear is pressed, what saving leaves, on the line focus moves to", async () => {
+    // Clear goes once nobody is named, and the sentence beside it with it --
+    // but Save has still to do what it said. So the line that now says nobody
+    // approves says it too, and takes the focus the gone button had.
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-me" },
+      may: { edit: true, nameApprover: true, nameSender: false },
+      viewer: { moderates: true, approvesRemovals: true },
+    } as unknown as Row;
+    const people = {
+      storeId: "store-live",
+      people: [
+        { userId: "u-me", displayName: "Sam Me", email: "sam@example.com", mayRemove: true },
+        { userId: "u-mod", displayName: "Robin Moderator", email: "robin@example.com", mayRemove: false },
+      ],
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    const clear = within(approver).getByRole("button", { name: "Clear the approver" });
+    clear.focus();
+    await click(clear);
+
+    expect(within(approver).queryByRole("button", { name: "Clear the approver" })).toBeNull();
+    const said = "Nobody can remove a published review until an owner is named. Once you save, only the cluster's operators can name someone.";
+    const line = within(approver).getByText(said);
+    expect(line.classList.contains("os-caption")).toBe(true);
+    // Focus is on that line, never left on the page itself.
+    const focused = document.activeElement as HTMLElement;
+    expect(approver.contains(focused)).toBe(true);
+    expect(focused.textContent).toBe(said);
+    // And it is still said when Save is pressed.
+    await readTheBar();
+    expect(barButtons()).toEqual(["Discard", "Save"]);
+    expect(within(approver).getByText(said)).toBe(line);
+  });
+
+  it("move focus to the line that says nobody approves once an operator presses Clear, and say nothing of operators naming", async () => {
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    const clear = within(approver).getByRole("button", { name: "Clear the approver" });
+    clear.focus();
+    await click(clear);
+    const said = "Nobody can remove a published review until an owner is named.";
+    const focused = document.activeElement as HTMLElement;
+    expect(approver.contains(focused)).toBe(true);
+    expect(focused.textContent).toBe(said);
+  });
+
+  it("say nothing of the kind beside Clear to an operator, who can always name someone", async () => {
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-owner" },
+      may: { edit: true, nameApprover: true, nameSender: true },
+      viewer: { moderates: false, approvesRemovals: false },
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    expect(within(approver).getByRole("button", { name: "Clear the approver" })).toBeTruthy();
+    expect(within(approver).queryByText(/only the cluster.s operators can name/)).toBeNull();
+  });
+
+  it("say only the cluster's operators can name an approver while nobody is named, to whoever may not", async () => {
+    // There is no owner to point at: nobody is named, and only an operator may
+    // name somebody where nobody is.
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "" },
+      may: { edit: true, nameApprover: false },
+      viewer: { moderates: true, approvesRemovals: false },
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    const approver = settingRow("Removal approver");
+    expect(within(approver).getByText("Nobody can remove a published review until an owner is named. Only the cluster's operators can name one.")).toBeTruthy();
+    expect(within(approver).queryByText(/Only that owner/)).toBeNull();
+    expect(within(approver).queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+  });
+
+  it("offer no clearing while nobody approves removals", async () => {
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "" },
+      may: { edit: true, nameApprover: true, nameSender: true },
+      viewer: { moderates: false, approvesRemovals: false },
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people: PEOPLE }));
+    await click(tab("Settings"));
+    await screen.findByRole("combobox", { name: "Choose who approves removals" });
+    expect(within(settingRow("Removal approver")).getByText(/Nobody can remove a published review until an owner is named\./)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Clear the approver/ })).toBeNull();
+  });
+
+  it("say why nobody can be chosen when who can moderate could not be read", async () => {
+    const connection = await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, peopleError: "reviews: reading the organization's people: the connection to the database dropped" }));
+    await click(tab("Settings"));
+    const approver = settingRow("Removal approver");
+    const why = await within(approver).findByText("Nobody can be chosen, because who can moderate this store could not be read.");
+    expect(why.classList.contains("os-caption")).toBe(true);
+    expect(within(approver).queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    // An approver is still named. A list that could not be read lists nobody:
+    // it says nothing about who they are, and never that there is nobody.
+    expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).getByText(/Someone this page cannot name is the one person who can remove a published review/)).toBeTruthy();
+
+    // The Who can moderate row keeps its notice, and Try again asks again.
+    const moderate = settingRow("Who can moderate");
+    expect(within(moderate).getByText("Who can moderate this store could not be read.")).toBeTruthy();
+    const reads = connection.callsNamed("reviewsPeople").length;
+    await click(within(moderate).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(connection.callsNamed("reviewsPeople")).toHaveLength(reads + 1));
+  });
+
+  it.each([
+    ["who can moderate could not be read", { peopleError: "reviews: reading the organization's people: the connection to the database dropped" }],
+    ["nobody who can moderate is listed", { people: { storeId: "store-live", people: [] } as unknown as Row }],
+    ["the approver sorts past the people listed", { people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }],
+  ])("offer Clear to whoever may name the approver though this page cannot name them, when %s", async (_why, over) => {
+    // Somebody is named and the page cannot say who: no reason to keep them.
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, ...over }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    const approver = settingRow("Removal approver");
+    expect(await within(approver).findByText(/^Someone (this page cannot name|not among the people listed) is the one person/)).toBeTruthy();
+    expect(within(approver).getByRole("button", { name: "Clear the approver" })).toBeTruthy();
+  });
+
+  it("say nothing of choosing to a viewer who may not name the approver, when who can moderate could not be read", async () => {
+    // The seed's own settings: a moderator who is not the approver.
+    await openReviews(reviewsSeed({ peopleError: "reviews: reading the organization's people: the connection to the database dropped" }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    expect(await within(settingRow("Who can moderate")).findByText("Who can moderate this store could not be read.")).toBeTruthy();
+    const approver = settingRow("Removal approver");
+    // Nobody could be chosen by them whatever was read, so the read is no reason.
+    expect(within(approver).queryByText(/Nobody can be chosen/)).toBeNull();
+    expect(within(approver).queryByRole("combobox", { name: "Choose who approves removals" })).toBeNull();
+    expect(within(approver).getByText(/Only that owner, or the cluster's operators, can name someone else\.$/)).toBeTruthy();
+  });
+
+  it("draw who approves as the shape of a name while who can moderate is read, never a sentence about them", async () => {
+    // The settings name Avery, whom this session's roster cannot name: until
+    // the people who can moderate are read, nothing on hand says who she is.
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, peoplePending: true }));
+    await click(tab("Settings"));
+    await screen.findByLabelText("Days a review link stays open");
+    const approver = settingRow("Removal approver");
+    expect(within(approver).queryByText(/not among the people listed/)).toBeNull();
+    expect(within(approver).queryByText(/cannot name/)).toBeNull();
+    expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
+    const reading = within(approver).getByText("Reading who approves removals");
+    expect(reading.closest('[aria-busy="true"]')).not.toBeNull();
+  });
+
+  it("say when only the first people by name are listed, and never that nobody approves", async () => {
+    // The engine lists the first 100 by what each is called. Zoe approves
+    // removals and sorts past the cut, so she is on no row. The viewer is one
+    // of the store's moderators, who may not name an approver.
+    const settings = {
+      exists: true,
+      settings: { linkLifetimeDays: 14, requestDelayDays: 14, removalApproverUserId: "u-zoe" },
+      may: { edit: true, nameApprover: false },
+      viewer: { moderates: true, approvesRemovals: false },
+    } as unknown as Row;
+    await openReviews(reviewsSeed({ settings, people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }));
+    await click(tab("Settings"));
+    const list = await screen.findByRole("list", { name: "Who can moderate this store's reviews" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(100);
+    const cut = within(settingRow("Who can moderate")).getByText("Only the first 100 people, by name, are listed.");
+    expect(cut.classList.contains("os-caption")).toBe(true);
+    // No row approves removals, and somebody still does.
+    expect(within(list).queryByText("Approves removals")).toBeNull();
+    const approver = settingRow("Removal approver");
+    expect(within(approver).queryByText(/Nobody can remove a published review/)).toBeNull();
+    expect(within(approver).getByText(/Someone not among the people listed is the one person who can remove a published review/)).toBeTruthy();
+  });
+
+  it("say nobody among the first listed has the name typed, when the engine cut the list", async () => {
+    // Zoe can moderate and sorts past the cut: nobody listed is called that,
+    // which is not nobody who can moderate.
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: { storeId: "store-live", people: FIRST_HUNDRED, truncated: true } as unknown as Row }));
+    await click(tab("Settings"));
+    const choices = await search("Zoe");
+    expect(within(choices).queryAllByRole("option")).toEqual([]);
+    expect(screen.getByText("Nobody among the first 100 by that name.")).toBeTruthy();
+    expect(screen.queryByText("Nobody who can moderate this store by that name.")).toBeNull();
+  });
+
+  it("say nobody who can moderate has the name typed, when everybody who can is listed", async () => {
+    await openReviews(reviewsSeed({ settings: OPERATOR_SETTINGS, people: PEOPLE }));
+    await click(tab("Settings"));
+    const choices = await search("Zoe");
+    expect(within(choices).queryAllByRole("option")).toEqual([]);
+    expect(screen.getByText("Nobody who can moderate this store by that name.")).toBeTruthy();
+    expect(screen.queryByText(/Nobody among the first/)).toBeNull();
   });
 });
 

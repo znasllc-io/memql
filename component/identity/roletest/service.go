@@ -322,7 +322,11 @@ func (s *Service) auditRoleTestSession(ctx context.Context, action, operator, ta
 }
 
 func (s *Service) Start(ctx context.Context, role string) (out Session, err error) {
-	var actorID, accountID string
+	var actorID string
+	// The organization a test of this role runs in is the installed role's
+	// alone, so it is known before anything can refuse, and every Start audits
+	// it, a refused one too.
+	_, accountID := organizationGroupID(role)
 	defer func() { s.auditRoleTestSession(ctx, "role_test_started", actorID, out.ID, role, accountID, err) }()
 	db, err := s.db()
 	if err != nil {
@@ -336,10 +340,15 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 	if !s.mayTest(ctx, operator, role) {
 		return out, ErrDenied
 	}
-	_, accountID = organizationGroupID(role)
 	group, err := s.organizationGroup(ctx, role)
 	if err != nil {
 		return out, err
+	}
+	// The test runs in the organization whose group its persona joins: that is
+	// what the session records for End, and what this Start audits.
+	accountID = ""
+	if group != nil {
+		accountID = group.accountID
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -363,30 +372,39 @@ func (s *Service) Start(ctx context.Context, role string) (out Session, err erro
 	if err != nil {
 		return out, err
 	}
+	// The session this Start issues is named before anything is written for
+	// it, so a warning on the way can say which one: the session it was
+	// issuing, which exists only if the Start then succeeds.
+	sessionID := uuid.NewString()
+	name := personaName(role, group)
 	if u == nil {
 		// The preceding actor/mayTest gates authorize exactly this bounded
 		// persona. Its reserved ID is server-generated, the actor is unchanged,
 		// and this inline stamp opens only the server-only user-creation write.
 		// Never return the stamped context or accept a caller-selected user ID.
-		err = s.Store.CreateUserOnFirstLogin(auth.ContextWithInternalOrigin(ctx), userID, personaName(role, group),
+		err = s.Store.CreateUserOnFirstLogin(auth.ContextWithInternalOrigin(ctx), userID, name,
 			strings.TrimPrefix(userID, "v1:identity:user:")+"@role-test.invalid", role, false, identity.UserProfileSeed{})
 		if err != nil {
 			return out, err
 		}
 	} else if !u.Active || u.Role != role {
 		return out, ErrDenied
+	} else if u.DisplayName != name {
+		// The role or its organization's group was renamed, or the role moved
+		// to another organization, since the persona was last named.
+		s.rename(ctx, userID, role, sessionID, name)
 	}
 	var entropy [32]byte
 	if _, err = rand.Read(entropy[:]); err != nil {
 		return out, err
 	}
-	out = Session{ID: uuid.NewString(), UserID: userID, Role: role, ExpiresAt: s.now().Add(Lifetime), Token: TokenPrefix + hex.EncodeToString(entropy[:])}
+	out = Session{ID: sessionID, UserID: userID, Role: role, ExpiresAt: s.now().Add(Lifetime), Token: TokenPrefix + hex.EncodeToString(entropy[:])}
 	// One active run per operator/role. Restarting a test also ends any old
 	// editor tabs for that persona instead of accumulating live credentials.
 	if _, err = tx.ExecContext(ctx, `UPDATE identity_role_test_sessions SET revoked_at=$2 WHERE user_id=$1 AND revoked_at IS NULL`, userID, s.now()); err != nil {
 		return Session{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO identity_role_test_sessions(id,token_hash,operator_id,operator_epoch,user_id,role,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, out.ID, hash(out.Token), actorID, operator.RevocationEpoch, userID, role, s.now(), out.ExpiresAt); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO identity_role_test_sessions(id,token_hash,operator_id,operator_epoch,user_id,role,created_at,expires_at,account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, out.ID, hash(out.Token), actorID, operator.RevocationEpoch, userID, role, s.now(), out.ExpiresAt, accountID); err != nil {
 		return Session{}, err
 	}
 	// The persona's membership, under its lock and before the session commits,
@@ -433,18 +451,37 @@ func personaName(role string, group *organizationGroup) string {
 	return "Test " + name
 }
 
+// rename gives an existing persona the name its test now calls for, before
+// Start issues the session. It writes that one field of the persona's own row:
+// updateUser merges a payload of displayName alone over the stored row, so the
+// role, the address, active and everything else stay as they were. The same
+// gates as the persona's creation precede it, on the same server-reserved ID
+// under the unchanged actor, and this inline stamp opens only that @serverOnly
+// write; the stamped context is never returned. Best effort: the name is what
+// the persona is called, not what it may do, so a failure is logged -- with the
+// persona, its role and the session the Start is issuing -- and the test starts
+// all the same.
+func (s *Service) rename(ctx context.Context, userID, role, sessionID, name string) {
+	_, err := s.Store.Engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation updateUser(userId: %s, payload: {displayName: %s})`,
+		langparser.QuoteString(userID), langparser.QuoteString(name)))
+	if err != nil {
+		s.warn("role test: renaming a persona failed", err, "userId", userID, "role", role, "sessionId", sessionID)
+	}
+}
+
 // ---------------------------------------------------------------------
 // The organization membership
 // ---------------------------------------------------------------------
 //
 // An organization role's persona is a member of exactly that organization's
 // group, so it sees what that organization's people see. The membership is
-// marked origin role-test, placed by Start before the session commits, and
-// never outlives its test: End removes it once no test of the persona is live,
-// and every Start and End also removes it from this operator's other personas
-// whose tests expired without an End (R14). Reads -- List, verification --
-// write nothing, so an expired test's membership stays until then; it admits
-// nobody, because nothing can authenticate as a persona without a live session.
+// marked origin role-test and placed by Start before the session commits. End
+// removes it once no test of the persona is live, and every Start and End also
+// removes it from this operator's other personas whose tests are no longer live
+// (R14): a test that expired without an End, or whose End failed to remove it,
+// keeps its membership until then. Reads -- List, verification -- write
+// nothing, so it stays through them; it admits nobody, because nothing can
+// authenticate as a persona without a live session.
 
 type organizationGroup struct{ id, accountID, name string }
 
@@ -593,10 +630,11 @@ func (s *Service) release(ctx context.Context, db *sql.DB, operatorID, role, use
 }
 
 // sweep releases this operator's other personas whose tests are no longer
-// live, so a test that expired without End keeps its membership only until the
-// operator's next Start or End. Best effort: a failure is the next call's to
-// retry and never fails the call it rides on. The predefined roles are never
-// organization roles, so their personas hold no membership to release.
+// live, so a test that expired without End, or whose End failed to remove its
+// membership, keeps it only until the operator's next Start or End. Best
+// effort: a failure is the next call's to retry and never fails the call it
+// rides on. The predefined roles are never organization roles, so their
+// personas hold no membership to release.
 func (s *Service) sweep(ctx context.Context, db *sql.DB, operatorID, exceptRole string) {
 	rows, err := db.QueryContext(ctx, `SELECT p.role, p.user_id FROM identity_role_test_personas p
 		WHERE p.operator_id=$1 AND p.role<>$2 AND p.role NOT IN ('reader','writer','developer','admin')
@@ -626,9 +664,11 @@ func (s *Service) sweep(ctx context.Context, db *sql.DB, operatorID, exceptRole 
 	}
 }
 
-func (s *Service) warn(msg string, err error) {
+// warn logs a failure the call it rode on survives, with what it was about:
+// attrs are slog's alternating keys and values.
+func (s *Service) warn(msg string, err error, attrs ...any) {
 	if s.Store != nil && s.Store.Logger != nil {
-		s.Store.Logger.Warn(msg, "error", err)
+		s.Store.Logger.Warn(msg, append([]any{"error", err}, attrs...)...)
 	}
 }
 
@@ -701,19 +741,33 @@ func (s *Service) End(ctx context.Context, sessionID string) (err error) {
 	// The session ends first, on a statement of its own, so nothing that
 	// follows can leave a test running.
 	var userID string
-	err = db.QueryRowContext(ctx, `UPDATE identity_role_test_sessions SET revoked_at=COALESCE(revoked_at,$3) WHERE id=$1 AND operator_id=$2 RETURNING user_id, role`, sessionID, actorID, s.now()).Scan(&userID, &role)
+	var ranIn sql.NullString
+	err = db.QueryRowContext(ctx, `UPDATE identity_role_test_sessions SET revoked_at=COALESCE(revoked_at,$3) WHERE id=$1 AND operator_id=$2 RETURNING user_id, role, account_id`, sessionID, actorID, s.now()).Scan(&userID, &role, &ranIn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrDenied
 	}
 	if err != nil {
 		return err
 	}
-	_, accountID = organizationGroupID(role)
+	// The organization the test ran in, as its Start recorded it -- not where
+	// the role points now, which may have moved since. A session from before
+	// Start recorded one (NULL) has only the role's current organization.
+	accountID = ranIn.String
+	if !ranIn.Valid {
+		_, accountID = organizationGroupID(role)
+	}
 	// Then its membership, once no test of the persona is live: ending a run
-	// that a newer Start already replaced leaves the live run's in place.
-	err = s.release(ctx, db, actorID, role, userID, true)
+	// that a newer Start already replaced leaves the live run's in place. The
+	// test has ended whatever happens here, so a membership that fails to go
+	// is logged rather than returned: it admits nobody without a live session,
+	// and this operator's next Start or End removes it -- the sweep, or this
+	// role's own next End. Its own name, so End's err, which the deferred audit
+	// reads, is never shadowed here.
+	if releaseErr := s.release(ctx, db, actorID, role, userID, true); releaseErr != nil {
+		s.warn("role test: removing an ended test's membership failed", releaseErr, "userId", userID, "role", role, "sessionId", sessionID)
+	}
 	s.sweep(ctx, db, actorID, role)
-	return err
+	return nil
 }
 
 // Role is one role an operator may test now, with what a client draws it by.

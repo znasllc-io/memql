@@ -20,8 +20,9 @@ use common.builtins.{ routingProposalCatalog, routingGeneratePolicyProposal, rou
 // threshold was crossed is an edit nobody made, and a week of bad luck on one
 // schema is not a reason to route a whole level elsewhere. The fold opens a
 // v1:work:approval of kind routingReview carrying the exact rule text, hashed,
-// and a person decides. Declining is RECORDED, which is the difference between
-// a proposal and a nag.
+// and an owner or developer decides: approving saves exactly that rule into the
+// routing configuration (integrations/work's routing review decision).
+// Declining is RECORDED, which is the difference between a proposal and a nag.
 //
 // It runs on the CRON LEADER, so exactly one replica folds, and it is on the
 // maintenance-principal list (component/auth/maintenance_actor.go) because

@@ -255,16 +255,31 @@ export interface ReviewPerson {
   mayRemove: boolean;
 }
 
+/** reviewsPeople's answer: who can moderate, and whether that is all of them. */
+export interface ReviewPeople {
+  /** In the engine's order: by what each is called. */
+  people: ReviewPerson[];
+  /**
+   * More people can moderate the store than are listed: the engine lists the
+   * first of them by what each is called, and no more. Somebody past the cut,
+   * the store's removal approver among them, is on no row here.
+   */
+  truncated: boolean;
+}
+
 /** reviewsPeople's answer, in the engine's order (by name). */
-export function reviewPeopleFrom(row: Row | null): ReviewPerson[] {
-  return list(row, "people")
-    .map((r) => ({
-      userId: rowString(r, "userId"),
-      displayName: rowString(r, "displayName"),
-      email: rowString(r, "email"),
-      mayRemove: flag(r, "mayRemove"),
-    }))
-    .filter((p) => p.userId !== "");
+export function reviewPeopleFrom(row: Row | null): ReviewPeople {
+  return {
+    people: list(row, "people")
+      .map((r) => ({
+        userId: rowString(r, "userId"),
+        displayName: rowString(r, "displayName"),
+        email: rowString(r, "email"),
+        mayRemove: flag(r, "mayRemove"),
+      }))
+      .filter((p) => p.userId !== ""),
+    truncated: flag(row, "truncated"),
+  };
 }
 
 /** What a person is called: their name, else their address. */

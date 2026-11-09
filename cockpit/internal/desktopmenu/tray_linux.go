@@ -39,7 +39,7 @@ func Run(executable, version, variant string) error {
 }
 
 type menuAction struct{ kind, id string }
-type homeMenu struct{ title, open, toggle *systray.MenuItem }
+type homeMenu struct{ title, detail, open, toggle *systray.MenuItem }
 type updateResult struct {
 	kind  string
 	reply updateReply
@@ -210,6 +210,9 @@ func menuLoop(ctx context.Context, executable, version, variant string) {
 			m, ok := homes[h.ID]
 			if !ok {
 				m.title = servers.AddSubMenuItem(h.Server, "")
+				m.detail = m.title.AddSubMenuItem("", "")
+				m.detail.Disable()
+				m.detail.Hide()
 				m.open = m.title.AddSubMenuItem("Open MemQL OS", "")
 				m.toggle = m.title.AddSubMenuItem("Pause connection", "")
 				homes[h.ID] = m
@@ -223,10 +226,13 @@ func menuLoop(ctx context.Context, executable, version, variant string) {
 			} else {
 				m.toggle.Enable()
 			}
-			if h.Enabled {
-				m.toggle.SetTitle("Pause connection")
+			label, detail, _ := homeConnectionAction(h)
+			m.toggle.SetTitle(label)
+			if detail == "" {
+				m.detail.Hide()
 			} else {
-				m.toggle.SetTitle("Allow connecting")
+				m.detail.SetTitle(detail)
+				m.detail.Show()
 			}
 			if _, err := safeOSURL(h.OSURL); err == nil {
 				m.open.Enable()
@@ -322,7 +328,8 @@ func menuLoop(ctx context.Context, executable, version, variant string) {
 					continue
 				}
 				if h, ok := state[action.id]; ok {
-					_, err = request(executable, "--action=home", "--home="+h.ID, fmt.Sprintf("--enabled=%t", !h.Enabled))
+					_, _, enabled := homeConnectionAction(h)
+					_, err = request(executable, "--action=home", "--home="+h.ID, fmt.Sprintf("--enabled=%t", enabled))
 					refresh()
 				}
 			case "open":

@@ -685,6 +685,30 @@ builtin siteAccessCodeCreate {
   expiresAt  datetime!  @description("When the code stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every code expires; there is no 'never'.")
 }
 
+/// Open one gate of a deployable to anyone, without a code (design record 2026-11-08-deployable-guest-access).
+///
+/// A GUEST PASS IS A CODE ROW WITH NO CODE. It is a siteAccessCode marked guest whose digest is a fixed
+/// function of the site, so a visitor who asks at the guest route is let in to that one gate, and no
+/// typed code can ever match it. There is nothing to hand back but the row's id and its expiry.
+///
+/// THE CHECKS ARE THE MINT'S, siteAccessCodeCreate's in every respect: the part, the organization, an
+/// owned deployable with a package deployable, a gate the deployable declares, the bounds on label,
+/// subject and expiry. A refusal at any of them has written nothing.
+///
+/// Returns {codeId, expiresAt}.
+@sdk
+@executor("integration.siteAccess.guestPassCreate")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/access")
+@description("Open one gate of a deployable to anyone without a code, for one subject if given (design record 2026-11-08-deployable-guest-access). Writes a guest pass: an access code row marked guest with no plain code at all. Refused for the same causes as siteAccessCodeCreate: a deployable with no owner, a system-owned deployable, one with no package deployable, a gate the deployable does not declare with @accessGate, a label outside 1 to 80 characters, a subject over 120 characters, and an expiry under a minute or over 366 days away. Returns {codeId, expiresAt}.")
+builtin siteAccessGuestPassCreate {
+  siteId     string!    @description("The deployable the guest pass opens a part of.")
+  label      string!    @description("The operator's name for the pass, 1 to 80 characters. Never sent to a visitor.")
+  gate       string!    @description("Which gate the pass opens: one the deployable declares with @accessGate. siteAccessGates lists them.")
+  subject    string     @description("Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone.")
+  expiresAt  datetime!  @description("When the pass stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every pass expires; there is no 'never'.")
+}
+
 /// Replace a code's secret, keeping everything else (design record 2026-10-29-deployable-access-codes).
 ///
 /// THIS IS HOW A CODE IS REVOKED AND REPLACED IN ONE ACT. The id, label, gate and subject survive, so
@@ -775,21 +799,22 @@ builtin siteAccessGates {
 /// siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's
 /// actor left untouched, so the tier still decides every row.
 ///
-/// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label,
+/// EVERY CODE, INCLUDING THE ENDED ONES, and the site's guest passes, one row each in the siteAccessCodeView shape: the label,
 /// what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed
-/// and when it was last opened. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the
+/// and when it was last opened. `guest` is true on a guest pass, a row that was never a code (design
+/// record 2026-11-08-deployable-guest-access), and absent on a code. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the
 /// code: the handler fills it from the newest session of the code's CURRENT generation
 /// (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was
 /// regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and
 /// draws an expired one as expired, so this decides neither.
 ///
 /// Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation,
-/// issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.
+/// issuedAt, expiresAt, revokedAt, lastOpenedAt, guest, createdAt}.
 @sdk
 @executor("integration.siteAccess.list")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/access")
-@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt and lastOpenedAt -- when a visitor last opened the code's current secret, absent for one nobody has opened. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. accountId is the organization copied from the deployable when the code was minted. Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.")
+@description("List the access codes minted against a deployable (design record 2026-10-29-deployable-access-codes): every code, removed and expired ones included, one row per code or guest pass with its label, gate, subject, hint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt and guest (true on a guest pass, which has no code and no hint) -- when a visitor last opened the code's current secret, absent for one nobody has opened. Never the code or its digest. No order is promised; the Access codes panel sorts by label. Judged against the deployable's organization as minting is. Answers no rows for a deployable with no codes. accountId is the organization copied from the deployable when the code was minted. Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, guest, createdAt}.")
 builtin siteAccessCodesForSite {
   siteId  string!  @description("The deployable to list the codes of.")
 }

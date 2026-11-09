@@ -105,9 +105,11 @@ func dslBundleFiles(t *testing.T) map[string]string {
 	return files
 }
 
-// unsupportedKindInBundle marks the refusal the bundle splitter emits for a
+// unsupportedKindInBundle marks the refusal the authoring path emits for a
 // construct kind it deliberately does not author: prompt / provider / tool /
-// builtin / policy / seed.
+// builtin / policy / seed, refused by the bundle splitter, and rule, which the
+// splitter classifies and Gate 1 refuses by name (a routing rule is saved with
+// routingRuleSave; the router never reads an armed one).
 //
 // That is a DESIGN LIMIT, not a divergence -- the sandbox says so in the
 // refusal itself -- so the gate below excludes it rather than asserting a
@@ -192,8 +194,8 @@ func TestAuthoringPathValidatesEveryDslFile(t *testing.T) {
 	// walk rather than about the tree -- and the excluded count is stated for
 	// the same reason, so nobody reads this pass as covering the whole tree.
 	t.Logf("validated %d construct(s) across %d file(s) through the authoring path; "+
-		"%d excluded as kinds the bundle splitter deliberately does not author "+
-		"(prompt / provider / tool / builtin / policy / seed)",
+		"%d excluded as kinds the authoring path deliberately does not author "+
+		"(prompt / provider / tool / builtin / policy / rule / seed)",
 		constructsChecked, filesChecked, unsupported)
 	if constructsChecked < 100 {
 		t.Fatalf("only %d construct(s) were checked across %d file(s) -- the sweep is broken, "+

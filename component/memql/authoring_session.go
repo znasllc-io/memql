@@ -57,7 +57,7 @@ type SessionDefineResult struct {
 // source) constructs the sandbox + authored runtime operate on. It reuses the
 // per-kind slicers the bootstrap loaders use, covering EVERY authorable kind so
 // a deployment-style bundle (concept + query/mutation/logic + spec/trait/shape +
-// automation + action + capability) is fully classified. Duplicate (kind, name)
+// rule + automation + action + capability) is fully classified. Duplicate (kind, name)
 // slices collapse to the first -- the sandbox separately hard-fails genuine
 // in-bundle duplicates.
 //
@@ -136,6 +136,17 @@ func SplitBundleSource(source string) []SandboxConstruct {
 			}
 			add(kind, s.Name, src)
 		}
+	}
+	// Rules: annotations and an empty body, sliced by the keyword slicer the
+	// embedded tree's rule loader uses (unified_rule_loader.go). They are
+	// sliced so Gate 1 can REFUSE one by name and say where a routing rule goes
+	// (routingRuleSave): a rule is cluster routing configuration, the router
+	// never reads an armed construct, and an unsliced rule would be refused as
+	// an unrecognized region, which names neither the rule nor the way out.
+	// A rule names its policy as a string and imports nothing, so like a shape
+	// it takes no import preamble.
+	for _, s := range ExtractKeywordSlices(source, "rule") {
+		add("rule", s.Name, s.Source)
 	}
 	// Automations (event-triggered orchestration) -- sliced by the dedicated
 	// automation extractor. The Gate-1 sandbox compiles them through the

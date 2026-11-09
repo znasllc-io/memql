@@ -1011,6 +1011,20 @@ the engine's clock on every request, so these words only say what a row says.
   `systemOwned`, and it has a `packageDeployableName`, because a code opens a
   gate that only a package's own deployable can declare. An illegal act on a row
   is absent too: a code minted under another organization offers only Remove.
+- **GUEST ACCESS IS A PART ABOVE THE CODES** (design record 2026-11-08). The
+  guest pass is the row `siteAccessCodesForSite` marks `guest`, and
+  `useAccessCodes` splits it from the list (`guestPass`), so the code list never
+  shows it and no step shows a code. Off is a sentence ("Off. Only someone with a
+  code can open it.") and one act, Allow guests, which is a code's Add form
+  without the code (Name prefilled "Guests", Opens, Subject when the gate reads
+  `accessSubject`, Ends). On is one row: what it opens, when it ends, when a
+  guest last opened it, and two acts, Change end date and Turn off, which asks in
+  place ("Everyone in as a guest is taken out now."). Regenerate is never drawn
+  on it, since it has no code, and Allow guests is absent with no gate or no
+  owner, as an illegal act is everywhere here. Only one pass stands at a time; the
+  engine's refusal is shown as written. The QA harness has `access-guest`,
+  `access-guest-form`, `access-guest-ask`, `access-guest-date` and
+  `access-guest-empty`.
 - **THE PLAIN CODE IS IN NO ROW.** The reply to a mint or a regenerate is the only
   place it ever exists, so `useAccessCodes` holds it in React state, no row type
   has a field for it, and it goes when the NEXT WRITE STARTS, not when a question
@@ -1067,6 +1081,18 @@ Releases, Logs and Settings. Shared pipeline components remain under
 Deployables their navigation owner. Deployables exposes contextual source
 facts and links, while Cluster Updates selects this installation’s release.
 Legacy saved routes and GitHub callbacks resolve to Pipelines.
+
+Settings > Security contains the installation-wide **Weekly security scans**
+switch. It is off unless `MEMQL_PIPELINES_SECURITY` explicitly enables it.
+The repository manifest defines the scheduled security stages; ordinary checks
+keep their existing schedule. New findings create remediation goals under the
+pipeline owner's account. Turning the switch off prevents future scan runs
+and new remediation goals; runs and goals already in progress may finish.
+The switch moves only after reading the saved configuration, keeps
+its last value on failure, and follows configuration changes from other windows.
+`test/pipelines/securitySettings.test.tsx` covers enable/disable, refused and
+unconfirmed saves, read recovery, external updates and keyboard focus. Browser
+fixtures are documented in `qa/README.md`; they change no installation state.
 
 Repository read access is distinct from write authority. `RepositoryChange`
 reads the backend’s fresh repository authority, creates an immutable bounded
@@ -2203,6 +2229,16 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   acts are on one bar beside the classifier's evidence, rendered in the data
   voice and never paraphrased: the rule id is where somebody goes to change the
   policy.
+
+  **A routing review is nobody's own.** The nightly evidence fold raises it as
+  the cluster, so the person's own approval reads never list it; the inbox and
+  the overview merge it in from `workRoutingReviews`
+  (`useRoutingReviews`), which answers an owner or developer and nobody else.
+  Its buttons carry its own options ("Add the rule", "Remove the exclusion",
+  "Leave routing as it is"), because approving changes routing before the
+  decision is recorded. Row admission sends a row nobody owns to cluster
+  owners only, so a developer is sent no update when one is decided: the
+  section re-reads the routing reviews and the open review after deciding one.
 
   Progress-limit questions use ordinary feedback: **Keep working**, **Stop
   here**, or the person's own words in Ask. Work can earn three automatic

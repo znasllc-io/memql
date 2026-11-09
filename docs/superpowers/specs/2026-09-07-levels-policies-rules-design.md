@@ -202,6 +202,8 @@ rule applied to two more kinds. `authoring_sandbox.go` gains compile paths for `
 precedence, on-unavailable) from the OS and activates it live, the `component/emailrules`
 shape. The natural-language path is epic 3.
 
+*The deterministic path was superseded on 2026-11-08: see C5 in section 4b.*
+
 ### D8 -- The request carries what a rule can branch on
 
 `ResolveRequest` gains `Level`, `Modality`, `Needs` (`Structured`, `Tools`, `Vision`,
@@ -375,6 +377,43 @@ says in a comment why the other two are absent.
 reading it when this epic re-pointed it, so the whole surface was a dead write
 naming a deleted policy. Both fields are removed: an agent no longer names a
 policy, and its ROLE is what a rule matches on.
+
+## 4b. Corrections made after shipping
+
+**C5 (2026-11-08) -- a custom rule is routing configuration, not an authored
+construct.** D7's deterministic path rendered a form into a `rule` construct and
+armed it into the owner-scoped authored runtime (`routingRuleActivate`). Nothing
+that routes a call reads that runtime: the rule set the router walks is the
+shipped and product-bundle rules plus the routing configuration document
+(`PolicyRegistry.SnapshotRouting`), so an armed rule read active and decided no
+call. Until memql#6022's follow-up Gate 1 also refused every generated rule, so
+none had ever armed. The builtin was unreachable besides: it carried no `@sdk`,
+so MemQL OS's fallback to it found no method, and its `when` argument is a
+keyword that no call text can pass, so any rule it armed would have matched
+every call. It checked no precedence tie against the live rules, and its policy
+check read only the shipped policies.
+
+The OS had already moved to `routingRuleSave`, which writes the one revisioned
+document every replica reads on every call, under the loader's own
+shipped-name, closed-key, policy-exists and precedence-tie checks
+(`RuleRegistry.Finalize`). The owner chose to keep that path and retire the
+other rather than make armed constructs route, which would have needed a second
+store of custom rules checked against the first under a shared lock, with
+cluster-wide names that memql#6022's per-owner bundle ids do not give. So
+`routingRuleActivate`, `routingRuleRetire`, their router handlers, the app
+adapters and the arming half of `component/routingrules` were deleted, and
+Gate 1 refuses a `rule` construct in any bundle, naming `routingRuleSave`.
+Nothing outside this repository called either builtin, and the deprecation
+window does not apply: it covers language forms, and the surface baseline lists
+no builtins. The `@args(when=, excludes=)` keys stay accepted and inert, because
+dropping them would narrow a recorded annotation form.
+
+What D7 says about locked rules stands. The failure mode below, "two custom
+rules at one precedence", is refused at SAVE with both names.
+`component/routingrules.GenerateRule` survives as the nightly evidence review's
+one renderer (epic memql#5146, D5). Approving a review saves its exact rule
+into the routing configuration document, under the save path's own checks:
+[2026-11-08 routing review apply](2026-11-08-routing-review-apply-design.md).
 
 ## 5. Failure modes
 

@@ -26,6 +26,7 @@ type preparationCapture struct {
 }
 
 type preparationRecord struct {
+	Continuity     map[string]argocd.ContinuityState
 	ID             string
 	Scope          preparationScope
 	SlotEpoch      int64
@@ -142,10 +143,10 @@ func (j *preparationJournal) reserve(ctx context.Context, scope preparationScope
 
 func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) (preparationRecord, error) {
 	r := preparationRecord{ID: key}
-	var scope, captures, retirement []byte
+	var scope, captures, retirement, continuity []byte
 	var request, actor, run string
 	var promoted sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id,promoted_plan_id,retirement FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run, &promoted, &retirement)
+	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id,promoted_plan_id,retirement,application_continuity FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run, &promoted, &retirement, &continuity)
 	if err != nil {
 		return preparationRecord{}, err
 	}
@@ -157,6 +158,9 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 	}
 	if (r.State == "promoted") != promoted.Valid || (promoted.Valid && !internalDigest.MatchString(promoted.String)) {
 		return preparationRecord{}, errors.New("installation preparation promotion marker is inconsistent")
+	}
+	if err = decodeApplicationContinuity(continuity, &r); err != nil {
+		return preparationRecord{}, err
 	}
 	r.Retirement, err = decodePreparationRetirement(retirement, r.State)
 	if err != nil {
@@ -292,7 +296,11 @@ func (j *preparationJournal) withRecordState(ctx context.Context, installation, 
 		if err != nil {
 			return preparationRecord{}, err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE installation_preparations SET captures=$2::jsonb,state=$3,retirement=$4::jsonb,updated_at=clock_timestamp() WHERE preparation_id=$1`, key, string(body), r.State, string(retirement))
+		continuity, err := json.Marshal(r.Continuity)
+		if err != nil {
+			return preparationRecord{}, err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE installation_preparations SET captures=$2::jsonb,state=$3,retirement=$4::jsonb,application_continuity=$5::jsonb,updated_at=clock_timestamp() WHERE preparation_id=$1`, key, string(body), r.State, string(retirement), string(continuity))
 		if err != nil {
 			return preparationRecord{}, err
 		}

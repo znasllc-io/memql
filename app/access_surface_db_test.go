@@ -1507,4 +1507,30 @@ func TestAVisitThroughTheRealEdge(t *testing.T) {
 	res = send(http.MethodGet, "/_memql/access", "", cookie)
 	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
 	require.JSONEq(t, `{"state":"ended"}`, read(res))
+
+	// A GUEST, with no code: the edge's fifth route in front of the bff's guest open. The
+	// pass is the operator's act, and what comes back is a session like any other, so it
+	// is used the same way and ended the same way, by taking the pass away.
+	pass := w.builtin("siteAccessGuestPassCreate", map[string]any{
+		"siteId": w.site, "label": "Guests", "gate": "dashboard",
+		"expiresAt": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	})
+	passID, _ := pass["codeId"].(string)
+	require.NotEmpty(t, passID)
+
+	res = send(http.MethodPost, "/_memql/access/guest", `{}`, "")
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+	match = accessE2ECookie.FindStringSubmatch(res.Header.Get("Set-Cookie"))
+	require.NotNil(t, match, "Set-Cookie = %q", res.Header.Get("Set-Cookie"))
+	guest := "__Host-memql_access=" + match[1]
+
+	res = send(http.MethodGet, "/_memql/access", "", guest)
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+	res = send(http.MethodPost, "/_memql/access/call", `{"call":"accessBriefs","args":{}}`, guest)
+	require.Equal(t, http.StatusOK, res.StatusCode, read(res))
+
+	w.builtin("siteAccessCodeRemove", map[string]any{"codeId": passID})
+	res = send(http.MethodGet, "/_memql/access", "", guest)
+	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	require.JSONEq(t, `{"state":"ended"}`, read(res))
 }

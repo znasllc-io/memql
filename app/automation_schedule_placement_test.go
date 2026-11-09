@@ -75,6 +75,12 @@ func TestPipelineArtifactRetentionRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, "sweepPipelineArtifacts", "agent")
 }
 
+// The pre-receipt log enrollment feeds that sweep and has its own lease, so a
+// slow page of either never delays the other.
+func TestLegacyPipelineLogEnrollmentRunsOnlyOnElectedAgent(t *testing.T) {
+	assertPlacedOnlyOn(t, "enrollLegacyPipelineLogs", "agent")
+}
+
 func TestReleaseKnowledgeReconciliationRunsOnlyOnElectedBFF(t *testing.T) {
 	assertPlacedOnlyOn(t, releaseKnowledgeAutomation, "bff")
 }

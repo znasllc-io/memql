@@ -95,7 +95,13 @@ func (i *Integration) Schedule(ctx context.Context) (PollResult, error) {
 		// The manifest declares cadence; the saved slot is the authority when
 		// the pinned DSL selects stages, including on a later manual retry.
 		seen := map[string]bool{}
+		securityEnabled := d.securitySettings(ctx).Enabled
 		for _, stage := range manifest.Pipeline.Stages {
+			// The manifest declares optional security work, but never grants
+			// consent. Other weekly work remains eligible while security is off.
+			if stage.Security && !securityEnabled {
+				continue
+			}
 			if !slices.Contains(stage.On, string(pipelines.EventSchedule)) {
 				continue
 			}

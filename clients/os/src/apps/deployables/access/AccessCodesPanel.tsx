@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { CalendarClock, Lock, RefreshCw, Trash2 } from "lucide-react";
+import { CalendarClock, Lock, Power, RefreshCw, Trash2 } from "lucide-react";
 import { sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, CopyValue, DateTimeInput, EmptyState, Field, Input, Notice, RecordListSkeleton, Select, Subhead, useNow } from "../../../kit";
@@ -11,7 +11,7 @@ import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { browserZone, instantToLocal } from "../../email/when";
 import { partsForOrganization, useDeployableParts, type PartsHeld } from "../parts";
 import { siteIsClusterOwned, type SiteRow } from "../rows";
-import { CUSTOM_EXPIRY, DEFAULT_EXPIRY, EXPIRY_PRESETS, expiryFromDraft, expiryWord, hasExpired, lastOpenedWord, type ExpiryDraft } from "./expiry";
+import { CUSTOM_EXPIRY, DEFAULT_EXPIRY, EXPIRY_PRESETS, expiryFromDraft, endWord, expiryWord, hasExpired, lastOpenedWord, type ExpiryDraft } from "./expiry";
 import { useAccessCodes, type AccessCodeRow, type AccessCodes, type AccessGateRow, type WriteOutcome } from "./useAccessCodes";
 
 // The Access codes panel (design record 2026-10-29-deployable-access-codes,
@@ -66,7 +66,8 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   useEffect(() => {
     onBusyChange?.(holding);
   }, [holding, onBusyChange]);
-  const [adding, setAdding] = useState(false);
+  // WHICH FORM TAKES THE LIST'S PLACE: a code's, or the guest pass's.
+  const [adding, setAdding] = useState<"code" | "guest" | null>(null);
   // The gates the form opened with. A re-read that fails answers null, and a draft
   // somebody is part-way through must not go with it.
   const [formGates, setFormGates] = useState<readonly AccessGateRow[]>([]);
@@ -79,12 +80,43 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   // The panel itself is the last resort: a list with every gate gone has no Add.
   const root = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const backTo = useRef<string | null>(null);
   const [refocus, setRefocus] = useState(0);
   useEffect(() => {
     if (refocus === 0) return;
-    const back = opener.current?.isConnected ? opener.current : root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
+    // The control that asked, else the one named for it (Allow guests is drawn again after its form
+    // closes, so the button that asked is not the one on screen), else Add, else the panel.
+    const named = backTo.current === null ? null : root.current?.querySelector<HTMLElement>(backTo.current);
+    backTo.current = null;
+    const back = opener.current?.isConnected ? opener.current : named ?? root.current?.querySelector<HTMLElement>(".os-add-button") ?? root.current;
     back?.focus();
   }, [refocus]);
+  // A NEW GUEST PASS TAKES FOCUS WHEN THE RE-READ AFTER ITS CREATE SETTLES: the form is gone by then, and
+  // the row comes with that read. ARMED WHEN THE WRITE STARTS (`onWriting`), because the re-read can
+  // begin before the write's answer is handled, and DISARMED when that read settles, whether or not the
+  // pass came in, so a pass that arrives with any later read cannot pull focus. A pass that opens nothing
+  // has no Change end date, and the last resort is the panel, as everywhere here.
+  const focusPass = useRef(false);
+  const sawRead = useRef(false);
+  const codesState = access.codes.state;
+  const passId = access.guestPass?.id;
+  useEffect(() => {
+    if (!focusPass.current) return;
+    if (codesState === "reading") {
+      sawRead.current = true;
+      return;
+    }
+    if (!sawRead.current || codesState === "unread" || adding !== null) return;
+    focusPass.current = false;
+    sawRead.current = false;
+    const part = root.current?.querySelector<HTMLElement>(".access-guest");
+    const target =
+      part?.querySelector<HTMLElement>('button[aria-label="Change end date"]') ??
+      part?.querySelector<HTMLElement>('button[aria-label="Turn off"]') ??
+      root.current?.querySelector<HTMLElement>(".os-add-button") ??
+      root.current;
+    target?.focus();
+  }, [codesState, passId, adding]);
   const returnFocus = (): void => setRefocus((n) => n + 1);
 
   const askFor = (event: MouseEvent<HTMLElement>, codeId: string, act: RowAct): void => {
@@ -106,11 +138,17 @@ export function AccessCodesPanel({ site, onBusyChange }: {
   // somebody else removed takes the row, and the question under it, off the list,
   // and a refusal nobody can read is a refusal nobody can act on.
   const refusal = access.refusal;
-  const refusedRowGone = refusal !== null && refusal.codeId !== "" && !(codes ?? []).some((code) => code.id === refusal.codeId);
+  const guestPass = access.guestPass;
+  // The guest pass is not on the code list, and its refusals belong to its row all the same.
+  const refusedRowGone = refusal !== null && refusal.codeId !== "" && !(codes ?? []).some((code) => code.id === refusal.codeId) && guestPass?.id !== refusal.codeId;
   // The question went with its row, with focus inside it.
   useEffect(() => {
     if (refusedRowGone) setRefocus((n) => n + 1);
   }, [refusedRowGone]);
+
+  // THE SAME RULE AS THE HEADING OVER CODES: no part over nothing. With no owner or no gate and
+  // nothing standing, the one explanation below is the panel.
+  const showGuests = codes !== null && (guestPass !== undefined || !((noGates || ownerless) && codes.length === 0));
 
   let body: ReactNode;
   if (!access.connected) {
@@ -178,6 +216,38 @@ export function AccessCodesPanel({ site, onBusyChange }: {
 
   return (
     <div className="access-codes" ref={root} tabIndex={-1}>
+      {/* ABOVE THE CODES, and gone while a form has taken the list's place. */}
+      {adding === null && showGuests ? (
+        <GuestAccess
+          site={site}
+          pass={guestPass}
+          canAllow={canAdd}
+          now={now}
+          access={access}
+          asked={guestPass !== undefined && asked?.codeId === guestPass.id ? asked.act : null}
+          onAllow={() => {
+            // CANCEL GIVES FOCUS BACK TO THIS ACT, which is drawn again with the part; a created pass
+            // clears it (`onCreated`), because the act is gone then.
+            opener.current = null;
+            backTo.current = ".access-guest .os-head button";
+            access.clearRefusal();
+            setAsked(null);
+            setFormGates(gates ?? []);
+            setAdding("guest");
+          }}
+          onAsk={(event, act) => guestPass !== undefined && askFor(event, guestPass.id, act)}
+          onKeep={() => {
+            access.clearRefusal();
+            setAsked(null);
+            returnFocus();
+          }}
+          onAnswered={(act) => {
+            setAsked(null);
+            if (act === "remove") opener.current = null;
+            returnFocus();
+          }}
+        />
+      ) : null}
       {/* No heading over nothing: with no codes and no way to add one, the explanation is the panel. */}
       {(noGates || ownerless) && codes !== null && codes.length === 0 ? null : (
         <Subhead
@@ -190,13 +260,13 @@ export function AccessCodesPanel({ site, onBusyChange }: {
                   access.clearRefusal();
                   setAsked(null);
                   setFormGates(gates);
-                  setAdding(true);
+                  setAdding("code");
                 }}
               />
             ) : null
           }
         >
-          {adding ? "Add an access code" : "Codes"}
+          {adding === "code" ? "Add an access code" : adding === "guest" ? "Allow guests" : "Codes"}
         </Subhead>
       )}
       {access.readFailures.map((sentence) => (
@@ -218,19 +288,31 @@ export function AccessCodesPanel({ site, onBusyChange }: {
       {/* THE FORM TAKES THE LIST'S PLACE (rule 11), under the name of the act. A
           list beneath a form is more to read past, in a dialog that has no height
           to spare, and nothing on it helps somebody name a new code. */}
-      {adding ? (
+      {adding !== null ? (
         <AddCodeForm
+          mode={adding}
           siteId={site.id}
           gates={gates ?? formGates}
           now={now}
           access={access}
           onCancel={() => {
             access.clearRefusal();
-            setAdding(false);
+            setAdding(null);
             returnFocus();
           }}
+          onWriting={(writing) => {
+            focusPass.current = writing;
+            sawRead.current = false;
+          }}
           onCreated={(outcome) => {
-            setAdding(false);
+            setAdding(null);
+            if (adding === "guest") {
+              opener.current = null;
+              backTo.current = null;
+              // Created: the new row takes focus when it arrives. Not known: the list is what to look at.
+              if (outcome !== "done") returnFocus();
+              return;
+            }
             // A new code takes focus for itself. Without one, nothing else will.
             if (outcome === "unknown") returnFocus();
           }}
@@ -239,6 +321,100 @@ export function AccessCodesPanel({ site, onBusyChange }: {
         body
       )}
     </div>
+  );
+}
+
+/**
+ * The Guest access part, above the codes.
+ *
+ * OFF IS A SENTENCE AND ONE ACT. ON IS ONE ROW: what it opens, when it ends and when a guest last
+ * came in, with the two acts the engine allows. THE PASS HAS NO CODE, so nothing here regenerates,
+ * copies or shows one, and its row is never on the code list. Its ending and its removal are the
+ * codes' own builtins, which is why the questions are `CodeAsk`'s, in the pass's words.
+ *
+ * AN ACT THAT IS NOT LEGAL IS ABSENT: no Allow guests with no gate or no owner, and, as on a code,
+ * no new end date for a pass minted under another organization or on a site with no owner.
+ */
+function GuestAccess({
+  site,
+  pass,
+  canAllow,
+  now,
+  access,
+  asked,
+  onAllow,
+  onAsk,
+  onKeep,
+  onAnswered,
+}: {
+  site: SiteRow;
+  pass: AccessCodeRow | undefined;
+  canAllow: boolean;
+  now: number;
+  access: AccessCodes;
+  asked: RowAct | null;
+  onAllow: () => void;
+  onAsk: (event: MouseEvent<HTMLElement>, act: RowAct) => void;
+  onKeep: () => void;
+  onAnswered: (act: RowAct, outcome: WriteOutcome) => void;
+}) {
+  const stale = pass !== undefined && (pass.accountId !== "" || site.accountId !== "") && !sameEntityId(pass.accountId, site.accountId);
+  const ownerless = siteIsClusterOwned(site);
+  const opensNothing = stale || ownerless;
+  const writing = access.busy !== null;
+  return (
+    <section className="access-guest" aria-label="Guest access">
+      <Subhead
+        actions={
+          pass === undefined && canAllow ? (
+            <Button disabled={writing} onClick={onAllow}>
+              Allow guests
+            </Button>
+          ) : null
+        }
+      >
+        Guest access
+      </Subhead>
+      {pass === undefined ? (
+        <Caption>Off. Only someone with a code can open it.</Caption>
+      ) : (
+        <>
+          <RecordList as="ul" label="Guest pass">
+            <RecordRow
+              name={pass.label}
+              secondary={
+                <span className="os-record-facts">
+                  {stale ? (
+                    <span className="access-code-warn">Allowed under another organization, so it opens nothing</span>
+                  ) : access.gates.value !== null && !access.gates.value.some((gate) => gate.gate === pass.gate) ? (
+                    <span className="access-code-warn">Opens {pass.gate}, which this app no longer declares</span>
+                  ) : (
+                    <span>Opens {pass.gate}{pass.subject === "" ? "" : ` for ${pass.subject}`}</span>
+                  )}
+                </span>
+              }
+              state={stale ? undefined : endWord(pass.expiresAt, now)}
+              tone={hasExpired(pass.expiresAt, now) ? "warn" : "muted"}
+              stateTitle={formatMoment(pass.expiresAt)}
+              stateExtra={stale ? undefined : <span className="access-code-opened" title={pass.lastOpenedAt === "" ? undefined : formatMoment(pass.lastOpenedAt)}>{lastOpenedWord(pass.lastOpenedAt, pass.issuedAt, now)}</span>}
+              actions={
+                <>
+                  {opensNothing ? null : (
+                    <IconButton label="Change end date" disabled={writing} aria-expanded={asked === "setExpiry"} onClick={(event) => onAsk(event, "setExpiry")}>
+                      <CalendarClock size={16} aria-hidden />
+                    </IconButton>
+                  )}
+                  <IconButton label="Turn off" disabled={writing} aria-expanded={asked === "remove"} onClick={(event) => onAsk(event, "remove")}>
+                    <Power size={16} aria-hidden />
+                  </IconButton>
+                </>
+              }
+            />
+            {asked !== null ? <CodeAsk key={asked} code={pass} act={asked} opensNothing={opensNothing} now={now} access={access} onKeep={onKeep} onAnswered={(outcome) => onAnswered(asked, outcome)} /> : null}
+          </RecordList>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -352,7 +528,8 @@ function CodeEntry({
 }
 
 /** What a question says: what is being asked, then what it costs, above the buttons (rule 8). */
-function askWords(act: RowAct, label: string, expired: boolean, opensNothing: boolean): { question: string; consequence: string; answer: string; answering: string } {
+function askWords(act: RowAct, label: string, expired: boolean, opensNothing: boolean, guest = false): { question: string; consequence: string; answer: string; answering: string } {
+  if (guest) return guestAskWords(act, expired, opensNothing);
   const nobody = "It has already expired, so nobody is using it.";
   switch (act) {
     case "regenerate":
@@ -379,6 +556,24 @@ function askWords(act: RowAct, label: string, expired: boolean, opensNothing: bo
   }
 }
 
+/** What the guest pass's two questions say. Regenerate is never asked of a pass: it has no code. */
+function guestAskWords(act: RowAct, expired: boolean, opensNothing: boolean): { question: string; consequence: string; answer: string; answering: string } {
+  if (act === "setExpiry") {
+    return {
+      question: "Change when guest access ends",
+      consequence: expired ? "Guests can come in again until the new time." : "The new time applies at once.",
+      answer: "Set end date",
+      answering: "Changing",
+    };
+  }
+  return {
+    question: "Turn off guest access?",
+    consequence: opensNothing || expired ? "Nobody is in as a guest now. To let guests in again, allow guests again." : "Everyone in as a guest is taken out now.",
+    answer: "Turn off guest access",
+    answering: "Turning off",
+  };
+}
+
 /**
  * The question under a row.
  *
@@ -399,6 +594,7 @@ function CodeAsk({
   onKeep,
   onAnswered,
 }: {
+  /** Also the guest pass, which is told by `code.guest`. */
   code: AccessCodeRow;
   act: RowAct;
   opensNothing: boolean;
@@ -411,7 +607,7 @@ function CodeAsk({
   const root = useRef<HTMLDivElement>(null);
   const expired = hasExpired(code.expiresAt, now);
   const asksExpiry = act === "setExpiry" || (act === "regenerate" && expired);
-  const { question, consequence, answer: answerWord, answering } = askWords(act, code.label, expired, opensNothing);
+  const { question, consequence, answer: answerWord, answering } = askWords(act, code.label, expired, opensNothing, code.guest);
   const refusal = access.refusal?.codeId === code.id ? access.refusal.sentence : "";
 
   // Into the question, so a keyboard is on the way out rather than on the act, and
@@ -438,7 +634,7 @@ function CodeAsk({
       <InPlaceAsk role="group" aria-label={question}>
         <Notice tone="warn" sentence={question}>
           <p className="os-caption">{consequence}</p>
-          {asksExpiry ? <ExpiryField id={`access-expiry-${code.id}`} draft={draft} now={now} onChange={setDraft} /> : null}
+          {asksExpiry ? <ExpiryField id={`access-expiry-${code.id}`} draft={draft} now={now} onChange={setDraft} label={code.guest ? "Ends" : "Expires"} /> : null}
           <div className="os-panel-actions">
             <Button disabled={access.busy !== null} onClick={onKeep}>
               {act === "setExpiry" ? "Cancel" : "Keep it"}
@@ -461,12 +657,12 @@ function CodeAsk({
 }
 
 /** The five presets and Custom, with the date behind Custom naming the zone it is read in. */
-function ExpiryField({ id, draft, now, onChange }: { id: string; draft: ExpiryDraft; now: number; onChange: (next: ExpiryDraft) => void }) {
-  const dateLabel = `Expires at · ${browserZone()}`;
+function ExpiryField({ id, draft, now, onChange, label = "Expires" }: { id: string; draft: ExpiryDraft; now: number; onChange: (next: ExpiryDraft) => void; label?: "Expires" | "Ends" }) {
+  const dateLabel = `${label === "Ends" ? "Ends" : "Expires"} at · ${browserZone()}`;
   return (
     <>
-      <Field label="Expires">
-        <Select id={id} label="Expires" value={draft.choice} onChange={(choice) => onChange({ ...draft, choice })}>
+      <Field label={label}>
+        <Select id={id} label={label} value={draft.choice} onChange={(choice) => onChange({ ...draft, choice })}>
           {EXPIRY_PRESETS.map((preset) => (
             <option key={preset.id} value={preset.id}>
               {preset.label}
@@ -493,21 +689,28 @@ function ExpiryField({ id, draft, now, onChange }: { id: string; draft: ExpiryDr
  * read one. A refusal lands here, beside what it refused, with the draft untouched.
  */
 function AddCodeForm({
+  mode,
   siteId,
   gates,
   now,
   access,
   onCancel,
   onCreated,
+  onWriting,
 }: {
+  /** A code's form, or the same form for the guest pass: without the code, and said in its own words. */
+  mode: "code" | "guest";
   siteId: string;
   gates: readonly AccessGateRow[];
   now: number;
   access: AccessCodes;
   onCancel: () => void;
   onCreated: (outcome: WriteOutcome) => void;
+  /** The guest pass's write started (true), or did not land (false). */
+  onWriting: (writing: boolean) => void;
 }) {
-  const [name, setName] = useState("");
+  const guest = mode === "guest";
+  const [name, setName] = useState(guest ? "Guests" : "");
   const [chosenGate, setChosenGate] = useState("");
   const [subject, setSubject] = useState("");
   const [draft, setDraft] = useState<ExpiryDraft>(DEFAULT_EXPIRY);
@@ -532,19 +735,23 @@ function AddCodeForm({
     // From the press: a form left open must not shorten the code it makes.
     const expiresAt = expiryFromDraft(draft, Date.now());
     if (!complete || expiresAt === null) return;
-    const outcome = await access.create({ label: name, gate, subject: usesSubject ? subject : "", expiresAt });
+    if (guest) onWriting(true);
+    const outcome = await (guest
+      ? access.allowGuests({ label: name, gate, subject: usesSubject ? subject : "", expiresAt })
+      : access.create({ label: name, gate, subject: usesSubject ? subject : "", expiresAt }));
+    if (guest && outcome !== "done") onWriting(false);
     if (outcome === "refused") return;
     answered.current = true;
     onCreated(outcome);
   }
 
   return (
-    <section className="os-form access-code-form" aria-label="Add an access code" ref={root}>
+    <section className="os-form access-code-form" aria-label={guest ? "Allow guests" : "Add an access code"} ref={root}>
       <Field label="Name">
-        <Input id={`access-name-${siteId}`} label="Name" value={name} onChange={setName} placeholder="Who it is for" onEnter={() => void create()} />
+        <Input id={`access-name-${siteId}`} label="Name" value={name} onChange={setName} placeholder={guest ? "What to call them" : "Who it is for"} onEnter={() => void create()} />
       </Field>
-      <Field label="Unlocks">
-        <Select id={`access-gate-${siteId}`} label="Unlocks" value={gate} onChange={setChosenGate}>
+      <Field label={guest ? "Opens" : "Unlocks"}>
+        <Select id={`access-gate-${siteId}`} label={guest ? "Opens" : "Unlocks"} value={gate} onChange={setChosenGate}>
           {gates.length === 1 ? null : <option value="">Choose a gate</option>}
           {gates.map((declared) => (
             <option key={declared.gate} value={declared.gate}>
@@ -554,18 +761,23 @@ function AddCodeForm({
         </Select>
       </Field>
       {usesSubject ? (
-        <Field label="Subject (optional)">
-          <Input id={`access-subject-${siteId}`} label="Subject (optional)" value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
-        </Field>
+        <>
+          <Field label={guest ? "Subject" : "Subject (optional)"}>
+            <Input id={`access-subject-${siteId}`} label={guest ? "Subject" : "Subject (optional)"} value={subject} onChange={setSubject} placeholder="Whose part of the app it opens" onEnter={() => void create()} />
+          </Field>
+          {/* A PASS'S SUBJECT IS PUBLIC: whoever asks the guest route gets it, where a code's
+              subject is only its holder's. Said where the subject is chosen. */}
+          {guest ? <Caption>{"Anyone can open this subject's part."}</Caption> : null}
+        </>
       ) : null}
-      <ExpiryField id={`access-expiry-${siteId}`} draft={draft} now={now} onChange={setDraft} />
+      <ExpiryField id={`access-expiry-${siteId}`} draft={draft} now={now} onChange={setDraft} label={guest ? "Ends" : "Expires"} />
       {refusal === "" ? null : <Notice tone="error" sentence={refusal} />}
       <div className="os-panel-actions">
         <Button disabled={access.busy !== null} onClick={onCancel}>
           Cancel
         </Button>
-        <Button tone="primary" busy={access.busy === "create"} busyLabel="Creating" disabled={!complete} onClick={() => void create()}>
-          Create
+        <Button tone="primary" busy={access.busy === (guest ? "allowGuests" : "create")} busyLabel={guest ? "Allowing" : "Creating"} disabled={!complete} onClick={() => void create()}>
+          {guest ? "Allow guests" : "Create"}
         </Button>
       </div>
     </section>

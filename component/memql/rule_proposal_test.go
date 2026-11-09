@@ -96,6 +96,7 @@ func TestValidateRuleProposalRefusals(t *testing.T) {
 		{"an unknown when level", func(p *RuleProposal) { p.When = map[string]string{"level": "smart"} }, "never be true"},
 		{"a quote in a value", func(p *RuleProposal) { p.When = map[string]string{"prompt": `a"b`} }, "cannot carry"},
 		{"a bad exclude", func(p *RuleProposal) { p.Excludes = []string{"cloud:cheapest"} }, "exclude"},
+		{"the retired fleet wildcard", func(p *RuleProposal) { p.Excludes = []string{"fleet:*"} }, "fleet:strongest"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := validProposal()

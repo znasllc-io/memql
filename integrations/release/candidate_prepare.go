@@ -47,6 +47,12 @@ type candidatePreparer struct {
 	assemblyWorkflow *automations.Automation
 	draftDefinitions map[string]*automations.Automation
 	verified         *candidateVerification
+	// archivalTargets resolves targetReader the first time archiving without a
+	// catalog has a published copy to read (verifyUncataloguedInputs), so a
+	// candidate with nothing to read never resolves its destinations. Only that
+	// handler sets it, on a preparer built for one call and one candidate, so
+	// the reader it caches is never shared.
+	archivalTargets func(context.Context) (*candidateTargetReader, error)
 }
 
 // candidateVerification remembers that a publication action has verified this

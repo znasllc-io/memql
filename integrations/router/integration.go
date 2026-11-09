@@ -27,10 +27,7 @@ type Integration struct {
 	engine    memql.IntegrationEngineAccess
 	providers *memql.ProviderRegistry
 	policies  *memql.PolicyRegistry
-	// ruleActivator arms runtime-authored routing rules. Installed from app/;
-	// nil on a node with no authored runtime, where the capability refuses.
-	ruleActivator RuleActivator
-	logger        *slog.Logger
+	logger    *slog.Logger
 	// ruleRenderer is the tree's ONE renderer of the routing-rule grammar
 	// (epic memql#5146, D5). Injected rather than called directly, because the
 	// evidence fold hashes what it renders and a second renderer of one grammar
@@ -95,16 +92,6 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name:        "listPolicies",
 			Description: "Return all routing policies loaded from policies/v1/*.memql. Feeds the /router/policies page.",
 			Handler:     i.handleListPolicies,
-		},
-		{
-			Name:        "activateRoutingRule",
-			Description: "Render a routing rule from a structured form, run it through the authoring gates, and arm it live. Owner or developer. No model is involved: the construct is a deterministic rendering of the form.",
-			Handler:     i.handleActivateRoutingRule,
-		},
-		{
-			Name:        "retireRoutingRule",
-			Description: "Retire a runtime-authored routing rule. A shipped rule is refused: the shipped set is re-read from the embedded tree on every boot, so one you want out of the way is out-ranked with a higher precedence rather than removed.",
-			Handler:     i.handleRetireRoutingRule,
 		},
 	}...)
 }

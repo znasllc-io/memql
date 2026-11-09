@@ -60,9 +60,9 @@ genuine cost control and it belongs in this document -- but it is a different
 kind from everything in the table.
 
 **A kill switch a policy can author around is not a kill switch.** The rules
-system is authored: a DSL bundle may add rules, and an owner may add one at
-runtime through `routingRuleActivate`. So the split is explicit and enforced by
-where the code lives:
+system is authored: a DSL bundle may add rules, and an owner or developer may
+save one at runtime through `routingRuleSave`. So the split is explicit and
+enforced by where the code lives:
 
 | Decided by rules (authored) | Decided in Go (not authorable) |
 |---|---|

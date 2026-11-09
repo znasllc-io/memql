@@ -37,9 +37,12 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 	fset := token.NewFileSet()
 	sites := 0
 	// Retention stamps only the owner-bound storage recipe; legacy adoption
-	// stamps only its verified log operation, after the completed work/step read.
+	// stamps only its verified log operation, after the completed work/step
+	// read, and the person's adoption and the scheduled enrollment share it.
+	// Local security reports read retained receipts only after the owner's
+	// run/source, live consent and successful scanner evidence are checked.
 	want := map[string]int{"store_dsl.go": 1, "sarif.go": 4, "repository_change.go": 2, "repository_cleanup.go": 1,
-		"artifact_retention.go": 1, "artifact_retention_legacy.go": 1}
+		"artifact_retention.go": 1, "artifact_retention_legacy.go": 1, "security_report.go": 1}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -72,8 +75,8 @@ func TestTheStampNeverEscapesItsCall(t *testing.T) {
 			t.Errorf("%s has %d internal-origin stamps, want %d audited storage calls", name, fileSites, want[name])
 		}
 	}
-	if sites != 10 {
-		t.Errorf("want the ten audited inline storage stamps, found %d", sites)
+	if sites != 11 {
+		t.Errorf("want the eleven audited inline storage stamps, found %d", sites)
 	}
 }
 
@@ -206,6 +209,12 @@ func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T)
 	}
 	if _, err := integ.SweepArtifacts(caller); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's artifact sweep: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.EnrollLegacyLogs(caller); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's legacy log enrollment: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.handleEnrollLegacyLogs(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's legacy log enrollment capability: %v, want ErrClientOrigin", err)
 	}
 	if _, err := integ.handlePoll(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's poll capability: %v, want ErrClientOrigin", err)

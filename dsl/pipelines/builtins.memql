@@ -12,6 +12,8 @@ builtin pipelinesExpiredArtifacts {
 
 /// Enroll a pre-receipt log in retention after verifying its bytes. The owned
 /// completed step supplies the file; this accepts no object path or file ID.
+/// enrollLegacyPipelineLogs enrolls every such log on its own, including those
+/// no step names; this enrolls one step's log at once.
 @executor("integration.pipelines.adoptLegacyLog")
 @args(profile="object")
 @requiresCapability("execute", "app:pipelines/rerun")
@@ -20,6 +22,12 @@ builtin pipelinesAdoptLegacyLog { runId string! stepKey string! }
 /// Internal cron entry; the handler refuses external origin before any read.
 @executor("integration.pipelines.sweepArtifacts")
 builtin pipelinesSweepArtifacts { }
+
+/// Internal cron entry for the pre-receipt log list; the handler refuses
+/// external origin before any read and takes no file, owner or run from its
+/// caller.
+@executor("integration.pipelines.enrollLegacyLogs")
+builtin pipelinesEnrollLegacyLogs { }
 
 /// Call-local operation bound to the maintenance pass's owner and producer.
 @executor("integration.pipelines.pipelineRetentionSweepPage")
@@ -126,6 +134,15 @@ builtin pipelineReportPublish { }
 @executor("integration.pipelines.reportObserve")
 @args(profile="object")
 builtin pipelineReportObserve { waitSeconds integer! }
+
+/// Private operations available only inside a claimed native security report.
+/// The compiled producer and retained bytes supply all finding/source evidence.
+@executor("integration.pipelines.securityRead")
+builtin pipelineSecurityRead { }
+
+@executor("integration.pipelines.securityOpenGoal")
+@args(profile="object")
+builtin pipelineSecurityOpenGoal { fingerprint string! statement string! }
 
 /// Read only this claimed run's compiled step states. Unavailable outside a pipeline workflow.
 @executor("integration.pipelines.workflowFacts")

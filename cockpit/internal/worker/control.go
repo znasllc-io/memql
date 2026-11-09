@@ -30,15 +30,22 @@ type managedHome struct {
 	prepared    *homeRun
 	duplicateOf string
 	retrying    bool
+	autoPaused  bool
+	healthy     bool
+	lastHealthy time.Time
+	failedSince time.Time
+	pauseFailed bool
+	generation  uint64
 }
 
 type LocalHomeStatus struct {
-	ID      string `json:"id"`
-	Server  string `json:"server"`
-	URL     string `json:"url"`
-	OSURL   string `json:"os_url,omitempty"`
-	Enabled bool   `json:"enabled"`
-	State   string `json:"state"`
+	ID         string `json:"id"`
+	Server     string `json:"server"`
+	URL        string `json:"url"`
+	OSURL      string `json:"os_url,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	State      string `json:"state"`
+	AutoPaused bool   `json:"auto_paused"`
 }
 
 type LocalStatus struct {
@@ -97,8 +104,10 @@ func (f *Fleet) LocalStatus() LocalStatus {
 	for _, home := range f.workers.Homes {
 		h := f.managed[home.ID]
 		enabled, state := home.IsEnabled(), "Starting"
+		autoPaused := !enabled && home.AutoPaused
 		if h != nil {
 			enabled = h.enabled
+			autoPaused = h.autoPaused
 			switch {
 			case h.duplicateOf != "":
 				state = "Duplicate of " + h.duplicateOf
@@ -106,6 +115,9 @@ func (f *Fleet) LocalStatus() LocalStatus {
 				state = "Pausing"
 			case !h.enabled:
 				state = "Paused"
+				if h.autoPaused {
+					state = "Paused automatically"
+				}
 			case h.runner != nil && h.runner.RegistrationId() != "":
 				state = "Connected"
 			case h.runner != nil:
@@ -117,6 +129,9 @@ func (f *Fleet) LocalStatus() LocalStatus {
 			}
 		} else if !enabled {
 			state = "Paused"
+			if autoPaused {
+				state = "Paused automatically"
+			}
 		}
 		u, _ := url.Parse(home.ClusterURL)
 		server, address := home.ID, ""
@@ -125,7 +140,7 @@ func (f *Fleet) LocalStatus() LocalStatus {
 			server = u.Host
 			address = (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
 		}
-		status.Homes = append(status.Homes, LocalHomeStatus{ID: home.ID, Server: server, URL: address, OSURL: homeOSURL(home), Enabled: enabled, State: state})
+		status.Homes = append(status.Homes, LocalHomeStatus{ID: home.ID, Server: server, URL: address, OSURL: homeOSURL(home), Enabled: enabled, State: state, AutoPaused: autoPaused})
 	}
 	return status
 }
@@ -145,8 +160,11 @@ func (f *Fleet) SetHomeEnabled(id string, enabled bool) error {
 			return errors.New("multiple enrollments target this server; resolve the duplicate in workers.yaml before changing its connection policy")
 		}
 	}
-	if h.enabled == enabled {
+	if h.enabled == enabled && !h.autoPaused {
 		return nil
+	}
+	if f.connectionPolicyReserved() {
+		return errors.New("an update is finishing; change this connection after the update finishes or is canceled")
 	}
 	// Persist first. A disk failure must leave the current connection policy
 	// unchanged, and a restart must never undo a successful pause.
@@ -154,6 +172,15 @@ func (f *Fleet) SetHomeEnabled(id string, enabled bool) error {
 		return err
 	}
 	h.enabled = enabled
+	h.generation++
+	h.autoPaused = false
+	h.healthy = false
+	h.lastHealthy = time.Time{}
+	h.failedSince = time.Time{}
+	h.pauseFailed = false
+	if enabled {
+		h.failedSince = f.connectionNow()
+	}
 	if !enabled && h.cancel != nil {
 		h.cancel()
 	}
@@ -168,6 +195,10 @@ func (f *Fleet) SetHomeEnabled(id string, enabled bool) error {
 // Edit only the selected enabled node, retaining tokens, other homes, unknown
 // keys and comments. Write atomically with credential-file permissions.
 func saveHomeEnabled(path, id string, enabled bool) error {
+	return saveHomeConnectionState(path, id, enabled, false)
+}
+
+func saveHomeConnectionState(path, id string, enabled, autoPaused bool) error {
 	if path == "" {
 		path = DefaultWorkersPath()
 	}
@@ -205,13 +236,16 @@ func saveHomeEnabled(path, id string, enabled bool) error {
 			if home.Kind != yaml.MappingNode {
 				return errors.New("invalid home entry")
 			}
-			match, enabledIndex := false, -1
+			match, enabledIndex, autoPausedIndex := false, -1, -1
 			for j := 0; j+1 < len(home.Content); j += 2 {
 				if home.Content[j].Value == "id" && home.Content[j+1].Value == id {
 					match = true
 				}
 				if home.Content[j].Value == "enabled" {
 					enabledIndex = j + 1
+				}
+				if home.Content[j].Value == "auto_paused" {
+					autoPausedIndex = j + 1
 				}
 			}
 			if !match {
@@ -227,6 +261,16 @@ func saveHomeEnabled(path, id string, enabled bool) error {
 				home.Content[enabledIndex].Value = value.Value
 			} else {
 				home.Content = append(home.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "enabled"}, value)
+			}
+			if autoPaused {
+				if autoPausedIndex >= 0 {
+					home.Content[autoPausedIndex].Tag = "!!bool"
+					home.Content[autoPausedIndex].Value = "true"
+				} else {
+					home.Content = append(home.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "auto_paused"}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
+				}
+			} else if autoPausedIndex >= 0 {
+				home.Content = append(home.Content[:autoPausedIndex-1], home.Content[autoPausedIndex+1:]...)
 			}
 		}
 	}
@@ -260,6 +304,7 @@ func defaultControlPath() string { return filepath.Join(homeDir(), ".memql", "co
 
 type controlRequest struct {
 	Action     string `json:"action"`
+	LogCursor  string `json:"log_cursor,omitempty"`
 	Home       string `json:"home,omitempty"`
 	Enabled    *bool  `json:"enabled,omitempty"`
 	Permission string `json:"permission,omitempty"`
@@ -273,6 +318,9 @@ type controlResponse struct {
 	Error       string                   `json:"error,omitempty"`
 	Status      *LocalStatus             `json:"status,omitempty"`
 	Logs        []LocalLogEntry          `json:"logs,omitempty"`
+	LogCursor   string                   `json:"log_cursor,omitempty"`
+	LogReset    string                   `json:"log_reset,omitempty"`
+	LogHasMore  bool                     `json:"log_has_more,omitempty"`
 	InputTarget *tools.InputTargetStatus `json:"input_target,omitempty"`
 }
 
@@ -394,13 +442,7 @@ func serveControlConnection(conn net.Conn, fleet *Fleet) {
 			response.Status = &status
 		}
 	case "logs":
-		logs, err := readLocalWorkerLogs(fleet.workers.StateDir)
-		if err != nil {
-			response.OK = false
-			response.Error = sanitizeLocalLog(err.Error())
-		} else {
-			response.Logs = logs
-		}
+		response, _ = localLogsControlResponse(fleet.workers.StateDir, request.LogCursor)
 	case "setup":
 		if request.Setup == nil {
 			response.OK = false
@@ -452,6 +494,7 @@ func callControl(path string, request controlRequest) (controlResponse, error) {
 func handleControl(args []string) {
 	fs := flag.NewFlagSet("worker control", flag.ContinueOnError)
 	action := fs.String("action", "status", "status, input-target-status (explicit read-only focus diagnostic), logs, home, setup (the installer's progress), request-permission (explicit local macOS prompt), prepare-update, finish-update, or cancel-update")
+	logCursor := fs.String("log-cursor", "", "for logs: continue after a cursor from a successful read")
 	permission := fs.String("permission", "", "accessibility or screen_recording, for request-permission")
 	pid := fs.Int("pid", 0, "expected worker process ID, required for permission and update actions")
 	home := fs.String("home", "", "configured server ID")
@@ -468,7 +511,7 @@ func handleControl(args []string) {
 		}
 		os.Exit(2)
 	}
-	request := controlRequest{Action: *action, Home: *home, Permission: *permission, PID: *pid}
+	request := controlRequest{Action: *action, LogCursor: *logCursor, Home: *home, Permission: *permission, PID: *pid}
 	if *enabled != "" {
 		if *enabled != "true" && *enabled != "false" {
 			fmt.Fprintln(os.Stderr, "enabled must be true or false")
@@ -489,11 +532,7 @@ func handleControl(args []string) {
 		response, err = callControl(defaultControlPath(), request)
 	}
 	if err != nil && request.Action == "logs" {
-		var logs []LocalLogEntry
-		logs, err = readLocalWorkerLogs(Defaults().StateDir)
-		if err == nil {
-			response = controlResponse{OK: true, Logs: logs}
-		}
+		response, err = localLogsControlResponse(Defaults().StateDir, request.LogCursor)
 	}
 	if err != nil {
 		response = controlResponse{Error: sanitizeLocalLog(err.Error())}

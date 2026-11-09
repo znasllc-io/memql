@@ -1129,10 +1129,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		//
 		// Meanwhile the row holds the caller's own cluster-wide `role`, which
 		// is a plain settable enum, and a payload SPLAT names no fields so
-		// validateMutationCallerArgs cannot see it. The one legitimate caller
-		// is the identity admin server, which already authorizes in
-		// admin/auth.go -- so origin gating puts the boundary where the
-		// authorization already lives.
+		// validateMutationCallerArgs cannot see it. Every legitimate caller is
+		// Go that has authorized the write first: the identity admin surface
+		// (component/identity/adminops), behind its owner/admin gate, and role
+		// testing (component/identity/roletest), which renames its own test
+		// persona with a payload of displayName alone after the operator's
+		// gates -- so origin gating puts the boundary where the authorization
+		// already lives.
 		{Path: "identity/mutations.memql", Name: "updateUser"}: true,
 		// memql#2987, the node-token trio. All three were @public while
 		// projecting identityFull -- which includes `credentials` -- and
@@ -1408,6 +1411,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Library admits the artifact and backing row before the fixed system
 		// audit read; only applied booleans leave the capability boundary.
 		{Path: "work/queries.memql", Name: "workDocumentApprovedRevisions"}: true,
+
+		// The nightly routing review (design record 2026-11-08-routing-review-apply):
+		// the evidence fold raises it as the cluster, so NO person owns one and
+		// actor.userId scoping would list it to nobody. The work integration
+		// reads it under the system actor only after the caller passed the
+		// routing-author check routingRuleSave applies (owner or developer).
+		{Path: "work/queries.memql", Name: "workRoutingReviewsForCluster"}: true,
+		{Path: "work/queries.memql", Name: "workRoutingReviewForCluster"}:  true,
 
 		// Note reads borrow the backing owner only after artifact authorization.
 		// actor.userId cannot attest the original caller under that authority;

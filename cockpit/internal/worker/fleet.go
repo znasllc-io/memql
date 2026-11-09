@@ -79,6 +79,10 @@ type Fleet struct {
 	runners []*Runner
 	managed map[string]*managedHome
 	runHome func(context.Context, *managedHome) error
+	// Only tests replace the clock/ticks; production elapsed time retains
+	// time.Now's monotonic component and never counts process downtime.
+	connectionClock func() time.Time
+	connectionTicks <-chan time.Time
 
 	// newRunner is NewRunner, and a seam: a test swaps in one that fails
 	// for one home, or one that hands the runner a scripted stream.
@@ -159,7 +163,7 @@ type homeRun struct {
 }
 
 // Run connects every enabled home in parallel, one stream per cluster
-// (runnableHomes). One home failing (or reconnecting forever) does not
+// (runnableHomes). One home failing or pausing after failed retries does not
 // cancel the others; only ctx cancel tears the supervisor down.
 //
 // EVERY HOME IS BUILT BEFORE ANY IS STARTED (memql-cockpit#433). A home
@@ -197,7 +201,7 @@ func (f *Fleet) Run(ctx context.Context) error {
 	f.machineID = machineID
 	var wg sync.WaitGroup
 	for _, home := range f.workers.Homes {
-		h := &managedHome{home: home, enabled: home.IsEnabled(), wake: make(chan struct{}, 1), prepared: prepared[home.ID], duplicateOf: suppressed[home.ID]}
+		h := &managedHome{home: home, enabled: home.IsEnabled(), autoPaused: !home.IsEnabled() && home.AutoPaused, wake: make(chan struct{}, 1), prepared: prepared[home.ID], duplicateOf: suppressed[home.ID]}
 		f.managed[home.ID] = h
 		if h.duplicateOf != "" {
 			continue
@@ -205,6 +209,8 @@ func (f *Fleet) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func() { defer wg.Done(); f.runManagedHome(runCtx, h) }()
 	}
+	wg.Add(1)
+	go func() { defer wg.Done(); f.monitorConnections(runCtx) }()
 	f.mu.Unlock()
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
@@ -232,6 +238,9 @@ func (f *Fleet) runManagedHome(ctx context.Context, h *managedHome) {
 		homeCtx, cancel := context.WithCancel(ctx)
 		h.cancel = cancel
 		h.retrying = false
+		if h.failedSince.IsZero() {
+			h.failedSince = f.connectionNow()
+		}
 		f.mu.Unlock()
 		run := f.runHome
 		if run == nil {
@@ -243,6 +252,11 @@ func (f *Fleet) runManagedHome(ctx context.Context, h *managedHome) {
 		f.mu.Lock()
 		h.cancel = nil
 		h.runner = nil
+		if h.enabled {
+			h.loseConnectionHealth(f.connectionNow())
+		} else {
+			h.healthy = false
+		}
 		h.retrying = !wasCanceled
 		f.mu.Unlock()
 		if !wasCanceled {
@@ -273,8 +287,14 @@ func (f *Fleet) runManagedHomeOnce(ctx context.Context, h *managedHome) error {
 		run = &built
 	}
 	f.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		f.mu.Unlock()
+		return err
+	}
 	h.runner = run.runner
 	f.runners = append(f.runners, run.runner)
+	generation := h.generation
+	run.runner.connectionHealth = func(conn *Connection, healthy bool) { f.connectionHealth(h, run.runner, generation, conn, healthy) }
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()

@@ -118,6 +118,10 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 		return revisionRecord{}, err
 	}
 	s := &revisionWorkflowScope{workflow: w, host: host, journal: journal, client: client, installation: installation, key: key, operator: actor, mode: mode, configuration: configuration, renders: map[string]argocd.RenderedRevision{}, sources: map[string]verifiedSourceCapture{}}
+	ctx, cancelContinuity := context.WithCancelCause(ctx)
+	s.cancelContinuity = cancelContinuity
+	defer cancelContinuity(nil)
+	defer func() { _ = s.continuity.stop() }()
 	if w.snapshot != nil {
 		_, err = workflowhost.RunSnapshot(ctx, w.snapshot, revisionContract, nil, workflowhost.Options{Operations: s.operations()})
 	} else {
@@ -138,6 +142,9 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 		})
 	}
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return revisionRecord{}, cause
+		}
 		return revisionRecord{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -153,6 +160,8 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 // native callbacks. The DSL controls their order; no callback accepts evidence
 // from its caller.
 type revisionWorkflowScope struct {
+	continuity        *applicationContinuityRun
+	cancelContinuity  context.CancelCauseFunc
 	memberNeeds       map[string]bool
 	memberObserved    map[string]bool
 	rollbackExecution bool
@@ -304,8 +313,30 @@ func (s *revisionWorkflowScope) readConfiguration(ctx context.Context, args map[
 		return nil, errors.New("installation revision requires its exact fresh authenticated receiver configuration")
 	}
 	intent, err := argocd.PlanRevision(cfg.application, r.Plan.Intent.RequestID, r.Plan.Intent.Revision, r.Plan.Intent.Prune)
-	if r.Plan.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
+	if r.Plan.FormatVersion != 2 && r.Plan.Intent.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
 		return nil, errors.New("installation revision intent differs from the current authenticated Application baseline")
+	}
+	if r.Plan.Intent.FormatVersion == 2 {
+		if s.continuity != nil {
+			if err := s.continuity.stop(); err != nil {
+				return nil, err
+			}
+		}
+		record, err := s.host.journal.get(ctx, r.Plan.InstallationID, binding.ID)
+		if err != nil {
+			return nil, err
+		}
+		if record.PromotedPlanID != r.ID || record.State != "promoted" {
+			return nil, errors.New("Application history is outside the promoted plan")
+		}
+		selected := s.memberNeeds
+		if r.Plan.FormatVersion == 1 {
+			selected = map[string]bool{"": s.needsWrite}
+		}
+		s.continuity, err = startApplicationContinuity(ctx, s.cancelContinuity, s.host.journal, s.client, record, selected)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.configuration = cfg
 	s.preparation = preparationRecord{}
@@ -583,7 +614,7 @@ func (s *revisionWorkflowScope) reobserveConfiguration(ctx context.Context, args
 		return nil, errors.New("installation configuration changed during revision admission")
 	}
 	intent, err := argocd.PlanRevision(fresh.application, r.Plan.Intent.RequestID, r.Plan.Intent.Revision, r.Plan.Intent.Prune)
-	if r.Plan.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
+	if r.Plan.FormatVersion != 2 && r.Plan.Intent.FormatVersion != 2 && (err != nil || !sameIntent(intent, r.Plan.Intent)) {
 		return nil, errors.New("installation Application changed during revision admission")
 	}
 	s.configuration = fresh
@@ -644,6 +675,16 @@ func (s *revisionWorkflowScope) begin(ctx context.Context, args map[string]any) 
 	if !s.needsWrite {
 		return nil, errors.New("installation start requires a controller read that still needs a write")
 	}
+	// Join the read-only guard before an owned Argo effect changes the baseline.
+	// Each member then obtains its own exact fresh proof immediately before CAS.
+	if err := s.continuity.stop(); err != nil {
+		return nil, err
+	}
+	if s.continuity != nil {
+		if err := s.continuity.check(ctx); err != nil {
+			return nil, err
+		}
+	}
 	admission, err := s.freshWriteEvidence(r)
 	if err != nil {
 		return nil, err
@@ -695,7 +736,14 @@ func (s *revisionWorkflowScope) applyLocked(ctx context.Context, args map[string
 	if err != nil || !currentAdmission.freshUntil.Equal(admission.freshUntil) {
 		return nil, errors.New("installation write admission expired during controller reconciliation")
 	}
-	if _, err := s.client.Apply(effectCtx, r.Plan.Intent); err != nil {
+	var proof *argocd.ContinuityProof
+	if r.Plan.Intent.FormatVersion == 2 {
+		proof, err = s.host.applicationProof(effectCtx, r.Plan, "")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err := s.client.ApplyWithContinuity(effectCtx, r.Plan.Intent, proof); err != nil {
 		return nil, errors.New("installation revision effect is unconfirmed; reconcile its recorded intent")
 	}
 	return nil, nil

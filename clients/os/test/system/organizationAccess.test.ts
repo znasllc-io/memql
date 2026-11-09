@@ -23,6 +23,25 @@ describe("organization capability discovery", () => {
     expect(accessAdmits("app:settings")).toBe(false);
   });
 
+  it("opens Pipelines where an organization opens it, as the engine answers it per organization", () => {
+    // Allowed in Acme, denied in Beta: the merged answer is Beta's deny, and
+    // the engine answers the door per organization, so Acme's allow opens it.
+    setEffectiveCapabilities([
+      { verb: "read", resource: "app:pipelines", effect: "deny", source: "group" },
+      { verb: "read", resource: "app:files", effect: "allow", source: "role" },
+      { verb: "read", resource: "app:logs", effect: "deny", source: "role" },
+    ], [
+      { accountId: "acme", verb: "read", resource: "app:pipelines", effect: "allow" },
+      { accountId: "acme", verb: "read", resource: "data", effect: "allow" },
+      { accountId: "beta", verb: "read", resource: "app:pipelines", effect: "deny" },
+    ]);
+    expect(holds("read", "app:pipelines")).toBe(false);
+    expect(accessAdmits("app:pipelines")).toBe(true);
+    // A door the organization entries do not carry is answered once: the merged answer.
+    expect(accessAdmits("app:files")).toBe(true);
+    expect(accessAdmits("app:logs")).toBe(false);
+  });
+
   it("requires app and data reads in the same organization even when the global app decision allows", () => {
     const mismatched = scoped.map(entry => entry.resource === "data" && entry.verb === "read"
       ? { ...entry, effect: entry.accountId === "acme" ? "deny" as const : "allow" as const }

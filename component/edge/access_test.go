@@ -226,7 +226,7 @@ func mustRetryAfter(t *testing.T, rec *httptest.ResponseRecorder) int {
 	return secs
 }
 
-// accessPairs are the four method and path pairs and where each one lands.
+// accessPairs are the five method and path pairs and where each one lands.
 var accessPairs = []struct {
 	name, method, path, forwarded string
 }{
@@ -234,15 +234,16 @@ var accessPairs = []struct {
 	{"session", http.MethodGet, "/_memql/access", "/access/session"},
 	{"leave", http.MethodPost, "/_memql/access/leave", "/access/leave"},
 	{"call", http.MethodPost, "/_memql/access/call", "/access/call"},
+	{"guest", http.MethodPost, "/_memql/access/guest", "/access/guest"},
 }
 
-// THE ROUTE IS FOUR PAIRS AND NOTHING ELSE. The interesting rows are the ones
+// THE ROUTE IS FIVE PAIRS AND NOTHING ELSE. The interesting rows are the ones
 // that look like it: the right path with the wrong method, the bff's own
 // spelling, a longer segment, and a path that merely starts with the same
 // letters. Each must reach the generic proxy untouched -- with apiProxy on it
 // is forwarded under the "/memql" root with no stamp, and with it off it is
 // the 404 it always was -- which is what proves it did not enter this surface.
-func TestAccessRoutesFourPairsAndNothingElse(t *testing.T) {
+func TestAccessSurfaceAnswersFivePairsAndNoOthers(t *testing.T) {
 	for _, pair := range accessPairs {
 		t.Run("routed/"+pair.name, func(t *testing.T) {
 			up := newAccessUpstream(t)
@@ -286,6 +287,11 @@ func TestAccessRoutesFourPairsAndNothingElse(t *testing.T) {
 		{"a trailing slash on unlock", http.MethodPost, "/_memql/access/", "/memql/access/"},
 		{"a trailing slash on leave", http.MethodPost, "/_memql/access/leave/", "/memql/access/leave/"},
 		{"a segment below call", http.MethodPost, "/_memql/access/call/x", "/memql/access/call/x"},
+		{"GET on guest", http.MethodGet, "/_memql/access/guest", "/memql/access/guest"},
+		{"DELETE on guest", http.MethodDelete, "/_memql/access/guest", "/memql/access/guest"},
+		{"a segment below guest", http.MethodPost, "/_memql/access/guest/x", "/memql/access/guest/x"},
+		{"a trailing slash on guest", http.MethodPost, "/_memql/access/guest/", "/memql/access/guest/"},
+		{"the bff's own name for guest", http.MethodPost, "/_memql/access/guest/open", "/memql/access/guest/open"},
 		{"POST to a longer first segment", http.MethodPost, "/_memql/accessories", "/memql/accessories"},
 		{"GET to a longer first segment", http.MethodGet, "/_memql/accessories", "/memql/accessories"},
 	}
@@ -362,7 +368,7 @@ func TestAccessIgnoresAPIProxy(t *testing.T) {
 // assertion. Both headers carry a SECOND forged value as well, since a refactor
 // from Set to Add would keep the first.
 //
-// There are two halves, and they are one rule seen from either side. On the four
+// There are two halves, and they are one rule seen from either side. On the five
 // pairs the edge's own values are what arrive. On everything ELSE the edge
 // forwards -- an apiProxy site's ordinary /_memql/* calls and the shopper
 // surface -- nothing arrives, because the bff would otherwise read a stamp the
@@ -1393,7 +1399,7 @@ func TestAccessSiteOfflineAnswersBeforeForwarding(t *testing.T) {
 	}
 }
 
-// THE EDGE NEVER READS THE COOKIE'S VALUE AND NEVER DECIDES ACCESS. On the four routes
+// THE EDGE NEVER READS THE COOKIE'S VALUE AND NEVER DECIDES ACCESS. On the five routes
 // it forwards that one cookie as the browser sent it, including a value no session could
 // have, and the bff alone says what it means; and the bff's Set-Cookie, the one thing
 // that can open or end a session, reaches the browser exactly as written.
@@ -1575,7 +1581,7 @@ func requireCookieLines(t *testing.T, got http.Header, want []string) {
 	}
 }
 
-// THE COOKIE REACHES THE BFF ON THE FOUR PAIRS, ALONE. The bff reads this one cookie and
+// THE COOKIE REACHES THE BFF ON THE FIVE PAIRS, ALONE. The bff reads this one cookie and
 // nothing else a browser sends: not a sign-in cookie and not a bearer. Forwarding them
 // made a visitor's own browser state a read on the access path (the session-revocation
 // middleware looks up any bearer it finds) and locked out a visitor holding a revoked
@@ -1606,7 +1612,7 @@ func TestAccessForwardsOnlyTheAccessCookie(t *testing.T) {
 }
 
 // accessOutbound is every way a request leaves this edge for an upstream that is not one
-// of the four pairs, and the proof it took that way. If a route is added, it goes here.
+// of the five pairs, and the proof it took that way. If a route is added, it goes here.
 var accessOutbound = []struct {
 	name         string
 	method, path string
@@ -1682,7 +1688,7 @@ func TestTheAccessCookieGoesNowhereElse(t *testing.T) {
 		}
 	}
 
-	// A BEARER IS NOT THE ACCESS SURFACE'S TO TAKE EVERYWHERE. Only the four routes drop
+	// A BEARER IS NOT THE ACCESS SURFACE'S TO TAKE EVERYWHERE. Only the five routes drop
 	// it: the identity proxy and the API bridge are what it is for.
 	t.Run("everything else keeps its bearer", func(t *testing.T) {
 		for _, route := range accessOutbound {
@@ -2020,7 +2026,7 @@ func TestAccessAQueryStringDoesNotChooseTheRoute(t *testing.T) {
 // A CODE PASTED INTO A URL TRAVELS NO FURTHER THAN IT HAS TO. The protocol puts a
 // code in the body of a POST and has no query parameters at all, so whatever
 // follows the question mark is not the bff's business: it is dropped here, on all
-// four pairs, and the route still works. What reaches the bff is the canonical
+// five pairs, and the route still works. What reaches the bff is the canonical
 // request target and nothing after it, so a code in a query string is not in the
 // bff's request line, and so not in anything that records the URL of what it
 // served. An empty query goes too: no query at all, not even a bare question mark.
@@ -2072,7 +2078,7 @@ func TestAccessACodeInTheQueryStringTravelsNoFurther(t *testing.T) {
 }
 
 // CASE IS NOT FOLDED. The route is an exact match, so a path in another case, or
-// a lower-case method, is not one of the four pairs. With apiProxy on the generic
+// a lower-case method, is not one of the five pairs. With apiProxy on the generic
 // proxy forwards what is under the marker -- unstamped, and to a path the bff does
 // not serve -- and with it off the request gets what it always did: the 404, or
 // the bundle's own answer. Either way nothing reaches the bff's /access routes.
@@ -2313,6 +2319,193 @@ func TestAccessUnderAPreviewGrant(t *testing.T) {
 		}
 		if up.count() != 0 {
 			t.Fatal("a grant for another deployable forwarded the request to the bff")
+		}
+	})
+}
+
+// accessGuest is a guest open that arrived from one address, as accessUnlock is an
+// unlock. The body is the empty object the route takes, since it carries no secret.
+func accessGuest(addr string) *http.Request {
+	req := accessRequest(http.MethodPost, "/_memql/access/guest", `{}`)
+	if addr != "" {
+		req.Header.Add("X-Forwarded-For", addr)
+	}
+	return req
+}
+
+// A GUEST OPEN DRAWS ON BUCKETS OF ITS OWN, AND ONLY THE GUEST OPEN DOES. A crowd of
+// guests must not use up what a code holder's unlock needs, and a flood of unlocks must
+// not shut guests out, so each is exhausted here while the other is shown to be whole.
+func TestGuestOpensHaveTheirOwnBuckets(t *testing.T) {
+	t.Run("ten per address, and unlock and the other routes still pass", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		for i := 0; i < 10; i++ {
+			if rec := serveAccess(h, accessGuest("203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("guest open %d = %d, want 200 inside the budget", i+1, rec.Code)
+			}
+		}
+		rec := serveAccess(h, accessGuest("203.0.113.9"))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the 11th guest open = %d, want 429", rec.Code)
+		}
+		mustRetryAfter(t, rec)
+		if got := accessErrorCode(t, rec); got != "rate_limited" {
+			t.Fatalf("error = %q, want rate_limited", got)
+		}
+		if rec := serveAccess(h, accessGuest("203.0.113.10")); rec.Code != http.StatusOK {
+			t.Fatalf("another address = %d, want its own budget", rec.Code)
+		}
+		if rec := serveAccess(h, accessUnlock("203.0.113.9")); rec.Code != http.StatusOK {
+			t.Fatalf("an unlock after the guest budget was gone = %d, want 200", rec.Code)
+		}
+		for _, pair := range accessPairs[1:4] {
+			req := accessRequest(pair.method, pair.path, "")
+			req.Header.Add("X-Forwarded-For", "203.0.113.9")
+			if rec := serveAccess(h, req); rec.Code != http.StatusOK {
+				t.Fatalf("%s after the guest budget was gone = %d, want 200", pair.name, rec.Code)
+			}
+		}
+	})
+
+	t.Run("sixty per site, spent by different addresses", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		for i := 0; i < 60; i++ {
+			addr := fmt.Sprintf("203.0.113.%d", i)
+			if rec := serveAccess(h, accessGuest(addr)); rec.Code != http.StatusOK {
+				t.Fatalf("guest open %d = %d, want 200 inside the site's 60", i+1, rec.Code)
+			}
+		}
+		rec := serveAccess(h, accessGuest("203.0.114.1"))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the 61st guest open = %d, want 429", rec.Code)
+		}
+		mustRetryAfter(t, rec)
+		if rec := serveAccess(h, accessUnlock("203.0.114.1")); rec.Code != http.StatusOK {
+			t.Fatalf("an unlock after the site's guest budget was gone = %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("an exhausted unlock budget leaves guests alone", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		for i := 0; i < 10; i++ {
+			serveAccess(h, accessUnlock("203.0.113.9"))
+		}
+		if rec := serveAccess(h, accessUnlock("203.0.113.9")); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the unlock budget is not gone: %d", rec.Code)
+		}
+		for i := 0; i < 10; i++ {
+			if rec := serveAccess(h, accessGuest("203.0.113.9")); rec.Code != http.StatusOK {
+				t.Fatalf("guest open %d after the unlocks = %d, want 200", i+1, rec.Code)
+			}
+		}
+	})
+
+	t.Run("an exhausted other-routes budget leaves guests alone", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		poll := func() *http.Request {
+			req := accessRequest(http.MethodGet, "/_memql/access", "")
+			req.Header.Add("X-Forwarded-For", "203.0.113.9")
+			return req
+		}
+		for i := 0; i < 600; i++ {
+			serveAccess(h, poll())
+		}
+		if rec := serveAccess(h, poll()); rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("the other budget is not gone: %d", rec.Code)
+		}
+		if rec := serveAccess(h, accessGuest("203.0.113.9")); rec.Code != http.StatusOK {
+			t.Fatalf("a guest open after the polls = %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("a site's guest budget is its own", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		other := accessSite(func(s *Site) { s.ID = "site2"; s.Hostname = "other.example.com" })
+		h, _ := accessHandlerFor(t, accessHostResolver{
+			"demo.example.com":  accessSite(nil),
+			"other.example.com": other,
+		}, up.server.URL)
+
+		for i := 0; i < 11; i++ {
+			serveAccess(h, accessGuest("203.0.113.9"))
+		}
+		req := accessGuest("203.0.113.9")
+		req.Host = "other.example.com"
+		if rec := serveAccess(h, req); rec.Code != http.StatusOK {
+			t.Fatalf("a guest open on another site = %d, want its own budget", rec.Code)
+		}
+	})
+}
+
+// THE GUEST OPEN IS A POST LIKE THE OTHERS, so it is held to the same shape: JSON, no
+// foreign origin, and a body no larger than the small cap, all refused before the bff.
+func TestGuestOpenChecksContentTypeOriginAndSize(t *testing.T) {
+	const path = "/_memql/access/guest"
+
+	t.Run("a body that is not declared JSON is refused", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		req := accessRequest(http.MethodPost, path, `{}`)
+		req.Header.Set("Content-Type", "text/plain")
+		if rec := serveAccess(h, req); rec.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("text/plain = %d, want 415", rec.Code)
+		}
+		if up.count() != 0 {
+			t.Fatal("a body that was not JSON reached the bff")
+		}
+	})
+
+	t.Run("a foreign origin is refused", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		req := accessRequest(http.MethodPost, path, `{}`)
+		req.Header.Set("Origin", "https://evil.example")
+		if rec := serveAccess(h, req); rec.Code != http.StatusForbidden {
+			t.Fatalf("a foreign origin = %d, want 403", rec.Code)
+		}
+		if up.count() != 0 {
+			t.Fatal("a foreign origin reached the bff")
+		}
+	})
+
+	t.Run("its own origin is forwarded", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+
+		req := accessRequest(http.MethodPost, path, `{}`)
+		req.Header.Set("Origin", "https://demo.example.com")
+		if rec := serveAccess(h, req); rec.Code != http.StatusOK || up.count() != 1 {
+			t.Fatalf("its own origin = %d with %d hits, want it forwarded", rec.Code, up.count())
+		}
+	})
+
+	t.Run("exactly 1 KiB is forwarded whole and one byte more is refused", func(t *testing.T) {
+		up := newAccessUpstream(t)
+		h := accessHandler(t, accessSite(nil), up.server.URL)
+		body := strings.Repeat("a", 1<<10)
+
+		if rec := serveAccess(h, accessRequest(http.MethodPost, path, body)); rec.Code != http.StatusOK {
+			t.Fatalf("1 KiB = %d, want 200", rec.Code)
+		}
+		if got := up.only(t).body; got != body {
+			t.Fatalf("the bff received %d bytes, want %d", len(got), len(body))
+		}
+		rec := serveAccess(h, accessRequest(http.MethodPost, path, body+"a"))
+		if rec.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("1 KiB and a byte = %d, want 413", rec.Code)
+		}
+		if up.count() != 1 {
+			t.Fatal("an oversized body reached the bff")
 		}
 	})
 }

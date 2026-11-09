@@ -44,7 +44,8 @@ import { OrganizationApps } from "./OrganizationApps";
 // ONE GROUP: who is in it, who is standing in it by rule, and what it grants.
 //
 // An organization's group also carries what its people may open: the apps its
-// allow grants open, set here (OrganizationApps) for whoever manages access.
+// allow grants open, set here (OrganizationApps) for whoever manages access,
+// while the group is active. An archived group grants nobody anything.
 
 export function GroupPage({
   group,
@@ -153,8 +154,13 @@ export function GroupPage({
         {group.accountId ? (
           <Panel label="Organization access">
             <p className="os-caption">Membership gives access to this organization’s work. Apps and actions must also be granted by a cluster operator. An organization administrator uses a role scoped to this organization, never the cluster Admin role.</p>
-            {os && holds("read", "app:settings/access") ? <OrganizationApps group={group} catalog={catalog} registry={os.registry} /> : null}
-            {os && holds("read", "app:settings/access") ? <Button onClick={() => os.actions.openApp("settings", "access", { groupId: group.id })}>Manage app access</Button> : null}
+            {/* NOT FOR AN ARCHIVED GROUP: it grants nobody anything, and the
+                engine will not answer for it (access_unknown_subject), so the
+                list would only ever be a warning that it could not be read,
+                and Manage app access would open Settings > Access on a group
+                it refuses (rule 12: an act that is not legal is absent). */}
+            {os && holds("read", "app:settings/access") && !archived ? <OrganizationApps group={group} catalog={catalog} registry={os.registry} /> : null}
+            {os && holds("read", "app:settings/access") && !archived ? <Button onClick={() => os.actions.openApp("settings", "access", { groupId: group.id })}>Manage app access</Button> : null}
             {os && holds("create", "role") ? <Button onClick={() => os.actions.openApp("users", "roles", { accountId: group.accountId, createRole: true })}>Create organization role</Button> : null}
           </Panel>
         ) : null}

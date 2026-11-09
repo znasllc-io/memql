@@ -375,7 +375,11 @@ func TestOwnerAndAdminReachTheEngine(t *testing.T) {
 // THIS TEST IS THE RELOCATED memql#2991 GUARD. It used to live in
 // component/identity/admin as TestAdminUpdateUserStampsInternalOrigin, pinned
 // on the templ console's one call site; that call site is gone and this is the
-// only path to `updateUser` now, so the guard moves rather than disappearing.
+// identity admin surface's path to `updateUser` now, so the guard moves rather
+// than disappearing. The surface is one of two production callers: role testing
+// also calls `updateUser`, with its own internal-origin stamp, to rename its own
+// test persona, and component/identity/roletest/service_db_test.go
+// (TestAPersonaIsCalledWhatItTests) is that caller's guard.
 //
 // Behavioural at the Engine seam, not a source scan, for the reasons that file
 // recorded at length: a scan was defeated three separate ways in review -- a

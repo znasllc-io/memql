@@ -139,7 +139,7 @@ func (h *Handler) newBFFProxy(site *Site, stamp func(*httputil.ProxyRequest)) *h
 			for _, name := range accessStampHeaders {
 				pr.Out.Header.Del(name)
 			}
-			// THE ACCESS COOKIE GOES NO FURTHER THAN THE FOUR ROUTES, and the access
+			// THE ACCESS COOKIE GOES NO FURTHER THAN THE FIVE ROUTES, and the access
 			// surface puts it back in its own stamp. See accessStripCookie.
 			accessStripCookie(pr.Out.Header)
 			if stamp != nil {

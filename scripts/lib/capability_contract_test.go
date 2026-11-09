@@ -23,10 +23,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -774,6 +776,329 @@ func TestNoCapabilityScriptHandRollsABooleanComparison(t *testing.T) {
 	}
 }
 
+type booleanReadFinding struct {
+	line int    // one-based
+	text string // the trimmed source line
+	why  string
+}
+
+var (
+	reSpecParam = regexp.MustCompile(`cap_spec_param(?:_required)?[ \t]+"([^"]+)"[ \t]+"((?:[^"\\]|\\.)*)"`)
+	// A param is DECLARED a flag when a parenthetical in its description
+	// names the word: "(flag)", "(flag; default: report only)", "(flag,
+	// forwarded to up.sh)", "(immutability override; flag)". Every boolean
+	// the corpus read with cap_flag said so; "flagged" is not the word.
+	reFlagMarker = regexp.MustCompile(`\([^()]*\bflag\b[^()]*\)`)
+	reParamRead  = regexp.MustCompile(`\b(cap_flag|cap_param|cap_bool_str|cap_bool)[ \t]+"?([A-Za-z0-9][A-Za-z0-9_-]*)"?`)
+	// The one placement where cap_bool_str's exit 2 stops the script: the
+	// whole right-hand side of a plain assignment, optionally after a
+	// `local NAME;` declaration on the same line.
+	reBoolStrAssign = regexp.MustCompile(`^(?:local[ \t]+[A-Za-z_][A-Za-z0-9_ \t]*;[ \t]*)?([A-Za-z_][A-Za-z0-9_]*)="?\$\(cap_bool_str[ \t].*\)"?(?:[ \t]+#.*)?$`)
+	reCapBoolSubst  = regexp.MustCompile("(?:\\$\\(|`)[ \t]*(?:![ \t]*)?cap_bool(?:[ \t;)`]|$)")
+)
+
+// booleanReadFindings returns every boolean read in a capability script's
+// source that can fail open or lose its refusal. Full-line comments are not
+// code. The rules, each a measured failure:
+//
+//  1. A param declared a flag (reFlagMarker) is read only with cap_bool or
+//     cap_bool_str. cap_flag and cap_param hand back the raw string, and
+//     "false" is non-empty.
+//  2. cap_flag reads only a param the script also resolves with cap_param: a
+//     presence probe for a VALUE param ("was --revision passed?"). Any other
+//     cap_flag read is a boolean read in disguise, whatever its description
+//     says -- four memql-znas scripts declared `apply` with no marker.
+//  3. cap_bool_str is the whole right-hand side of a plain assignment. Under
+//     `local`, `export`, a [[ ]] test or an argument, bash discards the
+//     substitution's exit 2 and a mistyped value reads as false.
+//  4. cap_bool never runs inside a command substitution, where its refusal is
+//     captured as output instead of stopping the script.
+//  5. A variable assigned from cap_bool_str is never tested for emptiness:
+//     it holds "true" or "false", so `-n` is always true. That is the mistake
+//     a conversion makes when it changes the read and not the test.
+func booleanReadFindings(src string) []booleanReadFinding {
+	declared := map[string]bool{}
+	for _, m := range reSpecParam.FindAllStringSubmatch(src, -1) {
+		if reFlagMarker.MatchString(m[2]) {
+			declared[m[1]] = true
+		}
+	}
+
+	type paramRead struct {
+		line      int
+		text, fn  string
+		paramName string
+	}
+	var (
+		findings []booleanReadFinding
+		reads    []paramRead
+		code     []bashCodeLine      // the non-comment lines
+		valued   = map[string]bool{} // resolved with cap_param somewhere
+		boolStr  = map[string]bool{} // variables holding a cap_bool_str value
+	)
+	for i, raw := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		code = append(code, bashCodeLine{text: trimmed, number: i + 1})
+		for _, m := range reParamRead.FindAllStringSubmatch(trimmed, -1) {
+			reads = append(reads, paramRead{line: i + 1, text: trimmed, fn: m[1], paramName: m[2]})
+			if m[1] == "cap_param" {
+				valued[m[2]] = true
+			}
+		}
+		if strings.Contains(trimmed, "cap_bool_str") {
+			m := reBoolStrAssign.FindStringSubmatch(trimmed)
+			if m != nil && strings.Count(trimmed, "cap_bool_str") == 1 {
+				boolStr[m[1]] = true
+			} else {
+				findings = append(findings, booleanReadFinding{i + 1, trimmed,
+					"cap_bool_str is not the whole right-hand side of a plain assignment, so its refusal of a " +
+						"non-boolean is lost: `local`, `export`, a [[ ]] test and an argument all discard the " +
+						"substitution's exit 2, and a mistyped value reads as false. Write NAME=\"$(cap_bool_str " +
+						"<param>)\" as its own statement, or branch with `if cap_bool <param>; then`."})
+			}
+		}
+		if reCapBoolSubst.MatchString(trimmed) {
+			findings = append(findings, booleanReadFinding{i + 1, trimmed,
+				"cap_bool runs inside a command substitution, where its refusal of a non-boolean is captured " +
+					"as output instead of stopping the script. Branch with `if cap_bool <param>; then`, or take " +
+					"the value with NAME=\"$(cap_bool_str <param>)\"."})
+		}
+	}
+
+	for _, r := range reads {
+		switch {
+		case declared[r.paramName] && (r.fn == "cap_flag" || r.fn == "cap_param"):
+			findings = append(findings, booleanReadFinding{r.line, r.text, fmt.Sprintf(
+				"--%s is declared a flag (its description says so) but is read with %s, which returns the raw "+
+					"string: --%s=false is non-empty, so an emptiness test takes it as true. Read it with "+
+					"`if cap_bool %s; then`.", r.paramName, r.fn, r.paramName, r.paramName)})
+		case r.fn == "cap_flag" && !valued[r.paramName]:
+			findings = append(findings, booleanReadFinding{r.line, r.text, fmt.Sprintf(
+				"cap_flag %s reads a param this script never resolves with cap_param. cap_flag answers one "+
+					"question, whether a VALUE param arrived as a flag, beside that param's cap_param read; "+
+					"anything else is a boolean read in disguise, and --%s=false is a non-empty string. Read a "+
+					"boolean with `if cap_bool %s; then` (and say \"(flag)\" in its description), a value with "+
+					"cap_param.", r.paramName, r.paramName, r.paramName)})
+		}
+	}
+
+	for name := range boolStr {
+		emptiness := regexp.MustCompile(`-[nz][ \t]+"?\$\{?` + name + `\b|\$\{` + name + `:?\+`)
+		for _, c := range code {
+			if emptiness.MatchString(c.text) {
+				findings = append(findings, booleanReadFinding{c.number, c.text, fmt.Sprintf(
+					"%s holds cap_bool_str's \"true\" or \"false\", both non-empty, so this emptiness test is "+
+						"constant. Compare it: [[ \"$%s\" == \"true\" ]].", name, name)})
+			}
+		}
+	}
+
+	sort.Slice(findings, func(i, j int) bool { return findings[i].line < findings[j].line })
+	return findings
+}
+
+// TestCapabilityScriptsReadBooleansWithCapBool is the gate for boolean reads
+// that fail open (booleanReadFindings has the rules).
+//
+// cap_flag returns the raw parsed value, and a boolean read through it and
+// tested for emptiness takes --x=false as true. That shipped in thirteen
+// scripts. Measured, by the regression test beside each:
+// normalize-node-ids.sh --apply=false --confirm=normalize-node-ids rewrote
+// stored ids; k3d/down.sh --purge=false removed the kubeconfig context;
+// magic-link.sh, enrolment-link.sh and recovery-key.sh passed --local=false
+// through their gates to kubectl, against whatever context it pointed at; and
+// verify-frontdoor.sh --report-only=false, the exact argv the DSL action
+// renders for `reportOnly: false`, exited 0 over a failing front door. Read
+// from the code, not run: bringup.sh --clean=false took the clean-slate path,
+// which deletes the cluster and its database.
+//
+// TestNoCapabilityScriptHandRollsABooleanComparison catches the `== "true"`
+// half of the same mistake; this catches the read itself and the emptiness
+// tests that went with it.
+func TestCapabilityScriptsReadBooleansWithCapBool(t *testing.T) {
+	scripts := capabilityScripts(t)
+	if len(scripts) == 0 {
+		t.Fatal("no capability scripts discovered")
+	}
+	declaredFlags := 0
+	for _, path := range scripts {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		src := string(b)
+		for _, m := range reSpecParam.FindAllStringSubmatch(src, -1) {
+			if reFlagMarker.MatchString(m[2]) {
+				declaredFlags++
+			}
+		}
+		for _, f := range booleanReadFindings(src) {
+			t.Errorf("%s:%d: %s\n    %s", rel(t, path), f.line, f.why, f.text)
+		}
+	}
+	if declaredFlags == 0 {
+		t.Fatal("found no param declared a flag -- either every \"(flag)\" description went or the scan " +
+			"stopped matching, and either way rule 1 is watching nothing")
+	}
+}
+
+// TestBooleanReadFindingsCatchEachShape drives booleanReadFindings over one
+// fixture per shape, so the corpus sweep below cannot pass by matching
+// nothing. Each bad shape is one measured way for a boolean to fail open or
+// lose its refusal; each good one is a reader the conversions rely on.
+func TestBooleanReadFindingsCatchEachShape(t *testing.T) {
+	const declarations = `cap_spec_param "apply" "perform the rewrite (flag; default: report only)"
+cap_spec_param "force" "overwrite an existing lockfile (immutability override; flag)"
+cap_spec_param "quiet" "log failures only"
+cap_spec_param "domain" "the domain"
+cap_spec_param "internal-domains" "domains whose users are flagged internal"
+`
+	cases := []struct {
+		name string
+		body string
+		want string // substring of the one expected finding; "" = no finding
+	}{
+		{"a declared flag read with cap_flag", `APPLY="$(cap_flag apply)"`, "declared a flag"},
+		{"a declared flag read with cap_param", `FORCE="$(cap_param force "${FORCE_ENV:-}")"`, "declared a flag"},
+		{"an undeclared boolean read with cap_flag", `[[ -n "$(cap_flag quiet)" ]] || log_sample`, "never resolves with cap_param"},
+		{"a value probe beside its cap_param read", "DOMAIN=\"$(cap_param domain \"\")\"\n[[ -z \"$(cap_flag domain)\" ]] && DOMAIN=fallback", ""},
+		{"flagged as a word is not a flag marker", `INTERNAL="$(cap_param internal-domains "")"`, ""},
+		{"the branch form", `if cap_bool apply; then APPLY=1; else APPLY=""; fi`, ""},
+		{"the negated branch form", `if ! cap_bool apply; then cap_fail 3 "refused"; fi`, ""},
+		{"the value form", `APPLY="$(cap_bool_str apply)"`, ""},
+		{"the value form after a local declaration", `local apply; apply="$(cap_bool_str apply false)"`, ""},
+		{"the value form compared to true", "APPLY=\"$(cap_bool_str apply)\"\nif [[ \"$APPLY\" == \"true\" ]]; then run; fi", ""},
+		{"local discards the refusal", `local APPLY="$(cap_bool_str apply)"`, "plain assignment"},
+		{"export discards the refusal", `export APPLY="$(cap_bool_str apply)"`, "plain assignment"},
+		{"a test discards the refusal", `if [[ "$(cap_bool_str apply)" == "true" ]]; then run; fi`, "plain assignment"},
+		{"an argument discards the refusal", `cap_result_set_raw applied "$(cap_bool_str apply)"`, "plain assignment"},
+		{"cap_bool inside a substitution", `APPLY="$(cap_bool apply && echo true || echo false)"`, "command substitution"},
+		{"an emptiness test of a cap_bool_str value", "APPLY=\"$(cap_bool_str apply)\"\nif [[ -n \"$APPLY\" ]]; then run; fi", "emptiness"},
+		{"a pass-through of a cap_bool_str value", "APPLY=\"$(cap_bool_str apply)\"\nrun ${APPLY:+--apply}", "emptiness"},
+		{"a longer name sharing the prefix is another variable", "APPLY=\"$(cap_bool_str apply)\"\n[[ -n \"$APPLY_LOG\" ]] && run", ""},
+		{"a comment is not a read", `# APPLY="$(cap_flag apply)"`, ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			findings := booleanReadFindings(declarations + tc.body + "\n")
+			if tc.want == "" {
+				for _, f := range findings {
+					t.Errorf("unexpected finding at line %d: %s\n    %s", f.line, f.why, f.text)
+				}
+				return
+			}
+			if len(findings) != 1 {
+				t.Fatalf("want exactly one finding containing %q, got %d: %+v", tc.want, len(findings), findings)
+			}
+			if !strings.Contains(findings[0].why, tc.want) {
+				t.Errorf("finding does not say %q:\n    %s", tc.want, findings[0].why)
+			}
+		})
+	}
+}
+
+// capBoolHarness writes a capability script that sources the runtime,
+// declares a boolean `dryRun` and a value `foo`, parses its flags and then
+// runs body, and returns its path.
+func capBoolHarness(t *testing.T, body string) string {
+	t.Helper()
+	lib := filepath.Join(repoRoot(t), "scripts", "lib", "capability.sh")
+	harness := filepath.Join(t.TempDir(), "capbool_reader_harness.sh")
+	script := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.capBoolReader\" \"boolean reader harness\"\n" +
+		"cap_spec_param \"dryRun\" \"report without acting (flag)\"\n" +
+		"cap_spec_param \"foo\" \"a value param\"\n" +
+		"cap_parse_flags \"$@\"\n" +
+		body
+	if err := os.WriteFile(harness, []byte(script), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+	return harness
+}
+
+// TestCapBoolStrRefusalNamesTheValue pins what a mistyped boolean tells the
+// person who typed it when the script reads it with cap_bool_str.
+//
+// cap_bool_str runs inside a command substitution, so its refusal envelope is
+// captured into the variable and never printed. The assignment's exit 2 still
+// stops the script, and the EXIT trap then reports only that the run "aborted
+// (exit 2)". Measured on bash 3.2.57 and 5.3.15: nothing said which flag or
+// which value. stderr is the one stream a substitution does not capture, so
+// the refusal names both there.
+func TestCapBoolStrRefusalNamesTheValue(t *testing.T) {
+	harness := capBoolHarness(t, "DRY=\"$(cap_bool_str dryRun)\"\ncap_info \"dry=${DRY}\"\ncap_ok\n")
+	cmd := exec.Command("bash", harness, "--dryRun=ture")
+	cmd.Stdin = nil
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	diag := "--- stdout ---\n" + stdout.String() + "--- stderr ---\n" + stderr.String()
+
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit %d, want 2 (bad param)\n%s", code, diag)
+	}
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("stdout must carry exactly one envelope, got %d lines\n%s", len(lines), diag)
+	}
+	var env envelope
+	if json.Unmarshal([]byte(lines[0]), &env) != nil || env.OK || env.Error == nil || env.Error.Code != 2 {
+		t.Fatalf("want one failure envelope with error.code=2\n%s", diag)
+	}
+	for _, want := range []string{"--dryRun", "'ture'"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr does not name %s: a refused boolean must say which flag and which value\n%s", want, diag)
+		}
+	}
+}
+
+// TestCapParamsStdinIsABoolean holds the runtime's own boolean flag to the
+// rule it sets every script. _cap_load_stdin read --params-stdin with cap_flag
+// and tested it for emptiness, so --params-stdin=false READ stdin. That flag
+// exists to keep a capability from consuming a stream it was not handed.
+func TestCapParamsStdinIsABoolean(t *testing.T) {
+	harness := capBoolHarness(t, "printf 'RESULT=%s\\n' \"$(cap_param foo defval)\"\ncap_ok\n")
+	cases := []struct {
+		name     string
+		args     []string
+		want     string
+		wantExit int
+	}{
+		{name: "bare flag reads stdin", args: []string{"--params-stdin"}, want: "stdinval"},
+		{name: "true reads stdin", args: []string{"--params-stdin=true"}, want: "stdinval"},
+		{name: "false reads no stdin", args: []string{"--params-stdin=false"}, want: "defval"},
+		{name: "zero reads no stdin", args: []string{"--params-stdin=0"}, want: "defval"},
+		{name: "a typo is refused, not guessed", args: []string{"--params-stdin=ture"}, wantExit: 2},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", append([]string{harness}, tc.args...)...)
+			cmd.Stdin = strings.NewReader(`{"foo":"stdinval"}`)
+			out, err := cmd.CombinedOutput()
+			if tc.wantExit != 0 {
+				if code := exitCode(err); code != tc.wantExit {
+					t.Fatalf("exit %d, want %d\noutput:\n%s", code, tc.wantExit, out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("harness failed: %v\noutput:\n%s", err, out)
+			}
+			if got := parseResult(string(out)); got != tc.want {
+				t.Errorf("foo resolved %q, want %q\noutput:\n%s", got, tc.want, out)
+			}
+		})
+	}
+}
+
 // TestCapProgressWritesOneStderrLine pins `cap_progress`, the structured
 // progress line a long capability writes while it works.
 //
@@ -1002,11 +1327,17 @@ func TestCapBash32ExpansionDeathIsAFailure(t *testing.T) {
 	}
 }
 
-// TestCapabilityTrapsHandCapOnExitTheRealStatus keeps _cap_on_exit reading
-// the script's own exit status when a script composes it with cleanup of its
-// own.
+// TestCapabilityTrapsHandCapOnExitTheRealStatus keeps capability.sh's result
+// guarantee in force wherever a capability script installs an EXIT trap of its
+// own. A trap replaces the one cap_init installs, so cleanup can drop the
+// guarantee in two ways, and both shipped.
 //
-// THE BUG. `trap 'cleanup_tmp; _cap_on_exit' EXIT` reads naturally and is
+// REPLACED. `trap 'rm -rf "$WORK"' EXIT` removes the guarantee outright: from
+// that line on, an abort reaches the caller with nothing on stdout.
+// scripts/deploy/render-diff.sh and scripts/deploy/seed-instance-secrets.sh did
+// that, with cleanup traps of their own.
+//
+// MISFED. `trap 'cleanup_tmp; _cap_on_exit' EXIT` reads naturally and is still
 // wrong: _cap_on_exit reads the status from $?, and by the time it runs, $? is
 // cleanup_tmp's, not the script's. scripts/install/hosts-entries.sh composed
 // its trap that way precisely so an abort would still emit an envelope
@@ -1015,23 +1346,28 @@ func TestCapBash32ExpansionDeathIsAFailure(t *testing.T) {
 // reported as a failure, the same composition would report an abort as an
 // exit 0 and blame the wrong thing.
 //
-// THE RULE. Inline, a trap that names _cap_on_exit names nothing else.
-// Anything that has to run first goes in a handler function that captures $?
-// as its first statement, turns errexit off, and restores the status with
-// `(exit "$rc")` immediately before calling _cap_on_exit -- _install_on_exit in
+// THE RULE. Every EXIT trap reaches _cap_on_exit. Inline, a trap that names
+// _cap_on_exit names nothing else. Anything that has to run first goes in a
+// handler function, defined in the script, that captures $? as its first
+// statement, turns errexit off, and restores the status with `(exit "$rc")`
+// immediately before calling _cap_on_exit -- _install_on_exit in
 // scripts/install/install-binary.sh is the reference. The `set +e` is not
 // optional: under errexit, `(exit "$rc")` is itself a failing command whenever
 // the status is non-zero, so the handler is abandoned there -- on exactly the
 // aborts it exists for -- before _cap_on_exit runs. Measured on bash 3.2 and 5.
-//
-// A trap that never calls _cap_on_exit is a different defect (the guarantee
-// is dropped, not misfed) and is not judged here.
+// Clearing the trap (`trap - EXIT`) is refused as well, except inside a
+// handler, where it only stops the handler running twice.
 func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 	inlineTrap := regexp.MustCompile(`^trap[ \t]+(?:'([^']*)'|"([^"]*)")[ \t]+EXIT\b`)
 	namedTrap := regexp.MustCompile(`^trap[ \t]+'?([A-Za-z_][A-Za-z0-9_]*)'?[ \t]+EXIT\b`)
+	clearsTrap := regexp.MustCompile(`^trap[ \t]+(-|''|"")[ \t]+EXIT\b`)
+	identifier := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	captures := regexp.MustCompile(`^local[ \t]+([A-Za-z_][A-Za-z0-9_]*)=\$\?$`)
 	errexitOff := regexp.MustCompile(`^set[ \t]+\+e([ \t;]|$)`)
 	callsCapOnExit := regexp.MustCompile(`^_cap_on_exit([ \t;]|$)`)
+	const repair = "Repair: put the cleanup in a handler function that starts `local rc=$?`, runs " +
+		"`set +e`, and runs `(exit \"$rc\")` right before _cap_on_exit, as _install_on_exit in " +
+		"scripts/install/install-binary.sh does, and install that with `trap <handler> EXIT`."
 
 	scripts := capabilityScripts(t)
 	if len(scripts) == 0 {
@@ -1045,45 +1381,49 @@ func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 		}
 		lines := strings.Split(string(body), "\n")
 
-		// Every function's code lines (no blanks, no comments), by name.
-		funcs := map[string][]string{}
-		var fn string
-		depth := 0
+		// Every function's code lines, by name, and the function each code
+		// line belongs to.
+		funcs := map[string][]bashCodeLine{}
+		enclosing := map[int]string{}
+		for _, fn := range bashFunctions(string(body)) {
+			funcs[fn.name] = fn.code
+			for _, c := range fn.code {
+				enclosing[c.number] = fn.name
+			}
+		}
+		handlers := map[string]bool{}
 		for _, raw := range lines {
-			trimmed := strings.TrimSpace(raw)
-			if depth == 0 {
-				// The header's own braces count: a one-line definition
-				// (`function kc() { kubectl ...; }`) closes where it opens, and
-				// starting from 1 would read the rest of the file as its body.
-				if m := bashFuncHeader.FindStringSubmatch(trimmed); m != nil {
-					if d := strings.Count(raw, "{") - strings.Count(raw, "}"); d > 0 {
-						fn, depth = m[1], d
-					}
-				}
-				continue
-			}
-			depth += strings.Count(raw, "{") - strings.Count(raw, "}")
-			if depth <= 0 {
-				fn, depth = "", 0
-				continue
-			}
-			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				funcs[fn] = append(funcs[fn], trimmed)
+			if m := namedTrap.FindStringSubmatch(strings.TrimSpace(raw)); m != nil {
+				handlers[m[1]] = true
 			}
 		}
 
 		for i, raw := range lines {
 			trimmed := strings.TrimSpace(raw)
 			where := rel(t, path) + ":" + strconv.Itoa(i+1)
+			if clearsTrap.MatchString(trimmed) {
+				if !handlers[enclosing[i+1]] {
+					t.Errorf("%s: this clears the EXIT trap, and with it capability.sh's guarantee of "+
+						"an envelope on every exit:\n    %s\nOnly an EXIT handler may clear it, to "+
+						"stop itself running twice.", where, trimmed)
+				}
+				continue
+			}
 			if m := inlineTrap.FindStringSubmatch(trimmed); m != nil {
 				inline := strings.TrimSpace(m[1] + m[2])
-				if strings.Contains(inline, "_cap_on_exit") && inline != "_cap_on_exit" {
+				switch {
+				case identifier.MatchString(inline):
+					// _cap_on_exit itself, or a named handler, judged below.
+				case strings.Contains(inline, "_cap_on_exit"):
 					t.Errorf("%s: an EXIT trap runs other commands with _cap_on_exit:\n    %s\n"+
 						"_cap_on_exit reads the script's status from $?, which the commands before it "+
-						"have replaced -- an abort is then reported as an exit 0, or not at all.\n"+
-						"Repair: move the cleanup into a handler that starts `local rc=$?`, runs "+
-						"`set +e`, and runs `(exit \"$rc\")` right before _cap_on_exit, as "+
-						"_install_on_exit in scripts/install/install-binary.sh does.", where, trimmed)
+						"have replaced -- an abort is then reported as an exit 0, or not at all.\n%s",
+						where, trimmed, repair)
+					continue
+				default:
+					t.Errorf("%s: an EXIT trap replaces capability.sh's result guarantee:\n    %s\n"+
+						"From this line on, an abort reaches the caller with nothing on stdout.\n%s",
+						where, trimmed, repair)
 					continue
 				}
 			}
@@ -1093,35 +1433,40 @@ func TestCapabilityTrapsHandCapOnExitTheRealStatus(t *testing.T) {
 			}
 			code, defined := funcs[m[1]]
 			if !defined {
+				t.Errorf("%s: the EXIT handler %s() is not a multi-line function defined in this "+
+					"script, so nothing can check that it reaches _cap_on_exit.\n%s", where, m[1], repair)
 				continue
 			}
 			call := -1
 			for j, c := range code {
-				if callsCapOnExit.MatchString(c) {
+				if callsCapOnExit.MatchString(c.text) {
 					call = j
 					break
 				}
 			}
 			if call < 0 {
+				t.Errorf("%s: the EXIT handler %s() never calls _cap_on_exit, so it replaces "+
+					"capability.sh's result guarantee: an abort reaches the caller with nothing on "+
+					"stdout.\n%s", where, m[1], repair)
 				continue
 			}
 			checked++
-			first := captures.FindStringSubmatch(code[0])
+			first := captures.FindStringSubmatch(code[0].text)
 			if first == nil || call == 0 {
 				t.Errorf("%s: the EXIT handler %s() calls _cap_on_exit but does not begin by capturing "+
-					"the script's status (`local rc=$?`); it begins:\n    %s", where, m[1], code[0])
+					"the script's status (`local rc=$?`); it begins:\n    %s", where, m[1], code[0].text)
 				continue
 			}
 			restore := regexp.MustCompile(`^\(exit[ \t]+"?\$\{?` + first[1] + `\}?"?\)([ \t]+#.*)?$`)
-			if !restore.MatchString(code[call-1]) {
+			if !restore.MatchString(code[call-1].text) {
 				t.Errorf("%s: the EXIT handler %s() does not restore the status it captured right "+
 					"before calling _cap_on_exit -- `(exit \"$%s\")` must be the line before it; "+
-					"found:\n    %s", where, m[1], first[1], code[call-1])
+					"found:\n    %s", where, m[1], first[1], code[call-1].text)
 				continue
 			}
 			off := false
 			for _, c := range code[1 : call-1] {
-				off = off || errexitOff.MatchString(c)
+				off = off || errexitOff.MatchString(c.text)
 			}
 			if !off {
 				t.Errorf("%s: the EXIT handler %s() restores the status without `set +e` first. "+

@@ -217,6 +217,8 @@ export interface FakeSeed {
    */
   accessCodes?: Row[];
   accessCodesError?: string;
+  /** What `siteAccessGuestPassCreate` refuses with, when it should. */
+  accessGuestError?: string;
   /** What `siteAccessGates` answers. ABSENT IS NONE, what a deployable with no @accessGate answers. */
   accessGates?: Row[];
   accessGatesError?: string;
@@ -237,6 +239,10 @@ export interface FakeSeed {
     settings?: Row;
     /** What `reviewsPeople` answers: the people who can moderate the store. */
     people?: Row;
+    /** Fails every `reviewsPeople` read with this server message. */
+    peopleError?: string;
+    /** Leaves every `reviewsPeople` read unanswered: who can moderate is still being read. */
+    peoplePending?: boolean;
     /** Fails the next decision or erasure with this server message. */
     decideError?: string;
     /** Fails the next settings save with this server message. */
@@ -564,6 +570,8 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("reviewsSettings", [seed.reviews?.settings ?? ({ exists: false, settings: {}, may: { edit: false, nameApprover: false }, viewer: { moderates: true, approvesRemovals: false } } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsPeople(")) {
+        if (seed.reviews?.peopleError !== undefined) throw new Error(seed.reviews.peopleError);
+        if (seed.reviews?.peoplePending === true) return new Promise<never>(() => {});
         return builtinReply("reviewsPeople", [seed.reviews?.people ?? ({ storeId: "", people: [] } as unknown as Row)]);
       }
       if (call.startsWith("builtin reviewsDecide(") || call.startsWith("builtin reviewsEraseReviewer(")) {
@@ -849,9 +857,26 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         }));
         return siteAccessReply("create", "codeId", [{ codeId, expiresAt, code }]);
       }
+      if (call.startsWith("builtin siteAccessGuestPassCreate(")) {
+        // The engine's own refusal while a pass stands, and never a code in the reply.
+        if (seed.accessGuestError !== undefined) throw new Error(seed.accessGuestError);
+        const arg = (name: string) => new RegExp(`${name}: "([^"]*)"`).exec(call)?.[1] ?? "";
+        const standing = (seed.accessCodes ?? []).some((row) => row["siteId"] === arg("siteId") && row["guest"] === true && !row["revokedAt"]);
+        if (standing) throw new Error(refusedByEngine("siteAccessGuestPassCreate", "This deployable already lets guests in. Change when guest access ends, or turn it off first."));
+        const codeId = `pass-minted-${++accessMints}`;
+        const expiresAt = arg("expiresAt");
+        (seed.accessCodes ??= []).push(accessCodeRow({
+          id: codeId, label: arg("label"), siteId: arg("siteId"), gate: arg("gate"), guest: true, issuedAt: new Date().toISOString(), expiresAt,
+          ...(arg("subject") === "" ? {} : { subject: arg("subject") }),
+        }));
+        return siteAccessReply("create", "codeId", [{ codeId, expiresAt }]);
+      }
       if (call.startsWith("builtin siteAccessCodeRegenerate(")) {
         if (seed.accessRegenerateError !== undefined) throw new Error(seed.accessRegenerateError);
         const codeId = /codeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.accessCodes?.find((r) => r["id"] === codeId)?.["guest"] === true) {
+          throw new Error(refusedByEngine("siteAccessCodeRegenerate", "Guest access has no code to regenerate. Change when it ends, or turn it off."));
+        }
         const row = codePastTheGate("siteAccessCodeRegenerate", codeId);
         refuseIfEnded("siteAccessCodeRegenerate", row);
         const code = nextAccessCode();

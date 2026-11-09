@@ -225,7 +225,7 @@ const docSecretField = "The field holds a secret. It is emitted as `x-secret`, a
 // component/edge serves it to every host that resolves to a live site (handler.go). The page
 // that carries the rest, the wire and the limits, is docs/public/operate/site-access-codes.md.
 const docAccessGateAuthoring = "A declared argument that differs from a reserved name only in case, such as `accessCodeID`, is refused at " +
-	"load. The handler matches the four names exactly, so it would be an ordinary caller-supplied argument, and a filter on it " +
+	"load. The handler matches every reserved name exactly, so it would be an ordinary caller-supplied argument, and a filter on it " +
 	"would read as scoped to the code while opening to any id a visitor names.\n" +
 	"\n" +
 	"A code opens gated constructs and nothing else. It protects nothing in a public bundle, which the edge serves to everyone " +

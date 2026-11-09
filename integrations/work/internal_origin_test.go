@@ -296,6 +296,10 @@ func TestCapabilitiesRefuseAnUnauthenticatedCaller(t *testing.T) {
 			_, err := i.handleDecideApproval(ctx, map[string]any{"approvalId": "a", "decision": "approved"}, 0)
 			return err
 		}},
+		{"routingReviews", func(i *Integration, ctx context.Context) error {
+			_, err := i.handleRoutingReviews(ctx, map[string]any{}, 0)
+			return err
+		}},
 		{"sweepWaiting", func(i *Integration, ctx context.Context) error {
 			_, err := i.handleSweepWaiting(ctx, nil, 0)
 			return err

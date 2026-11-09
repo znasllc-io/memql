@@ -170,7 +170,10 @@ var sandboxSupportedKinds = map[string]bool{
 	"action":     true,
 	"capability": true,
 	"policy":     true,
-	"rule":       true,
+	// rule is "compiled" to a refusal (see sandboxCompileOne): it stays in the
+	// set because a kind outside it is SKIPPED, and a skipped construct does
+	// not fail the bundle.
+	"rule": true,
 }
 
 // SandboxCompileBundle compiles + binds each candidate construct in
@@ -500,25 +503,33 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 
 	case "rule":
-		decl, err := languageParser.ParseRuleDecl(stripUseDeclarations(c.Source))
-		if err != nil {
-			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
-		}
-		actualName = decl.Name
-		// @locked IS REFUSED HERE, not only at load. The loader's check keys
-		// on which TREE a file came from, and an authored construct comes from
-		// no tree at all -- so without this the annotation would pass Gate 1,
-		// reach activation, and be refused there instead: later, further from
-		// the author, and with a message about trees they have no file in.
-		if decl.Locked {
-			return failAt(d, c, fmt.Sprintf("%s: rule %q carries @locked, which is accepted only in the embedded tree. "+
-				"An authored rule orders itself with @precedence, which is visible beside every other rule; "+
-				"@locked would place it ahead of the shipped rules, which is the one authority runtime authoring does not grant",
-				origin, decl.Name))
-		}
-		if _, err := ruleDeclToRuleConfig(decl, origin); err != nil {
-			return failAt(d, c, fmt.Sprintf("%s: %v", origin, err))
-		}
+		// A ROUTING RULE IS NOT AN AUTHORED CONSTRUCT (2026-11-08). The router
+		// reads the shipped rules plus the routing configuration document
+		// (routing_configuration_rules.go) and never the authored runtime, so a
+		// rule armed from a bundle would read active everywhere activation
+		// writes and decide no call. That is what the retired
+		// routingRuleActivate did; this gate let it through only from
+		// memql#6022's follow-up until its retirement, and refused every rule
+		// as unrecognized before that.
+		//
+		// It is refused HERE, at the first gate every bundle passes, so the
+		// author hears it before anything is written. The splitter still
+		// classifies the region as a rule (authoring_bundle_slices.go) so the
+		// refusal can name it and say where a rule goes: routingRuleSave
+		// writes the one revisioned document every replica reads on every
+		// call, under the loader's own shipped-name, policy and precedence-tie
+		// checks. Locked or not, the answer is the same, so @locked needs no
+		// refusal of its own here.
+		//
+		// The refusal says "authoring is not supported in a bundle", the
+		// phrase every deliberately unauthorable kind's refusal carries, so
+		// the boot-versus-authoring parity gate
+		// (TestAuthoringPathValidatesEveryDslFile) counts the shipped rules as
+		// a design limit rather than as a divergence.
+		return failAt(d, c, fmt.Sprintf("%s: rule %q: routing rule authoring is not supported in a bundle. A routing rule "+
+			"is cluster routing configuration, not an authored construct, and the router never reads an armed one: "+
+			"save it with routingRuleSave, which every replica reads on every call, or declare it in a product DSL "+
+			"domain loaded at boot", origin, c.Name))
 
 	case "action":
 		// Authored actions compile through the SAME loader the bootstrap uses
@@ -566,7 +577,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// authorable construct kind (SplitBundleSource fail-loud backstop, E1
 		// #2372). Hard failure -- NEVER a silent pass. c.Name carries the header
 		// line excerpt.
-		return failAt(d, c, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
+		return failAt(d, c, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / rule / seed authoring is not supported in a bundle", origin, c.Name))
 
 	default:
 		// A kind with no compile path in this pass (a stray prompt / policy /

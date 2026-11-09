@@ -62,6 +62,12 @@ func readSelectedReceiver(ctx context.Context, h *preparationHost, r revisionRec
 			return nil, errors.New("application identity changed")
 		}
 		if _, owned := active[app.Key]; !owned {
+			if app.Intent.FormatVersion == 2 {
+				if _, err := h.applicationProof(ctx, r.Plan, app.Key); err != nil {
+					return nil, err
+				}
+				continue
+			}
 			expected, err := argocd.PlanRevision(observed.application, app.Intent.RequestID, app.Intent.Revision, app.Intent.Prune)
 			if err != nil || !sameIntent(expected, app.Intent) {
 				return nil, errors.New("unapplied application differs from its immutable baseline")
@@ -157,7 +163,14 @@ func (s *revisionWorkflowScope) applyGroup(ctx context.Context, r revisionRecord
 	}
 	effect, cancel := context.WithDeadline(ctx, admission.freshUntil)
 	defer cancel()
-	if _, err = s.client.Apply(effect, app.Intent); err != nil {
+	var proof *argocd.ContinuityProof
+	if app.Intent.FormatVersion == 2 {
+		proof, err = s.host.applicationProof(effect, r.Plan, key)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if _, err = s.client.ApplyWithContinuity(effect, app.Intent, proof); err != nil {
 		return nil, errors.New("application effect is unconfirmed; resume the exact selected group")
 	}
 	s.memberNeeds[key] = false

@@ -189,8 +189,10 @@ bytes from cleanup. Migration rollback refuses nonempty fence history.
 This closes admission, not the entire cleanup operation. A previously admitted
 provider request may still be in flight. The owning workflow must first retire
 the producer, then fence it, release its durable consumer pins, and reconcile
-every inventoried intent through the permanent provider tombstone before
-releasing the installation slot. Neither an empty unfenced inventory nor an
+every inventoried intent through the permanent provider tombstone, or through
+the store's refusal to retire a file the Library keeps, before releasing the
+installation slot. A kept file already has a committed, verified object, which
+no late upload can replace. Neither an empty unfenced inventory nor an
 elapsed timeout can prove completion. No public cleanup action is registered.
 
 The local required-database race tests cover lost upload receipts, replacement
@@ -212,7 +214,8 @@ authorize an external caller or replace the native workflow host.
 
 Separate bounded operations stop the preparation-owned Workbench run, fence
 each capture's artifact scope, permanently release its exact source consumer,
-load one inventory page, and retire one inventoried artifact. The native gates
+load one inventory page, retire one inventoried artifact, and then remove that
+retired artifact's Library entries. The native gates
 enforce those prerequisites; the cleanup recipe owns ordering and iteration.
 A capture without a recorded receipt can still have unknown uploads, so both
 capture scopes must reach a confirmed empty inventory after retirement. Pinning
@@ -221,8 +224,12 @@ before a delayed verifier can acquire another pin.
 
 Each page holds at most 128 intent IDs and native retirement receipt digests.
 A replacement host recovers a pending page after a lost reply. Advancing its
-cursor requires every receipt, and an external error preserves the unconfirmed
-entry. Parallel callbacks on different connections preserve each other's
+cursor requires, for each entry, its retirement receipt and a confirmed Library
+removal, which itself requires that artifact's retirement receipt, or the
+Library store's refusal to retire a file it keeps, recorded as `retained`
+(the bytes and entries stay). Any other external error preserves the
+unconfirmed entry. An intent behind the cursor is not read again,
+so a removal skipped there would leave an entry pointing at a retired file. Parallel callbacks on different connections preserve each other's
 receipts. Only confirmed producer stop and completion of both capture scopes
 release the installation slot as `cancelled`. A lost final reply returns that
 history without touching a successor's head. Migration rollback refuses to

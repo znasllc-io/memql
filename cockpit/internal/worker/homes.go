@@ -40,6 +40,9 @@ type Home struct {
 	OSURL      string `yaml:"os_url,omitempty"`
 	Token      string `yaml:"token"`
 	Enabled    *bool  `yaml:"enabled,omitempty"`
+	// AutoPaused distinguishes a connection that exhausted its retry window
+	// from an explicit owner pause. Enrollment and credentials are retained.
+	AutoPaused bool `yaml:"auto_paused,omitempty"`
 }
 
 // IsEnabled reports whether the home should be connected. Absent

@@ -61,7 +61,7 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 		// and write on access codes is a builtin in this table, and every query and
 		// mutation beneath them is @serverOnly
 		// (TestEveryClientCallableAccessCodeActIsAGatedBuiltin).
-		case "siteAccessCodeCreate", "siteAccessGates", "siteAccessCodesForSite":
+		case "siteAccessCodeCreate", "siteAccessGuestPassCreate", "siteAccessGates", "siteAccessCodesForSite":
 			return "v1:platform:site", "siteId"
 		case "siteAccessCodeRegenerate", "siteAccessCodeSetExpiry", "siteAccessCodeRemove":
 			return "v1:platform:siteAccessCode", "codeId"

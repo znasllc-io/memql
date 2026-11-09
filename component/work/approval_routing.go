@@ -74,8 +74,17 @@ func RoutingReviewApproval(p RoutingProposal, now time.Time, ttl time.Duration) 
 	// same evidence proposing again next week, which is the nag this design
 	// exists to avoid: a decline is RECORDED, and recording it is what makes it
 	// final for that week's evidence.
+	//
+	// The approve label says what approving DOES, and the two directions do
+	// opposite things: approving a demotion saves its rule into the routing
+	// configuration, approving a promotion removes the demotion it lifts
+	// (integrations/work's routing review decision).
+	approve := "Add the rule"
+	if p.Direction == "promotion" {
+		approve = "Remove the exclusion"
+	}
 	a.Options = []map[string]any{
-		{"label": "Add the rule", "value": "approved"},
+		{"label": approve, "value": "approved"},
 		{"label": "Leave routing as it is", "value": "rejected"},
 	}
 	return a

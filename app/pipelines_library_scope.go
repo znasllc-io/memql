@@ -47,7 +47,11 @@ func readPipelineScopeFence(ctx context.Context, tx *sql.Tx, scope pipelinesteps
 // including when a producer never returned an intent receipt. The same owner
 // lock serializes this permanent record with every new/recovered reservation.
 // Calls admitted earlier may still contact storage; each inventoried intent
-// must also pass RetireRunFile's permanent provider fence before cleanup ends.
+// must also pass RetireRunFile's permanent provider fence before cleanup ends,
+// unless RetireRunFile refuses it as kept. A kept intent already has a
+// committed, verified object (no Library entry exists before verification),
+// and a commit never replaces one (it is conditional), so such a call cannot
+// change a kept file's bytes.
 func (s *pipelinesLibraryStore) FenceRunFileScope(ctx context.Context, scope pipelinesteps.RunFileReceiptScope) error {
 	var err error
 	if scope, err = validatePipelineReceiptScope(ctx, scope, nil); err != nil {

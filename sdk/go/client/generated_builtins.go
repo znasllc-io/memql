@@ -2594,7 +2594,7 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	return b.String()
 }
 
-// EffectiveAccessForSubject -- What a PERSON can open, and why, or a GROUP's own grants: the read an operator decides access from. The caller holds a cluster role at admin rank or above (the grant reads' floor, applied by the handler because a builtin carries no @requiresRank), and nobody reads a person who outranks them. For a user, the engine's own resolver runs for that person: role, then group grants, then person grants, with an organization role's limits. One row per app door (`read app:<id>`), floored section (`read app:<id>/<section>`) and part (`execute app:<id>/<part>`) the role catalog or the person's grants name; a pair the engine decides PER ORGANIZATION (opening Email or Deployables, the data verbs, an organization's deployable parts) has one row per organization the person's scope reaches and no merged row, and every other pair one row with accountId empty. An operator has no per-organization rows, their scope reaching every organization alike: each app pair comes once with accountId empty, and no data verb has a row at all. The same holds for a person whose scope reaches no organization. For a group, one row per active grant it holds, held from its effect, accountId the group's own organization. Rows: {verb, resourceType, held, source, sourceId, accountId}. source is role, group, person, scoped-role-limit (an organization role's limit, which no grant lifts) or not-granted; sourceId is the role slug, the group's id or the person's id, empty for not-granted. A refusal is an error starting with its code: access_caller_not_permitted, access_subject_outranks_caller, access_unknown_subject, access_invalid or access_unavailable.
+// EffectiveAccessForSubject -- What a PERSON can open, and why, or a GROUP's own grants: the read an operator decides access from. The caller holds a cluster role at admin rank or above (the grant reads' floor, applied by the handler because a builtin carries no @requiresRank), and nobody reads a person who outranks them. For a user, the engine's own resolver runs for that person: role, then group grants, then person grants, with an organization role's limits. One row per app door (`read app:<id>`), floored section (`read app:<id>/<section>`) and part (`execute app:<id>/<part>`) the role catalog or the person's grants name; a pair the engine decides PER ORGANIZATION (opening Email, Deployables or Pipelines, the data verbs, an organization's deployable parts) has one row per organization the person's scope reaches and no merged row, and every other pair one row with accountId empty. An operator has no per-organization rows, their scope reaching every organization alike: each app pair comes once with accountId empty, and no data verb has a row at all. The same holds for a person whose scope reaches no organization. For a group, one row per active grant it holds, held from its effect, accountId the group's own organization. Rows: {verb, resourceType, held, source, sourceId, accountId}. source is role, group, person, scoped-role-limit (an organization role's limit, which no grant lifts) or not-granted; sourceId is the role slug, the group's id or the person's id, empty for not-granted. A refusal is an error starting with its code: access_caller_not_permitted, access_subject_outranks_caller, access_unknown_subject, access_invalid or access_unavailable.
 type EffectiveAccessForSubjectArgs struct {
 	// `user` or `group`.
 	SubjectKind string
@@ -6875,6 +6875,26 @@ func ReleaseArchiveCandidateBuild(args ReleaseArchiveCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseArchiveWithoutCatalog -- Release the build inputs of an approved candidate that has no signed catalog. Every component it contains must have a later or equal release with one; every copy it published is read back first; and nothing it began may have changed for two hours. Nothing remote changes, and the candidate can never prepare, publish or be catalogued again. Owner only.
+type ReleaseArchiveWithoutCatalogArgs struct {
+	CandidateId string
+}
+
+// ReleaseArchiveWithoutCatalog calls the engine builtin releaseArchiveWithoutCatalog.
+func (qc *QueryClient) ReleaseArchiveWithoutCatalog(ctx context.Context, args ReleaseArchiveWithoutCatalogArgs) (*Result, error) {
+	call := ReleaseArchiveWithoutCatalogBuild(args)
+	return qc.executeNamed(ctx, "releaseArchiveWithoutCatalog", call)
+}
+
+func ReleaseArchiveWithoutCatalogBuild(args ReleaseArchiveWithoutCatalogArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseArchiveWithoutCatalog(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseAssembleCandidate -- Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively.
 type ReleaseAssembleCandidateArgs struct {
 	PlanName string
@@ -9568,8 +9588,8 @@ func SiteAccessCodeSetExpiryBuild(args SiteAccessCodeSetExpiryArgs) string {
 
 // SiteAccessCodesForSite -- The access codes of a deployable, for the Access codes panel (design record 2026-10-29-deployable-access-codes).
 // IT IS A BUILTIN, NOT A QUERY, because the shared organization gate judges builtins and mutations and never a query: a client-callable list would let a person who held the part in one organization read the labels, hints and expiries of a site in another whose row tier admitted them. As a builtin it is judged against the site's organization exactly as minting is, and the handler reads the rows through siteAccessCodeRowsForSite -- a @serverOnly query -- with internal origin stamped and the caller's actor left untouched, so the tier still decides every row.
-// EVERY CODE, INCLUDING THE ENDED ONES, one row per code in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last opened. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the code: the handler fills it from the newest session of the code's CURRENT generation (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
-// Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, createdAt}.
+// EVERY CODE, INCLUDING THE ENDED ONES, and the site's guest passes, one row each in the siteAccessCodeView shape: the label, what it unlocks, the hint, the generation, when it was issued, when it expires, when it was removed and when it was last opened. `guest` is true on a guest pass, a row that was never a code (design record 2026-11-08-deployable-guest-access), and absent on a code. NEVER THE CODE and never its digest. `lastOpenedAt` is not a field of the code: the handler fills it from the newest session of the code's CURRENT generation (siteAccessSessionLatestForCode), so it is absent for a code nobody has opened and for one that was regenerated since. No order is promised; the panel sorts by label. The OS hides a removed code and draws an expired one as expired, so this decides neither.
+// Returns one row per code: {id, siteId, accountId, label, gate, subject, codeHint, generation, issuedAt, expiresAt, revokedAt, lastOpenedAt, guest, createdAt}.
 type SiteAccessCodesForSiteArgs struct {
 	// The deployable to list the codes of.
 	SiteId string
@@ -9610,6 +9630,60 @@ func SiteAccessGatesBuild(args SiteAccessGatesArgs) string {
 	b.WriteString("builtin siteAccessGates(")
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteAccessGuestPassCreate -- Open one gate of a deployable to anyone, without a code (design record 2026-11-08-deployable-guest-access).
+// A GUEST PASS IS A CODE ROW WITH NO CODE. It is a siteAccessCode marked guest whose digest is a fixed function of the site, so a visitor who asks at the guest route is let in to that one gate, and no typed code can ever match it. There is nothing to hand back but the row's id and its expiry.
+// THE CHECKS ARE THE MINT'S, siteAccessCodeCreate's in every respect: the part, the organization, an owned deployable with a package deployable, a gate the deployable declares, the bounds on label, subject and expiry. A refusal at any of them has written nothing.
+// Returns {codeId, expiresAt}.
+type SiteAccessGuestPassCreateArgs struct {
+	// The deployable the guest pass opens a part of.
+	SiteId string
+	// The operator's name for the pass, 1 to 80 characters. Never sent to a visitor.
+	Label string
+	// Which gate the pass opens: one the deployable declares with @accessGate. siteAccessGates lists them.
+	Gate string
+	// Optional scope within the gate, at most 120 characters, stamped on the accessSubject argument of every gated construct that declares one. Empty for a gate that is not scoped to anyone.
+	Subject string
+	// When the pass stops opening the site (RFC 3339). More than a minute away and at most 366 days. Every pass expires; there is no 'never'.
+	ExpiresAt string
+}
+
+// SiteAccessGuestPassCreate calls the engine builtin siteAccessGuestPassCreate.
+func (qc *QueryClient) SiteAccessGuestPassCreate(ctx context.Context, args SiteAccessGuestPassCreateArgs) (*Result, error) {
+	call := SiteAccessGuestPassCreateBuild(args)
+	return qc.executeNamed(ctx, "siteAccessGuestPassCreate", call)
+}
+
+func SiteAccessGuestPassCreateBuild(args SiteAccessGuestPassCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteAccessGuestPassCreate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("gate: ")
+	b.WriteString(quoteMemQL(args.Gate))
+	if args.Subject != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("subject: ")
+		b.WriteString(quoteMemQL(args.Subject))
+	}
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -10291,6 +10365,29 @@ func WorkRecordGoalEvaluationBuild(args WorkRecordGoalEvaluationArgs) string {
 	}
 	b.WriteString("result: ")
 	b.WriteString(renderMemQLValue(args.Result))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRoutingReviews -- The nightly routing reviews the caller may decide: the pending ones, oldest first, or one by id whatever its decision. No person owns a routing review -- the evidence fold raises it as the cluster -- so the owner-scoped approval reads never list one. An owner or developer, the people who may change routing, sees them; anyone else gets no rows.
+type WorkRoutingReviewsArgs struct {
+	// One routing review by id, decided or not. Omit for every pending one.
+	ApprovalId string
+}
+
+// WorkRoutingReviews calls the engine builtin workRoutingReviews.
+func (qc *QueryClient) WorkRoutingReviews(ctx context.Context, args WorkRoutingReviewsArgs) (*Result, error) {
+	call := WorkRoutingReviewsBuild(args)
+	return qc.executeNamed(ctx, "workRoutingReviews", call)
+}
+
+func WorkRoutingReviewsBuild(args WorkRoutingReviewsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workRoutingReviews(")
+	if args.ApprovalId != "" {
+		b.WriteString("approvalId: ")
+		b.WriteString(quoteMemQL(args.ApprovalId))
+	}
 	b.WriteString(")")
 	return b.String()
 }

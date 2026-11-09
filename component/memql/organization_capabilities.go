@@ -95,8 +95,12 @@ func (e *MemQLEngine) ContextForPerson(ctx context.Context, userId string, role 
 
 // resolveOrganizationDecisions answers, for the actor on ctx, every pair the
 // engine decides per organization in every organization their scope reaches.
-// The pairs are the organization surfaces -- opening Email and Deployables,
-// the data verbs -- plus the organization deployable parts among `known`.
+// The pairs are the organization surfaces -- opening Email, Deployables and
+// Pipelines, the data verbs -- plus the organization deployable parts among
+// `known`. Opening Pipelines is one of them because it is decided per
+// organization by both callers that matter: personalSourceCapable asks it in
+// each organization, and the OS deployable parts list asks
+// holdsForOrganization(acct, "read", "app:pipelines") for each one.
 func (e *MemQLEngine) resolveOrganizationDecisions(ctx context.Context, known []auth.Decision) []OrganizationDecision {
 	out := []OrganizationDecision{}
 	if e == nil {
@@ -115,6 +119,7 @@ func (e *MemQLEngine) resolveOrganizationDecisions(ctx context.Context, known []
 	pairs := map[auth.VerbResource]bool{
 		{Verb: auth.VerbRead, Resource: "app:email"}:         true,
 		{Verb: auth.VerbRead, Resource: "app:deployables"}:   true,
+		{Verb: auth.VerbRead, Resource: "app:pipelines"}:     true,
 		{Verb: auth.VerbRead, Resource: auth.ResourceData}:   true,
 		{Verb: auth.VerbCreate, Resource: auth.ResourceData}: true,
 		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}: true,

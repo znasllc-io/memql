@@ -23,8 +23,14 @@ func settingsReader(row map[string]any) *decideReader {
 
 func writeSettings(t *testing.T, ctx context.Context, row map[string]any, args map[string]any, display bool) (map[string]any, error) {
 	t.Helper()
+	return writeSettingsOn(t, ctx, shopRoster(), row, args, display)
+}
+
+// writeSettingsOn is writeSettings over the roster given, so a test can read
+// back what the write read.
+func writeSettingsOn(t *testing.T, ctx context.Context, roster *orgRoster, row map[string]any, args map[string]any, display bool) (map[string]any, error) {
+	t.Helper()
 	w := &fakeWriter{}
-	roster := shopRoster()
 	p := &Provider{reader: withRoster{rowReader: settingsReader(row), roster: roster}, organizations: roster, writer: w}
 	var err error
 	if display {
@@ -119,19 +125,25 @@ func TestOnlyTheCurrentOwnerOrAnOperatorNamesTheRemovalApprover(t *testing.T) {
 // approverRefusal is the one sentence a refused removal approver gets.
 const approverRefusal = "reviews: Choose someone in this store's organization who can moderate reviews."
 
+// approverArgs names who as the store's removal approver.
+func approverArgs(who string) map[string]any {
+	return map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": who}
+}
+
 // THE REMOVAL APPROVER IS ONE OF THE STORE'S OWN PEOPLE WHO CAN MODERATE IT
 // (review focus 4). Not somebody outside the store's organization, however much
 // they hold in their own; not one of the cluster's operators, who host the
 // reviews and decide none; nobody who could not moderate there. Whoever names
 // them -- an operator, or the current approver handing the role on -- and in
-// addition to the rule on who may name one, which is unchanged.
+// addition to the rule on who may name one, which is unchanged. Each refusal
+// is reached by asking about the person named and nobody else: the write
+// never reads the organization's roster.
 func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
-	name := func(who string) map[string]any {
-		return map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": who}
-	}
+	name := approverArgs
 	for _, c := range []struct{ who, why string }{
 		{"outsider-1", "a person of another organization, who moderates there"},
 		{"staff-1", "a cluster operator in the store's own group"},
+		{auth.RoleTestUserPrefix + "stand-in", "a role test's stand-in in the store's own group"},
 		{"viewer-1", "a person of the organization without the reviews part"},
 		{"doorless-1", "a person with the part who cannot open the organization's Deployables"},
 		{"away-1", "a deactivated person"},
@@ -142,9 +154,18 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 			ctx  context.Context
 			name string
 		}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
-			_, err := writeSettings(t, namer.ctx, existingSettings(), name(c.who), false)
+			roster := shopRoster()
+			_, err := writeSettingsOn(t, namer.ctx, roster, existingSettings(), name(c.who), false)
 			if err == nil || err.Error() != approverRefusal {
 				t.Errorf("%s naming %s (%s): err = %v, want %q", namer.name, c.who, c.why, err, approverRefusal)
+			}
+			if members := roster.read("membersOfGroup"); len(members) != 0 {
+				t.Errorf("%s naming %s: the write read the organization's roster (%v)", namer.name, c.who, members)
+			}
+			for _, about := range append(roster.read("userByIdSystem"), roster.asked...) {
+				if about != c.who {
+					t.Errorf("%s naming %s: the write read about %s", namer.name, c.who, about)
+				}
 			}
 		}
 	}
@@ -200,6 +221,133 @@ func TestSettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	}
 }
 
+// A PERSON IS ONE OF THE STORE'S PEOPLE THROUGH AN ACTIVE GROUP OF ITS
+// ORGANIZATION, whatever the engine answers for them there. Whether they can
+// moderate is the engine's verdict (canModerate); whether they are the
+// organization's is their membership's, and neither the list nor the approver
+// check takes the one for the other. Everybody tried here is answered able to
+// moderate in the store's organization, and is off the list and refused as the
+// approver all the same: the only group that would make them its person is
+// another organization's, or archived, or no longer any group of an
+// organization that has none.
+func TestOnlyAnActiveGroupOfItsOrganizationMakesSomebodyTheStoresPerson(t *testing.T) {
+	able := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	noGroups := func() *orgRoster {
+		r := shopRoster()
+		delete(r.groups, "acct-shop")
+		return r
+	}
+	for _, c := range []struct {
+		who, why string
+		roster   func() *orgRoster
+	}{
+		{"visitor-1", "a person whose only group is another organization's", func() *orgRoster {
+			r := shopRoster()
+			r.members["group-other"] = append(r.members["group-other"], rosterMember("group-other", "visitor-1", "added", "active"))
+			r.users["visitor-1"], r.holds["visitor-1"] = rosterUser("visitor-1", "Vic Visitor", "user", true), able
+			return r
+		}},
+		{"former-1", "an active member of the organization's archived group", func() *orgRoster {
+			r := shopRoster()
+			archived := rosterGroup("group-shop-old", "acct-shop")
+			archived["status"] = "archived"
+			r.groups["acct-shop"] = append(r.groups["acct-shop"], archived)
+			r.members["group-shop-old"] = []map[string]any{rosterMember("group-shop-old", "former-1", "added", "active")}
+			r.users["former-1"], r.holds["former-1"] = rosterUser("former-1", "Fran Former", "user", true), able
+			return r
+		}},
+		{"mod-1", "an active member of groups the organization, which has none, no longer holds", noGroups},
+	} {
+		people, err := readPeople(t, operatorCtxFor("op-1"), settingsReader(existingSettings()), c.roster(), theStore)
+		if err != nil {
+			t.Fatalf("%s (%s): %v", c.who, c.why, err)
+		}
+		for _, id := range peopleIDs(people) {
+			if id == c.who {
+				t.Errorf("%s (%s) is listed among the store's people: %v", c.who, c.why, peopleIDs(people))
+			}
+		}
+		for _, namer := range []struct {
+			ctx  context.Context
+			name string
+		}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+			if _, err := writeSettingsOn(t, namer.ctx, c.roster(), existingSettings(), approverArgs(c.who), false); err == nil || err.Error() != approverRefusal {
+				t.Errorf("%s naming %s (%s): err = %v, want %q", namer.name, c.who, c.why, err, approverRefusal)
+			}
+		}
+	}
+	// An organization with no groups has no people at all.
+	people, err := readPeople(t, operatorCtxFor("op-1"), settingsReader(existingSettings()), noGroups(), theStore)
+	if err != nil || len(people) != 0 {
+		t.Fatalf("people of an organization with no groups = %v (%v), want nobody", peopleIDs(people), err)
+	}
+}
+
+// NAMING THE APPROVER ASKS ABOUT THAT PERSON ALONE. Whether the one person named
+// can moderate is answered from the organization's groups, the person's own
+// memberships, their own user row and the engine's answer for them -- never
+// the organization's roster -- so naming an approver costs one person's reads
+// however many people the organization has. Every read is the deployment's,
+// and only the user row's carries internal origin.
+func TestNamingTheApproverResolvesThatPersonAlone(t *testing.T) {
+	deployment := auth.SystemActor(peopleActor).UserId
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		roster := shopRoster()
+		if _, err := writeSettingsOn(t, namer.ctx, roster, existingSettings(), approverArgs("mod-1"), false); err != nil {
+			t.Fatalf("%s naming mod-1: %v", namer.name, err)
+		}
+		if got := strings.Join(roster.asked, ","); got != "mod-1" {
+			t.Errorf("%s naming mod-1: the engine was asked about %q, want mod-1 alone", namer.name, got)
+		}
+		for query, want := range map[string]string{
+			"groupsForAccount": "acct-shop", "groupsForUser": "mod-1", "userByIdSystem": "mod-1", "membersOfGroup": "",
+		} {
+			if got := strings.Join(roster.read(query), ","); got != want {
+				t.Errorf("%s naming mod-1: %s read about %q, want %q", namer.name, query, got, want)
+			}
+		}
+		for _, read := range roster.reads {
+			if read.actor != deployment || read.internal != (read.query == "userByIdSystem") {
+				t.Errorf("%s naming mod-1: %+v, want it read as %s, with internal origin on the user row alone", namer.name, read, deployment)
+			}
+		}
+	}
+}
+
+// THE APPROVER CHECK IS ANSWERED IN FULL OR NOT AT ALL, as the list is. A read
+// behind it that failed -- the engine's while it resolved the person, or one of
+// the deployment's own, failing outright or answering from part of what it
+// reads -- refuses the write for the read, not for the person, and nothing is
+// written (writeSettingsOn asserts it).
+func TestTheApproverCheckRefusesWhenAReadBehindItFails(t *testing.T) {
+	breaks := map[string]func(*orgRoster){
+		"the engine's grant read": func(r *orgRoster) { r.failRead = true },
+	}
+	for _, query := range []string{"groupsForAccount", "groupsForUser", "userByIdSystem"} {
+		breaks[query+" failing"] = func(r *orgRoster) { r.errorIn = query }
+		breaks[query+" answering from part of what it reads"] = func(r *orgRoster) { r.noteFailureIn = query }
+	}
+	for name, broken := range breaks {
+		roster := shopRoster()
+		broken(roster)
+		_, err := writeSettingsOn(t, operatorCtxFor("op-1"), roster, existingSettings(), approverArgs("mod-1"), false)
+		if err == nil || err.Error() == approverRefusal {
+			t.Errorf("%s: err = %v, want the write refused for the read that failed", name, err)
+		}
+	}
+	// The refusal says what was read: the person named, alone. Naming an
+	// approver reads none of the organization's people.
+	roster := shopRoster()
+	roster.errorIn = "userByIdSystem"
+	_, err := writeSettingsOn(t, operatorCtxFor("op-1"), roster, existingSettings(), approverArgs("mod-1"), false)
+	if want := "reviews: reading the approver named: the rows could not be read"; err == nil || err.Error() != want {
+		t.Errorf("the named approver's user row failing: err = %v, want %q", err, want)
+	}
+}
+
 // A ROLE TEST'S STAND-IN IS NEVER ONE OF THE STORE'S PEOPLE (ruling R3). While
 // an organization role's test is live its 30-minute identity is a member of the
 // organization's account group, and the engine answers it able to moderate --
@@ -247,6 +395,85 @@ func TestTheApproverIsKnownInEitherSpellingOfTheirId(t *testing.T) {
 	if _, err := writeSettings(t, canonical, existingSettings(),
 		map[string]any{"siteId": "site-1", "storeId": "store-live", "removalApproverUserId": "mod-1"}, false); err != nil {
 		t.Fatalf("the approver, signed in under their canonical id, handing the role on: %v", err)
+	}
+}
+
+// THE APPROVER IS STORED BY THEIR BARE ID, however the namer spelled it: the
+// spelling reviewsPeople answers and clients write, so the row reads the same
+// whoever named the person and however.
+func TestTheApproverIsStoredByTheirBareId(t *testing.T) {
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		out, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs("v1:identity:user:mod-1"), false)
+		if err != nil {
+			t.Fatalf("%s naming v1:identity:user:mod-1: %v", namer.name, err)
+		}
+		if out["removalApproverUserId"] != "mod-1" {
+			t.Errorf("%s naming v1:identity:user:mod-1 saved %v, want mod-1", namer.name, out["removalApproverUserId"])
+		}
+	}
+}
+
+// AN ID OF ANOTHER CONCEPT NAMES NOBODY. A person's id is spelled bare or under
+// the user concept's own prefix, and that prefix is the only one this package
+// strips (bareUser). `v1:accounts:account:mod-1` is some other row's id that
+// happens to end the way mod-1's does; reading it as mod-1 would let a stray
+// id, or a caller who means it, name a person nobody named -- as the approver,
+// or as one of the store's people. Nor is a user id with the prefix twice
+// anybody's, not even its own: stripped once it is still canonical, which no
+// person is spelled as here, though the engine answers mod-1's memberships for
+// it -- so a membership spelled so lists nobody, as the write names nobody by
+// it.
+func TestAnIdOfAnotherConceptNamesNobody(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{"v1:identity:user:mod-1", "mod-1", true},
+		{"mod-1", "v1:identity:user:mod-1", true},
+		{"mod-1", "mod-1", true},
+		{"v1:accounts:account:mod-1", "mod-1", false},
+		{"v1:identity:group:mod-1", "v1:identity:user:mod-1", false},
+		{"v1:identity:user:v1:identity:user:mod-1", "mod-1", false},
+		{"v1:identity:user:v1:identity:user:mod-1", "v1:identity:user:v1:identity:user:mod-1", false},
+		{"v1:identity:user:", "", false},
+	} {
+		if got := sameUser(c.a, c.b); got != c.same {
+			t.Errorf("sameUser(%q, %q) = %v, want %v", c.a, c.b, got, c.same)
+		}
+	}
+	for _, namer := range []struct {
+		ctx  context.Context
+		name string
+	}{{operatorCtxFor("op-1"), "an operator"}, {moderatorCtx("owner-1"), "the current approver"}} {
+		for _, who := range []string{"v1:accounts:account:mod-1", "v1:identity:user:v1:identity:user:mod-1"} {
+			if _, err := writeSettings(t, namer.ctx, existingSettings(), approverArgs(who), false); err == nil || err.Error() != approverRefusal {
+				t.Errorf("%s naming %s: err = %v, want %q", namer.name, who, err, approverRefusal)
+			}
+		}
+	}
+	// A membership spells its member the same two ways: solo-2 under the user
+	// concept's prefix is solo-2, and the row naming an account's id is nobody's.
+	// So is the row naming solo-3 with the prefix twice, whom the engine would
+	// answer as solo-3: listed, they would be offered and then refused.
+	roster := shopRoster()
+	held := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	roster.members["group-shop"] = append(roster.members["group-shop"],
+		rosterMember("group-shop", "v1:accounts:account:solo-1", "added", "active"),
+		rosterMember("group-shop", "v1:identity:user:solo-2", "added", "active"),
+		rosterMember("group-shop", "v1:identity:user:v1:identity:user:solo-3", "added", "active"))
+	roster.users["solo-1"], roster.users["solo-2"] = rosterUser("solo-1", "Sol One", "user", true), rosterUser("solo-2", "Sol Two", "user", true)
+	roster.users["solo-3"] = rosterUser("solo-3", "Sol Three", "user", true)
+	roster.holds["solo-1"], roster.holds["solo-2"], roster.holds["solo-3"] = held, held, held
+	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,mod-1,solo-2" {
+		t.Fatalf("people = %s, want owner-1,mod-1,solo-2: a member spelled under another concept's prefix, or under the user's twice, is nobody", got)
 	}
 }
 

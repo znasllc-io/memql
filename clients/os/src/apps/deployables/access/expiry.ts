@@ -111,3 +111,14 @@ export function lastOpenedWord(lastOpenedAt: string, issuedAt: string, now: numb
   }
   return Number.isFinite(issued) && now - issued <= SESSION_RETENTION_MS ? "Not opened yet" : "Not opened in the last 30 days";
 }
+
+/**
+ * When guest access ends, said as the expiry is: "Ends in 12 days", and "Ended" from the instant
+ * it is past. The same clock and the same units as `expiryWord`, so the two never disagree.
+ */
+export function endWord(expiresAt: string, now: number): string {
+  const word = expiryWord(expiresAt, now);
+  if (word === "Expired") return "Ended";
+  if (word === "Expiry unknown") return "End unknown";
+  return word.replace(/^Expires/, "Ends");
+}

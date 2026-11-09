@@ -5059,6 +5059,7 @@
         "expiresAt",
         "gate",
         "generation",
+        "guest",
         "issuedAt",
         "label",
         "lastChangedBy",

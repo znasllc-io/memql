@@ -146,6 +146,10 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 }
 
 func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	s.cancelContinuity = cancel
+	defer cancel(nil)
+	defer func() { _ = s.continuity.stop() }()
 	h := s.host
 	_, err := workflowhost.Run(ctx, h.definition.Name, nil, workflowhost.Options{Operations: s.operations(), Load: func(name string) (*automations.Automation, error) {
 		switch name {
@@ -159,6 +163,9 @@ func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, err
 		return nil, errors.New("installation preparation cannot load unbound logic")
 	}})
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return revisionRecord{}, cause
+		}
 		return revisionRecord{}, err
 	}
 	if ctx.Err() != nil {
@@ -171,7 +178,9 @@ func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, err
 }
 
 type preparationWorkflowScope struct {
-	healthBaseline *HealthObservation
+	continuity       *applicationContinuityRun
+	cancelContinuity context.CancelCauseFunc
+	healthBaseline   *HealthObservation
 	// Native preparation proofs mutate together. Artifact checks share a read
 	// lock and retain their own bounded concurrency inside the child scope.
 	mu                  sync.RWMutex
@@ -286,18 +295,25 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	if _, err := s.compatibility(ctx, nil); err != nil {
 		return nil, err
 	}
-	cfg := s.configuration.configuration
-	started := time.Now().UTC().Format(time.RFC3339Nano)
-	if s.record.ID != "" {
-		for _, capture := range s.record.Scope.Captures {
-			started = capture.RunStartedAt
-			break
-		}
+	if s.continuity != nil {
+		return nil, s.continuity.check(ctx)
 	}
+	cfg := s.configuration.configuration
+	client, err := argocd.New(s.host.api)
+	if err != nil {
+		return nil, err
+	}
+	if s.record.ID != "" {
+		// Recovery keeps the original history boundary and intent. A fresh
+		// observation must never erase a missed configuration transition.
+		s.continuity, err = startApplicationContinuity(ctx, s.cancelContinuity, s.host.journal, client, s.record, nil)
+		return nil, err
+	}
+	started := time.Now().UTC().Format(time.RFC3339Nano)
 	scope := preparationScope{FormatVersion: cfg.FormatVersion, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
 	for n, app := range s.configuration.applicationMembers() {
-		intent, err := argocd.PlanRevision(app.application, s.request.RequestID, s.request.OverlayRevision, s.request.Prune)
+		intent, err := client.PlanObservedRevision(ctx, app.application, s.request.RequestID, s.request.OverlayRevision, s.request.Prune)
 		if err != nil {
 			return nil, err
 		}
@@ -337,6 +353,10 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	record, err := s.host.journal.reserve(ctx, scope)
 	if err == nil {
 		s.record = record
+		s.continuity, err = startApplicationContinuity(ctx, s.cancelContinuity, s.host.journal, client, record, nil)
+		if err == nil {
+			s.record, err = s.host.journal.get(ctx, cfg.InstallationID, record.ID)
+		}
 	}
 	return nil, err
 }
@@ -475,6 +495,17 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 	}
 	if !s.reobserved || time.Since(s.configuration.observed) > time.Minute || s.artifacts == nil || s.artifacts.result == nil || !s.artifacts.result.expires.After(time.Now()) {
 		return nil, errors.New("installation promotion requires fresh configuration and complete artifact evidence")
+	}
+	if s.record.Scope.Intent.FormatVersion == 2 {
+		if err := s.continuity.stop(); err != nil {
+			return nil, err
+		}
+		if s.continuity == nil {
+			return nil, errors.New("preparation has no Application history guard")
+		}
+		if err := s.continuity.check(ctx); err != nil {
+			return nil, err
+		}
 	}
 	artifact := *s.artifacts.result
 	if artifact.configuration != s.configuration.digest || artifact.candidate != s.candidate.Digest() || artifact.rollback != s.rollback.Digest() || artifact.resources != s.resources.digest || artifact.before != s.inventory("rollback").Digest() || artifact.after != s.inventory("candidate").Digest() {

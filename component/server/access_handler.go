@@ -20,8 +20,9 @@ import (
 
 // access_handler.go -- THE BFF HALF OF THE ACCESS SURFACE (design record
 // docs/superpowers/specs/2026-10-29-deployable-access-codes-design.md, section
-// 6). It is what a visitor's browser actually reaches, and it decides on every
-// request whether somebody is still allowed in.
+// 6, and for the guest route docs/superpowers/specs/2026-11-08-deployable-guest-access-design.md,
+// sections 6 to 8). It is what a visitor's browser actually reaches, and it decides on
+// every request whether somebody is still allowed in.
 //
 // # The header is a POINTER, never an assertion
 //
@@ -47,8 +48,8 @@ import (
 //
 // # A stranger costs nothing
 //
-// Anybody on the internet can send these four requests, and the budget in front of them
-// is 600 a minute per (site, address) on each edge replica, so what a request with no
+// Anybody on the internet can send these five requests, and the budget in front of most of
+// them is 600 a minute per (site, address) on each edge replica, so what a request with no
 // credential costs is the floor of what the cluster can be made to spend. Measured
 // before this order: a cookie-less status check ran 52 statements, because the site was
 // resolved first and under the owner's authority, which reads who the owner is and what
@@ -58,18 +59,28 @@ import (
 // its digest, and a digest that finds nothing is the end of it: no site read and no other
 // write. Only a digest that found a row pays for the site, one point read as the cluster.
 //
+// THE GUEST ROUTE IS THE ONE PRICED RATHER THAN FREE (G-D7). A guest open has no secret to
+// check first, so nothing about its shape can stand in for a credential, and its first read
+// is the site's guest pass, by the site's guest digest, through the same index. No pass, a
+// removed one and one past its end are the end of it, with no site read and no write. What
+// bounds the rest is the edge, which spends buckets of the guest route's own on it, so a
+// crowd of guests draws nothing from the budget a code holder's unlock needs.
+//
 // THE OWNER'S AUTHORITY IS READ ONCE, RIGHT BEFORE IT IS LENT. A call reads the site and
 // its package under the owner just ahead of running the construct, which already pays for
 // that authority, and answers 404 if the owner cannot read them. That is what closes a
-// tied site whose owner left its organization. The other three requests never lend it, so
-// such a site still unlocks and still says who is in, and nothing gated runs.
+// tied site whose owner left its organization. The other four requests never lend it, so
+// such a site still unlocks, still lets guests in and still says who is in, and nothing
+// gated runs.
 //
 // # What a session is and is not
 //
 // It authenticates nobody to MemQL: no JWT, no actor, no stream, no reach to any
 // other route. It is honored here, for one site, and everything it opens runs as
 // the site's owner, BORROWED, and never with internal origin, so a @serverOnly
-// construct stays out of reach of anybody holding a code (D6). The reads that
+// construct stays out of reach of anybody holding a code (D6). A guest's session is a
+// code's in every respect, opened on the site's guest pass (G-D5): the same row, cookie,
+// cap and checks, so nothing below asks whose session it is except to say so. The reads that
 // decide a request are the store's, which makes them as the cluster with its own
 // internal origin, because this package may not stamp one and the rows are
 // unreadable without it (D14). The one read that is not is the owner's own, ahead of a
@@ -88,7 +99,9 @@ import (
 // # One answer each, identical to the byte
 //
 // A reply that differs is an oracle. Unknown, another site's, removed and superseded
-// codes are one `invalid`. A session that ended, for any reason, is one `ended`. A
+// codes are one `invalid`. Every reason guest access is closed is one `closed`: the route
+// is open to everybody, so it says nothing a visitor could not learn by asking again. A
+// session that ended, for any reason, is one `ended`. A
 // construct this session's gate does not reach is one 404 whatever the reason, so a
 // holder of one gate's code learns nothing about another's, and it is the same 404 a
 // request with no stamp gets. The bodies are constants below, so "identical" is not
@@ -108,7 +121,7 @@ import (
 // other party dictates the wire.
 
 // AccessCookieName is the cookie a visitor's session token travels in. It is memql's,
-// because the edge has to keep it to the four routes and neither can import the other.
+// because the edge has to keep it to the surface's routes and neither can import the other.
 const AccessCookieName = memql.AccessCookieName
 
 // AccessStampSiteHeader and AccessStampOwnerHeader are the edge's stamp: the site a
@@ -120,19 +133,25 @@ const AccessStampSiteHeader, AccessStampOwnerHeader = memql.AccessStampSiteHeade
 
 // The op and result labels of memql_site_access_requests_total. Fixed sets, so a
 // label never holds anything a visitor sent.
+//
+// A result is named for the word its reply says, a state or an error, and a reply two
+// routes share is counted under one name, so a dashboard reads every route the same way.
 const (
 	accessOpUnlock  = "unlock"
 	accessOpSession = "session"
 	accessOpLeave   = "leave"
 	accessOpCall    = "call"
+	accessOpGuest   = "guest"
 
 	accessResultOK          = "ok"
 	accessResultInvalid     = "invalid"
 	accessResultExpired     = "expired"
+	accessResultClosed      = "closed"
 	accessResultNone        = "none"
 	accessResultEnded       = "ended"
 	accessResultNotFound    = "not_found"
 	accessResultInvalidArgs = "invalid_args"
+	accessResultInvalidBody = "invalid_body"
 	accessResultRefused     = "refused"
 )
 
@@ -140,10 +159,12 @@ const (
 var (
 	accessBodyInvalid     = []byte(`{"state":"invalid"}`)
 	accessBodyExpired     = []byte(`{"state":"expired"}`)
+	accessBodyClosed      = []byte(`{"state":"closed"}`)
 	accessBodyNone        = []byte(`{"state":"none"}`)
 	accessBodyEnded       = []byte(`{"state":"ended"}`)
 	accessBodyNotFound    = []byte(`{"error":"not_found"}`)
 	accessBodyInvalidArgs = []byte(`{"error":"invalid_args"}`)
+	accessBodyInvalidBody = []byte(`{"error":"invalid_body"}`)
 	accessBodyRefused     = []byte(`{"error":"refused"}`)
 )
 
@@ -159,9 +180,9 @@ const (
 	accessReasonNotOwner   = "the stamped owner is not this site's owner"
 )
 
-// accessRoute is one of the four method and path pairs. One table, because the
+// accessRoute is one of the five method and path pairs. One table, because the
 // routes this handler answers and the routes the verifier steps aside for
-// (AccessSelfAuthenticatedPaths) have to be the same four, and two lists that agree
+// (AccessSelfAuthenticatedPaths) have to be the same five, and two lists that agree
 // by coincidence are the pair that drifts. The paths are memql's, for the same reason
 // about the edge.
 type accessRoute struct {
@@ -179,6 +200,9 @@ var accessRoutes = []accessRoute{
 	{http.MethodGet, memql.AccessSessionPath, accessOpSession, memql.AccessSmallBodyBytes},
 	{http.MethodPost, memql.AccessLeavePath, accessOpLeave, memql.AccessSmallBodyBytes},
 	{http.MethodPost, memql.AccessCallPath, accessOpCall, memql.AccessCallBodyBytes},
+	// THE GUEST OPEN, which carries no code and no argument. Its body is still read, to
+	// be held to a JSON object, so it has the cap unlock has.
+	{http.MethodPost, memql.AccessGuestPath, accessOpGuest, memql.AccessSmallBodyBytes},
 }
 
 func accessRouteFor(method, path string) (accessRoute, bool) {
@@ -211,6 +235,11 @@ type AccessCode struct {
 	Generation                                  int
 	ExpiresAt                                   time.Time
 	Revoked                                     bool
+	// Guest is true for the site's guest pass, a code nobody holds: the guest route opens
+	// a session on it, and no typed code ever finds it. Nothing decides by it once a
+	// session is open, because a guest's session is a code's (G-D5). It is said back in
+	// every reply about a session, so a page can tell whose it is.
+	Guest bool
 }
 
 // AccessSession is one v1:platform:siteAccessSession, as the decision needs it.
@@ -257,6 +286,10 @@ type AccessStore interface {
 	// CodeByHash finds a code by the digest of what a visitor typed. A removed or
 	// expired code still answers; which of those means which reply is decided here.
 	CodeByHash(ctx context.Context, siteID, codeHash string) (*AccessCode, error)
+	// GuestPassForSite finds the site's guest pass that has not been removed, one read
+	// through the digest index by the site's guest digest. A site with no such pass is a
+	// miss. A pass past its end still answers; which reply that means is decided here.
+	GuestPassForSite(ctx context.Context, siteID string) (*AccessCode, error)
 	// CodeByID resolves the code a session was opened with.
 	CodeByID(ctx context.Context, codeID string) (*AccessCode, error)
 	// SessionByTokenHash finds a session by the digest of the cookie presented. An
@@ -319,6 +352,8 @@ func (h *AccessHandler) serve(op string, w http.ResponseWriter, r *http.Request)
 	switch op {
 	case accessOpUnlock:
 		return h.serveUnlock(w, r, stamp)
+	case accessOpGuest:
+		return h.serveGuest(w, r, stamp)
 	case accessOpSession:
 		return h.serveSession(w, r, stamp)
 	case accessOpLeave:
@@ -351,7 +386,9 @@ func readAccessStamp(r *http.Request) (accessStamp, bool) {
 // row says otherwise says nothing about which of those it was.
 //
 // IT RUNS ONLY FOR A REQUEST WHOSE DIGEST FOUND A ROW. See the file note. Past a miss
-// nothing here is ever reached, which is what keeps a stranger from costing a read.
+// nothing here is ever reached, which is what keeps a stranger from costing this read. On
+// the guest route the row is the site's pass, so where an operator lets guests in, anybody
+// reaches here, as often as the edge's guest buckets allow.
 //
 // WHAT COMES OUT OF HERE IS THE ONE THING EVERY LATER ROW IS HELD TO. The codes and
 // sessions are read as the cluster, so nothing but a comparison with this site's id
@@ -408,7 +445,9 @@ func (h *AccessHandler) answerSite(w http.ResponseWriter, r *http.Request, stamp
 // NOTHING A VISITOR SENT GOES IN THIS LINE, and neither does the owner the stamp named:
 // the reason is a constant, and the site is the edge's stamp or the row's own id. It is
 // said once per request, because there is no state here to say it once with. Only a
-// credential that found a row can reach it, so a stranger cannot drive it at all.
+// credential that found a row can reach it. A guest pass that stands is that credential for
+// everybody, so on a deployable that lets guests in it is the edge's guest buckets, and not
+// the need for a code, that bound how often a stranger can drive it.
 func (h *AccessHandler) warnSiteClosed(siteID, reason string) {
 	h.logger.Warn("access surface: a credential holder was answered 404, see reason",
 		"component", "server", "reason", reason,
@@ -489,7 +528,13 @@ func (h *AccessHandler) serveUnlock(w http.ResponseWriter, r *http.Request, stam
 		writeAccessJSON(w, http.StatusForbidden, accessBodyExpired)
 		return accessResultExpired
 	}
+	return h.openSession(w, r, site, code, now)
+}
 
+// openSession mints a session on a code just found to open this site, decided at `now`, and
+// answers it. Unlock and a guest open both end here, because a guest's session is a code's
+// in every respect (G-D5): one row, one cookie, and the end worked out the same way.
+func (h *AccessHandler) openSession(w http.ResponseWriter, r *http.Request, site *AccessSite, code *AccessCode, now time.Time) string {
 	// WHOLE-SECOND UTC, because the latest-session sort compares this field as text.
 	// The store enforces that form too; rounding here as well means the end this reply
 	// states is the end the next request will work out from the row, and rounding down
@@ -513,6 +558,61 @@ func (h *AccessHandler) serveUnlock(w http.ResponseWriter, r *http.Request, stam
 	setAccessCookie(w, token)
 	writeAccessSession(w, code, memql.AccessSessionEnd(issuedAt, code.ExpiresAt), now)
 	return accessResultOK
+}
+
+// ---------------------------------------------------------------------------
+// the guest route
+// ---------------------------------------------------------------------------
+
+// serveGuest opens a session on the site's guest pass, for whoever asks (design record
+// 2026-11-08, section 6). There is no code to check, so the pass is the credential: an
+// operator made it, for one gate of this deployable, with an end, and nothing a visitor
+// sends can stand in for it or point it anywhere else.
+//
+// THE ORDER IS STILL WHAT A STRANGER COSTS. The body costs nothing to refuse. The pass is one
+// read, and every way of finding no pass that opens is decided from that row alone: no
+// pass, a removed one, and one past its end. Only a pass that stands pays for the site, and
+// only a site that checks out pays for the write.
+func (h *AccessHandler) serveGuest(w http.ResponseWriter, r *http.Request, stamp accessStamp) string {
+	// A JSON OBJECT, AND WHAT IT SAYS IS NEVER READ. The route takes nothing today, and a page
+	// sends `{}`. Holding the body to an object keeps the route a JSON POST like its
+	// neighbours, and means a field added later arrives in a shape every page already sends.
+	// A body over the cap fails here too: MaxBytesReader surfaces as a read error.
+	var body map[string]json.RawMessage
+	if !decodeAccessBody(r.Body, &body) || body == nil {
+		writeAccessJSON(w, http.StatusBadRequest, accessBodyInvalidBody)
+		return accessResultInvalidBody
+	}
+
+	pass, err := h.store.GuestPassForSite(r.Context(), stamp.site)
+	if err != nil {
+		h.logger.Warn("access surface: looking up the guest pass failed",
+			"component", "server", "site", stamp.site, "err", err)
+		writeAccessJSON(w, http.StatusBadGateway, accessBodyRefused)
+		return accessResultRefused
+	}
+	// THE ROW IS HELD TO BEING A PASS THAT STANDS, though the store answers nothing else: a
+	// row that does not say it is a pass would open a session whose replies call it a code
+	// holder's, and a removed one would let guests in after an operator turned them away. A
+	// zero end, what an unreadable one comes back as, is before now, so a pass with no
+	// readable end is closed rather than open for ever.
+	now := h.now()
+	if pass == nil || !pass.Guest || pass.Revoked || !now.Before(pass.ExpiresAt) {
+		writeAccessJSON(w, http.StatusForbidden, accessBodyClosed)
+		return accessResultClosed
+	}
+
+	site, answered := h.answerSite(w, r, stamp)
+	if answered != "" {
+		return answered
+	}
+	// THE SAME TEST A CODE MEETS, with the same `closed` for each way of failing it: another
+	// site's pass, and a pass carrying the organization the site has left (D15).
+	if !codeOpensSite(pass, site) {
+		writeAccessJSON(w, http.StatusForbidden, accessBodyClosed)
+		return accessResultClosed
+	}
+	return h.openSession(w, r, site, pass, now)
 }
 
 // ---------------------------------------------------------------------------
@@ -853,6 +953,9 @@ func accessCallArgs(entry *memql.AccessGateEntry, sent map[string]any, site *Acc
 			if code.Subject != "" {
 				args[name] = code.Subject
 			}
+		case memql.AccessArgGuest:
+			// A bool, stamped on queries too: it tells the visitor nothing they do not know.
+			args[name] = code.Guest
 		case memql.AccessArgCodeLabel:
 			if entry.Kind == memql.AccessKindMutation && code.Label != "" {
 				args[name] = code.Label
@@ -954,24 +1057,30 @@ func decodeAccessBody(body io.Reader, into any) bool {
 	return errors.Is(err, io.EOF)
 }
 
-// writeAccessSession is the 200 an unlock and a status check share.
+// writeAccessSession is the 200 an unlock, a guest open and a status check share.
 //
 // `expiresAt` AND `remainingMs` ARE ONE INSTANT, the session's end, stated two ways.
 // remainingMs is the one a client schedules from, so a wrong client clock does not
 // move the moment. A long-lived code's own expiry would sit here beside a remainder of
 // at most a day and leave a client holding two answers to when it is taken out.
+//
+// `guest` SAYS WHOSE SESSION IT IS (G-D8), true on the guest pass and false on a code, so
+// a page can say "Guest" rather than count down to an end its visitor never chose, and can
+// ask the guest route again when a guest's session reaches its cap.
 func writeAccessSession(w http.ResponseWriter, code *AccessCode, end, now time.Time) {
-	// Strings and an integer, which do not fail to encode.
+	// Strings, an integer and a boolean, which do not fail to encode.
 	payload, _ := json.Marshal(struct {
 		Gate        string `json:"gate"`
 		Subject     string `json:"subject"`
 		ExpiresAt   string `json:"expiresAt"`
 		RemainingMs int64  `json:"remainingMs"`
+		Guest       bool   `json:"guest"`
 	}{
 		Gate:        code.Gate,
 		Subject:     code.Subject,
 		ExpiresAt:   end.UTC().Format(time.RFC3339Nano),
 		RemainingMs: end.Sub(now).Milliseconds(),
+		Guest:       code.Guest,
 	})
 	writeAccessJSON(w, http.StatusOK, payload)
 }

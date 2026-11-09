@@ -569,6 +569,11 @@ query siteAccessCode siteAccessCodeById {
 /// and 'expired' (only somebody holding the exact code can learn it) are different replies, and
 /// that is a decision about the reply rather than about which rows exist.
 ///
+/// A SITE'S GUEST PASSES SHARE ONE DIGEST (AccessGuestPassDigest, component/memql), the same for every
+/// pass the site ever has, so asked with it this answers all of them, the removed ones included, and
+/// the reader keeps the one that is not removed (livePassForSite, integrations/siteaccess). No typed
+/// code normalizes to that digest, so a visitor's lookup never meets those rows.
+///
 /// @serverOnly, and actor.userId scoping is not the fix: this is the visitor's credential check, a
 /// visitor has no actor, and the store runs it as the cluster acting, so no row's owner decides it.
 /// A code keeps the owner it was stamped with at birth while its site can go on to have another, and
@@ -578,7 +583,7 @@ query siteAccessCode siteAccessCodeById {
 /// is the wire: a client-callable lookup by digest is an oracle for whether a guessed digest is a live
 /// code, for a caller who never held the code.
 @serverOnly
-@unbounded("access code by site and digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
+@unbounded("access code by site and digest -- a single row for a code, whose digest is its credential and shared by no other row; for a site's guest digest, the guest passes the deployable has had, one row each time guest access is turned on and none ever removed. The guest route and the mint read them with this, and like every @unbounded read it returns at most the engine's MaxResults rows (500 by default): a site past that is not read whole, and the mint, which names the next pass by the count, moves past at most eight ids it finds taken before it reports a conflict")
 @actor
 @cache(0)
 query siteAccessCode siteAccessCodeByHash {

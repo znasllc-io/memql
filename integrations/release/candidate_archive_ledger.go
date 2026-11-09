@@ -105,8 +105,10 @@ func readCandidateArchive(ctx context.Context, tx *sql.Tx, owner string, rec can
 	var approval, stored string
 	var verified, archived time.Time
 	var body []byte
+	// Only catalog evidence answers here. A candidate archived on the
+	// supersession basis has no catalog, so its row is never read as one.
 	err := tx.QueryRowContext(ctx, `SELECT approval_id,catalog_digest,verified_at,archived_at,receipt
-FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2`, rec.ID, owner).Scan(&approval, &stored, &verified, &archived, &body)
+FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2 AND basis='catalog'`, rec.ID, owner).Scan(&approval, &stored, &verified, &archived, &body)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,23 @@ import (
 func validateSARIFStep(spec *Spec, stage string, step StepSpec) *Refusal {
 	scope := stage + "/" + step.Name
 	r := step.SARIF
+	if r != nil {
+		switch r.Destination {
+		case "", "github":
+		case "goals":
+			security := false
+			for _, declared := range spec.Stages {
+				if declared.Name == stage {
+					security = declared.Security
+				}
+			}
+			if !security {
+				return Refuse(CodeStepInvalid, scope, "Local security goals require a security stage controlled by the Pipelines security switch.")
+			}
+		default:
+			return Refuse(CodeStepInvalid, scope, "sarif.destination must be github or goals.")
+		}
+	}
 	if r == nil || r.Path == "" || len(r.Path) > 1024 || path.Clean(r.Path) != r.Path ||
 		strings.HasPrefix(r.Path, "/") || strings.HasPrefix(r.Path, "../") ||
 		strings.ContainsAny(r.Path, "\\\x00\r\n*?[]") || !strings.HasSuffix(r.Path, ".sarif") {
@@ -21,7 +38,7 @@ func validateSARIFStep(spec *Spec, stage string, step StepSpec) *Refusal {
 		step.Platform != "" || step.CPUMilli != 0 || step.MemoryMiB != 0 || step.Packages != "" || step.Only != "" ||
 		step.Shards != 0 || step.When != nil || len(step.Needs) > 0 || len(step.Services) > 0 || step.Caches != nil ||
 		len(step.Secrets) > 0 || step.ImagePullSecret != "" || len(step.Artifacts) > 0 || step.Repeatable != nil {
-		return Refuse(CodeStepInvalid, scope, "sarif accepts only name, producer step, artifact path and timeout; the driver owns its execution and current source grant.")
+		return Refuse(CodeStepInvalid, scope, "sarif accepts only name, producer step, artifact path, destination and timeout; the driver owns its execution and current source grant.")
 	}
 	if step.Timeout != "" {
 		d, err := time.ParseDuration(step.Timeout)

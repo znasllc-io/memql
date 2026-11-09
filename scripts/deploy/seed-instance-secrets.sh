@@ -122,11 +122,26 @@ KEPT=0
 
 # A mode-700 scratch directory is the ONLY place a plaintext value is ever
 # written, and the trap fires on failure and on the cap_fail exits too, because
-# cap_fail exits rather than returning.
+# cap_fail exits rather than returning. The trap is _seed_secrets_on_exit, which
+# shreds the directory and then runs capability.sh's result guarantee: the bare
+# `trap 'shred_workdir' EXIT` it replaced dropped the guarantee, so an abort
+# after this point reached the caller with nothing on stdout.
 function make_workdir() {
     WORK="$(mktemp -d)"
     chmod 700 "$WORK"
-    trap 'shred_workdir' EXIT
+    trap _seed_secrets_on_exit EXIT
+}
+
+# _seed_secrets_on_exit -- the EXIT trap: shreds the scratch directory, then
+# runs capability.sh's result guarantee with the status the script exited with.
+function _seed_secrets_on_exit() {
+    local rc=$?
+    # errexit off: `(exit "$rc")` is a failing command whenever rc is non-zero,
+    # and errexit would abandon the handler there, before the envelope.
+    set +e
+    shred_workdir
+    (exit "$rc")
+    _cap_on_exit
 }
 
 function shred_workdir() {

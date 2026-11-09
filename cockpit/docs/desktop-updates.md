@@ -44,6 +44,16 @@ homes, so a new request cannot slip between the idle check and reservation.
 New requests receive their normal terminal response explaining that Cockpit
 is updating. Pings and cancellation traffic continue.
 
+After acquiring the reservation, the updater reads the worker again and checks
+its exact process, executable, running build, idle state, active reservation
+and saved home choices. A connection paused automatically just before the
+reservation therefore stops this attempt before files or the recovery record
+change; retry starts from the current choices. During the reservation, manual
+connection changes are refused and automatic pauses are deferred. Cancellation
+or expiry restores the ordinary connection checks without resetting their
+failure window. This keeps an update from recording choices that its own
+replacement worker can no longer match.
+
 This reservation is in memory. Before shutdown is accepted, `cancel-update`
 releases it on failure, and expiry releases it if the updater disappears. It never writes
 paused state to the enrollment registry. The new worker starts with the same
@@ -115,6 +125,9 @@ expired reservations, response delivery and paused-home persistence. Restart
 tests cover already-busy replacements, changed identities, lost replies and
 shutdown/start failures without forcing or stopping replacement work;
 native menu tests exercise available, pending, failure and completion states.
+[`reservation_test.go`](../internal/selfupdate/reservation_test.go) covers a
+home pausing or the worker changing between preflight and the reserved read,
+for both installation and recovery.
 macOS tests also build and sign scratch bundles, reject tampered executables,
 and exercise whole-bundle exchange and rollback without installing an app.
 These checks do not constitute a published-release upgrade against a live

@@ -66,8 +66,14 @@ func (l *candidateLedger) beginPublication(ctx context.Context, key, approvalID,
 		return candidatePublication{}, err
 	}
 	intent.ApprovalID = approvalID
+	// Repeating begin returns the same effect identity, and the effect it
+	// guards may now be running again, so a pending intent records when it was
+	// last resumed. Archiving without a catalog judges whether a writer can
+	// still be acting by that time (uncataloguedQuietPeriod); a complete
+	// intent keeps its completion time.
 	_, err = tx.ExecContext(ctx, `INSERT INTO release_publication_intents(effect_id,candidate_id,target_id,component_name,artifact_name,approval_id,state)
-VALUES($1,$2,$3,$4,$5,$6,'pending') ON CONFLICT(candidate_id,target_id,component_name,artifact_name) DO NOTHING`, id.NewShortId(), key, target, component, artifact, approvalID)
+VALUES($1,$2,$3,$4,$5,$6,'pending') ON CONFLICT(candidate_id,target_id,component_name,artifact_name)
+DO UPDATE SET updated_at=clock_timestamp() WHERE release_publication_intents.state='pending'`, id.NewShortId(), key, target, component, artifact, approvalID)
 	if err != nil {
 		return candidatePublication{}, err
 	}

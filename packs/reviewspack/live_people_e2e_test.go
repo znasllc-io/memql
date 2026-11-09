@@ -7,9 +7,10 @@ package reviewspack_test
 // resolver. This proves them through the real engine: the builtin reaches its
 // handler through the DSL, the organization gate admits a caller who holds the
 // reviews part in the store's organization and refuses one who holds it only
-// in another, the organization's roster is read as the deployment reads it,
-// and the engine's own resolver answers who can moderate there -- with the ids
-// the wire carries, a signed-in caller's canonical and a chosen person's bare.
+// in another, the organization's roster -- and a named approver's own
+// memberships -- are read as the deployment reads them, and the engine's own
+// resolver answers who can moderate there -- with the ids the wire carries, a
+// signed-in caller's canonical and a chosen person's bare.
 //
 // Postgres-gated: skips when no database is reachable; MEMQL_REQUIRE_DB=1
 // turns that skip into a failure.
@@ -123,6 +124,10 @@ func TestLiveE2E_ReviewsPeopleListsTheStoresModerators(t *testing.T) {
 	if first["displayName"] != "Avery Colleague" || first["email"] != w.colleague+"@example.test" || first["mayRemove"] != false || len(first) != 4 {
 		t.Fatalf("a person = %v, want their id, name and address, and that they approve nothing yet", first)
 	}
+	// And the answer says the list is whole: everybody who can moderate is on it.
+	if answer := payloadOf(t, w.eng, w.as(w.moderator), `builtin reviewsPeople(storeId: `+quote(w.store)+`, siteId: `+quote(w.site)+`)`); answer["truncated"] != false {
+		t.Fatalf("truncated = %v, want false: the list is whole", answer["truncated"])
+	}
 
 	// The cluster's operators read the same people: the answer is the store's.
 	if got := idsOf(w.people(t, w.operator())); got != w.colleague+","+w.moderator {
@@ -143,7 +148,10 @@ func TestLiveE2E_ReviewsPeopleListsTheStoresModerators(t *testing.T) {
 // store's organization or to an operator, through the real engine.
 func TestLiveE2E_SettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	w := newPeopleWorld(t)
-	for _, who := range []string{w.outsider, w.staff, w.persona, w.away, w.bystander, "user-reviews-people-nobody-" + w.n} {
+	// The last two are the store's moderator's id under another concept's
+	// prefix, and under the user prefix twice: neither names anybody.
+	for _, who := range []string{w.outsider, w.staff, w.persona, w.away, w.bystander, "user-reviews-people-nobody-" + w.n,
+		"v1:accounts:account:" + w.colleague, "v1:identity:user:v1:identity:user:" + w.colleague} {
 		if err := w.nameApprover(w.operator(), who); err == nil || !strings.Contains(err.Error(), approverRefusal) {
 			t.Errorf("an operator naming %s the approver: err = %v, want %q", who, err, approverRefusal)
 		}
@@ -174,7 +182,12 @@ func TestLiveE2E_SettingsRefuseAnApproverWhoCannotModerate(t *testing.T) {
 	if err := w.nameApprover(w.as(w.colleague), w.outsider); err == nil || !strings.Contains(err.Error(), approverRefusal) {
 		t.Fatalf("the approver handing the role outside the organization: err = %v, want %q", err, approverRefusal)
 	}
-	if err := w.nameApprover(w.as(w.colleague), w.moderator); err != nil {
+	// Named in the canonical spelling a token carries, and stored bare.
+	if err := w.nameApprover(w.as(w.colleague), "v1:identity:user:"+w.moderator); err != nil {
 		t.Fatalf("the approver handing the role to the store's moderator: %v", err)
+	}
+	settings = payloadOf(t, w.eng, w.as(w.moderator), `builtin reviewsSettings(storeId: `+quote(w.store)+`, siteId: `+quote(w.site)+`)`)
+	if saved, _ := settings["settings"].(map[string]any); saved["removalApproverUserId"] != w.moderator {
+		t.Fatalf("the approver saved = %v, want %s, the bare id", saved["removalApproverUserId"], w.moderator)
 	}
 }

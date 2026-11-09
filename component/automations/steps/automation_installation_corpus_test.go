@@ -99,24 +99,38 @@ func TestAutomationInstallationProbeContracts(t *testing.T) {
 		}
 		t.Run(label, func(t *testing.T) {
 			record := run("installationRetirementWorkflow", map[string]any{
-				"installationRetirementPage":    map[string]any{"items": []any{map[string]any{"intentId": "artifact-1"}}, "complete": ready},
-				"installationRetirementObserve": map[string]any{"ready": ready},
+				"installationRetirementPage":     map[string]any{"items": []any{map[string]any{"intentId": "artifact-1"}}, "complete": ready},
+				"installationRetirementArtifact": map[string]any{"retained": false},
+				"installationRetirementObserve":  map[string]any{"ready": ready},
 			})
 			require.False(t, record.Refused)
 			expected := []string{"installationRetirementBegin", "installationRetirementStop", "installationRetirementRequirements"}
 			for range 2 {
-				expected = append(expected, "installationRetirementFence", "installationRetirementRelease", "installationRetirementPage", "installationRetirementArtifact", "installationRetirementPage")
+				expected = append(expected, "installationRetirementFence", "installationRetirementRelease", "installationRetirementPage", "installationRetirementArtifact", "installationRetirementPurge", "installationRetirementPage")
 			}
 			expected = append(expected, "installationRetirementObserve")
 			if ready {
 				expected = append(expected, "installationRetirementComplete")
 			}
 			require.Equal(t, expected, names(record))
-			for n, call := range selected(record, "installationRetirementArtifact") {
-				require.Equal(t, map[string]any{"role": []string{"candidate", "rollback"}[n], "intentId": "artifact-1"}, call.Args)
+			for _, name := range []string{"installationRetirementArtifact", "installationRetirementPurge"} {
+				for n, call := range selected(record, name) {
+					require.Equal(t, map[string]any{"role": []string{"candidate", "rollback"}[n], "intentId": "artifact-1"}, call.Args, name)
+				}
 			}
 		})
 	}
+	t.Run("retirement leaves a kept capture's Library entries", func(t *testing.T) {
+		record := run("installationRetirementWorkflow", map[string]any{
+			"installationRetirementPage":     map[string]any{"items": []any{map[string]any{"intentId": "artifact-1"}}, "complete": false},
+			"installationRetirementArtifact": map[string]any{"retained": true},
+			"installationRetirementObserve":  map[string]any{"ready": true},
+		})
+		require.False(t, record.Refused)
+		require.Len(t, selected(record, "installationRetirementArtifact"), 2)
+		require.Empty(t, selected(record, "installationRetirementPurge"))
+		require.Equal(t, "installationRetirementComplete", record.Calls[len(record.Calls)-1].Name)
+	})
 	for _, test := range []struct{ automation, operation string }{
 		{"installationPrepareWorkflow", "installationApplications"},
 		{"installationPrepareWorkflow", "installationSourceRequirements"},

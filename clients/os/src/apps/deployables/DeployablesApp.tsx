@@ -44,6 +44,7 @@ import { RunsSection } from "./pipelines/RunsSection";
 import { useConnectFlow } from "./pipelines/connect/useConnectFlow";
 import { DeliveryOverview, ChangesSection } from "../pipelines/DeliveryOverview";
 import { PipelinesAISettings } from "../pipelines/PipelinesAISettings";
+import { PipelinesSecuritySettings } from "../pipelines/PipelinesSecuritySettings";
 import { ReleasesSection } from "../cluster/releases/ReleasesSection";
 import { PipelinesSection } from "../settings/PipelinesSection";
 import { holds } from "../../system/roles";
@@ -90,7 +91,7 @@ const DEPLOYABLES_LOG_CONCEPTS = [
 ] as const;
 
 /** Pipelines > Settings' sibling views, one `LocalTabs` row under its Head. */
-const PIPELINE_SETTINGS_TABS = [["infrastructure", "Infrastructure"], ["connections", "Connections"], ["ai", "AI"]] as const;
+const PIPELINE_SETTINGS_TABS = [["infrastructure", "Infrastructure"], ["connections", "Connections"], ["ai", "AI"], ["security", "Security"]] as const;
 type PipelineSettingsTab = (typeof PIPELINE_SETTINGS_TABS)[number][0];
 
 export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {
@@ -560,7 +561,7 @@ function DeployablesAppContent({
     <RetainedSection active={sectionId === "runs"}>{runsContent}</RetainedSection>
     <RetainedSection active={sectionId === "releases"}><ReleasesSection visible={windowVisible && sectionId === "releases"} openRequest={releaseOpenRequest} runs={runs?.snapshot.rows ?? []} runsFresh={runs?.snapshot.state === "live" && !runs.snapshot.error} onOpenRun={runsReachable ? openRun : undefined} onOpenRepository={pipelineReach.sections.includes("repositories") ? openSource : undefined} /></RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
-    <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={PIPELINE_SETTINGS_TABS} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsTab === "ai" ? <PipelinesAISettings /> : settingsContent}</div></RetainedSection>
+    <RetainedSection active={sectionId === "settings"}><div className="os-app-stack"><Head title="Settings" /><LocalTabs label="Pipeline settings" value={settingsTab} onChange={setSettingsTab} options={PIPELINE_SETTINGS_TABS} />{settingsTab === "infrastructure" ? <PipelinesSection heading={false} intent={intent} consumeIntent={consumeIntent} /> : settingsTab === "ai" ? <PipelinesAISettings /> : settingsTab === "security" ? <PipelinesSecuritySettings /> : settingsContent}</div></RetainedSection>
   </ActivePane>;
   return <ActivePane active={windowVisible}>
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>

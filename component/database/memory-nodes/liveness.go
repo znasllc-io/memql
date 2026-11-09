@@ -20,9 +20,24 @@ const ObservedRowsSQL = `(SELECT * FROM "MemoryNodes" UNION ALL SELECT * FROM me
 
 // HasLiveness identifies the closed set whose observation-only writes live
 // outside the versioned store. All authorization still runs in the engine.
+//
+// A concept enters this set together with its own reader handshake (an
+// Enable...WhenReady below and the storage switch it guards), because this
+// list is what a reader knows: a reader without the concept here enumerates
+// its latest keys from MemoryNodes alone (latestScanKeys, latestScanWalk) and
+// reports every observation-only write to a held journal as a business write
+// (executeWrite's observationOnly). Adding a FIELD to a listed concept's
+// observation list in memory_node_store_liveness needs no handshake.
+//
+// v1:pipelines:run is listed for its lease renewal alone (driverHeartbeatAt,
+// migration 20261108190000_pipeline_run_lease_observations): the lease is the
+// run's liveness, every 30 s, and nothing reads a superseded renewal. No
+// payload lookup or walk index serves the concept (payloadLookups,
+// payloadWalks in component/memql), so listing it changes only which table its
+// latest keys come from, not an index path.
 func HasLiveness(concept string) bool {
 	switch concept {
-	case "v1:worker:registration", "v1:cluster:node", "v1:platform:moduleReadiness", "v1:platform:customDomain", "v1:platform:syncState":
+	case "v1:worker:registration", "v1:cluster:node", "v1:platform:moduleReadiness", "v1:platform:customDomain", "v1:platform:syncState", "v1:pipelines:run":
 		return true
 	default:
 		return false
@@ -40,6 +55,25 @@ func EnableLivenessStorageWhenReady(ctx context.Context, db *bun.DB, nodeID stri
 // the observation table. Such a reader must block this second rollout.
 func EnableReconcileObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
 	return enableObservationsWhenReady(ctx, db, nodeID, "memory_reconcile_observation_storage", "memory_reconcile_observation_readers")
+}
+
+// EnablePipelineRunObservationsWhenReady is the third handshake, for the
+// pipeline run's lease renewal. A reader of the first two releases does not
+// list v1:pipelines:run in HasLiveness and must block it; once every
+// non-stopped node advertises here the renewal is an observation on the whole
+// cluster. Like the other two it never turns itself off: observations already
+// stored must stay readable.
+//
+// It runs only where schema references are enabled (SchemaCompactor.run), so
+// on a cluster that never set MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE every
+// renewal stays a version. Where references are already enabled (production
+// since 2026-10-14) it activates once every replica runs an engine that
+// advertises it: deploying that engine is the decision. Regression tests:
+// TestPipelineRunObservationsWaitForTheirOwnReaderHandshake (component/memql)
+// and TestLeaseRenewalsAreObservationsAcrossTwoReplicas
+// (component/pipelinerun).
+func EnablePipelineRunObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
+	return enableObservationsWhenReady(ctx, db, nodeID, "memory_pipeline_run_observation_storage", "memory_pipeline_run_observation_readers")
 }
 
 func enableObservationsWhenReady(ctx context.Context, db *bun.DB, nodeID, storage, readers string) (bool, error) {

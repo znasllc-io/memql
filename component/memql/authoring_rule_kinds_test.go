@@ -5,30 +5,20 @@ import (
 	"testing"
 )
 
-// TestSandboxCompilesRuleAndPolicy. Both kinds used to fall through the
-// sandbox's default arm and be reported "not compiled by the sandbox" -- a
-// graceful skip, which meant a runtime-authored rule reached activation
-// without its grammar ever having been checked.
-func TestSandboxCompilesRuleAndPolicy(t *testing.T) {
-	report := SandboxCompileBundle([]SandboxConstruct{
-		{
-			Name: "myRule",
-			Kind: "rule",
-			Source: `@when(prompt="agentReply")
-@policy("localFirst")
-@precedence(500)
-rule myRule { }`,
-		},
-		{
-			Name: "myPolicy",
-			Kind: "policy",
-			Source: `@primary("fleet:strongest")
+// TestSandboxCompilesAPolicy. A policy used to fall through the sandbox's
+// default arm and be reported "not compiled by the sandbox" -- a graceful skip,
+// which meant an authored construct reached activation without its grammar ever
+// having been checked.
+func TestSandboxCompilesAPolicy(t *testing.T) {
+	report := SandboxCompileBundle([]SandboxConstruct{{
+		Name: "myPolicy",
+		Kind: "policy",
+		Source: `@primary("fleet:strongest")
 @fallback("federation:cheapest")
 policy myPolicy { }`,
-		},
-	})
+	}})
 	if !report.OK {
-		t.Fatalf("a valid rule and policy did not compile: %+v", report.Diagnostics)
+		t.Fatalf("a valid policy did not compile: %+v", report.Diagnostics)
 	}
 	for _, d := range report.Diagnostics {
 		if d.Skipped {
@@ -39,63 +29,46 @@ policy myPolicy { }`,
 	}
 }
 
-// TestSandboxRefusesAnAuthoredLockedRule is one of the two refusals design D7
-// names.
-//
-// The check is here as well as in the loader because the loader's keys on which
-// TREE a file came from, and an authored construct comes from no tree at all --
-// so without this arm the annotation would pass Gate 1, reach activation, and
-// be refused there instead: later, further from the author, and with a message
-// about trees they have no file in.
-func TestSandboxRefusesAnAuthoredLockedRule(t *testing.T) {
-	report := SandboxCompileBundle([]SandboxConstruct{{
-		Name: "sneaky",
-		Kind: "rule",
-		Source: `@when()
-@policy("localFirst")
-@precedence(9999)
-@locked
-rule sneaky { }`,
-	}})
-	if report.OK {
-		t.Fatal("an authored rule carrying @locked compiled; it would then evaluate before every shipped rule")
-	}
-	joined := ""
-	for _, d := range report.Diagnostics {
-		joined += d.Error + "\n"
-	}
-	for _, want := range []string{"@locked", "embedded tree", "@precedence"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("the refusal does not mention %q, so it does not tell the author what to do instead:\n%s", want, joined)
-		}
-	}
-}
-
-// TestSandboxRefusesAMalformedRule. The point of routing an authored construct
-// through the real parser is that a form the grammar refuses never reaches the
-// registry.
-func TestSandboxRefusesAMalformedRule(t *testing.T) {
+// TestSandboxRefusesEveryRule. A routing rule is cluster routing configuration
+// (routingRuleSave), and the router never reads one armed from a bundle, so
+// Gate 1 refuses a rule whatever it says -- valid, locked or malformed --
+// rather than compiling it and letting it arm as a construct that decides no
+// call (2026-11-08). It is REFUSED, never skipped: a skipped construct does not
+// fail the bundle.
+func TestSandboxRefusesEveryRule(t *testing.T) {
 	for _, tc := range []struct{ name, source string }{
-		{"no policy", "@when()\n@precedence(5)\nrule noPolicy { }"},
-		{"an unknown condition key", "@when(model=\"gpt-5\")\n@policy(\"localFirst\")\n@precedence(5)\nrule badKey { }"},
-		{"an unknown level", "@when()\n@level(\"smart\")\n@policy(\"localFirst\")\n@precedence(5)\nrule badLevel { }"},
-		{"a non-empty body", "@when()\n@policy(\"localFirst\")\n@precedence(5)\nrule hasBody { step x { } }"},
+		{"a valid rule", "@when(prompt=\"agentReply\")\n@policy(\"localFirst\")\n@precedence(500)\nrule myRule { }"},
+		{"a locked rule", "@when()\n@policy(\"localFirst\")\n@precedence(9999)\n@locked\nrule myRule { }"},
+		{"a malformed rule", "@when(model=\"gpt-5\")\n@precedence(5)\nrule myRule { }"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			name := tc.source[strings.LastIndex(tc.source, "rule ")+5:]
-			name = strings.TrimSpace(name[:strings.Index(name, " ")])
-			report := SandboxCompileBundle([]SandboxConstruct{{Name: name, Kind: "rule", Source: tc.source}})
+			report := SandboxCompileBundle([]SandboxConstruct{{Name: "myRule", Kind: "rule", Source: tc.source}})
 			if report.OK {
-				t.Fatalf("the sandbox accepted a rule with %s", tc.name)
+				t.Fatalf("the sandbox accepted %s; armed, it would decide no call", tc.name)
+			}
+			if len(report.Diagnostics) != 1 {
+				t.Fatalf("want one diagnostic for the one rule, got %+v", report.Diagnostics)
+			}
+			d := report.Diagnostics[0]
+			if d.Skipped {
+				t.Fatalf("%s was skipped rather than refused, so it would not fail its bundle: %+v", tc.name, d)
+			}
+			for _, want := range []string{`rule "myRule"`, "authoring is not supported in a bundle", "routingRuleSave"} {
+				if !strings.Contains(d.Error, want) {
+					t.Fatalf("the refusal of %s does not say %q, so it does not tell the author where a rule goes:\n%s",
+						tc.name, want, d.Error)
+				}
 			}
 		})
 	}
 }
 
-// TestEngineCoreHasCoversRuleAndPolicy is the OTHER refusal design D7 names,
-// at the layer that enforces it: the authoring pipeline's core-first resolver.
-// A kind absent from this switch reports false, which reads as "core does not
-// own this name" and lets an authored construct take it.
+// TestEngineCoreHasCoversRuleAndPolicy: the authoring pipeline's core-first
+// resolver sees the loaded rules and policies. A kind absent from its switch
+// reports false, which reads as "core does not own this name" and would let an
+// authored construct take it. Gate 1 refuses an authored rule outright now;
+// the resolver still answers truthfully for the kind, so an active bundle
+// armed before that refusal cannot claim a shipped name either.
 func TestEngineCoreHasCoversRuleAndPolicy(t *testing.T) {
 	e := &MemQLEngine{}
 	e.rules = NewRuleRegistry()

@@ -79,17 +79,68 @@ replica's recovery. That test does not claim live installation completion.
 An unfinished preparation can be cancelled by its original operator from
 **Cluster > Updates**. `releaseCancelInstallationPreparation` runs one bounded
 pass of the existing installed retirement workflow: stop the scoped producer,
-fence its artifact writes, release its references, and confirm retirement of
-the complete inventory before releasing the installation reservation. Use
-**Resume cancellation** when cleanup remains pending. An uncertain reply must
+fence its artifact writes, release its references, confirm retirement of the
+complete inventory and remove each retired file's Library entries before
+releasing the installation reservation. A removal needs the journal's own
+retirement receipt for that file, and an unconfirmed one keeps its page, so a
+cancelled preparation leaves no Library entry pointing at a retired file.
+Preparations cancelled before that step left those entries behind; the
+pipeline artifact sweep removes them, and it never retires a preparation's
+files ([Retention](../../public/operate/pipelines-substrate.md#retention)).
+
+The Library store refuses to retire a file it keeps
+(`pipelinesteps.ErrArtifactRetained`): one its owner filed, labelled, edited,
+gave another version or trained into a knowledge domain, one whose Library
+history names another owner or source, or one whose entry is not ready. The
+last includes a capture whose upload the cancellation interrupted before its
+entry was marked ready, which nobody chose to keep. The store also refuses a
+file an active durable reference pins; a capture's only one, its own source
+reference, is released before its first page. Cleanup records the refusal on
+the page entry as `retained`, leaves the file's bytes and Library entries, and
+moves on, so a kept capture does not hold the installation reservation. A kept
+file already has a committed, verified object, which no late upload can
+replace, so it needs no tombstone. Until 2026-11-08 the refusal read as an
+unconfirmed retirement, and the preparation stayed `retiring` and held the head
+for good.
+
+A recorded answer is final. The pipeline sweep skips a kept file and asks again
+on its next visit; this cleanup never asks again, so the file stays in its
+owner's Library even after they stop keeping it. The page entry goes when the
+page advances; afterwards only the file's upload journal row, still not
+retired, under the preparation's source run shows what was left. If two passes
+ask either side of the owner unfiling the file, a retirement receipt outranks
+the kept answer while the page still holds the file, and the file still leaves
+the Library. If the kept answer has already moved the page on, the late receipt
+is refused: the file is retired with its Library entries left, which the
+pipeline sweep removes, or, when that retirement did not finish, it stays
+`retiring` and nothing finishes it. That needs two passes of one preparation at
+once and the owner's change between their store calls; closing it needs cleanup
+passes serialized per preparation, which is not done. A later preparation runs
+under its own source run, so its fence and inventory never include an earlier
+preparation's files.
+`TestPreparationRetirementLeavesAKeptCaptureAndReleasesItsHead` and
+`TestRetirementWorkflowInstalledPassLeavesKeptCapturesOnFreshHost` cover a kept
+capture, including a lost reply asked again on another connection, and
+`TestPreparationRetirementReceiptOutranksARacingKeptAnswer` covers the two
+passes while the page holds the file; their Library is a fixture. The real
+store's refusal of a labelled or versioned file is
+`TestPipelineLibraryDB/TestPipelineRetentionLibraryDB`, in `app`.
+
+Use **Resume cancellation** when cleanup remains pending. An uncertain reply must
 be reconciled from the saved preparation; it cannot authorize another capture.
 The cleanup entry does not depend on optional release choices or GitHub reads.
 It refuses promoted plans and other operators, including a different owner.
 Legacy captures retain their absent event and original receipt identity for
-cleanup. Once cleanup starts, its recipe is bound to the executing engine;
-an incompatible engine change refuses resumption rather than changing a
-partially completed cleanup. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
+cleanup. Once cleanup starts, its recipe is bound to the executing engine's
+build commit, so any engine change refuses resumption rather than changing a
+partially completed cleanup. A preparation left `retiring` across an upgrade
+therefore keeps the installation reservation, and no product action releases
+it. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
 covers interrupted cleanup, a fresh host, ownership and a successor reservation.
+`TestRetirementWorkflowInstalledPassPurgesRetiredCapturesOnFreshHost` covers a
+lost Library removal reply repeated on a fresh host, and
+`TestArtifactRetentionPurgesARetiredPreparationsCapturesAcrossReplicas` the
+sweep's removal for an earlier cancellation.
 
 A private product root remains supported. Rendering mints a fresh GitHub App
 token limited to that root repository and `contents: read`, through the same
@@ -200,6 +251,62 @@ process exit retains the attempt and its target claims. Starting the same
 selection resumes the saved intent; observing it cannot apply a missing one.
 The native passes are bounded, so an installation's DSL can schedule subsequent
 passes under its authorized operator context. A timer does not grant authority.
+
+### Application status and retained change history
+
+Some installed Application CRDs have no status subresource. Their routine
+controller status updates advance `metadata.generation` even when the complete
+spec is unchanged. Comparing that generation in the long-lived configuration
+digest refused preparation after a healthy Argo refresh. Removing the generation
+check alone would hide a configuration edit followed by a restoration.
+
+New preparations therefore capture a name-filtered Application list's global
+resource version and retain a history cursor with each original intent in
+`installation_preparations.application_continuity`. An object's own resource
+version may predate history compaction even when freshly read, so it cannot
+replace the list boundary. A call-owned guard checks the cursor every ten
+seconds while preparation or pre-apply verification is running. It is joined
+before the call returns or dispatches an owned Application write; no detached
+controller or timer acquires installation authority.
+
+An unchanged object version refreshes the global boundary without a watch.
+Otherwise a bounded watch must account for every intervening event through the
+freshly read object. The original UID, complete spec, intent marker and idle
+operation must remain unchanged. Status-driven generation advances are accepted;
+a real edit, including one restored before the next read, permanently invalidates
+that preparation. Missing, expired or malformed history refuses and does not
+advance the cursor. Concurrent replicas compare and persist cursors under the
+existing original-operator, installation-head and workflow locks. A slower
+successful read cannot erase another replica's invalidation. Recovery starts
+from the retained cursor, never from a newly invented baseline.
+
+The final patch needs a fresh native proof for the exact observed object version
+and tests UID, resource version, generation and complete spec atomically. Cursor
+JSON is not such a proof. Already owned effects reconcile through their original
+intent marker. Existing intent-format-1 records and rollback intents retain
+their strict generation fences; this change does not rebind uncertain reversals.
+If a paused preparation loses required Kubernetes history, cancel it and prepare
+again. An uncertain started effect must instead be reconciled from its saved
+intent. The additive cursor migration cannot be reversed while retained history
+exists.
+
+Installers need `get`, `list` and `watch` on only their configured Application
+names. Keep `resourceNames` on that Role rule: each list/watch supplies the exact
+`metadata.name` field selector. Unfiltered collections and unrelated Application
+names remain unauthorized. Patch permissions, credentials and subjects do not
+change. Activate the scoped read permissions before deploying an engine that
+uses history-backed preparation.
+
+Regression coverage is in
+[`continuity_test.go`](../../../integrations/argocd/continuity_test.go),
+[`application_continuity_db_test.go`](../../../integrations/installation/application_continuity_db_test.go)
+and the existing group recovery/rollback protocol suite. The PostgreSQL cases
+cover replica recovery, sticky invalidation, cancellation, unavailable-history
+retry and joined lifecycle cancellation. The opt-in
+`TestApplicationHistoryThroughInstalledKubernetes` observes a real status-driven
+generation change using an explicitly selected operator connection and named
+Application. It performs no writes and does not qualify installer RBAC or live
+installation completion; those still require their own checks.
 
 ## Rollback
 

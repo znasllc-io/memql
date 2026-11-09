@@ -17,6 +17,40 @@ and update this map when a covered path changes. User-facing behavior belongs in
 These paths are shared across goals and projects; repository names, user-specific
 paths and one task's acceptance criteria must not become routing rules.
 
+## Pipeline security findings
+
+The optional weekly security workflow consumes retained SARIF inside the
+pipeline driver. `pipelineSecurityRemediation` owns goal statements and order;
+native report operations own the current settings/source/lease gates and exact
+artifact verification. A successful scanner may contain findings, so this path
+does not use the failed-run maintenance trigger or its separate AI diagnosis
+switch. `destination: goals` performs no GitHub report upload.
+
+The native goal admission hashes the owner and stable source/finding identity.
+Its shared database gate serializes replica retries. Existing goals retain
+their first evidence, account scope and human decisions. A partial bootstrap
+can create its missing run; an existing run is never restarted by another scan,
+and a closed goal stays closed. New runs enter the ordinary goal compiler and
+Work permission/budget/review path. Scanner text remains untrusted input and
+cannot grant repository write or deployment authority. Goal completion still
+requires the owner's acceptance.
+
+Security settings are read again before selecting stages and before each new
+goal write. Off prevents new security work without changing other pipeline
+checks or cancelling existing goals. A scan failure, invalid SARIF or missing
+receipt stops report delivery rather than claiming there were no findings.
+Deduplication is durable across weeks; fallback identities without native
+scanner fingerprints can change when indistinguishable sites are inserted or
+removed. The report receipt links the goals and source digest, while the goal
+keeps normalized evidence after ordinary artifact retention.
+
+Regression coverage: `component/pipelinerun/security_schedule_test.go`,
+`component/pipelines/security_findings_test.go`,
+`integrations/work/pipeline_security_goal_db_test.go` and the Security settings
+UI tests. Fixture and isolated-database coverage do not establish a completed
+production scan. See [native security checks](native-security-checks.md) and
+[pipeline operations](../../public/operate/pipelines.md#remediation-goals-from-retained-security-reports).
+
 ## Delegation and return
 
 A delegated App can finish its operations but return an invalid terminal
@@ -4806,12 +4840,89 @@ it compiled into is no longer beaten beside it (`guardJournal` and `reopened`,
   same way.
 - **Tests:** the Postgres-backed `TestLeaseRenewalsWriteNoWorkRunVersionsOverRealRows`
   (ten renewals, a takeover and ten more leave the work run at 3 versions while
-  the lease row still takes one per renewal), `TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten`,
+  the lease row still takes one per renewal, because the shared test schema
+  keeps pipeline-run observation storage off; see the next section), `TestARunWhoseRunnerOwnsItsLivenessIsNeverBeaten`,
   `TestRecordDriverWritesTheNodeOnceAfterATakeover`,
   `TestAResumedRunKeepsWhatFinishedAndResendsTheSameAttempt` and
   `TestTheHeartbeatRenewsTheLeaseAndReadsACancel`.
 - **Unverified:** no production run has been observed with the change; the
   saving is the 2026-11-06 measurement projected.
+
+## A pipeline run's lease renewal is a current observation (2026-11-08)
+
+The lease renewal no longer appends a version of the `v1:pipelines:run` row: a
+write that changes only `driverHeartbeatAt` replaces the run's one row in
+`memory_liveness` (migration `20261108190000_pipeline_run_lease_observations`,
+`HasLiveness` and `EnablePipelineRunObservationsWhenReady` in
+`component/database/memory-nodes/liveness.go`, the call in `schema_compactor.go`).
+
+- **Trigger:** every renewal (`renew`, `component/pipelinerun/lease.go`), every
+  30 s for each run a replica drives, once the cluster's switch is on.
+- **Evidence:** a renewal writes `driverHeartbeatAt` and nothing else (`renew`
+  sends a patch of that field alone, and `updatePipelineRun` stamps only the id),
+  and each one appended a whole version with the ~14 KB `policySnapshot`: about
+  three quarters of the 3,831 versions of 30 runs written in one day on
+  production (2026-11-06). Nothing reads a superseded renewal.
+- **Chosen path:** the store that already holds worker, cluster-node,
+  readiness, custom-domain and sync-state observations, with
+  `['driverHeartbeatAt']` as the run's observation list. A claim (new
+  `driverNodeId` and `driverLeaseId`), the stage table, the work run, a cancel
+  request and the conclusion stay versions, carry the observed heartbeat in
+  through the read-merge, and clear the observation in the same transaction.
+- **Why the lease stays sound:** every engine read merges `memory_liveness`; the
+  claim's fresh read and recovery's list read see the observed heartbeat, so a
+  takeover waits for the observation, not the newest version, to be
+  `leaseStaleAfter` old. The row-version fence reads the newest `createdAt`
+  across both tables (`ObservedRowsSQL`), so a decision made before an observed
+  renewal is refused, and a fenced write is stamped after its witness, which
+  the trigger's backdating rule needs.
+- **Alternatives:** a slower renewal keeps the cost and lengthens a takeover;
+  dropping `policySnapshot` from the versions needs a second content-addressed
+  store and a lookup on every fresh read (left, `operational-retention.md`).
+  Moving the Library pass's and app sessions' `v1:work:run` heartbeat the same
+  way is not possible as the engine stands: `HasLiveness` turns off the work
+  run's payload lookup and walk indexes.
+- **Fallback and stop conditions:** the switch,
+  `memory_pipeline_run_observation_storage.enabled`, stays off until every
+  non-stopped node has advertised in `memory_pipeline_run_observation_readers`
+  within 30 s; a reader of the two earlier handshakes does not count, and an
+  offline node blocks it. While it is off every renewal is a version, as before.
+  Once on it never turns itself off. The down migration folds each observation
+  back into the run's newest version. The migration runs under a 5 s
+  `lock_timeout` and takes `"MemoryNodes"` before `memory_liveness`, the order
+  readers and writers take them, so a busy moment fails it whole and the next
+  attempt retries.
+- **Invariant:** the newest version of a run, observation included, is what
+  every reader and every fence sees, and a lease is taken over only after its
+  newest renewal is `leaseStaleAfter` old.
+- **Retained versus temporary:** superseded renewals are not kept at all; the
+  newest renewal survives the declared keep-latest retention (it judges within
+  `MemoryNodes`, which keeps the newest business version) and goes when
+  whole-run retention retires the run (the prune trigger's `WHEN` list).
+- **Survives a retry, pause or replica change:** the observation is a row, so
+  a restarted or other replica reads it; a driver paused past
+  `leaseStaleAfter` loses the run to a claim, and its next write is refused by
+  the fence and by the fresh read under the gate, as before.
+- **Activation:** the compactor advertises the handshake only where schema
+  references are enabled. On production they have been since 2026-10-14, so
+  the switch turns on by itself once every replica runs an engine with this
+  change: deploying it is the owner's decision. A cluster that never set
+  `MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE=true`, as a local one, never turns
+  it on.
+- **Tests:** `TestLeaseRenewalsAreObservationsAcrossTwoReplicas`
+  (`component/pipelinerun`, two engines over a private schema: ten renewals add
+  no version and report no business write to a held journal, the other
+  replica and its recovery list read the observed heartbeat, a writer fenced on
+  the claim's version is refused, the takeover waits for the observation to
+  age, a stage write carries it, retention keeps the newest version and the
+  observation, the down migration folds it) and
+  `TestPipelineRunObservationsWaitForTheirOwnReaderHandshake` (`component/memql`:
+  the switch waits for its own readers, then holds; retiring the whole run
+  prunes the observation).
+- **Unverified:** no production run has been observed with the switch on, and
+  the migration's lock behavior is reasoned, not measured on production's load.
+  The OS run lists kept their plan on 2,000 local runs (one empty index-only
+  scan of `memory_liveness` added); production's planner and data were not read.
 
 ## The timing table learns from the steps it balances (2026-11-02)
 

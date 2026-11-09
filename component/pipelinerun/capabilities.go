@@ -29,7 +29,7 @@ func init() {
 		// (app/integrations_pipelines.go): only app/ can see the packages
 		// integration and the direct database. Until it does, every act
 		// that needs one refuses by name rather than half-working.
-		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret, SystemVariable: pctx.ResolveSystemVariable}
+		d := Deps{Logger: pctx.Logger, Secrets: pctx.ResolveSystemSecret, SystemVariable: pipelineSystemVariableReader(pctx.Engine, pctx.ResolveSystemVariable)}
 		if pctx.Engine != nil {
 			d.Store = NewDSLStore(pctx.Engine)
 		}
@@ -52,6 +52,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "channelAllow", Description: "Allow or revoke one channel on a caller-owned pipeline.", Handler: i.handleChannelAllow, ArgsSchema: map[string]string{"pipelineId": "string (required) -- caller-owned pipeline", "name": "string (required) -- caller-owned channel", "allowed": "boolean (required) -- grant or revoke"}},
 		{Name: "reportPublish", Handler: workflowCapability("reportPublish")},
 		{Name: "reportObserve", Handler: workflowCapability("reportObserve")},
+		{Name: "securityRead", Handler: workflowCapability("securityRead")},
+		{Name: "securityOpenGoal", Handler: workflowCapability("securityOpenGoal")},
 		{Name: "readSARIF", Description: "Observe a caller-owned native SARIF upload without re-uploading. Only complete proves ingestion; uncertain never retries the write.", Handler: i.handleReadSARIF, ArgsSchema: map[string]string{"publicationId": "string (required) -- exact native SARIF publication identity"}},
 		{Name: "publishSARIF", Description: "Publish one successful native scanner artifact through the source owner's current GitHub grant. Journal the upload before observing ingestion; repeated calls never retry an uncertain POST.", Handler: i.handlePublishSARIF, ArgsSchema: map[string]string{"runId": "string (required) -- caller-owned pipeline run", "stepKey": "string (required) -- completed scanner step", "path": "string (required) -- exact retained .sarif path"}},
 		{Name: "reviewPullRequest", Description: "Independently review only the claimed exact pull request under installed policy.", Handler: workflowCapability("reviewPullRequest")},

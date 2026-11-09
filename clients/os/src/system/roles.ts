@@ -359,6 +359,14 @@ export function hasOrganizationDecisions(): boolean {
   return organizationEffective.length > 0;
 }
 
+/** Whether the engine answers `verb` on `resource` per organization for this
+ * person: their organization entries carry the pair. Which pairs those are is
+ * the engine's to say (component/memql/organization_capabilities.go), never a
+ * list here. False for an operator, who has no organization entries. */
+export function decidedPerOrganization(verb: string, resource: string): boolean {
+  return organizationEffective.some(entry => entry.verb === verb && entry.resource === resource);
+}
+
 /** The whole set, resource then verb, for a surface that RENDERS it (the permissions self-view). */
 export function effectiveCapabilities(): EffectiveCapability[] {
   return [...effective.values()].sort(

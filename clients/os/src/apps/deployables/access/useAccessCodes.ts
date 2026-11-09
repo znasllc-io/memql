@@ -36,6 +36,8 @@ export interface AccessCodeRow {
   lastOpenedAt: string;
   /** The organization copied from the site at mint (D15). */
   accountId: string;
+  /** The deployable's guest pass, which has no code. The panel keeps it off the code list. */
+  guest: boolean;
 }
 
 function accessCodeFromRow(row: Row): AccessCodeRow {
@@ -49,6 +51,8 @@ function accessCodeFromRow(row: Row): AccessCodeRow {
     expiresAt: rowString(row, "expiresAt"),
     lastOpenedAt: rowString(row, "lastOpenedAt"),
     accountId: rowString(row, "accountId"),
+    // READ AS TEXT TOO, as a gate's flag is: a scalar boolean on a builtin's row.
+    guest: row["guest"] === true || row["guest"] === "true",
   };
 }
 
@@ -94,7 +98,7 @@ export interface AccessRefusal {
   unknown: boolean;
 }
 
-export type AccessAct = "create" | "regenerate" | "setExpiry" | "remove";
+export type AccessAct = "create" | "allowGuests" | "regenerate" | "setExpiry" | "remove";
 
 /**
  * How a write ended. REFUSED means the engine answered no, and the draft waits for
@@ -108,6 +112,7 @@ export type WriteOutcome = "done" | "refused" | "unknown";
 const UNANSWERED: Readonly<Record<AccessAct, string>> = {
   create: "The connection dropped before the cluster answered, so this code may have been saved, and it cannot be shown now. If it is on the list, regenerate it to get one you can copy.",
   regenerate: "The connection dropped before the cluster answered, so a new code may have been saved, and the old one may have stopped working. Regenerate it again to get one you can copy.",
+  allowGuests: "The connection dropped before the cluster answered, so guest access may have been turned on. Check Guest access before trying again.",
   setExpiry: "The connection dropped before the cluster answered, so this change may have been saved. Check the list before trying again.",
   remove: "The connection dropped before the cluster answered, so this change may have been saved. Check the list before trying again.",
 };
@@ -138,10 +143,20 @@ export interface NewAccessCode {
   expiresAt: string;
 }
 
+export interface NewGuestPass {
+  label: string;
+  gate: string;
+  subject?: string;
+  expiresAt: string;
+}
+
 export interface AccessCodes {
   /** False before there is a connection to ask through: not a read in progress. */
   connected: boolean;
+  /** The codes, WITHOUT the guest pass: it has no code, so a list of codes is not its place. */
   codes: Reading<AccessCodeRow[]>;
+  /** The deployable's standing guest pass, if it has one. Undefined is off. */
+  guestPass: AccessCodeRow | undefined;
   gates: Reading<AccessGateRow[]>;
   /** Why each read failed, each sentence once. Two refused reads are usually one refusal. */
   readFailures: string[];
@@ -153,6 +168,8 @@ export interface AccessCodes {
   minted: MintedCode | null;
   dropMinted: () => void;
   create: (code: NewAccessCode) => Promise<WriteOutcome>;
+  /** Turns guest access on. The reply holds no code, and nothing here asks for one. */
+  allowGuests: (pass: NewGuestPass) => Promise<WriteOutcome>;
   /** Keeps the expiry unless given one, which a code already past its expiry needs. */
   regenerate: (code: AccessCodeRow, expiresAt?: string) => Promise<WriteOutcome>;
   setExpiry: (code: AccessCodeRow, expiresAt: string) => Promise<WriteOutcome>;
@@ -206,7 +223,13 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
       return accessCodesFromRows(result.rows());
     };
   }, [connection, id]);
-  const codes = useReading<AccessCodeRow[]>(connection === null || id === "" ? "no-site" : `access-codes:${id}`, readCodes, written);
+  const everything = useReading<AccessCodeRow[]>(connection === null || id === "" ? "no-site" : `access-codes:${id}`, readCodes, written);
+
+  const codes = useMemo<Reading<AccessCodeRow[]>>(
+    () => ({ ...everything, value: everything.value === null ? null : everything.value.filter((row) => !row.guest) }),
+    [everything],
+  );
+  const guestPass = everything.value?.find((row) => row.guest);
 
   const readGates = useMemo(() => {
     if (connection === null || id === "") return null;
@@ -273,6 +296,21 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
     [run, id],
   );
 
+  const allowGuests = useCallback(
+    (pass: NewGuestPass): Promise<WriteOutcome> =>
+      run("allowGuests", "siteAccessGuestPassCreate", "", async (query) => {
+        const subject = (pass.subject ?? "").trim();
+        await query.siteAccessGuestPassCreate({
+          siteId: id,
+          label: pass.label.trim(),
+          gate: pass.gate,
+          ...(subject === "" ? {} : { subject }),
+          expiresAt: pass.expiresAt,
+        });
+      }),
+    [run, id],
+  );
+
   const regenerate = useCallback(
     (code: AccessCodeRow, expiresAt?: string): Promise<WriteOutcome> =>
       run("regenerate", "siteAccessCodeRegenerate", code.id, async (query) => {
@@ -317,6 +355,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
   return {
     connected: connection !== null,
     codes,
+    guestPass,
     gates,
     readFailures,
     reread,
@@ -326,6 +365,7 @@ export function useAccessCodes(site: SiteRow): AccessCodes {
     minted,
     dropMinted: useCallback(() => setMinted(null), []),
     create,
+    allowGuests,
     regenerate,
     setExpiry,
     remove,

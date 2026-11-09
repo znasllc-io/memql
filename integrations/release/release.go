@@ -128,6 +128,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "getCandidate", Description: "Read one caller-owned immutable candidate from its authority journal.", Handler: i.handleCandidateGet},
 		{Name: "retireCandidate", Description: "Fence an unpublished candidate and release its artifact references.", Handler: i.handleCandidateRetire},
 		{Name: "archiveCandidate", Description: "Verify published copies, permanently fence a sealed candidate and release duplicate build-input references. Owner only.", Handler: i.handleCandidateArchive},
+		{Name: "archiveWithoutCatalog", Description: "Require a catalogued later or equal release of every component, verify the copies an approved candidate with no catalog published, then permanently fence it and release its build-input references. No remote write. Owner only.", Handler: i.handleCandidateArchiveWithoutCatalog},
 		{Name: "setInputArchiveSchedule", Description: "Enable or pause this owner's scheduled duplicate publication-input archival using captured owner authority.", Handler: i.handleArchiveSchedule},
 		{Name: "sweepPublishedInputs", Description: "Internal leased maintenance of one enrolled owner's published candidate inputs.", Handler: i.handleSweepPublishedInputs},
 		{

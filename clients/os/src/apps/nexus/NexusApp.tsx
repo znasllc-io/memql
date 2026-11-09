@@ -43,6 +43,7 @@ import {
   type NexusSettingsStore, NEXUS_REQUIRES, NEXUS_WANTS } from "./settings";
 import {
   useApprovals,
+  useRoutingReviews,
   useGoals,
   useJournal,
   useRunArtifacts,
@@ -107,6 +108,9 @@ export function NexusApp({
   const allGoals = useGoals(overview);
   const allRuns = useRuns(overview || sectionId === "approvals", sectionId === "approvals");
   const allApprovals = useApprovals(overview);
+  // Routing reviews are nobody's own, so the person's approvals never hold
+  // them; the overview counts them beside the person's own (useRoutingReviews).
+  const routingReviews = useRoutingReviews(overview);
   const selectedRun = useWorkRecord("run", sectionId === "runs" ? openRunId : "");
   const selectedRunGoal = selectedRun.snapshot.rows[0] ? runFromRow(selectedRun.snapshot.rows[0]).goalId : "";
   const detailGoalId = sectionId === "goals" ? openGoalId : sectionId === "runs" ? selectedRunGoal : "";
@@ -116,7 +120,7 @@ export function NexusApp({
   const scopedApprovals = useRunApprovals(overview ? [] : runRaw.map(row => String(row.id ?? "")));
   const goals = { ...allGoals, snapshot: { ...selectedGoal.snapshot, ...(overview ? allGoals.snapshot : {}), rows: mergeRows(allGoals.snapshot.rows, selectedGoal.snapshot.rows) } };
   const runs = { ...allRuns, snapshot: { ...allRuns.snapshot, rows: runRaw } };
-  const approvals = { ...allApprovals, snapshot: overview ? allApprovals.snapshot : scopedApprovals.snapshot };
+  const approvals = { ...allApprovals, snapshot: overview ? { ...allApprovals.snapshot, rows: mergeRows(allApprovals.snapshot.rows, routingReviews.snapshot.rows) } : scopedApprovals.snapshot };
 
   // Project the retained overview or selected-detail records for joins.
   const goalRows: GoalRow[] = useMemo(

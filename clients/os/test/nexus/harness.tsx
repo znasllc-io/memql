@@ -106,6 +106,10 @@ export interface FakeSeed {
   goals?: Row[];
   runs?: Row[];
   approvals?: Row[];
+  /** The nightly routing reviews `workRoutingReviews` answers. NOBODY OWNS
+   *  ONE (the evidence fold raises it as the cluster), so seed them here with
+   *  `ownerUserId: ""` and not in `approvals`, which is the person's own. */
+  routingReviews?: Row[];
   accounts?: Row[];
   steps?: Row[] | Error;
   modelCalls?: Row[] | Error;
@@ -146,6 +150,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
   const constructRows = new Map([...(Array.isArray(seed.constructs) ? seed.constructs : []), ...(Array.isArray(seed.learnedProcedures) ? seed.learnedProcedures : [])].map(row => [String(row.id), row]));
   const goalRows = new Map((seed.goals ?? []).map(row => [String(row.id), row]));
   const approvalRows = new Map((seed.approvals ?? []).map(row => [String(row.id), row]));
+  const routingReviewRows = new Map((seed.routingReviews ?? []).map(row => [String(row.id), row]));
   const runRows = new Map((seed.runs ?? []).map((row) => [String(row.id), row]));
   const read = (rows: Row[] | Error | undefined) =>
     vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => {
@@ -302,7 +307,28 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // loudly and prove less.
       forkRun: write(seed.deriveReply),
       replayRun: write(seed.deriveReply),
-      decideApproval: builtinWrite("decideApproval", args => ({ approvalId: args.approvalId, decision: args.decision, runId: "run", runResumed: true })),
+      // A routing review is decided like any approval, parks no run, and an
+      // approved one answers with the routing change it made. The fake marks
+      // it decided, so the next workRoutingReviews read no longer lists it.
+      decideApproval: builtinWrite("decideApproval", args => {
+        const review = routingReviewRows.get(String(args.approvalId));
+        if (!review) return { approvalId: args.approvalId, decision: args.decision, runId: "run", runResumed: true };
+        routingReviewRows.set(String(args.approvalId), { ...review, decision: args.decision, decidedBy: "v1:identity:user:me", decidedAt: "2026-11-08T12:00:00Z" });
+        const changed = args.decision === "approved"
+          ? { routingRule: String((review.subject as { ruleName?: string } | undefined)?.ruleName ?? ""), routingRevision: 1, routingChanged: true }
+          : {};
+        return { approvalId: args.approvalId, decision: args.decision, runId: "", runResumed: false, ...changed };
+      }),
+      // The routing reviews the viewer may decide: a BUILTIN, so it answers in
+      // the builtin wire shape. With an id it answers that review whatever its
+      // decision, the way the detail and a re-read ask for it.
+      workRoutingReviews: vi.fn(async (args: Record<string, unknown> = {}, _opts?: unknown) => {
+        const id = typeof args.approvalId === "string" ? args.approvalId : "";
+        const rows = id
+          ? [routingReviewRows.get(id)].filter((row): row is Row => row !== undefined)
+          : [...routingReviewRows.values()].filter(row => !row.decision);
+        return builtinReply("workRoutingReviews", rows);
+      }),
       refreshComputerPermission: builtinWrite("refreshComputerPermission", args => ({ approvalId: args.approvalId, permissionState: "review_ready" })),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
         // Decode the SDK's quoted ID so a reread does not retain stale seed data.

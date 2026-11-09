@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -229,6 +231,138 @@ func TestPackageDomainsForAccessIsAFreshPointReadAsTheCluster(t *testing.T) {
 			t.Fatalf("domains = %v, err = %v", domains, err)
 		}
 	})
+}
+
+// THE GUEST PASS IS THE ROW NOT REMOVED, among every row its site's guest digest finds. A
+// site that turned guest access off and on again holds a row for each time, all with one
+// digest, so the first row found is not the answer.
+func TestLivePassForSiteIsTheGuestPassNotRemoved(t *testing.T) {
+	row := func(id, site, issued string, guest any, revoked any) map[string]any {
+		r := map[string]any{
+			"id": "v1:platform:siteAccessCode:" + id, "siteId": "v1:platform:site:" + site, "gate": "dashboard",
+			"generation": 1, "issuedAt": issued, "expiresAt": "2026-12-01T00:00:00Z", "guest": guest,
+		}
+		if revoked != nil {
+			r["revokedAt"] = revoked
+		}
+		return r
+	}
+	removed := row("removed", "site1", "2026-11-01T00:00:00Z", true, "2026-11-02T00:00:00Z")
+	live := row("live", "site1", "2026-11-03T00:00:00Z", true, nil)
+
+	t.Run("the one not removed, whatever the order", func(t *testing.T) {
+		for name, rows := range map[string][]any{
+			"removed first": {removed, live},
+			"removed last":  {live, removed},
+		} {
+			engine := &storeFakeEngine{rows: rows}
+			pass, ok, err := NewGraphStore(engine).livePassForSite(context.Background(), "site1")
+			if err != nil || !ok || pass.ID != "live" || !pass.Guest || pass.Revoked {
+				t.Fatalf("%s: pass = %+v, ok = %v, err = %v; want the live pass", name, pass, ok, err)
+			}
+		}
+	})
+
+	t.Run("it reads the site's guest digest, as the cluster", func(t *testing.T) {
+		engine := &storeFakeEngine{rows: []any{live}}
+		if _, _, err := NewGraphStore(engine).livePassForSite(context.Background(), "v1:platform:site:site1"); err != nil {
+			t.Fatal(err)
+		}
+		if len(engine.reads) != 1 {
+			t.Fatalf("reads = %+v, want one", engine.reads)
+		}
+		read := engine.reads[0]
+		for _, want := range []string{"query siteAccessCodeByHash(", `"site1"`, memql.AccessGuestPassDigest("site1")} {
+			if !strings.Contains(read.query, want) {
+				t.Errorf("query = %s, want it to carry %s", read.query, want)
+			}
+		}
+		if strings.Contains(read.query, "v1:platform:site:") {
+			t.Errorf("query = %s, want the bare site id the digest is of", read.query)
+		}
+		if !auth.IsSystemActorId(read.actor) || read.origin != auth.OriginInternal {
+			t.Errorf("the read ran as %q with origin %v: a row's owner must have no say in it", read.actor, read.origin)
+		}
+	})
+
+	t.Run("never another site's row, nor a row that is not a pass", func(t *testing.T) {
+		engine := &storeFakeEngine{rows: []any{
+			row("elsewhere", "site2", "2026-11-04T00:00:00Z", true, nil),
+			row("code", "site1", "2026-11-05T00:00:00Z", false, nil),
+			row("unmarked", "site1", "2026-11-06T00:00:00Z", nil, nil),
+			removed,
+		}}
+		pass, ok, err := NewGraphStore(engine).livePassForSite(context.Background(), "site1")
+		if err != nil || ok {
+			t.Fatalf("pass = %+v, ok = %v, err = %v; want no pass", pass, ok, err)
+		}
+	})
+
+	t.Run("against the invariant, the newest by issuedAt", func(t *testing.T) {
+		newer := row("newer", "site1", "2026-11-07T00:00:00Z", true, nil)
+		for name, rows := range map[string][]any{"older first": {live, newer}, "newer first": {newer, live}} {
+			pass, ok, err := NewGraphStore(&storeFakeEngine{rows: rows}).livePassForSite(context.Background(), "site1")
+			if err != nil || !ok || pass.ID != "newer" {
+				t.Fatalf("%s: pass = %+v, ok = %v, err = %v; want the newer pass", name, pass, ok, err)
+			}
+		}
+	})
+
+	t.Run("no rows is no pass, and a failed read is an error and not a miss", func(t *testing.T) {
+		if pass, ok, err := NewGraphStore(&storeFakeEngine{}).livePassForSite(context.Background(), "site1"); err != nil || ok {
+			t.Fatalf("pass = %+v, ok = %v, err = %v", pass, ok, err)
+		}
+		failure := errors.New("the read failed")
+		if _, ok, err := NewGraphStore(&storeFakeEngine{err: failure}).livePassForSite(context.Background(), "site1"); ok || !errors.Is(err, failure) {
+			t.Fatalf("ok = %v, err = %v", ok, err)
+		}
+	})
+}
+
+// A ROW IS A GUEST PASS ONLY WHEN IT SAYS SO, and every row written before guest passes
+// existed says nothing.
+func TestARowSaysWhetherItIsAGuestPass(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value any
+		want  bool
+	}{
+		"true":          {true, true},
+		"the text true": {"true", true},
+		"false":         {false, false},
+		"null":          {nil, false},
+	} {
+		if got := codeFromRow(map[string]any{"guest": tc.value}).Guest; got != tc.want {
+			t.Errorf("%s: Guest = %v, want %v", name, got, tc.want)
+		}
+	}
+	if codeFromRow(map[string]any{}).Guest {
+		t.Error("a row with no guest field reads as a guest pass")
+	}
+}
+
+// A GUEST PASS'S ID IS FIXED BY ITS SITE AND ITS ORDINAL, so two mints that read the same
+// passes ask for the same row. It is a UUID, as every id here is, which the digest
+// scrubber leaves alone.
+func TestAGuestPassIDIsFixedBySiteAndOrdinal(t *testing.T) {
+	first := guestPassID("site1", 1)
+	if first != guestPassID("site1", 1) || first != guestPassID("v1:platform:site:site1", 1) {
+		t.Errorf("two mints of a site's first pass ask for different ids")
+	}
+	for name, other := range map[string]string{
+		"the second pass":       guestPassID("site1", 2),
+		"another site's first":  guestPassID("site2", 1),
+		"a site named like one": guestPassID("site", 11),
+	} {
+		if other == first {
+			t.Errorf("%s has the first pass's id", name)
+		}
+	}
+	if _, err := uuid.Parse(first); err != nil {
+		t.Errorf("guestPassID = %q, which is not a UUID: %v", first, err)
+	}
+	if digestRun.MatchString(first) {
+		t.Errorf("guestPassID = %q, which the scrubber would take for a digest", first)
+	}
 }
 
 // BOTH LOOKUPS THAT OPEN A DOOR CARRY THE CODE'S NAME, the operator's label as the view

@@ -222,6 +222,17 @@ builtin releaseArchiveCandidate {
   candidateId string!
 }
 
+/// Release the build inputs of an approved candidate that has no signed
+/// catalog. Every component it contains must have a later or equal release
+/// with one; every copy it published is read back first; and nothing it began
+/// may have changed for two hours. Nothing remote changes, and the candidate
+/// can never prepare, publish or be catalogued again. Owner only.
+@sdk
+@executor("integration.release.archiveWithoutCatalog")
+builtin releaseArchiveWithoutCatalog {
+  candidateId string!
+}
+
 /// Enroll or pause your published-input cleanup. The schedule resolves your
 /// current owner role and retains credential ceilings; maintenance cannot lend
 /// authority. Pausing prevents another pass; an admitted pass may finish.

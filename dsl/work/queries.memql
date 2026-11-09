@@ -504,6 +504,38 @@ query feedbackPolicy feedbackPolicyCurrent {
   shape   feedbackPolicyFull
 }
 
+/// The pending nightly routing reviews (epic memql#5146, D5), oldest first. Only the evidence fold
+/// raises one, as the cluster's maintenance principal, so no person owns it: scoping to
+/// actor.userId would list it to nobody, which is what the owner-scoped reads above do. It
+/// selects on the kind ALONE for the same reason: a review raised before
+/// memql#4817's owner undo still carries the `system:maintenance:` owner, and
+/// `row.ownerUserId == ""` would hide it forever. @serverOnly: the work integration reads it under
+/// the system actor once the caller passed the routing-author check (owner or developer) that
+/// routingRuleSave applies -- design record
+/// docs/superpowers/specs/2026-11-08-routing-review-apply-design.md, section 1.
+@serverOnly
+@actor
+query approval workRoutingReviewsForCluster {
+  filter row => actor.isClusterOwner == true && row.kind == "routingReview" && row.decision == ""
+  sort "requestedAt", "asc"
+  paginate 100
+  shape workApprovalFull
+}
+
+/// One nightly routing review by id, whatever its decision, so a decided one can show its receipt
+/// and a retried decision can answer with the one recorded. Read as workRoutingReviewsForCluster
+/// is, for the same reason: no person owns it, so actor.userId scoping would find nothing.
+@serverOnly
+@actor
+query approval workRoutingReviewForCluster {
+  args {
+    approvalId string!
+  }
+  filter row => actor.isClusterOwner == true && row.kind == "routingReview" && row.id == args.approvalId
+  paginate 1
+  shape workApprovalFull
+}
+
 /// Exact caller-owned approval receipt, including decided approvals for recovery.
 @actor
 query approval workApprovalForOwner {

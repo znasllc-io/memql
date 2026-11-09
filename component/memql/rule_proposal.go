@@ -4,18 +4,19 @@ package memql
 //
 // A RULE ARRIVES BY TWO FRONT DOORS AND MUST BE JUDGED IDENTICALLY. An
 // operator fills in a form in MemQL OS; an operator types a sentence and a
-// model compiles it. Both end up as a rendered `rule` construct that the
-// loader either accepts or refuses, so anything one door lets through that the
-// other does not is a rule that validates, renders, and then fails -- with the
-// person holding a confident account of what it does.
+// model compiles it (routingRuleDescribe, rule_assist.go). Both are validated
+// and saved into the routing configuration through routingRuleValidate and
+// routingRuleSave (routing_configuration_rules.go), so anything one door lets
+// through that the other does not is a rule that validates and then fails --
+// with the person holding a confident account of what it does.
 //
-// WHY HERE RATHER THAN IN EITHER DOOR. `component/routingrules` is the form
-// door and lives in the root module; `component/router` is the compiler door
-// and is a LEAF module the root depends on. Neither can import the other, and
-// the first attempt to share by importing was a dependency-direction violation
-// the module-boundaries lane caught -- correctly, and invisibly to both
-// `go build ./...` and `make test`. This package is what they already share:
-// it owns RuleConfig, RuleWhenKeys and the OnUnavailable values, and it
+// WHY HERE RATHER THAN IN EITHER DOOR. `component/router`'s compiled-rule
+// check is a LEAF module the root depends on, so it cannot import the root
+// module's door. The first attempt to share by importing (when the form door
+// was component/routingrules, retired 2026-11-08) was a dependency-direction
+// violation the module-boundaries lane caught -- correctly, and invisibly to
+// both `go build ./...` and `make test`. This package is what they already
+// share: it owns RuleConfig, RuleWhenKeys and the OnUnavailable values, and it
 // already imports the policy-entry parser.
 //
 // THE POINT IS TO SHARE THE PREDICATES, NOT TO SHARE A LIST. The state this

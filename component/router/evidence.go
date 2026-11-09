@@ -25,7 +25,7 @@ package router
 // The approval's guarantee is that an approved decision cannot carry to a
 // different rule, and it rests on hashing the rendered SOURCE. Two renderers of
 // one grammar drift, and with a hash the drift is silent: a person approves
-// text A and text B is armed.
+// text A and text B is what gets applied.
 //
 // So the renderer is INJECTED. This package produces a Form and hashes whatever
 // the renderer returns; the tree's one renderer fills it in at the call site.
@@ -91,10 +91,11 @@ func validEvidenceLevel(level string) bool {
 
 // Form mirrors component/routingrules.Form field for field.
 //
-// It is a MIRROR rather than an import because that package is epic
-// memql#5127's and is not on this branch's base; the rebase deletes this type
-// and imports the real one. Until then TestEvidenceFormMatchesTheRuleGrammar
-// pins the field list, so the swap is a deletion rather than a redesign.
+// It is a MIRROR rather than an import because this is a leaf module and that
+// package lives in the root module, which depends on this one: the import
+// would be a cycle. app/'s TestEvidenceFormMirrorsTheRoutingRulesForm, the one
+// place both types are visible, fails the build if the two field lists
+// diverge.
 type Form struct {
 	Name        string
 	Description string
@@ -112,7 +113,7 @@ type Form struct {
 	Excludes      []string
 }
 
-// Renderer turns a Form into the rule source that will be armed.
+// Renderer turns a Form into the rule source a person is asked to approve.
 //
 // Injected; see the file header. The tree's one renderer is
 // component/routingrules.GenerateRule, which is stable across map iteration
@@ -135,7 +136,7 @@ type Proposal struct {
 	Week      string
 	Direction string
 	RuleName  string
-	// RuleSource is what will actually be armed.
+	// RuleSource is the exact text a person is asked to approve.
 	RuleSource string
 	// Hash is over RuleSource, not over the Form. An approval is a decision
 	// about one specific rule TEXT, and hashing the inputs would let a renderer
@@ -149,7 +150,7 @@ type Proposal struct {
 
 // ProposalHash is the artifact hash an approval carries.
 //
-// OVER THE RENDERED SOURCE, so it covers what will actually be armed. Hashing
+// OVER THE RENDERED SOURCE, so it covers the exact text approved. Hashing
 // the Form would let a renderer change move the text under an approval that
 // still verified -- which is the one failure the hash exists to prevent, and
 // the one nobody would notice.
@@ -158,39 +159,68 @@ func ProposalHash(ruleSource string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// RuleName is the generated rule's name, derived from the model and level.
+// RuleName is the generated rule's name, derived from the direction, the model
+// and the level.
 //
 // DERIVED rather than random, so a second fold of the same evidence produces
-// the same name and the authoring pipeline treats it as the same rule rather
-// than as a second one beside it.
+// the same name, and a promotion names the demotion it lifts by deriving it
+// again (integrations/work's routing review decision).
+//
+// ITS SHAPE IS A SAVED RULE'S: lowerCamelCase letters and digits. An approved
+// demotion is saved into the routing configuration through routingRuleSave's
+// own checks (component/memql's ValidateRuleProposal), which refuse any other
+// shape, and so do MemQL OS's rule forms. Until 2026-11-08 the name joined
+// its parts with underscores, so no approved demotion could have been saved.
+//
+// The model part is the model id's letters and digits with each run
+// capitalised, for a reader, then the first eight hex digits of the SHA-256 of
+// the EXACT model id, for uniqueness: "qwen3.5:9b" and "qwen35:9b" share their
+// letters and digits, and one name for both would let approving one replace
+// the other's demotion. Nothing reads the model back out of a name; it travels
+// on the evidence row and in the rule's @exclude, byte-identical to what the
+// router selects on.
 func RuleName(direction, modelId, level string) string {
-	// The direction is capitalised by hand rather than through strings.Title,
-	// which is deprecated and, more to the point, would apply Unicode word
-	// rules to a value from a closed two-word set.
-	word := direction
-	if word != "" {
-		word = strings.ToUpper(word[:1]) + word[1:]
-	}
-	return "evidence" + word + "_" + slugForRule(modelId) + "_" + level
+	return "evidence" + upperFirst(direction) + upperFirst(level) + modelWords(modelId) + ProposalHash(modelId)[:8]
 }
 
-// slugForRule reduces a model tag to something a rule name may carry.
-//
-// A tag holds ':' and '/' and a rule name is an identifier, so the translation
-// is unavoidable -- and it is one-way BY DESIGN: nothing reads the model back
-// out of a rule name. The model id travels on the evidence row, where it stays
-// byte-identical to what the router selects on.
-func slugForRule(modelId string) string {
+// maxModelWords bounds the readable part of a rule name; the digest after it
+// is what keeps a truncated name unique.
+const maxModelWords = 40
+
+// modelWords is a model id's ASCII letters and digits, each run capitalised.
+func modelWords(modelId string) string {
 	var b strings.Builder
+	startOfRun := true
 	for _, r := range modelId {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'z':
+			if startOfRun {
+				r -= 'a' - 'A'
+			}
 			b.WriteRune(r)
+			startOfRun = false
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			startOfRun = false
 		default:
-			b.WriteRune('_')
+			startOfRun = true
 		}
 	}
-	return b.String()
+	words := b.String()
+	if len(words) > maxModelWords {
+		words = words[:maxModelWords]
+	}
+	return words
+}
+
+// upperFirst capitalises a word from a closed ASCII set (a direction, a level)
+// by hand rather than through strings.Title, which is deprecated and would
+// apply Unicode word rules to a value that has none.
+func upperFirst(word string) string {
+	if word == "" {
+		return ""
+	}
+	return strings.ToUpper(word[:1]) + word[1:]
 }
 
 // SortWindows orders windows so a fold writes them in a stable order.

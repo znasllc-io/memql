@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/integrations/npmregistry"
 	"github.com/znasllc-io/memql/integrations/ociregistry"
 )
@@ -65,79 +66,98 @@ func (p *candidatePreparer) verifyPublishedInputs(ctx context.Context, snapshot 
 	}
 	checkedFiles := map[string]bool{}
 	for _, destination := range record.Manifest.Destinations {
-		publication, err := candidatePublicationFor(record, destination.TargetID, destination.Component, destination.Artifact)
+		var bound *candidateDraftRecord
+		if p.targetReader.files[destination.TargetID].ID != "" {
+			for j := range drafts {
+				if slices.Contains(drafts[j].Targets, destination.TargetID) {
+					if bound != nil {
+						return proof, errors.New("published release has ambiguous native identity")
+					}
+					bound = &drafts[j]
+				}
+			}
+		}
+		target, err := p.verifyPublishedDestination(ctx, record, destination, bound, checkedFiles)
 		if err != nil {
 			return proof, err
 		}
-		a := publication.Artifact
-		switch {
-		case p.targetReader.targets[destination.TargetID].ID != "":
-			target, err := p.targetReader.authenticatedRegistry(ctx, destination)
-			if err != nil {
-				return proof, err
-			}
-			verifier, err := ociregistry.NewAvailabilityVerifier(target)
-			if err != nil {
-				return proof, err
-			}
-			available, err := verifier.Check(ctx, a.ImageDigest, a.Platform, ociregistry.AvailabilityLimits{})
-			if err != nil {
-				return proof, err
-			}
-			receipt, err := available.Receipt()
-			if err != nil || receipt.ImageDigest != a.ImageDigest || receipt.Platform != a.Platform {
-				return proof, errors.New("published image availability differs from the sealed artifact")
-			}
-		case p.targetReader.files[destination.TargetID].ID != "":
-			plan, err := p.targetReader.draftPlan(ctx, record, destination.TargetID)
-			if err != nil {
-				return proof, err
-			}
-			if !checkedFiles[plan.ResourceKey] {
-				var bound *candidateDraftRecord
-				for j := range drafts {
-					if slices.Contains(drafts[j].Targets, destination.TargetID) {
-						if bound != nil {
-							return proof, errors.New("published release has ambiguous native identity")
-						}
-						bound = &drafts[j]
-					}
-				}
-				if bound == nil || bound.State != "published" || bound.Receipt == nil || plan.Target.Draft == nil {
-					return proof, errors.New("published release requires its complete native lifecycle receipt")
-				}
-				client, err := p.targetReader.fileLifecycle(ctx, destination)
-				if err != nil {
-					return proof, err
-				}
-				fresh, err := client.ObservePublished(ctx, bound.ReleaseID, *plan.Target.Draft, plan.marker(*bound), plan.expected())
-				if err != nil {
-					return proof, err
-				}
-				if fresh.ReleaseID != bound.ReleaseID || fresh.Draft || !slices.Equal(fresh.Assets, bound.Receipt.Assets) {
-					return proof, errors.New("published release inventory changed since native publication")
-				}
-				checkedFiles[plan.ResourceKey] = true
-			}
-		case p.targetReader.npm[destination.TargetID].ID != "":
-			target, _, err := p.targetReader.resolveNPM(ctx, destination)
-			if err != nil {
-				return proof, err
-			}
-			client, err := p.targetReader.npmPublisher(ctx, destination)
-			if err != nil {
-				return proof, err
-			}
-			_, err = client.Observe(ctx, npmregistry.Expected{Name: target.PackageName, Version: target.Version, SHA256: a.Digest, Size: a.Size})
-			if err != nil {
-				return proof, err
-			}
-		default:
-			return proof, errors.New("archive requires the current configured destination for every published artifact")
-		}
-		proof.Targets = append(proof.Targets, candidateArchiveTarget{TargetID: destination.TargetID, Digest: a.Digest, ImageDigest: a.ImageDigest, Platform: a.Platform, Size: a.Size})
+		proof.Targets = append(proof.Targets, target)
 	}
 	return proof, nil
+}
+
+// verifyPublishedDestination freshly reads one destination's canonical copy
+// through the destination the current profile or configuration still authorizes
+// at its approved digest: an OCI image by digest, a whole published release by
+// bytes (once per release, recorded in checkedFiles), or an npm tarball. bound
+// is the published release record a file destination belongs to; archival finds
+// it among the candidate's own drafts, and archiving without a catalog may find
+// it under a renewal successor. A destination the current configuration no
+// longer declares refuses, so credentials are only ever used where the operator
+// still authorizes them.
+func (p *candidatePreparer) verifyPublishedDestination(ctx context.Context, record candidateRecord, destination pl.ReleaseDestination, bound *candidateDraftRecord, checkedFiles map[string]bool) (candidateArchiveTarget, error) {
+	publication, err := candidatePublicationFor(record, destination.TargetID, destination.Component, destination.Artifact)
+	if err != nil {
+		return candidateArchiveTarget{}, err
+	}
+	a := publication.Artifact
+	switch {
+	case p.targetReader.targets[destination.TargetID].ID != "":
+		target, err := p.targetReader.authenticatedRegistry(ctx, destination)
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		verifier, err := ociregistry.NewAvailabilityVerifier(target)
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		available, err := verifier.Check(ctx, a.ImageDigest, a.Platform, ociregistry.AvailabilityLimits{})
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		receipt, err := available.Receipt()
+		if err != nil || receipt.ImageDigest != a.ImageDigest || receipt.Platform != a.Platform {
+			return candidateArchiveTarget{}, errors.New("published image availability differs from the sealed artifact")
+		}
+	case p.targetReader.files[destination.TargetID].ID != "":
+		plan, err := p.targetReader.draftPlan(ctx, record, destination.TargetID)
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		if !checkedFiles[plan.ResourceKey] {
+			if bound == nil || bound.State != "published" || bound.Receipt == nil || plan.Target.Draft == nil {
+				return candidateArchiveTarget{}, errors.New("published release requires its complete native lifecycle receipt")
+			}
+			client, err := p.targetReader.fileLifecycle(ctx, destination)
+			if err != nil {
+				return candidateArchiveTarget{}, err
+			}
+			fresh, err := client.ObservePublished(ctx, bound.ReleaseID, *plan.Target.Draft, plan.marker(*bound), plan.expected())
+			if err != nil {
+				return candidateArchiveTarget{}, err
+			}
+			if fresh.ReleaseID != bound.ReleaseID || fresh.Draft || !slices.Equal(fresh.Assets, bound.Receipt.Assets) {
+				return candidateArchiveTarget{}, errors.New("published release inventory changed since native publication")
+			}
+			checkedFiles[plan.ResourceKey] = true
+		}
+	case p.targetReader.npm[destination.TargetID].ID != "":
+		target, _, err := p.targetReader.resolveNPM(ctx, destination)
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		client, err := p.targetReader.npmPublisher(ctx, destination)
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+		_, err = client.Observe(ctx, npmregistry.Expected{Name: target.PackageName, Version: target.Version, SHA256: a.Digest, Size: a.Size})
+		if err != nil {
+			return candidateArchiveTarget{}, err
+		}
+	default:
+		return candidateArchiveTarget{}, errors.New("archive requires the current configured destination for every published artifact")
+	}
+	return candidateArchiveTarget{TargetID: destination.TargetID, Digest: a.Digest, ImageDigest: a.ImageDigest, Platform: a.Platform, Size: a.Size}, nil
 }
 
 // archivalCandidateFor builds the preparer archival verifies with. configuredCandidateFor

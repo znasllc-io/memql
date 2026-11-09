@@ -278,11 +278,14 @@ func TestArmingSomebodyElsesRuleIsRefused(t *testing.T) {
 	}
 }
 
-// bundleOwnerGate is the real gate's comparison: the id it is handed must equal
-// the bundle's ownerUserId, which writeBundle stamps from the caller and the
-// store keeps canonical. The other fakes accept any owner, which is how a
-// gate handed the BARE rule owner refused every activation in a real engine
-// while every test here passed.
+// bundleOwnerGate accepts exactly the id writeBundle stamps on the bundle -- the
+// caller's, kept canonical -- and nothing else. The real gate also passes the
+// bare spelling of that id, since it compares people rather than spellings
+// (memql#6022 follow-up); this one stays strict so a test against it fails
+// when the gate is handed anything but the caller as the bundle was stamped,
+// the rule row's bare owner included. The other fakes accept any owner, which
+// is how a gate handed the BARE rule owner refused every activation in a real
+// engine while every test here passed.
 func bundleOwnerGate(verb string) func(owner, bundleID string) error {
 	const stamped = "v1:identity:user:owner1"
 	return func(owner, _ string) error {
@@ -293,8 +296,8 @@ func bundleOwnerGate(verb string) func(owner, bundleID string) error {
 	}
 }
 
-// The rule row reads back with its owner bare-ified (ruleFromRow), so the
-// gate has to be handed the authenticated caller, not the rule's owner field.
+// The gate has to be handed the authenticated caller, not the rule's owner
+// field (which reads back bare-ified, ruleFromRow): it checks the person asking.
 func TestActivationHandsTheGateTheCallerAsTheBundleWasStamped(t *testing.T) {
 	e := &fakeEngine{rule: ruleRow(), activate: bundleOwnerGate("activate")}
 	res, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34")

@@ -839,6 +839,30 @@ func TestEffectiveAccessIsPerOrganization(t *testing.T) {
 	expectAccess(t, rows, "", "read", "app:files", true, "role", "writer")
 }
 
+// TestEffectiveAccessAnswersThePipelinesDoorPerOrganization: opening Pipelines
+// is decided per organization (the personal-source gate and the OS parts
+// list both ask it in each organization), so it has one row per organization
+// and no merged row.
+func TestEffectiveAccessAnswersThePipelinesDoorPerOrganization(t *testing.T) {
+	w := newAccessWorld(t)
+	acme, beta := w.id("acme"), w.id("beta")
+	w.installCatalog(acme)
+	acmeGroup, betaGroup := w.organization(acme), w.organization(beta)
+	person := w.person("both", "writer")
+	w.join(acmeGroup, acme, person)
+	w.join(betaGroup, beta, person)
+	w.grant(acmeGroup, "read", "app:pipelines", "allow")
+	w.grant(betaGroup, "read", "app:pipelines", "deny")
+
+	rows, err := readAccess(t, w.eng, accessCaller(w.id("admin"), componentAuth.RoleAdmin), "user", person)
+	if err != nil {
+		t.Fatalf("an admin reading a person in two organizations: %v", err)
+	}
+	expectAccess(t, rows, acme, "read", "app:pipelines", true, "group", acmeGroup)
+	expectAccess(t, rows, beta, "read", "app:pipelines", false, "group", betaGroup)
+	expectNoMergedRow(t, rows, "read app:pipelines")
+}
+
 // TestEffectiveAccessRefusesSomeoneWhoOutranksTheCaller (review focus 5):
 // asked about somebody else, the read keeps the grant reads' floor -- a
 // cluster role at admin or above -- and nobody reads a person who outranks

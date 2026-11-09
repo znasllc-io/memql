@@ -310,13 +310,13 @@ describe("an organization's apps on its group page", () => {
    * owner holding `held` -- the owner's whole set unless a case takes away
    * the one capability it is about.
    */
-  async function openAcmeInShell(connection: Conn, held = seededAccessFor("owner")) {
+  async function openAcmeInShell(connection: Conn, held = seededAccessFor("owner"), store = memoryStore()) {
     setEffectiveCapabilities(held);
     h.connection = connection;
     const view = renderApp(
       withSession(
         <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 12, rows: 8 }} store={new LocalDesktopStore(memStorage())}>
-          <UsersApp sectionId="groups" navigate={() => {}} askContext={() => {}} store={memoryStore()} />
+          <UsersApp sectionId="groups" navigate={() => {}} askContext={() => {}} store={store} />
         </OsProvider>,
       ),
     );
@@ -394,6 +394,34 @@ describe("an organization's apps on its group page", () => {
     const list = await screen.findByRole("list", { name: "Apps its people can open" });
     expect(appRows(list)).toEqual(["Deployables", "  reviews"]);
     expect(screen.queryByRole("button", { name: "Add an app" })).toBeNull();
+    view.unmount();
+  });
+
+  it("is not on an archived organization group's page, which grants nobody anything", async () => {
+    // The engine refuses to answer for an archived group (access_unknown_subject),
+    // and an archived group opens nothing for anyone: no list to read, so no
+    // warning about a list that could not be.
+    const archived = groupRow({ id: "g-acme", name: "Acme", kind: "account", accountId: "acct-acme", status: "archived" });
+    const connection = acmeSeed({
+      groupsAll: [archived],
+      effectiveAccess: { "group:g-acme": new Error("effectiveAccessForSubject: MemQL engine failed to execute query. Details: access_unknown_subject: no active group by that id") },
+    });
+    const view = await openAcmeInShell(connection, seededAccessFor("owner"), memoryStore({ showArchivedGroups: true }));
+    const panel = screen.getByRole("region", { name: "Organization access" });
+    expect(within(panel).queryByText("Apps its people can open")).toBeNull();
+    expect(within(panel).queryByText(/access_unknown_subject/)).toBeNull();
+    expect(within(panel).queryByText("What this group grants could not be read.")).toBeNull();
+    expect(connection.query.effectiveAccessForSubject).not.toHaveBeenCalled();
+    // Nor a way to manage what it grants: Settings > Access would open on a
+    // group the engine refuses to answer for.
+    expect(within(panel).queryByRole("button", { name: "Manage app access" })).toBeNull();
+    view.unmount();
+  });
+
+  it("offers Manage app access on an active organization group", async () => {
+    const view = await openAcmeInShell(acmeSeed());
+    const panel = screen.getByRole("region", { name: "Organization access" });
+    expect(within(panel).getByRole("button", { name: "Manage app access" })).toBeTruthy();
     view.unmount();
   });
 

@@ -1,6 +1,8 @@
 import liveQuickReply from "../test/nexus/fixtures/liveQuickReply.json";
 import { flatten as flattenLiveCapture } from "../src/kit/rows";
 import { RepositoryChange } from "../src/apps/pipelines/RepositoryChange";
+import { PipelinesApp } from "../src/apps/pipelines/PipelinesApp";
+import { pipelineSecurityConnection } from "./pipelineSecurityConnection";
 import { InstallationUpdates } from "../src/apps/cluster/updates/InstallationUpdates";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { UsersApp } from "../src/apps/users/UsersApp";
@@ -465,6 +467,12 @@ function RunsWindow({ runId }: { runId?: string }) {
   return <DeployablesWindow section="runs" fallback="Runs" intent={runId ? { runId } : undefined} />;
 }
 
+function PipelineSecurityWindow() {
+  const { actions } = useOs();
+  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+  return <WindowBody fallback="Pipelines"><PipelinesApp sectionId="settings" navigate={() => {}} askContext={() => {}} /></WindowBody>;
+}
+
 /** The Deployables fake, also answering the machines feed. */
 function pipelinesConnection(seed: FakeSeed, extra: { machines?: unknown[] } = {}) {
   const fake = fakeConnection(seed);
@@ -755,10 +763,22 @@ const ACCESS_REFUSED: FakeSeed = {
   accessGatesError: "siteAccessGates: MemQL engine failed to execute query. Details: No deployable you can read has that id. Reload the list of deployables and choose one you can see.",
 };
 
+/** The same dialog with guest access on: a pass in the engine's own row, no code anywhere on it. */
+const ACCESS_GUEST_SEED: FakeSeed = {
+  accessGates: ACCESS_GATES,
+  accessCodes: [
+    ...(ACCESS_SEED.accessCodes ?? []).slice(0, 2),
+    accessCodeRow({ id: "pass-guests", label: "Guests", gate: "engagement", subject: "acme", guest: true, codeHint: "", issuedAt: accessAt(-ACCESS_DAY), expiresAt: accessAt(12 * ACCESS_DAY), lastOpenedAt: accessAt(-2) }),
+  ],
+};
+
 /** `?click=` for the view that can only be reached by pressing: the code exists once. */
 const ACCESS_CLICKS: Record<string, string> = {
   "access-minted": "Regenerate Client reviewers|Regenerate",
   "access-unanswered": "Regenerate Client reviewers|Regenerate",
+  "access-guest-form": "Allow guests",
+  "access-guest-ask": "Turn off",
+  "access-guest-date": "Change end date",
 };
 
 /** A regenerate that lands with its reply lost on the way back. */
@@ -850,11 +870,24 @@ const QA_REVIEWS_SEED: FakeSeed = {
     } as unknown as Row,
   },
 };
-/** The settings as the store's approver reads them: they may hand the role on. */
+/**
+ * The settings as the store's approver reads them: this session's person,
+ * u-me, is the one named, so they may hand the role on or clear it. The engine
+ * answers `approvesRemovals` to the person named alone (packs/reviewspack,
+ * readSettings), so the settings and the list name u-me, and nobody else.
+ */
 const QA_REVIEWS_APPROVER_SEED: FakeSeed = {
   reviews: {
     ...QA_REVIEWS_SEED.reviews,
-    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-owner" }, may: { edit: true, nameApprover: true }, viewer: { moderates: true, approvesRemovals: true } } as unknown as Row,
+    settings: { exists: true, settings: { publicDisplay: false, linkLifetimeDays: 14, requestDelayDays: 14, requestsEnabled: true, requestTemplateId: "tmpl-review-request", notifyEmail: "moderators@example.com", removalApproverUserId: "u-me" }, may: { edit: true, nameApprover: true, nameSender: false }, viewer: { moderates: true, approvesRemovals: true } } as unknown as Row,
+    people: {
+      storeId: "store-live",
+      people: [
+        { userId: "u-carol", displayName: "Carol Reyes", email: "carol@example.com", mayRemove: false },
+        { userId: "u-owner", displayName: "Store Owner", email: "owner@shop.example.com", mayRemove: false },
+        { userId: "u-me", displayName: "", email: "moderator@shop.example.com", mayRemove: true },
+      ],
+    } as unknown as Row,
   },
 };
 const QA_NAMES: Record<string, string> = { "u-carol": "Carol Reyes", "u-owner": "Store Owner" };
@@ -1272,6 +1305,10 @@ const VIEWS: Record<
     render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
   },
   "pipeline-map": { connect: () => pipelinesConnection({ ...LISTS, ...mapPipelines() }), wrap: pipelinesWrap, render: () => <DeployablesWindow section="map" fallback="Overview" /> },
+  "pipeline-security-off": { connect: () => pipelineSecurityConnection("off"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-on": { connect: () => pipelineSecurityConnection("on"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-unavailable": { connect: () => pipelineSecurityConnection("unavailable"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
+  "pipeline-security-refused": { connect: () => pipelineSecurityConnection("refused"), wrap: pipelinesWrap, render: () => <PipelineSecurityWindow /> },
   // Settings -> Pipelines, the optional readiness item, in each reading.
   "settings-pipelines-unset": {
     connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),
@@ -1462,6 +1499,11 @@ const VIEWS: Record<
   access: { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
   "access-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-minted": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-form": { seed: ACCESS_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-ask": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-date": { seed: ACCESS_GUEST_SEED, framed: true, render: () => <AccessPage /> },
+  "access-guest-empty": { seed: { accessGates: ACCESS_GATES, accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-no-gates": { seed: { accessGates: [], accessCodes: [] }, framed: true, render: () => <AccessPage /> },
   "access-refused": { seed: ACCESS_REFUSED, framed: true, render: () => <AccessPage /> },
   "access-unanswered": { connect: accessUnanswered, framed: true, render: () => <AccessPage /> },

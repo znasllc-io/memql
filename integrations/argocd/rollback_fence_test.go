@@ -94,3 +94,29 @@ func TestUnappliedRollbackRefusesChangedBaselineOrSubstitution(t *testing.T) {
 	require.ErrorIs(t, err, ErrChanged)
 	require.Equal(t, 0, f.writeCount())
 }
+
+func TestUnappliedHistoryIntentRetainsStrictRollbackFence(t *testing.T) {
+	f, c, forward, _ := newContinuityFixture(t)
+	// The original baseline must be an immutable revision to be reversible.
+	f.application.change(t, func(o map[string]any) {
+		object(object(o, "spec"), "source")["targetRevision"] = strings.Repeat("b", 40)
+	})
+	snapshot, err := c.ReadPlanning(t.Context(), forward.Target)
+	require.NoError(t, err)
+	forward, err = PlanRevision(snapshot, "history-forward", testRevision, false)
+	require.NoError(t, err)
+	snapshot, err = c.Read(t.Context(), forward.Target)
+	require.NoError(t, err)
+	fence, err := PlanUnappliedRollback(snapshot, forward, "history-fence")
+	require.NoError(t, err)
+	require.Equal(t, 1, fence.FormatVersion)
+	require.NoError(t, ValidateUnappliedRollback(forward, fence))
+	f.modify("42", forward.BeforeGeneration+1, nil)
+	snapshot, err = c.Read(t.Context(), forward.Target)
+	require.NoError(t, err)
+	_, err = PlanUnappliedRollback(snapshot, forward, "changed-fence")
+	require.ErrorIs(t, err, ErrChanged)
+	_, err = c.Apply(t.Context(), fence)
+	require.ErrorIs(t, err, ErrChanged)
+	require.Zero(t, f.application.writeCount())
+}

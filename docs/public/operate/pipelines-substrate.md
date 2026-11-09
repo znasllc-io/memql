@@ -1357,6 +1357,26 @@ windows. Filing or labelling a Library entry, changing its title or contents,
 retaining another version, or training the file into a knowledge domain also
 keeps it. An active or unconfirmed producer never qualifies.
 
+Each active reference belongs to one consumer, and only that consumer releases it:
+
+| Consumer | Keeps | Releases it when |
+| --- | --- | --- |
+| A [release candidate](release-candidates.md) | its evidence files and every component artifact | it is retired, which only an unpublished candidate can be, or archived: with a complete publication and a signed catalog, or, with no catalog, once a later catalogued release supersedes it and what it published is read back |
+| A SARIF publication | its report | the publication completes, fails or is rejected |
+| A repository change | its proposal | the change is applied; one that never applied keeps it |
+| An installation's source capture | its capture | the preparation is retired |
+
+A prepared candidate nobody approved keeps its inputs until its owner retires it
+with `releaseRetireCandidate(candidateId)`. A candidate with any publication
+intent, even a pending one, cannot be retired. An approved candidate that has no
+signed catalog, such as one approved before catalogs existed or one a draft
+renewal replaced, keeps its inputs until its owner calls
+`releaseArchiveWithoutCatalog(candidateId)`, which needs a later or equal
+catalogued release of every component it contains and reads back what it
+published ([Archive a candidate that has no catalog](release-candidates.md#archive-a-candidate-that-has-no-catalog)).
+Once a reference is released, the sweep's next visit to that producer retires
+the file, since its window has already passed.
+
 `sweepPipelineArtifacts` runs on the agent cron leader once a minute. Each pass
 handles at most 32 files from one producer, with a four-minute time bound. A
 durable lease and cursor rotate fairly across producers and allow a replacement
@@ -1367,14 +1387,54 @@ failure preserves the journal for retry; it cannot produce a successful cleanup
 receipt. Never delete these tombstones or break their leases with a storage
 lifecycle rule.
 
+An installation preparation's source captures and their step logs are stored in
+the same journal, under the preparation's own run rather than a pipeline run, so
+none of the windows above applies to them and the sweep never retires them. The
+preparation's cleanup does: cancelling a preparation fences each capture,
+releases its reference, retires every file and then removes its Library
+entries, and the cancellation is not finished until each removal is confirmed.
+A file kept in the Library, as above, is the exception: the cleanup records
+that it was kept, leaves its bytes and Library entries, and finishes without
+it, so it does not hold up the installation's next update. Nothing asks about
+that file again, and the sweep never retires a preparation's files, so it stays
+in its owner's Library even after they stop keeping it.
+A promoted preparation keeps its captures for its rollback. The sweep visits such
+a producer only while a file that cleanup retired still has Library entries,
+and removes only those entries, 32 a pass, after confirming each file's
+tombstone. That covers preparations cancelled before their cleanup removed the
+entries itself.
+
 `pipelinesRetireArtifacts(runId, afterId, dryRun)` applies the same safeguards to
 one owner-selected completed run. `dryRun: true` reads a page without changing
 anything; the page count is not a promise that every file will qualify. Continue
 with the returned `afterId` while `hasMore` is true. A file kept by a publication
-or Library edit is reported as retained. Files uploaded before logs received
-native receipts can be enrolled with `pipelinesAdoptLegacyLog(runId, stepKey)`:
-the owned completed step supplies its log identity, and the existing bytes are
-verified before adoption. This operation uploads and deletes nothing.
+or Library edit is reported as retained.
+
+Step logs stored before logs had native receipts (engines before 0.30.5) have
+none, so the sweep cannot see them. The migration that creates
+`pipeline_legacy_log_enrollment` lists each such file once.
+`enrollLegacyPipelineLogs` runs on the agent cron leader once a minute under
+its own lease. Each pass leases up to 32 listed files of one producer and
+rereads that producer's work journal, pipeline run and step as their owner; all
+three must be finished. It then verifies each log's stored bytes against its
+Library record and writes the receipt the log would have had. The list names a
+file's step from the file's own `producedByRunId` and `producedByStepKey`, so a
+log that no version of its step names, such as one stored while its step was
+being cancelled, is enrolled too. So is a log whose step's other files were
+already retired: their retirement fenced the step against further uploads, and
+the fence admits exactly this adoption, a verified receipt for bytes already
+stored, and still refuses every upload. From then on the log is an ordinary
+receipted file: the sweep retires it at its next visit to that producer.
+
+A failed file is retried on later passes, behind every other producer, and is
+recorded `refused`, with its reason, after five failures. A file its owner
+filed, labelled or edited is refused at once, because retention would keep it
+anyway. A refused file keeps its bytes and rows. A pass that dies leaves its
+files to the next pass once the lease lapses, and a receipt it had already
+written is found again rather than written twice.
+`pipelinesAdoptLegacyLog(runId, stepKey)` enrolls the log one completed step
+names straight away, with the same verification. Neither operation uploads,
+retires or deletes anything.
 
 The run detail keeps the original execution result after cleanup. It labels a
 log or artifact as expired only when `pipelinesExpiredArtifacts(runId, fileIds)`
@@ -1385,7 +1445,7 @@ after the producing work journal is swept.
 
 DSL record TTL is not a substitute for this process: expiring a record alone
 does not delete the blob bytes. New logs use the same durable upload journal as
-artifacts. Existing logs require the explicit verified adoption above.
+artifacts, and older logs are enrolled into it by the scheduled verification above.
 
 `MEMQL_PIPELINES_RUN_RETENTION_DAYS` (30 by default) is how many days after a
 finished run's latest version its records are kept. The nightly operational
@@ -1406,7 +1466,8 @@ this order:
 A work run with model-call or observation detail, a pending approval, a recent
 child, or a child with no owner or someone else's, is kept until that clears,
 and its goal with it. Pipeline and work journals also remain while their native
-artifact receipts still own bytes or await Library cleanup, and while a live release
+artifact receipts still own bytes or await Library cleanup, while one of the run's
+step logs still waits in the legacy enrollment list, and while a live release
 candidate names the run in its evidence, [reused a step](release-candidates.md#reused-steps)
 from it, or the run is an attempt of its release. Nothing is deleted without an archive
 the sweep has read back: a cluster with no archive container (`MEMQL_WORK_ARCHIVE_CONTAINER`, else

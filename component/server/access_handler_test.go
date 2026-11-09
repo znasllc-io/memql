@@ -46,6 +46,12 @@ const (
 	accessTestCodeID     = "code1"
 	accessTestSubject    = "acme"
 	accessTestLabel      = "Client reviewers"
+
+	// The site's guest pass: a code nobody holds, with a subject and a name of its own so
+	// that a reply or a call made on it cannot pass for one made on the code.
+	accessTestPassID      = "pass1"
+	accessTestPassSubject = "guests"
+	accessTestPassLabel   = "Guests"
 )
 
 // accessT0 is when every test starts, at a whole second so a remainingMs reads as
@@ -153,6 +159,21 @@ func (f *accessFakeStore) CodeByHash(_ context.Context, _, codeHash string) (*Ac
 		return nil, err
 	}
 	code, found := f.codes[f.digests[codeHash]]
+	if !found {
+		return nil, nil
+	}
+	copied := *code
+	return &copied, nil
+}
+
+// GuestPassForSite answers the row the site's guest digest finds, REMOVED OR NOT, though the
+// real one keeps only the pass that is not removed: the handler holds the row to that as
+// well, and a fake that filtered would leave the check unexercised by anything.
+func (f *accessFakeStore) GuestPassForSite(_ context.Context, siteID string) (*AccessCode, error) {
+	if err := f.note("GuestPassForSite"); err != nil {
+		return nil, err
+	}
+	code, found := f.codes[f.digests[memql.AccessGuestPassDigest(siteID)]]
 	if !found {
 		return nil, nil
 	}
@@ -284,6 +305,10 @@ func newAccessRig(t *testing.T) *accessRig {
 			Args: []string{"window"}, Stamped: append([]string(nil), memql.ReservedAccessArgs...)}),
 		dashboard(memql.AccessGateEntry{Construct: "deskNote", Kind: memql.AccessKindMutation,
 			Args: []string{"noteId", "title"}, Stamped: []string{memql.AccessArgCodeID}}),
+		dashboard(memql.AccessGateEntry{Construct: "deskGuestFlag", Kind: memql.AccessKindMutation,
+			Args: []string{"title"}, Stamped: []string{memql.AccessArgCodeID, memql.AccessArgGuest}}),
+		dashboard(memql.AccessGateEntry{Construct: "deskGuestQuery", Kind: memql.AccessKindQuery,
+			Stamped: []string{memql.AccessArgGuest}}),
 		dashboard(memql.AccessGateEntry{Construct: "deskVisit", Kind: memql.AccessKindMutation,
 			Args: []string{"visitId"}, Stamped: []string{memql.AccessArgCodeID, memql.AccessArgCodeLabel}}),
 		// HAND-BUILT, since the load never lets a reserved name into Args: what stops a
@@ -313,6 +338,15 @@ func newAccessRig(t *testing.T) *accessRig {
 		Subject: accessTestSubject, Label: accessTestLabel, Generation: 1, ExpiresAt: accessT0.Add(time.Hour),
 	}
 	store.digests[memql.AccessCodeDigest(accessTestCode)] = accessTestCodeID
+	// THE SITE LETS GUESTS IN, through a pass an operator made: a code's row that says it is a
+	// guest pass, found by the site's guest digest. It ends far enough off that a guest's
+	// session ends at its 24-hour cap, as a long-lived code's does.
+	store.codes[accessTestPassID] = &AccessCode{
+		ID: accessTestPassID, SiteID: accessTestSite, AccountID: accessTestAccount, Gate: "dashboard",
+		Subject: accessTestPassSubject, Label: accessTestPassLabel, Generation: 1,
+		ExpiresAt: accessT0.Add(12 * 24 * time.Hour), Guest: true,
+	}
+	store.digests[memql.AccessGuestPassDigest(accessTestSite)] = accessTestPassID
 	engine := &accessFakeEngine{}
 	clock := &accessFakeClock{at: accessT0}
 	logs := &bytes.Buffer{}
@@ -400,6 +434,22 @@ func (r *accessRig) open() string {
 	return accessTokenFrom(r.t, rec)
 }
 
+// guest asks the guest route for a session, with the body a page sends.
+func (r *accessRig) guest() *httptest.ResponseRecorder {
+	r.t.Helper()
+	return r.send(http.MethodPost, "/access/guest", "{}", "")
+}
+
+// openGuest opens a guest session and answers the token the browser now holds.
+func (r *accessRig) openGuest() string {
+	r.t.Helper()
+	rec := r.guest()
+	if rec.Code != http.StatusOK {
+		r.t.Fatalf("opening a guest session answered %d: %s", rec.Code, rec.Body.String())
+	}
+	return accessTokenFrom(r.t, rec)
+}
+
 var accessCookiePattern = regexp.MustCompile(`^__Host-memql_access=(mql_acs_[A-Za-z0-9_-]{43}); Path=/; HttpOnly; Secure; SameSite=Strict$`)
 
 func accessTokenFrom(t *testing.T, rec *httptest.ResponseRecorder) string {
@@ -450,8 +500,13 @@ func accessSessionBody(t *testing.T, rec *httptest.ResponseRecorder) (gate, subj
 	if err := json.Unmarshal(rec.Body.Bytes(), &fields); err != nil {
 		t.Fatalf("not an object: %v: %s", err, rec.Body.String())
 	}
-	if len(fields) != 4 {
-		t.Fatalf("the reply carries %d fields, want gate, subject, expiresAt and remainingMs: %s", len(fields), rec.Body.String())
+	if len(fields) != 5 {
+		t.Fatalf("the reply carries %d fields, want gate, subject, expiresAt, remainingMs and guest: %s", len(fields), rec.Body.String())
+	}
+	for _, name := range []string{"gate", "subject", "expiresAt", "remainingMs", "guest"} {
+		if _, ok := fields[name]; !ok {
+			t.Fatalf("the reply carries no %s: %s", name, rec.Body.String())
+		}
 	}
 	var body struct {
 		Gate        string `json:"gate"`
@@ -463,6 +518,21 @@ func accessSessionBody(t *testing.T, rec *httptest.ResponseRecorder) (gate, subj
 		t.Fatal(err)
 	}
 	return body.Gate, body.Subject, body.ExpiresAt, body.RemainingMs
+}
+
+// accessSessionGuest is what a session reply says about whose session it is. It has to be
+// there and a boolean: a page reads anything else as a code's session, and counts down to
+// an end its guest never chose.
+func accessSessionGuest(t *testing.T, rec *httptest.ResponseRecorder) bool {
+	t.Helper()
+	accessSessionBody(t, rec)
+	var body struct {
+		Guest *bool `json:"guest"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Guest == nil {
+		t.Fatalf("the reply says nothing a page can read about whose session it is: %s", rec.Body.String())
+	}
+	return *body.Guest
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,7 +1119,7 @@ func TestCallStampsReservedArgumentsLast(t *testing.T) {
 
 	rig.call(token, "deskStamped", map[string]any{"window": "24h"})
 
-	want := `query desk.deskStamped(accessCodeId: "code1", accessGate: "dashboard", accessSubject: "acme", siteId: "site1", window: "24h")`
+	want := `query desk.deskStamped(accessCodeId: "code1", accessGate: "dashboard", accessGuest: false, accessSubject: "acme", siteId: "site1", window: "24h")`
 	if len(rig.engine.calls) != 1 || rig.engine.calls[0] != want {
 		t.Fatalf("calls = %v, want %q", rig.engine.calls, want)
 	}
@@ -1610,6 +1680,353 @@ func TestCallBodies(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// the guest route
+// ---------------------------------------------------------------------------
+
+// A GUEST PASS IS A CODE NOBODY HOLDS (design record 2026-11-08), and the guest route opens a
+// session on it for whoever asks. From there it is a code's session in every respect: the
+// row, the cookie and the 24-hour cap, with the reply saying it is a guest's.
+func TestGuestOpensASessionOnTheLivePass(t *testing.T) {
+	rig := newAccessRig(t)
+	// Not the 1 every pass is minted with: the session has to carry the pass's own
+	// generation, and a 1 written by rote would look the same as one read off the row.
+	rig.store.codes[accessTestPassID].Generation = 2
+
+	var rec *httptest.ResponseRecorder
+	cost := rig.costOf(func() { rec = rig.guest() })
+
+	gate, subject, expiresAt, remainingMs := accessSessionBody(t, rec)
+	if gate != "dashboard" || subject != accessTestPassSubject {
+		t.Fatalf("gate = %q, subject = %q, want the pass's", gate, subject)
+	}
+	// THE 24-HOUR CAP IS A CODE'S (D10): the pass ends in twelve days and the session in one.
+	if want := accessT0.Add(24 * time.Hour).Format(time.RFC3339); expiresAt != want {
+		t.Fatalf("expiresAt = %q, want %q", expiresAt, want)
+	}
+	if remainingMs != (24 * time.Hour).Milliseconds() {
+		t.Fatalf("remainingMs = %d, want a day", remainingMs)
+	}
+	if !accessSessionGuest(t, rec) {
+		t.Fatalf("a guest's session says it is a code's: %s", rec.Body.String())
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) != 1 {
+		t.Fatalf("Set-Cookie = %q, want the one cookie", got)
+	}
+	token := accessTokenFrom(t, rec)
+
+	// ONE READ BY THE SITE'S GUEST DIGEST, THEN THE SITE, THEN THE ROW: what unlock costs, with
+	// the pass where the typed code's digest would be.
+	if want := []string{"GuestPassForSite", "SiteAsCluster", "CreateSession"}; !reflect.DeepEqual(cost, want) {
+		t.Fatalf("cost = %v, want %v", cost, want)
+	}
+	if len(rig.store.created) != 1 {
+		t.Fatalf("wrote %d sessions, want 1", len(rig.store.created))
+	}
+	written := rig.store.created[0]
+	if written.in.SiteID != accessTestSite || written.in.CodeID != accessTestPassID || written.in.Generation != 2 ||
+		!written.in.IssuedAt.Equal(accessT0) || written.in.IssuedAt.Location() != time.UTC {
+		t.Fatalf("session row = %+v, want one on the pass, of its generation, issued now in UTC", written.in)
+	}
+	if written.tokenHash != memql.AccessSessionTokenDigest(token) {
+		t.Fatal("the row does not hold the digest of the cookie, so the cookie would find nothing")
+	}
+	if len(rig.store.owners) != 1 || rig.store.owners[0] != accessTestOwner {
+		t.Fatalf("the row was written as %v, want the site's owner", rig.store.owners)
+	}
+
+	// The next request finds the session by the cookie alone, and it is still a guest's.
+	if !accessSessionGuest(t, rig.session(token)) {
+		t.Fatal("the status check of a guest's session says it is a code's")
+	}
+
+	// Every open is a session of its own, as every unlock is.
+	if rig.openGuest() == token || len(rig.store.created) != 2 {
+		t.Fatalf("a second open did not mint a session of its own: %d written", len(rig.store.created))
+	}
+}
+
+// NO PASS IS `closed`, FOR ONE READ AND NOTHING ELSE. A guest open has no secret to check
+// first, so it cannot cost nothing as a stranger's other requests do (G-D7): it costs the
+// lookup by the site's guest digest, and a miss ends it, with no site read, no write and no
+// line in the log for anybody to drive.
+func TestGuestIsClosedWithoutAPass(t *testing.T) {
+	for name, arrange := range map[string]func(*accessRig){
+		"a site that never let guests in": func(r *accessRig) {
+			delete(r.store.digests, memql.AccessGuestPassDigest(accessTestSite))
+		},
+		// The real store hands back only a row that says it is a pass. This is the handler
+		// holding the row to that anyway, since the reply says whose session it is from it.
+		"a row that does not say it is a guest pass": func(r *accessRig) {
+			r.store.codes[accessTestPassID].Guest = false
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			arrange(rig)
+			var rec *httptest.ResponseRecorder
+			cost := rig.costOf(func() { rec = rig.guest() })
+			assertAccessReply(t, rec, http.StatusForbidden, `{"state":"closed"}`)
+			assertNoAccessCookie(t, rec)
+			if want := []string{"GuestPassForSite"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("cost = %v, want %v", cost, want)
+			}
+			if len(rig.store.created) != 0 {
+				t.Fatalf("a closed door wrote a session: %+v", rig.store.created)
+			}
+			if logged := rig.logs.String(); logged != "" {
+				t.Fatalf("a closed door logged:\n%s", logged)
+			}
+		})
+	}
+}
+
+// A PASS THAT WAS TURNED OFF, OR HAS COME TO ITS END, LETS NOBODY IN, and the row says so
+// before the site is read: whether it still opens is known from the row, so a crowd asking a
+// closed door costs one read each.
+func TestGuestIsClosedForARemovedOrExpiredPass(t *testing.T) {
+	end := accessT0.Add(12 * 24 * time.Hour)
+	for name, arrange := range map[string]func(*accessRig){
+		// The real store answers nothing for a removed pass. This is the handler holding the
+		// row to that as well.
+		"a removed pass":         func(r *accessRig) { r.store.codes[accessTestPassID].Revoked = true },
+		"at the instant it ends": func(r *accessRig) { r.clock.at = end },
+		"long past its end":      func(r *accessRig) { r.clock.at = end.Add(48 * time.Hour) },
+		"its end moved into the past": func(r *accessRig) {
+			r.store.codes[accessTestPassID].ExpiresAt = accessT0.Add(-time.Minute)
+		},
+		// An end that cannot be read comes back as the zero time, which is long past: a pass
+		// with no readable end is ended rather than open for ever.
+		"an end that cannot be read": func(r *accessRig) { r.store.codes[accessTestPassID].ExpiresAt = time.Time{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			arrange(rig)
+			var rec *httptest.ResponseRecorder
+			cost := rig.costOf(func() { rec = rig.guest() })
+			assertAccessReply(t, rec, http.StatusForbidden, `{"state":"closed"}`)
+			assertNoAccessCookie(t, rec)
+			if want := []string{"GuestPassForSite"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("cost = %v, want %v", cost, want)
+			}
+			if len(rig.store.created) != 0 {
+				t.Fatalf("a closed door wrote a session: %+v", rig.store.created)
+			}
+		})
+	}
+
+	t.Run("the millisecond before its end is still open", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rig.clock.at = end.Add(-time.Millisecond)
+		if _, _, _, remaining := accessSessionBody(t, rig.guest()); remaining != 1 {
+			t.Fatalf("remainingMs = %d, want the millisecond left", remaining)
+		}
+	})
+}
+
+// A PASS WHOSE COPY OF THE ORGANIZATION IS NOT ITS SITE'S OPENS NOTHING (D15), whatever its
+// end, and neither does anything else that would make a code not this site's. Each is the
+// one `closed`, and each is known only once the site has been read, which a pass that stands
+// has paid for.
+func TestGuestIsClosedForAnotherOrganizationsCopy(t *testing.T) {
+	for name, arrange := range map[string]func(*accessRig){
+		"a copy of the organization the site left": func(r *accessRig) {
+			r.store.codes[accessTestPassID].AccountID = "acct-the-site-left"
+		},
+		"a copy on a site that now has none": func(r *accessRig) { r.store.site.AccountID = "" },
+		"a pass of another site": func(r *accessRig) {
+			r.store.codes[accessTestPassID].SiteID = accessTestOtherSite
+		},
+		"a pass of no readable generation": func(r *accessRig) {
+			r.store.codes[accessTestPassID].Generation = 0
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			arrange(rig)
+			var rec *httptest.ResponseRecorder
+			cost := rig.costOf(func() { rec = rig.guest() })
+			assertAccessReply(t, rec, http.StatusForbidden, `{"state":"closed"}`)
+			assertNoAccessCookie(t, rec)
+			if want := []string{"GuestPassForSite", "SiteAsCluster"}; !reflect.DeepEqual(cost, want) {
+				t.Fatalf("cost = %v, want %v", cost, want)
+			}
+			if len(rig.store.created) != 0 {
+				t.Fatalf("a stale pass wrote a session: %+v", rig.store.created)
+			}
+		})
+	}
+
+	t.Run("one id spelled two ways is not a move", func(t *testing.T) {
+		rig := newAccessRig(t)
+		rig.store.site.AccountID = "v1:accounts:account:" + accessTestAccount
+		if !accessSessionGuest(t, rig.guest()) {
+			t.Fatal("a canonical spelling read as a move")
+		}
+	})
+
+	t.Run("a guest's open session ends when the site moves", func(t *testing.T) {
+		rig := newAccessRig(t)
+		token := rig.openGuest()
+		rig.store.site.AccountID = "acct-the-site-moved-to"
+		rec := rig.session(token)
+		assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+		assertAccessCookieCleared(t, rec)
+	})
+}
+
+// THE BODY IS A JSON OBJECT OR THE ROUTE SAYS SO, before anything is read. What the object
+// says is never read: the route takes nothing, and a page sends `{}`.
+func TestGuestRefusesABodyThatIsNotAnObject(t *testing.T) {
+	sized := func(size int) string { return "{" + strings.Repeat(" ", size-2) + "}" }
+	for name, body := range map[string]string{
+		"an array":            `[]`,
+		"a string":            `"x"`,
+		"not JSON":            `x`,
+		"a number":            `1`,
+		"null":                `null`,
+		"an empty body":       ``,
+		"JSON and then more":  `{}{}`,
+		"one byte over 1 KiB": sized(1<<10 + 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			rec := rig.send(http.MethodPost, "/access/guest", body, "")
+			assertAccessReply(t, rec, http.StatusBadRequest, `{"error":"invalid_body"}`)
+			assertNoAccessCookie(t, rec)
+			if len(rig.store.calls) != 0 || len(rig.store.created) != 0 {
+				t.Fatalf("a body that is not an object reached the store: %v", rig.store.calls)
+			}
+		})
+	}
+
+	for name, body := range map[string]string{
+		"an empty object": `{}`,
+		// A CODE IN THE BODY IS NOT AN UNLOCK, and a gate in it opens nothing: the session is
+		// the pass's, whatever the object says.
+		"an object whose fields are ignored": `{"code":"` + accessTestCode + `","gate":"clients"}`,
+		"exactly 1 KiB":                      sized(1 << 10),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			rec := rig.send(http.MethodPost, "/access/guest", body, "")
+			if gate, subject, _, _ := accessSessionBody(t, rec); gate != "dashboard" || subject != accessTestPassSubject {
+				t.Fatalf("gate = %q, subject = %q, want the pass's", gate, subject)
+			}
+			if !accessSessionGuest(t, rec) || rig.store.called("CodeByHash") != 0 {
+				t.Fatalf("the object was read as something to unlock: %v", rig.store.calls)
+			}
+		})
+	}
+}
+
+// EVERY REPLY THAT DESCRIBES A SESSION SAYS WHOSE IT IS (G-D8), so a page can say "Guest"
+// rather than count down to an end its visitor never chose. A code's says false.
+func TestSessionRepliesSayWhetherTheyAreAGuests(t *testing.T) {
+	rig := newAccessRig(t)
+
+	unlocked := rig.unlock(accessTestCode)
+	if accessSessionGuest(t, unlocked) {
+		t.Fatalf("an unlock says it opened a guest's session: %s", unlocked.Body.String())
+	}
+	code := accessTokenFrom(t, unlocked)
+	if accessSessionGuest(t, rig.session(code)) {
+		t.Fatal("the status check of a code's session says it is a guest's")
+	}
+
+	opened := rig.guest()
+	if !accessSessionGuest(t, opened) {
+		t.Fatalf("a guest open says it opened a code's session: %s", opened.Body.String())
+	}
+	guest := accessTokenFrom(t, opened)
+	if !accessSessionGuest(t, rig.session(guest)) {
+		t.Fatal("the status check of a guest's session says it is a code's")
+	}
+
+	// Each is still what it was, one beside the other.
+	if accessSessionGuest(t, rig.session(code)) {
+		t.Fatal("a guest's session opening turned a code's into a guest's")
+	}
+}
+
+// TURNING GUEST ACCESS OFF TAKES EVERY GUEST OUT ON THEIR NEXT REQUEST, as removing a code
+// takes out its holders (design record 2026-11-08, section 7). The session is a code's, so
+// what ends it is what ends a code's, with no branch of its own, and the route is closed
+// from then on. A code holder is not taken out with them.
+func TestRemovingThePassEndsAnOpenGuestSession(t *testing.T) {
+	inAnHour := accessT0.Add(time.Hour)
+	for name, tc := range map[string]struct {
+		arrange, end func(*accessRig)
+	}{
+		"turned off": {end: func(r *accessRig) { r.store.codes[accessTestPassID].Revoked = true }},
+		"its end moved to now": {end: func(r *accessRig) {
+			r.store.codes[accessTestPassID].ExpiresAt = accessT0
+		}},
+		"its end came": {
+			arrange: func(r *accessRig) { r.store.codes[accessTestPassID].ExpiresAt = inAnHour },
+			end:     func(r *accessRig) { r.clock.at = inAnHour },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newAccessRig(t)
+			if tc.arrange != nil {
+				tc.arrange(rig)
+			}
+			rig.store.codes[accessTestCodeID].ExpiresAt = accessT0.Add(2 * time.Hour)
+			guests := []string{rig.openGuest(), rig.openGuest()}
+			holder := rig.open()
+
+			tc.end(rig)
+
+			for _, token := range guests {
+				rec := rig.session(token)
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				assertAccessCookieCleared(t, rec)
+				rec = rig.call(token, "deskBriefs", nil)
+				assertAccessReply(t, rec, http.StatusUnauthorized, `{"state":"ended"}`)
+				assertAccessCookieCleared(t, rec)
+			}
+			if len(rig.engine.calls) != 0 {
+				t.Fatalf("a guest taken out reached the engine: %v", rig.engine.calls)
+			}
+			assertAccessReply(t, rig.guest(), http.StatusForbidden, `{"state":"closed"}`)
+			if len(rig.store.ended) != 0 {
+				t.Fatal("ending guest access wrote to the sessions; ending one is a comparison, not a write")
+			}
+			if rec := rig.session(holder); rec.Code != http.StatusOK {
+				t.Fatalf("turning guests away took a code holder out: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A GUEST'S CALL IS STAMPED AS A CODE'S IS (G-D6): the pass is its accessCodeId, so to a
+// product all guests together are one more code, and the pass's name reaches a mutation that
+// declares accessCodeLabel and never a query.
+func TestAGuestCallIsStampedAsTheCodeIs(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.openGuest()
+
+	assertAccessReply(t, rig.call(token, "deskStamped", map[string]any{"window": "24h"}), http.StatusOK, `{"data":[]}`)
+	assertAccessReply(t, rig.call(token, "deskVisit", map[string]any{"visitId": "visit1"}), http.StatusOK, `{"data":[]}`)
+
+	want := []string{
+		`query desk.deskStamped(accessCodeId: "pass1", accessGate: "dashboard", accessGuest: true, accessSubject: "guests", siteId: "site1", window: "24h")`,
+		`desk.deskVisit(accessCodeId: "pass1", accessCodeLabel: "Guests", visitId: "visit1")`,
+	}
+	if !reflect.DeepEqual(rig.engine.calls, want) {
+		t.Fatalf("calls = %q, want %q", rig.engine.calls, want)
+	}
+	for i, actor := range rig.engine.actors {
+		if actor != accessTestOwner || rig.engine.origins[i] == auth.OriginInternal {
+			t.Fatalf("call %d ran as %q with origin %v, want the site's owner, borrowed", i, actor, rig.engine.origins[i])
+		}
+	}
+	if strings.Contains(rig.engine.calls[0], memql.AccessArgCodeLabel) || strings.Contains(rig.engine.calls[0], accessTestPassLabel) {
+		t.Fatalf("a query was told the pass's name: %s", rig.engine.calls[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
 // the bound on the body
 // ---------------------------------------------------------------------------
 
@@ -1686,7 +2103,11 @@ func TestRefusalIsNotLoggedWithArguments(t *testing.T) {
 	rig.unlock("00000-00000-00000-00000-00000")
 	rig.store.fail["CreateSession"] = errors.New("the store failed")
 	rig.unlock(accessTestCode)
+	rig.send(http.MethodPost, "/access/guest", `{"note":"`+secretArgument+`"}`, "")
 	delete(rig.store.fail, "CreateSession")
+	rig.store.fail["GuestPassForSite"] = errors.New("the store failed")
+	rig.send(http.MethodPost, "/access/guest", `{"note":"`+secretArgument+`"}`, "")
+	delete(rig.store.fail, "GuestPassForSite")
 	rig.session(token)
 	rig.leave(token)
 
@@ -1722,6 +2143,11 @@ func TestRepliesAreNoStore(t *testing.T) {
 
 	replies["unlock 200"] = rig.unlock(accessTestCode)
 	replies["unlock 401"] = rig.unlock("00000-00000-00000-00000-00000")
+	replies["guest 200"] = rig.guest()
+	replies["guest 400"] = rig.send(http.MethodPost, "/access/guest", "[]", "")
+	rig.store.fail["GuestPassForSite"] = errors.New("the store failed")
+	replies["guest 502"] = rig.guest()
+	delete(rig.store.fail, "GuestPassForSite")
 	replies["session 200"] = rig.session(token)
 	replies["session none"] = rig.session("")
 	replies["session ended"] = rig.session(accessUnheldToken(t))
@@ -1738,6 +2164,8 @@ func TestRepliesAreNoStore(t *testing.T) {
 	replies["an unknown route"] = rig.send(http.MethodGet, "/access/nope", "", "")
 	rig.clock.at = accessT0.Add(2 * time.Hour)
 	replies["unlock 403"] = rig.unlock(accessTestCode)
+	rig.store.codes[accessTestPassID].Revoked = true
+	replies["guest 403"] = rig.guest()
 	rig.stamp = nil
 	replies["an unstamped request"] = rig.session("")
 
@@ -1758,6 +2186,7 @@ func TestRepliesAreNoStore(t *testing.T) {
 func accessEveryOperation(r *accessRig, token string) map[string]*httptest.ResponseRecorder {
 	return map[string]*httptest.ResponseRecorder{
 		"unlock":  r.unlock(accessTestCode),
+		"guest":   r.guest(),
 		"session": r.session(token),
 		"leave":   r.leave(token),
 		"call":    r.call(token, "deskBriefs", nil),
@@ -1787,12 +2216,13 @@ func TestUnstampedRequestIs404(t *testing.T) {
 }
 
 // accessOnlyFindsTheCredentialAndTheSite is what a request whose stamp does not check out
-// may read: the digest it presented, and the site that turned it away.
+// may read: the digest it presented, or the site's guest pass, and the site that turned it
+// away.
 func accessOnlyFindsTheCredentialAndTheSite(t *testing.T, cost []string) {
 	t.Helper()
 	for _, call := range cost {
 		switch call {
-		case "CodeByHash", "SessionByTokenHash", "SiteAsCluster":
+		case "CodeByHash", "GuestPassForSite", "SessionByTokenHash", "SiteAsCluster":
 		default:
 			t.Fatalf("a stamp that does not check out went on to %s: %v", call, cost)
 		}
@@ -1860,8 +2290,10 @@ func TestForgedOwnerReadsNothing(t *testing.T) {
 		token := rig.open()
 		rig.store.answersAnySite = true
 		rig.stamp[AccessStampSiteHeader] = accessTestOtherSite
-		// Both rows name the stamped site, so it is the row of the site that refuses.
+		// The rows name the stamped site, so it is the row of the site that refuses.
 		rig.store.sessions[memql.AccessSessionTokenDigest(token)].SiteID = accessTestOtherSite
+		rig.store.codes[accessTestPassID].SiteID = accessTestOtherSite
+		rig.store.digests[memql.AccessGuestPassDigest(accessTestOtherSite)] = accessTestPassID
 		var replies map[string]*httptest.ResponseRecorder
 		cost := rig.costOf(func() { replies = accessEveryOperation(rig, token) })
 		for op, rec := range replies {
@@ -1890,18 +2322,23 @@ func TestForgedOwnerReadsNothing(t *testing.T) {
 		if rec := rig.call(token, "deskBriefs", nil); rec.Code != http.StatusOK {
 			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 		}
+		if rec := rig.guest(); rec.Code != http.StatusOK {
+			t.Fatalf("a guest open answered %d: %s", rec.Code, rec.Body.String())
+		}
 	})
 
 	t.Run("a row with no owner refuses every stamp", func(t *testing.T) {
 		rig := newAccessRig(t)
 		rig.store.site.OwnerUserID = ""
 		assertAccessReply(t, rig.unlock(accessTestCode), http.StatusNotFound, `{"error":"not_found"}`)
+		assertAccessReply(t, rig.guest(), http.StatusNotFound, `{"error":"not_found"}`)
 	})
 
 	t.Run("a site with no package deployable has no codes to open", func(t *testing.T) {
 		rig := newAccessRig(t)
 		rig.store.site.DeployableName = "  "
 		assertAccessReply(t, rig.unlock(accessTestCode), http.StatusNotFound, `{"error":"not_found"}`)
+		assertAccessReply(t, rig.guest(), http.StatusNotFound, `{"error":"not_found"}`)
 	})
 }
 
@@ -1931,6 +2368,7 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 			const visitorWrote = "something-only-the-visitor-sent"
 			for op, rec := range map[string]*httptest.ResponseRecorder{
 				"unlock":  rig.unlock(accessTestCode),
+				"guest":   rig.send(http.MethodPost, "/access/guest", `{"note":"`+visitorWrote+`"}`, ""),
 				"session": rig.session(token),
 				"leave":   rig.leave(token),
 				"call":    rig.call(token, visitorWrote, map[string]any{"window": visitorWrote}),
@@ -1942,8 +2380,8 @@ func TestAStampThatDoesNotCheckOutIsLoggedAndStillTheOne404(t *testing.T) {
 			}
 
 			logged := rig.logs.String()
-			if got := strings.Count(logged, "level=WARN"); got != 4 {
-				t.Fatalf("logged %d WARN lines for 4 requests:\n%s", got, logged)
+			if got := strings.Count(logged, "level=WARN"); got != 5 {
+				t.Fatalf("logged %d WARN lines for 5 requests:\n%s", got, logged)
 			}
 			for _, want := range []string{tc.reason, "subject.id=" + accessTestSite, "subject.concept=v1:platform:site"} {
 				if !strings.Contains(logged, want) {
@@ -2008,7 +2446,8 @@ func accessUnheldToken(t *testing.T) string {
 // is 600 a minute per (site, address) on each edge replica. Measured before this order: a
 // cookie-less status check ran 52 statements, because the handler resolved the site under
 // the owner's authority before anything else, and a pool of four connections flattened at
-// about 50 requests a second.
+// about 50 requests a second. The guest route is the one priced rather than free, at one
+// read: TestGuestIsClosedWithoutAPass.
 func TestAStrangerCostsNoReads(t *testing.T) {
 	for name, tc := range map[string]struct {
 		send   func(*accessRig) *httptest.ResponseRecorder
@@ -2425,7 +2864,7 @@ func TestTheCookieIsExactlyWhatAHostPrefixRequires(t *testing.T) {
 	})
 }
 
-func TestOnlyTheFourRoutesAnswer(t *testing.T) {
+func TestOnlyTheFiveRoutesAnswer(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/access/unlock"},
 		{http.MethodPost, "/access/session"},
@@ -2435,12 +2874,17 @@ func TestOnlyTheFourRoutesAnswer(t *testing.T) {
 		{http.MethodPut, "/access/unlock"},
 		{http.MethodOptions, "/access/unlock"},
 		{http.MethodHead, "/access/session"},
+		{http.MethodGet, "/access/guest"},
+		{http.MethodPut, "/access/guest"},
+		{http.MethodPost, "/access/guest/"},
+		{http.MethodPost, "/access/guest/deeper"},
 		{http.MethodPost, "/access/"},
 		{http.MethodGet, "/access/"},
 		{http.MethodPost, "/access/unlock/"},
 		{http.MethodPost, "/access/unlock/deeper"},
 		{http.MethodPost, "/access/nope"},
 		{http.MethodPost, "/accessories/unlock"},
+		{http.MethodPost, "/accessories/guest"},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			rig := newAccessRig(t)
@@ -2486,6 +2930,9 @@ func TestAStoreFailureOpensNothingAndEndsNothing(t *testing.T) {
 		{"the code read, on the session", "CodeByID", "session"},
 		{"the code read, on a call", "CodeByID", "call"},
 		{"the end of the session", "EndSession", "leave"},
+		{"the guest pass read, on a guest open", "GuestPassForSite", "guest"},
+		{"the site read, on a guest open", "SiteAsCluster", "guest"},
+		{"the session write, on a guest open", "CreateSession", "guest"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newAccessRig(t)
@@ -2515,6 +2962,8 @@ func accessEveryOperationOf(r *accessRig, op, token string) *httptest.ResponseRe
 	switch op {
 	case "unlock":
 		return r.unlock(accessTestCode)
+	case "guest":
+		return r.guest()
 	case "session":
 		return r.session(token)
 	case "leave":
@@ -2544,6 +2993,7 @@ func TestAccessRoutesReachTheHandlerWithoutABearer(t *testing.T) {
 		status             int
 	}{
 		"unlock":  {http.MethodPost, "/access/unlock", `{"code":"` + accessTestCode + `"}`, http.StatusOK},
+		"guest":   {http.MethodPost, "/access/guest", "{}", http.StatusOK},
 		"session": {http.MethodGet, "/access/session", "", http.StatusUnauthorized},
 		"leave":   {http.MethodPost, "/access/leave", "{}", http.StatusNoContent},
 		"call":    {http.MethodPost, "/access/call", `{"call":"deskBriefs"}`, http.StatusUnauthorized},
@@ -2568,13 +3018,14 @@ func TestAccessRoutesReachTheHandlerWithoutABearer(t *testing.T) {
 	}
 }
 
-// THE VERIFIER STEPS ASIDE FOR FOUR EXACT ROUTES AND NOTHING ELSE, so a route mounted
+// THE VERIFIER STEPS ASIDE FOR FIVE EXACT ROUTES AND NOTHING ELSE, so a route mounted
 // beneath the prefix later does not inherit a bypass nobody decided on.
 func TestAccessSelfAuthenticationDoesNotExemptOtherPaths(t *testing.T) {
 	t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "")
 	for _, path := range []string{
 		"/access", "/access/", "/access/nope", "/access/unlock/", "/access/unlock/deeper",
 		"/access/call/x", "/access%2Funlock", "/%61ccess/unlock", "/access/unlock%20",
+		"/access/guest/", "/access/guest/x", "/access%2Fguest",
 	} {
 		t.Run(path, func(t *testing.T) {
 			called := false
@@ -2606,6 +3057,7 @@ func TestAccessSurfaceDeclarations(t *testing.T) {
 			"/access/session", "/tenant/access/session",
 			"/access/leave", "/tenant/access/leave",
 			"/access/call", "/tenant/access/call",
+			"/access/guest", "/tenant/access/guest",
 		}
 		if got := AccessSelfAuthenticatedPaths(); !reflect.DeepEqual(got, want) {
 			t.Fatalf("AccessSelfAuthenticatedPaths() = %v, want %v", got, want)
@@ -2670,6 +3122,76 @@ func TestAccessRequestsAreCounted(t *testing.T) {
 	counted("call", "refused", func() { rig.call(token, "deskBriefs", nil) })
 	rig.engine.err = nil
 	counted("leave", "ok", func() { rig.leave(token) })
+	counted("guest", "ok", func() { rig.openGuest() })
+	counted("guest", "invalid_body", func() { rig.send(http.MethodPost, "/access/guest", "[]", "") })
+	rig.store.fail["GuestPassForSite"] = errors.New("the store failed")
+	counted("guest", "refused", func() { rig.guest() })
+	delete(rig.store.fail, "GuestPassForSite")
 	rig.clock.at = accessT0.Add(2 * time.Hour)
 	counted("unlock", "expired", func() { rig.unlock(accessTestCode) })
+	rig.store.codes[accessTestPassID].Revoked = true
+	counted("guest", "closed", func() { rig.guest() })
+	// A pass that stands, and a stamp that does not check out against the site.
+	rig.store.codes[accessTestPassID].Revoked = false
+	rig.stamp[AccessStampOwnerHeader] = accessTestMember
+	counted("guest", "not_found", func() { rig.guest() })
+}
+
+// accessGuest (G-D9): true from a guest's session, false from a code's, on a query as on a
+// mutation, and nothing extra for a construct that does not declare it.
+func TestAGuestCallIsStampedAccessGuestTrue(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.openGuest()
+
+	rig.call(token, "deskGuestFlag", map[string]any{"title": "t"})
+	rig.call(token, "deskGuestQuery", nil)
+
+	want := []string{
+		`desk.deskGuestFlag(accessCodeId: "pass1", accessGuest: true, title: "t")`,
+		`query desk.deskGuestQuery(accessGuest: true)`,
+	}
+	if !reflect.DeepEqual(rig.engine.calls, want) {
+		t.Fatalf("calls = %q, want %q", rig.engine.calls, want)
+	}
+}
+
+func TestACodeCallIsStampedAccessGuestFalse(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.open()
+
+	rig.call(token, "deskGuestFlag", map[string]any{"title": "t"})
+	rig.call(token, "deskGuestQuery", nil)
+
+	want := []string{
+		`desk.deskGuestFlag(accessCodeId: "code1", accessGuest: false, title: "t")`,
+		`query desk.deskGuestQuery(accessGuest: false)`,
+	}
+	if !reflect.DeepEqual(rig.engine.calls, want) {
+		t.Fatalf("calls = %q, want %q", rig.engine.calls, want)
+	}
+}
+
+func TestACallerCannotSendAccessGuest(t *testing.T) {
+	for _, construct := range []string{"deskGuestFlag", "deskGuestQuery", "deskNote"} {
+		t.Run(construct, func(t *testing.T) {
+			rig := newAccessRig(t)
+			token := rig.open()
+			rec := rig.call(token, construct, map[string]any{memql.AccessArgGuest: true})
+			assertAccessReply(t, rec, http.StatusBadRequest, `{"error":"invalid_args"}`)
+			if len(rig.engine.calls) != 0 {
+				t.Fatalf("a forged accessGuest reached the engine: %v", rig.engine.calls)
+			}
+		})
+	}
+}
+
+func TestAccessGuestNotDeclaredIsNotStamped(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.openGuest()
+
+	rig.call(token, "deskNote", map[string]any{"noteId": "n1", "title": "t"})
+
+	if len(rig.engine.calls) != 1 || strings.Contains(rig.engine.calls[0], memql.AccessArgGuest) {
+		t.Fatalf("calls = %v: a construct that did not declare accessGuest was told", rig.engine.calls)
+	}
 }

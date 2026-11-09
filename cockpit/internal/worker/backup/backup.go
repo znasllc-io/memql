@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/znasllc-io/memql/cockpit/internal/worker/transfer"
 	"io/fs"
 	"log/slog"
 	"math/rand"
@@ -15,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/znasllc-io/memql/cockpit/internal/auth"
+	"github.com/znasllc-io/memql/cockpit/internal/worker/transfer"
 )
 
 // The watched-folder backup: one folder on this machine, kept arriving in the
@@ -94,6 +96,11 @@ type Manager struct {
 
 	mu      sync.Mutex
 	ledgers map[string]*Ledger
+
+	// A missing personal sign-in does not disconnect the enrolled worker.
+	// Keep one warning until watched-folder access succeeds, while preserving
+	// the scheduled retry and reporting unrelated failures normally.
+	loginRequired bool
 
 	// workerID is the registration this sweep is acting as. Written by
 	// SweepOnce from its own parameter and read by the push path beneath it,
@@ -229,9 +236,26 @@ func (m *Manager) sweep(ctx context.Context, workerID string, force bool) {
 	m.mu.Unlock()
 	m.workerID = workerID
 	watches, err := m.graph.Watches(ctx, workerID)
+	if errors.Is(err, auth.ErrLoginRequired) {
+		m.mu.Lock()
+		announce := !m.loginRequired
+		m.loginRequired = true
+		m.mu.Unlock()
+		if announce {
+			m.logger.Warn("backup: sign-in required; worker connection is unaffected", "error", err)
+		}
+		return
+	}
 	if err != nil {
 		m.logger.Warn("backup: could not read this machine's watched folders", "error", err)
 		return
+	}
+	m.mu.Lock()
+	recovered := m.loginRequired
+	m.loginRequired = false
+	m.mu.Unlock()
+	if recovered {
+		m.logger.Info("backup: sign-in available again; checking watched folders")
 	}
 	for _, watch := range watches {
 		if err := ctx.Err(); err != nil {

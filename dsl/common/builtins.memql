@@ -763,26 +763,6 @@ builtin fleetModelPull {
   model           string!  @description("The model id in the runtime's own vocabulary. Carried verbatim -- the router selects on this exact string, so a model pulled under one spelling is unreachable under any other.")
 }
 
-// ---- routing rules (epic memql#5127, design D7) ----
-
-@executor("integration.router.activateRoutingRule")
-@args(when="object", excludes="array")
-@description("Add a routing rule at runtime. Renders the form into a `rule` construct DETERMINISTICALLY -- no model is involved -- runs it through the same authoring gates a DSL rule passes, and arms it live; it survives a restart through the authored-bundle re-arm. Owner or developer. A form naming a SHIPPED rule is refused: the shipped set is re-read from the embedded tree on every boot, so a custom rule taking one of those names would be replaced at the next restart with nothing saying so. `when` is an OBJECT of condition keys (level, modality, prompt, role, actorRole, tag, touches) and that shape is load-bearing: a key present with an empty value is a condition matching only an empty value, while an ABSENT key is no condition at all, and separate string arguments could not tell those apart.")
-builtin routingRuleActivate {
-  name           string!
-  policy         string!
-  precedence     integer!
-  description    string
-  level          enum("fast", "strong", "reasoning", "embeddings")
-  onUnavailable  enum("degrade", "park")
-}
-
-@executor("integration.router.retireRoutingRule")
-@description("Retire a runtime-authored routing rule by name. Owner or developer. A shipped rule is refused -- one you want out of the way is out-ranked with a custom rule at a higher precedence, not removed.")
-builtin routingRuleRetire {
-  name  string!
-}
-
 // ---- Pulling the whole recommended set (epic memql#5146, D2) ----
 //
 // The same act, once per model, in the order the catalog recommends. A person
@@ -904,7 +884,7 @@ builtin fleetModelProbe {
 
 // ---- The nightly evidence fold (epic memql#5146, D5) ----
 
-@description("Fold the week's router calls into per-model, per-level evidence rows, and open a routingReview approval where the evidence carries a demotion. It PROPOSES and never applies: routing is a thing a person is accountable for, and a rule that appeared overnight because a threshold was crossed is an edit nobody made. Above a 0.3 structured-failure rate over at least twenty calls it renders the exclusion rule, hashes the exact text, and puts it to a person; approving arms it through the authoring pipeline and declining is recorded so the same week's evidence does not ask again. Calls that did not say which level they were serving are COUNTED AND EXCLUDED rather than folded under a blank -- a demotion at an unknown level is a demotion at every level, which is far more than the evidence supports.")
+@description("Fold the week's router calls into per-model, per-level evidence rows, and open a routingReview approval where the evidence carries a demotion. It PROPOSES and never applies: routing is a thing a person is accountable for, and a rule that appeared overnight because a threshold was crossed is an edit nobody made. Above a 0.3 structured-failure rate over at least twenty calls it renders the exclusion rule, hashes the exact text, and puts it to an owner or developer. Approving saves exactly that rule into the routing configuration under a new revision, which every replica reads on its next call; approving a promotion removes the demotion instead. Declining is recorded so the same week's evidence does not ask again. A demotion that no call would reach is withheld rather than proposed: the shipped rules are locked and tried before any saved rule, and fastLane, reasoningParks and embeddingsBound take every call at their levels, so today a demotion is proposed only at strong. Only one evidence demotion can be saved per level, and approving a second is refused naming the first. Calls that did not say which level they were serving are COUNTED AND EXCLUDED rather than folded under a blank -- a demotion at an unknown level is a demotion at every level, which is far more than the evidence supports.")
 @executor("integration.router.routingEvidenceFold")
 builtin routingEvidenceFold {
 }

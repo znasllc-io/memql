@@ -266,16 +266,24 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 196 -> 197: reclaimClosedChunkSpace, the nightly closed-chunk compaction
 // that gives back the space retention deletes leave in closed MemoryNodes
 // chunks (2026-11-06). One added, none removed; measured by the strict loader.
-// 197 -> 198: siteStatisticsRollupSweep, the five-minute fold of the edge's
+// 197 -> 198: enrollLegacyPipelineLogs, the scheduled enrollment of step logs
+// written before logs had upload receipts (2026-11-08). One added, none removed.
+// 198 -> 199: pipelineSecurityRemediation, the private retained-report-to-goal
+// workflow (2026-11-08). One added, none removed; measured by the strict loader.
+// 199 -> 200: purgeRetiredPipelineArtifacts, the sweep's page for an
+// installation preparation's captures, which only removes the Library entries
+// of files its cleanup already retired (2026-11-08). One added, none removed;
+// measured by the strict loader.
+// 200 -> 201: siteStatisticsRollupSweep, the five-minute fold of the edge's
 // request log into website statistics (2026-11-08). One added, none removed;
 // measured by the strict loader.
-// 198 -> 199: geoCountryRefreshSweep, the daily check that downloads DB-IP's
+// 201 -> 202: geoCountryRefreshSweep, the daily check that downloads DB-IP's
 // monthly country database (2026-11-08). One added, none removed; measured by
 // the strict loader.
-// 199 -> 200: emailStatisticsRollupSweep, the five-minute fold of campaign
+// 202 -> 203: emailStatisticsRollupSweep, the five-minute fold of campaign
 // deliveries, engagement and consent events into the email statistics facts
 // (2026-11-08). One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 200
+const shippedAutomationCount = 203
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

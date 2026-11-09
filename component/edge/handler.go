@@ -379,7 +379,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	// has already been answered 503 and a draft or archived one 404 before
 	// this line, preview aside, with nothing forwarded for the bff to decide.
 	//
-	// THE CONDITION IS THE FOUR PAIRS, not the /_memql/access prefix. A prefix
+	// THE CONDITION IS THE FIVE PAIRS, not the /_memql/access prefix. A prefix
 	// would make /_memql/access/x and /_memql/accessories this surface's, and
 	// they are the generic proxy's to answer exactly as they were before it
 	// existed. See access.go.

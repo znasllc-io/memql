@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -332,33 +333,109 @@ func TestTheSettingsReadAnswersWhatIsInForce(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // orgRoster is an organization's people as the pack reads them -- each
-// organization's groups, their members and every person's user row -- and what
-// the engine answers for each person in each of their organizations. It
-// answers the roster's reads and stands in for the engine's resolver
-// (organizationDecisions), so the rule over them is tested as a function.
+// organization's groups, their members, each person's own memberships and
+// every person's user row -- and what the engine answers for each person in
+// each of their organizations. It answers the people reads and stands in for
+// the engine's resolver (organizationDecisions), so the rule over them is
+// tested as a function, and it keeps a log of every read and every person the
+// engine was asked about, so a test can say what an answer cost.
 type orgRoster struct {
 	groups  map[string][]map[string]any             // groupsForAccount, by account
-	members map[string][]map[string]any             // membersOfGroup, by group
+	members map[string][]map[string]any             // membersOfGroup, by group; groupsForUser, by member
 	users   map[string]map[string]any               // userByIdSystem, by user
 	holds   map[string][]memql.OrganizationDecision // the engine's decisions, by user
 	// failRead: the engine notes a failed grant read while it resolves.
 	failRead bool
-	asked    []string
+	// noteFailureIn: this read answers in full and notes a read it could not
+	// make on its context, as the engine's tolerant readers do.
+	noteFailureIn string
+	// errorIn: this read fails outright.
+	errorIn string
+	asked   []string
+	reads   []rosterRead
 }
 
-func (r *orgRoster) rows(query string, args map[string]string) ([]map[string]any, bool) {
+// rosterRead is one read the roster answered: the query, the id it was asked
+// about, and who asked -- the actor on the context, and whether it carried
+// internal origin.
+type rosterRead struct {
+	query, about, actor string
+	internal            bool
+}
+
+func (r *orgRoster) rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, bool, error) {
+	var out []map[string]any
+	about := args["userId"]
 	switch query {
 	case "groupsForAccount":
-		return r.groups[args["accountId"]], true
+		about = args["accountId"]
+		out = r.groups[about]
 	case "membersOfGroup":
-		return r.members[args["groupId"]], true
-	case "userByIdSystem":
-		if row, ok := r.users[args["userId"]]; ok {
-			return []map[string]any{row}, true
+		about = args["groupId"]
+		out = r.members[about]
+	case "groupsForUser":
+		// Every group's rows for the person, whatever their status, as the
+		// membersOfGroup double answers them: the status is the pack's to read.
+		// The person is matched as the engine matches a member (asMember).
+		groups := make([]string, 0, len(r.members))
+		for group := range r.members {
+			groups = append(groups, group)
 		}
-		return nil, true
+		sort.Strings(groups)
+		for _, group := range groups {
+			for _, m := range r.members[group] {
+				if asMember(asString(m["userId"])) == asMember(about) {
+					out = append(out, m)
+				}
+			}
+		}
+	case "userByIdSystem":
+		if row, ok := r.users[engineUser(about)]; ok {
+			out = []map[string]any{row}
+		}
+	default:
+		return nil, false, nil
 	}
-	return nil, false
+	actor := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok {
+		actor = ac.UserId
+	}
+	r.reads = append(r.reads, rosterRead{query: query, about: about, actor: actor, internal: auth.OriginFromContext(ctx).IsInternal()})
+	if query == r.errorIn {
+		return nil, true, errors.New("the rows could not be read")
+	}
+	if query == r.noteFailureIn {
+		auth.NoteReadFailure(ctx, errors.New("part of the rows could not be read"))
+	}
+	return out, true, nil
+}
+
+// asMember is a member's id as groupsForUser's filter compares it: the engine
+// stores a membership's userId canonical and takes a bare id it is asked about
+// as a user's; an id already carrying a prefix it compares as given.
+func asMember(id string) string {
+	if strings.Contains(id, ":") {
+		return id
+	}
+	return "v1:identity:user:" + id
+}
+
+// engineUser is the person an id names to the engine's user-row read and its
+// resolver, which take a user's canonical id and their bare one as the same
+// person.
+func engineUser(id string) string {
+	return strings.TrimPrefix(id, "v1:identity:user:")
+}
+
+// read is who each read of query was about, in the order they were made.
+func (r *orgRoster) read(query string) []string {
+	out := []string{}
+	for _, read := range r.reads {
+		if read.query == query {
+			out = append(out, read.about)
+		}
+	}
+	return out
 }
 
 func (r *orgRoster) ResolveOrganizationDecisionsFor(ctx context.Context, userId string, _ auth.Role, _ []auth.Decision) []memql.OrganizationDecision {
@@ -366,7 +443,7 @@ func (r *orgRoster) ResolveOrganizationDecisionsFor(ctx context.Context, userId 
 	if r.failRead {
 		auth.NoteReadFailure(ctx, errors.New("the grant rows could not be read"))
 	}
-	return r.holds[userId]
+	return r.holds[engineUser(userId)]
 }
 
 // withRoster answers the roster's reads and hands every other read on.
@@ -376,8 +453,8 @@ type withRoster struct {
 }
 
 func (w withRoster) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
-	if rows, ok := w.roster.rows(query, args); ok {
-		return rows, nil
+	if rows, ok, err := w.roster.rows(ctx, query, args); ok {
+		return rows, err
 	}
 	return w.rowReader.Rows(ctx, query, args)
 }
@@ -468,23 +545,45 @@ func shopRoster() *orgRoster {
 	}
 }
 
-func readPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) ([]map[string]any, error) {
+// peopleAnswer is the v1:reviews:people receipt as a client reads it.
+type peopleAnswer struct {
+	StoreID   string           `json:"storeId"`
+	People    []map[string]any `json:"people"`
+	Truncated *bool            `json:"truncated"`
+}
+
+// truncated is the answer's truncated, false when it carries none (askPeople
+// has failed the test for that).
+func (a peopleAnswer) truncated() bool {
+	return a.Truncated != nil && *a.Truncated
+}
+
+// askPeople reads reviewsPeople's whole answer. Every answer says whether its
+// list is cut (truncated), the empty one included: a client cannot tell a whole
+// list from a cut one by looking at it.
+func askPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) (peopleAnswer, error) {
 	t.Helper()
 	nodes, err := (&Provider{reader: withRoster{rowReader: r, roster: roster}, organizations: roster}).people(ctx, args, 0)
 	if err != nil {
-		return nil, err
+		return peopleAnswer{}, err
 	}
-	var out struct {
-		StoreID string           `json:"storeId"`
-		People  []map[string]any `json:"people"`
-	}
+	var out peopleAnswer
 	if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.StoreID != "store-live" {
 		t.Fatalf("storeId = %q, want the store asked about", out.StoreID)
 	}
-	return out.People, nil
+	if out.Truncated == nil {
+		t.Errorf("the answer carries no truncated: %s", nodes[0].Payload)
+	}
+	return out, nil
+}
+
+func readPeople(t *testing.T, ctx context.Context, r rowReader, roster *orgRoster, args map[string]any) ([]map[string]any, error) {
+	t.Helper()
+	answer, err := askPeople(t, ctx, r, roster, args)
+	return answer.People, err
 }
 
 func peopleIDs(people []map[string]any) []string {
@@ -543,6 +642,113 @@ func TestReviewsPeopleListsTheStoresModerators(t *testing.T) {
 	}
 }
 
+// crowd is the store's organization (acct-shop) with one group and nobody in
+// it yet; join puts people there.
+func crowd() *orgRoster {
+	return &orgRoster{
+		groups:  map[string][]map[string]any{"acct-shop": {rosterGroup("group-crowd", "acct-shop")}},
+		members: map[string][]map[string]any{},
+		users:   map[string]map[string]any{},
+		holds:   map[string][]memql.OrganizationDecision{},
+	}
+}
+
+// join makes one more person an active member of crowd's group, called name,
+// able to moderate in acct-shop when moderates says so and holding nothing
+// there otherwise.
+func (r *orgRoster) join(id, name string, moderates bool) {
+	r.members["group-crowd"] = append(r.members["group-crowd"], rosterMember("group-crowd", id, "added", "active"))
+	r.users[id] = rosterUser(id, name, "user", true)
+	if moderates {
+		r.holds[id] = heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	}
+}
+
+var theStore = map[string]any{"storeId": "store-live", "siteId": "site-1"}
+
+// EVERY MEMBER IS JUDGED BEFORE THE LIST IS CUT. A bound on the organization's
+// members, taken before anybody was asked whether they can moderate, kept the
+// first maxPeople ids whoever they were: an organization whose first hundred
+// could not moderate listed nobody, and said nothing. The bound is the list's.
+func TestTheListIsCutOnlyOnceEveryMemberIsJudged(t *testing.T) {
+	roster := crowd()
+	for i := 0; i < maxPeople; i++ {
+		roster.join(fmt.Sprintf("a-%03d", i), fmt.Sprintf("Ash %03d", i), false)
+	}
+	for _, id := range []string{"b-1", "b-2", "b-3"} {
+		roster.join(id, "Bea "+id, true)
+	}
+	answer, err := askPeople(t, moderatorCtx("b-1"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(answer.People), ","); got != "b-1,b-2,b-3" || answer.truncated() {
+		t.Fatalf("people = %q (truncated %v), want b-1,b-2,b-3, the whole list", got, answer.truncated())
+	}
+}
+
+// A LIST LONGER THAN THE BOUND IS CUT BY NAME, AND SAYS SO. The people kept are
+// the first maxPeople as a person reads the list, by what they are called --
+// not the first by id -- and truncated tells a client the list is not everyone
+// who can moderate. A list exactly the bound is whole.
+func TestALongListIsCutByNameAndSaysSo(t *testing.T) {
+	roster := crowd()
+	for i := 0; i <= maxPeople; i++ {
+		// Ids and names run opposite ways: p-000 is called Pat 100, p-100 Pat 000.
+		roster.join(fmt.Sprintf("p-%03d", i), fmt.Sprintf("Pat %03d", maxPeople-i), true)
+	}
+	answer, err := askPeople(t, moderatorCtx("p-000"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.People) != maxPeople || !answer.truncated() {
+		t.Fatalf("listed %d people (truncated %v), want %d and truncated", len(answer.People), answer.truncated(), maxPeople)
+	}
+	for i, p := range answer.People {
+		if want := fmt.Sprintf("Pat %03d", i); p["displayName"] != want {
+			t.Fatalf("person %d = %v, want %s: the first %d by name", i, p["displayName"], want, maxPeople)
+		}
+	}
+
+	exact := crowd()
+	for i := 0; i < maxPeople; i++ {
+		exact.join(fmt.Sprintf("p-%03d", i), fmt.Sprintf("Pat %03d", i), true)
+	}
+	whole, err := askPeople(t, moderatorCtx("p-000"), settingsReader(existingSettings()), exact, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(whole.People) != maxPeople || whole.truncated() {
+		t.Fatalf("listed %d of %d (truncated %v), want all and not truncated", len(whole.People), maxPeople, whole.truncated())
+	}
+}
+
+// THE LIST READS BY WHAT PEOPLE ARE CALLED: their name, else their address --
+// what the admin panel shows for each -- whatever its case, then by id. A
+// person with no name sorts by their address among the named, not ahead of
+// them all, and two people called the same keep one order between reads.
+func TestTheListReadsByWhatPeopleAreCalled(t *testing.T) {
+	roster := shopRoster()
+	held := heldIn("acct-shop", readData, openDeployables, moderateReviews)
+	add := func(id, name, email string) {
+		roster.members["group-shop"] = append(roster.members["group-shop"], rosterMember("group-shop", id, "added", "active"))
+		row := rosterUser(id, name, "user", true)
+		row["primaryEmail"] = email
+		roster.users[id], roster.holds[id] = row, held
+	}
+	add("nell-1", "", "nell@example.com")
+	// Called the same but for case, with addresses that order against their ids.
+	add("dana-2", "dana", "a@example.com")
+	add("dana-1", "Dana", "z@example.com")
+	people, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster, theStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(peopleIDs(people), ","); got != "owner-1,dana-1,dana-2,nell-1,mod-1" {
+		t.Fatalf("people = %s, want owner-1,dana-1,dana-2,nell-1,mod-1: by name, else address, in any case, then by id", got)
+	}
+}
+
 // A STORE WHOSE SITE BELONGS TO NO ORGANIZATION HAS NOBODY TO MODERATE IT, and
 // its people are never looked for.
 func TestReviewsPeopleOfAStoreInNoOrganizationIsNobody(t *testing.T) {
@@ -560,13 +766,33 @@ func TestReviewsPeopleOfAStoreInNoOrganizationIsNobody(t *testing.T) {
 
 // WHO CAN MODERATE IS ANSWERED IN FULL OR NOT AT ALL: a grant read that failed
 // under the answer could hide a deny, and a list drawn without it names a
-// moderator the store's organization has barred.
+// moderator the store's organization has barred. So could one of the
+// deployment's own reads -- the groups, their members, a person's row -- that
+// answered from part of what it reads, and the answer refuses that too.
 func TestReviewsPeopleRefusesWhenAReadBehindItFails(t *testing.T) {
 	roster := shopRoster()
 	roster.failRead = true
 	if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
 		map[string]any{"storeId": "store-live", "siteId": "site-1"}); err == nil {
 		t.Fatal("an answer was drawn from part of the grants")
+	}
+	for _, query := range []string{"groupsForAccount", "membersOfGroup", "userByIdSystem"} {
+		roster := shopRoster()
+		roster.noteFailureIn = query
+		if _, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), roster,
+			map[string]any{"storeId": "store-live", "siteId": "site-1"}); err == nil {
+			t.Errorf("an answer was drawn from part of %s", query)
+		}
+	}
+	// The refusal says what was read: the organization's people, one of whose
+	// user rows failed. The approver write says it read the one person named
+	// (TestTheApproverCheckRefusesWhenAReadBehindItFails).
+	broken := shopRoster()
+	broken.errorIn = "userByIdSystem"
+	_, err := readPeople(t, moderatorCtx("mod-1"), settingsReader(existingSettings()), broken,
+		map[string]any{"storeId": "store-live", "siteId": "site-1"})
+	if want := "reviews: reading the organization's people: the rows could not be read"; err == nil || err.Error() != want {
+		t.Errorf("a member's user row failing: err = %v, want %q", err, want)
 	}
 }
 

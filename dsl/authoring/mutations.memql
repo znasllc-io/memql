@@ -45,7 +45,9 @@ mutation bundle createAuthoringBundle {
 }
 
 /// Create an authored construct (the .memql source for one concept / automation / logic / shape /
-/// spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped
+/// spec / trait / policy / rule / mutation / query / prompt) as a member of a bundle. The kind enum
+/// is the construct concept's, held to it by test/dslconformance (a runtime-authored routing rule's
+/// construct could not be written while `rule` was missing here). ownerUserId stamped
 /// from actor.userId; status starts draft and follows the bundle. @serverOnly (memql#6022): an
 /// active bundle arms every construct it holds, so the constructs are what its gates saw -- written
 /// by the server pipelines that run those gates, under internal origin, and only while the bundle
@@ -60,7 +62,7 @@ mutation construct createAuthoringConstruct {
   args {
     constructId      string!
     bundleId         string!
-    kind             enum("concept", "automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")!
+    kind             enum("concept", "automation", "logic", "shape", "spec", "trait", "policy", "rule", "mutation", "query", "prompt")!
     name             string!
     targetNamespace  string!
     source           string!

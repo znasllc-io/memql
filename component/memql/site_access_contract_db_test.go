@@ -818,14 +818,15 @@ func installAccessExecutorRecorders(t *testing.T, eng *MemQLEngine, executors ..
 //
 // The premise is asserted first, because the claim is meaningless without it: the
 // rows under the list ARE visible to this person through the tier alone. Then the
-// gate. The builtins fall in two groups, judged against two different rows: minting,
-// the list and the gate listing ask about the SITE, and regenerate, set-expiry and
-// remove ask about the CODE, whose accountId was copied off its site when it was
-// minted. All six are refused for Beta's with capability_not_held and reach no
-// executor, and all six pass for Acme's, where the same grant holds. A member of Beta
-// who was never granted the part is refused on Beta's own site and code, so the pass on
-// Acme's is the GRANT's doing and not an accident of the fixture. A code or a site that
-// does not exist is refused, never answered empty or passed through to the handler.
+// gate. The builtins fall in two groups, judged against two different rows: minting a
+// code or a guest pass, the list and the gate listing ask about the SITE, and
+// regenerate, set-expiry and remove ask about the CODE, whose accountId was copied off
+// its site when it was minted. All seven are refused for Beta's with
+// capability_not_held and reach no executor, and all seven pass for Acme's, where the
+// same grant holds. A member of Beta who was never granted the part is refused on
+// Beta's own site and code, so the pass on Acme's is the GRANT's doing and not an
+// accident of the fixture. A code or a site that does not exist is refused, never
+// answered empty or passed through to the handler.
 func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
@@ -874,8 +875,8 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	require.Contains(t, resultBlob(t, rows), codeBeta,
 		"the premise failed: the row tier does not admit this person to Beta's code, so the gate below is not the only thing in the way")
 
-	// scope is what a call is about: a site for the three builtins that ask about
-	// the site, a code for the three that ask about the code.
+	// scope is what a call is about: a site for the four builtins that ask about
+	// the site, a code for the three that ask about the code, which come last.
 	type scope struct{ site, code string }
 	inBeta, inAcme := scope{siteBeta, codeBeta}, scope{siteAcme, codeAcme}
 	expiry := issued.Add(2 * time.Hour).Format(time.RFC3339)
@@ -889,6 +890,11 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 		}},
 		{"siteAccessCodeCreate", "integration.siteAccess.create", func(s scope) string {
 			return siteAccessCall(t, "builtin", "siteAccessCodeCreate", map[string]any{
+				"siteId": s.site, "label": "Probe", "gate": "dashboard", "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
+			})
+		}},
+		{"siteAccessGuestPassCreate", "integration.siteAccess.guestPassCreate", func(s scope) string {
+			return siteAccessCall(t, "builtin", "siteAccessGuestPassCreate", map[string]any{
 				"siteId": s.site, "label": "Probe", "gate": "dashboard", "expiresAt": issued.Add(time.Hour).Format(time.RFC3339),
 			})
 		}},
@@ -957,7 +963,7 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	t.Run("a code named by its canonical id is judged by the same row", func(t *testing.T) {
 		// The gate must not be steerable by spelling: the canonical form of Beta's
 		// code is refused as the bare form is, and Acme's passes as it does.
-		for _, act := range acts[3:] {
+		for _, act := range acts[4:] {
 			before := *reached[act.executor]
 			_, err := eng.Execute(personCtx, act.call(scope{siteBeta, "v1:platform:siteAccessCode:" + codeBeta}))
 			refused(t, err, act.builtin)
@@ -966,7 +972,7 @@ func TestSiteAccessListIsJudgedByTheOrganizationGate(t *testing.T) {
 	})
 
 	t.Run("a blank code is refused", func(t *testing.T) {
-		for _, act := range acts[3:] {
+		for _, act := range acts[4:] {
 			before := *reached[act.executor]
 			_, err := eng.Execute(personCtx, act.call(scope{siteAcme, " "}))
 			require.Error(t, err, "%s was admitted for a blank code", act.builtin)
