@@ -14,6 +14,7 @@ import { setupWizardScenes } from "./setupWizardScenes";
 import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
+import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
 import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
 import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
 import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
@@ -1025,6 +1026,8 @@ const VIEWS: Record<
   ...NEXUS_PAGED_VIEWS,
   ...CONCEPT_PAGED_VIEWS,
   ...mapScenes(WindowBody),
+  // A deployable's Statistics and the Overview's Websites (deployableStatisticsScenes.tsx).
+  ...deployableStatisticsScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.

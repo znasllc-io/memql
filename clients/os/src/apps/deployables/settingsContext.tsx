@@ -4,17 +4,18 @@ import { DEFAULT_DEPLOYABLES_SETTINGS, type DeployablesSettings } from "./settin
 
 // The app's settings, readable from anywhere inside it.
 //
-// WHY A CONTEXT AND NOT PROPS. Two of these preferences are read at the BOTTOM
-// of the tree -- the traffic window in the Live stop's panel, four levels below
-// the app -- and written from the top. Drilling them would put two props
-// through every component in between that has no interest in either.
+// WHY A CONTEXT AND NOT PROPS. These preferences are read at the BOTTOM of the
+// tree -- the statistics period on a deployable's Statistics page, four levels
+// below the app, and on the Overview's Websites section beside the client it
+// reads under -- and written from the top. Drilling them would put props
+// through every component in between that has no interest in any of them.
 //
 // WHY A CONTEXT AND NOT A SECOND STORE. The obvious alternative is for the
 // panel to construct its own LocalDeployablesSettingsStore and read/write the
 // same key. That is a read-modify-write race on one document: the app holds
 // the settings in state, so a write from the panel would be invisible to it,
 // and the app's next `update()` would spread its stale copy back over storage
-// and silently undo the person's window. One owner, one writer.
+// and silently undo the person's period. One owner, one writer.
 //
 // The default value is the DEFAULTS rather than null, so a component rendered
 // outside the provider -- a test mounting one panel, say -- reads a coherent

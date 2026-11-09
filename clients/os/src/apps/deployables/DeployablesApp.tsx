@@ -265,7 +265,7 @@ function DeployablesAppContent({
   // is drawn for (`read app:deployables/runs`).
   const runsReachable = pipelineReach.sections.includes("runs");
 
-  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
+  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store" | "statistics"; result?: string } | undefined>();
   // A run to open on the Runs tab -- a check run's details link, a link from
   // Ask -- and a source to open on the Sources tab -- the map's Checks node, a
   // run page's trail. Each is consumed once by revision.
@@ -418,11 +418,12 @@ function DeployablesAppContent({
       />
     );
   const deployablesContent = (
-      // THE ONE BRANCH THAT NEEDS IT. The traffic window is read four levels
-      // down (Live stop -> traffic panel) and the open-source set is read by
-      // the list itself; both are written here. The settings section takes
-      // `settings` and `update` directly because it is one level away, and the
-      // map has neither.
+      // THE BRANCHES THAT NEED IT: this one, the Sources root and the map. The
+      // statistics period is read four levels down (a deployable's Statistics
+      // page) and on the map's Websites section, beside the client that
+      // section reads under; the open-source set is read by the list itself.
+      // All are written here. The settings section takes `settings` and
+      // `update` directly because it is one level away.
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
           onCatalogDemand={requestCatalog}
@@ -504,26 +505,34 @@ function DeployablesAppContent({
       </DeployablesSettingsProvider>
     );
   const mapContent = (
-    <MapSection
-      sites={snapshot.rows}
-      snapshot={snapshot}
-      ticks={ticks}
-      selection={selection}
-      onSelectNode={selectNode}
-      // THE MAP POINTS, THE SECTION OWNS THE PAGE (rule 11). Choosing a
-      // deployable on the map selects it -- the two surfaces share ONE
-      // selection -- and navigates to the section that owns its page, which
-      // opens on that selection.
-      onOpenDeployable={(siteId) => {
-        selectSite(siteId);
-        setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1 }));
-        navigate("deployables", { fromContent: true });
-      }}
-      onBrowse={() => navigate("deployables", { fromContent: true })}
-      pipelines={pipelineRows}
-      runs={runs?.snapshot.rows ?? []}
-      onOpenSource={openSource}
-    />
+    <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
+      <MapSection
+        sites={snapshot.rows}
+        snapshot={snapshot}
+        ticks={ticks}
+        selection={selection}
+        onSelectNode={selectNode}
+        // THE MAP POINTS, THE SECTION OWNS THE PAGE (rule 11). Choosing a
+        // deployable on the map selects it -- the two surfaces share ONE
+        // selection -- and navigates to the section that owns its page, which
+        // opens on that selection.
+        onOpenDeployable={(siteId) => {
+          selectSite(siteId);
+          setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1 }));
+          navigate("deployables", { fromContent: true });
+        }}
+        // A WEBSITE'S ROW opens the same page, on its Statistics.
+        onOpenStatistics={(siteId) => {
+          selectSite(siteId);
+          setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1, detail: "statistics" }));
+          navigate("deployables", { fromContent: true });
+        }}
+        onBrowse={() => navigate("deployables", { fromContent: true })}
+        pipelines={pipelineRows}
+        runs={runs?.snapshot.rows ?? []}
+        onOpenSource={openSource}
+      />
+    </DeployablesSettingsProvider>
   );
   // RUNS (epic memql#5479): every run of every source this person connected.
   // Its own section and its own view state, so opening a run here does not

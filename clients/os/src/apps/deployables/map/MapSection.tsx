@@ -11,6 +11,7 @@ import type { MapChecks, MapNode } from "./layout";
 import type { PipelineRow, RunRow } from "../pipelines/rows";
 import { checksBranchOf, lastRunPerBranch, outcomeKey, runsOfPipeline } from "../pipelines/runs";
 import { runOutcome } from "../pipelines/words";
+import { WebsitesSection } from "../statistics/WebsitesSection";
 
 export interface MapSelection { nodeId: string; siteIds: string[] }
 export const NO_SELECTION: MapSelection = { nodeId: "", siteIds: [] };
@@ -58,14 +59,20 @@ function checksWords(run: RunRow, branch: string): string {
   return at ? `${said}, at ${at.name}` : said;
 }
 
-/** Overview reads the same measured rows as the list; it never repeats the list. */
-export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onBrowse, pipelines = [], runs = [], onOpenSource }: {
+/**
+ * Overview reads the same measured rows as the list; it never repeats the list.
+ * Its Websites section (statistics/WebsitesSection) stands between the status
+ * breakdown and the map: what every website served, before where each lives.
+ */
+export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onOpenStatistics, onBrowse, pipelines = [], runs = [], onOpenSource }: {
   sites: readonly SiteRow[];
   snapshot: LiveSnapshot<SiteRow>;
   ticks: Map<string, ArrivalTick>;
   selection: MapSelection;
   onSelectNode: (node: MapNode) => void;
   onOpenDeployable: (siteId: string) => void;
+  /** Open a deployable's Statistics: what a row of the Websites list does. */
+  onOpenStatistics: (siteId: string) => void;
   onBrowse?: () => void;
   /** The caller's pipelines and runs (epic memql#5479): a source with checks draws a Checks node. */
   pipelines?: readonly PipelineRow[];
@@ -92,6 +99,7 @@ export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, on
   ]}>
     {snapshot.error ? <Notice tone="error" sentence="Deployables could not be read." next="Reconnect to update this overview." /> : null}
     {fresh ? <OverviewBreakdown title="Deployment status" segments={segments} /> : null}
+    <WebsitesSection sites={sites} onOpenStatistics={onOpenStatistics} />
     {current.length === 0 && fresh ? <EmptyState title="No deployables to map yet" action={onBrowse ? <Button onClick={onBrowse}>Open deployables</Button> : undefined}>Add an app to see its address and source here.</EmptyState> : <DeployMap
       // A Checks node with nowhere to go would be a button that does nothing,
       // so without a way to the source page there is no node to choose.

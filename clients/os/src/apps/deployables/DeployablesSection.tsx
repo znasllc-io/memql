@@ -116,7 +116,7 @@ import { runTitle } from "./pipelines/words";
 /** Which view the section is showing. One at a time, one Head each. */
 type DeployablesView =
   | { kind: "list" }
-  | { kind: "deployable"; siteId: string; from?: string; detail?: "store"; result?: string; revision?: number }
+  | { kind: "deployable"; siteId: string; from?: string; detail?: "store" | "statistics"; result?: string; revision?: number }
   | { kind: "source"; packageId: string; fromSite?: string; openView?: { section: "details" | "settings"; revision: number } }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
   | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn }
@@ -168,7 +168,7 @@ export function DeployablesSection({
   onOpenRepository?: ((packageId: string, repositoryView?: "settings") => void) | null;
   active?: boolean;
   navigation?: OsAppProps["navigation"];
-  openRequest?: { siteId: string; revision: number; detail?: "store"; result?: string };
+  openRequest?: { siteId: string; revision: number; detail?: "store" | "statistics"; result?: string };
   composeOpenRequest?: { packageId: string; app: string; revision: number };
   onOpenDeployable?: (siteId: string) => void;
   onComposeDeployable?: (packageId: string, app: string) => void;
