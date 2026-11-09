@@ -1393,6 +1393,11 @@ none of the windows above applies to them and the sweep never retires them. The
 preparation's cleanup does: cancelling a preparation fences each capture,
 releases its reference, retires every file and then removes its Library
 entries, and the cancellation is not finished until each removal is confirmed.
+A file kept in the Library, as above, is the exception: the cleanup records
+that it was kept, leaves its bytes and Library entries, and finishes without
+it, so it does not hold up the installation's next update. Nothing asks about
+that file again, and the sweep never retires a preparation's files, so it stays
+in its owner's Library even after they stop keeping it.
 A promoted preparation keeps its captures for its rollback. The sweep visits such
 a producer only while a file that cleanup retired still has Library entries,
 and removes only those entries, 32 a pass, after confirming each file's

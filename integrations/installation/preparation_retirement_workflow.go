@@ -177,8 +177,9 @@ func (s *retirementWorkflowScope) page(ctx context.Context, args map[string]any)
 	items := make([]any, 0, len(c.Page))
 	for _, artifact := range c.Page {
 		// Pending until both its retirement and its Library removal are
-		// recorded; the recipe repeats either, and each is idempotent.
-		if artifact.ReceiptDigest == "" || !artifact.Purged {
+		// recorded, or the store's refusal to retire a file it keeps; the
+		// recipe repeats either step, and each is idempotent.
+		if !artifact.settled() {
 			items = append(items, map[string]any{"intentId": artifact.IntentID})
 		}
 	}
@@ -194,13 +195,25 @@ func retirementArtifactArgs(args map[string]any) (string, string, error) {
 	return role, intent, nil
 }
 
+// artifact answers {retained} from the journal entry it recorded, not from the
+// store's reply alone, so a recipe asks for no Library removal of a kept file.
+// That choice is the recipe's; the removal gate refuses it anyway.
 func (s *retirementWorkflowScope) artifact(ctx context.Context, args map[string]any) (any, error) {
 	role, intent, err := retirementArtifactArgs(args)
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.journal.retireCaptureArtifact(ctx, s.installation, s.key, s.workflow, s.cleanup, role, intent, s.files)
-	return nil, err
+	r, err := s.journal.retireCaptureArtifact(ctx, s.installation, s.key, s.workflow, s.cleanup, role, intent, s.files)
+	if err != nil {
+		return nil, err
+	}
+	retained := false
+	for _, artifact := range r.Retirement.Captures[role].Page {
+		if artifact.IntentID == intent {
+			retained = artifact.Retained
+		}
+	}
+	return map[string]any{"retained": retained}, nil
 }
 
 func (s *retirementWorkflowScope) purge(ctx context.Context, args map[string]any) (any, error) {

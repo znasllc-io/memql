@@ -84,17 +84,58 @@ complete inventory and remove each retired file's Library entries before
 releasing the installation reservation. A removal needs the journal's own
 retirement receipt for that file, and an unconfirmed one keeps its page, so a
 cancelled preparation leaves no Library entry pointing at a retired file.
-Preparations cancelled before that step kept those entries; the pipeline
-artifact sweep removes them, and it never retires a preparation's files
-([Retention](../../public/operate/pipelines-substrate.md#retention)). Use
-**Resume cancellation** when cleanup remains pending. An uncertain reply must
+Preparations cancelled before that step left those entries behind; the
+pipeline artifact sweep removes them, and it never retires a preparation's
+files ([Retention](../../public/operate/pipelines-substrate.md#retention)).
+
+The Library store refuses to retire a file it keeps
+(`pipelinesteps.ErrArtifactRetained`): one its owner filed, labelled, edited,
+gave another version or trained into a knowledge domain, one whose Library
+history names another owner or source, or one whose entry is not ready. The
+last includes a capture whose upload the cancellation interrupted before its
+entry was marked ready, which nobody chose to keep. The store also refuses a
+file an active durable reference pins; a capture's only one, its own source
+reference, is released before its first page. Cleanup records the refusal on
+the page entry as `retained`, leaves the file's bytes and Library entries, and
+moves on, so a kept capture does not hold the installation reservation. A kept
+file already has a committed, verified object, which no late upload can
+replace, so it needs no tombstone. Until 2026-11-08 the refusal read as an
+unconfirmed retirement, and the preparation stayed `retiring` and held the head
+for good.
+
+A recorded answer is final. The pipeline sweep skips a kept file and asks again
+on its next visit; this cleanup never asks again, so the file stays in its
+owner's Library even after they stop keeping it. The page entry goes when the
+page advances; afterwards only the file's upload journal row, still not
+retired, under the preparation's source run shows what was left. If two passes
+ask either side of the owner unfiling the file, a retirement receipt outranks
+the kept answer while the page still holds the file, and the file still leaves
+the Library. If the kept answer has already moved the page on, the late receipt
+is refused: the file is retired with its Library entries left, which the
+pipeline sweep removes, or, when that retirement did not finish, it stays
+`retiring` and nothing finishes it. That needs two passes of one preparation at
+once and the owner's change between their store calls; closing it needs cleanup
+passes serialized per preparation, which is not done. A later preparation runs
+under its own source run, so its fence and inventory never include an earlier
+preparation's files.
+`TestPreparationRetirementLeavesAKeptCaptureAndReleasesItsHead` and
+`TestRetirementWorkflowInstalledPassLeavesKeptCapturesOnFreshHost` cover a kept
+capture, including a lost reply asked again on another connection, and
+`TestPreparationRetirementReceiptOutranksARacingKeptAnswer` covers the two
+passes while the page holds the file; their Library is a fixture. The real
+store's refusal of a labelled or versioned file is
+`TestPipelineLibraryDB/TestPipelineRetentionLibraryDB`, in `app`.
+
+Use **Resume cancellation** when cleanup remains pending. An uncertain reply must
 be reconciled from the saved preparation; it cannot authorize another capture.
 The cleanup entry does not depend on optional release choices or GitHub reads.
 It refuses promoted plans and other operators, including a different owner.
 Legacy captures retain their absent event and original receipt identity for
-cleanup. Once cleanup starts, its recipe is bound to the executing engine;
-an incompatible engine change refuses resumption rather than changing a
-partially completed cleanup. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
+cleanup. Once cleanup starts, its recipe is bound to the executing engine's
+build commit, so any engine change refuses resumption rather than changing a
+partially completed cleanup. A preparation left `retiring` across an upgrade
+therefore keeps the installation reservation, and no product action releases
+it. `TestSelectedPreparationCancellationRecoversLegacyScopeWithoutReleasingAnotherHead`
 covers interrupted cleanup, a fresh host, ownership and a successor reservation.
 `TestRetirementWorkflowInstalledPassPurgesRetiredCapturesOnFreshHost` covers a
 lost Library removal reply repeated on a fresh host, and

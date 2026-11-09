@@ -2,6 +2,7 @@ package installation
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -101,16 +102,75 @@ func TestRetirementWorkflowInstalledPassPurgesRetiredCapturesOnFreshHost(t *test
 	require.Equal(t, 2, files.purged[first.IntentID], "the fresh host repeated the unconfirmed removal")
 }
 
+// The installed recipe leaves a capture its owner kept in the Library: it asks
+// for no removal of that file's entries, and a lost reply to the store's
+// refusal is asked again on a fresh host. The pass that records the answer
+// does not fail, and completion releases the installation head.
+func TestRetirementWorkflowInstalledPassLeavesKeptCapturesOnFreshHost(t *testing.T) {
+	db, otherDB := journalDB(t)
+	j, other := preparationConnection(db), preparationConnection(otherDB)
+	scope, _ := preparationFixture(t)
+	ctx := captureOperator(auth.RoleOwner, scope.RequestedBy)
+	r, err := j.reserve(ctx, scope)
+	require.NoError(t, err)
+	w, err := loadRetirementWorkflow(strings.Repeat("d", 40))
+	require.NoError(t, err)
+	files, executor := retirementFiles(scope), &retirementStopFixture{}
+	kept := fmt.Sprintf("%064x", 4) // the rollback capture's only file
+	files.kept[kept] = true
+	files.fail = "keep"
+	_, err = w.run(ctx, j, scope.InstallationID, r.ID, executor, files)
+	require.Error(t, err, "a lost reply is no answer")
+	r, err = other.get(ctx, scope.InstallationID, r.ID)
+	require.NoError(t, err)
+	require.Equal(t, []preparationArtifactRetirement{{IntentID: kept}}, r.Retirement.Captures["rollback"].Page)
+	next := successorPreparation(t)
+	_, err = other.reserve(ctx, next)
+	require.ErrorIs(t, err, errBusy)
+	for range 3 {
+		r, err = w.run(ctx, other, scope.InstallationID, r.ID, executor, files)
+		require.NoError(t, err, "a kept capture is not a failed pass")
+		if r.State == "cancelled" {
+			break
+		}
+	}
+	require.Equal(t, "cancelled", r.State)
+	require.Equal(t, map[string]int{fmt.Sprintf("%064x", 1): 1, fmt.Sprintf("%064x", 2): 1, fmt.Sprintf("%064x", 3): 1}, files.purged)
+	require.NotContains(t, files.retired, kept)
+	successor, err := other.reserve(ctx, next)
+	require.NoError(t, err)
+	require.Equal(t, successor.ID, activePreparation(t, db, scope.InstallationID))
+}
+
+func retirementPageJSON(entry string) []byte {
+	return []byte(`{"workflowDigest":"memql-id:` + strings.Repeat("c", 64) + `","producerStopped":true,"captures":{` +
+		`"candidate":{"fenced":true,"pinsReleased":true,"cursor":"","page":[` + entry + `],"complete":false},` +
+		`"rollback":{"fenced":true,"pinsReleased":true,"cursor":"","page":[],"complete":false}}}`)
+}
+
+// A kept file was never retired, so its entry can carry no retirement receipt
+// or Library removal, and false stays omitted so older pages keep their bytes.
+func TestPreparationRetirementKeptArtifactCarriesNoRetirement(t *testing.T) {
+	intent := strings.Repeat("a", 64)
+	receipt := "memql-id:" + strings.Repeat("b", 64)
+	_, err := decodePreparationRetirement(retirementPageJSON(`{"intentId":"`+intent+`","receiptDigest":"","retained":true}`), "retiring")
+	require.NoError(t, err)
+	for name, entry := range map[string]string{
+		"kept and retired":   `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `","retained":true}`,
+		"kept and gone":      `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `","purged":true,"retained":true}`,
+		"noncanonical false": `{"intentId":"` + intent + `","receiptDigest":"","retained":false}`,
+	} {
+		_, err := decodePreparationRetirement(retirementPageJSON(entry), "retiring")
+		require.Error(t, err, name)
+	}
+}
+
 // A page written before removals were recorded keeps its exact encoding, and
 // a removal can never be recorded for an artifact without its retirement.
 func TestPreparationRetirementRemovalNeedsItsRetirementReceipt(t *testing.T) {
 	intent := strings.Repeat("a", 64)
 	receipt := "memql-id:" + strings.Repeat("b", 64)
-	page := func(entry string) []byte {
-		return []byte(`{"workflowDigest":"memql-id:` + strings.Repeat("c", 64) + `","producerStopped":true,"captures":{` +
-			`"candidate":{"fenced":true,"pinsReleased":true,"cursor":"","page":[` + entry + `],"complete":false},` +
-			`"rollback":{"fenced":true,"pinsReleased":true,"cursor":"","page":[],"complete":false}}}`)
-	}
+	page := retirementPageJSON
 	for name, entry := range map[string]string{
 		"pending":      `{"intentId":"` + intent + `","receiptDigest":""}`,
 		"retired":      `{"intentId":"` + intent + `","receiptDigest":"` + receipt + `"}`,

@@ -33,6 +33,25 @@ type preparationArtifactRetirement struct {
 	// readable; that engine's cleanup cannot resume under this recipe anyway,
 	// because the cleanup digest binds the engine revision.
 	Purged bool `json:"purged,omitempty"`
+	// Retained records the Library store's refusal to retire a file it keeps
+	// (pipelinesteps.ErrArtifactRetained): its owner filed, labelled, edited,
+	// versioned or trained it, its history names another owner or source, or
+	// its entry is not ready (which includes an upload this cancellation
+	// interrupted before it was marked ready); or a durable reference pins it
+	// (a capture's own is released before its first page). The bytes and
+	// entries stay and the page may advance past it; read as unconfirmed, that
+	// refusal held the page and the installation head forever. A kept file has
+	// no receipt, so it is never removed from the Library. Omitted while false,
+	// like Purged. An earlier engine cannot decode a page holding it, but a
+	// page is dropped when it advances, and that engine could not resume this
+	// cleanup anyway.
+	Retained bool `json:"retained,omitempty"`
+}
+
+// settled: retired and removed from the Library, or kept. Only a settled
+// entry may fall behind the cursor, which is never read again.
+func (a preparationArtifactRetirement) settled() bool {
+	return a.Retained || (a.ReceiptDigest != "" && a.Purged)
 }
 
 func decodePreparationRetirement(body []byte, state string) (*preparationRetirement, error) {
@@ -70,7 +89,7 @@ func decodePreparationRetirement(body []byte, state string) (*preparationRetirem
 		for _, artifact := range c.Page {
 			if !pl.ValidArtifactIntentIDs([]string{artifact.IntentID}) || artifact.IntentID <= previous ||
 				(artifact.ReceiptDigest != "" && !internalDigest.MatchString(artifact.ReceiptDigest)) ||
-				(artifact.Purged && artifact.ReceiptDigest == "") {
+				(artifact.Purged && artifact.ReceiptDigest == "") || (artifact.Retained && artifact.ReceiptDigest != "") {
 				return nil, errors.New("preparation retirement page is inconsistent")
 			}
 			previous = artifact.IntentID
@@ -84,8 +103,9 @@ func decodePreparationRetirement(body []byte, state string) (*preparationRetirem
 
 // This is a native binding to the selected sealed cleanup recipe, not a
 // caller-supplied approval. Retirement keeps the shared head until every
-// external producer/storage fence has a durable receipt. Ordinary capture
-// mutations remain restricted to preparing, so late callbacks cannot reopen it.
+// external producer/storage fence has a durable receipt, or the Library store
+// has refused to retire a file it keeps. Ordinary capture mutations remain
+// restricted to preparing, so late callbacks cannot reopen it.
 func (j *preparationJournal) beginRetirement(ctx context.Context, installation, key, workflow, cleanupWorkflow string) (preparationRecord, error) {
 	r, err := j.get(ctx, installation, key)
 	if err != nil {

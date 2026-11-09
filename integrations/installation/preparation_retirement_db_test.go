@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -23,15 +24,22 @@ type retirementFilesFixture struct {
 	released map[string]bool
 	retired  map[string]pipelinesteps.RetiredFileReceipt
 	purged   map[string]int
-	fail     string
-	calls    int
+	// kept names intents the Library refuses to retire because their owner
+	// filed, labelled, edited, versioned or trained them; refused the way the
+	// store refuses them, before any storage effect.
+	kept map[string]bool
+	// beforeRetire and afterRetire each run once, outside the lock, around the
+	// next retirement call: a second cleanup pass racing this one.
+	beforeRetire, afterRetire func()
+	fail                      string
+	calls                     int
 }
 
 func retirementFiles(scope preparationScope) *retirementFilesFixture {
 	return &retirementFilesFixture{ids: map[pipelinesteps.RunFileReceiptScope][]string{
 		retirementArtifactScope(scope.Captures["candidate"]): {fmt.Sprintf("%064x", 1), fmt.Sprintf("%064x", 2), fmt.Sprintf("%064x", 3)},
 		retirementArtifactScope(scope.Captures["rollback"]):  {fmt.Sprintf("%064x", 4)},
-	}, fenced: map[pipelinesteps.RunFileReceiptScope]bool{}, released: map[string]bool{}, retired: map[string]pipelinesteps.RetiredFileReceipt{}, purged: map[string]int{}}
+	}, fenced: map[pipelinesteps.RunFileReceiptScope]bool{}, released: map[string]bool{}, retired: map[string]pipelinesteps.RetiredFileReceipt{}, purged: map[string]int{}, kept: map[string]bool{}}
 }
 
 func (f *retirementFilesFixture) effect(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, operation string) error {
@@ -88,10 +96,35 @@ func (f *retirementFilesFixture) ReleaseRunFileReference(ctx context.Context, re
 	return f.effect(ctx, ref.Scope, "release")
 }
 func (f *retirementFilesFixture) RetireRunFile(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, id string) (pipelinesteps.RetiredFileReceipt, error) {
+	f.race(&f.beforeRetire)
+	receipt, err := f.retire(ctx, scope, id)
+	f.race(&f.afterRetire)
+	return receipt, err
+}
+
+func (f *retirementFilesFixture) race(hook *func()) {
+	f.mu.Lock()
+	run := *hook
+	*hook = nil
+	f.mu.Unlock()
+	if run != nil {
+		run()
+	}
+}
+
+// Like the store, an already retired file answers its receipt, and a kept one
+// is refused with pipelinesteps.ErrArtifactRetained and its reason.
+func (f *retirementFilesFixture) retire(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, id string) (pipelinesteps.RetiredFileReceipt, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.fenced[scope] || !slices.Contains(f.ids[scope], id) {
 		return pipelinesteps.RetiredFileReceipt{}, errors.New("foreign/unfenced artifact")
+	}
+	if _, retired := f.retired[id]; !retired && f.kept[id] {
+		if err := f.effect(ctx, scope, "keep"); err != nil {
+			return pipelinesteps.RetiredFileReceipt{}, err
+		}
+		return pipelinesteps.RetiredFileReceipt{}, fmt.Errorf("%w: the file was filed in a folder", pipelinesteps.ErrArtifactRetained)
 	}
 	receipt := pipelinesteps.RetiredFileReceipt{IntentID: id, FileID: "file-" + id, TombstoneETag: "permanent-etag"}
 	f.retired[id] = receipt
@@ -246,13 +279,7 @@ func TestPreparationRetirementReconcilesLostRepliesAndReleasesOnlyItsHead(t *tes
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", r.State)
 	require.True(t, r.Captures["rollback"].Started, "retirement must preserve dispatch history")
-	next, _ := preparationFixture(t)
-	next.RequestID = "next-request"
-	for role, spec := range next.Captures {
-		spec.RunID = preparationSourceRun(next.InstallationID, next.RequestID, next.RequestedBy)
-		spec.WorkRunID = spec.RunID
-		next.Captures[role] = spec
-	}
+	next := successorPreparation(t)
 	successor, err := peer.reserve(ctx, next)
 	require.NoError(t, err)
 	again, err := peer.finishRetirement(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup)
@@ -263,6 +290,175 @@ func TestPreparationRetirementReconcilesLostRepliesAndReleasesOnlyItsHead(t *tes
 	require.Equal(t, successor.ID, active)
 	_, err = j.stopRetiringProducer(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, executor)
 	require.Error(t, err)
+}
+
+// successorPreparation is the installation's next request. It has its own
+// source run, so none of its capture scopes is one of the first preparation's.
+func successorPreparation(t *testing.T) preparationScope {
+	t.Helper()
+	next, _ := preparationFixture(t)
+	next.RequestID = "next-request"
+	for role, spec := range next.Captures {
+		spec.RunID = preparationSourceRun(next.InstallationID, next.RequestID, next.RequestedBy)
+		spec.WorkRunID = spec.RunID
+		next.Captures[role] = spec
+	}
+	return next
+}
+
+func activePreparation(t *testing.T, db *sql.DB, installation string) string {
+	t.Helper()
+	var active sql.NullString
+	require.NoError(t, db.QueryRow("SELECT active_preparation_id FROM installation_revision_heads WHERE installation_id=$1", installation).Scan(&active))
+	return active.String
+}
+
+// readyToRetire reserves a preparation and brings its cleanup to the first
+// artifact page: retiring, producer stopped, both captures fenced and released.
+func readyToRetire(t *testing.T, ctx context.Context, j *preparationJournal, scope preparationScope, cleanup string, files *retirementFilesFixture) preparationRecord {
+	t.Helper()
+	r, err := j.reserve(ctx, scope)
+	require.NoError(t, err)
+	_, err = j.beginRetirement(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup)
+	require.NoError(t, err)
+	_, err = j.stopRetiringProducer(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, &retirementStopFixture{})
+	require.NoError(t, err)
+	for _, role := range []string{"candidate", "rollback"} {
+		_, err = j.fenceRetiringCapture(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, files)
+		require.NoError(t, err)
+		r, err = j.releaseRetiringCapturePins(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, files)
+		require.NoError(t, err)
+	}
+	return r
+}
+
+// A capture its owner kept in the Library -- filed, labelled, edited, given
+// another version or trained into a knowledge domain -- is refused by the
+// store as retained (pipelinesteps.ErrArtifactRetained). That refusal is the
+// store's answer, not an unconfirmed effect. Read as unconfirmed, it held the
+// page, the preparation and the installation head for good (2026-11-08):
+// cleanup records it as kept, leaves the file's bytes and Library entries,
+// and completion releases the head.
+func TestPreparationRetirementLeavesAKeptCaptureAndReleasesItsHead(t *testing.T) {
+	db, peerDB := journalDB(t)
+	j, peer := preparationConnection(db), preparationConnection(peerDB)
+	scope, _ := preparationFixture(t)
+	ctx := captureOperator(auth.RoleOwner, scope.RequestedBy)
+	cleanup := "memql-id:" + strings.Repeat("e", 64)
+	files := retirementFiles(scope)
+	r := readyToRetire(t, ctx, j, scope, cleanup, files)
+	r, err := j.nextRetiringArtifacts(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", files)
+	require.NoError(t, err)
+	first, kept, third, rollback := fmt.Sprintf("%064x", 1), fmt.Sprintf("%064x", 2), fmt.Sprintf("%064x", 3), fmt.Sprintf("%064x", 4)
+	require.Equal(t, []preparationArtifactRetirement{{IntentID: first}, {IntentID: kept}}, r.Retirement.Captures["candidate"].Page)
+	files.kept[kept] = true
+
+	// A lost reply records nothing, so the head stays held.
+	files.fail = "keep"
+	_, err = j.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", kept, files)
+	require.Error(t, err)
+	current, err := peer.get(ctx, scope.InstallationID, r.ID)
+	require.NoError(t, err)
+	require.Equal(t, preparationArtifactRetirement{IntentID: kept}, current.Retirement.Captures["candidate"].Page[1])
+	next := successorPreparation(t)
+	_, err = peer.reserve(ctx, next)
+	require.ErrorIs(t, err, errBusy)
+
+	// The other connection repeats the call and records the store's answer.
+	r, err = peer.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", kept, files)
+	require.NoError(t, err)
+	require.Equal(t, preparationArtifactRetirement{IntentID: kept, Retained: true}, r.Retirement.Captures["candidate"].Page[1])
+	calls := files.calls
+	again, err := j.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", kept, files)
+	require.NoError(t, err)
+	require.Equal(t, r.Retirement, again.Retirement)
+	require.Equal(t, calls, files.calls, "a recorded answer is final for this cleanup; the store is not asked again")
+	_, err = j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", kept, files)
+	require.Error(t, err, "a kept file keeps its Library entries")
+	require.Equal(t, calls, files.calls)
+	held, err := peer.nextRetiringArtifacts(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "candidate", files)
+	require.NoError(t, err)
+	require.Equal(t, r.Retirement.Captures["candidate"].Page, held.Retirement.Captures["candidate"].Page, "the page still waits for its other file")
+
+	// Every other file is retired and leaves the Library as before. Four page
+	// reads cover a capture's two pages and its empty one; a page that never
+	// moves past the kept file runs out of them.
+	for n, role := range []string{"candidate", "rollback"} {
+		for range 4 {
+			r, err = []*preparationJournal{j, peer}[n].nextRetiringArtifacts(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, files)
+			require.NoError(t, err)
+			if r.Retirement.Captures[role].Complete {
+				break
+			}
+			for _, artifact := range r.Retirement.Captures[role].Page {
+				if artifact.Retained {
+					continue
+				}
+				_, err = peer.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, artifact.IntentID, files)
+				require.NoError(t, err)
+				_, err = j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, role, artifact.IntentID, files)
+				require.NoError(t, err)
+			}
+		}
+		require.True(t, r.Retirement.Captures[role].Complete, role)
+	}
+	r, err = peer.finishRetirement(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup)
+	require.NoError(t, err)
+	require.Equal(t, "cancelled", r.State)
+	retired := slices.Sorted(maps.Keys(files.retired))
+	require.Equal(t, []string{first, third, rollback}, retired, "the kept file keeps its bytes")
+	require.Equal(t, map[string]int{first: 1, third: 1, rollback: 1}, files.purged, "and its Library entries")
+	successor, err := peer.reserve(ctx, next)
+	require.NoError(t, err)
+	require.Equal(t, successor.ID, activePreparation(t, db, scope.InstallationID))
+}
+
+// Two cleanup passes can ask the store about one file either side of its
+// owner unfiling it, so one hears it was kept and the other retires it. The
+// retirement receipt is the stronger fact, whichever reply is recorded first:
+// the bytes are gone, so the entry is retired and must leave the Library, or
+// it would point at a zero-byte tombstone after the page moved on.
+func TestPreparationRetirementReceiptOutranksARacingKeptAnswer(t *testing.T) {
+	for name, keptFirst := range map[string]bool{"kept answer recorded first": true, "receipt recorded first": false} {
+		t.Run(name, func(t *testing.T) {
+			db, peerDB := journalDB(t)
+			j, peer := preparationConnection(db), preparationConnection(peerDB)
+			scope, _ := preparationFixture(t)
+			ctx := captureOperator(auth.RoleOwner, scope.RequestedBy)
+			cleanup := "memql-id:" + strings.Repeat("e", 64)
+			files := retirementFiles(scope)
+			r := readyToRetire(t, ctx, j, scope, cleanup, files)
+			r, err := j.nextRetiringArtifacts(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "rollback", files)
+			require.NoError(t, err)
+			intent := fmt.Sprintf("%064x", 4)
+			files.kept[intent] = true
+			retire := func(journal *preparationJournal) {
+				_, err := journal.retireCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "rollback", intent, files)
+				require.NoError(t, err)
+			}
+			unfile := func() { files.mu.Lock(); files.kept[intent] = false; files.mu.Unlock() }
+			if keptFirst {
+				// peer read the page, then j heard "kept" and recorded it before
+				// the owner unfiled the file and peer's store call retired it.
+				files.beforeRetire = func() { retire(j); unfile() }
+				retire(peer)
+			} else {
+				// j heard "kept"; before j recorded it, the owner unfiled the
+				// file and peer retired it and recorded its receipt.
+				files.afterRetire = func() { unfile(); retire(peer) }
+				retire(j)
+			}
+			r, err = peer.get(ctx, scope.InstallationID, r.ID)
+			require.NoError(t, err)
+			entry := r.Retirement.Captures["rollback"].Page[0]
+			require.NotEmpty(t, entry.ReceiptDigest)
+			require.False(t, entry.Retained, "retired bytes cannot be kept")
+			require.False(t, entry.Purged)
+			_, err = j.purgeRetiredCaptureArtifact(ctx, scope.InstallationID, r.ID, scope.WorkflowDigest, cleanup, "rollback", intent, files)
+			require.NoError(t, err)
+			require.Equal(t, map[string]int{intent: 1}, files.purged)
+		})
+	}
 }
 
 func TestPreparationRetirementAuthorityHistoryAndParallelPageReceipts(t *testing.T) {

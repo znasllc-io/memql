@@ -13,11 +13,13 @@ builtin installationRetirementFence { role string! }
 @executor("integration.installation.installationRetirementRelease")
 @args(profile="object")
 builtin installationRetirementRelease { role string! }
-/// Recover the pending artifact page or advance after all its receipts exist.
+/// Recover the pending artifact page, or advance once each file on it is retired and
+/// removed from the Library, or kept there.
 @executor("integration.installation.installationRetirementPage")
 @args(profile="object")
 builtin installationRetirementPage { role string! }
-/// Confirm provider retirement for one inventoried artifact.
+/// Confirm provider retirement for one inventoried artifact, or record that the Library
+/// keeps it (answers retained: true).
 @executor("integration.installation.installationRetirementArtifact")
 @args(profile="object")
 builtin installationRetirementArtifact { role string! intentId string! }
