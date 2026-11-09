@@ -5,9 +5,9 @@
 // does not know, so folding per-app preferences into it would mean somebody
 // loses their desks because an app learned a checkbox.
 
+import { SITE_PERIODS, isPeriod, type Period } from "../../kit/statistics/period";
 import type { ModuleId } from "../../system/modules";
 import type { OsAppSection } from "../../system/registry";
-import { TRAFFIC_WINDOWS, type TrafficWindow } from "./traffic";
 
 /** Overview is the fixed landing section; Settings and Logs stay in the window chrome. */
 export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
@@ -29,14 +29,22 @@ export const DEPLOYABLES_SECTION_IDS = DEPLOYABLES_SECTIONS.map((s) => s.id);
 export interface DeployablesSettings {
   version: 1;
   /**
-   * The traffic window a deployable's page opens on.
+   * The period a deployable's Statistics page and the Overview's Websites
+   * section read (the 2026-11-08 statistics design, section 8; it replaced
+   * the Traffic page's `trafficWindow`).
    *
-   * ONE CHOICE FOR EVERY DEPLOYABLE, not one per site. Somebody troubleshooting
-   * moves between deployables asking the same question, and a per-site memory
-   * would make them re-pick the window on each one -- which is the clicking
-   * this field exists to stop.
+   * ONE CHOICE FOR EVERY DEPLOYABLE, not one per site. Somebody comparing
+   * websites moves between them asking about the same period, and a per-site
+   * memory would make them re-pick it on each one.
    */
-  trafficWindow: TrafficWindow;
+  statisticsPeriod: Period;
+  /**
+   * The client the Overview's Websites section reads under: an organization's
+   * id, or "" for every client in scope. Presentation only: the client scope
+   * (apps/accounts/clientScope) offers it again only while it is among the
+   * person's choices, and the read narrows on the server either way (D11).
+   */
+  statisticsScope: string;
   /** Legacy expanded-source preference, retained for document compatibility. */
   expandedSources: string[];
   /** Composition shows relationships by default; explicit collapses persist. */
@@ -47,11 +55,11 @@ export const DEPLOYABLES_SETTINGS_KEY = "memql-os-deployables-v1";
 
 export const DEFAULT_DEPLOYABLES_SETTINGS: DeployablesSettings = {
   version: 1,
-  // THE HOUR, not the day. A person opening a deployable is nearly always
-  // checking on it -- "is it up", which is the hour's question -- rather than
-  // measuring it. The day and the week stay one click away, and a click is
-  // remembered.
-  trafficWindow: "hour",
+  // A WEEK: the shortest period of whole days, so a first look shows a shape
+  // rather than one day's figure, and today stands beside the six days before.
+  statisticsPeriod: "7d",
+  // Every client in scope: the scope opens on All (spec D13).
+  statisticsScope: "",
   // Composition shows source branches until explicitly collapsed.
   expandedSources: [],
 };
@@ -64,10 +72,10 @@ export function sanitizeDeployablesSettings(raw: unknown): DeployablesSettings {
   const doc = raw as Partial<DeployablesSettings>;
   if (doc.version !== 1) return { ...DEFAULT_DEPLOYABLES_SETTINGS };
 
-  const trafficWindow =
-    doc.trafficWindow !== undefined && TRAFFIC_WINDOWS.includes(doc.trafficWindow as TrafficWindow)
-      ? (doc.trafficWindow as TrafficWindow)
-      : DEFAULT_DEPLOYABLES_SETTINGS.trafficWindow;
+  // Against the WEBSITE read's own periods: a period it does not offer would be
+  // refused on every read, so it is repaired to the default here.
+  const statisticsPeriod = isPeriod(doc.statisticsPeriod, SITE_PERIODS) ? doc.statisticsPeriod : DEFAULT_DEPLOYABLES_SETTINGS.statisticsPeriod;
+  const statisticsScope = typeof doc.statisticsScope === "string" ? doc.statisticsScope : DEFAULT_DEPLOYABLES_SETTINGS.statisticsScope;
 
   // Entries are filtered rather than the list being rejected: a stored id is
   // a key groups are looked up by, so a stray number never matches anything
@@ -76,7 +84,7 @@ export function sanitizeDeployablesSettings(raw: unknown): DeployablesSettings {
     ? (doc.expandedSources as unknown[]).filter((v): v is string => typeof v === "string")
     : [...DEFAULT_DEPLOYABLES_SETTINGS.expandedSources];
 
-  return { version: 1, trafficWindow, expandedSources,
+  return { version: 1, statisticsPeriod, statisticsScope, expandedSources,
     ...(Array.isArray(doc.collapsedSources) ? { collapsedSources: doc.collapsedSources.filter((v): v is string => typeof v === "string") } : {}) };
 }
 

@@ -181,12 +181,12 @@ async function openPage(seed: FakeSeed, hostname: string, session: Parameters<ty
   return screen.findByRole("region", { name: `Deployable ${hostname}` });
 }
 
-describe("the lock sits after Traffic and is absent without the part, on a system-owned site, and with no package deployable", () => {
-  it("sits immediately after Traffic and opens the codes on a page of their own", async () => {
+describe("the lock sits after Statistics and is absent without the part, on a system-owned site, and with no package deployable", () => {
+  it("sits immediately after Statistics and opens the codes on a page of their own", async () => {
     const page = await openPage({ sites: [DESK], accessGates: [DASHBOARD], accessCodes: [reviewers()] }, "desk.memql.example.com");
-    const traffic = within(page).getByRole("button", { name: "Traffic" });
+    const statistics = within(page).getByRole("button", { name: "Statistics" });
     const lock = within(page).getByRole("button", { name: "Access codes" });
-    expect(traffic.nextElementSibling).toBe(lock);
+    expect(statistics.nextElementSibling).toBe(lock);
     await click(lock);
     const codes = await screen.findByRole("region", { name: "Access codes for desk.memql.example.com" });
     expect(await within(codes).findByText("Client reviewers")).toBeTruthy();
@@ -195,21 +195,21 @@ describe("the lock sits after Traffic and is absent without the part, on a syste
 
   it("is absent without the part", async () => {
     const page = await openPage({ sites: [DESK] }, "desk.memql.example.com", { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/access") });
-    expect(within(page).getByRole("button", { name: "Traffic" })).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Statistics" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Access codes" })).toBeNull();
   });
 
   it("is absent on a system-owned site, even one with a package deployable", async () => {
     const system = { ...PLATFORM_SITE, packageId: "pkg-os", packageDeployableName: "os" } as Row;
     const page = await openPage({ sites: [system] }, String(PLATFORM_SITE["hostname"]));
-    expect(within(page).getByRole("button", { name: "Traffic" })).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Statistics" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Access codes" })).toBeNull();
   });
 
   it("is absent with no package deployable", async () => {
     const plain = siteRow({ id: "site-plain", hostname: "plain.memql.example.com" });
     const page = await openPage({ sites: [plain] }, "plain.memql.example.com");
-    expect(within(page).getByRole("button", { name: "Traffic" })).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Statistics" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Access codes" })).toBeNull();
   });
 });

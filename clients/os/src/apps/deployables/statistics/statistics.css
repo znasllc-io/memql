@@ -1,0 +1,33 @@
+/*
+ * A deployable's Statistics page, its whole lists, and the Overview's
+ * Websites section. The pieces are the kit's (kit/statistics); this is only
+ * how they stand on these pages. Theme tokens only.
+ */
+
+.deployable-statistics { display: grid; gap: 24px; min-width: 0; }
+
+/* The figure row, the line about counting and the chart read as one group. */
+.deployable-statistics-figures { display: grid; gap: 12px; min-width: 0; }
+
+/* The chart's shape while the read is out: the chart's own height (its
+ * readout line, a 160px plot and the time axis), so nothing below moves when
+ * it arrives. */
+.deployable-statistics-chart-pending { min-height: 208px; }
+
+/* The lists: one column, and two from 760px of pane (kit useWide), Pages
+ * beside Sources, then Countries beside Devices. */
+.deployable-statistics-lists { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; min-width: 0; }
+.deployable-statistics-lists[data-wide] { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
+
+/* The Devices list and the tabs that choose what it lists. */
+.deployable-statistics-devices { display: grid; align-content: start; gap: 4px; min-width: 0; }
+.deployable-statistics-device-tabs > .os-local-tabs { margin: 0; }
+
+/* On the Overview, Websites is a group of its own between the status
+ * breakdown and the map: one hairline above it, and room before the map's
+ * heading. */
+.os-overview > .deployable-websites { padding: 18px 0 10px; border-top: 1px solid var(--os-line); }
+
+/* Health is a change of subject: one hairline above it. */
+.deployable-statistics-health { display: grid; gap: 12px; min-width: 0; padding-top: 18px; border-top: 1px solid var(--os-line); }
+.deployable-statistics-health > .os-subhead { margin: 0; }

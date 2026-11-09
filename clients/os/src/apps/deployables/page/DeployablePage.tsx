@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Activity, Lock, MessageSquareText } from "lucide-react";
+import { ChartLine, Lock, MessageSquareText } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -22,7 +22,9 @@ import { actsFor, candidateBlockedReason, candidateTargetOffered, runForApp, sib
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import { DeployableWorkspace, type WorkspaceDetail } from "./DeployableWorkspace";
 import { RuntimeSettingsPanel } from "./stops/RuntimeSettings";
-import { TrafficPanel } from "./stops/Traffic";
+import { LIST_TITLES, type Dimension } from "../statistics/read";
+import { SiteStatisticsView, StatisticsPeriodControl, statisticsMeasured } from "../statistics/SiteStatisticsView";
+import { StatisticsListPage } from "../statistics/StatisticsListPage";
 import "../composition.css";
 import { railFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
@@ -175,6 +177,9 @@ export function DeployablePage({
   // live row on every render (`versionOpen` below), so a roll back that lands
   // while the page is open turns it to Current and takes the act off the bar.
   const [chosenVersion, setChosenVersion] = useState<{ version: SiteVersion; served: boolean } | null>(null);
+  // WHICH STATISTICS LIST IS OPEN WHOLE, held the way the version is: its
+  // page needs the list it is about, and without one Statistics stands.
+  const [listDimension, setListDimension] = useState<Dimension | null>(null);
   // WHETHER THE ACCESS CODES HOLD BACK: what they hold is the only copy.
   const [accessHeld, setAccessHeld] = useState(false);
   useEffect(() => {
@@ -191,6 +196,7 @@ export function DeployablePage({
   useEffect(() => {
     setDetail(initialDetail ?? null);
     setChosenVersion(null);
+    setListDimension(null);
     setDomainView({ kind: "list" });
     setConfirming(false);
     setTyped("");
@@ -204,6 +210,12 @@ export function DeployablePage({
     setTyped("");
     setChosenVersion({ version, served });
     setDetail("version");
+  }
+
+  // A LIST'S "All pages" OPENS IT WHOLE, as a page one step under Statistics.
+  function openList(dimension: Dimension) {
+    setListDimension(dimension);
+    setDetail("statisticsList");
   }
 
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
@@ -448,15 +460,17 @@ export function DeployablePage({
   }
 
   // EVERY OTHER DETAIL CHANGES THE PAGE TOO (the owner's rule, 2026-11-03).
-  // Traffic, Access codes and each stop's detail used to open a dialog over
-  // the page; now each takes the page's place under its own Head, so the
-  // trail names where the person is and both Backs -- the row's and the
-  // browser's -- step out. The bar stays: the deployable's acts are still the
-  // deployable's while one of its details is open. Visit and a version's
-  // details followed on 2026-11-08 ("no pop-up at all"), and Logs opens the
-  // Logs app. A version's page needs the version it is about, so without one
-  // the overview stands.
-  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || (detail === "version" && chosenVersion === null) ? null : detail;
+  // Traffic (now Statistics), Access codes and each stop's detail used to open
+  // a dialog over the page; now each takes the page's place under its own
+  // Head, so the trail names where the person is and both Backs -- the row's
+  // and the browser's -- step out. The bar stays: the deployable's acts are
+  // still the deployable's while one of its details is open. Visit and a
+  // version's details followed on 2026-11-08 ("no pop-up at all"), and Logs
+  // opens the Logs app. A version's page needs the version it is about, so
+  // without one the overview stands; a whole statistics list needs its list,
+  // so without one Statistics stands.
+  const inPage = detail === null || detail === "whereItLives" || detail === "store" || detail === "reviews" || (detail === "version" && chosenVersion === null) ? null
+    : detail === "statisticsList" && listDimension === null ? "statistics" : detail;
   // WHAT THE OPEN VERSION IS NOW, read from the live row rather than kept
   // from the click: one that has become the one serving has served.
   const versionOpen = inPage === "version" && chosenVersion !== null ? {
@@ -464,19 +478,27 @@ export function DeployablePage({
     state: versionState(site, chosenVersion.version.bundleRef),
     served: chosenVersion.served || chosenVersion.version.bundleRef === site.bundleRef,
   } : null;
-  const pageTitle = versionOpen !== null ? `Version ${versionLabel(versionOpen.version.bundleRef)}` : inPage === null ? "" : detailTitle(inPage);
+  const pageTitle = versionOpen !== null ? `Version ${versionLabel(versionOpen.version.bundleRef)}` : inPage === null ? "" : detailTitle(inPage, listDimension);
   // A NEW ACCESS CODE IS SHOWN ONCE, so Back waits for Done while one stands,
   // as the dialog's Close and Escape did: the row's Back is inert, and the
   // browser's Back lands on it.
   const holding = inPage === "access" && accessHeld;
   const toOverview = () => setDetail(null);
+  // A WHOLE LIST IS ONE STEP UNDER STATISTICS: the trail names it and Back
+  // returns there, not to the deployable.
+  const underStatistics = inPage === "statisticsList";
+  const toStatistics = () => setDetail("statistics");
   const detailView = inPage === null ? null : (
     <Panel label={`${pageTitle} for ${siteName(site)}`}>
-      <Head navigationKey={`deployable:${site.id}:${inPage}${versionOpen !== null ? `:${versionOpen.version.bundleRef}` : ""}`} title={pageTitle}
-        breadcrumbs={[{ label: backLabel, onSelect: holding ? undefined : onBack }, { label: name, onSelect: holding ? undefined : toOverview }, { label: pageTitle }]}
-        back={holding ? undefined : { label: name, onSelect: toOverview }} />
+      <Head navigationKey={`deployable:${site.id}:${inPage}${underStatistics ? `:${listDimension}` : ""}${versionOpen !== null ? `:${versionOpen.version.bundleRef}` : ""}`} title={pageTitle}
+        breadcrumbs={[{ label: backLabel, onSelect: holding ? undefined : onBack }, { label: name, onSelect: holding ? undefined : toOverview }, ...(underStatistics ? [{ label: detailTitle("statistics", null), onSelect: toStatistics }] : []), { label: pageTitle }]}
+        back={holding ? undefined : underStatistics ? { label: detailTitle("statistics", null), onSelect: toStatistics } : { label: name, onSelect: toOverview }}>
+        {/* The period at the right of the Head (spec 8), where the page has statistics to read for it. */}
+        {inPage === "statistics" && statisticsMeasured(site) ? <StatisticsPeriodControl /> : null}
+      </Head>
       {inPage === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
-        inPage === "traffic" ? <TrafficPanel site={site} /> :
+        inPage === "statistics" ? <SiteStatisticsView site={site} onShowAll={openList} /> :
+        inPage === "statisticsList" && listDimension !== null ? <StatisticsListPage site={site} dimension={listDimension} /> :
         // KEYED, so a code held for one deployable is never drawn over another.
         inPage === "access" ? <AccessCodesPanel key={site.id} site={site} onBusyChange={setAccessHeld} /> :
         inPage === "visit" ? <VisitPage key={site.id} site={site} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} /> :
@@ -518,7 +540,7 @@ export function DeployablePage({
           <Head navigationKey={`deployable:${site.id}`} title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
             <VisitSiteButton site={site} name={name} onOpenVisit={() => setDetail("visit")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
-            <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
+            <IconButton label="Statistics" onClick={() => setDetail("statistics")}><ChartLine size={16} aria-hidden /></IconButton>
             {/* ABSENT, NOT DISABLED (rule 12): a system-owned site is exempt from
                 the whole axis, and a code opens a gate that only a package's own
                 deployable can declare. */}
@@ -742,7 +764,8 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
   });
 }
 
-// Each detail's title, as its page's Head and the trail name it.
-function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", access: "Access codes", store: "Store", reviews: "Reviews", visit: "Visit", version: "Version" }[detail];
+// Each detail's title, as its page's Head and the trail name it. A whole
+// statistics list is named by its list ("Pages"), Statistics without one.
+function detailTitle(detail: WorkspaceDetail, dimension: Dimension | null): string {
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", statistics: "Statistics", statisticsList: dimension === null ? "Statistics" : LIST_TITLES[dimension], access: "Access codes", store: "Store", reviews: "Reviews", visit: "Visit", version: "Version" }[detail];
 }

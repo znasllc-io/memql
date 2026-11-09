@@ -92,7 +92,7 @@ beforeEach(() => {
 });
 
 describe("the Reviews icon", () => {
-  it("sits after Traffic on a storefront and opens the queue on a page of its own", async () => {
+  it("sits after Statistics on a storefront and opens the queue on a page of its own", async () => {
     const { page } = await openDeployable(reviewsSeed());
     const icon = within(page).getByRole("button", { name: "Reviews" });
     await click(icon);
@@ -103,7 +103,7 @@ describe("the Reviews icon", () => {
 
   it("is absent without the reviews part", async () => {
     const { page } = await openDeployable(reviewsSeed(), { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/reviews") });
-    expect(within(page).getByRole("button", { name: "Traffic" })).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Statistics" })).toBeTruthy();
     expect(within(page).queryByRole("button", { name: "Reviews" })).toBeNull();
   });
 

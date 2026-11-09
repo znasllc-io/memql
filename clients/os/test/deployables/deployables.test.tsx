@@ -1078,17 +1078,17 @@ describe("the Live stop", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("labels built-in bundles honestly and keeps Traffic immediately after Logs", async () => {
+  it("labels built-in bundles honestly and keeps Statistics immediately after Logs", async () => {
     const { connection, page } = await mountAndOpen({ sites: [PLATFORM_SITE] }, String(PLATFORM_SITE.hostname));
     const versions = within(page).getByRole("list", { name: "Versions" });
     expect(within(versions).getByRole("button", { name: "Version Bundled with MemQL, current" })).toBeTruthy();
     expect(within(versions).getByText("No separate version number is recorded")).toBeTruthy();
     expect(connection.callsNamed("siteById")).toHaveLength(0);
     const logs = within(page).getByRole("button", { name: /^Logs for / });
-    const traffic = within(page).getByRole("button", { name: "Traffic" });
-    expect(logs.nextElementSibling).toBe(traffic);
-    await click(traffic);
-    expect(await screen.findByRole("region", { name: `Traffic for ${String(PLATFORM_SITE.hostname)}` })).toBeTruthy();
+    const statistics = within(page).getByRole("button", { name: "Statistics" });
+    expect(logs.nextElementSibling).toBe(statistics);
+    await click(statistics);
+    expect(await screen.findByRole("region", { name: `Statistics for ${String(PLATFORM_SITE.hostname)}` })).toBeTruthy();
   });
 
   it("keeps history readable without publication permission", async () => {

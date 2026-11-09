@@ -330,6 +330,15 @@ export interface FakeSeed {
   traffic?: { series?: Row[]; summary?: Row[] };
   /** Fails the next `siteTrafficInWindow` with this server message. */
   trafficError?: string;
+  /**
+   * What `siteStatistics` answers: ONE payload, keyed as
+   * component/sitetraffic's `Statistics.Payload()` writes it
+   * (`siteStatisticsRow` builds one), whatever the call names. Absent answers
+   * no node at all.
+   */
+  siteStatistics?: Row;
+  /** Fails every `siteStatistics` read with this server message. */
+  siteStatisticsError?: string;
   /** Fails the next `updateSiteSettings` with this server message. */
   settingsError?: string;
   /** Fails the next `updateSiteStatus` with this server message. */
@@ -719,6 +728,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         // executeNamed at all.
         const summary = call.includes("summary: true");
         return builtinReply("siteTrafficInWindow", (summary ? seed.traffic?.summary : seed.traffic?.series) ?? []);
+      }
+
+      if (call.startsWith("builtin siteStatistics(")) {
+        if (seed.siteStatisticsError !== undefined) throw new Error(seed.siteStatisticsError);
+        return builtinReply("siteStatistics", seed.siteStatistics === undefined ? [] : [seed.siteStatistics]);
       }
 
       if (call.startsWith("mutation updateSiteSettings(")) {
@@ -1498,6 +1512,86 @@ export function trafficRow(over: Partial<Row> & { windowStart: string }): Row {
     clientErrorCount: 0,
     bytesTotal: 0,
     lastServedAt: "",
+    ...over,
+  };
+}
+
+/** A period's totals in a `siteStatistics` payload: every figure null unless named, because absent is the default. */
+export function statisticsTotals(over: Partial<Row> = {}): Row {
+  return {
+    visitors: null, visits: null, bounces: null, pageViews: null, viewsPerVisit: null, bounceRate: null,
+    requests: null, errors: null, notFound: null, bytes: null, botRequests: null, medianMs: null, p95Ms: null,
+    ...over,
+  };
+}
+
+/** One bucket of a `siteStatistics` series: every figure null unless named. */
+export function statisticsPoint(at: string, over: Partial<Row> = {}): Row {
+  return { at, visitors: null, visits: null, bounces: null, pageViews: null, requests: null, errors: null, notFound: null, p95Ms: null, ...over };
+}
+
+/** Seven daily buckets from `firstDay` (2026-10-DD or 2026-11-DD), each figure read off its column. */
+function statisticsWeek(firstDay: string, columns: Record<string, readonly number[]>): Row[] {
+  return Array.from({ length: 7 }, (_, index) => {
+    const at = new Date(Date.parse(`${firstDay}T00:00:00Z`) + index * 86_400_000).toISOString().replace(".000Z", "Z");
+    return statisticsPoint(at, Object.fromEntries(Object.entries(columns).map(([key, values]) => [key, values[index] ?? null])));
+  });
+}
+
+/**
+ * A `siteStatistics` payload as `Statistics.Payload()` writes it: the week of
+ * Nov 2 to Nov 8 2026, measured, against the week before it, with visitors
+ * counted since October. Visitors 1,204 against 1,075 (+12%), visits 1,530
+ * against 1,530 (no change), page views 4,210 against 3,900, errors 14 against
+ * 0. Override any key.
+ */
+export function siteStatisticsRow(over: Partial<Row> = {}): Row {
+  return {
+    period: "7d",
+    bucket: "day",
+    start: "2026-11-02T00:00:00Z",
+    end: "2026-11-09T00:00:00Z",
+    hasPrevious: true,
+    prevStart: "2026-10-26T00:00:00Z",
+    prevEnd: "2026-11-02T00:00:00Z",
+    measuredSince: "2026-10-01",
+    totals: statisticsTotals({
+      visitors: 1204, visits: 1530, bounces: 459, pageViews: 4210, viewsPerVisit: 4210 / 1530, bounceRate: 0.3,
+      requests: 18800, errors: 14, notFound: 1203, bytes: 13_000_000, botRequests: 230, medianMs: 48, p95Ms: 120,
+    }),
+    previous: statisticsTotals({
+      visitors: 1075, visits: 1530, bounces: 490, pageViews: 3900, viewsPerVisit: 3900 / 1530, bounceRate: 490 / 1530,
+      requests: 17000, errors: 0, notFound: 1410, bytes: 12_000_000, botRequests: 210, medianMs: 45, p95Ms: 110,
+    }),
+    series: statisticsWeek("2026-11-02", {
+      visitors: [150, 160, 170, 180, 170, 180, 194],
+      visits: [190, 205, 215, 230, 215, 230, 245],
+      bounces: [57, 61, 64, 69, 65, 69, 74],
+      pageViews: [520, 560, 590, 640, 590, 630, 680],
+      requests: [2600, 2700, 2650, 2750, 2700, 2700, 2700],
+      errors: [2, 2, 2, 2, 2, 2, 2],
+      notFound: [170, 172, 171, 173, 172, 172, 173],
+      p95Ms: [110, 120, 115, 130, 118, 125, 121],
+    }),
+    previousSeries: statisticsWeek("2026-10-26", {
+      visitors: [140, 150, 150, 160, 150, 160, 165],
+      visits: [200, 215, 215, 230, 215, 230, 225],
+      bounces: [64, 69, 69, 74, 69, 74, 71],
+      pageViews: [480, 520, 540, 600, 560, 590, 610],
+      requests: [2400, 2450, 2400, 2450, 2400, 2450, 2450],
+      errors: [0, 0, 0, 0, 0, 0, 0],
+      notFound: [200, 200, 200, 200, 200, 200, 210],
+      p95Ms: [100, 105, 110, 108, 112, 109, 111],
+    }),
+    top: {
+      page: [{ value: "/", visitors: 900, visits: 1100, pageViews: 1800 }, { value: "/pricing", visitors: 300, visits: 320, pageViews: 700 }],
+      source: [{ value: "direct", visitors: 700, visits: 800, pageViews: 2000 }, { value: "search.example", visitors: 400, visits: 500, pageViews: 1600 }],
+      country: [{ value: "DE", visitors: 600, visits: 700, pageViews: 2000 }, { value: "(unknown)", visitors: 40, visits: 50, pageViews: 90 }],
+      device: [{ value: "desktop", visitors: 800, visits: 1000, pageViews: 3000 }, { value: "mobile", visitors: 404, visits: 530, pageViews: 1210 }],
+      browser: [{ value: "Chrome", visitors: 700, visits: 900, pageViews: 2500 }, { value: "Safari", visitors: 504, visits: 630, pageViews: 1710 }],
+      os: [{ value: "macOS", visitors: 600, visits: 800, pageViews: 2200 }, { value: "Windows", visitors: 604, visits: 730, pageViews: 2010 }],
+    },
+    sites: [],
     ...over,
   };
 }

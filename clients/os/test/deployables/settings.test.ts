@@ -102,8 +102,8 @@ describe("the manifest", () => {
 describe("sanitizing a stored document", () => {
   it("discards removed landing and density preferences while preserving current choices", () => {
     for (const section of ["map", "deployables", "sources", "sites", "packages", "actions"]) {
-      expect(sanitizeDeployablesSettings({ version: 1, defaultSection: section, density: "compact", trafficWindow: "week" }))
-        .toEqual({ version: 1, trafficWindow: "week", expandedSources: [] });
+      expect(sanitizeDeployablesSettings({ version: 1, defaultSection: section, density: "compact", statisticsPeriod: "30d" }))
+        .toEqual({ version: 1, statisticsPeriod: "30d", statisticsScope: "", expandedSources: [] });
     }
   });
 
@@ -123,10 +123,11 @@ describe("the store", () => {
   it("round-trips", () => {
     const storage = memStorage();
     const store = new LocalDeployablesSettingsStore(storage);
-    store.save({ version: 1, trafficWindow: "week", expandedSources: ["pkg:a"] });
+    store.save({ version: 1, statisticsPeriod: "90d", statisticsScope: "acme", expandedSources: ["pkg:a"] });
     expect(new LocalDeployablesSettingsStore(storage).load()).toEqual({
       version: 1,
-      trafficWindow: "week",
+      statisticsPeriod: "90d",
+      statisticsScope: "acme",
       expandedSources: ["pkg:a"],
     });
   });
@@ -140,7 +141,8 @@ describe("the store", () => {
     );
     expect(new LocalDeployablesSettingsStore(storage).load()).toEqual({
       version: 1,
-      trafficWindow: "hour",
+      statisticsPeriod: "7d",
+      statisticsScope: "",
       expandedSources: [],
     });
   });
@@ -174,21 +176,31 @@ describe("the store", () => {
 // ---------------------------------------------------------------------------
 //
 // These view choices are repaired independently when reading stored settings.
-describe("the traffic window a person last chose", () => {
-  it("defaults to the hour, which is the window that answers 'is it up'", () => {
-    // The day was the old default and it is the wrong first question: somebody
-    // opening a deployable is usually checking on it, not measuring it.
-    expect(DEFAULT_DEPLOYABLES_SETTINGS.trafficWindow).toBe("hour");
+describe("the statistics period and client a person last chose", () => {
+  it("defaults to the last 7 days and every client", () => {
+    expect(DEFAULT_DEPLOYABLES_SETTINGS.statisticsPeriod).toBe("7d");
+    expect(DEFAULT_DEPLOYABLES_SETTINGS.statisticsScope).toBe("");
   });
 
-  it("keeps a window the person picked, so troubleshooting does not re-click it", () => {
-    expect(sanitizeDeployablesSettings({ version: 1, trafficWindow: "week" }).trafficWindow).toBe("week");
+  it("keeps a period the person picked, so every deployable opens on it", () => {
+    expect(sanitizeDeployablesSettings({ version: 1, statisticsPeriod: "12m" }).statisticsPeriod).toBe("12m");
+    expect(sanitizeDeployablesSettings({ version: 1, statisticsPeriod: "24h" }).statisticsPeriod).toBe("24h");
   });
 
-  it("repairs a window that is not one of the three, rather than dropping the document", () => {
-    const doc = sanitizeDeployablesSettings({ version: 1, density: "compact", trafficWindow: "fortnight" });
-    expect(doc.trafficWindow).toBe("hour");
+  it("repairs a period a website read does not offer, rather than dropping the document", () => {
+    const doc = sanitizeDeployablesSettings({ version: 1, density: "compact", statisticsPeriod: "fortnight", trafficWindow: "week" });
+    expect(doc.statisticsPeriod).toBe("7d");
     expect(doc).not.toHaveProperty("density");
+    // The window the Traffic page remembered went with it.
+    expect(doc).not.toHaveProperty("trafficWindow");
+  });
+
+  it("keeps a client as written and repairs anything that is not one", () => {
+    // Whether the person may still read that client is the scope's question,
+    // asked when the page draws (apps/accounts/clientScope): a stored id is
+    // presentation, and the read narrows on the server either way.
+    expect(sanitizeDeployablesSettings({ version: 1, statisticsScope: "acme" }).statisticsScope).toBe("acme");
+    expect(sanitizeDeployablesSettings({ version: 1, statisticsScope: 7 }).statisticsScope).toBe("");
   });
 });
 
@@ -223,7 +235,8 @@ describe("a document written before these fields existed", () => {
     const doc = sanitizeDeployablesSettings({ version: 1, defaultSection: "deployables", density: "compact" });
     expect(doc).toEqual({
       version: 1,
-      trafficWindow: "hour",
+      statisticsPeriod: "7d",
+      statisticsScope: "",
       expandedSources: [],
     });
   });
