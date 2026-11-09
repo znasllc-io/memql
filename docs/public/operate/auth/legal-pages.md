@@ -58,10 +58,11 @@ versions a person accepted, once per version.
   code, upstream OIDC) appends to `v1:identity:user.legalAcceptance` one
   entry per document whose version in force differs from the newest entry
   already recorded for that document: `{documentType, version, acceptedAt,
-  sourceIP}`. A second sign-in on the same version records nothing. A new
-  version is recorded at the person's next sign-in. Earlier entries are never
-  edited or dropped. Each recording also writes a `legal_acceptance_recorded`
-  audit event naming the documents and versions.
+  sourceIP, sessionId}`, the last naming the session that sign-in created. A
+  second sign-in on the same version records nothing. A new version is
+  recorded at the person's next sign-in. Earlier entries are never edited or
+  dropped. Each recording also writes a `legal_acceptance_recorded` audit
+  event naming the documents and versions.
 - **Where it runs.** `createSessionRow` in `component/identity/http` is the
   one place a session row is created, so every factor is covered by one hook.
   The versions come from the web server, which loaded the documents
@@ -87,18 +88,22 @@ versions a person accepted, once per version.
   dates from the person's own row, newest first. The source IP stays on the
   record and off the page. A history that could not be read says so instead
   of showing as empty.
-- **What the record is not.** It is not a change notice, and none is shown
-  at sign-in. Before a person signs in the page does not know who they are,
-  so it cannot compare the version in force with their record; after
-  sign-in, the terms say that continuing to sign in once a new version is
-  in force is acceptance, and the record shows exactly that. The documents
-  promise notice in the platform and by email at least 30 days before a
-  material change takes effect (next section); the engine has no notice
-  mechanism for either, so today the operator gives that notice, and an
-  in-platform notice of an upcoming version is a feature to build. It would
-  need a way to publish the next version beside the current one, because
-  the engine serves one document per type and records acceptance of the
-  version it serves.
+- **The notice after sign-in.** When a sign-in recorded a version, the
+  version in force differed from what the person had accepted, or they had
+  accepted nothing yet. MemQL OS says so once, right after that sign-in: the
+  account overview (`GET /me/`, native) lists the entries the caller's own
+  session recorded, each with the document's title, version and effective
+  date and whether an earlier version had been accepted
+  (`component/identity/web/legal_notice.go`), and the OS shell shows them as
+  one quiet notice with a link to each document
+  (`clients/os/src/auth/LegalNoticeBanner.tsx`). It never blocks sign-in:
+  the notice is dismissed per browser tab, nothing records that it was
+  seen, a sign-in that recorded nothing shows nothing, and a history that
+  could not be read shows nothing either. Before a person signs in the page
+  does not know who they are, so no notice is shown there.
+- **What the record is not.** It is not a prompt to re-accept: the terms say
+  that continuing to sign in once a new version is in force is acceptance,
+  and the record shows exactly that.
 
 The Privacy Notice describes the sign-in records the service keeps,
 including the IP address a sign-in arrives from. An installation that
@@ -135,11 +140,15 @@ the title twice.
 
 Both documents promise notice in the platform and by email to each user's
 account address at least 30 days before a change that materially affects
-users takes effect. The engine shows no change notice and sends no such
-email on its own today: the operator does both, and sets `effectiveDate`
-on the new version to a date at least 30 days after the notice. A change
-that only corrects an error or reduces a user's obligations may take
-effect when published.
+users takes effect. The engine does the platform half, after the fact: at a
+person's first sign-in once a new version is in force, MemQL OS tells them
+the document changed, to which version and from which date, and that signing
+in accepted it ("What the service records" above). The engine sends no email
+and shows nothing BEFORE a version takes effect: it serves one document per
+type, so it has no next version to announce. The operator gives the 30 days'
+notice, by email, and sets `effectiveDate` on the new version to a date at
+least 30 days after that notice. A change that only corrects an error or
+reduces a user's obligations may take effect when published.
 
 ## Replacing the defaults in an installation
 

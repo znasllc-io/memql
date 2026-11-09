@@ -60,7 +60,7 @@ func raceLegalRecorders(store *Store, user string, n int) (writes int, recordedB
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			results[i], errs[i] = store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.9", legalNow)
+			results[i], errs[i] = store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.9", legalSession, legalNow)
 		}(i)
 	}
 	close(start)
@@ -160,14 +160,14 @@ func TestRecordLegalAcceptanceAgainstARealEngine(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	first, err := store.RecordLegalAcceptance(ctx, userId, legalInForce, "203.0.113.5", legalNow)
+	first, err := store.RecordLegalAcceptance(ctx, userId, legalInForce, "203.0.113.5", "v1:identity:authSession:s-"+stamp, legalNow)
 	if err != nil {
 		t.Fatalf("first sign-in: %v", err)
 	}
 	if len(first) != 2 {
 		t.Fatalf("first sign-in recorded %d entries, want 2: %+v", len(first), first)
 	}
-	again, err := store.RecordLegalAcceptance(ctx, userId, legalInForce, "203.0.113.6", legalNow.Add(time.Hour))
+	again, err := store.RecordLegalAcceptance(ctx, userId, legalInForce, "203.0.113.6", "v1:identity:authSession:s-"+stamp, legalNow.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("second sign-in: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRecordLegalAcceptanceAgainstARealEngine(t *testing.T) {
 		t.Fatalf("second sign-in on the same versions recorded %+v, want nothing", again)
 	}
 	newer := []LegalDocumentVersion{{DocumentType: "tos", Version: "2.1.0"}, {DocumentType: "privacy", Version: "2.0.0"}}
-	third, err := store.RecordLegalAcceptance(ctx, userId, newer, "203.0.113.7", legalNow.Add(2*time.Hour))
+	third, err := store.RecordLegalAcceptance(ctx, userId, newer, "203.0.113.7", "v1:identity:authSession:s-"+stamp, legalNow.Add(2*time.Hour))
 	if err != nil {
 		t.Fatalf("sign-in after new terms: %v", err)
 	}
@@ -191,6 +191,7 @@ func TestRecordLegalAcceptanceAgainstARealEngine(t *testing.T) {
 		t.Fatalf("the row holds %d entries, want 3 (two from the first sign-in, one from the new terms): %+v", len(entries), entries)
 	}
 	if entries[0].DocumentType != "tos" || entries[0].Version != "2.0.0" || entries[0].SourceIP != "203.0.113.5" ||
+		entries[0].SessionId != "v1:identity:authSession:s-"+stamp ||
 		entries[1].DocumentType != "privacy" || entries[2].Version != "2.1.0" || entries[2].SourceIP != "203.0.113.7" {
 		t.Errorf("entries = %+v, want the first sign-in's two kept verbatim and tos 2.1.0 appended", entries)
 	}

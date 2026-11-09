@@ -105,7 +105,7 @@ func (s *Server) recordLegalAcceptance(r *http.Request, in sessionRowInput) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	recorded, err := s.Store.RecordLegalAcceptance(r.Context(), in.UserId, docs, clientIP(r), now)
+	recorded, err := s.Store.RecordLegalAcceptance(r.Context(), in.UserId, docs, clientIP(r), in.SessionId, now)
 	ev := identity.AuditEvent{
 		Category:    identity.AuditCategoryIdentity,
 		Action:      "legal_acceptance_recorded",

@@ -23,7 +23,7 @@ import (
 // is the record of that: on every sign-in that creates a session, one entry
 // per document whose version in force the account has not yet accepted is
 // appended to v1:identity:user.legalAcceptance, as {documentType, version,
-// acceptedAt, sourceIP}. Once per VERSION, never per session: a person who
+// acceptedAt, sourceIP, sessionId}. Once per VERSION, never per session: a person who
 // signs in a hundred times under version 2.0.0 has one entry for it, and the
 // day the operator publishes 2.1.0 their next sign-in appends one more.
 //
@@ -64,11 +64,19 @@ type LegalDocumentVersion struct {
 
 // LegalAcceptanceEntry is one recorded acceptance, in the shape stored on
 // v1:identity:user.legalAcceptance. AcceptedAt is RFC 3339 in UTC.
+//
+// SessionId names the v1:identity:authSession whose sign-in recorded the
+// entry. It is what lets the account overview answer "which versions did
+// THIS sign-in accept" exactly, so MemQL OS can show the person a notice
+// after sign-in (the documents promise notice in the platform when a version
+// changes) without comparing clocks or re-deriving the decision. Empty on an
+// entry written before the field existed.
 type LegalAcceptanceEntry struct {
 	DocumentType string `json:"documentType"`
 	Version      string `json:"version"`
 	AcceptedAt   string `json:"acceptedAt"`
 	SourceIP     string `json:"sourceIP"`
+	SessionId    string `json:"sessionId,omitempty"`
 }
 
 // legalAcceptanceConcept is the row the history lives on.
@@ -187,9 +195,9 @@ func rowVersion(node *memqlv1.MemoryNode) time.Time {
 }
 
 // RecordLegalAcceptance appends, for the user, one entry per document in
-// force whose version the account has not yet accepted, stamped with `now`
-// and the sign-in's source IP. It returns the entries it appended, nil when
-// nothing was due.
+// force whose version the account has not yet accepted, stamped with `now`,
+// the sign-in's source IP and the session it created. It returns the entries
+// it appended, nil when nothing was due.
 //
 // The protocol is the one memql#5431 asks of every cross-replica
 // read-modify-write: the per-user advisory lock around the whole thing, a
@@ -198,7 +206,7 @@ func rowVersion(node *memqlv1.MemoryNode) time.Time {
 // again, up to legalAcceptanceWriteAttempts times; the error surfaces after
 // that, and the caller treats it as bookkeeping to log, never as a reason
 // to refuse the sign-in.
-func (s *Store) RecordLegalAcceptance(ctx context.Context, userId string, inForce []LegalDocumentVersion, sourceIP string, now time.Time) ([]LegalAcceptanceEntry, error) {
+func (s *Store) RecordLegalAcceptance(ctx context.Context, userId string, inForce []LegalDocumentVersion, sourceIP, sessionId string, now time.Time) ([]LegalAcceptanceEntry, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errNoEngine
 	}
@@ -239,6 +247,7 @@ func (s *Store) RecordLegalAcceptance(ctx context.Context, userId string, inForc
 					Version:      d.Version,
 					AcceptedAt:   acceptedAt,
 					SourceIP:     strings.TrimSpace(sourceIP),
+					SessionId:    strings.TrimSpace(sessionId),
 				})
 			}
 			all := make([]LegalAcceptanceEntry, 0, len(entries)+len(appended))

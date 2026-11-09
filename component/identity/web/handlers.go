@@ -1074,12 +1074,19 @@ func (s *Server) handleMeDashboard(w http.ResponseWriter, r *http.Request) {
 			s.renderError(w, r, http.StatusServiceUnavailable, "Your profile is unavailable.")
 			return
 		}
-		writeNative(w, map[string]any{"page": "me/profile", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{
+		data := map[string]any{
 			"Layout": map[string]string{"Title": "Your identity"},
 			"Profile": map[string]string{"Name": user.DisplayName, "First name": user.FirstName, "Last name": user.LastName,
 				"Email": user.PrimaryEmail, "Phone": user.Phone, "Role at organization": user.PrimaryRole, "Gender": user.Gender,
 				"Date of birth": user.Birthdate, "Cluster role": user.Role},
-		}})
+		}
+		// What this sign-in accepted (legal_notice.go), for the notice the OS
+		// shows after sign-in. Absent when the history could not be read; an
+		// empty list when the sign-in recorded nothing.
+		if notices := s.legalNotices(r, claims); notices != nil {
+			data["LegalNotices"] = notices
+		}
+		writeNative(w, map[string]any{"page": "me/profile", "csrf": CSRFTokenFromRequest(r), "data": data})
 		return
 	}
 	extra := []string{s.assetURL("/static/me-dashboard.js")}

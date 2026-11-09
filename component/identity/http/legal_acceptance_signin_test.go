@@ -30,6 +30,7 @@ import (
 var (
 	fakeLegalReadRe  = regexp.MustCompile(`^query userLegalAcceptanceById\(userId: "([^"]*)"\)$`)
 	fakeLegalArrayRe = regexp.MustCompile(`legalAcceptance: (\[.*?\])(?:,|\))`)
+	fakeSessionIdRe  = regexp.MustCompile(`sessionId: "([^"]*)"`)
 )
 
 // legalSessionEngine is sessionEngine plus the user's acceptance history.
@@ -39,6 +40,7 @@ type legalSessionEngine struct {
 	version     time.Time
 	failWrites  bool
 	sessions    int
+	sessionIds  []string
 	legalReads  int
 	legalWrites [][]map[string]any
 	unknown     []string
@@ -59,6 +61,9 @@ func (e *legalSessionEngine) Execute(_ context.Context, q string) (*memqlengine.
 		}}}}, nil
 	case strings.HasPrefix(q, "mutation createAuthSession("):
 		e.sessions++
+		if m := fakeSessionIdRe.FindStringSubmatch(q); m != nil {
+			e.sessionIds = append(e.sessionIds, m[1])
+		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 	case strings.HasPrefix(q, "mutation rotateAuthSession("), strings.HasPrefix(q, "mutation createAuditEvent("):
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -184,6 +189,9 @@ func TestASignInRecordsTheLegalVersionsInForceOnce(t *testing.T) {
 	}
 	if at, _ := first[0]["acceptedAt"].(string); at == "" {
 		t.Errorf("acceptedAt is empty: %v", first[0])
+	}
+	if len(eng.sessionIds) != 1 || first[0]["sessionId"] != eng.sessionIds[0] || first[1]["sessionId"] != eng.sessionIds[0] {
+		t.Errorf("entries name session %v, want the session this sign-in created (%v): the OS asks which versions THIS sign-in accepted", first[0]["sessionId"], eng.sessionIds)
 	}
 	ev, ok := audit.find("legal_acceptance_recorded")
 	if !ok {

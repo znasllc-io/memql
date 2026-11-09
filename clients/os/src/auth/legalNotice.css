@@ -1,0 +1,16 @@
+/* The legal notice after sign-in: the shared Notice, placed like the storage
+ * warning but at the top, clear of the dock and of whatever the person is
+ * doing. Straight edges, one quiet strip, gone when dismissed. */
+.os-legal-notice {
+  position: fixed;
+  z-index: 180;
+  inset-inline: max(12px, env(safe-area-inset-left));
+  top: calc(12px + env(safe-area-inset-top));
+  width: fit-content;
+  max-width: min(40rem, calc(100vw - 24px));
+  margin-inline: auto;
+}
+.os-root[data-role-test] .os-legal-notice { top: calc(64px + 12px + env(safe-area-inset-top)); }
+.os-legal-notice .os-notice { box-shadow: var(--os-shadow-sm, 0 1px 2px rgb(0 0 0 / 0.08)); }
+.os-legal-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.os-legal-notice-actions .os-button { align-self: auto; }

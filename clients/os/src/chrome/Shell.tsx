@@ -1,6 +1,7 @@
 import { isRoleTestTab } from "../auth/roleTest";
 import { InMemoryResumeStore } from "../items/uploadResume";
 import { RoleTestBanner } from "../auth/RoleTestBanner";
+import { LegalNoticeBanner } from "../auth/LegalNoticeBanner";
 import { StorageHealthProvider, StorageWarning } from "../cluster/storage/StorageHealth";
 import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
@@ -459,6 +460,10 @@ function DesktopChrome({
         }}
       />
       <StorageWarning onHeightChange={setStorageWarningHeight} />
+      {/* What this sign-in accepted, when a legal document's version changed
+          under the person (the documents promise notice in the platform).
+          Reads one identity page after sign-in, says so once, dismissible. */}
+      <LegalNoticeBanner />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
       <AskSheet dockReserve={placement.dockReserve} />

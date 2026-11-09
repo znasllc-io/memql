@@ -152,8 +152,10 @@ func (f *legalFakeEngine) writeCount() int {
 }
 
 func entry(doc, version, at, ip string) map[string]any {
-	return map[string]any{"documentType": doc, "version": version, "acceptedAt": at, "sourceIP": ip}
+	return map[string]any{"documentType": doc, "version": version, "acceptedAt": at, "sourceIP": ip, "sessionId": "v1:identity:authSession:earlier"}
 }
+
+const legalSession = "v1:identity:authSession:this-sign-in"
 
 var (
 	legalNow     = time.Date(2026, 11, 9, 16, 10, 0, 0, time.UTC)
@@ -207,7 +209,7 @@ func TestRecordLegalAcceptanceRecordsEachVersionInForceOnce(t *testing.T) {
 	eng := &legalFakeEngine{userId: user, version: legalNow.Add(-time.Hour)}
 	store := newLegalStore(eng)
 
-	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalNow)
+	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow)
 	if err != nil {
 		t.Fatalf("RecordLegalAcceptance: %v", err)
 	}
@@ -215,8 +217,8 @@ func TestRecordLegalAcceptanceRecordsEachVersionInForceOnce(t *testing.T) {
 		t.Fatalf("the recorder issued constructs the fake does not model: %s", strings.Join(eng.unknown, "; "))
 	}
 	want := []LegalAcceptanceEntry{
-		{DocumentType: "tos", Version: "2.0.0", AcceptedAt: "2026-11-09T16:10:00Z", SourceIP: "203.0.113.5"},
-		{DocumentType: "privacy", Version: "2.0.0", AcceptedAt: "2026-11-09T16:10:00Z", SourceIP: "203.0.113.5"},
+		{DocumentType: "tos", Version: "2.0.0", AcceptedAt: "2026-11-09T16:10:00Z", SourceIP: "203.0.113.5", SessionId: legalSession},
+		{DocumentType: "privacy", Version: "2.0.0", AcceptedAt: "2026-11-09T16:10:00Z", SourceIP: "203.0.113.5", SessionId: legalSession},
 	}
 	if fmt.Sprint(recorded) != fmt.Sprint(want) {
 		t.Fatalf("recorded = %+v, want %+v", recorded, want)
@@ -229,8 +231,9 @@ func TestRecordLegalAcceptanceRecordsEachVersionInForceOnce(t *testing.T) {
 		t.Errorf("write names user %q, want %q", w.userId, user)
 	}
 	if len(w.entries) != 2 || w.entries[0]["documentType"] != "tos" || w.entries[1]["documentType"] != "privacy" ||
-		w.entries[0]["version"] != "2.0.0" || w.entries[1]["acceptedAt"] != "2026-11-09T16:10:00Z" || w.entries[1]["sourceIP"] != "203.0.113.5" {
-		t.Errorf("written array = %v, want the two entries with the version, the instant and the source IP", w.entries)
+		w.entries[0]["version"] != "2.0.0" || w.entries[1]["acceptedAt"] != "2026-11-09T16:10:00Z" || w.entries[1]["sourceIP"] != "203.0.113.5" ||
+		w.entries[0]["sessionId"] != legalSession || w.entries[1]["sessionId"] != legalSession {
+		t.Errorf("written array = %v, want the two entries with the version, the instant, the source IP and the session that recorded them", w.entries)
 	}
 
 	// The memql#5431 protocol, visible on the contexts the fake saw.
@@ -245,7 +248,7 @@ func TestRecordLegalAcceptanceRecordsEachVersionInForceOnce(t *testing.T) {
 	}
 
 	// A second sign-in on the same versions is NOT a second record.
-	again, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "198.51.100.9", legalNow.Add(time.Hour))
+	again, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "198.51.100.9", legalSession, legalNow.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("second RecordLegalAcceptance: %v", err)
 	}
@@ -265,7 +268,7 @@ func TestRecordLegalAcceptanceKeepsEarlierEntriesAndAppendsOnlyTheChangedDocumen
 	}}
 	store := newLegalStore(eng)
 
-	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalNow)
+	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow)
 	if err != nil {
 		t.Fatalf("RecordLegalAcceptance: %v", err)
 	}
@@ -302,7 +305,7 @@ func TestRecordLegalAcceptanceRereadsAfterAConcurrentWrite(t *testing.T) {
 	}
 	store := newLegalStore(eng)
 
-	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalNow)
+	recorded, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow)
 	if err != nil {
 		t.Fatalf("RecordLegalAcceptance: %v", err)
 	}
@@ -326,7 +329,7 @@ func TestRecordLegalAcceptanceGivesUpAfterRepeatedConflicts(t *testing.T) {
 	eng := &legalFakeEngine{userId: user, version: legalNow.Add(-time.Hour),
 		writeErrs: []error{memqlengine.ErrRowVersionChanged, memqlengine.ErrRowVersionChanged, memqlengine.ErrRowVersionChanged, memqlengine.ErrRowVersionChanged}}
 	store := newLegalStore(eng)
-	_, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalNow)
+	_, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow)
 	if !errors.Is(err, memqlengine.ErrRowVersionChanged) {
 		t.Fatalf("err = %v, want the version conflict surfaced after the attempts run out", err)
 	}
@@ -338,7 +341,7 @@ func TestRecordLegalAcceptanceGivesUpAfterRepeatedConflicts(t *testing.T) {
 func TestRecordLegalAcceptanceRefusesWithoutARowOrAVersion(t *testing.T) {
 	t.Run("no such user", func(t *testing.T) {
 		eng := &legalFakeEngine{userId: "v1:identity:user:gone", missing: true}
-		_, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:gone", legalInForce, "", legalNow)
+		_, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:gone", legalInForce, "", legalSession, legalNow)
 		if err == nil {
 			t.Fatal("recording against a missing row succeeded; there is nothing to append to")
 		}
@@ -348,7 +351,7 @@ func TestRecordLegalAcceptanceRefusesWithoutARowOrAVersion(t *testing.T) {
 	})
 	t.Run("a row without a version is not written", func(t *testing.T) {
 		eng := &legalFakeEngine{userId: "v1:identity:user:u5"}
-		_, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:u5", legalInForce, "", legalNow)
+		_, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:u5", legalInForce, "", legalSession, legalNow)
 		if err == nil {
 			t.Fatal("recording without the row's version succeeded; the fence would have nothing to compare and the write could erase a sibling's")
 		}
@@ -358,7 +361,7 @@ func TestRecordLegalAcceptanceRefusesWithoutARowOrAVersion(t *testing.T) {
 	})
 	t.Run("nothing in force means nothing to do", func(t *testing.T) {
 		eng := &legalFakeEngine{userId: "v1:identity:user:u6", version: legalNow}
-		recorded, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:u6", nil, "", legalNow)
+		recorded, err := newLegalStore(eng).RecordLegalAcceptance(context.Background(), "v1:identity:user:u6", nil, "", legalSession, legalNow)
 		if err != nil || recorded != nil {
 			t.Fatalf("recorded, err = %v, %v; want nothing and no error", recorded, err)
 		}
@@ -379,8 +382,8 @@ func TestLegalAcceptanceForUserDecodesTheHistoryAndItsVersion(t *testing.T) {
 		t.Fatalf("LegalAcceptanceForUser: %v", err)
 	}
 	want := []LegalAcceptanceEntry{
-		{DocumentType: "tos", Version: "1.0.0", AcceptedAt: "2026-01-02T03:04:05Z", SourceIP: "192.0.2.1"},
-		{DocumentType: "privacy", Version: "1.0.0", AcceptedAt: "2026-01-02T03:04:06Z"},
+		{DocumentType: "tos", Version: "1.0.0", AcceptedAt: "2026-01-02T03:04:05Z", SourceIP: "192.0.2.1", SessionId: "v1:identity:authSession:earlier"},
+		{DocumentType: "privacy", Version: "1.0.0", AcceptedAt: "2026-01-02T03:04:06Z", SessionId: "v1:identity:authSession:earlier"},
 	}
 	if fmt.Sprint(entries) != fmt.Sprint(want) {
 		t.Errorf("entries = %+v, want %+v", entries, want)
@@ -420,7 +423,7 @@ func TestLegalAcceptanceStatementsParseAgainstTheRealTree(t *testing.T) {
 		entry("tos", "1.0.0", "2026-01-02T03:04:05Z", `203.0.113.7`),
 	}}
 	store := newLegalStore(eng)
-	if _, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalNow); err != nil {
+	if _, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow); err != nil {
 		t.Fatalf("RecordLegalAcceptance: %v", err)
 	}
 	read := fmt.Sprintf(`query userLegalAcceptanceById(userId: %q)`, user)
