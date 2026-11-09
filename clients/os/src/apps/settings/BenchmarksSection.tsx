@@ -33,7 +33,7 @@ import { useBenchmarks } from "./useBenchmarks";
  * bar of height zero is a measurement of zero, which for durability's headline
  * is the exact opposite of what an absence means.
  *
- * Plain DOM in the OS's own idiom, following TrafficStrip and SendBar: no
+ * Plain DOM in the OS's own idiom, following Email's SendBar: no
  * charting dependency, one hue, and every value reachable in words. `--os-warn`
  * and `--os-error` are never a data series here -- amber is warn and red is
  * error everywhere in this shell, and a regression is said in words rather

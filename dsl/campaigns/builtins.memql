@@ -606,9 +606,10 @@ builtin emailStatisticsRollup { }
 /// by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is
 /// dropped, an empty list means every organization they reach, and a list that names none of them
 /// answers every figure null -- so a client's member who names another client's organization gets the
-/// answer of somebody who reaches nothing, and learns nothing. A figure over days whose records the
-/// rollup has not yet walked is null, never zero, and test runs and the consent events of an
-/// organization's testing audience are left out.
+/// answer of somebody who reaches nothing, and learns no figure of it. The one date an answer carries,
+/// measuredSince, is the cluster's first recorded day, not any one organization's. A figure over days
+/// whose records the rollup has not yet walked is null, never zero, and test runs and the consent
+/// events of an organization's testing audience are left out.
 @sdk
 @executor("integration.emailStats.statistics")
 @args(profile="object")

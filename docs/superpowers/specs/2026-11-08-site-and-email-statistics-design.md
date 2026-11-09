@@ -325,9 +325,11 @@ surface, dated 2026-11-08, beside the access-code and shopper routes.
   absent for a period the facts table does not yet cover. A 12-month period
   returns no `previous` and no `previousSeries` (D4).
 
-Both reads are cached by the engine's result cache for 60 seconds by default
-and are re-read by the page on `AutoRefresh` (five minutes for 24 hours,
-fifteen otherwise) while the page is visible.
+Both reads are re-read by the page on `AutoRefresh` (five minutes for 24
+hours, fifteen otherwise) while the page is visible. Neither is cached: the
+engine answers a top-level builtin before its result cache is consulted, so
+that cadence is what bounds their load (corrected at the final review,
+2026-11-09; this record first said both were cached for 60 seconds).
 
 ## 8. Shared pieces in the kit
 

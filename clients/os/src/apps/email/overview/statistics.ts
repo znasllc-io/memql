@@ -35,8 +35,9 @@ import { useReading, type Reading } from "../useEmail";
 //
 // ONE READ, NO CLOCK. The surface that shows it mounts the kit's `AutoRefresh`
 // on `reload` every `STATISTICS_REFRESH_MS` (spec 7: fifteen minutes for a
-// daily period), which reads only while the pane is seen; the engine's result
-// cache answers a repeat within its minute.
+// daily period), which reads only while the pane is seen. Nothing caches the
+// read: the engine answers a top-level builtin before its result cache is
+// consulted (component/memql/engine.go), so the cadence is what bounds the load.
 
 /** How often the Overview reads its statistics again while it is seen (spec 7). */
 export const STATISTICS_REFRESH_MS = 900_000;

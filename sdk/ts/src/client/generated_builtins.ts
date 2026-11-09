@@ -2064,7 +2064,7 @@ QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRend
   return this.executeNamed("emailRender", buildEmailRender(args), opts);
 };
 
-/** The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns nothing. A figure over days whose records the rollup has not yet walked is null, never zero, and test runs and the consent events of an organization's testing audience are left out. */
+/** The email statistics the Email Overview reads (the 2026-11-08 statistics design, section 7). Gated by the caller's ORGANIZATIONS, the ones their grant reaches: a named organization outside it is dropped, an empty list means every organization they reach, and a list that names none of them answers every figure null -- so a client's member who names another client's organization gets the answer of somebody who reaches nothing, and learns no figure of it. The one date an answer carries, measuredSince, is the cluster's first recorded day, not any one organization's. A figure over days whose records the rollup has not yet walked is null, never zero, and test runs and the consent events of an organization's testing audience are left out. */
 export interface EmailStatisticsArgs {
   /** The organizations to read, as bare ids. Empty reads every organization you reach. It narrows what you reach and never widens it. */
   accountIds?: string[];

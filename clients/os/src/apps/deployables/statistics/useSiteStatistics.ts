@@ -14,8 +14,10 @@ import { fetchSiteStatistics, type SiteStatistics } from "./read";
 // event when a day's figures move, so a subscription would draw a page that
 // never changes. The page reads once, and `AutoRefresh` (mounted beside the
 // figures, so a hidden pane stops) reads again on the cadence below, and on
-// the app's return. The engine's result cache answers a repeat within a
-// minute, so two pages asking the same question cost one read.
+// the app's return. NOTHING CACHES IT: the engine answers a top-level builtin
+// before its result cache is consulted (component/memql/engine.go), so every
+// read reaches the rollup tables, and the cadence below is what bounds the
+// load. Two pages asking the same question cost two reads.
 //
 // ===========================================================================
 // WHAT A READ BELONGS TO

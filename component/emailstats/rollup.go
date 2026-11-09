@@ -885,6 +885,12 @@ func laterStart(since, askedAt time.Time) time.Time {
 // Each is read off the driver's error when the engine passes it on, and off
 // the text the driver renders when the engine passes on only that
 // (TestAPageTooLongForItsDeadlineIsToldApartFromAnyOtherFailure).
+//
+// THE MESSAGE IS THE SERVER'S ENGLISH. A server whose lc_messages is another
+// language words a statement timeout differently, so its timeouts read as
+// ordinary failures here and a first walk's start does not move on them; the
+// client read deadline above still does. component/retention reads the same
+// message for the same reason.
 func isPageTimeout(err error) bool {
 	var pgerr pgdriver.Error
 	if errors.As(err, &pgerr) {

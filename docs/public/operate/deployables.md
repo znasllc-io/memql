@@ -1017,7 +1017,10 @@ non-system-owned deployable serves from its own origin
 forward, the script sends the new path with `navigator.sendBeacon` to
 `POST /_memql/view`, which the edge answers itself and never forwards. It never
 reports the first load, which the navigation already counted, and it reads no
-cookie and stores nothing in the browser. A ping is a page view only when:
+cookie and stores nothing in the browser. A router that moves between pages
+with `history.replaceState` alone is not counted: the script does not wrap it,
+because most routers call it for state that is not a new page. A ping is a page
+view only when:
 
 - it is a `POST` from the site's own origin: its `Origin` names the host it was
   sent to, or, when `Origin` is absent or the `null` a page with a

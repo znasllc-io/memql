@@ -10512,9 +10512,8 @@ a.os-button {
  * stylesheet that made absences small would argue the opposite of the thing it
  * renders.
  *
- * The rail is a SHAPE, not a chart -- the same call TrafficStrip makes, and
- * for the same reason: sixty marks in a 200px column is a smear, and the
- * numbers beside it are where the values live. Plain flex, one hue, no
+ * The rail is a SHAPE, not a chart: sixty marks in a 200px column is a smear,
+ * and the numbers beside it are where the values live. Plain flex, one hue, no
  * dependency.
  *
  * ONE HUE, AND IT IS NEVER A STATUS COLOUR. Amber is `warn` and red is `error`

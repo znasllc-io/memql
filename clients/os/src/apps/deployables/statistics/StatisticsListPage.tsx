@@ -21,8 +21,8 @@ import "./statistics.css";
 // on the Statistics page, one step back; this page reads the one remembered.
 //
 // IT READS FOR ITSELF, the same read the Statistics page made, so it holds
-// nothing across the hop and a refresh keeps it current; the engine's result
-// cache answers the repeat.
+// nothing across the hop and a refresh keeps it current. That repeat is a
+// second read: nothing caches the statistics read (useSiteStatistics.ts).
 //
 // THE DEVICES LIST KEEPS ITS THREE VIEWS: the tabs stand under the Head, as
 // on any page with sibling views, opening on the one whose "All devices" was
