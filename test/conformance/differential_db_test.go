@@ -115,40 +115,52 @@ type laneExpr struct {
 type laneRow struct {
 	label   string
 	payload map[string]any
+	// at, when set, is the row's createdAt, and history its earlier versions,
+	// oldest first: a corpus case's dated row (its `createdAt` and `history`)
+	// is written as versions at their own instants, so the read's
+	// latest-version collapse has a history to get wrong.
+	at      time.Time
+	history []laneVersion
+}
+
+// laneVersion is one earlier version of a dated row.
+type laneVersion struct {
+	at      time.Time
+	payload map[string]any
 }
 
 // laneValues are the stored values the matrix puts in an `any` field.
 var laneValues = []laneRow{
-	{"null", map[string]any{"value": nil}},
-	{"empty", map[string]any{"value": ""}},
-	{"space", map[string]any{"value": " "}},
-	{"zero", map[string]any{"value": 0}},
-	{"one", map[string]any{"value": 1}},
-	{"one-and-a-half", map[string]any{"value": 1.5}},
-	{"false", map[string]any{"value": false}},
-	{"true", map[string]any{"value": true}},
-	{"e-acute", map[string]any{"value": "é"}},
-	{"upper-e", map[string]any{"value": "E"}},
-	{"lower-e", map[string]any{"value": "e"}},
-	{"text-one", map[string]any{"value": "1"}},
-	{"a", map[string]any{"value": "a"}},
-	{"abc", map[string]any{"value": "abc"}},
-	{"tags-empty", map[string]any{"tags": []any{}}},
-	{"tags-a", map[string]any{"tags": []any{"a"}}},
-	{"tags-numbers", map[string]any{"tags": []any{1, 2, 3}}},
-	{"tags-scalar", map[string]any{"tags": "a"}},
-	{"tags-null", map[string]any{"tags": nil}},
-	{"tags-object", map[string]any{"tags": map[string]any{"k": "a"}}},
-	{"obj-empty", map[string]any{"obj": map[string]any{}}},
-	{"obj-a", map[string]any{"obj": map[string]any{"a": "x"}}},
-	{"obj-a-null", map[string]any{"obj": map[string]any{"a": nil}}},
-	{"obj-null", map[string]any{"obj": nil}},
-	{"obj-scalar", map[string]any{"obj": "x"}},
-	{"flag-true", map[string]any{"flag": true}},
-	{"flag-false", map[string]any{"flag": false}},
-	{"flag-null", map[string]any{"flag": nil}},
-	{"flag-string-true", map[string]any{"flag": "true"}},
-	{"flag-malformed", map[string]any{"flag": "maybe"}},
+	{label: "null", payload: map[string]any{"value": nil}},
+	{label: "empty", payload: map[string]any{"value": ""}},
+	{label: "space", payload: map[string]any{"value": " "}},
+	{label: "zero", payload: map[string]any{"value": 0}},
+	{label: "one", payload: map[string]any{"value": 1}},
+	{label: "one-and-a-half", payload: map[string]any{"value": 1.5}},
+	{label: "false", payload: map[string]any{"value": false}},
+	{label: "true", payload: map[string]any{"value": true}},
+	{label: "e-acute", payload: map[string]any{"value": "é"}},
+	{label: "upper-e", payload: map[string]any{"value": "E"}},
+	{label: "lower-e", payload: map[string]any{"value": "e"}},
+	{label: "text-one", payload: map[string]any{"value": "1"}},
+	{label: "a", payload: map[string]any{"value": "a"}},
+	{label: "abc", payload: map[string]any{"value": "abc"}},
+	{label: "tags-empty", payload: map[string]any{"tags": []any{}}},
+	{label: "tags-a", payload: map[string]any{"tags": []any{"a"}}},
+	{label: "tags-numbers", payload: map[string]any{"tags": []any{1, 2, 3}}},
+	{label: "tags-scalar", payload: map[string]any{"tags": "a"}},
+	{label: "tags-null", payload: map[string]any{"tags": nil}},
+	{label: "tags-object", payload: map[string]any{"tags": map[string]any{"k": "a"}}},
+	{label: "obj-empty", payload: map[string]any{"obj": map[string]any{}}},
+	{label: "obj-a", payload: map[string]any{"obj": map[string]any{"a": "x"}}},
+	{label: "obj-a-null", payload: map[string]any{"obj": map[string]any{"a": nil}}},
+	{label: "obj-null", payload: map[string]any{"obj": nil}},
+	{label: "obj-scalar", payload: map[string]any{"obj": "x"}},
+	{label: "flag-true", payload: map[string]any{"flag": true}},
+	{label: "flag-false", payload: map[string]any{"flag": false}},
+	{label: "flag-null", payload: map[string]any{"flag": nil}},
+	{label: "flag-string-true", payload: map[string]any{"flag": "true"}},
+	{label: "flag-malformed", payload: map[string]any{"flag": "maybe"}},
 }
 
 // laneMatrix is the generated half: the absence table and the typed
@@ -388,7 +400,11 @@ func laneCorpusExpressions(t *testing.T) ([]*laneExpr, map[string]string, map[st
 		domain := corpusDomainName(strings.TrimPrefix(r.dir, r.edition+"/")) + "_lane"
 		fixtures[domain] = r.fixture
 		if r.c.Row != nil {
-			caseRows[domain] = append(caseRows[domain], laneRow{label: fmt.Sprintf("%s#%d", r.c.File, r.index+1), payload: r.c.Row})
+			row, err := laneCaseRow(fmt.Sprintf("%s#%d", r.c.File, r.index+1), r.c.Row, r.c.History)
+			if err != nil {
+				t.Fatalf("%s: %v", r.rel, err)
+			}
+			caseRows[domain] = append(caseRows[domain], row)
 		}
 		key := r.rel + fmt.Sprint(r.c.Args) + fmt.Sprint(r.c.Actor)
 		if seen[key] {
@@ -508,9 +524,41 @@ func laneContext(actor map[string]any) context.Context {
 	return auth.ContextWithInternalOrigin(ctx)
 }
 
+// laneCaseRow is a corpus case's row as the lane writes it. A `createdAt` key
+// is the version's instant rather than a payload field, as the corpus runner
+// reads it (corpusRowCreatedAt), and history is written as the row's earlier
+// versions.
+func laneCaseRow(label string, row map[string]any, history []map[string]any) (laneRow, error) {
+	out := laneRow{label: label, payload: row}
+	at, dated, err := corpusRowCreatedAt(row)
+	if err != nil || !dated {
+		return out, err
+	}
+	out.at, out.payload = at, laneWithout(row, "createdAt")
+	for _, version := range history {
+		vat, _, err := corpusRowCreatedAt(version)
+		if err != nil {
+			return out, err
+		}
+		out.history = append(out.history, laneVersion{at: vat, payload: laneWithout(version, "createdAt")})
+	}
+	return out, nil
+}
+
+func laneWithout(m map[string]any, key string) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if k != key {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // laneWrite inserts each row through the engine's raw insert form and reads
-// the stored nodes back. A row the concept's schema refuses is not written,
-// and says so.
+// the stored nodes back, each at its latest version. A row the concept's
+// schema refuses is not written, and says so. A dated row is written as its
+// versions instead (laneWriteVersions).
 func laneWrite(t *testing.T, ctx context.Context, eng *memql.MemQLEngine, db *bun.DB, lane, conceptID string, rows []laneRow) []memoryNodes.MemoryNode {
 	t.Helper()
 	for i, row := range rows {
@@ -529,16 +577,45 @@ func laneWrite(t *testing.T, ctx context.Context, eng *memql.MemQLEngine, db *bu
 			t.Fatalf("row %s is not JSON: %v", row.label, err)
 		}
 		id := fmt.Sprintf("%s-%d", lane, i+1)
+		if !row.at.IsZero() {
+			laneWriteVersions(t, db, conceptID, id, lane, row)
+			continue
+		}
 		if _, err := eng.Execute(ctx, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`, ast.QuoteString(conceptID), ast.QuoteString(id), raw)); err != nil {
 			t.Logf("differential: %s row %s %s is not written: %v", conceptID, row.label, raw, err)
 		}
 	}
+	// Each row at its latest version, which is what a read returns: a dated
+	// row has earlier ones, and the in-process side decides the latest.
 	var nodes []memoryNodes.MemoryNode
-	if err := db.NewSelect().Model(&nodes).Where("concept = ?", conceptID).Where("payload->>'lane' = ?", lane).Scan(context.Background()); err != nil {
+	if err := db.NewSelect().Model(&nodes).DistinctOn("id").Where("concept = ?", conceptID).Where("payload->>'lane' = ?", lane).
+		OrderExpr(`id ASC, "createdAt" DESC`).Scan(context.Background()); err != nil {
 		t.Fatalf("read back the lane's %s rows: %v", conceptID, err)
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 	return nodes
+}
+
+// laneWriteVersions writes a dated row as its versions, oldest first, each at
+// its own instant. The engine's insert form stamps the clock's instant, so
+// these are written as stored rows -- the way the engine's own latest-scan
+// tests write a history (component/memql/latest_scan_keys_db_test.go).
+func laneWriteVersions(t *testing.T, db *bun.DB, conceptID, id, lane string, row laneRow) {
+	t.Helper()
+	versions := append(append([]laneVersion{}, row.history...), laneVersion{at: row.at, payload: row.payload})
+	nodes := make([]memoryNodes.MemoryNode, 0, len(versions))
+	for _, v := range versions {
+		payload := laneWithout(v.payload, "lane")
+		payload["lane"] = lane
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("a version of row %s is not JSON: %v", row.label, err)
+		}
+		nodes = append(nodes, memoryNodes.MemoryNode{ID: conceptID + ":" + id, Concept: conceptID, CreatedAt: v.at, CreatedBy: "differential-lane", Payload: raw})
+	}
+	if _, err := db.NewInsert().Model(&nodes).Exec(context.Background()); err != nil {
+		t.Fatalf("write the versions of row %s: %v", row.label, err)
+	}
 }
 
 // laneSelect runs the expression's query through the executor's real read
@@ -619,9 +696,9 @@ func laneEvaluate(eng *memql.MemQLEngine, x *laneExpr, node memoryNodes.MemoryNo
 // the directory's evaluate cases name.
 func laneRowsFor(domain, concept string, fixtures map[string]string, caseRows map[string][]laneRow) []laneRow {
 	if domain == laneDomain {
-		return append([]laneRow{{"absent", map[string]any{}}}, laneValues...)
+		return append([]laneRow{{label: "absent", payload: map[string]any{}}}, laneValues...)
 	}
-	rows := []laneRow{{"absent", map[string]any{}}}
+	rows := []laneRow{{label: "absent", payload: map[string]any{}}}
 	file, err := corpusParseFile(langparser.Edition, fixtures[domain])
 	if err == nil && file != nil {
 		for _, def := range file.Definitions {

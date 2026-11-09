@@ -29,11 +29,15 @@ import (
 // watermark less five minutes (watermarkOverlap), or from four hundred days
 // back when it has none. The engine answers each row at its latest version, so
 // a delivery whose outcome changed since the last run is read again and adds
-// what it newly says (facts.go). Each page's facts are written in one
-// transaction with the watermark moved to the page's newest row, so the
-// watermark never passes a fact that was not written, and a run that dies
-// part way -- a replica stopping, the cron lead moving to another node --
-// leaves the next run to carry on from the last page that landed.
+// what it newly says (facts.go). The query's `row.createdAt >= since` is a
+// top-level conjunct, so the engine collapses only the versions written since
+// (latestScanLowerBounds, component/memql/latest_scan_keys.go): a run pays for
+// what was written since its watermark, and only a first run pays for the
+// history. Each page's facts are written in one transaction with the
+// watermark moved to the page's newest row, so the watermark never passes a
+// fact that was not written, and a run that dies part way -- a replica
+// stopping, the cron lead moving to another node -- leaves the next run to
+// carry on from the last page that landed.
 //
 // # Why the overlap
 //

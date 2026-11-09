@@ -1092,13 +1092,18 @@ query delivery providerCounterLedger {
 // (component/emailstats), which runs as the emailStatisticsRollupSweep
 // automation's maintenance principal. Each source query reads, in row.createdAt
 // order, the rows written since a watermark less a five-minute overlap, at each
-// row's latest version, so a delivery whose outcome changed is read again. The
-// two lookups attribute a page's facts to their journey and audience in one
-// batched read each. Every one of the five projects only what the facts read
-// (deliveryStatRef, engagementStatRef, consentStatRef and the two refs): no
-// address, no address digest and no owner, because the walk reads every
-// organization's recipients and a figure needs none of them. The one reference
-// to a recipient is the id a subscribe or an unsubscribe is counted under.
+// row's latest version, so a delivery whose outcome changed is read again. Keep
+// `row.createdAt >= args.since` a top-level `&&` conjunct: that shape alone lets
+// the engine collapse only the versions written since, so a page costs what
+// was written since and not the concept's history (latestScanLowerBounds in
+// component/memql/latest_scan_keys.go). Under `||` or `!` it collapses the
+// whole history again. The two lookups attribute a page's facts to their
+// journey and audience in one batched read each. Every one of the five projects
+// only what the facts read (deliveryStatRef, engagementStatRef, consentStatRef
+// and the two refs): no address, no address digest and no owner, because the
+// walk reads every organization's recipients and a figure needs none of them.
+// The one reference to a recipient is the id a subscribe or an unsubscribe is
+// counted under.
 
 /// Internal statistics walk across every organization's deliveries. actor.userId scoping would count only one person's sends; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
 @actor

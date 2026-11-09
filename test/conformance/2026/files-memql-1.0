@@ -644,6 +644,7 @@ expr/queryFilter/not-call.memql
 expr/queryFilter/not-in.memql
 expr/queryFilter/not-open.memql
 expr/queryFilter/not-urgent-flag.memql
+expr/queryFilter/not-written-since.memql
 expr/queryFilter/null-literal.memql
 expr/queryFilter/open-or-high-priority.memql
 expr/queryFilter/optional-arg-guard.memql
@@ -672,6 +673,8 @@ expr/queryFilter/traversal-two-lambdas.memql
 expr/queryFilter/unquoted-canonical-id.memql
 expr/queryFilter/urgent-flag.memql
 expr/queryFilter/when-guard.memql
+expr/queryFilter/written-since-or-open.memql
+expr/queryFilter/written-since.memql
 expr/queryRefine/a-in-tags.memql
 expr/queryRefine/contains-method.memql
 expr/queryRefine/doubled-priority.memql

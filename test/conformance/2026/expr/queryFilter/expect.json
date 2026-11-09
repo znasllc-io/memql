@@ -808,6 +808,199 @@
         "title": 42
       },
       "expect": false
+    },
+    {
+      "file": "written-since.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "sql": "(\"createdAt\" >= ?)",
+      "note": "A createdAt lower bound lowers to a comparison of the intrinsic column, bound as an instant. As a top-level conjunct of a read it also narrows the latest-version collapse to the versions at or after it (latestScanLowerBounds, component/memql/latest_scan_keys.go); the evaluate cases below are the rows that collapse could get wrong, and the differential lane writes each one's history as versions."
+    },
+    {
+      "file": "written-since.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2026-01-01T06:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-30T00:00:00Z",
+          "status": "draft"
+        },
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "review"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": true,
+      "note": "The latest version is after the bound and the older ones are before it. The row is read at its latest version, which a collapse of only the versions at or after the bound still finds."
+    },
+    {
+      "file": "written-since.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2025-12-31T23:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "draft"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": false,
+      "note": "Every version is before the bound: neither the full collapse nor the bounded one returns the row."
+    },
+    {
+      "file": "written-since.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2026-01-01T00:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T12:00:00Z",
+          "status": "draft"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": true,
+      "note": "A version AT the bound is at or after it, so the bounded collapse keeps it and the row is found."
+    },
+    {
+      "file": "written-since-or-open.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "sql": "(\"createdAt\" >= ?) OR (jsonb_typeof(payload->'status') = 'string'",
+      "note": "The same bound as one arm of an OR lowers to the same comparison; it is not required there, so it narrows nothing."
+    },
+    {
+      "file": "written-since-or-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2025-12-31T23:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "draft"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": true,
+      "note": "Every version is before the bound and the latest is open. Pushed into the collapse from under the OR, the bound would lose this row."
+    },
+    {
+      "file": "written-since-or-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2025-12-31T23:00:00Z",
+        "status": "closed"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "open"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": false,
+      "note": "An older version that was open does not count: the latest version decides."
+    },
+    {
+      "file": "written-since-or-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2026-01-01T06:00:00Z",
+        "status": "closed"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "open"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": true
+    },
+    {
+      "file": "not-written-since.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "sql": "NOT COALESCE(((\"createdAt\" >= ?)), FALSE)",
+      "note": "The bound under a NOT selects the rows written before it, so it narrows nothing."
+    },
+    {
+      "file": "not-written-since.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2025-12-31T23:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-30T00:00:00Z",
+          "status": "draft"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": true,
+      "note": "Every version is before the bound, so the negation keeps the row. Pushed as a lower bound from under the NOT, the bound would drop it."
+    },
+    {
+      "file": "not-written-since.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "createdAt": "2026-01-01T06:00:00Z",
+        "status": "open"
+      },
+      "history": [
+        {
+          "createdAt": "2025-12-31T00:00:00Z",
+          "status": "draft"
+        }
+      ],
+      "args": {
+        "since": "2026-01-01T00:00:00Z"
+      },
+      "expect": false,
+      "note": "The latest version is after the bound, though an older one is before it: the latest decides."
     }
   ]
 }

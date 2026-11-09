@@ -254,15 +254,40 @@ func adapterMap(m map[string]any) map[string]any {
 }
 
 // adapterRow is the case row as a stored node reads: the whole map is the
-// payload, and an `id` key is also the row's id, so `row.id` reads the
-// intrinsic exactly as it does on a stored row.
+// payload, an `id` key is also the row's id and a `createdAt` key its
+// createdAt, so `row.id` and `row.createdAt` read the intrinsics exactly as
+// they do on a stored row.
 func adapterRow(env ExprEnv) (memql.ExprRow, error) {
 	payload, err := json.Marshal(adapterMap(env.Row))
 	if err != nil {
 		return memql.ExprRow{}, fmt.Errorf("the case row is not JSON: %w", err)
 	}
 	id, _ := env.Row["id"].(string)
-	return memql.NewExprRow(memorynodes.MemoryNode{ID: id, Concept: env.Concept, Payload: payload})
+	node := memorynodes.MemoryNode{ID: id, Concept: env.Concept, Payload: payload}
+	at, dated, err := corpusRowCreatedAt(env.Row)
+	if err != nil {
+		return memql.ExprRow{}, err
+	}
+	if dated {
+		node.CreatedAt = at
+	}
+	return memql.NewExprRow(node)
+}
+
+// corpusRowCreatedAt is a case row's createdAt: the RFC 3339 instant under its
+// `createdAt` key, and false when it has none. The pushdown probe reads the key
+// the same way (memql.ProbeLowered.Matches).
+func corpusRowCreatedAt(row map[string]any) (time.Time, bool, error) {
+	raw, ok := row["createdAt"]
+	if !ok {
+		return time.Time{}, false, nil
+	}
+	text, _ := raw.(string)
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("row.createdAt is %v, which is not an RFC 3339 instant", raw)
+	}
+	return at.UTC(), true, nil
 }
 
 // adapterLiteralPosition reports the positions whose syntax is a literal: the

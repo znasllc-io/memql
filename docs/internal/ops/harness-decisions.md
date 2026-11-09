@@ -3994,6 +3994,71 @@ reject what a walk finds. The same sweep's `workAutomationStepsForOwner` and
 `workGoalsForOwner` read concepts with no owner index at all, so bounding the
 run read alone would not let the sweep finish.
 
+## A read since a watermark collapses only the versions since (2026-11-08)
+
+A read returns each row at its latest version, and the key enumeration
+(`latestScanKeys`, `component/memql/latest_scan_keys.go`) collapses a concept's
+versions to their latest before the filter runs. A read bounded by
+`row.createdAt >= <since>` therefore paid for the concept's whole history, and
+the email statistics walk makes that read for each source every five minutes.
+On 100,000 versions of 50,000 deliveries over 60 days, a steady-state page
+(since five minutes ago) read 101,620 index entries and probed 51,591 payloads
+to keep 648 rows: 1,106 ms at the `timescaledb-ha` default planner settings and
+1,099 ms at production's.
+
+**Chosen path.** `latestScanLowerBounds` pushes the bound into the enumeration,
+which then collapses only the versions at or after it: the same page took 15.8
+and 16.3 ms and probed 643 payloads. Only one shape is taken: a top-level AND
+conjunct `createdAt >= X` on the intrinsic, with X a plan constant (an argument
+or a literal, already folded by argument expansion), compiled by the filter's
+own `compileCreatedAtComparison`. Every other shape enumerates byte for byte as
+before:
+- a term under OR or NOT, or inside a relationship;
+- a comparison against a field, or any other operator;
+- the payload lookup path, and the newest-first walk.
+
+The pushdown is exact. A row whose true latest version is at or after X has
+that version among the versions at or after X, and no newer version can be
+before X. `latestMatchingNodes` still re-reads the true latest version.
+
+**Rejected.**
+- Walking the source in 24-hour `since`/`until` windows. A window cost what a
+  page cost, 1.07 to 1.09 s whether or not it held rows, because the bounds
+  applied after the collapse.
+- Pushing an upper bound. It is not exact without a true-latest check of its
+  own: collapsing the versions before Y returns an older version of a row whose
+  latest is later.
+- Pushing `>` as well. It would be as exact as `>=`, and is left out to keep
+  the change to the one shape the walk writes.
+
+**The production-plan class** (the walk's 2026-11-01 lesson above: a plan
+measured at `random_page_cost` 1.1 over three chunks is not production's at 4
+over ten).
+- The bound is a constant on the hypertable's partitioning column, so
+  TimescaleDB excludes the chunks before it while planning, at any cost setting.
+- The planner has one new choice, and both answers cost the range: the covering
+  `(concept, id, createdAt DESC)` index in DISTINCT ON order, or the retention
+  index `(concept, createdAt, id)` from the bound followed by a sort.
+- At production's settings over ten one-day chunks it took the range and the
+  sort: one chunk, 230 entries, 48 payloads, under a millisecond.
+- A first run, since four hundred days back, plans and costs as before.
+
+**Tests.**
+- `TestLatestScanKeysPushesOnlyATopLevelCreatedAtLowerBound` pins the trigger,
+  and that every other shape's SQL is unchanged.
+- `TestLatestScanLowerBoundReadsOnlyTheVersionsAfterIt` runs at production's
+  planner settings over ten chunks. It pins the rows, the chunks, the entries,
+  the size of the sort and the payload reads, and that an OR shape is not
+  narrowed.
+- The `written-since*` and `not-written-since` cases in
+  `test/conformance/2026/expr/queryFilter/` carry a `history`, which the
+  differential lane writes as versions. The lane fails when the bound is pushed
+  from under an OR or a NOT, or as `>`.
+
+**Still open.** A first-run backfill still costs about 1.1 s a page per 100,000
+versions of a source, the collapse it always had. The bound excludes nothing
+there.
+
 ## Pipeline AI is off until the owner turns it on (2026-10-29)
 
 The owner decided that a pipeline should mostly run by itself: AI review and AI

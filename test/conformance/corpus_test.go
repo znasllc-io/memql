@@ -71,6 +71,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
@@ -124,9 +125,19 @@ type corpusCase struct {
 	// over; the directory's fixture.memql declares it.
 	Concept string `json:"concept,omitempty"`
 	// Row, Args and Actor are the values a lower / evaluate expression sees.
+	// A `createdAt` key of Row, an RFC 3339 instant, is also the row's
+	// createdAt, as an `id` key is its id.
 	Row   map[string]any `json:"row,omitempty"`
 	Args  map[string]any `json:"args,omitempty"`
 	Actor map[string]any `json:"actor,omitempty"`
+	// History is the earlier versions of an evaluate case's row at a pushdown
+	// position, oldest first, each written as Row is and each with its own
+	// createdAt; Row is the latest version. The verdict is the row's, because
+	// a read returns a row at its latest version. Only the differential lane
+	// reads History: it writes every version, so the read's latest-version
+	// collapse has a history to get wrong (latestScanLowerBounds,
+	// component/memql/latest_scan_keys.go).
+	History []map[string]any `json:"history,omitempty"`
 	// Calls answers the construct calls an evaluate expression makes, by
 	// "<kind> <name>" ("query openTickets"): the value the call returns. The
 	// corpus boots no database, so a call's answer is the case's to give;
@@ -662,6 +673,11 @@ func corpusValidateCase(dir string, c corpusCase) string {
 	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
 		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
 	}
+	if len(c.History) > 0 {
+		if msg := corpusValidateHistory(dir, c); msg != "" {
+			return msg
+		}
+	}
 	switch c.Verdict {
 	case verdictLoadOK:
 	case verdictLoadWarn:
@@ -707,6 +723,38 @@ func corpusValidateExpression(dir string, c corpusCase) string {
 		return fmt.Sprintf("position %q is not a tiers.Position (write one, or put the case under expr/<position>/)", pos)
 	}
 	return corpusValidateFile(c)
+}
+
+// corpusValidateHistory checks a case's earlier versions: they belong to an
+// evaluate case at a pushdown position, whose row is the latest version; every
+// version is dated, oldest first, and all of them are before the row.
+func corpusValidateHistory(dir string, c corpusCase) string {
+	pos := c.Position
+	if pos == "" {
+		pos = corpusDefaultPosition(dir)
+	}
+	if c.Verdict != verdictEvaluate || tiers.TierOf(tiers.Position(pos)) != tiers.TierP {
+		return "history is a row's earlier versions, which only an evaluate case at a pushdown position has (the differential lane writes them)"
+	}
+	latest, dated, err := corpusRowCreatedAt(c.Row)
+	if err != nil || !dated {
+		return "a case with history gives its row, the latest version, a createdAt"
+	}
+	var previous time.Time
+	for i, version := range c.History {
+		at, dated, err := corpusRowCreatedAt(version)
+		if err != nil || !dated {
+			return fmt.Sprintf("history[%d] gives no createdAt: every version is dated", i)
+		}
+		if i > 0 && !at.After(previous) {
+			return fmt.Sprintf("history[%d] is not after history[%d]: history is oldest first", i, i-1)
+		}
+		if !at.Before(latest) {
+			return fmt.Sprintf("history[%d] is not before the row: the row is the latest version", i)
+		}
+		previous = at
+	}
+	return ""
 }
 
 // corpusValidateFile checks that a case names a case file of its directory.

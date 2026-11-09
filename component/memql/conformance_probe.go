@@ -132,7 +132,8 @@ func (e *MemQLEngine) ProbeLower(ctx context.Context, position tiers.Position, c
 
 // Matches decides one row the way the executor's in-process post-filter does
 // -- the half a read re-runs on every candidate the SQL returned. The row is
-// the payload; an `id` key is also the row's id.
+// the payload; an `id` key is also the row's id, and a `createdAt` key, an RFC
+// 3339 instant, is also its createdAt, so a case can decide a createdAt bound.
 func (p *ProbeLowered) Matches(row map[string]any) (bool, error) {
 	if row == nil {
 		row = map[string]any{}
@@ -143,6 +144,14 @@ func (p *ProbeLowered) Matches(row map[string]any) (bool, error) {
 	}
 	id, _ := row["id"].(string)
 	node := memorynodes.MemoryNode{ID: id, Concept: p.concept, Payload: payload}
+	if raw, dated := row["createdAt"]; dated {
+		text, _ := raw.(string)
+		at, err := time.Parse(time.RFC3339Nano, text)
+		if err != nil {
+			return false, fmt.Errorf("row.createdAt is %v, which is not an RFC 3339 instant", raw)
+		}
+		node.CreatedAt = at.UTC()
+	}
 	return nodeMatchesExpression(node, p.root, map[string]map[string]any{})
 }
 
