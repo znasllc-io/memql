@@ -54,6 +54,18 @@
 // errors returns a row whose errorCount is 0. The reader never invents a zero
 // (the campaignStats rule), because "nobody visited" and "we were not
 // recording" send a person to two different places.
+//
+// # Which connection each part runs on
+//
+// Everything but the rollup -- the edge's writer, its visitor secret and
+// country loaders, the country refresh and both reads -- runs on the request
+// pool and inside its limit: a server statement_timeout (8 s by default) set
+// below pgdriver's 10 s client read deadline, so a slow statement is cancelled
+// by the server, not abandoned by the client and left running. Nothing here
+// raises that limit, which would only move the cut to the client
+// (statisticsTx). The five-minute rollup, whose statements can rightly run
+// longer, runs on the dedicated maintenance session instead, with limits of its
+// own (rollup.go, "Where the statements run").
 package sitetraffic
 
 import "time"

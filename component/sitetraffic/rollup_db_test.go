@@ -15,9 +15,9 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 )
 
@@ -131,13 +131,21 @@ func seedRequests(t *testing.T, db *bun.DB, site string, rows ...Row) {
 	}
 }
 
-func runRollup(t *testing.T, db *bun.DB, now time.Time) RollupReport {
+func runRollup(t *testing.T, open MaintenanceSession, now time.Time) RollupReport {
 	t.Helper()
-	rep, err := Rollup(context.Background(), db, now)
+	rep, err := Rollup(context.Background(), open, now)
 	if err != nil {
 		t.Fatalf("Rollup at %s: %v", now.Format(time.RFC3339), err)
 	}
 	return rep
+}
+
+// testSession opens the rollup's session on the test database as production
+// opens it (database.OpenMaintenanceSessionDSN: no statement_timeout, no read
+// deadline beyond the context), never on a test pool, so every test here runs
+// the statements on the kind of connection a deployed run uses.
+func testSession(ctx context.Context) (*sql.Conn, func(), error) {
+	return database.OpenMaintenanceSessionDSN(ctx, dbtest.DSN())
 }
 
 // rollupRow is one hourly or daily row, its bucket rendered in UTC.
@@ -286,7 +294,7 @@ func TestRollupCountsVisitorsPageViewsAndHealthPerHourAndDay(t *testing.T) {
 	)
 	seedRequests(t, db, other, pageViewRow(dayAt(day, 10, 0), "vz", "/"))
 
-	runRollup(t, db, dayAt(day, 12, 30))
+	runRollup(t, testSession, dayAt(day, 12, 30))
 
 	hourly := hourlyOf(t, db, site)
 	if len(hourly) != 2 {
@@ -338,20 +346,20 @@ func TestRerunningTheRollupChangesNothing(t *testing.T) {
 	)
 
 	now := dayAt(day, 15, 0)
-	runRollup(t, db, now)
+	runRollup(t, testSession, now)
 	first := rollupSnapshot(t, db, site, day)
 	if !strings.Contains(first, "2036-03-12T08") || !strings.Contains(first, "page|/shop") {
 		t.Fatalf("the first run wrote nothing worth comparing:\n%s", first)
 	}
 
-	rep := runRollup(t, db, now)
+	rep := runRollup(t, testSession, now)
 	if rep.Backfilled {
 		t.Errorf("a second run backfilled again: %+v", rep)
 	}
 	if again := rollupSnapshot(t, db, site, day); again != first {
 		t.Errorf("a re-run changed the rows.\nfirst:\n%s\nre-run:\n%s", first, again)
 	}
-	runRollup(t, db, now.Add(5*time.Minute))
+	runRollup(t, testSession, now.Add(5*time.Minute))
 	if later := rollupSnapshot(t, db, site, day); later != first {
 		t.Errorf("the next scheduled run, with no new requests, changed the rows.\nfirst:\n%s\nlater:\n%s", first, later)
 	}
@@ -403,7 +411,7 @@ func TestRequestsWithoutVisitFieldsRollUpToNullVisitors(t *testing.T) {
 		pageViewRow(dayAt(day, 11, 30), "n1", "/"),
 	)
 
-	runRollup(t, db, dayAt(day, 18, 0))
+	runRollup(t, testSession, dayAt(day, 18, 0))
 
 	hourly := hourlyOf(t, db, site)
 	wantFigures(t, "unmeasured hour", hourly, "2036-03-14T09", visitFigures{})
@@ -449,7 +457,7 @@ func TestTopListsKeepAHundredAndFoldTheRest(t *testing.T) {
 	}
 	seedRequests(t, db, site, rows...)
 
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	top := topOf(t, db, site, day)
 	var pages []string
@@ -511,7 +519,7 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 		pageViewRow(time.Date(2036, 6, 15, 9, 0, 0, 0, time.UTC), "b4", "/"),
 	)
 
-	rep := runRollup(t, db, now)
+	rep := runRollup(t, testSession, now)
 	// The window is the sixty days 2036-04-16 through 2036-06-14, and today.
 	// The hours run from the first one the hourly table keeps, 2036-05-16
 	// 12:00, through the current one: thirty days of them and the hour under
@@ -549,7 +557,7 @@ func TestTheFirstRunBackfillsEveryDayStillLogged(t *testing.T) {
 		t.Error("a day older than the window was recorded final")
 	}
 
-	again := runRollup(t, db, now)
+	again := runRollup(t, testSession, now)
 	if again.Backfilled || again.Days != 1 || again.Hours != 13 {
 		t.Errorf("the next run reported %+v, want today alone: 1 day, its 13 hours so far, no backfill", again)
 	}
@@ -566,7 +574,7 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 	for _, d := range []int{5, 10, 15, 20} {
 		seedRequests(t, db, site, pageViewRow(time.Date(2036, 6, d, 9, 0, 0, 0, time.UTC), "i"+strconv.Itoa(d), "/"))
 	}
-	runRollup(t, db, now)
+	runRollup(t, testSession, now)
 
 	// What a run cancelled after 2036-06-12 leaves behind: the days before
 	// it neither written nor recorded final.
@@ -582,7 +590,7 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep := runRollup(t, db, now)
+	rep := runRollup(t, testSession, now)
 	if !rep.Backfilled {
 		t.Errorf("the run after an interrupted backfill reported %+v, want it to finish the backfill", rep)
 	}
@@ -604,6 +612,15 @@ func TestAnInterruptedBackfillResumesOnTheNextRun(t *testing.T) {
 // leave it refusing those dates for the next run.
 func refuseDailyRowsFor(t *testing.T, db *bun.DB, days ...time.Time) func() {
 	t.Helper()
+	return refuseDailyRowsWith(t, db, "raise_exception", days...)
+}
+
+// refuseDailyRowsWith is refuseDailyRowsFor raising the given condition: the
+// default raise_exception (SQLSTATE P0001) leaves the connection open, while
+// query_canceled (57014), the code a statement timeout raises, is one pgdriver
+// closes the connection under.
+func refuseDailyRowsWith(t *testing.T, db *bun.DB, condition string, days ...time.Time) func() {
+	t.Helper()
 	ctx := context.Background()
 	dates := make([]string, len(days))
 	for i, d := range days {
@@ -613,7 +630,7 @@ func refuseDailyRowsFor(t *testing.T, db *bun.DB, days ...time.Time) func() {
 	remove()
 	for _, stmt := range []string{
 		"CREATE FUNCTION " + dailyRefusal + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN " +
-			"IF NEW.day::text = ANY (TG_ARGV) THEN RAISE EXCEPTION 'injected failure for %', NEW.day; END IF; " +
+			"IF NEW.day::text = ANY (TG_ARGV) THEN RAISE EXCEPTION 'injected failure for %', NEW.day USING ERRCODE = '" + condition + "'; END IF; " +
 			"RETURN NEW; END $$",
 		"CREATE TRIGGER " + dailyRefusal + " BEFORE INSERT ON edge_stats_daily FOR EACH ROW EXECUTE FUNCTION " +
 			dailyRefusal + "(" + strings.Join(dates, ", ") + ")",
@@ -653,7 +670,7 @@ func TestAFailedDayDoesNotHoldBackOtherDays(t *testing.T) {
 	}
 	restore := refuseDailyRowsFor(t, db, time.Date(2036, 6, 10, 0, 0, 0, 0, time.UTC))
 
-	rep, err := Rollup(context.Background(), db, now)
+	rep, err := Rollup(context.Background(), testSession, now)
 	if err == nil || !strings.Contains(err.Error(), "2036-06-10") {
 		t.Fatalf("the run reported %v, want the failure of 2036-06-10", err)
 	}
@@ -676,13 +693,49 @@ func TestAFailedDayDoesNotHoldBackOtherDays(t *testing.T) {
 	}
 
 	restore()
-	rep = runRollup(t, db, now)
+	rep = runRollup(t, testSession, now)
 	if rep.Days != 2 || !rep.Backfilled {
 		t.Errorf("the next run reported %+v, want today and the day that failed", rep)
 	}
 	wantFigures(t, "retried day", dailyOf(t, db, site), "2036-06-10", measuredFigures(1, 1, 1, 1))
 	if _, ok := finalDays(t, db, now.AddDate(0, 0, -10), now)["2036-06-10"]; !ok {
 		t.Error("the retried day was not recorded final")
+	}
+}
+
+// A DAY THE SERVER CANCELS COSTS THAT DAY ALONE, ON ONE SESSION. A statement
+// the server ends at its timeout fails with SQLSTATE 57014, and pgdriver closes
+// the connection under that code; a run's days share one session, so had the
+// cancelled day kept it, every day after it would fail as well, on a closed
+// connection (rollupSession.inTx). The trigger raises the same SQLSTATE, since
+// a real timeout would take rollupStatementTimeout to reach, and pgdriver reads
+// nothing but the code.
+func TestADayTheServerCancelsCostsThatDayAlone(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	now := time.Date(2036, 7, 20, 12, 0, 0, 0, time.UTC)
+	for _, d := range []int{5, 10, 15} {
+		seedRequests(t, db, site, pageViewRow(time.Date(2036, 7, d, 9, 0, 0, 0, time.UTC), "x"+strconv.Itoa(d), "/"))
+	}
+	refuseDailyRowsWith(t, db, "query_canceled", time.Date(2036, 7, 15, 0, 0, 0, 0, time.UTC))
+
+	_, err := Rollup(context.Background(), testSession, now)
+	var failed []string
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, f := range joined.Unwrap() {
+			failed = append(failed, f.Error())
+		}
+	} else if err != nil {
+		failed = append(failed, err.Error())
+	}
+	if len(failed) != 1 || !strings.Contains(failed[0], "2036-07-15") || !strings.Contains(failed[0], "57014") {
+		t.Fatalf("the run failed %d times: %v; want the cancelled day alone, by its SQLSTATE", len(failed), failed)
+	}
+	daily := dailyOf(t, db, site)
+	for d, want := range map[string]bool{"2036-07-15": false, "2036-07-10": true, "2036-07-05": true} {
+		if _, got := daily[d]; got != want {
+			t.Errorf("a daily row for %s exists = %v, want %v", d, got, want)
+		}
 	}
 }
 
@@ -699,7 +752,7 @@ func TestEachFailedDayIsLoggedOnceByName(t *testing.T) {
 	refuseDailyRowsFor(t, db, time.Date(2036, 6, 22, 0, 0, 0, 0, time.UTC), time.Date(2036, 6, 26, 0, 0, 0, 0, time.UTC))
 
 	logs := &recordedLogs{}
-	i := NewIntegration(nil, func() *bun.DB { return db }, slog.New(logs))
+	i := NewIntegration(nil, func() *bun.DB { return db }, testSession, slog.New(logs))
 	i.now = func() time.Time { return now }
 	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
 	if _, err := i.handleRollup(ctx, nil, 0); err == nil {
@@ -775,7 +828,7 @@ func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 	)
 	restore := refuseDailyRowsFor(t, db, yesterday)
 
-	if _, err := Rollup(context.Background(), db, dayAt(today, 1, 0)); err == nil || !strings.Contains(err.Error(), "2036-06-24") {
+	if _, err := Rollup(context.Background(), testSession, dayAt(today, 1, 0)); err == nil || !strings.Contains(err.Error(), "2036-06-24") {
 		t.Fatalf("the first run reported %v, want yesterday's failure", err)
 	}
 	daily := dailyOf(t, db, site)
@@ -785,7 +838,7 @@ func TestAYesterdayThatFailsDuringABackfillIsWrittenAfterTwo(t *testing.T) {
 	wantFigures(t, "a day older than the failed yesterday", daily, "2036-06-20", measuredFigures(1, 1, 1, 1))
 
 	restore()
-	rep := runRollup(t, db, dayAt(today, 3, 0))
+	rep := runRollup(t, testSession, dayAt(today, 3, 0))
 	if rep.Days != 2 || rep.Backfilled {
 		t.Errorf("the run after 02:00 reported %+v, want yesterday and today alone: the older days were written already", rep)
 	}
@@ -812,7 +865,7 @@ func TestAStrayRawRowCannotReopenAFinalDay(t *testing.T) {
 		pageViewRow(dayAt(day, 11, 0), "s3", "/"),
 		pageViewRow(time.Date(2036, 8, 5, 9, 0, 0, 0, time.UTC), "n1", "/"),
 	)
-	runRollup(t, db, now)
+	runRollup(t, testSession, now)
 	wantFigures(t, "the day", dailyOf(t, db, site), "2036-08-01", measuredFigures(3, 3, 3, 3))
 
 	// The request log is cut to five days, which drops the day's requests, and
@@ -821,13 +874,13 @@ func TestAStrayRawRowCannotReopenAFinalDay(t *testing.T) {
 	if _, err := db.ExecContext(context.Background(), "DELETE FROM edge_request WHERE served_at >= ? AND served_at < ?", day, day.AddDate(0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	runRollup(t, db, now.Add(5*time.Minute))
+	runRollup(t, testSession, now.Add(5*time.Minute))
 
 	// Then the retention goes back to thirty days, bringing the day back into
 	// the window, and a replica with a lagging clock writes a request on it.
 	t.Setenv("MEMQL_EDGE_REQUEST_LOG_RETENTION_DAYS", "30")
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 12, 0), "stray", "/stray"))
-	rep := runRollup(t, db, now.Add(10*time.Minute))
+	rep := runRollup(t, testSession, now.Add(10*time.Minute))
 	if rep.Days != 1 {
 		t.Errorf("the run recomputed %d days, want today alone", rep.Days)
 	}
@@ -848,11 +901,11 @@ func TestAnOutageAcrossTwoAMHealsOnTheNextRun(t *testing.T) {
 	yesterday := time.Date(2036, 7, 19, 0, 0, 0, 0, time.UTC)
 	today := yesterday.AddDate(0, 0, 1)
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 20, 0), "o1", "/"), pageViewRow(dayAt(yesterday, 22, 0), "o2", "/"))
-	runRollup(t, db, dayAt(yesterday, 22, 55))
+	runRollup(t, testSession, dayAt(yesterday, 22, 55))
 
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 30), "o3", "/late"))
 	// No run between 22:55 and 03:00.
-	rep := runRollup(t, db, dayAt(today, 3, 0))
+	rep := runRollup(t, testSession, dayAt(today, 3, 0))
 	if rep.Days != 2 {
 		t.Errorf("the run at 03:00 recomputed %d days, want today and yesterday", rep.Days)
 	}
@@ -872,13 +925,13 @@ func TestAFinalDayIsNotRecomputed(t *testing.T) {
 	day := time.Date(2036, 7, 22, 0, 0, 0, 0, time.UTC)
 	next := day.AddDate(0, 0, 1)
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 10, 0), "l1", "/"))
-	runRollup(t, db, dayAt(next, 3, 0))
+	runRollup(t, testSession, dayAt(next, 3, 0))
 	if _, ok := finalDays(t, db, day, day)["2036-07-22"]; !ok {
 		t.Fatal("the day was not recorded final by a run after 02:00 the next day, so this test would prove nothing")
 	}
 
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 11, 0), "l2", "/late"))
-	rep := runRollup(t, db, dayAt(next, 4, 0))
+	rep := runRollup(t, testSession, dayAt(next, 4, 0))
 	if rep.Days != 1 {
 		t.Errorf("the run recomputed %d days, want today alone", rep.Days)
 	}
@@ -901,12 +954,12 @@ func TestTodayIsNeverFinal(t *testing.T) {
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 10, 0), "t1", "/"))
 
 	for _, when := range []time.Time{dayAt(day, 10, 5), dayAt(day, 23, 59).Add(59 * time.Second), dayAt(next, 1, 59).Add(59 * time.Second)} {
-		runRollup(t, db, when)
+		runRollup(t, testSession, when)
 		if final := finalDays(t, db, day, next); len(final) != 0 {
 			t.Errorf("after the run at %s the record holds %v, want nothing final yet", when.Format(time.RFC3339), final)
 		}
 	}
-	runRollup(t, db, dayAt(next, 2, 0))
+	runRollup(t, testSession, dayAt(next, 2, 0))
 	final := finalDays(t, db, day, next)
 	if _, ok := final["2036-07-25"]; !ok {
 		t.Error("the day was not recorded final by the run at 02:00 the next day")
@@ -934,11 +987,11 @@ func TestYesterdayIsRecomputedUntilTwoAfterMidnight(t *testing.T) {
 	}
 
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 20, 0), "y1", "/"))
-	runRollup(t, db, dayAt(yesterday, 21, 0))
+	runRollup(t, testSession, dayAt(yesterday, 21, 0))
 
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59), "y2", "/"))
 	at0030 := dayAt(today, 0, 30)
-	if rep := runRollup(t, db, at0030); rep.Days != 2 {
+	if rep := runRollup(t, testSession, at0030); rep.Days != 2 {
 		t.Errorf("at 00:30 the run recomputed %d days, want yesterday and today", rep.Days)
 	}
 	if got := pageViewsOn(at0030); got != 2 {
@@ -951,7 +1004,7 @@ func TestYesterdayIsRecomputedUntilTwoAfterMidnight(t *testing.T) {
 	// Written before 02:00: the 02:00 run is yesterday's last recompute.
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59).Add(30*time.Second), "y3", "/"))
 	at0200 := dayAt(today, 2, 0)
-	if rep := runRollup(t, db, at0200); rep.Days != 2 {
+	if rep := runRollup(t, testSession, at0200); rep.Days != 2 {
 		t.Errorf("at 02:00 the run recomputed %d days, want yesterday one last time, and today", rep.Days)
 	}
 	if got := pageViewsOn(at0200); got != 3 {
@@ -961,7 +1014,7 @@ func TestYesterdayIsRecomputedUntilTwoAfterMidnight(t *testing.T) {
 	// Written after it: a late row for 23:59 does not count at 02:30.
 	seedRequests(t, db, site, pageViewRow(dayAt(yesterday, 23, 59).Add(45*time.Second), "y4", "/"))
 	at0230 := dayAt(today, 2, 30)
-	if rep := runRollup(t, db, at0230); rep.Days != 1 {
+	if rep := runRollup(t, testSession, at0230); rep.Days != 1 {
 		t.Errorf("at 02:30 the run recomputed %d days, want today alone", rep.Days)
 	}
 	if got := pageViewsOn(at0230); got != 3 {
@@ -1023,7 +1076,7 @@ func TestRowsPastRetentionAreDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep := runRollup(t, db, now)
+	rep := runRollup(t, testSession, now)
 	if rep.Deleted != pastRetention || pastRetention < 3 {
 		t.Errorf("retention deleted %d rows, want the %d past retention, this test's three among them", rep.Deleted, pastRetention)
 	}
@@ -1085,7 +1138,7 @@ func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
 	}
 
 	touched := false
-	refusing := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, quietLogger())
+	refusing := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, touchingSession(&touched), quietLogger())
 	for name, ac := range map[string]*auth.AccessContext{
 		"an ordinary user":              {UserId: "user-ordinary", Role: auth.RoleWriter},
 		"a cluster owner by hand":       {UserId: "user-owner", Role: auth.RoleOwner},
@@ -1110,7 +1163,7 @@ func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
 	site := "site-rollup-" + suffix(t)
 	now := time.Date(2036, 9, 1, 12, 0, 0, 0, time.UTC)
 	seedRequests(t, db, site, pageViewRow(dayAt(now.Truncate(24*time.Hour), 9, 0), "p1", "/"))
-	admitting := NewIntegration(nil, func() *bun.DB { return db }, quietLogger())
+	admitting := NewIntegration(nil, func() *bun.DB { return db }, testSession, quietLogger())
 	admitting.now = func() time.Time { return now }
 	nodes, err := admitting.handleRollup(auth.ContextWithAccess(context.Background(), principal), nil, 0)
 	if err != nil {
@@ -1133,12 +1186,21 @@ func TestTheBuiltinRefusesAnyoneButItsMaintenancePrincipal(t *testing.T) {
 // nothing: a run slower than the schedule must not pile up behind itself.
 func TestASecondRollupInTheSameProcessIsSkipped(t *testing.T) {
 	touched := false
-	i := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, quietLogger())
+	i := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, touchingSession(&touched), quietLogger())
 	i.rollupRunning.Store(true)
 	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
 	nodes, err := i.handleRollup(ctx, nil, 0)
 	if err != nil || nodes != nil || touched {
 		t.Errorf("got %d nodes, error %v, database touched %v; want a quiet skip", len(nodes), err, touched)
+	}
+}
+
+// touchingSession is a session opener that only records that it was asked, for
+// a test that wants the database left alone.
+func touchingSession(touched *bool) MaintenanceSession {
+	return func(context.Context) (*sql.Conn, func(), error) {
+		*touched = true
+		return nil, nil, fmt.Errorf("this test opens no maintenance session")
 	}
 }
 
@@ -1171,7 +1233,7 @@ func TestAGapOverThirtyMinutesStartsANewVisit(t *testing.T) {
 		pageViewRow(dayAt(day, 16, 40), "g4", "/c"),
 		pageViewRow(dayAt(day, 17, 0), "g4", "/d"),
 	)
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	hourly := hourlyOf(t, db, site)
 	wantFigures(t, "hour", hourly, "2036-05-05T10", measuredFigures(1, 2, 1, 3))
@@ -1196,7 +1258,7 @@ func TestAOnePageVisitIsABounce(t *testing.T) {
 		pageViewRow(dayAt(day, 10, 40), "b3", "/"),
 		pageViewRow(dayAt(day, 11, 40), "b3", "/"),
 	)
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	hourly := hourlyOf(t, db, site)
 	wantFigures(t, "hour", hourly, "2036-05-06T10", measuredFigures(3, 3, 2, 4))
@@ -1211,7 +1273,7 @@ func TestAVisitCountsInTheHourItStarted(t *testing.T) {
 	site := "site-rollup-" + suffix(t)
 	day := time.Date(2036, 5, 7, 0, 0, 0, 0, time.UTC)
 	seedRequests(t, db, site, pageViewRow(dayAt(day, 10, 50), "h1", "/"), pageViewRow(dayAt(day, 11, 10), "h1", "/next"))
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	hourly := hourlyOf(t, db, site)
 	wantFigures(t, "hour", hourly, "2036-05-07T10", measuredFigures(1, 1, 0, 1))
@@ -1230,7 +1292,7 @@ func TestAVisitAcrossMidnightSplitsInTwo(t *testing.T) {
 	first := time.Date(2036, 5, 8, 0, 0, 0, 0, time.UTC)
 	second := first.AddDate(0, 0, 1)
 	seedRequests(t, db, site, pageViewRow(dayAt(first, 23, 50), "m1", "/"), pageViewRow(dayAt(second, 0, 10), "m1", "/next"))
-	runRollup(t, db, dayAt(second, 0, 30))
+	runRollup(t, testSession, dayAt(second, 0, 30))
 
 	hourly := hourlyOf(t, db, site)
 	wantFigures(t, "hour", hourly, "2036-05-08T23", measuredFigures(1, 1, 1, 1))
@@ -1267,7 +1329,7 @@ func TestTopRowsCountAVisitUnderItsEntryPageAndSource(t *testing.T) {
 		with(pageViewRow(dayAt(day, 13, 0), "e3", "/b"), "", "FR"),
 		with(pageViewRow(dayAt(day, 13, 5), "e3", "/c"), "mail", "FR"),
 	)
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	top := topOf(t, db, site, day)
 	for key, want := range map[string]rollupTopRow{
@@ -1307,13 +1369,26 @@ func TestDaysAndHoursAreUTCWhateverTheSessionTimeZone(t *testing.T) {
 	second := first.AddDate(0, 0, 1)
 	seedRequests(t, db, site, pageViewRow(dayAt(first, 23, 40), "k1", "/"), pageViewRow(dayAt(second, 0, 20), "k2", "/"))
 
-	kolkata := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(
-		pgdriver.WithDSN(dbtest.DSN()),
-		pgdriver.WithConnParams(map[string]any{"timezone": "Asia/Kolkata"}),
-	)), pgdialect.New())
-	t.Cleanup(func() { _ = kolkata.Close() })
+	// Every session the run opens is put in +05:30 before the run sees it.
+	kolkata := func(ctx context.Context) (*sql.Conn, func(), error) {
+		conn, closeSession, err := testSession(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, err := conn.ExecContext(ctx, "SET TIME ZONE 'Asia/Kolkata'"); err != nil {
+			closeSession()
+			return nil, nil, err
+		}
+		return conn, closeSession, nil
+	}
+	conn, closeSession, err := kolkata(context.Background())
+	if err != nil {
+		t.Fatalf("open a +05:30 session: %v", err)
+	}
 	var zone string
-	if err := kolkata.NewRaw("SHOW TIME ZONE").Scan(context.Background(), &zone); err != nil || zone != "Asia/Kolkata" {
+	err = conn.QueryRowContext(context.Background(), "SHOW TIME ZONE").Scan(&zone)
+	closeSession()
+	if err != nil || zone != "Asia/Kolkata" {
 		t.Fatalf("the session time zone is %q (%v), want Asia/Kolkata -- the test would prove nothing", zone, err)
 	}
 
@@ -1383,7 +1458,7 @@ func TestTheSnapshotIsTakenAfterALockOnTheDaysChunk(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := Rollup(ctx, db, dayAt(day, 12, 0))
+		_, err := Rollup(ctx, testSession, dayAt(day, 12, 0))
 		done <- err
 	}()
 	// Commit only once the recompute is waiting on the lock.
@@ -1431,7 +1506,7 @@ func TestTwoRollupsAtOnceBothFinish(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = Rollup(context.Background(), db, now)
+			_, errs[i] = Rollup(context.Background(), testSession, now)
 		}(i)
 	}
 	wg.Wait()
@@ -1441,6 +1516,80 @@ func TestTwoRollupsAtOnceBothFinish(t *testing.T) {
 		}
 	}
 	wantFigures(t, "day", dailyOf(t, db, site), "2036-05-14", measuredFigures(2, 2, 1, 3))
+}
+
+// A DAY'S STATEMENT MAY RUN PAST TEN SECONDS. pgdriver gives every connection
+// of the request pool a 10 s client read deadline, after which the client
+// reports an i/o timeout and the backend carries on unheard
+// (component/database, maintenance_session.go). A day's recompute on a busy
+// cluster can take longer than that, and on the pool it failed at the client
+// on every run -- the day never written, never final -- while its orphan kept
+// working. Here the day's first statement, the rollup's own lock, waits 10.5 s
+// on a holder, as it waits on another replica's run, and the day must still be
+// written.
+//
+// It takes about eleven seconds, which is the property itself: a wait past the
+// read deadline cannot be shown in less. component/database's own
+// maintenance-session test pays the same, and like it this runs in every lane;
+// the package has no -short convention, and CI's database lane passes none.
+func TestADayStatementOutlivesTheRequestPoolsReadDeadline(t *testing.T) {
+	db := rollupTestDB(t)
+	site := "site-rollup-" + suffix(t)
+	ctx := context.Background()
+	day := time.Date(2036, 9, 8, 0, 0, 0, 0, time.UTC)
+	seedRequests(t, db, site, pageViewRow(dayAt(day, 9, 0), "slow-1", "/"))
+
+	holder, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Rollback() })
+	// EXCLUSIVE conflicts with the rollup's SHARE ROW EXCLUSIVE, and with no
+	// reader, so nothing but a rollup or a writer waits on it.
+	if _, err := holder.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN EXCLUSIVE MODE"); err != nil {
+		t.Fatalf("lock edge_stats_daily: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Rollup(ctx, testSession, dayAt(day, 12, 0))
+		done <- err
+	}()
+	waitForLockWaiter(t, db, "edge_stats_daily")
+	time.Sleep(10*time.Second + 500*time.Millisecond)
+	if err := holder.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("a run whose day waited 10.5 s on its lock failed: %v", err)
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("the rollup did not finish after the lock was released")
+	}
+	wantFigures(t, "the day", dailyOf(t, db, site), "2036-09-08", measuredFigures(1, 1, 1, 1))
+}
+
+// waitForLockWaiter returns once some session waits for a lock on relation,
+// and fails the test if none does within ten seconds.
+func waitForLockWaiter(t *testing.T, db *bun.DB, relation string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := db.NewRaw(`SELECT count(*) FROM pg_locks WHERE locktype = 'relation' AND relation = ?::regclass AND NOT granted`,
+			relation).Scan(context.Background(), &waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nothing ever waited on %s, so this test would prove nothing", relation)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // THE SEGMENTATION'S CONTRACT over a window that is not one UTC day, which is
@@ -1514,7 +1663,7 @@ func TestACraftedOtherSourceJoinsTheFoldInsteadOfFailingTheDay(t *testing.T) {
 	}
 	seedRequests(t, db, site, rows...)
 
-	runRollup(t, db, dayAt(day, 20, 0))
+	runRollup(t, testSession, dayAt(day, 20, 0))
 
 	top := topOf(t, db, site, day)
 	// "(other)" ranks first on its three visitors; s000..s098 fill the

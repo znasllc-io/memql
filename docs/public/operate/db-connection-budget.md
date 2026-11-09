@@ -112,15 +112,24 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   which every caller treats as "nothing attempted, try later". Raise the size
   only if the budget above has the room.
 - **The maintenance session** (`component/database/maintenance_session.go`) is
-  one connection a closed-chunk compaction pass opens on the direct endpoint
-  for its duration and closes after, with no statement timeout and no client
-  read deadline beyond the pass's own (a `reorder_chunk` of a large chunk runs
-  for minutes). It is counted once per **installation**, not per process, under
-  separate jobs and monitors: an advisory lock admits one pass at a time
-  cluster-wide, the nightly one on the cron leader at 04:20 UTC, and a second
-  pass (an owner's manual call) holds its connection only long enough to be
-  refused the lock. An idle process holds none
+  one connection, opened on the direct endpoint for one run of the work that
+  uses it and closed after, with no statement timeout and no client read
+  deadline beyond the run's own: the work bounds every statement itself. Two
+  kinds of work open one. A closed-chunk compaction pass holds it for its
+  duration (a `reorder_chunk` of a large chunk runs for minutes): an advisory
+  lock admits one pass at a time cluster-wide, the nightly one on the cron
+  leader at 04:20 UTC, and a second pass (an owner's manual call) holds its
+  connection only long enough to be refused the lock
   ([closed-chunk compaction](database-platform.md#closed-chunk-compaction)).
+  The website statistics rollup holds one for each five-minute run, a second or
+  so on a quiet cluster and never more than fifteen minutes, because a day's
+  recompute can outlast the request pool's statement timeout and pgdriver's
+  10 s read deadline ([the rollup](deployables.md#the-rollup)); it runs on the
+  cron leader, so a second rollup session is open only while a change of leader
+  overlaps two runs. Count them per **installation**, not per process, under
+  separate jobs and monitors: two at once, since the nightly pass overlaps
+  rollup runs, and one more while the cron lead changes hands. An idle process
+  holds none.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 

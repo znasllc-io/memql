@@ -2,6 +2,7 @@ package sitetraffic
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/statsperiod"
@@ -1119,7 +1122,7 @@ func TestABlankOrMalformedIdNamesNothingAndNeverWidensTheRead(t *testing.T) {
 	day := utcDay(2038, 7, 1)
 	seedDailyStats(t, db, siteA, day, measured(2, 2, 1, 3, 4))
 	seedDailyStats(t, db, siteB, day, measured(5, 5, 1, 6, 7))
-	i := NewIntegration(eng, func() *bun.DB { return db }, quietLogger())
+	i := NewIntegration(eng, func() *bun.DB { return db }, nil, quietLogger())
 	i.now = func() time.Time { return dayAt(day, 12, 0) }
 	staff := operatorCtx("user-owner-" + sfx)
 
@@ -1216,7 +1219,7 @@ func TestTheStatisticsBuiltinAnswersOneNode(t *testing.T) {
 	site := seedDeployable(t, eng, owner, sfx)
 	now := time.Date(2038, 4, 2, 9, 0, 0, 0, time.UTC)
 	seedDailyStats(t, db, site, utcDay(2038, 4, 1), measured(2, 2, 1, 3, 4))
-	i := NewIntegration(eng, func() *bun.DB { return db }, quietLogger())
+	i := NewIntegration(eng, func() *bun.DB { return db }, nil, quietLogger())
 	i.now = func() time.Time { return now }
 
 	nodes, err := i.handleStatistics(userCtx(owner), map[string]any{"siteIds": []any{site}, "period": "7d"}, 0)
@@ -1239,4 +1242,63 @@ func TestTheStatisticsBuiltinAnswersOneNode(t *testing.T) {
 		!strings.Contains(err.Error(), "12m") {
 		t.Errorf("a period nobody offers answered %v, want a refusal naming the periods", err)
 	}
+}
+
+// THE READ RUNS INSIDE THE REQUEST POOL'S STATEMENT LIMIT, NEVER ABOVE IT.
+//
+// The pool's limit (MEMQL_DB_STATEMENT_TIMEOUT_MS, 8 s by default) sits below
+// pgdriver's 10 s client read deadline, so a slow statement is cancelled by the
+// SERVER and the caller is told why (component/database, database.go). A read
+// that raised it -- this one used to SET LOCAL statement_timeout = '30s' --
+// bought nothing, since the client still gives up at 10 s, and left a slow scan
+// running unheard for up to 20 s more, holding its snapshot, on every refresh of
+// every Statistics page. Asked under the shipped limit and under an operator's
+// lower one, with and without the request log held: the read follows the pool's
+// limit, whatever it is, and is never unbounded.
+func TestTheStatisticsReadStaysInsideThePoolsStatementLimit(t *testing.T) {
+	ctx := context.Background()
+	for _, poolMs := range []int64{8000, 3000} {
+		db := servingPool(t, poolMs)
+		var pool int64
+		if err := db.NewRaw(statementTimeoutSetting).Scan(ctx, &pool); err != nil {
+			t.Fatalf("read the pool's statement_timeout: %v", err)
+		}
+		if pool != poolMs {
+			t.Fatalf("the pool's sessions run under a statement_timeout of %d ms, want %d: the test would prove nothing", pool, poolMs)
+		}
+		for _, holdRequestLog := range []bool{false, true} {
+			var inside int64
+			if err := statisticsTx(ctx, db, holdRequestLog, func(ctx context.Context, tx bun.Tx) error {
+				return tx.NewRaw(statementTimeoutSetting).Scan(ctx, &inside)
+			}); err != nil {
+				t.Fatalf("the read's transaction (holding the request log: %v): %v", holdRequestLog, err)
+			}
+			if inside <= 0 || inside > pool {
+				t.Errorf("under a pool limit of %d ms the read (holding the request log: %v) runs its statements under %d ms, want the pool's limit or less, and some limit",
+					pool, holdRequestLog, inside)
+			}
+		}
+	}
+}
+
+// statementTimeoutSetting answers the session's statement_timeout in
+// milliseconds, as a SET LOCAL inside the transaction leaves it.
+const statementTimeoutSetting = `SELECT setting::bigint FROM pg_settings WHERE name = 'statement_timeout'`
+
+// servingPool opens the test database with the request pool's statement limit:
+// every backend SETs statement_timeout as component/database's sessionConnParams
+// does, under pgdriver's default 10 s read deadline.
+func servingPool(t *testing.T, statementTimeoutMs int64) *bun.DB {
+	t.Helper()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(
+		pgdriver.WithDSN(dbtest.DSN()),
+		pgdriver.WithConnParams(map[string]any{"statement_timeout": strconv.FormatInt(statementTimeoutMs, 10)}),
+	)), pgdialect.New())
+	if err := db.PingContext(context.Background()); err != nil {
+		_ = db.Close()
+		dbtest.Unreachable(t, "the statistics read's statement limit", dbtest.DSN(), err)
+		return nil
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }

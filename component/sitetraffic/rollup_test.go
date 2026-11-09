@@ -1,8 +1,16 @@
 package sitetraffic
 
 import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/uptrace/bun"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // The window a run looks for open days in is the request log's configured
@@ -26,5 +34,38 @@ func TestTheOpenWindowIsTheRequestLogsRetention(t *testing.T) {
 		if got := openFrom(today, c.retentionDays); !got.Equal(c.want) {
 			t.Errorf("openFrom(%s, %d) = %s, want %s", today.Format(time.DateOnly), c.retentionDays, got.Format(time.DateOnly), c.want.Format(time.DateOnly))
 		}
+	}
+}
+
+// NO MAINTENANCE SESSION, NO ROLLUP. The plug-in contract
+// (memql.PluginContext.OpenMaintenanceSession) has a plug-in that needs the
+// session refuse the capability rather than fall back to the request pool,
+// whose statement timeout and 10 s read deadline end a day's recompute part-way
+// -- the reason the session exists. So a node without one answers an error that
+// says so, and never reaches for the pool; and a session that cannot be opened
+// ends the run with the opener's own error, having done nothing.
+func TestTheRollupRefusesANodeWithoutAMaintenanceSession(t *testing.T) {
+	touched := false
+	i := NewIntegration(nil, func() *bun.DB { touched = true; return nil }, nil, quietLogger())
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("siteStatisticsRollupSweep"))
+	nodes, err := i.handleRollup(ctx, nil, 0)
+	if err == nil || nodes != nil || !strings.Contains(err.Error(), "maintenance session") {
+		t.Errorf("got %d nodes and error %v, want a refusal naming the maintenance session", len(nodes), err)
+	}
+	if touched {
+		t.Error("the rollup reached for the request pool instead of refusing")
+	}
+	if _, err := Rollup(context.Background(), nil, time.Now()); !errors.Is(err, errNoMaintenanceSession) {
+		t.Errorf("Rollup with no session answered %v, want errNoMaintenanceSession", err)
+	}
+
+	unavailable := errors.New("maintenance session unavailable on this database")
+	opened := 0
+	rep, err := Rollup(context.Background(), func(context.Context) (*sql.Conn, func(), error) {
+		opened++
+		return nil, nil, unavailable
+	}, time.Now())
+	if !errors.Is(err, unavailable) || opened != 1 || rep != (RollupReport{}) {
+		t.Errorf("a session that cannot be opened answered %+v, %v after %d opens; want the opener's error after one, and nothing done", rep, err, opened)
 	}
 }

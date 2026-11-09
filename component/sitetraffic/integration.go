@@ -78,8 +78,13 @@ const countryRefreshPrincipal = "system:maintenance:geoCountryRefreshSweep"
 // Integration exposes the two reads, the rollup and the country refresh.
 type Integration struct {
 	engine Engine
-	bunDB  func() *bun.DB
-	logger *slog.Logger
+	// bunDB is the request pool: both reads and the country refresh run on it.
+	bunDB func() *bun.DB
+	// maintenance opens the session the rollup runs on, and the rollup runs on
+	// nothing else (rollup.go, "Where the statements run"). nil refuses the
+	// rollup and nothing more: the reads and the country refresh never use it.
+	maintenance MaintenanceSession
+	logger      *slog.Logger
 
 	// now is the clock of the rollup, the country refresh and the statistics
 	// read's period; nil is time.Now. A field so a test runs a builtin at an
@@ -100,23 +105,27 @@ type Integration struct {
 	httpClient     *http.Client
 }
 
-// NewIntegration wires the handles. The db getter is resolved lazily at call
-// time, not at construction: a node's database handle is not necessarily up
-// when plug-ins are materialized.
-func NewIntegration(engine Engine, bunDB func() *bun.DB, logger *slog.Logger) *Integration {
+// NewIntegration wires the handles. The db getter and the session opener are
+// resolved lazily at call time, not at construction: a node's database handle
+// is not necessarily up when plug-ins are materialized.
+func NewIntegration(engine Engine, bunDB func() *bun.DB, maintenance MaintenanceSession, logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Integration{
-		engine: engine, bunDB: bunDB, logger: logger,
+		engine: engine, bunDB: bunDB, maintenance: maintenance, logger: logger,
 		countryBaseURL: defaultCountryBaseURL,
 		httpClient:     &http.Client{Timeout: 2 * time.Minute},
 	}
 }
 
+// A context without OpenMaintenanceSession still builds the plug-in: the
+// builtins are declared in every binary's DSL and must resolve everywhere
+// (above), and only the rollup needs the session, so it is the rollup that
+// refuses (handleRollup).
 func init() {
 	memql.RegisterPlugin("siteTraffic", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return NewIntegration(pctx.Engine, pctx.BunDB, pctx.Logger), nil
+		return NewIntegration(pctx.Engine, pctx.BunDB, pctx.OpenMaintenanceSession, pctx.Logger), nil
 	})
 }
 
@@ -175,25 +184,31 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 // Every day the run could not write is logged here, one Warn naming the day,
 // and the run's error is returned, so the automation's run says it failed; the
 // next run recomputes those days (rollup.go).
+//
+// NO MAINTENANCE SESSION, NO ROLLUP. The run's statements go to the database's
+// dedicated maintenance session (rollup.go, "Where the statements run"), so a
+// node whose plug-in context offers none is refused, never served from the
+// request pool, as memql.PluginContext.OpenMaintenanceSession requires. The app
+// bootstrap gives every node an opener; on a node without a database, the
+// first run answers the opener's own refusal.
 func (i *Integration) handleRollup(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, ok := auth.AccessFromContext(ctx)
 	if !ok || actor == nil || actor.UserId != rollupPrincipal || !actor.IsClusterOwner() {
 		return nil, fmt.Errorf("site statistics rollup requires the engine maintenance principal")
+	}
+	if i.maintenance == nil {
+		return nil, errNoMaintenanceSession
 	}
 	if !i.rollupRunning.CompareAndSwap(false, true) {
 		return nil, nil
 	}
 	defer i.rollupRunning.Store(false)
 
-	var db *bun.DB
-	if i.bunDB != nil {
-		db = i.bunDB()
-	}
 	now := time.Now()
 	if i.now != nil {
 		now = i.now()
 	}
-	rep, err := Rollup(ctx, db, now)
+	rep, err := Rollup(ctx, i.maintenance, now)
 	i.logRollupFailures(err)
 	// A routine run is the same line every five minutes, so it is Debug; a
 	// backfill or a retention delete is a change worth a line at Info. A

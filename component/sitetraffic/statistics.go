@@ -160,12 +160,6 @@ const statisticsConcept = "integration:siteTraffic:statistics"
 // value can reach these fifty on any day it was seen.
 const topEntriesKept = 50
 
-// statisticsStatementTimeout bounds every statement of one read. The reads
-// are index range scans and sum a few hundred rows for one deployable; the
-// bound is for staff summing every deployable of a large cluster over
-// ninety days, where a refusal that says it timed out is the honest answer.
-const statisticsStatementTimeout = "30s"
-
 // Statistics answers the query for the deployables the caller may read.
 func (r *Reader) Statistics(ctx context.Context, q StatisticsQuery) (Statistics, error) {
 	if len(q.SiteIds) > maxSitesPerRead {
@@ -260,8 +254,25 @@ func nullPoints(starts []time.Time) []Point {
 	return out
 }
 
-// statisticsTx runs one read in a read-only REPEATABLE READ transaction whose
-// statements are bounded by statisticsStatementTimeout.
+// statisticsTx runs one read in a read-only REPEATABLE READ transaction, on the
+// request pool and under the pool's own statement limit.
+//
+// THE POOL'S LIMIT IS THE READ'S, raised by nothing here. The database layer
+// gives every serving backend a statement_timeout (MEMQL_DB_STATEMENT_TIMEOUT_MS,
+// 8 s by default) set below pgdriver's 10 s client read deadline, so a slow
+// statement is cancelled by the server, which rolls it back and says so
+// (component/database, database.go). Raising it, as this read once did with a
+// 30 s SET LOCAL for staff summing every deployable of a large cluster over
+// ninety days, buys nothing: the client still stops listening at 10 s with an
+// i/o timeout, and the scan runs on unheard for up to 20 s more, holding its
+// snapshot (and, for 24 hours, the request log's lock below), on every refresh
+// of every Statistics page -- the orphan the pool's limit exists to prevent. A
+// local limit below the pool's was the other choice, and is not taken: it
+// would second-guess the operator's setting, lowering a raised one and raising
+// a lowered one, where following the pool keeps one serving limit for the whole
+// cluster. A read slower than the limit answers the server's statement-timeout
+// error, which is the honest refusal
+// (TestTheStatisticsReadStaysInsideThePoolsStatementLimit).
 //
 // HOLDING THE REQUEST LOG, for a read of it, is the rollup's lesson
 // (recomputeDay): TimescaleDB compresses a chunk by moving its rows and
@@ -275,9 +286,6 @@ func nullPoints(starts []time.Time) []Point {
 func statisticsTx(ctx context.Context, db *bun.DB, holdRequestLog bool, fn func(context.Context, bun.Tx) error) error {
 	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
 	return db.RunInTx(ctx, opts, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SET LOCAL statement_timeout = '"+statisticsStatementTimeout+"'"); err != nil {
-			return fmt.Errorf("bound the statements: %w", err)
-		}
 		if holdRequestLog {
 			if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
 				return fmt.Errorf("hold the request log: %w", err)

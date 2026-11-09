@@ -13,7 +13,9 @@ import (
 // that legitimately run for minutes. Its first user is the closed-chunk
 // compaction (component/retention/compact.go): a TimescaleDB reorder_chunk of
 // a multi-gigabyte chunk, and the heap scan that measures what a chunk would
-// give back.
+// give back. The second is the website statistics rollup
+// (component/sitetraffic/rollup.go), whose recompute of a busy UTC day can
+// outlast both limits below.
 //
 // # Why not a pool the process already has
 //
@@ -48,11 +50,13 @@ import (
 // otherwise, which is the direct endpoint on an install without a pooler.
 //
 // It is opened for one run and closed after it, so an idle process holds no
-// connection for it. The connection budget counts it as one per INSTALLATION
-// while a run is in progress, not one per process, because the caller's
-// advisory lock admits one run at a time cluster-wide; a contender opens its
-// session only long enough to be refused the lock
-// (docs/public/operate/db-connection-budget.md).
+// connection for it. The connection budget counts these sessions per
+// INSTALLATION while a run is in progress, not per process, because each
+// caller admits one run at a time cluster-wide: the compaction by an advisory
+// lock (a contender opens its session only long enough to be refused it), the
+// statistics rollup by running on the cron leader (a second session only while
+// a change of leader overlaps two runs). A new caller states its own bound
+// there (docs/public/operate/db-connection-budget.md).
 
 // ErrMaintenanceSessionUnavailable answers OpenMaintenanceSession on a
 // Database with no DSN, or one built over a custom opener (tests, sqlmock),

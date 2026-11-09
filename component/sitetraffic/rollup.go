@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/schema"
 )
 
 // The statistics rollup: folds the edge's request log into a deployable's
@@ -80,10 +82,38 @@ import (
 // # One statement per period, over every site
 //
 // Each statement covers all sites at once; there is no per-site loop. The bound
-// is the statement timeout: a period whose statement does not finish within it
-// fails, is logged by the caller, and is recomputed on the next run. A very
-// large cluster's day therefore degrades to "retried every five minutes"
+// is the statement timeout, which the server enforces (below): a period whose
+// statement does not finish within it fails, is logged by the caller, and is
+// recomputed on the next run, and a run as a whole stops at rollupRunBudget. A
+// very large cluster's day therefore degrades to "retried every five minutes"
 // rather than to a run that never ends.
+//
+// # Where the statements run: one maintenance session per run
+//
+// Not on the request pool. Its connections carry a server statement_timeout (8 s
+// by default) and pgdriver's 10 s CLIENT read deadline, past which the client
+// reports an i/o timeout and sends no cancel, so the backend carries on unheard
+// (component/database, maintenance_session.go). A day's statement folds a whole
+// UTC day of edge_request for every site, and on a busy cluster it can take
+// longer than 10 s: on the pool such a day failed at the client on every run,
+// never written and never final, while its orphan kept working up to the
+// server's limit with the day's locks still held.
+//
+// So every statement of a run goes to the dedicated maintenance session
+// (memql.PluginContext.OpenMaintenanceSession), which has no statement_timeout
+// and no read deadline of its own, and the run supplies both, per statement
+// (rollupTx.prepare): the server's statement_timeout is rollupStatementTimeout,
+// or less when the run's budget has less left, and the client waits
+// rollupStatementGrace past it. An overrun is then ended by the SERVER, which
+// rolls the statement back and says so, never by the client cutting the socket
+// (TestADayStatementOutlivesTheRequestPoolsReadDeadline).
+//
+// The session is opened when a run starts and closed when it ends, so an idle
+// process holds no connection for it; a day that fails closes it, and the next
+// day opens another (rollupSession.inTx says why). There is no fallback to the
+// request pool: without a maintenance session the rollup refuses to run
+// (errNoMaintenanceSession). docs/public/operate/db-connection-budget.md counts
+// the connection.
 
 // RollupReport says what one run of the rollup did.
 type RollupReport struct {
@@ -103,9 +133,24 @@ type RollupReport struct {
 }
 
 const (
-	// rollupStatementTimeout bounds every statement the rollup runs. It is the
-	// rollup's only bound on work: see the package comment above.
-	rollupStatementTimeout = "60s"
+	// rollupStatementTimeout bounds every statement of a run at the server,
+	// which cancels an overrun and rolls it back: the rollup's bound on the work
+	// of one period (see "One statement per period" above).
+	rollupStatementTimeout = 60 * time.Second
+
+	// rollupStatementGrace is how long past the server's bound the client keeps
+	// waiting for a statement, so the server always ends an overrun first. The
+	// client's own deadline is for a connection that has gone silent.
+	rollupStatementGrace = 15 * time.Second
+
+	// rollupRunBudget bounds a whole run. Longer than the longest a day's
+	// transaction can take -- ten statements, COMMIT among them, each at most
+	// rollupStatementTimeout -- so today, which every run recomputes first,
+	// always has room; short enough that a long backfill does not hold today's
+	// figures back for hours behind the per-process single flight
+	// (handleRollup). A run that reaches it stops between statements, and the
+	// days it left open are the next run's.
+	rollupRunBudget = 15 * time.Minute
 
 	// hourlyRetention is how long edge_stats_hourly keeps a row: the request
 	// log's own default, so the last thirty days can always be recomputed.
@@ -142,38 +187,53 @@ const (
 // carries on with every other open day. Each failed day is a *dayFailure in the
 // returned error, joined with any other failure, so the caller can log each by
 // name.
-func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error) {
+//
+// Every statement runs on a session that open opens, and on nothing else (see
+// "Where the statements run" above); with no open at all, the run refuses.
+func Rollup(ctx context.Context, open MaintenanceSession, now time.Time) (RollupReport, error) {
 	var rep RollupReport
-	if db == nil {
-		return rep, errors.New("site statistics rollup: no database handle")
+	if open == nil {
+		return rep, errNoMaintenanceSession
 	}
 	now = now.UTC()
+	ctx, cancel := context.WithTimeout(ctx, rollupRunBudget)
+	defer cancel()
+
+	// Opened before anything is planned: a run that cannot open its session
+	// can do nothing, and says so once rather than once for every day.
+	s := &rollupSession{open: open}
+	defer s.release()
+	if err := s.connect(ctx); err != nil {
+		return rep, fmt.Errorf("site statistics rollup: %w", err)
+	}
 
 	// A plan whose reads fail still has today to do: planRollup answers it
 	// whatever its reads said.
 	var failures []error
-	days, err := planRollup(ctx, db, now)
+	days, err := planRollup(ctx, s, now)
 	if err != nil {
 		failures = append(failures, fmt.Errorf("site statistics plan: %w", err))
 	}
 	for _, d := range days {
-		// A cancelled run stops: every day after this one would fail the
+		// A run that is cancelled, or has too little of its budget left to
+		// start a statement, stops: every day after this one would fail the
 		// same way, and none of them is lost, since none is recorded final.
-		if err := ctx.Err(); err != nil {
+		if _, err := statementBound(ctx); err != nil {
 			failures = append(failures, err)
 			break
 		}
 		if d.backfill {
 			rep.Backfilled = true
 		}
-		hours, err := recomputeDay(ctx, db, d.day, now, d.final)
+		hours, err := recomputeDay(ctx, s, d.day, now, d.final)
 		if err != nil {
 			// Carry on with the other days. They are independent of each
 			// other, so one that fails -- a statement timeout, a row the
 			// database refuses -- must not hold back the rest, older ones
 			// included. The run's length stays bounded by the statement
-			// timeout per day, and the per-process single flight in
-			// handleRollup keeps a slow run from overlapping the next.
+			// timeout per statement and by rollupRunBudget, and the
+			// per-process single flight in handleRollup keeps a slow run from
+			// overlapping the next.
 			failures = append(failures, &dayFailure{Day: d.day, Err: err})
 			continue
 		}
@@ -181,7 +241,7 @@ func Rollup(ctx context.Context, db *bun.DB, now time.Time) (RollupReport, error
 		rep.Hours += hours
 	}
 
-	deleted, err := deletePastRetention(ctx, db, now)
+	deleted, err := deletePastRetention(ctx, s, now)
 	if err != nil {
 		failures = append(failures, fmt.Errorf("site statistics retention: %w", err))
 	}
@@ -236,15 +296,15 @@ type rollupDay struct {
 //
 // The plan reads only the finalization record. Today is answered even when
 // that read fails, with the error beside it.
-func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, error) {
+func planRollup(ctx context.Context, s *rollupSession, now time.Time) ([]rollupDay, error) {
 	today := utcMidnight(now)
 	days := []rollupDay{{day: today}}
 	from := openFrom(today, RetentionDays())
 	final := map[string]bool{} // by date: time.Time's == also compares location and monotonic reading
-	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
-		var recorded []string
-		if err := tx.NewRaw(`SELECT day::text FROM edge_stats_final WHERE day >= ?::date AND day < ?::date`,
-			dateArg(from), dateArg(today)).Scan(ctx, &recorded); err != nil {
+	err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
+		recorded, err := tx.column(ctx, `SELECT day::text FROM edge_stats_final WHERE day >= ?::date AND day < ?::date`,
+			dateArg(from), dateArg(today))
+		if err != nil {
 			return fmt.Errorf("read the finalization record: %w", err)
 		}
 		for _, d := range recorded {
@@ -290,7 +350,7 @@ func planRollup(ctx context.Context, db *bun.DB, now time.Time) ([]rollupDay, er
 // sees the rows the other committed and replaces them, rather than failing on
 // them. SHARE ROW EXCLUSIVE conflicts with itself and with writers, never with
 // a reader, so the Statistics page is not held up by a run.
-func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final bool) (int, error) {
+func recomputeDay(ctx context.Context, s *rollupSession, day, now time.Time, final bool) (int, error) {
 	dayEnd := day.AddDate(0, 0, 1)
 	// The hours the hourly table keeps: retention removes every hour before
 	// hourlyFloor, so writing one would be work thrown away the same run.
@@ -301,8 +361,8 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final boo
 	withHours := hourStart.Before(dayEnd)
 	date := dateArg(day)
 
-	err := boundedTx(ctx, db, &sql.TxOptions{Isolation: sql.LevelRepeatableRead}, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+	err := s.inTx(ctx, "BEGIN ISOLATION LEVEL REPEATABLE READ", func(tx *rollupTx) error {
+		if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 			return fmt.Errorf("take the rollup lock: %w", err)
 		}
 		// Hold the request log still while this day is read. TimescaleDB
@@ -320,38 +380,38 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final boo
 		// EXCLUSIVE). The cost runs the other way: a compression or a drop
 		// that reaches its exclusive step while this transaction holds the
 		// lock waits for it to end, which the statement bound limits to the
-		// statements of one day's recompute
-		// (TestTheSnapshotIsTakenAfterALockOnTheDaysChunk).
-		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
+		// statements of one day's recompute, each ended by the server at
+		// rollupStatementTimeout (TestTheSnapshotIsTakenAfterALockOnTheDaysChunk).
+		if _, err := tx.exec(ctx, "LOCK TABLE edge_request IN ACCESS SHARE MODE"); err != nil {
 			return fmt.Errorf("hold the request log: %w", err)
 		}
 		if withHours {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?`, hourStart, dayEnd); err != nil {
+			if _, err := tx.exec(ctx, `DELETE FROM edge_stats_hourly WHERE hour >= ? AND hour < ?`, hourStart, dayEnd); err != nil {
 				return fmt.Errorf("clear the hours: %w", err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_daily WHERE day = ?::date`, date); err != nil {
+		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_daily WHERE day = ?::date`, date); err != nil {
 			return fmt.Errorf("clear the day: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_daily_top WHERE day = ?::date`, date); err != nil {
+		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_daily_top WHERE day = ?::date`, date); err != nil {
 			return fmt.Errorf("clear the top lists: %w", err)
 		}
 		if withHours {
 			q, args := bucketStatsInsert("edge_stats_hourly", "hour", hourOf, hourStart, dayEnd)
-			if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+			if _, err := tx.exec(ctx, q, args...); err != nil {
 				return fmt.Errorf("write the hours: %w", err)
 			}
 		}
 		q, args := bucketStatsInsert("edge_stats_daily", "day", dayOf, day, dayEnd)
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+		if _, err := tx.exec(ctx, q, args...); err != nil {
 			return fmt.Errorf("write the day: %w", err)
 		}
 		q, args = topInsert(day, dayEnd)
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+		if _, err := tx.exec(ctx, q, args...); err != nil {
 			return fmt.Errorf("write the top lists: %w", err)
 		}
 		if final {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)
+			if _, err := tx.exec(ctx, `INSERT INTO edge_stats_final (day, finalized_at) VALUES (?::date, ?)
 				ON CONFLICT (day) DO NOTHING`, date, now); err != nil {
 				return fmt.Errorf("record the day final: %w", err)
 			}
@@ -385,12 +445,12 @@ func recomputeDay(ctx context.Context, db *bun.DB, day, now time.Time, final boo
 // from the few rows there (TestAStrayRawRowCannotReopenAFinalDay). The cost is
 // at most one small row per day the daily table keeps. The records are not
 // counted in the answer.
-func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64, error) {
+func deletePastRetention(ctx context.Context, s *rollupSession, now time.Time) (int64, error) {
 	var deleted int64
 	cutoff := dateArg(dailyCutoff(utcMidnight(now)))
-	err := boundedTx(ctx, db, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := s.inTx(ctx, "BEGIN", func(tx *rollupTx) error {
 		deleted = 0
-		if _, err := tx.ExecContext(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+		if _, err := tx.exec(ctx, "LOCK TABLE edge_stats_daily IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 			return fmt.Errorf("take the rollup lock: %w", err)
 		}
 		for _, d := range []struct {
@@ -401,7 +461,7 @@ func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64,
 			{`DELETE FROM edge_stats_daily WHERE day < ?::date`, cutoff},
 			{`DELETE FROM edge_stats_daily_top WHERE day < ?::date`, cutoff},
 		} {
-			res, err := tx.ExecContext(ctx, d.query, d.arg)
+			res, err := tx.exec(ctx, d.query, d.arg)
 			if err != nil {
 				return err
 			}
@@ -411,7 +471,7 @@ func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64,
 			}
 			deleted += n
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, cutoff); err != nil {
+		if _, err := tx.exec(ctx, `DELETE FROM edge_stats_final WHERE day < ?::date`, cutoff); err != nil {
 			return fmt.Errorf("delete the finalization records past retention: %w", err)
 		}
 		return nil
@@ -422,16 +482,215 @@ func deletePastRetention(ctx context.Context, db *bun.DB, now time.Time) (int64,
 	return deleted, nil
 }
 
-// boundedTx runs fn in a transaction whose every statement is bounded by the
-// rollup's statement timeout. SET LOCAL ends with the transaction, so the
-// pooled connection goes back with its own setting.
-func boundedTx(ctx context.Context, db *bun.DB, opts *sql.TxOptions, fn func(context.Context, bun.Tx) error) error {
-	return db.RunInTx(ctx, opts, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SET LOCAL statement_timeout = '"+rollupStatementTimeout+"'"); err != nil {
-			return fmt.Errorf("bound the statements: %w", err)
+// MaintenanceSession opens the dedicated session a run's statements run on:
+// memql.PluginContext.OpenMaintenanceSession, which component/database's
+// maintenance_session.go provides. The run closes it with the func it answers.
+type MaintenanceSession func(ctx context.Context) (*sql.Conn, func(), error)
+
+// errNoMaintenanceSession refuses a run that has no session to run on. The
+// plug-in contract (memql.PluginContext.OpenMaintenanceSession) has a plug-in
+// that needs the session refuse rather than fall back to the request pool, and
+// the pool is exactly what the session replaces here.
+var errNoMaintenanceSession = errors.New("site statistics rollup: this node offers no maintenance session, and the rollup does not run on the request pool instead, whose statement timeout and 10 s read deadline end a day's recompute part-way")
+
+// queryGen formats a statement's ? placeholders as bun formats them for the
+// request pool, whose bun.DB is built over pgdialect.New() (component/database).
+// The session is a bare *sql.Conn with no bun.DB of its own, and the SQL
+// builders below are shared with the statistics read, which runs through bun,
+// so a statement reads the same on either.
+var queryGen = schema.NewQueryGen(pgdialect.New())
+
+// rollupSession is a run's maintenance session ("Where the statements run"
+// above): connected when the run starts, released when it ends or when one of
+// its transactions fails.
+type rollupSession struct {
+	open  MaintenanceSession
+	conn  *sql.Conn
+	close func()
+}
+
+// connect opens the session, unless the run holds one.
+//
+// client_connection_check_interval is component/retention's reason
+// (compact.go): the server does not look at a client's socket while a
+// statement runs, so a backend whose engine process died would run its
+// statement on for nobody until the server's limit, here a minute; with it,
+// the server looks every ten seconds and stops. PostgreSQL 14 and later; a
+// server that does not know it answers an error that changes nothing, so the
+// error is not the run's.
+func (s *rollupSession) connect(ctx context.Context) error {
+	if s.conn != nil {
+		return nil
+	}
+	conn, closeConn, err := s.open(ctx)
+	if err != nil {
+		return fmt.Errorf("open the maintenance session: %w", err)
+	}
+	s.conn, s.close = conn, closeConn
+	if sctx, _, cancel, err := statementContext(ctx); err == nil {
+		_, _ = conn.ExecContext(sctx, "SET client_connection_check_interval = '10s'")
+		cancel()
+	}
+	return nil
+}
+
+// release closes the session; a later transaction of the run opens another.
+func (s *rollupSession) release() {
+	if s.close != nil {
+		s.close()
+	}
+	s.conn, s.close = nil, nil
+}
+
+// inTx runs fn in one transaction on the session, begun with begin (BEGIN, or
+// BEGIN with an isolation level), and commits it.
+//
+// A TRANSACTION THAT FAILS RELEASES THE SESSION, and the next one opens a fresh
+// session, rather than rolling back and carrying on. Whether the connection
+// outlives a failure depends on the failure: pgdriver closes it under a
+// statement the server cancelled (SQLSTATE 57014, which a statement timeout
+// raises) and under any error it cannot read as the server's -- a deadline, a
+// broken socket -- and keeps it under the rest. Releasing is right for every
+// one of them: the server rolls the transaction back when its connection goes,
+// and a failed day costs that day alone, never the days after it in the run.
+// Kept instead, one cancelled day failed every later day of the run on "sql:
+// connection is already closed" (TestADayTheServerCancelsCostsThatDayAlone).
+//
+// BEGIN AND COMMIT ARE STATEMENTS SENT LIKE ANY OTHER, not database/sql's Tx:
+// pgdriver commits and rolls a Tx back under context.Background(), which on
+// this session, with no read deadline of its own, is a wait with no end. A
+// COMMIT sent here is bounded as every statement is.
+func (s *rollupSession) inTx(ctx context.Context, begin string, fn func(*rollupTx) error) error {
+	// No time left to start a statement is no reason to open a session.
+	if _, err := statementBound(ctx); err != nil {
+		return err
+	}
+	if err := s.connect(ctx); err != nil {
+		return err
+	}
+	tx := &rollupTx{conn: s.conn}
+	err := tx.begin(ctx, begin)
+	if err == nil {
+		err = fn(tx)
+	}
+	if err == nil {
+		_, err = tx.exec(ctx, "COMMIT")
+	}
+	if err != nil {
+		s.release()
+	}
+	return err
+}
+
+// rollupTx is one transaction of a run, on the run's session. Every statement
+// of it is bounded: BEGIN by begin, the rest, COMMIT among them, by prepare.
+type rollupTx struct {
+	conn *sql.Conn
+	// limit is the statement_timeout the transaction last SET LOCAL, so a
+	// statement under the same limit as the one before it needs no SET.
+	limit time.Duration
+}
+
+// begin opens the transaction. A SET LOCAL before BEGIN would mean nothing, so
+// BEGIN runs under the session's own limit, none, and the client's deadline
+// alone; it waits on nothing in the server.
+func (t *rollupTx) begin(ctx context.Context, statement string) error {
+	sctx, _, cancel, err := statementContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	_, err = t.conn.ExecContext(sctx, statement)
+	return err
+}
+
+// exec runs one statement of the transaction, bounded by prepare, its ?
+// placeholders formatted by queryGen.
+func (t *rollupTx) exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	sctx, cancel, err := t.prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	return t.conn.ExecContext(sctx, queryGen.FormatQuery(query, args...))
+}
+
+// column runs one query of the transaction as exec does, and answers its one
+// text column, row by row.
+func (t *rollupTx) column(ctx context.Context, query string, args ...any) ([]string, error) {
+	sctx, cancel, err := t.prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	rows, err := t.conn.QueryContext(sctx, queryGen.FormatQuery(query, args...))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
 		}
-		return fn(ctx, tx)
-	})
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// prepare bounds the statement about to run: the server's statement_timeout is
+// SET LOCAL to statementContext's limit, unless the transaction's last SET
+// already says it, and the client waits under statementContext's deadline. SET
+// takes no snapshot, so it may come before the lock a REPEATABLE READ
+// recompute takes ahead of its first query (recomputeDay).
+func (t *rollupTx) prepare(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	sctx, limit, cancel, err := statementContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if limit != t.limit {
+		if _, err := t.conn.ExecContext(sctx, "SET LOCAL statement_timeout = "+strconv.FormatInt(limit.Milliseconds(), 10)); err != nil {
+			cancel()
+			return nil, nil, fmt.Errorf("bound the statement: %w", err)
+		}
+		t.limit = limit
+	}
+	return sctx, cancel, nil
+}
+
+// statementContext answers, for a statement that starts now, the context the
+// client waits for it under and the server limit it runs under: the limit is
+// statementBound, and the client waits rollupStatementGrace past it, so the
+// client is never the one to stop first. component/retention's statementContext
+// (compact.go), but with no time left it refuses rather than rounding up.
+func statementContext(ctx context.Context) (context.Context, time.Duration, context.CancelFunc, error) {
+	limit, err := statementBound(ctx)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	sctx, cancel := context.WithTimeout(ctx, limit+rollupStatementGrace)
+	return sctx, limit, cancel, nil
+}
+
+// statementBound is the server's limit for a statement that starts now:
+// rollupStatementTimeout, or what ctx has left less rollupStatementGrace when
+// that is shorter. Less than a second is no time to start a statement in, and
+// answers an error wrapping context.DeadlineExceeded, which stops the run:
+// rounding up, as a compaction pass does, could hand the server a limit past
+// the client's deadline, the one order this file exists to rule out.
+func statementBound(ctx context.Context) (time.Duration, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	limit := rollupStatementTimeout
+	if d, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(d)-rollupStatementGrace)
+	}
+	if limit < time.Second {
+		return 0, fmt.Errorf("too little of the run's time is left to start a statement: %w", context.DeadlineExceeded)
+	}
+	return limit, nil
 }
 
 // The visit segmentation (spec D17): THE definition of a visit in SQL, built
