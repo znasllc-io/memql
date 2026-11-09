@@ -102,6 +102,10 @@ current configuration, at the digest the candidate was approved with. One that
 is no longer authorized refuses the whole operation, as it refuses archival.
 A destination that needs no read is never resolved, so a target removed from
 the configuration does not block recording that nothing was published there.
+The one exception, recorded after review: archival resolves a release profile's
+whole selection at once, so a profile-bound candidate that has a copy to read
+needs its profile to still authorize every destination it selected, read or
+not. Narrowing that resolution to the destinations read was not done.
 The release a file publication went to is identified from the target frozen
 in its intent (`target_snapshot`), which says whether that release was ever
 published before any current configuration is consulted.

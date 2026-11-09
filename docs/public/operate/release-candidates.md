@@ -548,10 +548,14 @@ things hold:
   cannot stand in for sealing a current release.
 - **What it published is read back first.** Every destination whose publication
   completed is verified as archival verifies it: registry images by their content,
-  published release assets by their bytes (on the successor's release for a
-  renewed candidate), npm archives by digest and size. Only these destinations
-  are resolved through the candidate's release profile or the current
-  configuration; one that no longer matches its approved digest refuses.
+  npm archives by digest and size, and release assets by their bytes if their
+  release was published (on the successor's release for a renewed candidate). The
+  destinations are resolved through the candidate's release profile or the
+  current configuration only when there is such a copy to read. Then, as in
+  archival, a profile or configuration that is gone refuses, and so does a
+  destination read that no longer matches its approved digest; a profile must
+  also still authorize every destination it selected, read or not. A candidate
+  with nothing to read needs neither.
 - **Nothing it began is still running.** No upload is in progress, and no pending
   publication or draft creation or promotion has changed in the last two hours,
   longer than any publication operation runs. Resuming a publication restarts

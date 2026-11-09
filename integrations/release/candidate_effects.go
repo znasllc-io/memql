@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -41,11 +42,17 @@ func (l *candidateLedger) effects(ctx context.Context, key string) ([]candidateP
 	}
 	// A candidate archived with its catalog completed every publication. One
 	// archived on the supersession basis may keep an intent that never completed;
-	// it stays in the history as pending, fenced from ever completing.
+	// it stays in the history as pending, fenced from ever completing. Both
+	// archives write their evidence row in the transaction that sets the state,
+	// so an archived candidate without one is a damaged journal, not an absent row.
 	unfinishedAllowed := false
 	if record.State == "archived" {
 		var basis string
-		if err := tx.QueryRowContext(ctx, `SELECT basis FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2`, record.ID, owner).Scan(&basis); err != nil {
+		err := tx.QueryRowContext(ctx, `SELECT basis FROM release_candidate_archives WHERE candidate_id=$1 AND owner_user_id=$2`, record.ID, owner).Scan(&basis)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("candidate publication journal is inconsistent")
+		}
+		if err != nil {
 			return nil, err
 		}
 		unfinishedAllowed = basis == "supersession"

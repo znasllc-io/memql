@@ -29,8 +29,13 @@ type candidateSupersessionProof struct {
 
 // verifyUncataloguedInputs reads back every destination the snapshot recorded
 // as verified, and nothing else: a destination whose publication never
-// completed has no canonical copy to read, so it is never resolved against the
-// current configuration and needs no credential.
+// completed has no canonical copy to read, so it is never read and needs no
+// credential. The owner's call resolves the destinations (archivalTargets) only
+// at the first copy to read, and a failure to resolve them refuses the whole
+// operation there. That resolution is archival's: a legacy candidate's
+// configuration is matched only for the destinations read, while a
+// profile-bound candidate's profile must then still authorize every
+// destination it selected, read or not.
 func (p *candidatePreparer) verifyUncataloguedInputs(ctx context.Context, snapshot candidateUncataloguedSnapshot) (candidateSupersessionProof, error) {
 	record := snapshot.record
 	proof := candidateSupersessionProof{CandidateID: record.ID, ApprovalID: record.ApprovalID, ObservedAt: snapshot.observedAt,
@@ -39,6 +44,13 @@ func (p *candidatePreparer) verifyUncataloguedInputs(ctx context.Context, snapsh
 	for _, outcome := range snapshot.destinations {
 		if outcome.Outcome != uncataloguedVerified {
 			continue
+		}
+		if p != nil && p.targetReader == nil && p.archivalTargets != nil {
+			reader, err := p.archivalTargets(ctx)
+			if err != nil {
+				return proof, err
+			}
+			p.targetReader = reader
 		}
 		if p == nil || p.targetReader == nil {
 			return proof, errors.New("published copy verification is unavailable")
@@ -103,19 +115,33 @@ func (p *candidatePreparer) archiveWithoutCatalog(ctx context.Context, key, publ
 	return record, releaseErr
 }
 
-// The destinations it reads are resolved as archival resolves them, through the
-// candidate's release profile or the current configuration, so the preparer is
-// archival's.
+// The preparer starts with the ledger and library alone. The destinations a
+// published copy is read through are resolved as archival resolves them,
+// through the candidate's release profile or the current configuration
+// (archivalCandidateFor), and only when verification reaches a copy to read. A
+// candidate that published nothing needs neither, so a removed profile or
+// configuration cannot keep its inputs retained.
+// TestArchiveWithoutCatalogResolvesDestinationsOnlyToReadACopy holds both sides
+// for a candidate of the legacy configuration; no test yet drives a
+// profile-bound candidate through this handler.
 func (i *Integration) handleCandidateArchiveWithoutCatalog(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	p, err := i.archivalCandidateFor(ctx, asString(args["candidateId"]))
+	key := asString(args["candidateId"])
+	p, err := i.candidateStorage(ctx)
 	if err != nil {
 		return nil, err
+	}
+	p.archivalTargets = func(ctx context.Context) (*candidateTargetReader, error) {
+		archival, err := i.archivalCandidateFor(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		return archival.targetReader, nil
 	}
 	_, config, trust, err := i.catalog(ctx)
 	if err != nil {
 		return nil, err
 	}
-	record, err := p.archiveWithoutCatalog(ctx, asString(args["candidateId"]), config.Publisher, trust)
+	record, err := p.archiveWithoutCatalog(ctx, key, config.Publisher, trust)
 	if err != nil {
 		return nil, err
 	}

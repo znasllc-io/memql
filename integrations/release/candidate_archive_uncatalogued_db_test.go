@@ -105,6 +105,70 @@ func TestSupersedingCatalogsCountOnlyTheOwnersVerifiedCatalogs(t *testing.T) {
 	}
 }
 
+// atVersion moves a fixture's component to another version, with the VERSION
+// file its source reads at the commit, so one release line can hold candidates
+// at two versions.
+func atVersion(t *testing.T, p *candidatePreparer, c pl.ReleaseCandidate, version string) pl.ReleaseCandidate {
+	t.Helper()
+	source := newFakeGitHub(t, nil, c.Components[0].Commit).withVersionFile(version + "\n")
+	p.versionReader = &candidateVersionReader{client: NewClient().WithBaseURL(source.server.URL), sources: p.versionReader.sources}
+	c.Components = slices.Clone(c.Components)
+	c.Components[0].Version = version
+	return c
+}
+
+// A signed catalog of the same component at a lower version does not show that
+// the release line moved past this candidate, so neither the snapshot's search
+// nor the fence's check of the catalog a proof names accepts one. The version
+// comparison itself is TestCatalogSupersedesSameOrHigherVersionOfTheSameComponent.
+func TestArchiveWithoutCatalogRefusesACatalogOfALowerVersion(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust := map[string]ed25519.PublicKey{"archive-test": public}
+	catalogued := func(version string) string {
+		t.Helper()
+		p, c, _, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, atVersion(t, p, c, version))
+		if _, err := p.publish(ownerCtx(), request); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.ledger.sealCatalog(ownerCtx(), request.CandidateID, request.ApprovalID, "fixture", "archive-test", private, trust); err != nil {
+			t.Fatal(err)
+		}
+		return request.CandidateID
+	}
+	lower := catalogued("0.25.0")
+	p, c, _, _ := candidatePublicationFixture(t, db, provider.server.URL)
+	request := preparePublication(t, db, p, atVersion(t, p, c, "0.26.0"))
+	if _, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust); err == nil || !strings.Contains(err.Error(), "engine 0.26.0") {
+		t.Fatal("the search let a catalog of engine 0.25.0 supersede engine 0.26.0", err)
+	}
+	equal := catalogued("0.26.0")
+	snapshot, err := p.ledger.uncataloguedSnapshot(ownerCtx(), request.CandidateID, "fixture", trust)
+	if err != nil || snapshot.supersededBy["engine"] != equal {
+		t.Fatal("a catalog of the same version did not supersede", snapshot.supersededBy, err)
+	}
+	proof, err := p.verifyUncataloguedInputs(ownerCtx(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := proof
+	named.SupersededBy = map[string]string{"engine": lower}
+	if _, err := p.ledger.archiveWithoutCatalog(ownerCtx(), snapshot, named, "fixture", trust); err == nil || !strings.Contains(err.Error(), "no longer does") {
+		t.Fatal("the fence accepted a catalog of a lower version", err)
+	}
+	if count, _, _ := archiveRows(t, db, request.CandidateID); count != 0 {
+		t.Fatal("a catalog of a lower version wrote a fence")
+	}
+	if record, err := p.ledger.archiveWithoutCatalog(ownerCtx(), snapshot, proof, "fixture", trust); err != nil || record.State != "archived" {
+		t.Fatal("the proof naming the same version's catalog did not fence", err)
+	}
+}
+
 func TestArchiveSupersessionRollbackRefusesWhileEvidenceExists(t *testing.T) {
 	db := candidateTestDB(t)
 	provider := archiveRegistryFixture(t)
@@ -537,6 +601,83 @@ func TestArchiveWithoutCatalogResolvesOnlyDestinationsItReads(t *testing.T) {
 	if _, err := withMovedTarget(p, "registry").verifyUncataloguedInputs(ownerCtx(), snapshot); err == nil || !strings.Contains(err.Error(), "changed since candidate review") {
 		t.Fatal("a published destination verified against a moved target", err)
 	}
+}
+
+// unconfiguredArchiveHost is an owner's host whose MEMQL_RELEASE_CANDIDATES is
+// gone, so archivalCandidateFor cannot resolve a legacy candidate's destinations
+// there, as it cannot for a profile-bound candidate whose profile was removed.
+// The catalog configuration stays, trusting the superseding catalog.
+func unconfiguredArchiveHost(t *testing.T, p *candidatePreparer, db *sql.DB, trust map[string]ed25519.PublicKey) *Integration {
+	t.Helper()
+	i, _ := archiveScheduleHost(t, p, db, trust, auth.RoleOwner)
+	configured := i.resolver.systemVariable
+	i.resolver.systemVariable = func(ctx context.Context, name string) (string, error) {
+		if name == CandidateConfigurationVariable {
+			return "", nil
+		}
+		return configured(ctx, name)
+	}
+	return i
+}
+
+// The owner's call resolves a destination only to read its published copy. A
+// candidate that published nothing archives where no destination resolves; one
+// with a copy to read refuses there with the reason and changes nothing, and
+// reads it where its destination still resolves.
+func TestArchiveWithoutCatalogResolvesDestinationsOnlyToReadACopy(t *testing.T) {
+	db := candidateTestDB(t)
+	provider := archiveRegistryFixture(t)
+	trust := supersedingFixture(t, db, provider)
+	archive := func(i *Integration, key string) error {
+		t.Helper()
+		_, err := i.handleCandidateArchiveWithoutCatalog(ownerCtx(), map[string]any{"candidateId": key}, 0)
+		return err
+	}
+	t.Run("nothing published", func(t *testing.T) {
+		p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		i := unconfiguredArchiveHost(t, p, db, trust)
+		if _, err := i.archivalCandidateFor(ownerCtx(), request.CandidateID); err == nil {
+			t.Fatal("the host still resolves the candidate's destinations")
+		}
+		before := provider.reads.Load()
+		if err := archive(i, request.CandidateID); err != nil || library.pins[request.CandidateID] || !library.released[request.CandidateID] || provider.reads.Load() != before {
+			t.Fatal("a candidate with nothing to read needed its destinations resolved", err)
+		}
+		if count, basis, _ := archiveRows(t, db, request.CandidateID); count != 1 || basis != "supersession" {
+			t.Fatal("the candidate was not archived on the supersession basis", count, basis)
+		}
+	})
+	t.Run("a copy that cannot be resolved", func(t *testing.T) {
+		p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		if _, err := p.publish(ownerCtx(), request); err != nil {
+			t.Fatal(err)
+		}
+		before := provider.reads.Load()
+		err := archive(unconfiguredArchiveHost(t, p, db, trust), request.CandidateID)
+		if err == nil || !strings.Contains(err.Error(), "explicit operator configuration") || !library.pins[request.CandidateID] || provider.reads.Load() != before {
+			t.Fatal("a published copy that cannot be resolved did not refuse with the reason", err)
+		}
+		if record, err := p.ledger.get(ownerCtx(), request.CandidateID); err != nil || record.State != "approved" {
+			t.Fatal("the refusal changed the candidate", record.State, err)
+		}
+	})
+	t.Run("a copy that resolves", func(t *testing.T) {
+		p, c, library, _ := candidatePublicationFixture(t, db, provider.server.URL)
+		request := preparePublication(t, db, p, c)
+		if _, err := p.publish(ownerCtx(), request); err != nil {
+			t.Fatal(err)
+		}
+		i, _ := archiveScheduleHost(t, p, db, trust, auth.RoleOwner)
+		before := provider.reads.Load()
+		if err := archive(i, request.CandidateID); err != nil || library.pins[request.CandidateID] || provider.reads.Load() == before {
+			t.Fatal("the published copy was not read back before the archive", err)
+		}
+		if count, basis, _ := archiveRows(t, db, request.CandidateID); count != 1 || basis != "supersession" {
+			t.Fatal("the candidate was not archived on the supersession basis", count, basis)
+		}
+	})
 }
 
 func TestArchiveWithoutCatalogOwnerWallPrecedesPorts(t *testing.T) {

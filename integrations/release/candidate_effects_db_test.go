@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -71,6 +73,32 @@ func TestCandidatePublicationHistoryRecoversPendingAndCompleteWithoutEffects(t *
 	}
 	if _, err := i.handleCandidateEffects(ownerCtx(), map[string]any{"candidateId": record.ID}, 0); err == nil {
 		t.Fatal("tampered completion was displayed as verified")
+	}
+}
+
+// Every archive writes its evidence row in the transaction that archives, so an
+// archived candidate without one is a damaged journal. The history says so
+// rather than returning a raw no-rows error, which reads as an absent row.
+func TestCandidatePublicationHistoryRefusesAnArchivedCandidateWithoutArchiveEvidence(t *testing.T) {
+	db := candidateTestDB(t)
+	ledger := &candidateLedger{db: func() *sql.DB { return db }}
+	record, err := ledger.prepare(ownerCtx(), candidateTestManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanupCandidate(t, db, record.ID)
+	if _, err := ledger.ready(ownerCtx(), record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.approve(ownerCtx(), record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE release_candidates SET state='archived' WHERE candidate_id=$1`, record.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ledger.effects(ownerCtx(), record.ID)
+	if err == nil || errors.Is(err, sql.ErrNoRows) || !strings.Contains(err.Error(), "candidate publication journal is inconsistent") {
+		t.Fatal("an archived candidate without archive evidence read as", err)
 	}
 }
 
