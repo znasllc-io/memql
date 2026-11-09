@@ -284,7 +284,7 @@ POST /_memql/access/call
 
 ### The reserved arguments, and how they isolate data
 
-Five argument names are **reserved**. When a construct declares one, the handler
+Six argument names are **reserved**. When a construct declares one, the handler
 stamps it, *last*, from what it knows about the session. A caller that sends one
 is refused with `invalid_args`, even to a construct that does not declare it,
 so a forged argument cannot tell anybody what a construct declares.
