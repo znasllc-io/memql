@@ -113,6 +113,13 @@ var maintenanceAutomations = map[string]string{
 		"Go handler. Without it the automation's RoleReader system actor is refused every five minutes, nothing " +
 		"is folded, and every deployable's statistics read as not measured -- a failure that looks like a site " +
 		"nobody has measured yet",
+	"emailStatisticsRollupSweep": "the five-minute fold of campaign deliveries, engagement events and consent events " +
+		"into the email statistics facts (the 2026-11-08 statistics design, D10 and D18). It is a cross-owner " +
+		"roll-up by nature: the figures are per organization and the walk reads every organization's campaign rows " +
+		"through @serverOnly queries filtered on actor.isClusterOwner, never one owner's at a time. Under the default " +
+		"RoleReader actor those reads answer zero rows and no error, and builtin emailStatisticsRollup admits this " +
+		"principal and no other caller in its Go handler besides, so without it every run is refused, nothing is " +
+		"folded, and every email figure reads as not measured -- a failure that looks like a cluster that sends nothing",
 	"geoCountryRefreshSweep": "the daily check that downloads DB-IP's monthly country database into edge_geo_country " +
 		"(the 2026-11-08 statistics design). The table is a dedicated one no row admission ever sees, and builtin " +
 		"geoCountryRefresh admits this principal and no other caller in its Go handler. Without it the automation's " +

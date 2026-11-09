@@ -112,6 +112,13 @@ var pluginKinds = map[string]moduleKind{
 	// the relationship `database` has to Postgres rather than the one
 	// `shopify` has to Shopify.
 	"siteTraffic": kindComponent,
+	// The email statistics facts (the 2026-11-08 statistics design, D10), for
+	// siteTraffic's reasons: builtin emailStatisticsRollup is declared in
+	// dsl/campaigns/builtins.memql, which EVERY binary loads, so a node without
+	// the executor fails boot resolution. And it calls nobody's API: it reads
+	// the cluster's own rows and tables, the campaign rows through the engine
+	// and its own fact and watermark tables with SQL.
+	"emailStats": kindComponent,
 	// Storefront preview (epic memql#5531): the grant an operator opens, what
 	// is legal right now, and the three active observations.
 	//

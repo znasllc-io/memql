@@ -103,6 +103,14 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
 		"demoteProcedures",
+		// emailStatisticsRollupSweep (the 2026-11-08 statistics design) folds
+		// every organization's campaign deliveries, engagement and consent
+		// events into the email statistics facts: a cross-owner roll-up by
+		// nature, read through @serverOnly queries filtered on
+		// actor.isClusterOwner. Under the default RoleReader actor those reads
+		// answer zero rows and the builtin refuses every run besides, so every
+		// email figure would read as not measured.
+		"emailStatisticsRollupSweep",
 		// geoCountryRefreshSweep (the 2026-11-08 statistics design) downloads
 		// DB-IP's monthly country database into a dedicated table outside
 		// graph admission; builtin geoCountryRefresh admits this principal and

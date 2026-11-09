@@ -272,7 +272,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 198 -> 199: geoCountryRefreshSweep, the daily check that downloads DB-IP's
 // monthly country database (2026-11-08). One added, none removed; measured by
 // the strict loader.
-const shippedAutomationCount = 199
+// 199 -> 200: emailStatisticsRollupSweep, the five-minute fold of campaign
+// deliveries, engagement and consent events into the email statistics facts
+// (2026-11-08). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 200
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

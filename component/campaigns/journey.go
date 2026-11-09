@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,40 @@ func journeyEnrollmentID(journeyID, recipientID string, joinedAt time.Time) stri
 	return sha256Hex("campaign-journey-enrollment\x00" + bare(journeyID) + "\x00" + bare(recipientID) + "\x00" + joinedAt.UTC().Format(time.RFC3339Nano))
 }
 func journeyRequestID(enrollmentID, stepID string) string {
-	return "journey-" + bare(enrollmentID) + "-" + stepID
+	return journeyRequestPrefix + bare(enrollmentID) + "-" + stepID
+}
+
+// journeyRequestPrefix opens every request id a journey's step sends under.
+const journeyRequestPrefix = "journey-"
+
+// JourneyEnrollmentOfRequest reads journeyRequestID backwards: the enrollment a
+// journey step's send was made for, and false for any request id no journey
+// step wrote. The email statistics rollup attributes a journey's sends to the
+// journey through it (component/emailstats, the 2026-11-08 statistics design,
+// D18). It lives here, beside the writer, so the form has one home and
+// TestJourneyRequestIDReadsBackToItsEnrollment holds the two directions
+// together.
+//
+// The form is exact rather than split on dashes, because a step id may hold
+// one: "journey-", the enrollment -- a SHA-256 in lowercase hex
+// (journeyEnrollmentID), so exactly 64 characters of 0-9a-f -- then "-" and a
+// step id journeyStepIDPattern admits.
+func JourneyEnrollmentOfRequest(requestID string) (string, bool) {
+	const enrollmentLen = sha256.Size * 2
+	rest, ok := strings.CutPrefix(requestID, journeyRequestPrefix)
+	if !ok || len(rest) < enrollmentLen+2 || rest[enrollmentLen] != '-' {
+		return "", false
+	}
+	enrollment, step := rest[:enrollmentLen], rest[enrollmentLen+1:]
+	for _, c := range enrollment {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", false
+		}
+	}
+	if !journeyStepIDPattern.MatchString(step) {
+		return "", false
+	}
+	return enrollment, true
 }
 
 func (w *Worker) drainJourneys(ctx, systemCtx context.Context) {

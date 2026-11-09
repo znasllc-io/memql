@@ -126,6 +126,7 @@ pipeline:
       - component/database
       - component/datasync
       - component/emailrules
+      - component/emailstats
       - component/grpc
       - component/identity
       - component/logstore

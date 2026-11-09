@@ -521,3 +521,19 @@ shape campaign providerCounterCampaign {
   status
   row.createdAt
 }
+
+/// An enrollment's journey and nothing else, for counting a journey's sends under it (the 2026-11-08
+/// statistics design, D18).
+@row
+shape journeyEnrollment enrollmentJourneyRef {
+  row.id
+  journeyId
+}
+
+/// A recipient's audience and nothing else, for counting a subscribe or an unsubscribe under it (the
+/// 2026-11-08 statistics design, D18). No address: a figure needs none.
+@row
+shape recipient recipientAudienceRef {
+  row.id
+  audienceId
+}

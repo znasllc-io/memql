@@ -143,6 +143,15 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # packages -- and the sink's own suite is DB-free through its insert seam, so
 # it now happens to run beside a database it ignores.
 #
+# The 2026-11-08 statistics design added `component/emailstats`. Its rollup
+# walks the campaign rows through the engine's own @serverOnly queries and
+# writes keyed facts, and what is worth proving is the engine's and the
+# database's: that the latest-version walk, the id spellings and the cursor give
+# the facts the rules say, that ON CONFLICT makes a rerun count nothing twice,
+# and that the watermark's overlap catches a late row. A fake engine asserts its
+# own rows. What the complement now means, having looked: the package is new,
+# and its pure fact rules run beside a database they ignore.
+#
 # `test/conformance` is deliberately ABSENT, and memql#5386 re-confirmed it
 # rather than changing it. The tree's db-gated cases -- the differential lane
 # above all -- run in the SEPARATE mcp-conformance job, which brings up the same
@@ -286,6 +295,7 @@ readonly DB_GATED_TREES=(
 	"component/database"
 	"component/datasync"
 	"component/emailrules"
+	"component/emailstats"
 	"component/grpc"
 	"component/identity"
 	"component/logstore"

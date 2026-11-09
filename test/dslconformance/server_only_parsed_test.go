@@ -222,6 +222,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "campaigns/mutations.memql", Name: "enrollJourneyRecipient"}:       true,
 		{Path: "campaigns/mutations.memql", Name: "advanceJourneyEnrollment"}:     true,
 		{Path: "campaigns/mutations.memql", Name: "nudgeJourneyEnrollment"}:       true,
+		// The email statistics walk (the 2026-11-08 statistics design, D10 and
+		// D18) is a sweep: its one reader is builtin emailStatisticsRollup's
+		// maintenance principal, and what it reads is every organization's
+		// rows at once, which no caller-scoped filter can express. The three
+		// source reads and the two attribution lookups are the whole of it.
+		{Path: "campaigns/queries.memql", Name: "deliveriesWrittenSince"}:       true,
+		{Path: "campaigns/queries.memql", Name: "engagementEventsWrittenSince"}: true,
+		{Path: "campaigns/queries.memql", Name: "consentEventsWrittenSince"}:    true,
+		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentsByIds"}:      true,
+		{Path: "campaigns/queries.memql", Name: "recipientAudiencesByIds"}:      true,
 
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;

@@ -208,6 +208,15 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// `selection.go` beside it holds no engine at all.
 		"component/skills":     "the capability graph's three @serverOnly writers -- server-initiated evidence and executable lists, refused without the stamp (memql#4970)",
 		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the authoring writes it stamps for -- the rule's bundle, its construct and their two gate verdicts -- are @serverOnly, as are the rule's own records (memql#4829, memql#6022)",
+		// The email statistics rollup (the 2026-11-08 statistics design, D10).
+		// SERVER-INITIATED: its one caller is the emailStatisticsRollupSweep
+		// automation's maintenance principal, which handleRollup checks before
+		// anything is read, and no request reaches it. The stamp is in ONE
+		// place, runRollup, and it is for READS only: the three source walks
+		// and the two attribution lookups, all @serverOnly, so without it every
+		// run is refused and every email figure reads as not measured. Nothing
+		// it reads leaves the package except as keyed facts in its own table.
+		"component/emailstats": "the email statistics rollup -- server-initiated under the emailStatisticsRollupSweep maintenance principal, checked before the walk; one stamp, for its five @serverOnly reads (three source walks and two attribution lookups), and it writes only its own fact and watermark tables",
 		// Routing-rule activation (epic memql#5127). Same shape as
 		// component/emailrules one line up, and the reasoning is the same
 		// three sentences: the package is SMALL, it exists for ONE operation

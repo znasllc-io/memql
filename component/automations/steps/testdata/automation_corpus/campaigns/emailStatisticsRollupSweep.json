@@ -1,0 +1,39 @@
+{
+  "automation": "campaigns/automations.memql emailStatisticsRollupSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "emailStatisticsRollup"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "emailStatisticsRollup"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

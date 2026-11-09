@@ -169,3 +169,24 @@ automation composeEmailRun {
 
   composeEmail := builtin campaignRunComposition(templateId: args.templateId)
 }
+
+/// Fold campaign deliveries, opens and clicks, and consent events into the email statistics facts
+/// (the 2026-11-08 statistics design, section 5, D10 and D18).
+///
+/// EVERY FIVE MINUTES ON THE CRON LEADER, at half past the minute, so it does not start in the same
+/// second as the website statistics rollup. Each run walks each source from its watermark less five
+/// minutes -- a row stamped by a writer whose clock lags is still read -- and records one fact per
+/// record and kind, so rows read twice count once. The first run starts four hundred days back and
+/// catches up forty pages a source per run.
+///
+/// THE WORK IS A BUILTIN, builtin emailStatisticsRollup in component/emailstats, because its output
+/// is no concept: a side table of facts the statistics read groups with SQL. It reads the campaign
+/// rows through the engine, never with SQL of its own.
+///
+/// A MAINTENANCE automation (component/auth/maintenance_actor.go): the builtin admits this
+/// automation's maintenance principal and no other caller, so the default reader actor would be
+/// refused on every run.
+@trigger(schedule="30 */5 * * * *")
+automation emailStatisticsRollupSweep {
+  roll := builtin emailStatisticsRollup()
+}

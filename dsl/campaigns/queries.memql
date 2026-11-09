@@ -1085,3 +1085,73 @@ query delivery providerCounterLedger {
   paginate 100
   shape providerCounterEntry
 }
+
+// ---- the email statistics walk (the 2026-11-08 statistics design, D10 and D18) ----
+//
+// Five reads for one reader: builtin emailStatisticsRollup's walk
+// (component/emailstats), which runs as the emailStatisticsRollupSweep
+// automation's maintenance principal. Each source query reads, in row.createdAt
+// order, the rows written since a watermark less a five-minute overlap, at each
+// row's latest version, so a delivery whose outcome changed is read again. The
+// two lookups attribute a page's facts to their journey and audience in one
+// batched read each.
+
+/// Internal statistics walk across every organization's deliveries. actor.userId scoping would count only one person's sends; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query delivery deliveriesWrittenSince {
+  args { since datetime! }
+  filter row => actor.isClusterOwner == true && row.createdAt >= args.since
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape deliveryFull
+}
+
+/// Internal statistics walk across every organization's opens and clicks. actor.userId scoping would count only one person's campaigns; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query engagementEvent engagementEventsWrittenSince {
+  args { since datetime! }
+  filter row => actor.isClusterOwner == true && row.createdAt >= args.since
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape engagementEventFull
+}
+
+/// Internal statistics walk across every organization's consent events. actor.userId scoping would count only one person's subscribers; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
+@actor
+@serverOnly
+@cache(0)
+query consentEvent consentEventsWrittenSince {
+  args { since datetime! }
+  filter row => actor.isClusterOwner == true && row.createdAt >= args.since
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape consentEventFull
+}
+
+/// Internal attribution of journey sends to their journeys, by the enrollments their request ids name. actor.userId scoping would miss every other owner's automations; the clusterOwner predicate and internal origin are both mandatory, and bare ids resolve inbound.
+@actor
+@serverOnly
+@cache(0)
+query journeyEnrollment journeyEnrollmentsByIds {
+  args { ids []string! }
+  filter row => actor.isClusterOwner == true && row.id in args.ids
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape enrollmentJourneyRef
+}
+
+/// Internal attribution of subscription changes to their recipients' audiences. actor.userId scoping would miss every other owner's audiences; the clusterOwner predicate and internal origin are both mandatory, and bare ids resolve inbound.
+@actor
+@serverOnly
+@cache(0)
+query recipient recipientAudiencesByIds {
+  args { ids []string! }
+  filter row => actor.isClusterOwner == true && row.id in args.ids
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape recipientAudienceRef
+}

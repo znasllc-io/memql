@@ -133,6 +133,11 @@ import (
 	// which on a node type that runs no authored runtime is the permanent and
 	// correct answer.
 	_ "github.com/znasllc-io/memql/component/emailrules"
+	// The email statistics facts (the 2026-11-08 statistics design, D10). On
+	// every node type for sitetraffic's reason: builtin emailStatisticsRollup
+	// is declared in dsl/campaigns/builtins.memql, which every binary loads, so
+	// a capability missing from the registry is a boot-time resolution failure.
+	_ "github.com/znasllc-io/memql/component/emailstats"
 	_ "github.com/znasllc-io/memql/component/sitehealth"
 	_ "github.com/znasllc-io/memql/component/sitetraffic"
 	_ "github.com/znasllc-io/memql/integrations/shopify"

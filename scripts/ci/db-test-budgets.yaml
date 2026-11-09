@@ -49,4 +49,7 @@ classes: |
   # Campaigns now covers 498 cases, including independent two-engine hops.
   # Keep each lock/write deadline assertion; give the full suite its own budget.
   db      campaigns component/campaigns 600s     serial,uncached 1
+  # The email statistics rollup walks shared watermarks over the campaign rows,
+  # so its suite runs alone and uncached; about 10s on a laptop.
+  db      emailstats component/emailstats 300s   serial,uncached 1
   db      default   -                   180s     -         2

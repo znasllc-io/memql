@@ -3,6 +3,7 @@ package campaigns
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -63,6 +64,18 @@ type campaignStatsResult map[string]any
 // two enums overlap in meaning and not in spelling, and a list carrying only
 // one family would silently file half the suppressions under "other".
 var suppressedSkipReasons = []string{"hard_bounce", "complaint", "manual", "bounced", "complained"}
+
+// IsSuppressedSkipReason reports whether a skipped delivery's skipReason is one
+// campaignStats counts as suppressed: exactly suppressedSkipReasons, compared
+// as the count query compares it, with no folding of case or space.
+//
+// Exported so the email statistics rollup (component/emailstats, the
+// 2026-11-08 statistics design) counts the same suppressions this breakdown
+// does. It READS the set rather than copying it, and it is a predicate rather
+// than the exported slice, so no caller can change what campaignStats counts.
+func IsSuppressedSkipReason(reason string) bool {
+	return slices.Contains(suppressedSkipReasons, reason)
+}
 
 // unsubscribedSkipReason is reported separately from the rest, because "they
 // asked us to stop" and "the address is dead" are different facts about a
