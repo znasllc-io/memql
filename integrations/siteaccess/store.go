@@ -487,8 +487,9 @@ func (s *GraphStore) codesForSite(ctx context.Context, siteID string) ([]codeVie
 // READ AS THE CLUSTER ACTING, for CodeByHash's reason and for one of the mint's own: how
 // many rows this finds names the site's next pass (guestPassID), so a pass the caller's
 // tier would hide from them, one minted before the site moved organization, must still be
-// counted, or the next pass is given an id that is already taken and can never be written.
-// A mint has authorized the person asking under their own actor before it reads this.
+// counted, or the next pass is given an id that is already taken and every mint has to move
+// past it (mintGuestPass). A mint has authorized the person asking under their own actor
+// before it reads this.
 func (s *GraphStore) guestPassRows(ctx context.Context, siteID string) ([]codeView, error) {
 	siteID = memql.BareShortId(siteID)
 	call, err := langparser.RenderCall("siteAccessCodeByHash", map[string]any{
@@ -521,8 +522,8 @@ func (s *GraphStore) livePassForSite(ctx context.Context, siteID string) (codeVi
 // livePass picks the site's pass that has not been removed out of what guestPassRows read.
 // A row of another site, or one that does not say it is a pass, is never the answer.
 //
-// MORE THAN ONE CANNOT HAPPEN WHILE THE FENCE HOLDS: two mints that read the same passes
-// ask for the same id, and the write refuses a row that is already there (createCode). If
+// MORE THAN ONE CANNOT HAPPEN WHILE THE FENCE HOLDS: two mints meet at the first id nobody
+// holds (mintGuestPass), and the write refuses a row that is already there (createCode). If
 // it happened anyway, the newest by issuedAt is the answer, the pass an operator turned on
 // last, and the row's latest write decides between two of one second.
 func livePass(siteID string, rows []codeView) (codeView, bool) {

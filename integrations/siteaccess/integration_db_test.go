@@ -680,10 +680,13 @@ func TestCreateCopiesOwnerAndAccountFromTheSite(t *testing.T) {
 // a guest pass
 // ---------------------------------------------------------------------------
 
-// The two refusals a guest pass adds, verbatim: the OS shows a refusal as written.
+// The refusals a guest pass adds, verbatim: the OS shows a refusal as written. The
+// conflict is the one a mint gives after losing the fence twice.
 const (
 	wantSecondPass         = "This deployable already lets guests in. Change when guest access ends, or turn it off first."
 	wantNoCodeToRegenerate = "Guest access has no code to regenerate. Change when it ends, or turn it off."
+	wantPassUnseen         = "Guest access is on for this deployable under a pass you cannot see, left from before it changed hands. A cluster operator has to turn it off."
+	wantGuestConflict      = "This deployable changed at the same moment, so guest access was not turned on. Reload the list and try again."
 )
 
 // guestArgs is a valid guest pass mint, named as the OS prefills it. A nil value in
@@ -1100,6 +1103,108 @@ func TestConcurrentGuestPassCreatesLeaveOne(t *testing.T) {
 	t.Run("the second mint let go once the first has landed", func(t *testing.T) {
 		for round := 0; round < 3; round++ {
 			race(t, true)
+		}
+	})
+}
+
+// passIDsAsked is the ids a mint's writes asked for, in the order it asked.
+func passIDsAsked(spy *spyEngine) []string {
+	var ids []string
+	for _, call := range spy.named("createSiteAccessCode") {
+		if m := askedCodeID.FindStringSubmatch(call.query); m != nil {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
+}
+
+var askedCodeID = regexp.MustCompile(`codeId: "([^"]+)"`)
+
+// AN ID CAN BE TAKEN BY A ROW THE SITE'S PASSES DO NOT COUNT. The count names the next
+// pass's id, and it falls short in two ways: the read behind it returns at most the
+// engine's MaxResults rows whatever @unbounded asks for, and an older engine's
+// regenerate, run on a pass after a rollback, gave the pass a code's digest. Either way
+// the next id belongs to a row the read does not find, every mint asks for it, and the
+// write refuses it, so without a way past it guests could never be let in again.
+func TestAGuestPassMovesPastAnIDTakenByARowTheReadDoesNotCount(t *testing.T) {
+	t.Run("a taken id and no pass standing: the next free one", func(t *testing.T) {
+		w := newWorld(t, "guesttaken")
+		operator := actorContext(w.operator, auth.RoleOwner)
+		first := w.allowGuests(operator, nil)
+		require.Equal(t, guestPassID(w.site, 1), first)
+
+		// AS AN OLDER ENGINE'S REGENERATE WROTE IT, which knew nothing of passes: a code's
+		// digest on the pass's row. Then the pass is turned off, so none stands.
+		_, digest, hint, err := memql.MintAccessCode()
+		require.NoError(t, err)
+		w.mutate(w.asOwner(), "rotateSiteAccessCode", map[string]any{
+			"codeId": first, "codeHash": digest, "codeHint": hint, "generation": 2,
+			"issuedAt": stamp(time.Now()), "expiresAt": stamp(time.Now().Add(time.Hour)), "lastChangedBy": w.owner,
+		})
+		w.removeCode(first)
+		// THE MINT'S OWN READ, which takes each row's latest version: passesOn would count the
+		// first version, written with the guest digest.
+		counted, err := NewGraphStore(liveEngine{w.eng}).guestPassRows(context.Background(), w.site)
+		require.NoError(t, err)
+		require.Empty(t, counted, "the premise failed: the site's guest digest still finds the first pass, so its id is counted")
+		taken := w.versions(first, 0)
+
+		in, spy := w.spied()
+		nodes, err := in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"label": "Guests again"}), 0)
+		require.NoError(t, err, "an id taken by a row the read does not count wedged the mint")
+		second := fmt.Sprint(onlyPayload(t, nodes)["codeId"])
+		require.Equal(t, guestPassID(w.site, 2), second, "the mint did not move on to the next id")
+		require.Equal(t, []string{first, second}, passIDsAsked(spy), "the mint did not ask for the counted id first and then the next")
+
+		require.Equal(t, taken, w.versions(first, 0), "the write landed on the row that holds the taken id")
+		require.Equal(t, "Guests again", w.row(second)["label"])
+		require.Equal(t, true, w.row(second)["guest"])
+		live, ok, err := NewGraphStore(liveEngine{w.eng}).livePassForSite(context.Background(), w.site)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, second, live.ID)
+		require.Len(t, w.events(second), 1, "one pass, one audit event")
+	})
+
+	t.Run("it moves past eight taken ids, and a ninth is the conflict", func(t *testing.T) {
+		w := newWorld(t, "guestbound")
+		operator := actorContext(w.operator, auth.RoleOwner)
+		now := time.Now()
+		// A CODE AT EACH OF A SITE'S FIRST PASS IDS, which the site's guest digest never
+		// finds: the count says no pass was ever minted, and every id it names is taken.
+		takeFirst := func(site string, n int) {
+			for ordinal := 1; ordinal <= n; ordinal++ {
+				w.forgeCode(site, guestPassID(site, ordinal), w.account, now, now.Add(time.Hour))
+			}
+		}
+		takeFirst(w.site, 8)
+		far := "ac-site-far-" + w.suffix
+		w.siteRow(far, nil)
+		takeFirst(far, 9)
+
+		in, spy := w.spied()
+		nodes, err := in.handleGuestPassCreate(operator, w.guestArgs(nil), 0)
+		require.NoError(t, err, "eight taken ids stopped the mint")
+		require.Equal(t, guestPassID(w.site, 9), fmt.Sprint(onlyPayload(t, nodes)["codeId"]))
+
+		spy.reset()
+		nodes, err = in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"siteId": far}), 0)
+		require.Nil(t, nodes, "the mint wrote past the ids it may move past")
+		require.Equal(t, wantGuestConflict, requireSentence(t, err))
+		require.True(t, errors.Is(err, memql.ErrRowVersionChanged), "a caller cannot tell the conflict from any other failure: %v", err)
+		asked := map[string]bool{}
+		for _, id := range passIDsAsked(spy) {
+			asked[id] = true
+		}
+		want := map[string]bool{}
+		for ordinal := 1; ordinal <= 9; ordinal++ {
+			want[guestPassID(far, ordinal)] = true
+		}
+		require.Equal(t, want, asked, "the mint did not stop at the ninth taken id")
+		require.Zero(t, w.passesOn(far), "a mint that reported the conflict wrote a pass")
+		require.Zero(t, w.eventsOnSite(far), "a mint that reported the conflict was audited")
+		for ordinal := 1; ordinal <= 9; ordinal++ {
+			require.Equal(t, 1, w.versions(guestPassID(far, ordinal), 0), "a write landed on the code holding a taken id")
 		}
 	})
 }
@@ -2574,6 +2679,54 @@ func TestASiteOnlyTransferLeavesItsCodesWorking(t *testing.T) {
 	row := w.row(codeID)
 	require.NotEmpty(t, row["revokedAt"])
 	require.Equal(t, w.owner, bare(row["ownerUserId"]), "removing moved the row's owner")
+}
+
+// A GUEST PASS LEFT FROM BEFORE A TRANSFER STILL STANDS, AND ITS NEW OWNER CANNOT SEE IT. On
+// an untied site a pass keeps the owner it was minted under, as a code does, so the new
+// owner's list leaves it out and their removal cannot reach it. The mint reads the passes as
+// the cluster and finds it all the same, and telling the new owner to turn it off first
+// would send them to an act they cannot take, so the refusal says who can.
+func TestAGuestPassLeftFromBeforeATransferIsForAClusterOperatorToEnd(t *testing.T) {
+	w := newWorld(t, "guesthands")
+	operator := actorContext(w.operator, auth.RoleOwner)
+	heir := "ac-heir-" + w.suffix
+	w.principal(heir, auth.RoleWriter)
+	// THE NEW OWNER READS THE PACKAGE, as a member of the organization that ships it, so the
+	// mint gets as far as the passes: a refusal about gates would prove nothing here.
+	w.join(w.group, heir)
+	untied := "ac-untied-" + w.suffix
+	w.siteRow(untied, map[string]any{"accountId": nil})
+
+	pass := w.allowGuests(operator, map[string]any{"siteId": untied})
+	require.Equal(t, w.owner, bare(w.row(pass)["ownerUserId"]), "the premise failed: the pass is not stamped with the site's owner of the time")
+	w.transfer(seedContext(), map[string]any{
+		"fromUserId": w.owner, "toUserId": heir, "concept": siteConcept, "rowId": siteConcept + ":" + untied,
+	})
+	require.Equal(t, heir, w.siteOwner(untied), "the premise failed: the site did not change hands")
+
+	// THE PREMISE: the new owner's list leaves the pass out, and their removal cannot reach it.
+	newOwner := actorContext(heir, auth.RoleWriter)
+	listed, err := w.in.handleList(newOwner, map[string]any{"siteId": untied}, 0)
+	require.NoError(t, err)
+	require.Empty(t, listed, "the premise failed: the new owner can see the pass")
+	_, err = w.in.handleRemove(newOwner, map[string]any{"codeId": pass}, 0)
+	require.Error(t, err, "the premise failed: the new owner can turn the pass off")
+
+	nodes, err := w.in.handleGuestPassCreate(newOwner, w.guestArgs(map[string]any{"siteId": untied}), 0)
+	require.Nil(t, nodes, "a second guest pass was minted beside one that stands")
+	require.Equal(t, wantPassUnseen, requireSentence(t, err), "the new owner is sent to turn off a pass they cannot see")
+	require.Equal(t, 1, w.passesOn(untied), "a refused mint wrote a pass")
+	require.Len(t, w.events(pass), 1, "a refused mint was audited")
+
+	// A CLUSTER OPERATOR CAN SEE IT, so they are told what anybody who can see it is told,
+	// and once they have turned it off the new owner lets guests in under a pass of their own.
+	_, err = w.in.handleGuestPassCreate(operator, w.guestArgs(map[string]any{"siteId": untied}), 0)
+	require.Equal(t, wantSecondPass, requireSentence(t, err))
+	_, err = w.in.handleRemove(operator, map[string]any{"codeId": pass}, 0)
+	require.NoError(t, err)
+	second := w.allowGuests(newOwner, map[string]any{"siteId": untied})
+	require.Equal(t, guestPassID(untied, 2), second)
+	require.Equal(t, heir, bare(w.row(second)["ownerUserId"]), "the new pass is not the new owner's")
 }
 
 // ---------------------------------------------------------------------------

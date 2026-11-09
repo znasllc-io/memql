@@ -277,8 +277,8 @@ func (i *Integration) mint(ctx context.Context, actor, siteID string, args map[s
 //
 // TWO OPERATORS AT ONCE LEAVE ONE PASS. Both read the site's passes, both ask for the
 // same id (guestPassID), and the write refuses a row that is already there, so the one
-// that loses runs again from its first read, finds the other's pass and is told guests
-// are already in.
+// that loses finds the id taken, reads the passes again, finds the other's pass and is
+// told guests are already in.
 func (i *Integration) handleGuestPassCreate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	actor, siteID, err := mintCaller(ctx, args, guestsInARun)
 	if err != nil {
@@ -302,27 +302,88 @@ func (i *Integration) handleGuestPassCreate(ctx context.Context, args map[string
 	})
 }
 
+// mintGuestPass is one attempt, and onceMore runs it again from its first read when the
+// site changed under it.
+//
+// AN ID THE COUNT NAMES CAN ALREADY BE TAKEN, by a row the read did not count: the read
+// returns at most the engine's MaxResults rows whatever @unbounded asks for, and an older
+// engine's regenerate, run on a pass after a rollback, gave the pass a code's digest. Every
+// mint would ask for that id and lose, and guests could never be let in again. So a lost
+// write asks whether its id is taken, the one thing the absent witness refuses it for.
+// Taken, the passes are read again: a pass standing is a rival's, and is refused as one,
+// and none standing moves on to the next id. A free id means the site's witness lost, and
+// that is onceMore's to read again from the top.
+//
+// THE WALK IS WHAT KEEPS TWO MINTS TO ONE PASS. It moves past an id only once a row is
+// known to hold it, so the ids taken stay the first ones in order with none skipped, and
+// two mints walking from whatever they counted meet at the first id nobody holds, where
+// the write lets one of them through. It moves past at most takenPassIDs of them, then
+// reports the conflict.
 func (i *Integration) mintGuestPass(ctx context.Context, actor, siteID string, args map[string]any) (minted, error) {
 	asked, err := i.checkMint(ctx, actor, siteID, args)
 	if err != nil {
 		return minted{}, err
 	}
-	// ONE READ ANSWERS BOTH QUESTIONS: whether a pass stands, and how many the site has
-	// had, which names the next one. It is livePassForSite's read, kept whole for the count.
-	passes, err := i.store.guestPassRows(ctx, asked.site.ID)
-	if err != nil {
-		return minted{}, err
-	}
-	if _, stands := livePass(asked.site.ID, passes); stands {
-		return minted{}, refuse("This deployable already lets guests in. Change when guest access ends, or turn it off first.")
-	}
 	// NO HINT: there is no code to tell apart, and codeHint takes an empty string.
-	row := asked.row(guestPassID(asked.site.ID, len(passes)+1), actor)
+	row := asked.row("", actor)
 	row.Digest, row.Guest = memql.AccessGuestPassDigest(asked.site.ID), true
-	if err := i.store.createCode(ctx, asked.site.OwnerUserID, row, asked.site.Version); err != nil {
-		return minted{}, err
+	next, movedPast := 0, 0
+	for {
+		// ONE READ ANSWERS BOTH QUESTIONS: whether a pass stands, and how many the site has
+		// had, which names the next one. It is livePassForSite's read, kept whole for the count.
+		passes, err := i.store.guestPassRows(ctx, asked.site.ID)
+		if err != nil {
+			return minted{}, err
+		}
+		if pass, stands := livePass(asked.site.ID, passes); stands {
+			return minted{}, i.passStands(ctx, pass)
+		}
+		ordinal := max(len(passes)+1, next)
+		row.ID = guestPassID(asked.site.ID, ordinal)
+		err = i.store.createCode(ctx, asked.site.OwnerUserID, row, asked.site.Version)
+		if err == nil {
+			return minted{CodeID: row.ID, SiteID: asked.site.ID, Gate: asked.gate, Generation: 1, ExpiresAt: asked.expiresAt}, nil
+		}
+		if !errors.Is(err, memql.ErrRowVersionChanged) || movedPast == takenPassIDs {
+			return minted{}, err
+		}
+		// AS THE CLUSTER, as the absent witness asks: any row at all holding the id refuses it.
+		holder, readErr := i.store.CodeByID(ctx, row.ID)
+		if readErr != nil {
+			return minted{}, readErr
+		}
+		if holder == nil {
+			return minted{}, err
+		}
+		next, movedPast = ordinal+1, movedPast+1
 	}
-	return minted{CodeID: row.ID, SiteID: asked.site.ID, Gate: asked.gate, Generation: 1, ExpiresAt: asked.expiresAt}, nil
+}
+
+// takenPassIDs is how many taken ids one attempt at a guest pass moves past before it
+// reports the conflict: a bound on the writes one mint makes. A site's count falls one short
+// for each pass an older engine gave a code's digest, and by however many passes it has had
+// past MaxResults. So this is room for a few of the first, and a site that has had more
+// than eight passes past MaxResults (500 by default) gets the conflict every time: the
+// limit siteAccessCodeByHash's @unbounded states.
+const takenPassIDs = 8
+
+// passStands is the refusal while a site has a guest pass that is not removed, worded for
+// what the caller can do about it.
+//
+// A PASS THE CALLER CANNOT READ STANDS ALL THE SAME. The passes are read as the cluster
+// (guestPassRows), while the list and removal read under the caller. On a site with no
+// organization a pass keeps the owner it was minted under, as a code does, so once the site
+// has changed hands its new owner's list leaves the pass out and their removal cannot reach
+// it. Turning it off first is then an act only a cluster operator can take.
+func (i *Integration) passStands(ctx context.Context, pass codeView) error {
+	_, readable, err := i.store.codeForCaller(ctx, pass.ID)
+	if err != nil {
+		return err
+	}
+	if !readable {
+		return refuse("Guest access is on for this deployable under a pass you cannot see, left from before it changed hands. A cluster operator has to turn it off.")
+	}
+	return refuse("This deployable already lets guests in. Change when guest access ends, or turn it off first.")
 }
 
 // guestPassID is the id of a site's nth guest pass, the same for every mint that asks.
@@ -331,8 +392,9 @@ func (i *Integration) mintGuestPass(ctx context.Context, actor, siteID string, a
 // the same row, and createCode refuses a row that is already there. The ordinal counts
 // every pass the site has had, removed ones included, because they keep the digest the
 // next read finds them by, so a site that turns guest access off and on again moves on to
-// an id nobody has used. A name-based UUID, because ids here are UUIDs (core/id), and the
-// digest scrubber leaves one alone.
+// an id nobody has used. Where the count falls short, a mint that finds its id taken moves
+// on to the next (mintGuestPass). A name-based UUID, because ids here are UUIDs (core/id),
+// and the digest scrubber leaves one alone.
 func guestPassID(siteID string, ordinal int) string {
 	name := "memql:siteAccessGuestPass:" + memql.BareShortId(siteID) + ":" + strconv.Itoa(ordinal)
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(name)).String()
