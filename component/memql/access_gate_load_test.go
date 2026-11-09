@@ -42,6 +42,7 @@ concept deskBrief {
   siteId        string
   title         string
   count         int
+  guest         bool
 }
 `
 
@@ -1084,7 +1085,7 @@ func TestAccessGateCallPrefixMirrorsTheShopperOne(t *testing.T) {
 // that stamps them: a name here the handler does not stamp is an argument no
 // caller can supply, and a name stamped that is not here is one a caller can.
 func TestAccessGateReservedArgumentsArePinned(t *testing.T) {
-	want := []string{"siteId", "accessCodeId", "accessGate", "accessSubject", "accessCodeLabel"}
+	want := []string{"siteId", "accessCodeId", "accessGate", "accessSubject", "accessCodeLabel", "accessGuest"}
 	if !reflect.DeepEqual(ReservedAccessArgs, want) {
 		t.Fatalf("ReservedAccessArgs = %v, want %v", ReservedAccessArgs, want)
 	}
@@ -1297,5 +1298,46 @@ func TestSiteAccessConceptsAreNotDefaultCached(t *testing.T) {
 		if isCacheDenylistedConcept(concept) {
 			t.Errorf("%s is denylisted; the access prefix is too loose", concept)
 		}
+	}
+}
+
+// accessGuest TELLS A CONSTRUCT ITS CALLER IS A GUEST (G-D9). It is a bool, unlike the
+// other reserved names, required or optional, and a query may declare it as well as a
+// mutation: it tells the visitor nothing they do not know.
+func TestAccessGuestMustBeABool(t *testing.T) {
+	_, problems := loadGateBundleEntries(t, gateBundleDomains(map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+		codeArgs+"    accessGuest string!\n    title string!\n",
+		"      accessCodeId: args.accessCodeId\n      guest: args.accessGuest\n")}), false)
+	joined := strings.Join(problems, "\n")
+	for _, want := range []string{"deskNote", "reserved argument accessGuest", "as string", "Declare it as bool"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("problems = %q, want mention of %q", joined, want)
+		}
+	}
+}
+
+func TestAccessGuestIsStampedOnAQueryAndAMutation(t *testing.T) {
+	for _, declared := range []string{"bool", "bool!"} {
+		t.Run(declared, func(t *testing.T) {
+			entries, problems := loadGateBundleEntries(t, gateBundleDomains(map[string]string{"desk": gateQuery(gateDashboard, "deskBriefs",
+				codeArgs+"    accessGuest "+declared+"\n", codeFilter+` && row.guest == args.accessGuest`)}), false)
+			if len(problems) != 0 || len(entries) != 1 {
+				t.Fatalf("entries = %+v, problems = %v", entries, problems)
+			}
+			if want := []string{AccessArgCodeID, AccessArgGuest}; !reflect.DeepEqual(entries[0].Stamped, want) {
+				t.Fatalf("Stamped = %v, want %v", entries[0].Stamped, want)
+			}
+			entries, problems = loadGateBundleEntries(t, gateBundleDomains(map[string]string{"desk": gateMutation(gateDashboard, "deskNote",
+				codeArgs+"    accessGuest "+declared+"\n    title string!\n", "      accessCodeId: args.accessCodeId\n      guest: args.accessGuest\n")}), false)
+			if len(problems) != 0 || len(entries) != 1 {
+				t.Fatalf("entries = %+v, problems = %v", entries, problems)
+			}
+			if want := []string{AccessArgCodeID, AccessArgGuest}; !reflect.DeepEqual(entries[0].Stamped, want) {
+				t.Fatalf("Stamped = %v, want %v", entries[0].Stamped, want)
+			}
+			if want := []string{"title"}; !reflect.DeepEqual(entries[0].Args, want) {
+				t.Fatalf("Args = %v, want %v", entries[0].Args, want)
+			}
+		})
 	}
 }

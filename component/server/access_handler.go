@@ -953,6 +953,9 @@ func accessCallArgs(entry *memql.AccessGateEntry, sent map[string]any, site *Acc
 			if code.Subject != "" {
 				args[name] = code.Subject
 			}
+		case memql.AccessArgGuest:
+			// A bool, stamped on queries too: it tells the visitor nothing they do not know.
+			args[name] = code.Guest
 		case memql.AccessArgCodeLabel:
 			if entry.Kind == memql.AccessKindMutation && code.Label != "" {
 				args[name] = code.Label

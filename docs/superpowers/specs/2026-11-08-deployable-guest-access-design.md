@@ -70,9 +70,10 @@ code, and its limits and partitions need no change.
 | G-D3 | A deployable has at most one guest pass that is not removed. Regenerate refuses a guest pass. | One switch to reason about. A secret nobody holds has nothing to rotate. |
 | G-D4 | A guest pass expires, like every code (D8), with the same presets and the same 366-day cap, and its expiry can be changed later. | An operator who forgets a public door still has it close. |
 | G-D5 | A guest session is a code session: one `siteAccessSession` row whose `codeId` is the pass, the same cookie, the 24-hour cap of D10 and the checks of D11. | Turning guest access off reaches open tabs exactly as removing a code does. |
-| G-D6 | A call from a guest is stamped as a code's is: `accessCodeId` is the pass, `accessCodeLabel` its name on a mutation, `accessGate` and `accessSubject` its own. No new reserved argument. | To a product, all guests are one code: it shares their limits and their partition without a change. A product that must tell guests apart is section 13. |
+| G-D6 | A call from a guest is stamped as a code's is: `accessCodeId` is the pass, `accessCodeLabel` its name on a mutation, `accessGate` and `accessSubject` its own. The one addition is `accessGuest`, G-D9. | To a product, all guests are one code: it shares their limits and their partition without a change. A product that must tell guests from codes declares `accessGuest` (G-D9). |
 | G-D7 | Opening a guest session costs one read through the digest index before anything else, and the edge limits it in buckets of its own: 10 a minute per (site, address) and 60 a minute per site, on each replica. | A guest open has no secret to check first, so "a stranger costs no read" cannot hold for this route. The buckets bound what it costs, and keeping them apart from unlock's stops a crowd of guests spending the budget a code holder's unlock draws on. |
 | G-D8 | The unlock, session and guest replies carry `guest`, `true` for a guest's session and `false` for a code's. | So a page can say "Guest" instead of counting down to an end its visitor never chose. |
+| G-D9 | A gated construct, a query or a mutation, may declare `accessGuest` typed `bool`, required or optional, and the handler stamps it `true` for a guest's session and `false` for a code's. Any other type is refused at load, and a caller that sends it is refused as the other reserved names are. Added 2026-11-08 at the owner's request, for the Crypto Operations Desk's separate manual-check limit for guests. | The DSL could not tell a guest from a code holder, and a product's limit or wording may differ between them. Unlike `accessCodeLabel` it is stamped on queries too: it tells the visitor nothing they do not know. |
 
 ## 4. Data
 
@@ -194,7 +195,7 @@ audit log.
   with no owner, and a body that is not an object.
 - The session reply's `guest` on all three routes, the 24-hour cap, and a removal
   taking an open guest session to `ended`.
-- Call: stamping identical to a code's, the pass's label on a mutation only.
+- Call: stamping identical to a code's, the pass's label on a mutation only, and `accessGuest` (G-D9) `true` on a construct that declares it, queries included.
 - Edge: the five pairs and nothing else, the caps, `Origin`, content type, and both
   guest buckets apart from unlock's.
 - Surface gates: `AssertUnauthenticatedSurfaceDeclared`, the front-door generator,
@@ -229,7 +230,5 @@ ships after the pin.
 
 ## 13. Not in this version
 
-- **`accessGuest`,** a reserved argument telling a construct that its caller is a
-  guest, for per-guest limits or wording. Added when a product asks for it.
 - More than one guest pass on a deployable.
 - Per-guest identity, which would undo the shared partition.

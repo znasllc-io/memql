@@ -296,6 +296,7 @@ so a forged argument cannot tell anybody what a construct declares.
 | `accessGate` | the gate the code opens. A construct has exactly one, so this is always that gate | record on a row which gate wrote it |
 | `siteId` | the bare id of the deployable's site | scope by deployable |
 | `accessCodeLabel` | the operator's name for the code, its label. **On a mutation only**: the load refuses it on a query | tell the operator which code did something |
+| `accessGuest` | a **bool**: `true` for a guest's session, `false` for a code's. Declare it `bool` or `bool!`; any other type is refused at load. Stamped on queries and mutations alike | give guests a limit or wording of their own |
 
 That is the isolation mechanism, and it is the author's to use: **rows carry the
 stamped `accessCodeId`, or match `accessSubject`, and the filter says so.** A
@@ -565,9 +566,11 @@ code holders out, and code holders' unlocks cannot lock guests out.
 A call from a guest runs exactly as a code's does: the construct must be
 declared `@accessGate` for the pass's gate, and the reserved arguments are
 stamped the same way. `accessCodeId` is the pass's id, `accessCodeLabel` is its
-name on a mutation only, and `accessGate` and `accessSubject` are its own. There
-is no new reserved argument, so **to a product all guests together are one more
-code**: they share its limits and its partition, and code holders keep theirs.
+name on a mutation only, and `accessGate` and `accessSubject` are its own. So
+**to a product all guests together are one more code**: they share its limits and
+its partition, and code holders keep theirs. A construct that must tell the two
+apart declares `accessGuest`, a bool stamped `true` for a guest and `false` for a
+code.
 A guest reaches one gate's declared constructs and nothing a code for that gate
 does not.
 

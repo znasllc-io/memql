@@ -339,6 +339,8 @@ deliberately by writing the annotation.
 `accessCodeLabel`, the code's label, joined them on 2026-11-04 (D16). It
 isolates nothing: it lets a product tell the operator which code did something,
 and only a mutation may declare it.
+`accessGuest`, a bool, joined them on 2026-11-08: `true` for a guest's session and
+`false` for a code's, on a query or a mutation (G-D9 of the guest access record).
 
 **Load rules**, in `component/memql/access_gate_load.go`, faults landing on the
 LoadReport so strict boot refuses them and package analysis reports

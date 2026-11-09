@@ -459,9 +459,10 @@ call as it answers a stranger.
   authority**, never internal origin, like the shopper write above. So the
   annotation is refused beside `@serverOnly`, `@requiresRank` and
   `@requiresCapability`, and on anything but a query or a mutation.
-- **Five arguments are reserved and stamped last**: `siteId`, `accessCodeId`,
-  `accessGate`, `accessSubject` and `accessCodeLabel`, the operator's name for the
-  code, which only a mutation may declare. The first four are how rows stay apart
+- **Six arguments are reserved and stamped last**: `siteId`, `accessCodeId`,
+  `accessGate`, `accessSubject`, `accessCodeLabel`, the operator's name for the
+  code, which only a mutation may declare, and `accessGuest`, a bool that is `true`
+  for a guest's session and `false` for a code's. The first four are how rows stay apart
   between codes, and a gated read that filters on neither `accessCodeId` nor
   `accessSubject` opens its rows to everyone holding any code for that gate. A
   reserved name that differs only in case is a load fault.

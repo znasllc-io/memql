@@ -266,10 +266,18 @@ func accessGateEntryFromFunction(fn *Function) (AccessGateEntry, error) {
 			entry.Args = append(entry.Args, name)
 			continue
 		}
-		// A STAMPED VALUE IS A STRING. The handler stamps ids and names as
+		// A STAMPED VALUE IS A STRING (accessGuest, below, is the one bool). The handler stamps ids and names as
 		// text; a reserved argument declared as anything else would be a
 		// stamp the construct's own validation refuses on every call, and the
 		// only symptom would be a visitor's 502.
+		if name == AccessArgGuest {
+			if field.Type != "bool" {
+				return AccessGateEntry{}, fmt.Errorf("%q declares the reserved argument %s as %s, but the access "+
+					"handler stamps it as a bool. Declare it as bool", fn.Name, name, field.Type)
+			}
+			entry.Stamped = append(entry.Stamped, name)
+			continue
+		}
 		if field.Type != "string" {
 			return AccessGateEntry{}, fmt.Errorf("%q declares the reserved argument %s as %s, but the access "+
 				"handler stamps it as a string. Declare it as string", fn.Name, name, field.Type)

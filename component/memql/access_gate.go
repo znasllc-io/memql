@@ -107,17 +107,25 @@ const (
 // what its shape selects and a mutation answers with its bare id. A row a mutation
 // writes it to is the product's to keep out of every gated read's shape, since the
 // name is never meant for a visitor (owner decision 2026-11-04).
+//
+// accessGuest tells a construct whether its caller is a guest: true for a session
+// opened on the site's guest pass, false for a code's. It is a bool, required or
+// optional, unlike the others, and a query may declare it as well as a mutation: it
+// tells the visitor nothing they do not know. It isolates nothing; a product uses it
+// for a limit or wording of its own for guests (design record G-D9, owner request
+// 2026-11-08).
 const (
 	AccessArgSiteID    = "siteId"
 	AccessArgCodeID    = "accessCodeId"
 	AccessArgGate      = "accessGate"
 	AccessArgSubject   = "accessSubject"
 	AccessArgCodeLabel = "accessCodeLabel"
+	AccessArgGuest     = "accessGuest"
 )
 
 // ReservedAccessArgs lists the stamped names. A construct that declares one
-// must declare it as a string; a caller that sends one is refused.
-var ReservedAccessArgs = []string{AccessArgSiteID, AccessArgCodeID, AccessArgGate, AccessArgSubject, AccessArgCodeLabel}
+// must declare it as a string (accessGuest as a bool); a caller that sends one is refused.
+var ReservedAccessArgs = []string{AccessArgSiteID, AccessArgCodeID, AccessArgGate, AccessArgSubject, AccessArgCodeLabel, AccessArgGuest}
 
 // reservedAccessArgSet is the same list as a set the load rules read. A copy,
 // so a caller rewriting the exported slice cannot loosen what the load refuses.

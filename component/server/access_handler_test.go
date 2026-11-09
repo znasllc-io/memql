@@ -305,6 +305,10 @@ func newAccessRig(t *testing.T) *accessRig {
 			Args: []string{"window"}, Stamped: append([]string(nil), memql.ReservedAccessArgs...)}),
 		dashboard(memql.AccessGateEntry{Construct: "deskNote", Kind: memql.AccessKindMutation,
 			Args: []string{"noteId", "title"}, Stamped: []string{memql.AccessArgCodeID}}),
+		dashboard(memql.AccessGateEntry{Construct: "deskGuestFlag", Kind: memql.AccessKindMutation,
+			Args: []string{"title"}, Stamped: []string{memql.AccessArgCodeID, memql.AccessArgGuest}}),
+		dashboard(memql.AccessGateEntry{Construct: "deskGuestQuery", Kind: memql.AccessKindQuery,
+			Stamped: []string{memql.AccessArgGuest}}),
 		dashboard(memql.AccessGateEntry{Construct: "deskVisit", Kind: memql.AccessKindMutation,
 			Args: []string{"visitId"}, Stamped: []string{memql.AccessArgCodeID, memql.AccessArgCodeLabel}}),
 		// HAND-BUILT, since the load never lets a reserved name into Args: what stops a
@@ -1115,7 +1119,7 @@ func TestCallStampsReservedArgumentsLast(t *testing.T) {
 
 	rig.call(token, "deskStamped", map[string]any{"window": "24h"})
 
-	want := `query desk.deskStamped(accessCodeId: "code1", accessGate: "dashboard", accessSubject: "acme", siteId: "site1", window: "24h")`
+	want := `query desk.deskStamped(accessCodeId: "code1", accessGate: "dashboard", accessGuest: false, accessSubject: "acme", siteId: "site1", window: "24h")`
 	if len(rig.engine.calls) != 1 || rig.engine.calls[0] != want {
 		t.Fatalf("calls = %v, want %q", rig.engine.calls, want)
 	}
@@ -2006,7 +2010,7 @@ func TestAGuestCallIsStampedAsTheCodeIs(t *testing.T) {
 	assertAccessReply(t, rig.call(token, "deskVisit", map[string]any{"visitId": "visit1"}), http.StatusOK, `{"data":[]}`)
 
 	want := []string{
-		`query desk.deskStamped(accessCodeId: "pass1", accessGate: "dashboard", accessSubject: "guests", siteId: "site1", window: "24h")`,
+		`query desk.deskStamped(accessCodeId: "pass1", accessGate: "dashboard", accessGuest: true, accessSubject: "guests", siteId: "site1", window: "24h")`,
 		`desk.deskVisit(accessCodeId: "pass1", accessCodeLabel: "Guests", visitId: "visit1")`,
 	}
 	if !reflect.DeepEqual(rig.engine.calls, want) {
@@ -3131,4 +3135,63 @@ func TestAccessRequestsAreCounted(t *testing.T) {
 	rig.store.codes[accessTestPassID].Revoked = false
 	rig.stamp[AccessStampOwnerHeader] = accessTestMember
 	counted("guest", "not_found", func() { rig.guest() })
+}
+
+// accessGuest (G-D9): true from a guest's session, false from a code's, on a query as on a
+// mutation, and nothing extra for a construct that does not declare it.
+func TestAGuestCallIsStampedAccessGuestTrue(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.openGuest()
+
+	rig.call(token, "deskGuestFlag", map[string]any{"title": "t"})
+	rig.call(token, "deskGuestQuery", nil)
+
+	want := []string{
+		`desk.deskGuestFlag(accessCodeId: "pass1", accessGuest: true, title: "t")`,
+		`query desk.deskGuestQuery(accessGuest: true)`,
+	}
+	if !reflect.DeepEqual(rig.engine.calls, want) {
+		t.Fatalf("calls = %q, want %q", rig.engine.calls, want)
+	}
+}
+
+func TestACodeCallIsStampedAccessGuestFalse(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.open()
+
+	rig.call(token, "deskGuestFlag", map[string]any{"title": "t"})
+	rig.call(token, "deskGuestQuery", nil)
+
+	want := []string{
+		`desk.deskGuestFlag(accessCodeId: "code1", accessGuest: false, title: "t")`,
+		`query desk.deskGuestQuery(accessGuest: false)`,
+	}
+	if !reflect.DeepEqual(rig.engine.calls, want) {
+		t.Fatalf("calls = %q, want %q", rig.engine.calls, want)
+	}
+}
+
+func TestACallerCannotSendAccessGuest(t *testing.T) {
+	for _, construct := range []string{"deskGuestFlag", "deskGuestQuery", "deskNote"} {
+		t.Run(construct, func(t *testing.T) {
+			rig := newAccessRig(t)
+			token := rig.open()
+			rec := rig.call(token, construct, map[string]any{memql.AccessArgGuest: true})
+			assertAccessReply(t, rec, http.StatusBadRequest, `{"error":"invalid_args"}`)
+			if len(rig.engine.calls) != 0 {
+				t.Fatalf("a forged accessGuest reached the engine: %v", rig.engine.calls)
+			}
+		})
+	}
+}
+
+func TestAccessGuestNotDeclaredIsNotStamped(t *testing.T) {
+	rig := newAccessRig(t)
+	token := rig.openGuest()
+
+	rig.call(token, "deskNote", map[string]any{"noteId": "n1", "title": "t"})
+
+	if len(rig.engine.calls) != 1 || strings.Contains(rig.engine.calls[0], memql.AccessArgGuest) {
+		t.Fatalf("calls = %v: a construct that did not declare accessGuest was told", rig.engine.calls)
+	}
 }
