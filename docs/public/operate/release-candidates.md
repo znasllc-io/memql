@@ -833,13 +833,15 @@ fingerprinted field between preparation and Apply, completion or restoration
 still refuses the plan.
 
 A started update whose saved protected-resource evidence can no longer match
-cannot be finished yet. **Check progress** and **Restore previous release**
-both compare fresh evidence with the evidence saved at preparation, and
-cancellation applies only to an update that has not started, so the update
-keeps the installation busy and no other release can be prepared. That happens
+can be neither verified nor restored. **Check progress** and **Restore previous
+release** both compare fresh evidence with the evidence saved at preparation,
+and cancellation applies only to an update that has not started. That happens
 when a controller updates a protected owner after an earlier engine, which
 fingerprinted whole owners, prepared the update, or when a fingerprinted field
 of a protected owner changes outside the installation after the update starts.
+The operator who started such an update ends it with **Close without
+verification**, described in
+[Close an update that cannot be verified](#close-an-update-that-cannot-be-verified).
 
 
 ## Restore a selected installation
@@ -884,6 +886,37 @@ is not a promise that restoration is safe, and cannot authorize an effect.
 An in-progress restoration is reported as `state: "applying"` with
 `direction: "rollback"`; completion is `state: "rolled_back"`. Callers must
 not interpret the original candidate's identity as the restored release.
+
+## Close an update that cannot be verified
+
+In **Cluster → Updates → This installation**, **Close without verification**
+ends a started update that can no longer finish, such as one whose saved
+protected-resource evidence can no longer match. Only the operator who started
+the update can close it, only while it is being applied, and they must give a
+reason.
+
+Closing changes no application and restores nothing. MemQL records who closed
+the update, when and why, and releases the installation so another release can
+be prepared. It writes no completion receipt: the screen says **This update was
+closed without verification**, and the update can no longer be restored from
+there. Confirm the installation's workloads by other means before relying on the
+release the update applied.
+
+The close is refused while the update's own Argo CD sync is still queued or
+running, including a restoration's reverse sync, because that sync would then
+finish with nothing tracking it. The applications need not still be at the
+update's revision: a hand deploy may have moved them on, or the update's change
+may never have reached them. An application that cannot be read refuses the
+close. A restoration of an update that had completed cannot be closed.
+
+| Builtin | Effect |
+|---|---|
+| `releaseCloseInstallation(installationId, planId, reason)` | Close that exact started plan without completion proof. The reason is one line of at most 500 characters |
+
+`canClose` in `releaseInstallationStatus()` means the original operator may
+request a close; the request still refuses while the update's own sync runs. A
+closed plan reads `state: "closed"` with `closedAt` and `closeReason`, and is
+reported as `latest` until a newer update finishes.
 
 ## Propose a complete installation update
 

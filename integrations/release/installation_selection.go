@@ -201,6 +201,20 @@ func (i *Integration) handleInstallationRollback(ctx context.Context, args map[s
 	return resultNode("installation", result.PlanID, result)
 }
 
+// The reason is the operator's own record of why the plan ends unproven. The
+// native close bounds it and checks the operator and controller itself.
+func (i *Integration) handleInstallationClose(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	p, err := i.receivingSelection(ctx, asString(args["installationId"]))
+	if err != nil {
+		return nil, err
+	}
+	result, err := p.CloseSelected(ctx, asString(args["installationId"]), asString(args["planId"]), asString(args["reason"]))
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("installation", result.PlanID, result)
+}
+
 // Recovery does not depend on a publisher or GitHub being reachable. The exact
 // receiving installation and persisted operator still gate every native call.
 func (i *Integration) receivingSelection(ctx context.Context, installationID string) (*installation.Preparer, error) {

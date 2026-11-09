@@ -356,6 +356,89 @@ describe("selected installation restoration", () => {
 });
 
 
+describe("closing a started update without verification", () => {
+  useFakeDate();
+  const reason = "Protected evidence was saved by an older engine";
+  function closeFixture(over: { canClose?: boolean; canManage?: boolean; state?: string; lostReply?: boolean } = {}) {
+    let lostReply = over.lostReply ?? false;
+    let active: Record<string, unknown> | null = { ...plan, state: over.state ?? "applying", canRollback: true, canClose: over.canClose ?? true, canManage: over.canManage ?? true };
+    let latest: Record<string, unknown> | null = null;
+    const executeNamed = vi.fn(async (name: string) => {
+      if (name === "releaseInstallationStatus") return answer({ installationId: plan.installationId, currentRevision: candidate.overlayRevision, choices: [candidate], active, latest });
+      if (name === "releaseCloseInstallation") {
+        latest = { ...plan, state: "closed", canRollback: false, canClose: false, closedAt: "2026-11-09T18:00:00Z", closeReason: reason };
+        active = null;
+        if (lostReply) { lostReply = false; throw new Error("Connection interrupted after the close was recorded."); }
+        return answer(latest);
+      }
+      throw new Error("Unexpected installation effect");
+    });
+    return { executeNamed };
+  }
+  const closes = (query: ReturnType<typeof closeFixture>) => (query.executeNamed.mock.calls as unknown as string[][]).filter(c => c[0] === "releaseCloseInstallation");
+
+  it("asks in place for a reason, sends the exact close once and then reads the closed update from history", async () => {
+    const query = closeFixture();
+    render(<InstallationUpdates query={query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Close without verification" }));
+    await screen.findByText("Close this update without verification?");
+    const field = screen.getByRole("textbox", { name: "Reason for closing this update" });
+    expect(document.activeElement).toBe(field);
+    expect((screen.getByRole("button", { name: "Close update" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Restore previous release" })).toBeNull();
+    fireEvent.change(field, { target: { value: `  ${reason}  ` } });
+    fireEvent.click(screen.getByRole("button", { name: "Close update" }));
+    expect(closes(query)).toHaveLength(0);
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Close update" }));
+    await screen.findByText("This update was closed without verification.");
+    expect(screen.getByText(reason)).toBeTruthy();
+    expect(closes(query)).toHaveLength(1);
+    expect(closes(query)[0]?.[1]).toBe(`builtin releaseCloseInstallation(installationId: "installation-one", planId: "plan-one", reason: "${reason}")`);
+    for (const name of ["Check progress", "Close without verification", "Restore previous release"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    expect(screen.queryByText("The selected release is installed and verified.")).toBeNull();
+    expect(await screen.findByRole("button", { name: /MemQL 1.2/ })).toBeTruthy();
+    expect(query.executeNamed.mock.calls.some(c => ["releaseRollbackInstallation", "releaseObserveInstallation", "releaseApplyInstallation"].includes(c[0]))).toBe(false);
+  });
+
+  it("keeps the update and returns focus when the question is declined", async () => {
+    const query = closeFixture();
+    render(<InstallationUpdates query={query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Close without verification" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason for closing this update" }), { target: { value: reason } });
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Keep update" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close without verification" })));
+    fireEvent.click(screen.getByRole("button", { name: "Close without verification" }));
+    expect((screen.getByRole("textbox", { name: "Reason for closing this update" }) as HTMLInputElement).value).toBe("");
+    expect(closes(query)).toHaveLength(0);
+  });
+
+  it("reads the saved plan after an uncertain close instead of closing again", async () => {
+    const query = closeFixture({ lostReply: true });
+    render(<InstallationUpdates query={query} connected />);
+    fireEvent.click(await screen.findByRole("button", { name: "Close without verification" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Reason for closing this update" }), { target: { value: reason } });
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Close update" }));
+    await screen.findByText("The operation could not be confirmed.");
+    expect(screen.queryByRole("button", { name: "Close without verification" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Read saved plan before continuing" }));
+    await screen.findByText("This update was closed without verification.");
+    expect(closes(query)).toHaveLength(1);
+  });
+
+  it.each([
+    { canClose: false },
+    { canManage: false },
+    { state: "prepared", canClose: false },
+  ])("offers no close without the server's eligibility for the original operator: %j", async over => {
+    render(<InstallationUpdates query={closeFixture(over)} connected />);
+    await screen.findByRole("button", { name: over.state === "prepared" ? "Choose a different release" : "Check progress" });
+    expect(screen.queryByRole("button", { name: "Close without verification" })).toBeNull();
+  });
+});
+
 describe("owner-push installation proposals", () => {
   useFakeDate();
   it("lands exact pins only after confirmation, then leaves applying separate", async () => {

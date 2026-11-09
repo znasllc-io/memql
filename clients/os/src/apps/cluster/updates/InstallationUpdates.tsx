@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { renderMemQLValue, type QueryClient, type Result } from "@znasllc-io/memql-sdk-core/client";
-import { Button, Caption, Details, DetailsSection, Fact, Facts, Notice, RecordList, RecordRow, Subhead } from "../../../kit";
+import { Button, Caption, Details, DetailsSection, Fact, Facts, Field, Input, Notice, RecordList, RecordRow, Subhead } from "../../../kit";
 import { InstallationProposals, readInstallationProposal, type InstallationProposal, type ProposedRelease } from "./InstallationProposals";
 import { InPlaceAsk } from "../../../kit/pressHold";
 import { useReleaseRead } from "../releases/useReleaseRead";
@@ -12,7 +12,13 @@ export interface InstallationPlan extends InstallationChoice {
   installationId: string; preparationId: string; planId: string; state: string;
   expectedCurrentRevision: string; artifactExpiresAt: string; canManage: boolean; canRollback: boolean; direction: "forward" | "rollback"; applications: InstallationApplication[];
   observation?: InstallationObservation;
+  /** The server offers a close to the original operator of an applying plan; the close itself still refuses while the plan's own sync runs. */
+  canClose: boolean;
+  /** A closed plan ended without completion evidence: the operator's record, never verification. */
+  closedAt: string; closeReason: string;
 }
+/** Plans in these states hold nothing: their notices come from history, and another release can be selected. */
+const FINISHED = ["complete", "cancelled", "rolled_back", "closed"];
 export interface InstallationPreparation extends InstallationChoice { installationId: string; preparationId: string; requestId: string; expectedCurrentRevision: string; state: string; canResume: boolean; canCancel: boolean }
 export interface InstallationStatus { proposalLandingMode?: string; applications: InstallationApplication[]; preparation: InstallationPreparation | null; installationId: string; currentRevision: string; choices: InstallationChoice[]; active: InstallationPlan | null; latest: InstallationPlan | null; proposalBaseRevision: string; proposals: InstallationProposal[]; choicesWarning: string; proposalWarning: string }
 type InstallationQuery = Pick<QueryClient, "executeNamed">;
@@ -53,7 +59,8 @@ export function readInstallationPlan(value: unknown): InstallationPlan {
   const v = record(value);
   return { ...choice(v), installationId: required(v.installationId), preparationId: required(v.preparationId), planId: required(v.planId), state: required(v.state),
     expectedCurrentRevision: required(v.expectedCurrentRevision), artifactExpiresAt: required(v.artifactExpiresAt), canManage: v.canManage === true, canRollback: v.canRollback === true,
-    direction: v.direction === "rollback" ? "rollback" : "forward", applications: applications(v.applications), observation: observation(v.observation) };
+    direction: v.direction === "rollback" ? "rollback" : "forward", applications: applications(v.applications), observation: observation(v.observation),
+    canClose: v.canClose === true, closedAt: typeof v.closedAt === "string" ? v.closedAt : "", closeReason: typeof v.closeReason === "string" ? v.closeReason : "" };
 }
 function readPreparation(value: unknown): InstallationPreparation {
   const v = record(value);
@@ -77,6 +84,7 @@ type InstallationArguments = {
   releaseCancelInstallationPreparation: Parameters<QueryClient["releaseCancelInstallationPreparation"]>[0];
   releaseCancelInstallation: Parameters<QueryClient["releaseCancelInstallation"]>[0];
   releaseRollbackInstallation: Parameters<QueryClient["releaseRollbackInstallation"]>[0];
+  releaseCloseInstallation: Parameters<QueryClient["releaseCloseInstallation"]>[0];
   releaseProposeInstallation: { installationId: string; requestId: string; candidateId: string; catalogDigest: string; expectedBaseRevision: string };
   releaseObserveInstallationProposal: { proposalId: string };
   releaseLandInstallationProposal: Parameters<QueryClient["releaseLandInstallationProposal"]>[0];
@@ -97,8 +105,11 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   const cancelPreparationButton = useRef<HTMLDivElement>(null);
   const cancelPreparationPrompt = useRef<HTMLDivElement>(null);
   const [rollbackFor, setRollbackFor] = useState<string | null>(null);
-  const rollbackButton = useRef<HTMLDivElement>(null);
+  const endButtons = useRef<HTMLDivElement>(null);
   const rollbackPrompt = useRef<HTMLDivElement>(null);
+  const [closeFor, setCloseFor] = useState<string | null>(null);
+  const [closeReason, setCloseReason] = useState("");
+  const closePrompt = useRef<HTMLDivElement>(null);
   const [saved, setSaved] = useState<InstallationPlan | null>(null);
   const request = useRef<{ key: string; id: string } | null>(null);
   const inFlight = useRef(false);
@@ -106,9 +117,9 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   const current = status.value;
   const recorded = saved ?? current?.active ?? current?.latest;
   const preparation = current?.preparation;
-  const plan = recorded && !["complete", "cancelled", "rolled_back"].includes(recorded.state) ? recorded : null;
+  const plan = recorded && !FINISHED.includes(recorded.state) ? recorded : null;
   const selectedLabel = plan ? current?.choices.find(c => c.candidateId === plan.candidateId && c.overlayRevision === plan.overlayRevision)?.label ?? plan.label : selected?.label;
-  async function perform(name: "prepare" | "apply" | "observe" | "resume" | "cancel" | "cancelPreparation" | "rollback" | "resumeRollback") {
+  async function perform(name: "prepare" | "apply" | "observe" | "resume" | "cancel" | "cancelPreparation" | "rollback" | "resumeRollback" | "close") {
     if (!query || !current || inFlight.current || !status.fresh) return;
     inFlight.current = true; setBusy(name); setError("");
     try {
@@ -134,6 +145,10 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
         if (!recorded?.canRollback || !recorded.canManage || preparation || error) return;
         if (name === "rollback" && rollbackFor !== recorded.planId || name === "resumeRollback" && recorded.direction !== "rollback") return;
         result = await installationCall(query, "releaseRollbackInstallation", { installationId: current.installationId, planId: recorded.planId });
+      } else if (name === "close") {
+        const reason = closeReason.trim();
+        if (!plan?.canClose || !plan.canManage || preparation || error || closeFor !== plan.planId || !reason) return;
+        result = await installationCall(query, "releaseCloseInstallation", { installationId: current.installationId, planId: plan.planId, reason });
       } else {
         if (!plan || ["apply", "cancel"].includes(name) && (plan.state !== "prepared" || !plan.canManage) || name === "cancel" && !confirmCancel) return;
         result = await installationCall(query, name === "apply" ? "releaseApplyInstallation" : name === "cancel" ? "releaseCancelInstallation" : "releaseObserveInstallation", { installationId: current.installationId, planId: plan.planId });
@@ -141,7 +156,8 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
       const outcome = readInstallationPlan(result.single());
       setSaved(outcome);
       setRollbackFor(null);
-      if (["complete", "cancelled", "rolled_back"].includes(outcome.state)) { select(null); request.current = null; setConfirmCancel(false); }
+      setCloseFor(null); setCloseReason("");
+      if (FINISHED.includes(outcome.state)) { select(null); request.current = null; setConfirmCancel(false); }
       status.retry();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -152,11 +168,18 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
   function refresh() { setSaved(null); setError(""); status.retry(); }
   const canRestore = !preparation && recorded?.canManage && recorded.canRollback && recorded.direction !== "rollback";
   const confirmRestore = canRestore && rollbackFor === recorded.planId;
+  // Closing ends an update that can no longer be verified or restored, so it
+  // sits beside Restore as the other way out, asks in place for the
+  // operator's reason, and changes nothing in the applications.
+  const canCloseUpdate = !preparation && !!plan?.canClose && plan.canManage;
+  const confirmClose = canCloseUpdate && closeFor === plan.planId;
   const confirmPreparationCancel = preparation?.canCancel && preparation.state === "preparing" && cancelPreparationFor === preparation.preparationId;
   useEffect(() => { if (confirmPreparationCancel) cancelPreparationPrompt.current?.querySelector("button")?.focus(); }, [confirmPreparationCancel]);
   function keepPreparation() { setCancelPreparationFor(null); requestAnimationFrame(() => cancelPreparationButton.current?.querySelector("button")?.focus()); }
   useEffect(() => { if (confirmRestore) rollbackPrompt.current?.querySelector("button")?.focus(); }, [confirmRestore]);
-  function keepRelease() { setRollbackFor(null); requestAnimationFrame(() => rollbackButton.current?.querySelector("button")?.focus()); }
+  function keepRelease() { setRollbackFor(null); requestAnimationFrame(() => endButtons.current?.querySelector("button")?.focus()); }
+  useEffect(() => { if (confirmClose) closePrompt.current?.querySelector("input")?.focus(); }, [confirmClose]);
+  function keepUpdate() { setCloseFor(null); setCloseReason(""); requestAnimationFrame(() => Array.from(endButtons.current?.querySelectorAll("button") ?? []).at(-1)?.focus()); }
   const needsSetup = /(?:^|:\s*)installation selection is not configured\.?$/i.test(status.error ?? "");
   return <Details><DetailsSection title="This installation">
     <Caption>Choose a verified release, review its installation plan, then apply it when you are ready.</Caption>
@@ -174,6 +197,7 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
       {!preparation && recorded?.state === "complete" ? <Notice sentence={recorded.overlayRevision === current.currentRevision ? "The selected release is installed and verified." : "A previous selected release was installed and verified."} detail="The installation confirmed its workloads, engine version, migrations and retained access at completion." /> : null}
       {!preparation && recorded?.state === "rolled_back" ? <Notice sentence={recorded.expectedCurrentRevision === current.currentRevision ? "The previous release is restored and verified." : "A previous release was restored and verified."} detail="The installation verified the previous workloads, unchanged migrations and retained access." /> : null}
       {recorded?.state === "cancelled" ? <Notice sentence="The previous installation plan was cancelled." /> : null}
+      {!preparation && recorded?.state === "closed" ? <Notice tone="warn" sentence="This update was closed without verification." next="MemQL did not confirm its release was installed, and it can no longer be restored from here." detail={recorded.closeReason || undefined} /> : null}
       {preparation ? <section className="os-app-stack" aria-label="Saved installation preparation"><Subhead>Saved preparation</Subhead><Caption>{preparation.state === "retiring" ? "This preparation is being cancelled. Its reserved work must finish cleanup before another release can be selected." : "This release has unfinished preparation. Resume the saved work to verify it and produce an installation plan. Nothing has been applied."}</Caption>
         <details className="nexus-technical"><summary>Preparation details</summary><Facts><Fact label="Selected revision" value={preparation.overlayRevision} /><Fact label="Original request" value={preparation.requestId} /><Fact label="Preparation reference" value={preparation.preparationId} /></Facts></details>
         <div className="os-panel-actions">{preparation.canResume ? <Button tone="primary" disabled={!!busy || !status.fresh} busy={busy === "resume"} onClick={() => void perform("resume")}>Resume preparation</Button> : preparation.state === "preparing" ? <Caption>The original operator must continue this preparation.</Caption> : null}<Button tone="quiet" disabled={!!busy} onClick={refresh}>Read saved preparation</Button></div>
@@ -191,12 +215,15 @@ export function InstallationUpdates({ query, connected, visible = true, proposed
         {current.choices.length === 0 && !current.choicesWarning ? <Caption>No reviewed release is ready to install. Choose a published release to prepare an update proposal.</Caption> : null}
         {selected && current.currentRevision && current.choices.some(choice => choice.candidateId === selected.candidateId && choice.catalogDigest === selected.catalogDigest && choice.overlayRevision === selected.overlayRevision) ? <div className="os-panel-actions"><Button tone="primary" busy={busy === "prepare"} disabled={busy !== "" || !status.fresh} onClick={() => void perform("prepare")}>Prepare installation plan</Button></div> : null}
       </>}
-      {canRestore && !error ? <section className="os-app-stack" aria-label="Restore previous release">
+      {(canRestore || canCloseUpdate) && !error ? <section className="os-app-stack" aria-label="End this update">
         {confirmRestore ? <InPlaceAsk key={recorded.planId}><Notice sentence="Restore the previous release?"><Caption>This returns the applications to the release recorded before this update. MemQL will first verify that stored data and access can be preserved. If that check fails, restoration will stop.</Caption>
           <div className="os-panel-actions" ref={rollbackPrompt}><Button tone="quiet" disabled={!!busy} onClick={keepRelease}>Keep current release</Button><Button tone="danger" busy={busy === "rollback"} disabled={!!busy || !status.fresh} onClick={() => void perform("rollback")}>Restore previous release</Button></div>
-        </Notice></InPlaceAsk> : <div className="os-panel-actions" ref={rollbackButton}><Button tone="quiet" disabled={!!busy || !status.fresh} onClick={() => setRollbackFor(recorded.planId)}>Restore previous release</Button></div>}
+        </Notice></InPlaceAsk> : confirmClose ? <InPlaceAsk key={plan.planId}><Notice sentence="Close this update without verification?"><Caption>Use this when progress can no longer be verified. The applications stay as they are, MemQL records the update as closed without verification, and it can no longer be restored from here.</Caption>
+          <div className="os-app-stack" ref={closePrompt}><Field label="Reason"><Input id={`installation-close-reason-${plan.planId}`} label="Reason for closing this update" value={closeReason} onChange={setCloseReason} placeholder="Why this update cannot be verified" /></Field>
+            <div className="os-panel-actions"><Button tone="quiet" disabled={!!busy} onClick={keepUpdate}>Keep update</Button><Button tone="danger" busy={busy === "close"} disabled={!!busy || !status.fresh || !closeReason.trim()} onClick={() => void perform("close")}>Close update</Button></div></div>
+        </Notice></InPlaceAsk> : <div className="os-panel-actions" ref={endButtons}>{canRestore ? <Button tone="quiet" disabled={!!busy || !status.fresh} onClick={() => { setCloseFor(null); setRollbackFor(recorded.planId); }}>Restore previous release</Button> : null}{canCloseUpdate ? <Button tone="quiet" disabled={!!busy || !status.fresh} onClick={() => { setRollbackFor(null); setCloseReason(""); setCloseFor(plan.planId); }}>Close without verification</Button> : null}</div>}
       </section> : null}
-      {!current.currentRevision ? <Notice sentence="The applications are at different revisions." detail={plan ? "Finish or restore the current update before selecting another release." : "An operator must bring these applications to the same reviewed release before another can be selected."} /> : null}
+      {!current.currentRevision ? <Notice sentence="The applications are at different revisions." detail={plan ? "Finish, restore or close the current update before selecting another release." : "An operator must bring these applications to the same reviewed release before another can be selected."} /> : null}
       <details className="nexus-technical"><summary>Current revision</summary><Facts>{current.currentRevision ? <Fact label="Installed configuration" value={current.currentRevision} copyValue={current.currentRevision} /> : current.applications.map(app => <Fact key={app.key} label={`${app.namespace}/${app.name}`} value={app.currentRevision} copyValue={app.currentRevision} />)}</Facts></details>
     </> : null}
     {error ? <Notice tone="error" sentence="The operation could not be confirmed." detail={error}><Button onClick={refresh}>Read saved plan before continuing</Button></Notice> : null}

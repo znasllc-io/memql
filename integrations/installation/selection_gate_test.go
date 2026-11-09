@@ -49,6 +49,10 @@ func TestSelectionEntrypointsRejectUnidentifiedOrInsufficientActorsBeforeHostIO(
 			_, err := p.RollbackSelected(ctx, selection.InstallationID, plan)
 			return err
 		},
+		"close": func(ctx context.Context) error {
+			_, err := p.CloseSelected(ctx, selection.InstallationID, plan, "Evidence can no longer match")
+			return err
+		},
 		"start": func(ctx context.Context) error {
 			_, err := p.StartSelected(ctx, selection.InstallationID, plan)
 			return err

@@ -5440,6 +5440,31 @@ QueryClient.prototype.releaseCandidates = function (this: QueryClient, args: Rel
   return this.executeNamed("releaseCandidates", buildReleaseCandidates(args), opts);
 };
 
+/** Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. The reason, one line of at most 500 characters, is kept with the closed plan. */
+export interface ReleaseCloseInstallationArgs {
+  installationId: string;
+  planId: string;
+  reason: string;
+}
+
+export function buildReleaseCloseInstallation(args: ReleaseCloseInstallationArgs): string {
+  const parts: string[] = [];
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  parts.push("planId: " + renderMemQLValue(args.planId));
+  parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin releaseCloseInstallation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCloseInstallation(args: ReleaseCloseInstallationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCloseInstallation = function (this: QueryClient, args: ReleaseCloseInstallationArgs = {} as ReleaseCloseInstallationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCloseInstallation", buildReleaseCloseInstallation(args), opts);
+};
+
 /** Separately create or reconcile the exact owner-approved draft and tag. */
 export interface ReleaseCreateCandidateDraftArgs {
   candidateId: string;

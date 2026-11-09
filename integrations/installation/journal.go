@@ -30,7 +30,16 @@ type revisionRecord struct {
 	Rollback           *rollbackRecord
 	Completion         *completionReceipt
 	RollbackCompletion *completionReceipt
+	Closure            *revisionClosure
 	RollbackEligible   bool
+}
+
+// revisionClosure is an operator's record that a started attempt ended without
+// completion proof. It is a statement, never evidence: see close_journal.go.
+type revisionClosure struct {
+	By     string
+	At     time.Time
+	Reason string
 }
 
 // The role is from the current resolved request, not a persisted claim or DSL
@@ -151,10 +160,11 @@ func readRevision(ctx context.Context, tx *sql.Tx, installation, key string) (re
 	r := revisionRecord{ID: key}
 	var plan, observation, completion, rollbackCompletion, members []byte
 	var requester string
-	var started, completed, rollbackCompleted sql.NullTime
-	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at,application_observations,rollback_completion_receipt,rollback_completed_at
+	var started, completed, rollbackCompleted, closed sql.NullTime
+	var closedBy, closeReason sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT plan,requested_by,slot_epoch,state,observation,observation_version,started_at,completion_receipt,completed_at,application_observations,rollback_completion_receipt,rollback_completed_at,closed_at,closed_by,close_reason
 FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR UPDATE`, installation, key).
-		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed, &members, &rollbackCompletion, &rollbackCompleted)
+		Scan(&plan, &requester, &r.SlotEpoch, &r.State, &observation, &r.ObservationVersion, &started, &completion, &completed, &members, &rollbackCompletion, &rollbackCompleted, &closed, &closedBy, &closeReason)
 	if err != nil {
 		return revisionRecord{}, err
 	}
@@ -163,15 +173,25 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 	if err != nil || actual != key || r.Plan.InstallationID != installation || r.Plan.RequestedBy != requester || r.SlotEpoch < 1 {
 		return revisionRecord{}, errors.New("installation revision journal identity is inconsistent")
 	}
-	if r.State != "prepared" && r.State != "applying" && r.State != "reverting" && r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" {
+	if r.State != "prepared" && r.State != "applying" && r.State != "reverting" && r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" && r.State != "closed" {
 		return revisionRecord{}, errors.New("installation revision journal state is invalid")
 	}
-	if (r.State == "applying" || r.State == "reverting" || r.State == "complete" || r.State == "rolled_back") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
+	if (r.State == "applying" || r.State == "reverting" || r.State == "complete" || r.State == "rolled_back" || r.State == "closed") != started.Valid || r.ObservationVersion < 0 || (r.ObservationVersion == 0) != (len(observation) == 0) {
 		return revisionRecord{}, errors.New("installation revision effect markers are inconsistent")
+	}
+	// A close is only ever taken from applying by the plan's own requester, so
+	// its marker carries exactly that operator and a bounded reason; nothing
+	// else may hold one.
+	if (r.State == "closed") != closed.Valid || closed.Valid != closedBy.Valid || closed.Valid != closeReason.Valid ||
+		(closed.Valid && (closedBy.String != requester || validCloseReason(closeReason.String) != nil)) {
+		return revisionRecord{}, errors.New("installation close markers are inconsistent")
+	}
+	if closed.Valid {
+		r.Closure = &revisionClosure{By: closedBy.String, At: closed.Time, Reason: closeReason.String}
 	}
 	if len(observation) != 0 {
 		var facts argocd.Facts
-		if json.Unmarshal(observation, &facts) != nil || (r.State != "applying" && r.State != "reverting" && r.State != "complete" && r.State != "rolled_back") {
+		if json.Unmarshal(observation, &facts) != nil || (r.State != "applying" && r.State != "reverting" && r.State != "complete" && r.State != "rolled_back" && r.State != "closed") {
 			return revisionRecord{}, errors.New("installation observation is invalid")
 		}
 		encoded, _ := json.Marshal(facts)
@@ -182,7 +202,7 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 		}
 		r.Observation = &facts
 	}
-	if completed.Valid != (len(completion) != 0) || ((r.State == "complete" || r.State == "reverting") && !completed.Valid) || ((r.State == "prepared" || r.State == "applying" || r.State == "cancelled") && completed.Valid) {
+	if completed.Valid != (len(completion) != 0) || ((r.State == "complete" || r.State == "reverting") && !completed.Valid) || ((r.State == "prepared" || r.State == "applying" || r.State == "cancelled" || r.State == "closed") && completed.Valid) {
 		return revisionRecord{}, errors.New("installation completion markers are inconsistent")
 	}
 	if len(completion) != 0 {
@@ -217,7 +237,8 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 }
 
 // withRecord always locks head then attempt, including reads. A historical
-// cancelled attempt may be read, but can never capture a successor's slot.
+// cancelled, completed, restored or closed attempt may be read, but can never
+// capture a successor's slot.
 func (j *revisionJournal) withRecord(ctx context.Context, installation, key string, update func(*sql.Tx, *revisionRecord, string) error) (revisionRecord, error) {
 	actor, err := installationActor(ctx)
 	if err != nil {
@@ -243,7 +264,7 @@ func (j *revisionJournal) withRecord(ctx context.Context, installation, key stri
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" && (active != key || epoch != r.SlotEpoch) {
+	if r.State != "cancelled" && r.State != "complete" && r.State != "rolled_back" && r.State != "closed" && (active != key || epoch != r.SlotEpoch) {
 		return revisionRecord{}, errChanged
 	}
 	if r.State == "prepared" || r.State == "applying" || r.State == "reverting" {

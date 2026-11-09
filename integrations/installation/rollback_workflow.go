@@ -45,6 +45,9 @@ func (p *Preparer) RollbackSelected(ctx context.Context, installationID, planID 
 	if record.State == "rolled_back" {
 		return selectionResult(ctx, record), nil
 	}
+	if record.State == "closed" {
+		return SelectionResult{}, errors.New("a closed installation plan cannot be restored; its close ended the selection without completion proof")
+	}
 	if record.State == "complete" {
 		record, err = journal.reacquireRollback(ctx, installationID, planID)
 		if err != nil {

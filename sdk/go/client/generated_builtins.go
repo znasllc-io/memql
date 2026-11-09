@@ -7171,6 +7171,38 @@ func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
 	return b.String()
 }
 
+// ReleaseCloseInstallation -- Close the original operator's started plan without completion proof, for an update that can no longer be verified or restored. Applies and restores nothing; refused while the plan's own controller operation is still running. The reason, one line of at most 500 characters, is kept with the closed plan.
+type ReleaseCloseInstallationArgs struct {
+	InstallationId string
+	PlanId         string
+	Reason         string
+}
+
+// ReleaseCloseInstallation calls the engine builtin releaseCloseInstallation.
+func (qc *QueryClient) ReleaseCloseInstallation(ctx context.Context, args ReleaseCloseInstallationArgs) (*Result, error) {
+	call := ReleaseCloseInstallationBuild(args)
+	return qc.executeNamed(ctx, "releaseCloseInstallation", call)
+}
+
+func ReleaseCloseInstallationBuild(args ReleaseCloseInstallationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCloseInstallation(")
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("planId: ")
+	b.WriteString(quoteMemQL(args.PlanId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCreateCandidateDraft -- Separately create or reconcile the exact owner-approved draft and tag.
 type ReleaseCreateCandidateDraftArgs struct {
 	CandidateId string

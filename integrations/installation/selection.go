@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -91,6 +92,14 @@ type SelectionResult struct {
 	Observation             map[string]any         `json:"observation,omitempty"`
 	CanManage               bool                   `json:"canManage"`
 	CanRollback             bool                   `json:"canRollback"`
+	// CanClose offers CloseSelected to the original operator of an applying
+	// plan. Like CanRollback it permits a request, never the outcome: the close
+	// still refuses while the plan's own controller operation is running.
+	CanClose bool `json:"canClose"`
+	// A closed plan ended without completion proof. ClosedAt and CloseReason
+	// are the operator's record of that, never verification.
+	ClosedAt    string `json:"closedAt,omitempty"`
+	CloseReason string `json:"closeReason,omitempty"`
 }
 type SelectionStatus struct {
 	Applications    []SelectionApplication `json:"applications,omitempty"`
@@ -143,6 +152,9 @@ func selectionResult(ctx context.Context, r revisionRecord) SelectionResult {
 	actor, err := installationActor(ctx)
 	out.CanManage = err == nil && actor == r.Plan.RequestedBy
 	out.CanRollback = out.CanManage && r.RollbackEligible
+	// The raw state: selectedResult reports a restoring completed update
+	// (reverting) as applying too, and that one cannot be closed.
+	out.CanClose = out.CanManage && r.State == "applying"
 	return out
 }
 
@@ -189,6 +201,9 @@ func selectedResult(r revisionRecord) SelectionResult {
 	}
 	if r.Rollback != nil || r.State == "reverting" {
 		out.Direction = "rollback"
+	}
+	if c := r.Closure; c != nil {
+		out.ClosedAt, out.CloseReason = c.At.UTC().Format(time.RFC3339), c.Reason
 	}
 	for _, app := range r.Plan.Applications {
 		member := r.Applications[app.Key]
@@ -359,8 +374,12 @@ func (p *Preparer) SelectionStatus(ctx context.Context) (SelectionStatus, error)
 		v := selectionResult(ctx, r)
 		out.Active = &v
 	}
+	// Latest is the newest finished outcome. A closed attempt counts: it is the
+	// newest thing that happened to this installation, and it must read as
+	// closed without verification rather than let an older verified completion
+	// stand in for the release now installed.
 	var latest string
-	err = db.QueryRowContext(ctx, `SELECT plan_id FROM installation_revision_attempts WHERE installation_id=$1 AND state IN ('complete','rolled_back') ORDER BY COALESCE(rollback_completed_at,completed_at) DESC,plan_id LIMIT 1`, out.InstallationID).Scan(&latest)
+	err = db.QueryRowContext(ctx, `SELECT plan_id FROM installation_revision_attempts WHERE installation_id=$1 AND state IN ('complete','rolled_back','closed') ORDER BY COALESCE(rollback_completed_at,completed_at,closed_at) DESC,plan_id LIMIT 1`, out.InstallationID).Scan(&latest)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return out, err
 	}

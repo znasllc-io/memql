@@ -59,7 +59,8 @@ same plan returns the same intent; a different plan cannot take an active slot.
 The native start operation commits `applying` before any external write.
 Cancellation is allowed only from `prepared`, is permanent for that plan, and
 cannot release a successor's slot. A timeout, crash or uncertain external reply
-does not release a started attempt.
+does not release a started attempt; only a terminal receipt or its operator's
+explicit close does ([Closing without completion proof](#closing-without-completion-proof)).
 
 Each authority read recomputes the plan identity and rejects unexpected fields
 or changed bindings. The current resolved developer/admin/owner role is checked
@@ -132,6 +133,55 @@ controller protocol evidence, not an engine-update or serving-continuity result.
 The journal remains private: its native host must still compose fresh receiving,
 artifact and preservation verifiers before any possible write. Digest fields
 in a journal row alone do not satisfy those proofs.
+
+### Closing without completion proof
+
+A started plan ends as `complete` or `rolled_back` only with a receipt whose
+protected-resource digest equals the one saved at preparation, and
+`completionReceipt.validate` enforces that on every journal read. A plan whose
+saved digest can never be reproduced therefore held the installation head
+forever: production's 0.31.27 plan of 2026-11-09 was saved under the
+whole-object owner fingerprint that engine `b74ef4f3a` replaced. The terminal
+state `closed` (migration `20261109150000_installation_revision_close`) lets
+that plan's original operator end it without proof
+(`integrations/installation/close.go`, `close_journal.go`).
+
+- **What it admits.** Only the plan's `RequestedBy`, and only from `applying`,
+  including an applying plan with a recorded restoration. A prepared plan is
+  cancelled instead. A restoration of a completed update (`reverting`) is not
+  closable: its forward completion was proven, and no case has yet needed it.
+- **What it waits for.** Under the plan's effect lock, `CloseSelected` reads
+  every intent the plan may have written (`dispatchedIntents`: the forward
+  intent once started, each started group member, each started reversal and
+  any reconciled replacement) with `argocd.Client.OperationSettled`. An
+  operation carrying the intent's digest that is queued, running or terminating
+  refuses, because it would finish with no journal owner. The Application need
+  not sit at the intent: a hand deploy may have moved it on, or the write may
+  never have landed. A replaced Application (new UID) holds nothing of the
+  intent; an unreadable or deleted one refuses. The journal transaction
+  compares the classified set with the stored markers under the head lock, so
+  an intent started since cannot be closed unexamined.
+- **What it records.** Who, when and a bounded one-line reason (the
+  `installation_revision_close` CHECK pins the closer to the requester), with
+  no completion receipt. It releases the head and the group's Application
+  claims; observations and any recorded reversal stay as history.
+  `rollbackEligibility` admits only `complete`, so a closed plan cannot be
+  restored, and every write path refuses a non-active state.
+- **The residual window.** The effect lock excludes every live writer. A writer
+  whose process died mid-request releases it, and its request could still land
+  after a close until the controller's next status write moves the
+  Application's `resourceVersion`, after which the request's compare-and-swap
+  refuses. Rollback fences this case with a baseline sync; a close writes
+  nothing to Argo by design.
+
+The alternative was an operator requalification that accepts the current
+protected resources and yields a real completion receipt. It was not built:
+the fresh evidence exists only inside the completion workflow, the receipt
+validator and rollback's `verifyProtected` and `freshWriteEvidence` would all
+have to accept a recorded re-baseline, and the resulting receipt would claim a
+preservation check that compared against a digest the operator chose. A close
+claims nothing. Regression tests: `close_db_test.go` and
+`integrations/argocd/settled_test.go`.
 
 ### Preparation before source dispatch
 
@@ -602,8 +652,9 @@ fingerprint refused production's 0.31.27 Apply and completion on 2026-11-09
 after an hourly ExternalSecret refresh. A started plan whose saved
 fingerprint cannot be reproduced, including one prepared before that change,
 can neither complete nor roll back, because both compare against the
-preparation digest and cancellation admits only an unstarted plan; an explicit
-operator requalification or close is not built yet. Arbitrary annotations, including
+preparation digest and cancellation admits only an unstarted plan. Its original
+operator ends it with a close without completion proof; see
+[Closing without completion proof](#closing-without-completion-proof). Arbitrary annotations, including
 last-applied configuration containing Secret data, are never retained in the
 observation or formatted as diagnostics.
 

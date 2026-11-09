@@ -23,6 +23,7 @@ const preparationMigrationPath = "../../component/database/memory-nodes/migratio
 const promotionMigrationPath = "../../component/database/memory-nodes/migrations/20261007120000_installation_preparation_promotion"
 const retirementMigrationPath = "../../component/database/memory-nodes/migrations/20261007140000_installation_preparation_retirement"
 const rollbackMigrationPath = "../../component/database/memory-nodes/migrations/20261007150000_installation_rollbacks"
+const closeMigrationPath = "../../component/database/memory-nodes/migrations/20261109150000_installation_revision_close"
 
 func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
@@ -72,6 +73,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
 	body, err = os.ReadFile("../../component/database/memory-nodes/migrations/20261108174500_installation_application_continuity.up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
+	body, err = os.ReadFile(closeMigrationPath + ".up.sql")
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
@@ -387,6 +392,10 @@ func TestInstallationPlanRequiresImmutableRollbackAndExactEvidenceBindings(t *te
 
 func TestInstallationJournalMigrationCanRollBackOnlyWhileEmpty(t *testing.T) {
 	db, _ := journalDB(t)
+	closeDown, err := os.ReadFile(closeMigrationPath + ".down.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(closeDown))
+	require.NoError(t, err)
 	groupsDown, err := os.ReadFile("../../component/database/memory-nodes/migrations/20261024010000_installation_groups.down.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(groupsDown))

@@ -53,7 +53,9 @@ func (p *Preparer) completeSelected(ctx context.Context, installationID, planID 
 	if err != nil {
 		return record, err
 	}
-	if record.State == "complete" || record.State == "rolled_back" {
+	// Finished attempts answer with their record. A closed one has no receipt
+	// to observe and never gains one: its close ended the selection.
+	if record.State == "complete" || record.State == "rolled_back" || record.State == "closed" {
 		return record, nil
 	}
 	if !record.rollbackActive() || record.Plan.RequestedBy != actor || record.Plan.Preparation == nil || record.Plan.HealthBaseline == nil || record.Plan.CompletionWorkflow == nil {

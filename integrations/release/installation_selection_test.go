@@ -118,9 +118,9 @@ func TestInstallationStatusKeepsNativeRecoveryAvailableDuringRepositoryOutage(t 
 	_, err = i.receivingSelection(actorContext(auth.RoleReader), "installation")
 	require.Error(t, err)
 	type handler func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error)
-	for name, call := range map[string]handler{"apply": i.handleInstallationApply, "observe": i.handleInstallationObserve, "cancel": i.handleInstallationCancel, "cancel preparation": i.handleInstallationPreparationCancel, "resume": i.handleInstallationResume, "rollback": i.handleInstallationRollback} {
+	for name, call := range map[string]handler{"apply": i.handleInstallationApply, "observe": i.handleInstallationObserve, "cancel": i.handleInstallationCancel, "cancel preparation": i.handleInstallationPreparationCancel, "resume": i.handleInstallationResume, "rollback": i.handleInstallationRollback, "close": i.handleInstallationClose} {
 		t.Run(name+" reaches native validation", func(t *testing.T) {
-			_, err := call(ownerCtx(), map[string]any{"installationId": "installation", "planId": strings.Repeat("0", 64), "preparationId": strings.Repeat("0", 64)}, 0)
+			_, err := call(ownerCtx(), map[string]any{"installationId": "installation", "planId": strings.Repeat("0", 64), "preparationId": strings.Repeat("0", 64), "reason": "Evidence can no longer match"}, 0)
 			require.Error(t, err, "a missing native plan must still be refused")
 			require.NotContains(t, err.Error(), "optional configuration unavailable")
 			_, err = call(actorContext(auth.RoleReader), map[string]any{"installationId": "installation", "planId": strings.Repeat("0", 64)}, 0)
@@ -146,11 +146,11 @@ func TestInstallationStatusPreservesGroupedRollbackProgress(t *testing.T) {
 	require.Equal(t, native.Applications, view["applications"])
 	require.Equal(t, native.Active, view["active"])
 	require.Equal(t, "", view["currentRevision"], "different revisions must not be collapsed into the first application")
-	var registered bool
+	registered := map[string]bool{}
 	for _, capability := range i.Capabilities() {
-		if capability.Name == "rollbackInstallation" {
-			registered = capability.Handler != nil
-		}
+		registered[capability.Name] = capability.Handler != nil
 	}
-	require.True(t, registered, "the public builtin needs an actual release capability")
+	for _, name := range []string{"rollbackInstallation", "closeInstallation"} {
+		require.True(t, registered[name], "the public builtin %s needs an actual release capability", name)
+	}
 }

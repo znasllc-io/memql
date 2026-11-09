@@ -568,6 +568,14 @@ builtin releaseCancelInstallation { installationId string! planId string! }
 @executor("integration.release.rollbackInstallation")
 builtin releaseRollbackInstallation { installationId string! planId string! }
 
+/// Close the original operator's started plan without completion proof, for an
+/// update that can no longer be verified or restored. Applies and restores
+/// nothing; refused while the plan's own controller operation is still running.
+/// The reason, one line of at most 500 characters, is kept with the closed plan.
+@sdk
+@executor("integration.release.closeInstallation")
+builtin releaseCloseInstallation { installationId string! planId string! reason string! }
+
 /// Confirm the exact saved installation pin with its connected GitHub owner.
 /// Only explicitly configured owner-push repositories support this operation.
 /// Landing makes a revision selectable; applying remains a separate action.

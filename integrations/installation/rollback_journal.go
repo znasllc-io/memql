@@ -129,7 +129,9 @@ func (p rollbackPlan) fresh() error {
 }
 
 // The lock order is always installation head, parent attempt, reversal row.
-// Historical observations are data, never authority to release that head.
+// Historical observations are data, never authority to release that head. A
+// closed parent keeps its recorded reversal as history; closing it fenced every
+// further reverse write (close_journal.go).
 func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*rollbackRecord, error) {
 	var r rollbackRecord
 	var body, observation, members []byte
@@ -142,7 +144,7 @@ func readRollback(ctx context.Context, tx *sql.Tx, parent revisionRecord) (*roll
 	if err != nil {
 		return nil, err
 	}
-	if (!parent.rollbackActive() && parent.State != "rolled_back") || len(body) > maxPlanBytes || json.Unmarshal(body, &r.Plan) != nil {
+	if (!parent.rollbackActive() && parent.State != "rolled_back" && parent.State != "closed") || len(body) > maxPlanBytes || json.Unmarshal(body, &r.Plan) != nil {
 		return nil, errors.New("installation rollback journal is inconsistent")
 	}
 	expected, key, err := r.Plan.canonical(parent)

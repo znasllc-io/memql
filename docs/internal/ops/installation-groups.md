@@ -338,6 +338,21 @@ baseline workloads, immutable runtime images, original identity, migrations,
 storage and protected resources all pass fresh checks. That terminal receipt
 releases the group's claims; controller health alone does not.
 
+## Closing without completion proof
+
+`Preparer.CloseSelected` (`releaseCloseInstallation`) ends an applying plan whose
+evidence can no longer match, typically a saved protected-resource digest no
+engine can reproduce. Only the original operator may close it, with a reason.
+Under the plan's effect lock it reads every started member's intent, and every
+started reversal, and refuses while one still has its own Argo operation
+queued, running or terminating. It does not require a member to sit at its
+intent, because a hand deploy may have moved it on. The `closed` attempt keeps
+its observations and any reversal, has no completion receipt and is never
+rollback-eligible; the close releases the head and every member's claim.
+A `reverting` attempt (restoring a completed update) is not closable. The
+design and its residual window are in
+[installation revision effects](../planning/installation-revision-effects.md#closing-without-completion-proof).
+
 ## Local qualification
 
 Run against a dedicated disposable database with the required extensions, never
@@ -347,7 +362,7 @@ example, after setting `MEMQL_DATABASE_DSN` to that worker's disposable database
 ```bash
 MEMQL_REQUIRE_DB=1 GOMAXPROCS=2 go test -p 1 -count=1 \
   ./integrations/installation \
-  -run 'TestInstallationGroup|TestPreparationWorkflowProtocolRecovery|TestRollbackJournal|TestSelectionEntrypoints'
+  -run 'TestInstallationGroup|TestPreparationWorkflowProtocolRecovery|TestRollbackJournal|TestInstallationClose|TestSelectionEntrypoints'
 ```
 
 The group protocol regression uses two real PostgreSQL connections, real native
