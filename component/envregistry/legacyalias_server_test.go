@@ -58,6 +58,7 @@ func TestServerServiceLegacyAliasesBridge(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.legacy, func(t *testing.T) {
+			preserveShimTargets(t)
 			// Set the LEGACY name only, and make sure the modern one starts
 			// unset -- the shim is set-if-absent, so a leaked value from the
 			// environment this test runs in would make it pass without bridging.
@@ -80,6 +81,7 @@ func TestServerServiceLegacyAliasesBridge(t *testing.T) {
 // its manifests one node at a time without the old value silently overriding
 // the new one on a pod that carries both.
 func TestServerAliasPrefersModernName(t *testing.T) {
+	preserveShimTargets(t)
 	t.Setenv("SERVER_ADDRESS", "0.0.0.0:1111")
 	t.Setenv("MEMQL_SERVER_ADDRESS", "0.0.0.0:2222")
 

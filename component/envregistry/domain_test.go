@@ -74,6 +74,7 @@ func TestDomainDerivationsRejectsMalformed(t *testing.T) {
 // Set-if-absent. An explicitly configured value is a statement of intent and
 // always wins -- this is what keeps staging and prod untouched.
 func TestApplyDomainDerivationsExplicitWins(t *testing.T) {
+	preserveShimTargets(t)
 	t.Setenv("MEMQL_DOMAIN", "memql.localhost")
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", "https://auth.example.com")
 	t.Setenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN", "")
@@ -95,6 +96,7 @@ func TestApplyDomainDerivationsExplicitWins(t *testing.T) {
 // No domain, no derivation. A node configured entirely by explicit env keeps
 // behaving exactly as it does today.
 func TestApplyDomainDerivationsNoopWithoutDomain(t *testing.T) {
+	preserveShimTargets(t)
 	t.Setenv("MEMQL_DOMAIN", "")
 	t.Setenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN", "")
 
@@ -125,6 +127,7 @@ func TestDomainDerivationsUseApiHost(t *testing.T) {
 // Idempotent, like ApplyLegacyEnvAliases: a second call finds every name
 // populated and changes nothing.
 func TestApplyDomainDerivationsIdempotent(t *testing.T) {
+	preserveShimTargets(t)
 	t.Setenv("MEMQL_DOMAIN", "memql.localhost")
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", "")
 

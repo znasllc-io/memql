@@ -6,6 +6,7 @@ import (
 )
 
 func TestApplyLegacyEnvAliases_BridgesLegacy(t *testing.T) {
+	preserveShimTargets(t)
 	const newName = "MEMQL_DATABASE_DSN"
 	const legacy = "MEMORY_NODES_DATABASE_DSN"
 	t.Setenv(newName, "")
@@ -22,6 +23,7 @@ func TestApplyLegacyEnvAliases_BridgesLegacy(t *testing.T) {
 }
 
 func TestApplyLegacyEnvAliases_NewWins(t *testing.T) {
+	preserveShimTargets(t)
 	// The fixtures below name aliases that are LIVE in LegacyAliases. That is
 	// load-bearing rather than incidental: a fixture naming a retired alias
 	// leaves the new name untouched, so "new wins" and "neither is present"
@@ -42,6 +44,7 @@ func TestApplyLegacyEnvAliases_NewWins(t *testing.T) {
 }
 
 func TestApplyLegacyEnvAliases_Idempotent(t *testing.T) {
+	preserveShimTargets(t)
 	const newName = "MEMQL_EMAIL_SENDER"
 	const legacy = "EMAIL_SENDER"
 	os.Unsetenv(newName)

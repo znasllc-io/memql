@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/envregistry"
 )
 
 // subcommand_env_test.go -- the #751 guard, rewritten for one delivery path
@@ -31,6 +33,7 @@ import (
 // required MEMQL_OPENAI_PROJECT_ID against a cluster still carrying the legacy
 // spelling, because nothing bridged the two on the subcommand path.
 func TestApplySubcommandEnvBridgesLegacyNames(t *testing.T) {
+	isolateSubcommandEnv(t)
 	const legacy = "MEMQL_SI_OPENAI_PROJECT_ID"
 	const modern = "MEMQL_AI_OPENAI_PROJECT_ID"
 
@@ -58,6 +61,7 @@ func TestApplySubcommandEnvBridgesLegacyNames(t *testing.T) {
 // node verifies with would produce a token nothing accepts, with every
 // manifest looking correct (memql#3593).
 func TestApplySubcommandEnvDerivesTheDomain(t *testing.T) {
+	isolateSubcommandEnv(t)
 	t.Setenv("MEMQL_DOMAIN", "lab.example.com")
 	for _, derived := range []string{
 		"MEMQL_IDENTITY_BASE_URL",
@@ -88,11 +92,48 @@ func TestApplySubcommandEnvDerivesTheDomain(t *testing.T) {
 // no MEMQL_DOMAIN, nothing to bridge. It must return nil rather than treating
 // an absent optional layer as a failure.
 func TestApplySubcommandEnvSucceedsWithNothingSet(t *testing.T) {
+	isolateSubcommandEnv(t)
 	t.Setenv("MEMQL_DOMAIN", "")
 	if err := os.Unsetenv("MEMQL_DOMAIN"); err != nil {
 		t.Fatalf("unset MEMQL_DOMAIN: %v", err)
 	}
 	if err := applySubcommandEnv("test"); err != nil {
 		t.Fatalf("applySubcommandEnv with nothing set: %v", err)
+	}
+}
+
+// isolateSubcommandEnv runs one of these tests in an empty working directory
+// and restores, when it ends, every variable the boot shims can write.
+//
+// The directory is so applySubcommandEnv's .env layer reads nothing a
+// developer keeps beside the checkout: these tests assume no .env, and one
+// that is read would set its variables for the rest of the run. The restore
+// is because t.Setenv restores only the names a test hands it, while the
+// shims write every name they find to fill: before this, the domain test left
+// five derivations set for every later test in the binary (TestMain now
+// fails a run that leaves any variable changed).
+func isolateSubcommandEnv(t *testing.T) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	derived := envregistry.DomainDerivations("lab.example.com")
+	if len(derived) == 0 {
+		t.Fatal("DomainDerivations named no variables, so the derived names would go unrestored")
+	}
+	names := make(map[string]bool, len(envregistry.LegacyAliases)+len(derived))
+	for name := range envregistry.LegacyAliases {
+		names[name] = true
+	}
+	for name := range derived {
+		names[name] = true
+	}
+	for name := range names {
+		value, set := os.LookupEnv(name)
+		t.Setenv(name, value) // registers the restore
+		if !set {
+			// Unset meanwhile, as it was before the test.
+			if err := os.Unsetenv(name); err != nil {
+				t.Fatalf("unset %s: %v", name, err)
+			}
+		}
 	}
 }
