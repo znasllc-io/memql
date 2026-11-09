@@ -473,9 +473,10 @@ removing the pass or letting its end date pass takes every guest out at once, an
 idle tab learns within 5 seconds, and the end date is exact to the timer.
 
 Guest access is **an operator's act and never DSL's**. A deployable with no
-guest pass answers the guest route `closed`, and nothing in a package can create
-one, so no annotation opens a deployable to the internet. An operator who turns
-guests on has chosen the internet for that one gate until they say otherwise.
+guest pass answers the guest route `closed`. No annotation, and no builtin call
+inside a run, can create one: declaring a gate opens it to nobody, and a run that
+asks to let guests in is refused. An operator who turns guests on has chosen the
+internet for that one gate until they say otherwise.
 
 ### Turning it on and off
 
@@ -575,30 +576,52 @@ does not.
 The three obligations of [What the page does](#what-the-page-does) apply to a
 guest's session unchanged. A fourth is added for a page that lets guests in:
 
-**When a guest's session ends, ask the guest route once.** A `200` is a new
-session and the visit goes on. `closed` means guest access has ended, and the
-page leaves, as it does on any other end. A guest's session most often ends at
-its 24-hour cap, and this keeps a long visit unbroken without letting it outlive
-guest access. Ask once, not in a loop: a `429` or a `5xx` says nothing, so keep
-the page's state and try at the next tick as for any other reply.
+**When a guest's session ends, ask the guest route once, and keep gated state
+only if it answers `200`.** A `200` is a new session and the visit goes on.
+Anything else leaves the page with no session, because the one it had has ended:
+`closed` means guest access has ended, and a `429`, a `5xx` or a network error
+mean no new session was opened. So the page drops gated state, as on any other
+end, and coming back in is one click on its guest entry. A guest's session most
+often ends at its 24-hour cap, and this keeps a long visit unbroken without
+letting it outlive guest access.
 
-The helper under [What the page does](#what-the-page-does) already has the
-change, inside `accessSession`: it remembers from the reply's `guest` whether
-the session is a guest's, and the end timer and a `401` call `end()` instead of
-`lock()`. For a guest's session `end()` is this:
+**Ask only after a `401` that follows a session the page actually held.** A
+status check that answers `200` shows the session's cookie comes back. A `401`
+before any check has answered `200` means the cookie never stuck, which is what
+a page in a cross-site frame sees, and asking the guest route then would open a
+new session every five seconds for as long as the page stays open. That `401` is
+the end of the visit, as it is for a code.
+
+**A page that lets guests in offers an entry that starts the visit**, and the
+same entry brings a guest back in once the page has locked. Its outcomes are
+`unlock`'s: `open` is in; `closed` means guest access is not on, so show the code
+box; `wait` means a guest bucket is spent, and `Retry-After` says for how long;
+`unavailable` is anything else.
+
+The helper under [What the page does](#what-the-page-does) carries all of it
+inside `accessSession`, and returns the entry as `guest()`. These are its guest
+parts, as written there:
 
 ```js
-// Inside accessSession. open() sets guest = session.guest on every reply.
-async function reopenAsGuest() {
-  let response;
-  try {
-    response = await post("/guest", {});
-  } catch {
-    return; // a network error says nothing either way: the next tick asks again
+// open(session, honoured) sets guest from the reply, and held when a status check's 200
+// is what opened it: that session's cookie comes back.
+const end = () => (guest ? reopenAsGuest() : lock());
+const refused = () => (held ? end() : lock()); // what a 401 on a check or a call does
+
+async function openAsGuest() {
+  const response = await post("/guest", {});
+  if (response.ok) {
+    open(await response.json());
+    return "open";
   }
-  if (response.ok) open(await response.json()); // a new session: the visit goes on
-  else if (response.status === 403) lock(); // closed: guest access has ended
-  // 429 and 5xx the same: say nothing, and ask again at the next tick
+  if (response.status === 429) return "wait"; // Retry-After says how long
+  if (response.status === 403) return "closed"; // guest access is not on
+  return "unavailable";
+}
+
+async function reopenAsGuest() {
+  const outcome = await openAsGuest().catch(() => "unavailable");
+  if (outcome !== "open") lock(); // no new session: drop gated state, and guest() brings them back
 }
 ```
 
@@ -865,6 +888,7 @@ const post = (path, body) =>
 export function accessSession({ onOpen, onLocked }) {
   let live = false;
   let guest = false; // the session reply says whose session it is
+  let held = false; // a status check has answered 200 for this session: its cookie comes back
   let endTimer;
   let poller;
 
@@ -880,10 +904,16 @@ export function accessSession({ onOpen, onLocked }) {
   // A guest's session that ends is not yet the end of the visit: ask the guest route once.
   const end = () => (guest ? reopenAsGuest() : lock());
 
+  // A 401 ends a session the page held. Before a status check has seen this one honoured, it
+  // means the cookie never stuck (a cross-site frame), and asking again would never stop.
+  const refused = () => (held ? end() : lock());
+
   // Obligation 1: end the visit from remainingMs, never from expiresAt against this clock.
-  function open(session) {
+  // honoured is true only for a status check's 200; a new session's cookie is not yet known to stick.
+  function open(session, honoured = false) {
     live = true;
     guest = session.guest;
+    held = honoured;
     clearTimeout(endTimer);
     endTimer = setTimeout(end, session.remainingMs); // a changed remainingMs lands here again
     poller ??= setInterval(recheck, 5000);
@@ -898,18 +928,26 @@ export function accessSession({ onOpen, onLocked }) {
     } catch {
       return;
     }
-    if (response.status === 401) end(); // none or ended
-    else if (response.ok) open(await response.json());
+    if (response.status === 401) refused(); // none or ended
+    else if (response.ok) open(await response.json(), true);
   }
-  async function reopenAsGuest() {
-    let response;
-    try {
-      response = await post("/guest", {});
-    } catch {
-      return; // a network error says nothing either way: the next tick asks again
+
+  // A guest's visit, started or come back to, with unlock's outcomes and closed for no guests.
+  async function openAsGuest() {
+    const response = await post("/guest", {});
+    if (response.ok) {
+      open(await response.json());
+      return "open";
     }
-    if (response.ok) open(await response.json());
-    else if (response.status === 403) lock();
+    if (response.status === 429) return "wait"; // Retry-After says how long
+    if (response.status === 403) return "closed"; // guest access is not on
+    return "unavailable";
+  }
+
+  // The guests' obligation: their session has ended, so only a new one keeps gated state.
+  async function reopenAsGuest() {
+    const outcome = await openAsGuest().catch(() => "unavailable");
+    if (outcome !== "open") lock(); // no new session: drop gated state, and guest() brings them back
   }
 
   const recheck = () => live && document.visibilityState === "visible" && check();
@@ -919,6 +957,8 @@ export function accessSession({ onOpen, onLocked }) {
 
   return {
     restore: check, // on page load: a cookie from an earlier visit may still be good
+
+    guest: openAsGuest, // a page that lets guests in: the entry that starts or resumes a visit
 
     async unlock(code) {
       const response = await post("", { code });
@@ -935,7 +975,7 @@ export function accessSession({ onOpen, onLocked }) {
     async call(name, args) {
       const response = await post("/call", { call: name, args });
       if (response.status === 401) {
-        end();
+        refused();
         throw new Error("The visit has ended.");
       }
       if (!response.ok) throw new Error(`The call was refused (${response.status}).`);
