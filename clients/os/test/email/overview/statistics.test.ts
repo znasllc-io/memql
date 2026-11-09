@@ -20,9 +20,7 @@ describe("the email statistics read's answer", () => {
       bucket: "day",
       start: "2026-10-10T00:00:00Z",
       end: "2026-11-09T00:00:00Z",
-      hasPrevious: true,
       prevStart: "2026-09-10T00:00:00Z",
-      prevEnd: "2026-10-10T00:00:00Z",
       measuredSince: "2026-09-01",
     });
     expect(stats.totals).toEqual(STATISTICS_TOTALS);
@@ -70,7 +68,10 @@ describe("the email statistics read's answer", () => {
   it("has no previous period for twelve months, and buckets them by the month", () => {
     const stats = parseEmailStatistics(twelveMonthsStatisticsRow());
 
-    expect(stats).toMatchObject({ period: "12m", bucket: "month", hasPrevious: false, prevStart: null, prevEnd: null, previous: null, previousSeries: null });
+    expect(stats).toMatchObject({ period: "12m", bucket: "month", prevStart: null, previous: null, previousSeries: null });
+    // Only the start of the previous period is kept: it is what decides a comparison.
+    expect(stats).not.toHaveProperty("hasPrevious");
+    expect(stats).not.toHaveProperty("prevEnd");
     expect(stats.series.map((point) => point.at.slice(0, 7))).toEqual([
       "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05",
       "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11",

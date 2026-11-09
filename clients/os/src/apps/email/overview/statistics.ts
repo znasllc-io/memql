@@ -7,11 +7,12 @@ import { useReading, type Reading } from "../useEmail";
 
 // THE EMAIL STATISTICS READ (spec 7 and 9): `builtin emailStatistics`, a period
 // of email figures for the organizations the caller reaches, answered as ONE
-// node whose payload is `EmailStatistics.Payload` in
-// component/emailstats/statistics.go. The keys below are that payload's, and
-// the types follow it where the brief's draft and the payload disagree: the
-// payload also says `hasPrevious`, `prevStart` and `prevEnd`, and the page
-// needs `prevStart` to decide whether a change can be drawn at all.
+// node whose payload is `EmailStatistics.Payload` in component/emailstats.
+// The keys below are that payload's. It also says `hasPrevious`, `prevStart`
+// and `prevEnd`; the page keeps only `prevStart`, which decides whether a
+// change can be drawn at all (kit previousComparable). `hasPrevious` says no
+// more than a null `prevStart` does, and the previous period's end is never
+// drawn.
 //
 // ===========================================================================
 // ABSENT IS NOT ZERO, AND THE PARSE IS WHERE THAT IS EASIEST TO BREAK
@@ -110,11 +111,8 @@ export interface EmailStatistics {
   bucket: Bucket;
   start: string;
   end: string;
-  /** Whether the read had a previous period to answer for. Twelve months have none (spec D4). */
-  hasPrevious: boolean;
-  /** The previous period's bounds; null without one. */
+  /** Where the previous period starts; null without one (twelve months, spec D4). */
   prevStart: string | null;
-  prevEnd: string | null;
   /** The cluster's first day with a recorded fact (YYYY-MM-DD, UTC); null when nothing was ever recorded, or the caller reaches nothing. */
   measuredSince: string | null;
   totals: EmailTotals;
@@ -258,9 +256,7 @@ export function parseEmailStatistics(row: Row): EmailStatistics {
     bucket,
     start: text(row.start),
     end: text(row.end),
-    hasPrevious: row.hasPrevious === true,
     prevStart: textOrNull(row.prevStart),
-    prevEnd: textOrNull(row.prevEnd),
     measuredSince: textOrNull(row.measuredSince),
     totals: totalsOf(row.totals),
     previous: fieldsOf(row.previous) === null ? null : totalsOf(row.previous),

@@ -376,21 +376,30 @@ one pinned action bar, readable copy and keyboard focus. Rendering fixtures do
 not establish live cluster behavior; the component tests exercise subscriptions,
 version order, omitted-payload re-reads and refusals separately.
 
-Email's Overview: `email-overview` is a month of mail (five measured figures and
-the campaigns by state), `email-overview-empty` is first use (real zeros, one
-sentence and `Add a campaign` -- `&click=Add a campaign` follows it to the
-wizard), `email-overview-reading` has every read still on its way (shapes, no
-warning), `email-overview-refused` has three reads refused with nothing to show
+Email's Overview, the period's statistics (`qa/emailOverviewScenes.tsx`, over
+the Email harness's `emailStatistics` payloads): `email-overview` is thirty days
+of mail as staff reading every client (five figures against the thirty days
+before, the chart, Delivery problems, Audience growth, Top campaigns,
+Automations, the campaigns by state and Clients), `email-overview-empty` is
+first use (one sentence and `Add a campaign` -- `&click=Add a campaign` follows
+it to the wizard), `email-overview-reading` has every read still on its way
+(shapes only, the chart's included), `email-overview-refused` has the
+statistics, the automations and a subscriber count refused with nothing to show
 (dashes and the engine's sentences, never a zero), `email-overview-unmeasured`
-has a rate the engine could not state exactly (a dash with its reason beneath)
-and `email-overview-untracked` has two rates with the same reason (said once,
-under the first). `email-overview-floor` has an audience past the engine's count
-window, so Subscriptions is a floor: `5,089 or more`, never an exact-looking sum.
-Two scenes catch the page a few seconds after the cluster
-stopped answering, with every figure still the last one: `email-overview-interrupted`
-(the cluster refuses the refreshes: one notice carrying its sentence) and
-`email-overview-reconnecting` (the connection dropped: the same notice, saying it
-is reconnecting). Take the 520 capture too: the five figures fall to three and two.
+is a cluster that has recorded no email yet (dashes that say so and a chart
+that says "Not measured", no lists) and `email-overview-untracked` has only
+automated mail in the period (no campaign mail for a rate to be a share of: the
+reason is on each rate's dash). `email-overview-floor` has an audience past the
+engine's count window, so Subscriptions is a floor -- `5,086 or more`, never an
+exact-looking sum -- and so is the audience's size in its growth row.
+`email-overview-twelve-months` is the current month and the twelve before it,
+with no change and no previous line anywhere, and `email-overview-member` is a
+member of one client: no client control, no Clients list, no other client's
+name. Two scenes catch the page a few seconds after the cluster stopped
+answering, with every figure still the last one: `email-overview-interrupted`
+(the cluster refuses the refreshes) and `email-overview-reconnecting` (the
+connection dropped), each said once on the heading's line. Take the 520
+capture too: the five figures fall to three and two.
 
 Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
 `azure-email-empty` use the shared Email Settings domain wizard. Open the

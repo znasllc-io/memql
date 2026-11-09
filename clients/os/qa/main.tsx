@@ -15,6 +15,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
+import { emailOverviewScenes } from "./emailOverviewScenes";
 import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
 import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
 import { RESOURCE_PAGE_VIEWS } from "./resourcePageScenes";
@@ -25,10 +26,7 @@ import { fakeConnection as filesConnection, artifactRow as filesArtifact, folder
 import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
-import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, ruleRow as emailRule, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
-import { useEmailFeeds } from "../src/apps/email/useEmail";
-import { EmailNavigationContext } from "../src/apps/email/openRequest";
-import { OverviewSection } from "../src/apps/email/overview/OverviewSection";
+import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -1060,20 +1058,8 @@ const VIEWS: Record<
   // The same, for somebody who chooses between organizations: Review's sentence
   // then says whose campaign it is.
   "email-campaigns-organizations": emailCampaignsView(true, true),
-  // Email -> Overview (memql#6033): a month of mail; a cluster with none; every
-  // read still on its way; every read refused; and a rate the engine could not
-  // state exactly.
-  "email-overview": emailOverviewView("populated"),
-  "email-overview-empty": emailOverviewView("empty"),
-  "email-overview-reading": emailOverviewView("reading"),
-  "email-overview-refused": emailOverviewView("refused"),
-  "email-overview-unmeasured": emailOverviewView("unmeasured"),
-  "email-overview-untracked": emailOverviewView("untracked"),
-  "email-overview-floor": emailOverviewView("floor"),
-  // The page a moment after the cluster stopped answering: the figures it had, and one
-  // notice -- the cluster refusing a refresh, and the connection dropping.
-  "email-overview-interrupted": emailOverviewInterruptedView("refused"),
-  "email-overview-reconnecting": emailOverviewInterruptedView("disconnected"),
+  // Email -> Overview, the period's statistics (emailOverviewScenes.tsx).
+  ...emailOverviewScenes(WindowBody),
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
@@ -1850,134 +1836,6 @@ function EmailPane({ section }: { section: string }) {
   // another tab (the Overview's "Add a campaign") can be captured arriving.
   const [current, setCurrent] = useState(section);
   return <WindowBody fallback="Email"><EmailApp sectionId={current} navigate={(id) => setCurrent(id)} askContext={() => {}} store={store}/></WindowBody>;
-}
-
-type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured" | "untracked" | "floor";
-
-/**
- * Email -> Overview as it reads in each of the ways it can. Dates are relative to
- * the clock, because the figures look back thirty days from now: a fixed date
- * would drift out of the window. Generic names and addresses only.
- */
-function emailOverviewView(scene: OverviewScene) {
-  const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
-  // Nothing counted opens or clicks: both rates have the same reason, said once.
-  const tracking = scene === "untracked" ? { trackOpens: false, trackClicks: false } : {};
-  const campaigns = scene === "empty" ? [] : [
-    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: ago(0), ...tracking }),
-    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: ago(3), completedAt: ago(3), ...tracking }),
-    emailCampaign({ id: "qa-c-digest", name: "Weekly digest", audienceId: "qa-signups", status: "sent", recipientCount: 2980, sentCount: 2980, startedAt: ago(12), completedAt: ago(12), ...tracking }),
-    emailCampaign({ id: "qa-c-old", name: "Summer sale", audienceId: "qa-newsletter", status: "sent", recipientCount: 3100, sentCount: 3100, startedAt: ago(61), completedAt: ago(61) }),
-    emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
-    emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter" }),
-    emailCampaign({ id: "qa-c-failed", name: "Spring promo", audienceId: "qa-signups", status: "failed", lastError: "The sending service refused the sender address." }),
-    emailCampaign({ id: "qa-c-cancelled", name: "Holiday preview", audienceId: "qa-newsletter", status: "cancelled" }),
-  ];
-  const stats: Record<string, Record<string, unknown>> = {
-    "qa-c-sending": { sent: 1204, opens: { unique: 318, total: 402 }, clicks: { unique: 77, total: 95 } },
-    "qa-c-sent": { sent: 1176, opens: { unique: 502, total: 688 }, clicks: { unique: 131, total: 174 } },
-    "qa-c-digest": { sent: 2980, opens: scene === "unmeasured" ? { total: 3410 } : { unique: 1104, total: 1620 }, clicks: { unique: 262, total: 340 } },
-  };
-  return {
-    connect: () => {
-      const conn = campaignConnection({
-        campaigns,
-        audiences: scene === "empty" ? [] : [
-          campaignAudience({ id: "qa-newsletter", name: "Newsletter" }),
-          campaignAudience({ id: "qa-signups", name: "Signups" }),
-          campaignAudience({ id: "qa-reviewers", name: "Reviewers" }),
-          campaignAudience({ id: "qa-old", name: "Old list", status: "archived" }),
-        ],
-        subscriberCounts: scene === "refused"
-          ? { "qa-newsletter": new Error("Counting subscribers is not yours to do."), "qa-signups": 86, "qa-reviewers": 3 }
-          : scene === "floor"
-            // Newsletter is past the engine's window: its count stopped at 5,000.
-            ? { "qa-newsletter": { atLeast: 5000 }, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 }
-            : { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 },
-        emailRules: scene === "empty" ? [] : [
-          emailRule({ id: "qa-r1", name: "Tell the owner about new admins", status: "active" }),
-          emailRule({ id: "qa-r2", name: "Welcome new users", status: "active" }),
-          emailRule({ id: "qa-r3", name: "Weekly recap", status: "active" }),
-          emailRule({ id: "qa-r4", name: "Invoice reminder", status: "paused" }),
-        ],
-        ...(scene === "refused" ? { campaignStats: new Error("Reading the breakdown is not yours to do.") } : {}),
-      });
-      // The harness's `vi.fn` is a shim without `mockImplementation`: answers are assigned.
-      if (scene === "refused") {
-        Object.assign(conn.query, { emailRules: async () => { throw new Error("Reading automations is not yours to do."); } });
-      } else if (scene === "reading") {
-        // Every read is on its way and none arrives: the shape of the page is what is judged.
-        const never = () => new Promise<never>(() => {});
-        Object.assign(conn.query, { campaigns: never, audiences: never, emailRules: never, campaignStats: never, audienceSubscriberCount: never });
-      } else {
-        Object.assign(conn.query, {
-          campaignStats: async (args: { campaignId?: string }) => {
-            const row = stats[args.campaignId ?? ""];
-            return rowsResult(row === undefined ? [] : [row]);
-          },
-        });
-      }
-      return conn;
-    },
-    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
-    render: () => <EmailPane section="overview" />,
-  };
-}
-
-/**
- * The Overview a few seconds after the cluster stopped answering. The page opens
- * on a month of mail, and 2.5 s in either the cluster refuses a re-read of the
- * campaigns and the refresh of the breakdowns and counts ("refused"), or the
- * connection drops ("disconnected"). What is judged is what stays on screen and
- * what the one notice says.
- */
-function emailOverviewInterruptedView(how: "refused" | "disconnected") {
-  const scene = emailOverviewView("populated");
-  let held: ReturnType<typeof campaignConnection> | null = null;
-  return {
-    connect: () => {
-      held = scene.connect();
-      return held;
-    },
-    wrap: scene.wrap,
-    render: () => (
-      <EmailOverviewInterruptedPane
-        how={how}
-        refuse={() => {
-          const sentence = "The cluster did not answer in time.";
-          const refuse = async () => { throw new Error(sentence); };
-          if (held !== null) Object.assign(held.query, { campaigns: refuse, campaignStats: refuse, audienceSubscriberCount: refuse });
-        }}
-      />
-    ),
-  };
-}
-
-function EmailOverviewInterruptedPane({ how, refuse }: { how: "refused" | "disconnected"; refuse: () => void }) {
-  const feeds = useEmailFeeds();
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (how === "disconnected") {
-        (feeds.campaigns.source as unknown as { markDisconnected: () => void } | null)?.markDisconnected();
-        return;
-      }
-      refuse();
-      feeds.campaigns.reseed();
-      // Coming back to the window reads the breakdowns and counts again.
-      window.dispatchEvent(new Event("focus"));
-    }, 2500);
-    return () => window.clearTimeout(timer);
-    // Once, a few seconds in.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const navigation = useMemo(() => ({ openRecord: () => {}, openSettings: () => {}, openInbox: () => {} }), []);
-  return (
-    <WindowBody fallback="Email">
-      <EmailNavigationContext.Provider value={navigation}>
-        <OverviewSection feeds={feeds} />
-      </EmailNavigationContext.Provider>
-    </WindowBody>
-  );
 }
 
 function AccountsPane() {

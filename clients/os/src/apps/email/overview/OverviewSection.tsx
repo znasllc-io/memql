@@ -141,11 +141,24 @@ function Parts({ line }: { line: string }) {
   );
 }
 
-/** A subject of the period under its own heading, named to assistive technology as it reads. */
-function Subject({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * A subject of the period under its own heading line, named to assistive
+ * technology as it reads.
+ *
+ * THE SHELL'S OWN GRAMMAR, no spacing of this app's: the heading line is the
+ * shell's list heading (`.os-record-heading`, the control line's height with
+ * the heading's margin taken off), the box the kit's ranked lists give theirs,
+ * so Audience growth stands like Top campaigns beside it. A list is the
+ * shell's record section, its rows as close under the heading as a ranked
+ * list's; Delivery problems -- a figure row, a chart and a fact -- stacks as
+ * the page itself does.
+ */
+function Subject({ title, list = false, children }: { title: string; list?: boolean; children: ReactNode }) {
   return (
-    <section className="email-overview-section" aria-label={title}>
-      <Subhead>{title}</Subhead>
+    <section className={list ? "os-record-section" : "os-app-stack"} aria-label={title}>
+      <div className="os-record-heading">
+        <Subhead>{title}</Subhead>
+      </div>
       {children}
     </section>
   );
@@ -219,7 +232,10 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
   // WHAT THE CLUSTER REFUSED THAT LEFT SOMETHING NOTHING TO SHOW: its sentence,
   // in the engine's own words, once. The statistics' stands in the chart's
   // place, under the figures it explains; the lists' stand under the facts.
-  const refusedCount = [...counts.values()].find((figure): figure is AbsentFigure => figure.kind === "absent" && figure.reason === "failed");
+  // A count refused for an audience counted only for its growth row (an
+  // archived one) leaves that row's size out, and says nothing about the
+  // Subscriptions figure: only the audiences that figure adds up are asked.
+  const refusedCount = subscribed.map((id) => counts.get(id)).find((figure): figure is AbsentFigure => figure?.kind === "absent" && figure.reason === "failed");
   const refusalNotices = [
     { sentence: "This cluster did not return your campaigns.", detail: campaignsStory.refusal },
     { sentence: "This cluster did not return your subscriptions.", detail: audiencesStory.refusal || (refusedCount?.detail ?? "") },
@@ -243,8 +259,10 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
 
   // FIRST USE is only ever said once the cluster has answered every list: a
   // cluster that could not say what it holds has not said it holds nothing.
-  const everyListAnswered = [feeds.campaigns, feeds.audiences, feeds.rules].every((feed) => answered(feed.snapshot) && feed.snapshot.error === "");
-  const firstUse = everyListAnswered && allCampaigns.length === 0 && allRules.length === 0;
+  // A journey is an automation like a rule: a welcome series alone sends mail
+  // the period counts, and "Nothing sent yet" beside it would contradict Sent.
+  const everyListAnswered = [feeds.campaigns, feeds.audiences, feeds.rules, feeds.journeys].every((feed) => answered(feed.snapshot) && feed.snapshot.error === "");
+  const firstUse = everyListAnswered && allCampaigns.length === 0 && allRules.length === 0 && allJourneys.length === 0;
   // The period's subjects: their shapes while the read is on its way, and drawn
   // once it answered for a period something counted.
   const subjects = !firstUse && (reading || measured);
@@ -279,17 +297,20 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
     };
   });
 
-  // THE CLIENTS, named as the client control names them, then as the account
-  // list does; they wait for that list, which is what names them for staff.
-  const clients = value !== null && value.accounts.length > 1 ? value.accounts : [];
-  const accountsAnswered = accounts.state === "live" || accounts.state === "degraded" || accounts.accounts.length > 0;
+  // THE CLIENTS, under All clients only (spec 9): while there is a choice and
+  // every client is in scope. A person who reaches one client has none to
+  // compare, and a chosen client is one, whatever the read lists. A choice is
+  // offered only once the names are known (the scope's own rule), so a row is
+  // named as the client control names it, else as the account list does (an
+  // archived organization is not among the choices).
+  const clients = scope.showControl && scope.value === "" && value !== null && value.accounts.length > 1 ? value.accounts : [];
   const clientName = (id: string): string => {
     const option = scope.options.find((candidate) => candidate.value === id && candidate.value !== "");
     if (option !== undefined) return option.label;
     const account = accounts.accounts.find((candidate) => candidate.id === id);
     return account === undefined ? untitledAccountName(id) : accountName(account);
   };
-  const clientRows: RankedRow[] = accountsAnswered ? clients.map((row) => ({ key: row.id, label: clientName(row.id), value: row.sent, secondary: clientLine(row) })) : [];
+  const clientRows: RankedRow[] = clients.map((row) => ({ key: row.id, label: clientName(row.id), value: row.sent, secondary: clientLine(row) }));
 
   const mainSpec = chosen(EMAIL_FIGURES, selected);
   const problemSpec = chosen(DELIVERY_FIGURES, problem);
@@ -339,7 +360,7 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
               </Facts>
             ) : null}
           </Subject>
-          <Subject title="Audience growth">
+          <Subject title="Audience growth" list>
             {growthReading ? (
               <RecordListSkeleton label="Loading audience growth" rows={3} />
             ) : growth.length === 0 ? (
@@ -362,7 +383,7 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
             )}
           </Subject>
           <RankedList title="Top campaigns" rows={topRows} loading={topReading} empty={emptyWords(listed?.campaigns)} />
-          <Subject title="Automations">
+          <Subject title="Automations" list>
             {automationsReading ? (
               <RecordListSkeleton label="Loading automations" rows={3} />
             ) : automations.length === 0 ? (
@@ -389,7 +410,7 @@ export function OverviewSection({ feeds, settings, update }: { feeds: EmailFeeds
       {!firstUse && answered(feeds.campaigns.snapshot) && campaignsStory.refusal === "" ? (
         <OverviewBreakdown title="Campaigns" segments={campaignDistribution(campaigns)} />
       ) : null}
-      {subjects && clients.length > 0 ? <RankedList title="Clients" rows={clientRows} loading={!accountsAnswered} /> : null}
+      {subjects && clients.length > 0 ? <RankedList title="Clients" rows={clientRows} /> : null}
       <PageHelp title="Overview">
         <p>A rate is the share of the campaign messages sent in the period that have been opened or clicked.</p>
         <p>Automations show no opens or clicks, because automated mail is not tracked for them.</p>

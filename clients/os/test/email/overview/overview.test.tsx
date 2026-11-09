@@ -28,6 +28,7 @@ const {
   campaignRow,
   fakeConnection,
   peakSubscriptions,
+  rowsResult,
   ruleRow,
   statisticsRow,
   twelveMonthsStatisticsRow,
@@ -66,6 +67,12 @@ const ACCOUNTS = [
   { id: "self", name: "Operator organization", status: "active" },
   { id: "acct-a", name: "Acme", status: "active" },
   { id: "acct-b", name: "Borden Ltd", status: "active" },
+];
+
+/** The read's organizations when it covers two: by sent, the second with no campaign mail to rate. */
+const TWO_CLIENTS = [
+  { id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 },
+  { id: "acct-b", sent: 304, uniqueOpens: 0, uniqueClicks: 0, openRate: null, clickRate: null },
 ];
 
 function journeyRow(over: Partial<Row> & { id: string }): Row {
@@ -471,6 +478,25 @@ describe("the period's lists", () => {
     expect(figure("subscribes").value).toBe(DASH);
   });
 
+  it("stands every subject's heading on the line the ranked lists give theirs", async () => {
+    mountWindow(seeded());
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+
+    // The shell's list heading line (`.os-record-heading`: the control line's
+    // height, the heading's margin taken off) is the box the kit's ranked lists
+    // give Top campaigns and Clients, so the subjects stand alike.
+    for (const name of ["Delivery problems", "Audience growth", "Automations"]) {
+      const heading = screen.getByRole("heading", { level: 4, name });
+      expect(heading.parentElement?.classList.contains("os-record-heading")).toBe(true);
+      expect(heading.parentElement?.parentElement?.getAttribute("aria-label")).toBe(name);
+    }
+    expect(screen.getByRole("heading", { level: 4, name: "Top campaigns" }).closest(".os-ranked-list")).not.toBeNull();
+    // A list that is a section of the page is the shell's record section.
+    for (const name of ["Audience growth", "Automations"]) {
+      expect(screen.getByRole("region", { name }).classList.contains("os-record-section")).toBe(true);
+    }
+  });
+
   it("keeps the campaigns by state", async () => {
     mountWindow(seeded());
 
@@ -509,14 +535,7 @@ describe("a period with nothing to compare", () => {
 
 describe("whose mail", () => {
   it("lets staff choose among every client, and lists the clients", async () => {
-    mountWindow(seeded({
-      emailStatistics: [statisticsRow({
-        accounts: [
-          { id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 },
-          { id: "acct-b", sent: 304, uniqueOpens: 0, uniqueClicks: 0, openRate: null, clickRate: null },
-        ],
-      })],
-    }));
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: TWO_CLIENTS })] }));
 
     const control = await screen.findByLabelText("Client");
     expect(selectedLabel(control)).toBe("All clients");
@@ -528,6 +547,17 @@ describe("whose mail", () => {
     await waitFor(() => expect(ranked(clients)).toEqual(["Acme | 45% opened | 900", "Borden Ltd | 304"]));
   });
 
+  it("lists the clients under All clients only, not once one client is chosen", async () => {
+    // The read here answers two organizations whatever it is asked; the page
+    // still draws them only while every client is in scope.
+    mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: TWO_CLIENTS })] }), { settings: { statisticsScope: "acct-b" } });
+
+    const control = await screen.findByLabelText("Client");
+    await waitFor(() => expect(selectedLabel(control)).toBe("Borden Ltd"));
+    expect(figure("sent").value).toBe("1,204");
+    expect(screen.queryByRole("region", { name: "Clients" })).toBeNull();
+  });
+
   it("lists no clients when the read covers one", async () => {
     mountWindow(seeded({ emailStatistics: [statisticsRow({ accounts: [{ id: "acct-a", sent: 900, uniqueOpens: 400, uniqueClicks: 30, openRate: 0.45, clickRate: 0.033 }] })] }));
 
@@ -536,7 +566,9 @@ describe("whose mail", () => {
   });
 
   it("shows a member of one client no client control and no other client", async () => {
-    const conn = seeded();
+    // Even a read that listed two organizations draws no Clients list for
+    // somebody who reaches one: the list is All clients' only (spec 9).
+    const conn = seeded({ emailStatistics: [statisticsRow({ accounts: TWO_CLIENTS })] });
     mountWindow(conn, { session: { role: "user", everyAccount: false, accountIds: ["acct-a"] } });
 
     await waitFor(() => expect(figure("sent").value).toBe("1,204"));
@@ -625,6 +657,63 @@ describe("a read that was refused", () => {
     await waitFor(() => expect(fact("Subscriptions")).toBe("1,330"));
   });
 
+  it("does not say the subscriptions were refused when only an audience the growth list names was", async () => {
+    // Old list is archived: it is counted only for its growth row, and its
+    // count is refused. Subscriptions, of the active audiences, was counted.
+    mountWindow(seeded({
+      subscriberCounts: { "a-news": 1204, "a-signups": 86, "a-borden": 40, "a-old": new Error("Counting subscribers is not yours to do.") },
+      emailStatistics: [statisticsRow({ audiences: [{ id: "a-news", subscribes: 12, unsubscribes: 3, net: 9 }, { id: "a-old", subscribes: 0, unsubscribes: 4, net: -4 }] })],
+    }));
+
+    await waitFor(() => expect(fact("Subscriptions")).toBe("1,330"));
+    const growth = screen.getByRole("region", { name: "Audience growth" });
+    await waitFor(() => expect(records(growth)).toEqual([
+      "Newsletter 12 new · 3 unsubscribed · +9 net · 1,204 subscribed",
+      // Its size could not be had: left out, never a zero.
+      "Old list 0 new · 4 unsubscribed · −4 net",
+    ]));
+    expect(notices()).toEqual([]);
+    expect(pane("overview").textContent).not.toContain("This cluster did not return your subscriptions.");
+  });
+
+  it("aborts the read a new period or client replaces, and never draws its late answer", async () => {
+    const conn = seeded();
+    const asked: { args: unknown; signal: AbortSignal; answer: (row: Row) => void }[] = [];
+    conn.query.emailStatistics.mockImplementation((args, opts) => new Promise((resolve) => {
+      asked.push({ args, signal: (opts as { signal: AbortSignal }).signal, answer: (row) => resolve(rowsResult([row])) });
+    }));
+    mountWindow(conn);
+    await waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0]?.args).toEqual({ accountIds: [], period: "30d" });
+
+    // A new period: the thirty days' read is stale from the moment the week is asked for.
+    chooseOption(screen.getByLabelText("Period"), "Last 7 days");
+    await waitFor(() => expect(asked).toHaveLength(2));
+    expect(asked[1]?.args).toEqual({ accountIds: [], period: "7d" });
+    expect(asked[0]?.signal.aborted).toBe(true);
+    expect(asked[1]?.signal.aborted).toBe(false);
+    await act(async () => asked[1]?.answer(statisticsRow({ period: "7d", totals: { sent: 280 } })));
+    await waitFor(() => expect(figure("sent").value).toBe("280"));
+    // The thirty days answer late: none of it is drawn.
+    await act(async () => asked[0]?.answer(statisticsRow({ totals: { sent: 9999 } })));
+    expect(figure("sent").value).toBe("280");
+
+    // A new client, chosen while the one before is still being read.
+    const control = await screen.findByLabelText("Client");
+    await waitFor(() => expect(within(openSelect(control)).getAllByRole("option")).toHaveLength(4));
+    chooseOption(control, "Borden Ltd");
+    await waitFor(() => expect(asked).toHaveLength(3));
+    chooseOption(control, "Acme");
+    await waitFor(() => expect(asked).toHaveLength(4));
+    expect(asked[2]?.args).toEqual({ accountIds: ["acct-b"], period: "7d" });
+    expect(asked[3]?.args).toEqual({ accountIds: ["acct-a"], period: "7d" });
+    expect(asked[2]?.signal.aborted).toBe(true);
+    await act(async () => asked[3]?.answer(statisticsRow({ period: "7d", totals: { sent: 600 } })));
+    await waitFor(() => expect(figure("sent").value).toBe("600"));
+    await act(async () => asked[2]?.answer(statisticsRow({ period: "7d", totals: { sent: 50 } })));
+    expect(figure("sent").value).toBe("600");
+  });
+
   it("keeps the last figures through a refused refresh, and says on the heading's line that updates are interrupted", async () => {
     const conn = seeded();
     standalone(conn);
@@ -694,9 +783,26 @@ describe("first use", () => {
     withCampaign.view.unmount();
 
     // A paused automation is still an automation.
-    mountWindow(fakeConnection({ emailRules: [ruleRow({ id: "r", status: "paused" })], emailStatistics: [statisticsRow()] }));
+    const withRule = mountWindow(fakeConnection({ emailRules: [ruleRow({ id: "r", status: "paused" })], emailStatistics: [statisticsRow()] }));
     await waitFor(() => expect(figure("sent").value).toBe("1,204"));
     expect(screen.queryByText("Nothing sent yet")).toBeNull();
+    withRule.view.unmount();
+  });
+
+  it("is not offered to a client whose only automation is a journey", async () => {
+    // A welcome series and nothing else: its sends are in the period's figures,
+    // so "Nothing sent yet" beside a Sent above zero would contradict them.
+    mountWindow(fakeConnection({
+      journeys: [journeyRow({ id: "j-series", name: "Welcome series", status: "active" })],
+      emailStatistics: [statisticsRow({ campaigns: [], automations: [{ id: "j-series", kind: "journey", sent: 40, failed: 0, suppressed: 0 }] })],
+    }));
+
+    await waitFor(() => expect(figure("sent").value).toBe("1,204"));
+    expect(screen.queryByText("Nothing sent yet")).toBeNull();
+    // The period is drawn: its chart, and the journey among the automations.
+    expect(mainChart().label).toBe("Sent");
+    await waitFor(() => expect(records(screen.getByRole("region", { name: "Automations" }))).toEqual(["Welcome series 40 sent · 0 failed · 0 suppressed"]));
+    expect(figure("sent").checked).toBe("true");
   });
 });
 
