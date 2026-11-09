@@ -75,6 +75,11 @@ describe("native OS sign-in", () => {
     fireEvent.click(screen.getByRole("button", { name: "Privacy Notice" }));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/legal/privacy"))).toBe(true));
   });
+  it("opens the Terms of Service on the same transport", async () => {
+    await load();
+    fireEvent.click(screen.getByRole("button", { name: "Terms of Service" }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/legal/tos"))).toBe(true));
+  });
   it.each([
     ["waitlist_signup", "Request access", "waitlist", "Your name", "name"],
     ["needs_invite", "Use invitation", "invite", "Invitation token", "invitation"],

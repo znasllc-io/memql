@@ -119,6 +119,16 @@ describe("native identity screens", () => {
     expect(screen.getByRole("link", { name: "Return to MemQL OS" })).toBeTruthy();
     if (page === "enroll" && "Rejection" in data) expect(screen.queryByRole("button", { name: "Add passkey" })).toBeNull();
   });
+  it("shows a legal document's version and effective date above the text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ page: "legal_view", data: {
+      Layout: { Title: "Terms of Service", BrandName: "MemQL" }, Body: "## 1. Accepting these terms\n\nYou accept these terms when you sign in.",
+      Version: "2.0.0", EffectiveDate: "2026-11-09",
+    } })));
+    render(<IdentityScreen initialPath="/legal/tos" />);
+    await screen.findByRole("heading", { level: 1, name: "Terms of Service" });
+    expect(screen.getByText("Version 2.0.0, effective 2026-11-09")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "1. Accepting these terms" })).toBeTruthy();
+  });
   it("leaves theme selection to the OS when identity is embedded", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ page: "me/profile", data: { Profile: { Name: "Ada" } } })));
     render(<IdentityScreen initialPath="/me/profile" embedded />);

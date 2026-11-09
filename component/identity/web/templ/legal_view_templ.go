@@ -8,9 +8,11 @@ package webtempl
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// LegalViewData drives the static legal documents (TOS / privacy).
-// `Body` is the markdown-rendered HTML — wrapped in templ.Raw because
-// the upstream loader has already sanitized + bounded it.
+// LegalViewData drives the two legal documents (Terms of Service and the
+// Privacy Notice). On the HTML page `Body` is the markdown rendered to HTML
+// by Server.renderLegal, with raw HTML in the source escaped, which is why
+// templ.Raw is safe here; on the native representation MemQL OS reads, Body
+// is the markdown itself and this template is not rendered.
 type LegalViewData struct {
 	Layout        LayoutData
 	DocTitle      string
@@ -60,7 +62,7 @@ func LegalView(data LegalViewData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(data.DocTitle)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 18, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 20, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -78,7 +80,7 @@ func LegalView(data LegalViewData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Version)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 21, Col: 27}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 23, Col: 27}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -90,9 +92,9 @@ func LegalView(data LegalViewData) templ.Component {
 				}
 				if data.EffectiveDate != "" {
 					var templ_7745c5c3_Var5 string
-					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(" — effective " + data.EffectiveDate)
+					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(", effective " + data.EffectiveDate)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 23, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `legal_view.templ`, Line: 25, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 					if templ_7745c5c3_Err != nil {

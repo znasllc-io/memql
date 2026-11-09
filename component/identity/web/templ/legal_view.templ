@@ -1,8 +1,10 @@
 package webtempl
 
-// LegalViewData drives the static legal documents (TOS / privacy).
-// `Body` is the markdown-rendered HTML — wrapped in templ.Raw because
-// the upstream loader has already sanitized + bounded it.
+// LegalViewData drives the two legal documents (Terms of Service and the
+// Privacy Notice). On the HTML page `Body` is the markdown rendered to HTML
+// by Server.renderLegal, with raw HTML in the source escaped, which is why
+// templ.Raw is safe here; on the native representation MemQL OS reads, Body
+// is the markdown itself and this template is not rendered.
 type LegalViewData struct {
 	Layout        LayoutData
 	DocTitle      string
@@ -20,7 +22,7 @@ templ LegalView(data LegalViewData) {
 				<p class="text-small text-subtle">
 					Version { data.Version }
 					if data.EffectiveDate != "" {
-						{ " — effective " + data.EffectiveDate }
+						{ ", effective " + data.EffectiveDate }
 					}
 				</p>
 			}

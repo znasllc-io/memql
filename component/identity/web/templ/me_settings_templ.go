@@ -139,7 +139,7 @@ func MeSettings(data MeSettingsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card card-wide\"><h1 class=\"card-title\">Profile</h1><div data-content=\"profile\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your profile&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Legal acceptance</h1><p class=\"card-subtitle\">Versions of our Terms of Service and Privacy Policy you've agreed to.</p><div data-content=\"legal\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Delete account</h1><p class=\"text-muted\">Account deletion enters a ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"card card-wide\"><h1 class=\"card-title\">Profile</h1><div data-content=\"profile\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading your profile&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Legal acceptance</h1><p class=\"card-subtitle\">Versions of our Terms of Service and Privacy Notice you've agreed to.</p><div data-content=\"legal\"><p class=\"text-muted\"><span class=\"spinner\"></span> Loading&hellip;</p></div></div><div class=\"card card-wide mt-3\"><h1 class=\"card-title\">Delete account</h1><p class=\"text-muted\">Account deletion enters a ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

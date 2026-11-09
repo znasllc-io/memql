@@ -322,10 +322,12 @@ type Server struct {
 	// assetURL when they construct URLs in Go (e.g. ExtraScripts).
 	assetVersions map[string]string
 
-	tosBytes       []byte
-	tosVersion     string
-	privacyBytes   []byte
-	privacyVersion string
+	// The two legal documents, loaded once at boot: the installation's
+	// override file when MEMQL_IDENTITY_TOS_OVERRIDE_PATH /
+	// MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH names a readable file, else the
+	// embedded engine default under legal/. See loadLegalDoc.
+	tos     legalDocument
+	privacy legalDocument
 }
 
 // NewServer loads legal docs (with override-path support) and returns
@@ -345,18 +347,12 @@ func NewServer(cfg identity.Config, logger *slog.Logger, live LiveSettings) (*Se
 		Logger:        logger.With(slog.String("component", "identity-web")),
 		assetVersions: versions,
 	}
-	tos, tosVer, err := loadLegalDoc(cfg.TosOverridePath, "legal/tos.md")
-	if err != nil {
+	if s.tos, err = loadLegalDoc(s.Logger, cfg.TosOverridePath, "legal/tos.md"); err != nil {
 		return nil, fmt.Errorf("identity/web: load TOS: %w", err)
 	}
-	priv, privVer, err := loadLegalDoc(cfg.PrivacyOverridePath, "legal/privacy.md")
-	if err != nil {
+	if s.privacy, err = loadLegalDoc(s.Logger, cfg.PrivacyOverridePath, "legal/privacy.md"); err != nil {
 		return nil, fmt.Errorf("identity/web: load Privacy: %w", err)
 	}
-	s.tosBytes = tos
-	s.tosVersion = tosVer
-	s.privacyBytes = priv
-	s.privacyVersion = privVer
 	return s, nil
 }
 
@@ -718,41 +714,79 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, c t
 	}
 }
 
-// loadLegalDoc reads a markdown doc from the override path (if set
-// and readable) or falls back to the embedded copy. Returns the body
-// bytes and a best-effort version string parsed from the front-matter.
-func loadLegalDoc(overridePath, embedPath string) ([]byte, string, error) {
-	if strings.TrimSpace(overridePath) != "" {
-		if body, err := os.ReadFile(overridePath); err == nil {
-			return body, parseVersion(body), nil
+// legalDocument is one of the two legal pages as loaded at boot: the
+// markdown source, front matter included (stripFrontMatter removes it at
+// render time), plus the two front-matter values the page shows.
+//
+// The front-matter shape (documentType / version / effectiveDate) is the
+// contract an installation's override file has to keep: the version is what
+// a user sees change when the operator publishes a new document, and the
+// effective date is what the documents' own 30-day notice promise is
+// measured against. The operator's side of the contract is
+// docs/public/operate/auth/legal-pages.md.
+type legalDocument struct {
+	Markdown      []byte
+	Version       string
+	EffectiveDate string
+}
+
+// loadLegalDoc reads a legal document from the override path when one is
+// set AND readable, and otherwise from the embedded engine default.
+//
+// The fallback is deliberate: an installation must never boot without legal
+// pages. But it is also the failure an operator cannot see from outside: a
+// mistyped mount path serves the engine default under the operator's brand,
+// and nothing on the page says so. Hence the WARN naming the path and the
+// error, so the substitution is at least loud in the boot log; the version
+// shown on the page (the override's front matter, not the embedded file's)
+// is the other way to tell.
+func loadLegalDoc(logger *slog.Logger, overridePath, embedPath string) (legalDocument, error) {
+	if p := strings.TrimSpace(overridePath); p != "" {
+		body, err := os.ReadFile(p)
+		if err == nil {
+			return newLegalDocument(body), nil
+		}
+		if logger != nil {
+			logger.Warn("identity-web: legal override unreadable, serving the embedded default",
+				"path", p, "embedded", embedPath, "error", err)
 		}
 	}
 	body, err := fs.ReadFile(FS, embedPath)
 	if err != nil {
-		return nil, "", err
+		return legalDocument{}, err
 	}
-	return body, parseVersion(body), nil
+	return newLegalDocument(body), nil
 }
 
-// parseVersion does a minimal scan of the front-matter for `version:`.
-// Returns "unknown" when the doc isn't structured as expected.
-func parseVersion(body []byte) string {
+func newLegalDocument(body []byte) legalDocument {
+	return legalDocument{
+		Markdown:      body,
+		Version:       frontMatterValue(body, "version", "unknown"),
+		EffectiveDate: frontMatterValue(body, "effectiveDate", ""),
+	}
+}
+
+// frontMatterValue does a minimal scan of the leading `---` block for
+// `<key>:` and returns its trimmed value, or fallback when the document has
+// no front matter or no such key. Minimal on purpose: the block is three
+// scalar keys, and a YAML parser in the sign-in path would buy nothing.
+func frontMatterValue(body []byte, key, fallback string) string {
 	src := string(body)
 	if !strings.HasPrefix(src, "---") {
-		return "unknown"
+		return fallback
 	}
 	end := strings.Index(src[3:], "---")
 	if end < 0 {
-		return "unknown"
+		return fallback
 	}
 	front := src[3 : 3+end]
 	for _, line := range strings.Split(front, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "version:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "version:"))
+		if strings.HasPrefix(line, key+":") {
+			return strings.TrimSpace(strings.TrimPrefix(line, key+":"))
 		}
 	}
-	return "unknown"
+	return fallback
 }
 
 // cspHandlerFunc is CSPHandlerFunc with form-action extended by the

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -14,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/yuin/goldmark"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/registration"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
@@ -969,28 +971,64 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, checkEmailURL(in.OwnerEmail, requestId), http.StatusSeeOther)
 }
 
-// handleLegalTOS renders the TOS markdown wrapped in the legal_view
-// template. Markdown rendering is intentionally minimal — we wrap the
-// body in <pre> for now, which preserves headings and paragraphs in a
-// readable monospace block. A proper markdown renderer can land later
-// without changing the storage format or override path.
+// handleLegalTOS and handleLegalPrivacy serve the two legal documents
+// (component/identity/web/legal/*.md, or the installation's override files;
+// see loadLegalDoc). One handler answers two representations:
+//
+//   - The HTML page, for a browser following the sign-in page's link on this
+//     host: the markdown is rendered to HTML here, because the legal_view
+//     template's `.markdown` styles address rendered headings and lists. The
+//     page used to inject the markdown source as-is, so the identity-hosted
+//     page showed literal `#` markers while MemQL OS rendered the same
+//     document properly.
+//   - The native representation MemQL OS asks for (Accept:
+//     application/vnd.memql.identity+json): Body stays MARKDOWN, because the
+//     OS renders it itself (clients/os/src/auth/IdentityScreen.tsx, the
+//     legal_view page). Rendering here too would hand the OS HTML to escape.
 func (s *Server) handleLegalTOS(w http.ResponseWriter, r *http.Request) {
-	s.renderLegal(w, r, "Terms of Service", s.tosBytes, s.tosVersion)
+	s.renderLegal(w, r, "Terms of Service", s.tos)
 }
 
 func (s *Server) handleLegalPrivacy(w http.ResponseWriter, r *http.Request) {
-	s.renderLegal(w, r, "Privacy Notice", s.privacyBytes, s.privacyVersion)
+	s.renderLegal(w, r, "Privacy Notice", s.privacy)
 }
 
-func (s *Server) renderLegal(w http.ResponseWriter, r *http.Request, title string, body []byte, version string) {
+func (s *Server) renderLegal(w http.ResponseWriter, r *http.Request, title string, doc legalDocument) {
 	data := webtempl.LegalViewData{
-		Layout:   s.LayoutData(r, title, false, nil, nil),
-		DocTitle: title,
-		Heading:  title,
-		Body:     stripFrontMatter(string(body)),
-		Version:  version,
+		Layout:        s.LayoutData(r, title, false, nil, nil),
+		DocTitle:      title,
+		Heading:       title,
+		Body:          stripFrontMatter(string(doc.Markdown)),
+		Version:       doc.Version,
+		EffectiveDate: doc.EffectiveDate,
+	}
+	if !nativeRequest(r) {
+		html, err := renderLegalMarkdown(data.Body)
+		if err != nil {
+			s.Logger.Error("identity-web: legal markdown render failed", "title", title, "error", err)
+			http.Error(w, "Legal page unavailable", http.StatusInternalServerError)
+			return
+		}
+		data.Body = html
 	}
 	s.render(w, r, "legal_view", webtempl.LegalView(data), data)
+}
+
+// legalMarkdown renders the legal documents for the HTML page. Defaults
+// only: CommonMark, with raw HTML in the source ESCAPED rather than passed
+// through (no html.WithUnsafe, unlike component/compose, whose input is the
+// operator's own composition). The override file is operator-supplied, but
+// this page is served to everyone before they sign in, so a renderer that
+// cannot emit a script tag or an inline handler keeps a mistaken paste in
+// that file from becoming a page-wide problem.
+var legalMarkdown = goldmark.New()
+
+func renderLegalMarkdown(markdown string) (string, error) {
+	var buf bytes.Buffer
+	if err := legalMarkdown.Convert([]byte(markdown), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // stripFrontMatter removes the leading `---\n...\n---\n` block so the

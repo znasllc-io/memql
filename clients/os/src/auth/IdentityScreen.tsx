@@ -275,7 +275,15 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         const bearer = await authSource.bearer(); if (!bearer) throw new Error("Sign in again to add a passkey");
         await registerPasskey(config, `Bearer ${bearer}`, "My passkey"); await load("/me/devices");
       })} />; break;
-    case "legal_view": body = <><Button onClick={() => void load(initialPath)}>Back</Button><div className="os-identity-legal"><ReactMarkdown>{value(data, "Body")}</ReactMarkdown></div></>; break;
+    case "legal_view": {
+      // The document promises that its version and effective date are shown
+      // at the top of the page; identity sends both beside the markdown.
+      const version = value(data, "Version"); const effective = value(data, "EffectiveDate");
+      body = <><Button onClick={() => void load(initialPath)}>Back</Button>
+        {version ? <p className="os-caption">Version {version}{effective ? `, effective ${effective}` : ""}</p> : null}
+        <div className="os-identity-legal"><ReactMarkdown>{value(data, "Body")}</ReactMarkdown></div></>;
+      break;
+    }
     default: body = page ? <p>{value(data, "Message") || "You can continue to MemQL OS."}</p> : busy ? <ContentSkeleton kind="form" label="Opening identity" /> : <p>Identity could not be opened.</p>;
   }
   const content = <>

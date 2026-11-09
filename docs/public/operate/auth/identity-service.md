@@ -113,7 +113,7 @@ the security-headers middleware.
 | `POST /auth/landing` | the token in the form body | Approve (no binding cookie) or finish (cookie matches). CSRF-exempt: the token IS the proof of possession |
 | `GET /auth/magic-link/status?request=<id>` | the `memql_ml` binding cookie | The requesting tab's poll. `404` -- indistinguishably -- for an unknown id and for a cookie that does not match |
 | `POST /auth/magic-link/finish` | the `memql_ml` cookie + a recorded approval | Consumes the request exactly once and mints |
-| `GET /legal/tos`, `/legal/privacy` | none | Legal pages |
+| `GET /legal/tos`, `/legal/privacy` | none | The Terms of Service and the Privacy Notice: the embedded engine defaults, or the installation's own files through `MEMQL_IDENTITY_TOS_OVERRIDE_PATH` / `MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH`. The OS reads the native representation; a browser on this host is sent to the OS page. See [legal-pages.md](legal-pages.md) |
 | `GET /enroll?code=mql_enr_<...>` | the enrolment token | Redeem an enrolment link and render the passkey registration page. Mounts only when the validator and audit sink are both wired (memql#3408) |
 | `GET /invitation?code=mql_inv_<...>` | the invitation | The invitation page. **Renders only -- writes nothing and sets no cookie**: it offers Continue, offers Accept to the browser that continued, and refuses any other. Mounts only when the invitation flow is wired (memql#4601) |
 | `POST /invitation/accept` | the invitation in the form body, plus the CSRF pair | `intent=continue` binds the invitation to this browser (the `memql_inv` cookie) and returns to the page; no intent accepts, only in that browser, and lands on `/enroll`. See [user-provisioning.md](user-provisioning.md#invitations) |
@@ -1054,4 +1054,7 @@ real gap, and nothing warns about it.
   spectrum, the wire-side lifecycle.
 - [user-provisioning.md](user-provisioning.md) -- registration
   modes, magic-link flow, invitations.
+- [legal-pages.md](legal-pages.md) -- the Terms of Service and Privacy
+  Notice, their front matter, what the service records, and how an
+  installation replaces them.
 - `component/identity/CLAUDE.md` -- per-package developer guide.
