@@ -104,7 +104,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "rollup",
-			Description: "Fold new and changed campaign deliveries, engagement events and consent events into the email statistics facts, each source walked through the engine from its watermark less five minutes, at most forty pages past it per run, one fact per source record and kind; then delete facts past four hundred days. Admits only the emailStatisticsRollupSweep maintenance principal.",
+			Description: "Fold new and changed campaign deliveries, engagement events and consent events into the email statistics facts, each source walked through the engine from its watermark less five minutes, at most forty pages past it per run, one fact per source record and kind, leaving out test runs and the consent events of each organization's testing audience; then delete facts past four hundred days. Admits only the emailStatisticsRollupSweep maintenance principal.",
 			Handler:     i.handleRollup,
 		},
 		{
@@ -277,6 +277,22 @@ func (i *Integration) logFailures(err error) {
 	for _, f := range failures {
 		var src *sourceFailure
 		if errors.As(f, &src) {
+			// A first walk whose first page failed moved the next one's start
+			// (rollup.go, "A first walk that cannot read its first page"): the
+			// Warn names the source and the day its statistics now start from,
+			// and says apart the timeout the move exists for.
+			var moved *firstWalkMoved
+			if errors.As(src.Err, &moved) {
+				why := "failed"
+				if moved.TimedOut {
+					why = "timed out"
+				}
+				i.logger.Warn(fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history %s",
+					src.Source, moved.Start.Format(time.DateOnly), why),
+					"component", "emailstats", "source", src.Source, "start", moved.Start.Format(time.DateOnly),
+					"timedOut", moved.TimedOut, "error", moved.Err)
+				continue
+			}
 			i.logger.Warn("Email statistics for a source were not folded; the next run carries on from its watermark",
 				"component", "emailstats", "source", src.Source, "error", src.Err)
 			continue

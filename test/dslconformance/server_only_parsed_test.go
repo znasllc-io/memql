@@ -226,12 +226,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// D18) is a sweep: its one reader is builtin emailStatisticsRollup's
 		// maintenance principal, and what it reads is every organization's
 		// rows at once, which no caller-scoped filter can express. The three
-		// source reads and the two attribution lookups are the whole of it.
+		// source reads, the two attribution lookups and the two that leave a
+		// test run and the testing audience out are the whole of it.
 		{Path: "campaigns/queries.memql", Name: "deliveriesWrittenSince"}:       true,
 		{Path: "campaigns/queries.memql", Name: "engagementEventsWrittenSince"}: true,
 		{Path: "campaigns/queries.memql", Name: "consentEventsWrittenSince"}:    true,
 		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentsByIds"}:      true,
 		{Path: "campaigns/queries.memql", Name: "recipientAudiencesByIds"}:      true,
+		{Path: "campaigns/queries.memql", Name: "campaignTestRunsByIds"}:        true,
+		{Path: "campaigns/queries.memql", Name: "testingAudiencesByIds"}:        true,
 
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;

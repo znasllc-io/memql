@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,8 +42,13 @@ import (
 // a database holding only a test's own facts it would fall inside the test's
 // period. Every band test therefore writes an anchor fact on the band's first
 // day, before every period it reads, so each bucket it reads is measured
-// whatever else the table holds. The tests about measuredSince itself read a
-// table of their own (emptyFactsTable).
+// whatever else the table holds.
+//
+// SO ARE THE WATERMARKS. A figure is measured only where the rollup has walked
+// its sources (statistics.go, "Absent is never zero"), so every band test sets
+// the three watermarks to statsNow, and puts them back at the real clock when
+// it ends, as the rollup tests do (walkFrom). The tests about measuredSince and
+// the walks' coverage read a pair of tables of their own (emptyStatsTables).
 //
 // Postgres-gated: CI's db-tests lane runs this package with MEMQL_REQUIRE_DB=1.
 
@@ -70,25 +76,51 @@ type statsFixture struct {
 	db     *bun.DB
 	suffix string
 	n      int
+	// anyDay lets the fixture write outside the band: a clock fixture's facts
+	// are dated by the real clock and removed by their prefix instead.
+	anyDay bool
 }
 
 // newStatsFixture writes into the shared table, inside the band, with the
-// anchor in place.
+// anchor in place and every source walked through statsNow.
 func newStatsFixture(t *testing.T) *statsFixture {
 	t.Helper()
 	_, db := statsEngine(t)
 	clearStatsBand(t, db)
 	t.Cleanup(func() { clearStatsBand(t, db) })
+	walkFrom(t, db, statsNow)
+	t.Cleanup(func() { walkFrom(t, db, time.Now()) })
 	f := &statsFixture{t: t, db: db, suffix: fmt.Sprintf("%s%d", statsSourcePrefix, time.Now().UnixNano())}
 	f.times(1, kindSkipped, statsBandStart, statFact{account: f.id("anchor")})
 	return f
 }
 
-// newEmptyTableFixture writes into a facts table of its own that starts empty,
-// with no anchor: the cluster it reads holds exactly the facts the test writes.
+// newEmptyTableFixture writes into tables of its own that start empty
+// (emptyStatsTables), with no anchor and every source walked through
+// statsNow: the cluster it reads holds exactly the facts the test writes.
 func newEmptyTableFixture(t *testing.T) *statsFixture {
 	t.Helper()
-	return &statsFixture{t: t, db: emptyFactsTable(t), suffix: fmt.Sprintf("%s%d", statsSourcePrefix, time.Now().UnixNano())}
+	f := &statsFixture{t: t, db: emptyStatsTables(t), suffix: fmt.Sprintf("%s%d", statsSourcePrefix, time.Now().UnixNano())}
+	for _, s := range sources {
+		f.walked(s.name, statsNow)
+	}
+	return f
+}
+
+// newClockFixture writes into the shared table on days of the real clock, for
+// a read the engine's own registered plug-in answers: it counts its period
+// back from time.Now(), so the band cannot serve it. Its facts are removed by
+// their prefix when the test ends.
+func newClockFixture(t *testing.T) *statsFixture {
+	t.Helper()
+	_, db := statsEngine(t)
+	f := &statsFixture{t: t, db: db, suffix: fmt.Sprintf("%s%d", statsSourcePrefix, time.Now().UnixNano()), anyDay: true}
+	t.Cleanup(func() {
+		if _, err := db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, f.suffix+"%").Exec(context.Background()); err != nil {
+			t.Errorf("remove the clock fixture's facts: %v", err)
+		}
+	})
+	return f
 }
 
 func clearStatsBand(t *testing.T, db *bun.DB) {
@@ -99,12 +131,45 @@ func clearStatsBand(t *testing.T, db *bun.DB) {
 	}
 }
 
-// emptyFactsTable is a database handle that sees an empty email_stat_fact of
-// its own: a temporary table of the same shape, indexes and key included, on
-// the handle's one connection, which hides the shared table from that
-// connection alone. It is how a test reads a cluster with no fact at all, or
-// one whose first fact it chose, on a database where other tests leave facts.
-func emptyFactsTable(t *testing.T) *bun.DB {
+// walked records how far a source's walk has read, as the rollup records it;
+// neverWalked removes the record, as on a cluster the rollup has not reached.
+// On a band fixture these move the shared watermarks, which the fixture puts
+// back at the real clock when the test ends.
+func (f *statsFixture) walked(source string, through time.Time) {
+	f.t.Helper()
+	if _, err := f.db.NewRaw(`INSERT INTO email_stat_watermark (source, through) VALUES (?, ?)
+		ON CONFLICT (source) DO UPDATE SET through = EXCLUDED.through`, source, through.UTC()).Exec(context.Background()); err != nil {
+		f.t.Fatalf("record the %s walk through %s: %v", source, through, err)
+	}
+}
+
+func (f *statsFixture) neverWalked(source string) {
+	f.t.Helper()
+	if _, err := f.db.NewRaw(`DELETE FROM email_stat_watermark WHERE source = ?`, source).Exec(context.Background()); err != nil {
+		f.t.Fatalf("forget the %s walk: %v", source, err)
+	}
+}
+
+// walksFrom records where a source's walk starts, as the rollup records it
+// after a first walk that could not read its first page. Only on a fixture's
+// own tables (emptyStatsTables): the shared table's starts move the rollup
+// tests' first walks.
+func (f *statsFixture) walksFrom(source string, start time.Time) {
+	f.t.Helper()
+	if _, err := f.db.NewRaw(`INSERT INTO email_stat_walk_start (source, starts_at) VALUES (?, ?)
+		ON CONFLICT (source) DO UPDATE SET starts_at = EXCLUDED.starts_at`, source, start.UTC()).Exec(context.Background()); err != nil {
+		f.t.Fatalf("record the %s walk start %s: %v", source, start, err)
+	}
+}
+
+// emptyStatsTables is a database handle that sees an empty email_stat_fact,
+// email_stat_watermark and email_stat_walk_start of its own: temporary tables
+// of the same shape, indexes and keys included, on the handle's one
+// connection, which hide the shared tables from that connection alone. It is
+// how a test reads a cluster with no fact at all, one whose first fact it
+// chose, or one whose walks it placed, on a database where other tests leave
+// facts and move watermarks.
+func emptyStatsTables(t *testing.T) *bun.DB {
 	t.Helper()
 	// Skips when no database is reachable, and leaves the schema migrated.
 	statsEngine(t)
@@ -118,17 +183,65 @@ func emptyFactsTable(t *testing.T) *bun.DB {
 	db := bun.NewDB(sqldb, pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `CREATE TEMP TABLE email_stat_fact (LIKE email_stat_fact INCLUDING ALL)`); err != nil {
-		t.Fatalf("make an empty facts table: %v", err)
-	}
-	// The read names the table bare, as it must; prove the name resolves to
-	// the temporary table here, or this test would read the shared one and
-	// pass or fail on other tests' facts.
-	var persistence string
-	if err := db.NewRaw(`SELECT relpersistence::text FROM pg_class WHERE oid = 'email_stat_fact'::regclass`).Scan(ctx, &persistence); err != nil || persistence != "t" {
-		t.Fatalf("email_stat_fact resolves to a table of persistence %q (%v), want the empty temporary one", persistence, err)
+	for _, table := range []string{"email_stat_fact", "email_stat_watermark", "email_stat_walk_start"} {
+		if _, err := db.ExecContext(ctx, `CREATE TEMP TABLE `+table+` (LIKE `+table+` INCLUDING ALL)`); err != nil {
+			t.Fatalf("make an empty %s: %v", table, err)
+		}
+		// The read names its tables bare, as it must; prove each name resolves
+		// to the temporary table here, or this test would read the shared one
+		// and pass or fail on other tests' rows.
+		var persistence string
+		if err := db.NewRaw(`SELECT relpersistence::text FROM pg_class WHERE oid = ?::regclass`, table).Scan(ctx, &persistence); err != nil || persistence != "t" {
+			t.Fatalf("%s resolves to a table of persistence %q (%v), want the empty temporary one", table, persistence, err)
+		}
 	}
 	return db
+}
+
+// statementRecorder keeps every statement a handle issues.
+type statementRecorder struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *statementRecorder) BeforeQuery(ctx context.Context, e *bun.QueryEvent) context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, e.Query)
+	return ctx
+}
+
+func (r *statementRecorder) AfterQuery(context.Context, *bun.QueryEvent) {}
+
+// recordedDB is a second handle on the test database, whose statements are
+// kept.
+func recordedDB(t *testing.T) (*bun.DB, *statementRecorder) {
+	t.Helper()
+	statsEngine(t)
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	rec := &statementRecorder{}
+	db.AddQueryHook(rec)
+	return db, rec
+}
+
+// wantThePoolsTimeout fails when a recorded statement moves statement_timeout,
+// and when none touched the table named: a recorder that saw nothing proves
+// nothing.
+func wantThePoolsTimeout(t *testing.T, what string, rec *statementRecorder, table string) {
+	t.Helper()
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	touched := false
+	for _, q := range rec.seen {
+		if strings.Contains(strings.ToLower(q), "statement_timeout") {
+			t.Errorf("%s moved the pool's statement timeout: %s", what, q)
+		}
+		touched = touched || strings.Contains(q, table)
+	}
+	if !touched {
+		t.Errorf("%s issued no statement on %s through the recorded handle; the %d it issued prove nothing", what, table, len(rec.seen))
+	}
 }
 
 // statFact is one email_stat_fact row as the rollup writes it; source is a
@@ -148,7 +261,7 @@ func (f *statsFixture) write(facts ...statFact) []string {
 	rows := make([]factRow, 0, len(facts))
 	sources := make([]string, 0, len(facts))
 	for _, x := range facts {
-		if x.day.Before(statsBandStart) || !x.day.Before(statsBandEnd) {
+		if !f.anyDay && (x.day.Before(statsBandStart) || !x.day.Before(statsBandEnd)) {
 			f.t.Fatalf("a %s fact on %s is outside the statistics tests' band [%s, %s)", x.kind, dateArg(x.day), dateArg(statsBandStart), dateArg(statsBandEnd))
 		}
 		if x.source == "" {
@@ -259,18 +372,54 @@ func callerCtx(userId string, role auth.Role) context.Context {
 // joinOrganization makes an organization with its own group and puts userId
 // in it, as a Member: one of the client's people, who reaches the
 // organization only through the group, which is what the engine's grant reads.
+//
+// THE THREE ROWS ARE REMOVED WHEN THE TEST ENDS, every version of each. They
+// are shared rows on a database every test in the lane reads, and fixture
+// organizations left behind on every run accumulate in each staff reader's
+// list of organizations until a test that walks that list stops passing.
 func joinOrganization(t *testing.T, eng *memql.MemQLEngine, account, userId string) {
 	t.Helper()
+	_, db := statsEngine(t)
 	group := account + "-group"
+	membership := group + "-" + userId
+	written := map[string]string{
+		"v1:accounts:account":         account,
+		"v1:identity:group":           group,
+		"v1:identity:groupMembership": membership,
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for concept, id := range written {
+			// Both spellings: the engine stores a row under its canonical id,
+			// and a bare one costs nothing to name.
+			ids := bun.In([]string{id, concept + ":" + id})
+			if _, err := db.NewRaw(`DELETE FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, concept, ids).Exec(ctx); err != nil {
+				t.Errorf("remove the fixture %s %s: %v", concept, id, err)
+				continue
+			}
+			var left int
+			if err := db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, concept, ids).Scan(ctx, &left); err != nil || left != 0 {
+				t.Errorf("the fixture %s %s still has %d rows after its removal (%v)", concept, id, left, err)
+			}
+		}
+	})
 	seed := auth.ContextWithInternalOrigin(callerCtx("email-statistics-seeder", auth.RoleOwner))
 	for _, q := range []string{
 		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name": "Statistics organization", "status": "active", "domainStatus": "unverified"})`, langparser.QuoteString(account)),
 		fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Statistics organization", kind: "account", accountId: %s, status: "active")`, langparser.QuoteString(group), langparser.QuoteString(account)),
 		fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, accountId: %s, origin: "added", status: "active")`,
-			langparser.QuoteString(group+"-"+userId), langparser.QuoteString(group), langparser.QuoteString(userId), langparser.QuoteString(account)),
+			langparser.QuoteString(membership), langparser.QuoteString(group), langparser.QuoteString(userId), langparser.QuoteString(account)),
 	} {
 		if _, err := eng.Execute(seed, q); err != nil {
 			t.Fatalf("put %s in %s: %v", userId, account, err)
+		}
+	}
+	// The rows are there under the ids the removal names, or it would remove
+	// nothing and say so only by leaving them.
+	for concept, id := range written {
+		var n int
+		if err := db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, concept, bun.In([]string{id, concept + ":" + id})).Scan(context.Background(), &n); err != nil || n == 0 {
+			t.Fatalf("the fixture %s %s was written under an id its removal does not name (%d rows, %v)", concept, id, n, err)
 		}
 	}
 }
@@ -1014,4 +1163,250 @@ func TestTheStatisticsBuiltinAnswersOneNodeThroughTheEngine(t *testing.T) {
 			t.Errorf("period %q answered %v, want a refusal naming 7d, 30d, 90d or 12m", period, err)
 		}
 	}
+}
+
+// THE POOL'S STATEMENT TIMEOUT STANDS. The plug-in reads through the request
+// pool, whose backends carry an 8 s server statement_timeout under pgdriver's
+// 10 s client read deadline: a statement the read let run past the second
+// would be cut off by the client and run on in the server, holding the read's
+// snapshot. So no statement the read issues moves the server's limit.
+func TestTheReadKeepsThePoolsStatementTimeout(t *testing.T) {
+	f := newStatsFixture(t)
+	a := statFact{account: f.id("a"), campaign: f.id("camp")}
+	f.of(kindOpenUnique, f.times(3, kindSent, day("2041-06-12"), a)[:1], day("2041-06-13"), a)
+	f.times(1, kindSubscribe, day("2041-06-13"), statFact{account: a.account, audience: f.id("aud")})
+	db, rec := recordedDB(t)
+	got, err := readStatistics(context.Background(), db, staff(), nil, statsperiod.Last7Days, statsNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if num(got.Totals.Sent) == "null" || len(got.Campaigns) == 0 || len(got.Audiences) == 0 {
+		t.Fatalf("the read answered %s with %d campaigns and %d audiences; it must read everything it reads for this to prove anything", totalsLine(got.Totals), len(got.Campaigns), len(got.Audiences))
+	}
+	wantThePoolsTimeout(t, "the read", rec, "email_stat_fact")
+}
+
+// firstRecorded writes the cluster's first fact, on a day before the periods a
+// test reads, so measuredSince does not decide its buckets and the walks'
+// coverage does. It belongs to an organization of its own, which no reader in
+// these tests reaches but staff.
+func (f *statsFixture) firstRecorded(on time.Time) {
+	f.t.Helper()
+	f.times(1, kindSkipped, on, statFact{account: f.id("first")})
+}
+
+// A figure is measured only where the walks of its sources have reached
+// (statistics.go, "Absent is never zero"). The deliveries are walked through
+// the read's clock and the engagement events only through the end of the
+// fourteenth: the last three days' unique opens and rates are null, though
+// their sends are measured, and the week's opens and rates are null with them.
+// The subscribes are the consent walk's, which is current, and the campaigns
+// list, which counts opens, is not listed for a week whose opens are not all
+// read. The week before, which ends before the engagement watermark, is
+// measured.
+func TestAFigureIsNullWhereItsSourcesWalkHasNotReached(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	a := statFact{account: f.id("a"), campaign: f.id("camp")}
+	aud := statFact{account: a.account, audience: f.id("aud")}
+	week := []string{"2041-06-11", "2041-06-12", "2041-06-13", "2041-06-14", "2041-06-15", "2041-06-16", "2041-06-17"}
+	for _, d := range week {
+		f.of(kindOpenUnique, f.times(10, kindSent, day(d), a)[:4], day(d), a)
+		f.times(1, kindSubscribe, day(d), aud)
+	}
+	f.walked(sourceEngagement, day("2041-06-15"))
+
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	var want []string
+	for i, d := range week {
+		if i < 4 {
+			want = append(want, d+" sent=10 uniqueOpens=4 uniqueClicks=0 unsubscribes=0 subscribes=1 bounces=0 complaints=0 failed=0 suppressed=0 openRate=0.4 clickRate=0")
+			continue
+		}
+		want = append(want, d+" sent=10 uniqueOpens=null uniqueClicks=null unsubscribes=0 subscribes=1 bounces=0 complaints=0 failed=0 suppressed=0 openRate=null clickRate=null")
+	}
+	wantSeries(t, "the week", got.Series, want)
+	if want := "sent=70 delivered=0 undelivered=0 failed=0 skipped=0 suppressed=0 opens=null clicks=null uniqueOpens=null uniqueClicks=null unsubscribes=0 bounces=0 complaints=0 subscribes=7 openRate=null clickRate=null"; totalsLine(got.Totals) != want {
+		t.Errorf("the week's totals:\n  got  %s\n  want %s", totalsLine(got.Totals), want)
+	}
+	if want := "sent=0 delivered=0 undelivered=0 failed=0 skipped=0 suppressed=0 opens=0 clicks=0 uniqueOpens=0 uniqueClicks=0 unsubscribes=0 bounces=0 complaints=0 subscribes=0 openRate=null clickRate=null"; totalsLine(got.Previous) != want {
+		t.Errorf("the week before ends before the engagement watermark, so it is measured:\n  got  %s\n  want %s", totalsLine(got.Previous), want)
+	}
+	if len(got.Campaigns) != 0 || len(got.Accounts) != 0 {
+		t.Errorf("campaigns %s and accounts %s are listed, want neither: their opens are not all read", figuresLine(got.Campaigns), figuresLine(got.Accounts))
+	}
+	if line := audiencesLine(got.Audiences); line != aud.audience+" subscribes=7 unsubscribes=0 net=7" {
+		t.Errorf("audiences %s, want the one audience: its consent walk is current", line)
+	}
+}
+
+// A healthy rollup's watermark is up to one run behind the read: the day under
+// way and the week are measured with it, or every read between two runs would
+// show today as missing. A watermark further behind than coverageGrace belongs
+// to a rollup that has stopped, and the day under way, and the week that ends
+// with it, are not measured; yesterday, which ended long before, still is.
+func TestAWatermarkARunBehindStillCountsTheDayUnderWay(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	f.times(3, kindSent, day("2041-06-17"), statFact{account: f.id("a"), campaign: f.id("camp")})
+
+	f.walked(sourceDelivery, statsNow.Add(-5*time.Minute))
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	if num(got.Series[6].Sent) != "3" || num(got.Totals.Sent) != "3" {
+		t.Errorf("a watermark one run behind: today %s, the week %s; want both measured", pointLine(got.Series[6]), totalsLine(got.Totals))
+	}
+
+	f.walked(sourceDelivery, statsNow.Add(-coverageGrace-time.Minute))
+	got = f.read(staff(), nil, statsperiod.Last7Days)
+	if got.Series[6].Sent != nil || got.Totals.Sent != nil {
+		t.Errorf("a watermark past the grace: today %s, the week %s; want both unmeasured", pointLine(got.Series[6]), totalsLine(got.Totals))
+	}
+	if num(got.Series[5].Sent) != "0" {
+		t.Errorf("yesterday %s, want it measured: it ended long before the watermark", pointLine(got.Series[5]))
+	}
+}
+
+// A source the rollup has never walked has nothing measured: every figure that
+// depends on it is null, in every bucket and in both periods, and its list is
+// not listed, while the figures of the walked sources are read as ever.
+func TestASourceNeverWalkedLeavesWhatDependsOnItNull(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	a := statFact{account: f.id("a"), campaign: f.id("camp")}
+	f.of(kindOpenUnique, f.times(10, kindSent, day("2041-06-12"), a)[:5], day("2041-06-13"), a)
+	f.times(3, kindUnsubscribe, day("2041-06-13"), statFact{account: a.account, audience: f.id("aud")})
+	f.neverWalked(sourceConsent)
+
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	for name, totals := range map[string]EmailTotals{"the week": got.Totals, "the week before": got.Previous} {
+		if totals.Unsubscribes != nil || totals.Subscribes != nil || totals.Bounces != nil || totals.Complaints != nil {
+			t.Errorf("%s: %s, want every consent figure null: the consent source was never walked", name, totalsLine(totals))
+		}
+	}
+	if num(got.Totals.Sent) != "10" || rate(got.Totals.OpenRate) != "0.5" || num(got.Totals.UniqueOpens) != "5" {
+		t.Errorf("the week: %s, want the walked sources' 10 sent and 5 opened", totalsLine(got.Totals))
+	}
+	for i, p := range append(append([]EmailPoint{}, got.Series...), got.PreviousSeries...) {
+		if p.Unsubscribes != nil || p.Subscribes != nil || p.Bounces != nil || p.Complaints != nil {
+			t.Errorf("point %d: %s, want its consent figures null", i, pointLine(p))
+		}
+		if p.Sent == nil {
+			t.Errorf("point %d: %s, want its sends measured", i, pointLine(p))
+		}
+	}
+	if len(got.Audiences) != 0 {
+		t.Errorf("audiences %s, want none listed: the consent source was never walked", audiencesLine(got.Audiences))
+	}
+	if len(got.Campaigns) != 1 {
+		t.Errorf("campaigns %s, want the one campaign: its sources are walked", figuresLine(got.Campaigns))
+	}
+}
+
+// A source whose walk was started later -- a first walk that could not read
+// its first page over a longer history (rollup.go) -- has nothing measured
+// before its start: the deliveries walk from the fourteenth, so the days
+// before have null sends and rates, while their opens, whose walk started at
+// the horizon, are measured. The week and the week before both begin before
+// the start, so their delivery figures and their rates are null, and the
+// lists that carry sends are not listed.
+func TestDaysBeforeASourcesWalkStartAreNull(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	a := statFact{account: f.id("a"), campaign: f.id("camp")}
+	week := []string{"2041-06-11", "2041-06-12", "2041-06-13", "2041-06-14", "2041-06-15", "2041-06-16", "2041-06-17"}
+	for _, d := range week {
+		f.of(kindOpenUnique, f.times(10, kindSent, day(d), a)[:4], day(d), a)
+	}
+	f.times(2, kindSubscribe, day("2041-06-12"), statFact{account: a.account, audience: f.id("aud")})
+	f.walksFrom(sourceDelivery, day("2041-06-14"))
+
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	var want []string
+	for i, d := range week {
+		subscribes := "0"
+		if d == "2041-06-12" {
+			subscribes = "2"
+		}
+		if i < 3 {
+			want = append(want, d+" sent=null uniqueOpens=4 uniqueClicks=0 unsubscribes=0 subscribes="+subscribes+" bounces=0 complaints=0 failed=null suppressed=null openRate=null clickRate=null")
+			continue
+		}
+		want = append(want, d+" sent=10 uniqueOpens=4 uniqueClicks=0 unsubscribes=0 subscribes=0 bounces=0 complaints=0 failed=0 suppressed=0 openRate=0.4 clickRate=0")
+	}
+	wantSeries(t, "the week", got.Series, want)
+	for name, totals := range map[string]EmailTotals{"the week": got.Totals, "the week before": got.Previous} {
+		if totals.Sent != nil || totals.OpenRate != nil || totals.Opens == nil || totals.Subscribes == nil {
+			t.Errorf("%s: %s, want its delivery figures and rates null and its opens and subscribes measured", name, totalsLine(totals))
+		}
+	}
+	if len(got.Campaigns)+len(got.Automations)+len(got.Accounts) != 0 || len(got.Audiences) != 1 {
+		t.Errorf("campaigns %s, automations %s, accounts %s, audiences %s: want only the audiences, whose walk began before the week",
+			figuresLine(got.Campaigns), automationsLine(got.Automations), figuresLine(got.Accounts), audiencesLine(got.Audiences))
+	}
+}
+
+// A source walked with nothing in it is measured, and reads zero: the walk
+// recorded how far it read though it found no row (rollup.go), which is what
+// tells "walked, nothing there" from "never walked". Deliveries and nothing
+// else: no open is a 0% open rate, not a missing one.
+func TestASourceWalkedWithNoRowsReadsMeasuredZeros(t *testing.T) {
+	f := newEmptyTableFixture(t)
+	f.firstRecorded(day("2041-06-01"))
+	f.times(10, kindSent, day("2041-06-12"), statFact{account: f.id("a"), campaign: f.id("camp")})
+
+	got := f.read(staff(), nil, statsperiod.Last7Days)
+	if want := "sent=10 delivered=0 undelivered=0 failed=0 skipped=0 suppressed=0 opens=0 clicks=0 uniqueOpens=0 uniqueClicks=0 unsubscribes=0 bounces=0 complaints=0 subscribes=0 openRate=0 clickRate=0"; totalsLine(got.Totals) != want {
+		t.Errorf("the week:\n  got  %s\n  want %s", totalsLine(got.Totals), want)
+	}
+	for i, p := range got.Series {
+		if p.UniqueOpens == nil || p.Subscribes == nil {
+			t.Errorf("point %d: %s, want the walked sources' figures measured", i, pointLine(p))
+		}
+	}
+}
+
+// enginePayload asks the engine itself, as the wire does, and answers the one
+// row's statistics payload.
+func enginePayload(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, call string) map[string]any {
+	t.Helper()
+	res, err := eng.Execute(ctx, call)
+	if err != nil {
+		t.Fatalf("%s: %v", call, err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) != 1 || rows[0]["concept"] != statisticsConcept {
+		t.Fatalf("%s answered %v, want one %s row", call, rows, statisticsConcept)
+	}
+	if payload, ok := rows[0]["payload"].(map[string]any); ok {
+		return payload
+	}
+	return rows[0]
+}
+
+// THE OWNER'S MOST IMPORTANT PROPERTY, through the engine's own registered
+// plug-in, as the OS asks it: a member of organization a reads a's figures and
+// nothing of b's, whether they name nobody or name b. The registered plug-in
+// counts its period back from the real clock, so these facts are dated today
+// rather than in the band, and every source is walked through now.
+func TestAMemberReadsTheirOwnOrganizationThroughTheEngine(t *testing.T) {
+	eng, db := statsEngine(t)
+	f := newClockFixture(t)
+	a, b, member := f.id("org-a"), f.id("org-b"), f.id("member")
+	joinOrganization(t, eng, a, member)
+	today := dayOf(time.Now())
+	f.times(10, kindSent, today, statFact{account: a, campaign: f.id("camp-a")})
+	f.times(20, kindSent, today, statFact{account: b, campaign: f.id("camp-b")})
+	walkFrom(t, db, time.Now())
+	t.Cleanup(func() { walkFrom(t, db, time.Now()) })
+
+	ctx := callerCtx(member, auth.RoleWriter)
+	own := enginePayload(t, eng, ctx, `builtin emailStatistics(period: "7d")`)
+	if sent := totalSent(own); sent != 10.0 {
+		t.Errorf("the member naming nobody: %v sent, want their organization's 10", sent)
+	}
+	if campaigns, _ := own["campaigns"].([]any); len(campaigns) != 1 {
+		t.Errorf("the member naming nobody: campaigns %v, want their organization's one", own["campaigns"])
+	}
+	wantNothingInPayload(t, "the member naming the other organization",
+		enginePayload(t, eng, ctx, `builtin emailStatistics(accountIds: [`+langparser.QuoteString(b)+`], period: "7d")`))
 }

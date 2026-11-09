@@ -10,8 +10,8 @@ import (
 
 // facts.go -- what one campaign row counts as (the 2026-11-08 statistics
 // design, section 5 and D18). Pure: a row in, its facts out. The walk that
-// reads the rows, the two lookups that attribute them and the table they are
-// written to are rollup.go's.
+// reads the rows, the lookups that attribute them and leave out a test run's,
+// and the table they are written to are rollup.go's.
 //
 // # One fact per source record and kind
 //
@@ -218,15 +218,15 @@ func journeyEnrollmentOf(requestID string) (enrollmentID string, ok bool) {
 
 // pageRefs are the records a page's facts are attributed through, each keyed
 // by the SourceID of the facts it attributes: the journey enrollment a
-// delivery's request names, and the recipient a subscription change is about.
+// delivery's request names, and the recipient a consent event is about.
 // attribute reads both in batches, once per page.
 type pageRefs struct {
 	enrollmentOf map[string]string
-	audienceOf   map[string]string
+	recipientOf  map[string]string
 }
 
 func newPageRefs() pageRefs {
-	return pageRefs{enrollmentOf: map[string]string{}, audienceOf: map[string]string{}}
+	return pageRefs{enrollmentOf: map[string]string{}, recipientOf: map[string]string{}}
 }
 
 // deliveryRefs notes the enrollment a journey send names.
@@ -240,17 +240,20 @@ func deliveryRefs(row map[string]any, refs pageRefs) {
 	}
 }
 
-// consentRefs notes the recipient a subscribe or an unsubscribe is about. The
-// other kinds carry no audience, so they ask for none.
+// consentRefs notes the recipient a consent event that makes a fact is about.
+// Its audience says two things: the audience a subscribe or an unsubscribe is
+// counted under, and, for every kind, whether the event is the organization's
+// testing audience's, which makes no fact (rollup.go, "Test runs are not
+// statistics"). A suppression makes no fact, so it asks for nothing.
 func consentRefs(row map[string]any, refs pageRefs) {
 	id := bareText(row, "id")
 	if id == "" {
 		return
 	}
 	switch text(row, "kind") {
-	case "grant", "withdraw":
+	case "grant", "withdraw", "bounce", "complaint":
 		if recipient := bareText(row, "recipientId"); recipient != "" {
-			refs.audienceOf[id] = recipient
+			refs.recipientOf[id] = recipient
 		}
 	}
 }

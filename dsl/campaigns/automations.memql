@@ -177,7 +177,8 @@ automation composeEmailRun {
 /// second as the website statistics rollup. Each run walks each source from its watermark less five
 /// minutes -- a row stamped by a writer whose clock lags is still read -- and records one fact per
 /// record and kind, so rows read twice count once. The first run starts four hundred days back and
-/// catches up forty pages a source per run.
+/// catches up forty pages a source per run. A test run, and the consent events of an organization's
+/// testing audience, make no fact.
 ///
 /// THE WORK IS A BUILTIN, builtin emailStatisticsRollup in component/emailstats, because its output
 /// is no concept: a side table of facts the statistics read groups with SQL. It reads the campaign

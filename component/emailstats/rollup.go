@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -26,8 +27,9 @@ import (
 //
 // Three sources -- deliveries, engagement events, consent events -- each walked
 // by its own @serverOnly query, in row.createdAt order, from that source's
-// watermark less five minutes (watermarkOverlap), or from four hundred days
-// back when it has none. The engine answers each row at its latest version, so
+// watermark less five minutes (watermarkOverlap), or when it has none from
+// four hundred days back or the later start an earlier first walk left (below).
+// The engine answers each row at its latest version, so
 // a delivery whose outcome changed since the last run is read again and adds
 // what it newly says (facts.go). The query's `row.createdAt >= since` is a
 // top-level conjunct, so the engine collapses only the versions written since
@@ -38,6 +40,49 @@ import (
 // fact that was not written, and a run that dies part way -- a replica
 // stopping, the cron lead moving to another node -- leaves the next run to
 // carry on from the last page that landed.
+//
+// # Walked, nothing there
+//
+// The page a walk reads LAST moves the watermark further: to the clock as the
+// walk asked for it, rows or none. Every row written before that instant had
+// been read, or was a late commit inside the overlap the next run reads again
+// (below), so the walk is through that instant. Without it a source with
+// nothing new keeps the watermark of its last row -- days old on a quiet
+// cluster, absent on one that never had a row -- and the statistics read,
+// which counts a figure only where its sources have been walked
+// (statistics.go, "Absent is never zero"), could not tell a source walked to
+// the clock with nothing in it from one the rollup has not reached. A walk
+// that stops at its page bound with rows still to read has not read what
+// comes after, and keeps the newest row it wrote
+// (TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy).
+//
+// # A first walk that cannot read its first page
+//
+// A first walk -- a source with no watermark -- starts four hundred days back
+// (firstWalkFrom), and its first page collapses every version the source
+// wrote since then (latestScanLowerBounds, component/memql). Measured at
+// about 1.1 s per 100,000 versions, that page outlasts the request pool's 8 s
+// statement timeout from roughly 700,000 versions, some 350,000 deliveries. A
+// failed page writes no watermark, so every run would start over from four
+// hundred days back, fail the same way, and the source's statistics would
+// never begin.
+//
+// So when the FIRST page of a FIRST walk fails -- any failure of the engine's
+// read of it, though the timeout is the one it exists for and is logged apart
+// -- the next first walk starts half way from this one's start to the clock
+// it asked the page by: 400 days, then 200, then 100, down to a floor of a day
+// (firstWalkFloor), at a UTC midnight. The start is recorded in
+// email_stat_walk_start, not in memory, so a run on another node after the
+// cron lead moves carries on from it, and each move is a Warn naming the
+// source and the start (plugin.go). A start only moves later (GREATEST): two
+// replicas that both failed leave the later of their starts. Once a walk
+// reads a page, the watermark takes over, and the start stays where it was
+// as the beginning of that source's record: the statistics read counts
+// nothing of the source before it (statistics_coverage.go), so the days the
+// walk gave up read as not measured rather than as zero. Only the read of the
+// page moves it, and not when the run's own context ended: what the page costs
+// grows with the span, while attributing or writing a page, or a node
+// stopping, does not (TestAFirstWalkThatCannotReadItsFirstPageStartsLater).
 //
 // # Why the overlap
 //
@@ -86,6 +131,48 @@ import (
 // error for that source, never a quiet stop or a loop
 // (TestTheFirstRunWalksAtMostFortyPagesPerSource).
 //
+// # Test runs are not statistics
+//
+// A test run is a campaign of its own (component/campaigns, test_audience.go):
+// testSourceCampaignId names the campaign it tests, it is sent to the
+// organization's testing audience, and its deliveries, opens and clicks each
+// name it. Counted, its sends would swell Sent and it would take a place among
+// the campaigns the Overview ranks, where the campaigns feed, which leaves
+// test runs out, has none to show for it. So a delivery, an open, a click or a
+// consent event whose campaign is a test run makes no fact. Nor does a consent
+// event about a recipient of an organization's testing audience: its people
+// are the organization's own, there to receive tests, and their joining is
+// not a subscriber's. A row left out is still read, and the watermark moves
+// past it like any other.
+//
+// Both are asked of the engine for each page AFTER the page is read, one
+// batched lookup each (campaignTestRunsByIds, testingAudiencesByIds), and only
+// for what the page names:
+//
+//   - No window for a new test run. A test run's campaign row is written
+//     before its send is started, so every row naming it is written after it,
+//     and a lookup made after the page holding such a row always finds the
+//     run. Asked once at the start of a run, a test created while the run
+//     walked would be counted (TestATestRunCreatedDuringARunIsStillLeftOut).
+//   - A campaign is asked about once a run: the answer is kept for the rest of
+//     it, because a campaign is a test run or not from its first write.
+//     testSourceCampaignId is accepted by one mutation, createCampaignTestRun,
+//     which creates the campaign, and a write from outside the engine that
+//     would set or clear it is refused (validateOrganizationSensitiveChanges,
+//     component/memql).
+//   - The testing audience is asked about on every page and never kept, since
+//     an organization can choose another at any time. A consent event is left
+//     out when its audience is the testing audience by the time the walk
+//     reads it, which takes in a person who joined an audience before it was
+//     chosen if the walk had not yet read their joining
+//     (TestTheTestingAudiencesConsentEventsMakeNoFact). What the walk read
+//     before the audience was chosen stays counted, as every fact does once
+//     written (facts.go): people added to an audience that becomes the testing
+//     audience after a run has read their joining count as its subscribers on
+//     the day they joined. That is the one window left.
+//
+// (TestATestRunsSendsOpensAndClicksMakeNoFact.)
+//
 // # Through the engine, never SQL over the graph
 //
 // The walk reads campaign rows only through named queries. Hand-written SQL
@@ -93,7 +180,20 @@ import (
 // the latest-version collapse, the canonical id spellings and the row
 // admission all live in the engine, and a statement here that re-derived them
 // would be one more place to get them wrong. What is plain SQL is this
-// package's own two tables, which nothing else reads or writes.
+// package's own tables -- the facts, the watermarks and the walks' starts --
+// which nothing else reads or writes.
+//
+// # The request pool's statement timeout stands
+//
+// The rollup writes through the request pool (PluginContext.BunDB), whose
+// backends carry an 8 s server statement_timeout under pgdriver's 10 s client
+// read deadline (component/database, sessionConnParams and
+// maintenance_session.go). Nothing here raises the server's limit: a
+// statement allowed past the client's deadline would be cut off by the client
+// and run on in the server, holding its locks, where at 8 s the server ends it
+// first and says so. Its statements are one page's facts and watermark, and
+// one day's retention, well inside that
+// (TestTheRollupKeepsThePoolsStatementTimeout).
 //
 // # Multi-node
 //
@@ -152,15 +252,22 @@ const (
 	// continuation at most; anything more is an engine answering a question
 	// it was not asked.
 	maxLookupPages = 4
-
-	// statementTimeout bounds each statement on this package's own tables.
-	statementTimeout = "30s"
 )
 
-// retention is retentionDays as a duration: how long a fact is kept and how far
-// back a first walk starts. A variable so a test can put a first walk's start
-// where only its own rows are.
-var retention = retentionDays * 24 * time.Hour
+// retention is retentionDays as a duration: how long a fact is kept, which
+// the run's delete is counted from, and the furthest back any walk starts. A
+// constant: a test that moved it would move the delete, across a table other
+// tests write to.
+const retention = retentionDays * 24 * time.Hour
+
+// firstWalkFrom is where a source's first walk starts when nothing has moved
+// its start: retention back from the run's clock. A variable so a test can
+// put a first walk at its own rows without moving the delete.
+var firstWalkFrom = func(now time.Time) time.Time { return now.Add(-retention) }
+
+// firstWalkFloor is the shortest span a first walk that cannot read its first
+// page is moved to: see "A first walk that cannot read its first page".
+const firstWalkFloor = 24 * time.Hour
 
 // walkPageSize is how many rows one page of a walk reads: the queries' own
 // `paginate 500`, the engine's per-query row cap. A variable so a test can
@@ -193,11 +300,14 @@ var sources = []source{
 	{name: sourceConsent, query: "paginate(query consentEventsWrittenSince(since: %s), %d)", facts: consentFacts, refs: consentRefs},
 }
 
-// The attribution lookups, formats taking the JSON list of ids and the page
-// size.
+// The lookups that attribute a page's facts, and the two that say which of its
+// rows are a test's (see "Test runs are not statistics"): formats taking the
+// JSON list of ids and the page size.
 const (
-	journeyLookup  = "paginate(query journeyEnrollmentsByIds(ids: %s), %d)"
-	audienceLookup = "paginate(query recipientAudiencesByIds(ids: %s), %d)"
+	journeyLookup         = "paginate(query journeyEnrollmentsByIds(ids: %s), %d)"
+	audienceLookup        = "paginate(query recipientAudiencesByIds(ids: %s), %d)"
+	testRunLookup         = "paginate(query campaignTestRunsByIds(ids: %s), %d)"
+	testingAudienceLookup = "paginate(query testingAudiencesByIds(ids: %s), %d)"
 )
 
 // sourceFailure is one source's walk failing. The other sources still run.
@@ -223,7 +333,7 @@ func runRollup(ctx context.Context, engine Engine, db *bun.DB, now time.Time) (R
 	if db == nil {
 		return rep, errors.New("this node has no database handle, so the email statistics cannot be written")
 	}
-	// Internal origin, because the five queries are @serverOnly: the
+	// Internal origin, because the seven queries are @serverOnly: the
 	// principal reads every organization's rows, and nothing on the wire may.
 	// A fresh read, because the result cache must not answer a walk with a
 	// page from before the rows it is looking for were written. A roots-only
@@ -238,10 +348,19 @@ func runRollup(ctx context.Context, engine Engine, db *bun.DB, now time.Time) (R
 	began := time.Now()
 	clock := func() time.Time { return now.UTC().Add(time.Since(began)) }
 	horizon := now.UTC().Add(-retention)
+	firstFrom := firstWalkFrom(now.UTC())
+	if firstFrom.Before(horizon) {
+		firstFrom = horizon
+	}
+
+	// Which campaigns the run has found to be test runs, and which not: kept
+	// for the run, since a campaign is one or the other from its first write.
+	// See "Test runs are not statistics".
+	testRuns := map[string]bool{}
 
 	var failures []error
 	for _, src := range sources {
-		w, err := walkSource(ctx, engine, db, src, clock, horizon)
+		w, err := walkSource(ctx, engine, db, src, clock, horizon, firstFrom, testRuns)
 		rep.Rows[src.name] = w.rows
 		rep.Facts += w.facts
 		if w.behind {
@@ -266,8 +385,12 @@ type walked struct {
 }
 
 // walkSource reads one source from its watermark, page by page, writing each
-// page's facts and moving the watermark past it before reading the next.
-func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, clock func() time.Time, horizon time.Time) (walked, error) {
+// page's facts and moving the watermark past it before reading the next. A
+// source with no watermark walks for the first time, from firstFrom or the
+// later start an earlier first walk left (see "A first walk that cannot read
+// its first page"). testRuns is the run's answers about test runs, which the
+// walk adds to (attribute).
+func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, clock func() time.Time, horizon, firstFrom time.Time, testRuns map[string]bool) (walked, error) {
 	var w walked
 	from, found, err := readWatermark(ctx, db, src.name)
 	if err != nil {
@@ -290,6 +413,15 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		if s := from.Add(-watermarkOverlap); s.After(since) {
 			since = s
 		}
+	} else {
+		since = firstFrom
+		start, moved, err := readWalkStart(ctx, db, src.name)
+		if err != nil {
+			return w, err
+		}
+		if moved && start.After(since) {
+			since = start
+		}
 	}
 	query := fmt.Sprintf(src.query, quoteInstant(since), walkPageSize)
 
@@ -298,7 +430,21 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 		if read >= maxPagesReadPerRun {
 			return w, fmt.Errorf("read %d pages without passing the rows written in the five minutes before the watermark (%s); the walk stops here rather than reading on", read, from.UTC().Format(time.RFC3339))
 		}
+		// The clock as this page is asked for: if it is the last page, the
+		// walk is through this instant. See "Walked, nothing there" above.
+		askedAt := clock()
 		res, err := engine.Execute(memql.ContextWithCursor(ctx, cursor), query)
+		if err != nil && !found && read == 0 && ctx.Err() == nil {
+			// The first page of a first walk: start the next run's first walk
+			// later. See "A first walk that cannot read its first page". Not
+			// when the run's own context ended -- the node stopping, the lead
+			// moving -- which says nothing about how long the history is.
+			next := laterStart(since, askedAt)
+			if serr := recordWalkStart(ctx, db, src.name, next); serr != nil {
+				return w, errors.Join(fmt.Errorf("read a page: %w", err), serr)
+			}
+			return w, &firstWalkMoved{Start: next, TimedOut: isStatementTimeout(err), Err: fmt.Errorf("read a page: %w", err)}
+		}
 		if err != nil {
 			return w, fmt.Errorf("read a page: %w", err)
 		}
@@ -325,14 +471,20 @@ func walkSource(ctx context.Context, engine Engine, db *bun.DB, src source, cloc
 				src.refs(row, refs)
 			}
 		}
-		facts = uniqueFacts(facts)
-		if err := attribute(ctx, engine, facts, refs.enrollmentOf, refs.audienceOf); err != nil {
+		// Asked after the page is read: see "Test runs are not statistics".
+		if facts, err = attribute(ctx, engine, uniqueFacts(facts), refs, testRuns); err != nil {
 			return w, err
 		}
 		// Capped at the clock as it reads now: see "Never past the clock".
 		through := newest
 		if now := clock(); through.After(now) {
 			through = now
+		}
+		// The last page is through the clock it was asked by, rows or none:
+		// see "Walked, nothing there". askedAt is never past the clock, so the
+		// cap above still holds.
+		if next == "" && askedAt.After(through) {
+			through = askedAt
 		}
 		n, err := recordPage(ctx, db, src.name, facts, through)
 		if err != nil {
@@ -364,11 +516,16 @@ func quoteInstant(t time.Time) string {
 	return langparser.QuoteString(t.UTC().Format(time.RFC3339Nano))
 }
 
-// attribute fills JourneyID and AudienceID (D18). enrollmentOf names, by a
-// delivery fact's SourceID, the journey enrollment the delivery's request id
-// names; audienceOf names, by a subscription change's SourceID, the recipient
-// it is about. Both are read through the engine in batches -- two lookups per
-// page at most, each of at most lookupBatch ids -- under the walk's context.
+// attribute fills JourneyID and AudienceID (D18) and answers the facts to
+// record: the page's, less a test run's and the testing audience's (see "Test
+// runs are not statistics"). refs.enrollmentOf names, by a delivery fact's
+// SourceID, the journey enrollment the delivery's request id names;
+// refs.recipientOf names, by a consent fact's SourceID, the recipient it is
+// about. testRuns holds the run's answers so far, by campaign, true for a
+// test run; the page's campaigns it has no answer for are asked about and
+// added. Every lookup is read through the engine in batches -- four per page
+// at most, each of at most lookupBatch ids, and none when the page names
+// nothing to ask about -- under the walk's context.
 //
 // A JOURNEY ONLY IN ITS OWN ORGANIZATION. A request id is a string the sender
 // chose -- an event automation names its own -- and the lookup runs as the
@@ -384,36 +541,103 @@ func quoteInstant(t time.Time) string {
 // A record the lookup does not find leaves its facts unattributed: a send
 // whose request names no enrollment still counts in its organization's
 // totals, under no journey.
-func attribute(ctx context.Context, engine Engine, facts []Fact, enrollmentOf, audienceOf map[string]string) error {
-	journeys, err := lookup(ctx, engine, journeyLookup, enrollmentOf)
+func attribute(ctx context.Context, engine Engine, facts []Fact, refs pageRefs, testRuns map[string]bool) ([]Fact, error) {
+	journeys, err := lookup(ctx, engine, journeyLookup, refs.enrollmentOf)
 	if err != nil {
-		return fmt.Errorf("read the journeys of the page's journey sends: %w", err)
+		return nil, fmt.Errorf("read the journeys of the page's journey sends: %w", err)
 	}
-	audiences, err := lookup(ctx, engine, audienceLookup, audienceOf)
+	recipients, err := lookup(ctx, engine, audienceLookup, refs.recipientOf)
 	if err != nil {
-		return fmt.Errorf("read the audiences of the page's subscription changes: %w", err)
+		return nil, fmt.Errorf("read the audiences of the page's consent events: %w", err)
 	}
-	for i := range facts {
-		f := &facts[i]
+	if err := askTestRuns(ctx, engine, facts, testRuns); err != nil {
+		return nil, fmt.Errorf("read which of the page's campaigns are test runs: %w", err)
+	}
+	testing, err := testingAudiences(ctx, engine, recipients)
+	if err != nil {
+		return nil, fmt.Errorf("read which of the page's audiences are testing audiences: %w", err)
+	}
+	kept := make([]Fact, 0, len(facts))
+	for _, f := range facts {
+		if testRuns[f.CampaignID] {
+			continue
+		}
 		switch f.Kind {
 		case kindSent, kindDelivered, kindUndelivered, kindFailed, kindSkipped, kindSuppressed:
-			enrollmentID, named := enrollmentOf[f.SourceID]
+			enrollmentID, named := refs.enrollmentOf[f.SourceID]
 			enrollment, found := journeys[enrollmentID]
-			if !named || !found {
+			if named && found {
+				if account := bareText(enrollment, "accountId"); account != "" && account == f.AccountID {
+					f.JourneyID = bareText(enrollment, "journeyId")
+				}
+			}
+		case kindSubscribe, kindUnsubscribe, kindBounce, kindComplaint:
+			audience := ""
+			if recipientID, named := refs.recipientOf[f.SourceID]; named {
+				audience = bareText(recipients[recipientID], "audienceId")
+			}
+			if testing[audience] {
 				continue
 			}
-			if account := bareText(enrollment, "accountId"); account != "" && account == f.AccountID {
-				f.JourneyID = bareText(enrollment, "journeyId")
-			}
-		case kindSubscribe, kindUnsubscribe:
-			recipientID, named := audienceOf[f.SourceID]
-			recipient, found := audiences[recipientID]
-			if named && found {
-				f.AudienceID = bareText(recipient, "audienceId")
+			// Only a subscription change is counted under an audience.
+			if f.Kind == kindSubscribe || f.Kind == kindUnsubscribe {
+				f.AudienceID = audience
 			}
 		}
+		kept = append(kept, f)
+	}
+	return kept, nil
+}
+
+// askTestRuns asks which of the facts' campaigns the run has no answer for
+// are test runs, and records the answer for each in testRuns: true for a test
+// run, false for any other campaign, one the lookup does not find included.
+// The lookup answers test runs alone (campaignTestRunsByIds).
+func askTestRuns(ctx context.Context, engine Engine, facts []Fact, testRuns map[string]bool) error {
+	unasked := map[string]string{}
+	for _, f := range facts {
+		if _, asked := testRuns[f.CampaignID]; f.CampaignID != "" && !asked {
+			unasked[f.CampaignID] = f.CampaignID
+		}
+	}
+	if len(unasked) == 0 {
+		return nil
+	}
+	runs, err := lookup(ctx, engine, testRunLookup, unasked)
+	if err != nil {
+		return err
+	}
+	for id := range unasked {
+		_, isRun := runs[id]
+		testRuns[id] = isRun
 	}
 	return nil
+}
+
+// testingAudiences answers which of the audiences the page's recipients
+// belong to are an organization's testing audience, as the settings stand
+// now, after the page was read.
+func testingAudiences(ctx context.Context, engine Engine, recipients map[string]map[string]any) (map[string]bool, error) {
+	audiences := map[string]string{}
+	for _, recipient := range recipients {
+		if audience := bareText(recipient, "audienceId"); audience != "" {
+			audiences[audience] = audience
+		}
+	}
+	testing := map[string]bool{}
+	if len(audiences) == 0 {
+		return testing, nil
+	}
+	settings, err := lookup(ctx, engine, testingAudienceLookup, audiences)
+	if err != nil {
+		return nil, err
+	}
+	for _, setting := range settings {
+		if audience := bareText(setting, "audienceId"); audience != "" {
+			testing[audience] = true
+		}
+	}
+	return testing, nil
 }
 
 // lookup answers the row of each distinct record the refs name, keyed by the
@@ -492,16 +716,15 @@ type factRow struct {
 }
 
 // recordPage writes one page's facts and moves the source's watermark to
-// through -- the page's newest row, capped at the clock -- in one transaction,
-// and answers how many facts were new. The write never moves the watermark
-// back (GREATEST): a run finishing behind a faster one leaves it where the
-// faster one got. Only dropWatermarkAhead lowers one.
+// through -- the page's newest row, capped at the clock, or for the last page
+// the clock it was asked by -- in one transaction, and answers how many facts
+// were new. The write never moves the watermark back (GREATEST): a run
+// finishing behind a faster one leaves it where the faster one got. Only
+// dropWatermarkAhead lowers one. Its statements run under the request pool's
+// own statement timeout: see "The request pool's statement timeout stands".
 func recordPage(ctx context.Context, db *bun.DB, source string, facts []Fact, through time.Time) (int, error) {
 	var inserted int64
 	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SET LOCAL statement_timeout = '"+statementTimeout+"'"); err != nil {
-			return fmt.Errorf("bound the page's statements: %w", err)
-		}
 		if len(facts) > 0 {
 			rows := make([]factRow, 0, len(facts))
 			for _, f := range facts {
@@ -543,6 +766,77 @@ func readWatermark(ctx context.Context, db *bun.DB, source string) (time.Time, b
 	return through, true, nil
 }
 
+// firstWalkMoved is a first walk whose first page failed, and where the next
+// one starts: see "A first walk that cannot read its first page".
+type firstWalkMoved struct {
+	Start time.Time
+	// TimedOut is whether the page ended at the statement timeout, which is
+	// the failure the move exists for and is logged apart.
+	TimedOut bool
+	Err      error
+}
+
+func (m *firstWalkMoved) Error() string {
+	return fmt.Sprintf("%v; the next first walk starts from %s", m.Err, m.Start.Format(time.DateOnly))
+}
+
+func (m *firstWalkMoved) Unwrap() error { return m.Err }
+
+// laterStart is where the next first walk starts after one that could not
+// read its first page from since: half way from since to the clock it asked
+// by, no nearer the clock than firstWalkFloor, at the UTC midnight that day
+// begins with, so the days from it on are walked whole -- and never before
+// since, which the midnight could otherwise put it at a walk already near the
+// floor.
+func laterStart(since, askedAt time.Time) time.Time {
+	next := since.Add(askedAt.Sub(since) / 2)
+	if latest := askedAt.Add(-firstWalkFloor); next.After(latest) {
+		next = latest
+	}
+	if next = dayOf(next); next.Before(since) {
+		return since
+	}
+	return next
+}
+
+// isStatementTimeout reports whether a read ended at the server's statement
+// timeout (SQLSTATE 57014): the driver's own error when the engine passes it
+// on, and the text it renders when the engine passes on only the text.
+func isStatementTimeout(err error) bool {
+	var pgerr pgdriver.Error
+	if errors.As(err, &pgerr) {
+		return pgerr.StatementTimeout()
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "57014") || strings.Contains(text, "canceling statement due to statement timeout")
+}
+
+// readWalkStart answers where a source's first walk starts when an earlier
+// first walk moved it, and false when none has.
+func readWalkStart(ctx context.Context, db *bun.DB, source string) (time.Time, bool, error) {
+	var start time.Time
+	err := db.NewRaw(`SELECT starts_at FROM email_stat_walk_start WHERE source = ?`, source).Scan(ctx, &start)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("read where the first walk starts: %w", err)
+	}
+	return start, true, nil
+}
+
+// recordWalkStart records where a source's next first walk starts. It never
+// moves a start back: two replicas whose first walks both failed leave the
+// later of the starts they computed.
+func recordWalkStart(ctx context.Context, db *bun.DB, source string, start time.Time) error {
+	if _, err := db.NewRaw(`INSERT INTO email_stat_walk_start (source, starts_at) VALUES (?, ?)
+		ON CONFLICT (source) DO UPDATE SET starts_at = GREATEST(email_stat_walk_start.starts_at, EXCLUDED.starts_at)`,
+		source, start.UTC()).Exec(ctx); err != nil {
+		return fmt.Errorf("record where the next first walk starts: %w", err)
+	}
+	return nil
+}
+
 // dropWatermarkAhead removes a source's watermark when it is past tolerance,
 // the clock plus the overlap -- the one write that lowers a watermark. The
 // condition is in the statement, so a watermark another run has just written
@@ -554,19 +848,16 @@ func dropWatermarkAhead(ctx context.Context, db *bun.DB, source string, toleranc
 	return nil
 }
 
-// deleteExpired removes the facts dated before the horizon's UTC day.
+// deleteExpired removes the facts dated before the horizon's UTC day: one
+// statement, under the request pool's own statement timeout (see "The request
+// pool's statement timeout stands"). Each day it finds one day of facts past
+// the horizon, so it stays small; a delete the timeout ends removes nothing,
+// and the next run's retention pass deletes the same days.
 func deleteExpired(ctx context.Context, db *bun.DB, horizon time.Time) (int64, error) {
-	var deleted int64
-	err := db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SET LOCAL statement_timeout = '"+statementTimeout+"'"); err != nil {
-			return err
-		}
-		res, err := tx.NewRaw(`DELETE FROM email_stat_fact WHERE day < ?::date`, horizon.UTC().Format(time.DateOnly)).Exec(ctx)
-		if err != nil {
-			return err
-		}
-		deleted, _ = res.RowsAffected()
-		return nil
-	})
-	return deleted, err
+	res, err := db.NewRaw(`DELETE FROM email_stat_fact WHERE day < ?::date`, horizon.UTC().Format(time.DateOnly)).Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	deleted, _ := res.RowsAffected()
+	return deleted, nil
 }

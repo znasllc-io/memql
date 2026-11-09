@@ -301,8 +301,16 @@ func TestIdsAreBare(t *testing.T) {
 	refs := newPageRefs()
 	deliveryRefs(map[string]any{"id": "v1:campaigns:delivery:d9", "requestId": journeyRequest(strings.Repeat("ab", 32), "welcome")}, refs)
 	consentRefs(map[string]any{"id": "v1:campaigns:consentEvent:ce-9", "kind": "grant", "recipientId": "v1:campaigns:recipient:rcp-9"}, refs)
-	if refs.enrollmentOf["d9"] != strings.Repeat("ab", 32) || refs.audienceOf["ce-9"] != "rcp-9" {
-		t.Errorf("the attribution references are %v and %v, want them keyed and valued by bare ids", refs.enrollmentOf, refs.audienceOf)
+	if refs.enrollmentOf["d9"] != strings.Repeat("ab", 32) || refs.recipientOf["ce-9"] != "rcp-9" {
+		t.Errorf("the attribution references are %v and %v, want them keyed and valued by bare ids", refs.enrollmentOf, refs.recipientOf)
+	}
+	// Every kind that makes a fact notes its recipient, whose audience may be
+	// the testing audience; a suppression makes none and asks for nothing.
+	for kind, noted := range map[string]bool{"withdraw": true, "bounce": true, "complaint": true, "suppress": false} {
+		consentRefs(map[string]any{"id": "v1:campaigns:consentEvent:ce-" + kind, "kind": kind, "recipientId": "v1:campaigns:recipient:rcp-" + kind}, refs)
+		if got := refs.recipientOf["ce-"+kind]; (got == "rcp-"+kind) != noted {
+			t.Errorf("a %s notes the recipient %q; want it noted: %v", kind, got, noted)
+		}
 	}
 }
 
@@ -339,16 +347,20 @@ func TestJourneyEnrollmentOfParsesOnlyAJourneyRequestId(t *testing.T) {
 	}
 }
 
-// fakeEngine answers the two attribution lookups from fixed tables and
-// records every id it was asked for, one entry per call.
+// fakeEngine answers the attribution lookups and the two that say which rows
+// are a test's from fixed tables, and records every id it was asked for, one
+// entry per call.
 type fakeEngine struct {
 	journeys  map[string]string
 	audiences map[string]string
-	calls     []string
-	asked     [][]string
+	// testRuns are the campaigns that are test runs, testing the audiences
+	// that are an organization's testing audience.
+	testRuns, testing map[string]bool
+	calls             []string
+	asked             [][]string
 }
 
-var lookupCall = regexp.MustCompile(`query (journeyEnrollmentsByIds|recipientAudiencesByIds)\(ids: (\[[^\]]*\])\)`)
+var lookupCall = regexp.MustCompile(`query (journeyEnrollmentsByIds|recipientAudiencesByIds|campaignTestRunsByIds|testingAudiencesByIds)\(ids: (\[[^\]]*\])\)`)
 
 func (e *fakeEngine) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
 	m := lookupCall.FindStringSubmatch(query)
@@ -372,6 +384,14 @@ func (e *fakeEngine) Execute(_ context.Context, query string) (*memql.ExecuteRes
 			if audience, ok := e.audiences[id]; ok {
 				rows = append(rows, map[string]any{"id": "v1:campaigns:recipient:" + id, "audienceId": "v1:campaigns:audience:" + audience})
 			}
+		case "campaignTestRunsByIds":
+			if e.testRuns[id] {
+				rows = append(rows, map[string]any{"id": "v1:campaigns:campaign:" + id})
+			}
+		case "testingAudiencesByIds":
+			if e.testing[id] {
+				rows = append(rows, map[string]any{"id": "v1:campaigns:testSettings:settings-" + id, "audienceId": "v1:campaigns:audience:" + id})
+			}
 		}
 	}
 	return memql.NewResultWithOutput(rows), nil
@@ -393,9 +413,9 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 	}
 	refs.enrollmentOf["d-other-org"] = fmt.Sprintf("%064x", 7)
 	refs.enrollmentOf["d-no-org"] = fmt.Sprintf("%064x", 8)
-	refs.audienceOf["ce-grant"] = "rcp-1"
-	refs.audienceOf["ce-withdraw"] = "rcp-2"
-	refs.audienceOf["ce-bounce"] = "rcp-1"
+	refs.recipientOf["ce-grant"] = "rcp-1"
+	refs.recipientOf["ce-withdraw"] = "rcp-2"
+	refs.recipientOf["ce-bounce"] = "rcp-1"
 	engine.audiences["rcp-1"] = "aud-1"
 	engine.audiences["rcp-2"] = "aud-2"
 	facts = append(facts,
@@ -410,7 +430,8 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 		Fact{Kind: kindSubscribe, SourceID: "ce-no-recipient"},
 	)
 
-	if err := attribute(context.Background(), engine, facts, refs.enrollmentOf, refs.audienceOf); err != nil {
+	facts, err := attribute(context.Background(), engine, facts, refs, map[string]bool{})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,9 +479,95 @@ func TestAttributionReadsInBatchesAndFillsOnlyItsKinds(t *testing.T) {
 
 	// No reference, no lookup.
 	quiet := &fakeEngine{}
-	if err := attribute(context.Background(), quiet, []Fact{{Kind: kindSent, SourceID: "d1"}}, map[string]string{}, map[string]string{}); err != nil || len(quiet.calls) != 0 {
+	if _, err := attribute(context.Background(), quiet, []Fact{{Kind: kindSent, SourceID: "d1"}}, newPageRefs(), map[string]bool{}); err != nil || len(quiet.calls) != 0 {
 		t.Errorf("a page with nothing to attribute made %d lookups (error %v), want none", len(quiet.calls), err)
 	}
+}
+
+// A test run's facts and the testing audience's are left out, every other
+// fact is kept as it was, and a campaign is asked about once a run: the
+// second page asks only about the campaign it is the first to name. The
+// testing audience is asked about on every page, for the audiences the page's
+// recipients belong to.
+func TestATestRunsFactsAndTheTestingAudiencesAreLeftOut(t *testing.T) {
+	engine := &fakeEngine{
+		audiences: map[string]string{"rcp-tester": "aud-test", "rcp-member": "aud-live"},
+		testRuns:  map[string]bool{"camp-test": true},
+		testing:   map[string]bool{"aud-test": true},
+	}
+	refs := newPageRefs()
+	for source, recipient := range map[string]string{
+		"ce-tester": "rcp-tester", "ce-tester-bounce": "rcp-tester", "ce-tester-complaint": "rcp-tester",
+		"ce-member": "rcp-member", "ce-member-bounce": "rcp-member",
+	} {
+		refs.recipientOf[source] = recipient
+	}
+	testRuns := map[string]bool{}
+	got, err := attribute(context.Background(), engine, []Fact{
+		{Kind: kindSent, SourceID: "d-test", CampaignID: "camp-test"},
+		{Kind: kindDelivered, SourceID: "d-test", CampaignID: "camp-test"},
+		{Kind: kindOpen, SourceID: "ev-test", CampaignID: "camp-test"},
+		{Kind: kindOpenUnique, SourceID: "d-test", CampaignID: "camp-test"},
+		// A one-click withdraw from a forwarded test message: only its
+		// campaign says it is a test's.
+		{Kind: kindUnsubscribe, SourceID: "ce-run", CampaignID: "camp-test"},
+		{Kind: kindSubscribe, SourceID: "ce-tester"},
+		{Kind: kindBounce, SourceID: "ce-tester-bounce"},
+		{Kind: kindComplaint, SourceID: "ce-tester-complaint"},
+		{Kind: kindSent, SourceID: "d-live", CampaignID: "camp-live"},
+		{Kind: kindSubscribe, SourceID: "ce-member"},
+		{Kind: kindBounce, SourceID: "ce-member-bounce"},
+	}, refs, testRuns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := strings.Join(sortedKeys(byKey(got)), " "); keys != "bounce|ce-member-bounce sent|d-live subscribe|ce-member" {
+		t.Errorf("the page keeps %s, want the live send and the member's subscribe and bounce alone", keys)
+	}
+	if f := byKey(got)[kindSubscribe+"|ce-member"]; f.AudienceID != "aud-live" {
+		t.Errorf("the member's subscribe counts under %q, want aud-live", f.AudienceID)
+	}
+	if f := byKey(got)[kindBounce+"|ce-member-bounce"]; f.AudienceID != "" {
+		t.Errorf("the member's bounce was given the audience %q; only a subscription change is attributed to one", f.AudienceID)
+	}
+	if !testRuns["camp-test"] || testRuns["camp-live"] || len(testRuns) != 2 {
+		t.Errorf("the run's answers are %v, want camp-test a test run and camp-live not", testRuns)
+	}
+	asked := map[string][]string{}
+	for i, call := range engine.calls {
+		asked[call] = append(asked[call], engine.asked[i]...)
+	}
+	if ids := strings.Join(asked["campaignTestRunsByIds"], " "); ids != "camp-live camp-test" {
+		t.Errorf("the first page asked about the campaigns %q, want camp-live and camp-test", ids)
+	}
+	if ids := strings.Join(asked["testingAudiencesByIds"], " "); ids != "aud-live aud-test" {
+		t.Errorf("the first page asked about the audiences %q, want its recipients' aud-live and aud-test", ids)
+	}
+
+	engine.calls, engine.asked = nil, nil
+	got, err = attribute(context.Background(), engine, []Fact{
+		{Kind: kindSent, SourceID: "d-test-2", CampaignID: "camp-test"},
+		{Kind: kindSent, SourceID: "d-live-2", CampaignID: "camp-live"},
+		{Kind: kindSent, SourceID: "d-new", CampaignID: "camp-new"},
+	}, newPageRefs(), testRuns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := strings.Join(sortedKeys(byKey(got)), " "); keys != "sent|d-live-2 sent|d-new" {
+		t.Errorf("the second page keeps %s, want the two campaigns' sends", keys)
+	}
+	if len(engine.calls) != 1 || engine.calls[0] != "campaignTestRunsByIds" || strings.Join(engine.asked[0], " ") != "camp-new" {
+		t.Errorf("the second page asked %v about %v, want one lookup of the campaign it is the first to name", engine.calls, engine.asked)
+	}
+}
+
+func sortedKeys(m map[string]Fact) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // One fact per kind and source on a page: a message opened twice on one page

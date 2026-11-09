@@ -47,7 +47,8 @@ CREATE INDEX IF NOT EXISTS email_stat_fact_day_idx ON email_stat_fact (day);
 -- page whose facts were written, per source concept, never past the clock of
 -- the run that wrote it. The next run starts five minutes before it, so a row
 -- written late with an earlier time is still read. A source with no row here
--- has never been walked, and its first run starts 400 days back.
+-- has never been walked, and its first run starts 400 days back, or where
+-- email_stat_walk_start moved it (20261108090400).
 CREATE TABLE IF NOT EXISTS email_stat_watermark (
     source  TEXT PRIMARY KEY,
     through TIMESTAMPTZ NOT NULL

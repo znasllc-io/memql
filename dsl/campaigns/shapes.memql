@@ -584,3 +584,18 @@ shape recipient recipientAudienceRef {
   row.id
   audienceId
 }
+
+/// A test run's id and nothing else, for leaving its sends, opens, clicks and consent events out of
+/// the email statistics: the query that answers it returns only test runs, so the id is the answer.
+@row
+shape campaign campaignTestRunRef {
+  row.id
+}
+
+/// An organization's testing audience and nothing else, for leaving its consent events out of the
+/// email statistics.
+@row
+shape testSettings testingAudienceRef {
+  row.id
+  audienceId
+}

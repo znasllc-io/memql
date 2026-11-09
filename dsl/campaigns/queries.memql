@@ -1088,7 +1088,7 @@ query delivery providerCounterLedger {
 
 // ---- the email statistics walk (the 2026-11-08 statistics design, D10 and D18) ----
 //
-// Five reads for one reader: builtin emailStatisticsRollup's walk
+// Seven reads for one reader: builtin emailStatisticsRollup's walk
 // (component/emailstats), which runs as the emailStatisticsRollupSweep
 // automation's maintenance principal. Each source query reads, in row.createdAt
 // order, the rows written since a watermark less a five-minute overlap, at each
@@ -1097,13 +1097,14 @@ query delivery providerCounterLedger {
 // the engine collapse only the versions written since, so a page costs what
 // was written since and not the concept's history (latestScanLowerBounds in
 // component/memql/latest_scan_keys.go). Under `||` or `!` it collapses the
-// whole history again. The two lookups attribute a page's facts to their
-// journey and audience in one batched read each. Every one of the five projects
-// only what the facts read (deliveryStatRef, engagementStatRef, consentStatRef
-// and the two refs): no address, no address digest and no owner, because the
-// walk reads every organization's recipients and a figure needs none of them.
-// The one reference to a recipient is the id a subscribe or an unsubscribe is
-// counted under.
+// whole history again. Two lookups attribute a page's facts to their journey
+// and audience in one batched read each, and two more say which of the page's
+// campaigns are test runs and which of its audiences are testing audiences,
+// whose rows make no fact. Every one of the seven projects only what the facts
+// read (deliveryStatRef, engagementStatRef, consentStatRef and the four refs):
+// no address, no address digest and no owner, because the walk reads every
+// organization's recipients and a figure needs none of them. The one reference
+// to a recipient is the id a consent event is judged and counted under.
 
 /// Internal statistics walk across every organization's deliveries. actor.userId scoping would count only one person's sends; the clusterOwner predicate and internal origin are both mandatory, and the rollup's maintenance principal is the one caller.
 @actor
@@ -1163,4 +1164,28 @@ query recipient recipientAudiencesByIds {
   sort "row.createdAt", "asc"
   paginate 500
   shape recipientAudienceRef
+}
+
+/// Internal statistics walk: which of a page's campaigns are test runs, whose sends, opens, clicks and consent events make no fact. actor.userId scoping would miss every other owner's test runs; the clusterOwner predicate and internal origin are both mandatory, and bare ids resolve inbound.
+@actor
+@serverOnly
+@cache(0)
+query campaign campaignTestRunsByIds {
+  args { ids []string! }
+  filter row => actor.isClusterOwner == true && row.id in args.ids && row.testSourceCampaignId != nil
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape campaignTestRunRef
+}
+
+/// Internal statistics walk: which of a page's audiences are an organization's testing audience, whose consent events make no fact. actor.userId scoping would miss every other owner's settings; the clusterOwner predicate and internal origin are both mandatory. A reference field is stored canonical and a bare id compared with it matches nothing, so the ids are made canonical here.
+@actor
+@serverOnly
+@cache(0)
+query testSettings testingAudiencesByIds {
+  args { ids []string! }
+  filter row => actor.isClusterOwner == true && row.audienceId in args.ids.select(candidate => canonicalId(candidate, audience))
+  sort "row.createdAt", "asc"
+  paginate 500
+  shape testingAudienceRef
 }

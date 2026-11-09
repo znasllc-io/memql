@@ -40,13 +40,46 @@ import (
 //
 // # Absent is never zero
 //
-// measuredSince is the first day the facts table holds anything, for the
-// whole cluster, because the rollup walks every organization's mail at once:
-// its first fact is where its record of anybody's mail begins. A bucket that
-// ends on or before that day is null -- nothing was recorded then, for anyone
-// -- and with no fact at all every figure is null. From that day on, a bucket
-// with no fact in scope is a measured zero: nothing was sent. A rate with no
-// campaign mail to be a share of is null.
+// A day's figures are measured between two bounds, and null outside them.
+//
+// From below, measuredSince: the first day the facts table holds anything,
+// for the whole cluster, because the rollup walks every organization's mail
+// at once, and its first fact is where its record of anybody's mail begins. A
+// bucket that ends on or before that day is null -- nothing was recorded then,
+// for anyone -- and with no fact at all every figure is null. It is the
+// CLUSTER's first recorded day, the plan's rule, so a member may be shown a
+// date that came from another organization's mail: a date, never a figure,
+// and only to a caller who reaches some organization. And, for a source whose
+// first walk was started later because one over a longer history could not
+// read its first page (rollup.go), that start: the walk never reads what is
+// before it, so a range that begins before it is not measured for the
+// source's figures (TestDaysBeforeASourcesWalkStartAreNull).
+//
+// From above, how far the rollup has walked each source (email_stat_watermark,
+// rollup.go), read in the same snapshot as the facts. A delivery figure needs
+// the deliveries walked, an open or a click the engagement events, a rate both
+// (its sends and their opens), and a subscription change or a bounce the
+// consent events; so a range is measured for a figure only when every source
+// it is counted from has been walked through the range's end, or through the
+// read's clock for the range under way, less coverageGrace. Without this the
+// days a backfill has not reached, or a stalled rollup's days since it
+// stopped, read as zero, and a source walked more slowly than another reads as
+// a wrong number rather than a missing one: deliveries caught up and opens
+// behind is a 0% open rate. A source never walked is measured nowhere; one
+// walked with nothing in it records how far it read (rollup.go, "Walked,
+// nothing there") and reads zero. A list is listed only when the period is
+// measured for every figure its rows carry -- campaigns and organizations
+// their sends and opens, rules and journeys their sends, audiences their
+// subscription changes -- because a row has no null to show for one of them
+// (TestAFigureIsNullWhereItsSourcesWalkHasNotReached,
+// TestASourceNeverWalkedLeavesWhatDependsOnItNull,
+// TestASourceWalkedWithNoRowsReadsMeasuredZeros). Coverage is by the time a
+// row was written, as the walk is, so a fact dated before the row that
+// carries it -- a consent event a provider's report dates back -- can still
+// arrive for a day already read as walked.
+//
+// Between the bounds, a bucket with no fact in scope is a measured zero:
+// nothing was sent. A rate with no campaign mail to be a share of is null.
 //
 // # Two ways to count an open (D18)
 //
@@ -80,11 +113,13 @@ import (
 // the facts are kept. Previous is every figure null, PreviousSeries is nil,
 // and the payload says null for both.
 //
-// # One snapshot
+// # One snapshot, under the pool's own timeout
 //
 // Every statement of a read runs in one read-only REPEATABLE READ transaction,
-// so the totals, the series and the lists agree with each other while the
-// rollup writes a page of facts underneath.
+// so the totals, the series, the lists and the watermarks they are judged by
+// agree with each other while the rollup writes a page of facts underneath.
+// The read runs on the request pool, and nothing raises that pool's 8 s
+// server statement timeout (statisticsTx).
 
 // emailPeriods are the periods the read offers: the website read's less 24
 // hours, because a fact is dated by its UTC day and has no hour.
@@ -171,8 +206,11 @@ type EmailStatistics struct {
 	// zero when HasPrevious is false.
 	Start, End, PrevStart, PrevEnd time.Time
 	HasPrevious                    bool
-	// MeasuredSince is the cluster's first day with a fact; nil when it has
-	// none, or when the caller reaches no organization.
+	// MeasuredSince is the cluster's first recorded day, the earliest day
+	// with a fact of any organization's, as the plan has it: a date, never a
+	// figure, which a member may be shown though it came from another
+	// organization's mail. nil when the cluster has no fact, or when the
+	// caller reaches no organization, who is never shown it.
 	MeasuredSince *time.Time
 	Totals        EmailTotals
 	// Previous is the previous period's figures, every one nil without one.
@@ -291,7 +329,7 @@ func readStatistics(ctx context.Context, db *bun.DB, grant memql.AccessGrant, re
 		return EmailStatistics{}, errors.New("this node has no database handle, so it cannot read email statistics")
 	}
 	err = statisticsTx(ctx, db, func(ctx context.Context, tx bun.Tx) error {
-		return fillStatistics(ctx, tx, scope, b, &out)
+		return fillStatistics(ctx, tx, scope, b, now, &out)
 	})
 	if err != nil {
 		return EmailStatistics{}, fmt.Errorf("read the email statistics: %w", err)
@@ -325,21 +363,23 @@ func nullPoints(starts []time.Time) []EmailPoint {
 	return out
 }
 
-// statisticsTx runs one read in a read-only REPEATABLE READ transaction whose
-// statements are bounded by statementTimeout, the rollup's own bound on this
-// package's tables.
+// statisticsTx runs one read in a read-only REPEATABLE READ transaction.
+//
+// THE REQUEST POOL'S STATEMENT TIMEOUT STANDS. The plug-in reads through the
+// request pool (PluginContext.BunDB), whose backends carry an 8 s server
+// statement_timeout under pgdriver's 10 s client read deadline
+// (component/database, sessionConnParams and maintenance_session.go). Raising
+// the server's limit past the client's would let a slow statement be cut off
+// by the client and run on in the server, holding this read's snapshot, on
+// every refresh of every page that asks; at 8 s the server ends it, rolls the
+// read back and says so (TestTheReadKeepsThePoolsStatementTimeout).
 func statisticsTx(ctx context.Context, db *bun.DB, fn func(context.Context, bun.Tx) error) error {
 	opts := &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
-	return db.RunInTx(ctx, opts, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, "SET LOCAL statement_timeout = '"+statementTimeout+"'"); err != nil {
-			return fmt.Errorf("bound the statements: %w", err)
-		}
-		return fn(ctx, tx)
-	})
+	return db.RunInTx(ctx, opts, fn)
 }
 
-// fillStatistics reads the facts in scope into out.
-func fillStatistics(ctx context.Context, tx bun.Tx, scope orgScope, b statsperiod.Bounds, out *EmailStatistics) error {
+// fillStatistics reads the facts in scope into out, as of now.
+func fillStatistics(ctx context.Context, tx bun.Tx, scope orgScope, b statsperiod.Bounds, now time.Time, out *EmailStatistics) error {
 	since, err := readMeasuredSince(ctx, tx)
 	if err != nil {
 		return err
@@ -350,6 +390,10 @@ func fillStatistics(ctx context.Context, tx bun.Tx, scope orgScope, b statsperio
 		return nil
 	}
 	out.MeasuredSince = since
+	cov, err := readCoverage(ctx, tx, *since, now)
+	if err != nil {
+		return err
+	}
 
 	// The previous period ends where the current one starts, so one read of
 	// the days covers both.
@@ -361,23 +405,31 @@ func fillStatistics(ctx context.Context, tx bun.Tx, scope orgScope, b statsperio
 	if err != nil {
 		return err
 	}
-	out.Totals = days.totals(b.Start, b.End, *since)
-	out.Series = days.series(b, b.Starts(), *since)
+	out.Totals = days.totals(b.Start, b.End, cov)
+	out.Series = days.series(b, b.Starts(), cov)
 	if b.HasPrevious {
-		out.Previous = days.totals(b.PrevStart, b.PrevEnd, *since)
-		out.PreviousSeries = days.series(b, b.PreviousStarts(), *since)
+		out.Previous = days.totals(b.PrevStart, b.PrevEnd, cov)
+		out.PreviousSeries = days.series(b, b.PreviousStarts(), cov)
 	}
 
-	if out.Campaigns, err = readCampaigns(ctx, tx, scope, b.Start, b.End); err != nil {
-		return err
+	// A list is read only when the period is measured for every figure its
+	// rows carry: see "Absent is never zero".
+	if cov.covers(b.Start, b.End, fromBoth...) {
+		if out.Campaigns, err = readCampaigns(ctx, tx, scope, b.Start, b.End); err != nil {
+			return err
+		}
 	}
-	if out.Automations, err = readAutomations(ctx, tx, scope, b.Start, b.End); err != nil {
-		return err
+	if cov.covers(b.Start, b.End, fromDeliveries...) {
+		if out.Automations, err = readAutomations(ctx, tx, scope, b.Start, b.End); err != nil {
+			return err
+		}
 	}
-	if out.Audiences, err = readAudiences(ctx, tx, scope, b.Start, b.End); err != nil {
-		return err
+	if cov.covers(b.Start, b.End, fromConsent...) {
+		if out.Audiences, err = readAudiences(ctx, tx, scope, b.Start, b.End); err != nil {
+			return err
+		}
 	}
-	if scope.several() {
+	if scope.several() && cov.covers(b.Start, b.End, fromBoth...) {
 		if out.Accounts, err = readAccounts(ctx, tx, scope, b.Start, b.End); err != nil {
 			return err
 		}
@@ -491,40 +543,48 @@ func (d dayFacts) sum(from, to time.Time) (map[string]int64, cohort) {
 	return kinds, c
 }
 
-// totals are [from, to)'s figures: every one nil when the range ends on or
-// before the first recorded day, and a count -- zero included -- otherwise.
-func (d dayFacts) totals(from, to, since time.Time) EmailTotals {
-	if !to.After(since) {
-		return EmailTotals{}
-	}
+// totals are [from, to)'s figures: each a count, zero included, where the
+// range is measured for it (coverage.covers), and nil where it is not.
+func (d dayFacts) totals(from, to time.Time, cov coverage) EmailTotals {
 	k, c := d.sum(from, to)
-	return EmailTotals{
-		Sent: figure(k[kindSent]), Delivered: figure(k[kindDelivered]), Undelivered: figure(k[kindUndelivered]),
-		Failed: figure(k[kindFailed]), Skipped: figure(k[kindSkipped]), Suppressed: figure(k[kindSuppressed]),
-		Opens: figure(k[kindOpen]), Clicks: figure(k[kindClick]),
-		UniqueOpens: figure(k[kindOpenUnique]), UniqueClicks: figure(k[kindClickUnique]),
-		Unsubscribes: figure(k[kindUnsubscribe]), Bounces: figure(k[kindBounce]),
-		Complaints: figure(k[kindComplaint]), Subscribes: figure(k[kindSubscribe]),
-		OpenRate: shareOf(c.opened, c.sent), ClickRate: shareOf(c.clicked, c.sent),
+	var t EmailTotals
+	if cov.covers(from, to, fromDeliveries...) {
+		t.Sent, t.Delivered, t.Undelivered = figure(k[kindSent]), figure(k[kindDelivered]), figure(k[kindUndelivered])
+		t.Failed, t.Skipped, t.Suppressed = figure(k[kindFailed]), figure(k[kindSkipped]), figure(k[kindSuppressed])
 	}
+	if cov.covers(from, to, fromEngagement...) {
+		t.Opens, t.Clicks = figure(k[kindOpen]), figure(k[kindClick])
+		t.UniqueOpens, t.UniqueClicks = figure(k[kindOpenUnique]), figure(k[kindClickUnique])
+	}
+	if cov.covers(from, to, fromBoth...) {
+		t.OpenRate, t.ClickRate = shareOf(c.opened, c.sent), shareOf(c.clicked, c.sent)
+	}
+	if cov.covers(from, to, fromConsent...) {
+		t.Unsubscribes, t.Bounces = figure(k[kindUnsubscribe]), figure(k[kindBounce])
+		t.Complaints, t.Subscribes = figure(k[kindComplaint]), figure(k[kindSubscribe])
+	}
+	return t
 }
 
 // series lays a period's days onto its buckets, each bucket by totals' rule.
-func (d dayFacts) series(b statsperiod.Bounds, starts []time.Time, since time.Time) []EmailPoint {
+func (d dayFacts) series(b statsperiod.Bounds, starts []time.Time, cov coverage) []EmailPoint {
 	out := nullPoints(starts)
 	for i, at := range starts {
 		end := b.Next(at)
-		if !end.After(since) {
-			continue
-		}
 		k, c := d.sum(at, end)
-		out[i] = EmailPoint{
-			At: at, Sent: figure(k[kindSent]),
-			UniqueOpens: figure(k[kindOpenUnique]), UniqueClicks: figure(k[kindClickUnique]),
-			Unsubscribes: figure(k[kindUnsubscribe]), Subscribes: figure(k[kindSubscribe]),
-			Bounces: figure(k[kindBounce]), Complaints: figure(k[kindComplaint]),
-			Failed: figure(k[kindFailed]), Suppressed: figure(k[kindSuppressed]),
-			OpenRate: shareOf(c.opened, c.sent), ClickRate: shareOf(c.clicked, c.sent),
+		p := &out[i]
+		if cov.covers(at, end, fromDeliveries...) {
+			p.Sent, p.Failed, p.Suppressed = figure(k[kindSent]), figure(k[kindFailed]), figure(k[kindSuppressed])
+		}
+		if cov.covers(at, end, fromEngagement...) {
+			p.UniqueOpens, p.UniqueClicks = figure(k[kindOpenUnique]), figure(k[kindClickUnique])
+		}
+		if cov.covers(at, end, fromBoth...) {
+			p.OpenRate, p.ClickRate = shareOf(c.opened, c.sent), shareOf(c.clicked, c.sent)
+		}
+		if cov.covers(at, end, fromConsent...) {
+			p.Unsubscribes, p.Subscribes = figure(k[kindUnsubscribe]), figure(k[kindSubscribe])
+			p.Bounces, p.Complaints = figure(k[kindBounce]), figure(k[kindComplaint])
 		}
 	}
 	return out
@@ -699,119 +759,3 @@ func shareOf(part, whole int64) *float64 {
 
 // dateArg is a UTC day as the 'YYYY-MM-DD' text a ?::date placeholder takes.
 func dateArg(t time.Time) string { return t.UTC().Format(time.DateOnly) }
-
-// Payload is the answer as the node carries it, which the OS parses
-// (parseEmailStatistics): lowerCamel keys, instants in RFC3339, measuredSince
-// as YYYY-MM-DD, and every figure nothing measured PRESENT AND NULL, so a
-// client can tell "not measured" from a key it does not know -- the website
-// read's payload (component/sitetraffic, Statistics.Payload). Without a
-// previous period, previous, previousSeries, prevStart and prevEnd are null.
-func (s EmailStatistics) Payload() map[string]any {
-	p := map[string]any{
-		"period":         string(s.Period),
-		"bucket":         s.Bucket,
-		"start":          instant(s.Start),
-		"end":            instant(s.End),
-		"hasPrevious":    s.HasPrevious,
-		"prevStart":      nil,
-		"prevEnd":        nil,
-		"measuredSince":  nil,
-		"totals":         s.Totals.payload(),
-		"previous":       nil,
-		"series":         pointsPayload(s.Series),
-		"previousSeries": nil,
-		"campaigns":      figuresPayload(s.Campaigns),
-		"automations":    automationsPayload(s.Automations),
-		"audiences":      audiencesPayload(s.Audiences),
-		"accounts":       figuresPayload(s.Accounts),
-	}
-	if s.HasPrevious {
-		p["prevStart"], p["prevEnd"] = instant(s.PrevStart), instant(s.PrevEnd)
-		p["previous"] = s.Previous.payload()
-		p["previousSeries"] = pointsPayload(s.PreviousSeries)
-	}
-	if s.MeasuredSince != nil {
-		p["measuredSince"] = s.MeasuredSince.UTC().Format(time.DateOnly)
-	}
-	return p
-}
-
-func (t EmailTotals) payload() map[string]any {
-	return map[string]any{
-		"sent": countOrNull(t.Sent), "delivered": countOrNull(t.Delivered),
-		"undelivered": countOrNull(t.Undelivered), "failed": countOrNull(t.Failed),
-		"skipped": countOrNull(t.Skipped), "suppressed": countOrNull(t.Suppressed),
-		"opens": countOrNull(t.Opens), "clicks": countOrNull(t.Clicks),
-		"uniqueOpens": countOrNull(t.UniqueOpens), "uniqueClicks": countOrNull(t.UniqueClicks),
-		"unsubscribes": countOrNull(t.Unsubscribes), "bounces": countOrNull(t.Bounces),
-		"complaints": countOrNull(t.Complaints), "subscribes": countOrNull(t.Subscribes),
-		"openRate": rateOrNull(t.OpenRate), "clickRate": rateOrNull(t.ClickRate),
-	}
-}
-
-func pointsPayload(points []EmailPoint) []any {
-	out := make([]any, len(points))
-	for i, p := range points {
-		out[i] = map[string]any{
-			"at":   instant(p.At),
-			"sent": countOrNull(p.Sent), "uniqueOpens": countOrNull(p.UniqueOpens),
-			"uniqueClicks": countOrNull(p.UniqueClicks), "unsubscribes": countOrNull(p.Unsubscribes),
-			"subscribes": countOrNull(p.Subscribes), "bounces": countOrNull(p.Bounces),
-			"complaints": countOrNull(p.Complaints), "failed": countOrNull(p.Failed),
-			"suppressed": countOrNull(p.Suppressed),
-			"openRate":   rateOrNull(p.OpenRate), "clickRate": rateOrNull(p.ClickRate),
-		}
-	}
-	return out
-}
-
-func figuresPayload(rows []CampaignFigures) []any {
-	out := make([]any, len(rows))
-	for i, r := range rows {
-		out[i] = map[string]any{
-			"id": r.ID, "sent": r.Sent, "uniqueOpens": r.UniqueOpens, "uniqueClicks": r.UniqueClicks,
-			"openRate": rateOrNull(r.OpenRate), "clickRate": rateOrNull(r.ClickRate),
-		}
-	}
-	return out
-}
-
-func automationsPayload(rows []AutomationFigures) []any {
-	out := make([]any, len(rows))
-	for i, r := range rows {
-		out[i] = map[string]any{"id": r.ID, "kind": r.Kind, "sent": r.Sent, "failed": r.Failed, "suppressed": r.Suppressed}
-	}
-	return out
-}
-
-func audiencesPayload(rows []AudienceFigures) []any {
-	out := make([]any, len(rows))
-	for i, r := range rows {
-		out[i] = map[string]any{"id": r.ID, "subscribes": r.Subscribes, "unsubscribes": r.Unsubscribes, "net": r.Net}
-	}
-	return out
-}
-
-// countOrNull and rateOrNull spell an unmeasured figure as an untyped nil,
-// which JSON writes as null.
-func countOrNull(p *int64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
-func rateOrNull(p *float64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
-// instant renders a bound in RFC3339, UTC; a zero time is no bound at all.
-func instant(t time.Time) any {
-	if t.IsZero() {
-		return nil
-	}
-	return t.UTC().Format(time.RFC3339)
-}

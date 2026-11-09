@@ -1,6 +1,7 @@
 package emailstats
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -26,13 +27,14 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/statsperiod"
 )
 
 // rollup_db_test.go -- the email facts rollup against a real database.
 //
 // The rows are written by the campaigns mutations the sending engine writes
 // with, under internal origin and an owner actor, and read back through the
-// engine the way the scheduled run reads them: through the five @serverOnly
+// engine the way the scheduled run reads them: through the seven @serverOnly
 // queries, under the automation's maintenance principal. A fake engine would
 // assert its own rows; what is worth proving here is that the engine's own
 // latest-version walk, its id spellings and its cursor give the facts the
@@ -169,6 +171,7 @@ func newFixture(t *testing.T) *fixture {
 	f.owner = auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: f.user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: f.user})
 
 	f.mutate("createClientAccount", map[string]any{"accountId": f.account, "name": "Statistics organization"})
+	f.removeAccountWhenDone()
 	f.mutate("createAudience", map[string]any{"audienceId": f.audience, "name": "Statistics audience", "accountId": f.account})
 	f.mutate("createTemplate", map[string]any{
 		"templateId": f.template, "name": "Statistics template", "subject": "Hello", "textBody": "Hello", "htmlBody": "Hello",
@@ -180,6 +183,42 @@ func newFixture(t *testing.T) *fixture {
 		"templateId": f.template, "recipientMode": "audience", "audienceId": f.audience, "accountId": f.account,
 	})
 	return f
+}
+
+// removeAccountWhenDone removes the fixture's organization, every version of
+// it, when the test ends, as joinOrganization removes its own: an organization
+// left behind on every run accumulates in every staff list of organizations
+// on a database the lane shares. Measured: after a day of runs, 607 were left,
+// and the account list -- capped at the engine's five hundred rows -- no
+// longer reached the one component/memql's
+// TestAccountCreationDefaultsPersistAcrossReplicas and
+// TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion look for. The
+// fixture's other rows stay, as every other test's do.
+func (f *fixture) removeAccountWhenDone() {
+	f.t.Helper()
+	const concept = "v1:accounts:account"
+	ids := bun.In([]string{f.account, concept + ":" + f.account})
+	count := func() int {
+		var n int
+		if err := f.db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, concept, ids).Scan(context.Background(), &n); err != nil {
+			f.t.Fatalf("count the fixture organization's rows: %v", err)
+		}
+		return n
+	}
+	// Under the ids the removal names, or it would remove nothing and say so
+	// only by leaving it.
+	if count() == 0 {
+		f.t.Fatalf("the fixture organization %s was written under an id its removal does not name", f.account)
+	}
+	f.t.Cleanup(func() {
+		if _, err := f.db.NewRaw(`DELETE FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, concept, ids).Exec(context.Background()); err != nil {
+			f.t.Errorf("remove the fixture organization %s: %v", f.account, err)
+			return
+		}
+		if left := count(); left != 0 {
+			f.t.Errorf("the fixture organization %s still has %d rows after its removal", f.account, left)
+		}
+	})
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
@@ -266,7 +305,14 @@ func (f *fixture) providerReport(delivery, status string, at time.Time) {
 // endpoint does, and answers the ids of every such event of that delivery.
 func (f *fixture) engage(delivery, kind string, at time.Time) []string {
 	f.t.Helper()
-	f.mutate("recordEngagementEvent", map[string]any{"campaignId": f.campaign, "deliveryId": delivery, "kind": kind, "occurredAt": stamp(at), "accountId": f.account})
+	return f.engageIn(f.campaign, delivery, kind, at)
+}
+
+// engageIn records one open or click of a delivery of the named campaign, and
+// answers the ids of every such event of that delivery.
+func (f *fixture) engageIn(campaign, delivery, kind string, at time.Time) []string {
+	f.t.Helper()
+	f.mutate("recordEngagementEvent", map[string]any{"campaignId": campaign, "deliveryId": delivery, "kind": kind, "occurredAt": stamp(at), "accountId": f.account})
 	var ids []string
 	err := f.db.NewSelect().TableExpr(`"MemoryNodes"`).ColumnExpr("DISTINCT id").
 		Where("concept = ?", "v1:campaigns:engagementEvent").
@@ -285,6 +331,13 @@ func (f *fixture) engage(delivery, kind string, at time.Time) []string {
 // consent appends one consent event and answers its id. An empty recipient
 // writes an event about an address with no membership.
 func (f *fixture) consent(mutation, recipient string, at time.Time) string {
+	return f.consentFrom(mutation, recipient, "", at)
+}
+
+// consentFrom appends one consent event a send of the named campaign gave
+// rise to -- a bounce, a complaint, a one-click withdraw -- and answers its
+// id. An empty campaign names none.
+func (f *fixture) consentFrom(mutation, recipient, campaign string, at time.Time) string {
 	f.made++
 	id := fmt.Sprintf("%s-ce-%d", f.suffix, f.made)
 	args := map[string]any{"eventId": id, "emailDigest": sha256Hex(id + "@example.test"), "source": "operator", "occurredAt": stamp(at), "accountId": f.account}
@@ -292,11 +345,39 @@ func (f *fixture) consent(mutation, recipient string, at time.Time) string {
 		args["recipientId"] = recipient
 		args["emailDigest"] = sha256Hex(recipient + "@example.test")
 	}
+	if campaign != "" {
+		args["campaignId"] = campaign
+	}
 	if mutation == "recordConsentSuppress" {
 		args["reason"] = "operator request"
 	}
 	f.mutate(mutation, args)
 	return id
+}
+
+// chooseTestingAudience makes an audience the organization's testing
+// audience, as Email Settings does (component/campaigns, test_audience.go).
+func (f *fixture) chooseTestingAudience(audience string) {
+	f.mutate("saveCampaignTestSettings", map[string]any{
+		"settingsId": sha256Hex(f.suffix + "-test-settings"), "accountId": f.account, "audienceId": audience,
+		"versionTime": stamp(time.Now()),
+	})
+}
+
+// testRun makes a test run of the fixture's campaign as a test send writes one
+// (component/campaigns, handleTestAudienceSend): the testing audience chosen,
+// then a campaign of its own, marked by testSourceCampaignId and addressed to
+// that audience. It answers the run's bare id, which, like every test run's,
+// is a SHA-256 in hex.
+func (f *fixture) testRun(testing string) string {
+	f.chooseTestingAudience(testing)
+	f.made++
+	run := sha256Hex(fmt.Sprintf("%s-test-run-%d", f.suffix, f.made))
+	f.mutate("createCampaignTestRun", map[string]any{
+		"campaignId": run, "testSourceCampaignId": f.campaign, "name": "Statistics campaign · Test",
+		"accountId": f.account, "audienceId": testing, "templateId": f.template,
+	})
+	return run
 }
 
 // journeyWithEnrollment makes an automation with one send step and enrolls a
@@ -563,6 +644,7 @@ func TestTheWatermarkOverlapCatchesALateWrite(t *testing.T) {
 // test's runs for a year. An hour later this one is behind every clock.
 func TestARowDatedAheadOfTheClockDoesNotHoldTheWalk(t *testing.T) {
 	f := newFixture(t)
+	began := time.Now().UTC().Truncate(time.Millisecond)
 	t.Cleanup(func() { walkFrom(t, f.db, time.Now()) })
 	walkFrom(t, f.db, time.Now())
 
@@ -581,12 +663,16 @@ func TestARowDatedAheadOfTheClockDoesNotHoldTheWalk(t *testing.T) {
 	wantFact(t, facts, kindSent, present)
 
 	// A stored watermark two hours ahead of the run's clock is dropped, and the
-	// source walked again from the horizon -- a short one here, so the walk
-	// starts behind this test's own row rather than a year back, across every
-	// row this shared database holds.
-	saved := retention
-	retention = 2 * time.Hour
-	t.Cleanup(func() { retention = saved })
+	// source walked again as a first walk -- from this test's own start here
+	// (firstWalkFrom), so it reads this test's rows and not the history the
+	// shared database holds, and moves no delete: retention, which the delete
+	// is counted from, is not the seam.
+	saved := firstWalkFrom
+	firstWalkFrom = func(time.Time) time.Time { return began }
+	t.Cleanup(func() { firstWalkFrom = saved })
+	if _, err := f.db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source = ?`, sourceDelivery).Exec(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	restarted := f.deliver(f.recipient(f.audience), map[string]any{"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now())})
 	walkFrom(t, f.db, time.Now().Add(2*time.Hour))
 	rollup(t, f.eng, f.db, time.Now())
@@ -697,23 +783,51 @@ func TestAJourneySendIsAttributedOnlyInItsOwnOrganization(t *testing.T) {
 // forty pages inside five minutes would hold the walk there for good.
 //
 // ITS RANGE STARTS AT ITS OWN FIRST ROW, so no row another test left can
-// change what it finds. The rows are dated three hours ahead and the horizon
-// is put on the first of them. Behind it are the rows this package's other
-// tests date by the clock or an hour ahead, the rows another package writes
-// beside it in CI, and this test's own from an earlier run of the suite, three
-// hours ahead of an earlier clock. A row another suite dates days ahead sorts
-// after this test's rows, which the second run's check allows for.
+// change what it finds. The rows are dated three hours ahead and the first
+// walk is put on the first of them (firstWalkFrom), with the run's clock an
+// hour past them so none is capped at it. Behind them are the rows this
+// package's other tests date by the clock or an hour ahead and the rows
+// another package writes beside it in CI. A row another suite dates days
+// ahead sorts after this test's rows, which the second run's check allows
+// for. Retention, which the run's delete is counted from, stays at its four
+// hundred days, so the run deletes nothing another test wrote.
+//
+// AND MORE THAN THE OVERLAP PAST ITS OWN EARLIER RUNS. Each run of this test
+// writes its eighty-five rows three hours ahead of its own clock, so a run
+// within five minutes of an earlier one -- a suite run again at once -- would
+// find the earlier rows inside its second run's overlap. At two rows a page
+// the overlap reads at most maxPagesReadPerRun pages, eight hundred rows,
+// which ten such runs exceed; the walk then stops with an error, rightly, and
+// the test failed for rows that are not its own. A run removes its rows when
+// it ends, and in case one did not -- a process killed mid-test -- the rows
+// start the overlap and a second past the newest an earlier run left.
 func TestTheFirstRunWalksAtMostFortyPagesPerSource(t *testing.T) {
 	f := newFixture(t)
-	pageSize, saved := walkPageSize, retention
-	walkPageSize, retention = 2, 25*time.Hour
-	t.Cleanup(func() { walkPageSize, retention = pageSize, saved })
+	pageSize, saved := walkPageSize, firstWalkFrom
+	walkPageSize = 2
+	t.Cleanup(func() { walkPageSize, firstWalkFrom = pageSize, saved })
 
 	recipient := f.recipient(f.audience)
 	const extra = 5
 	n := maxPagesPerRun*walkPageSize + extra
 	first := time.Now().UTC().Truncate(time.Millisecond).Add(3 * time.Hour)
+	if past := newestPageBoundRow(t, f.db).Add(watermarkOverlap + time.Second); past.After(first) {
+		first = past.Truncate(time.Millisecond)
+	}
+	firstWalkFrom = func(time.Time) time.Time { return first }
 	ids := make([]string, 0, n)
+	// Its rows and their facts go when it ends. Dated ahead of the clock, the
+	// rows would otherwise be read again by every rollup any test runs against
+	// this database until the clock passes them (rollup.go, "Never past the
+	// clock"): a few runs of the suite in an afternoon left five thousand.
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if len(ids) > 0 {
+			_, _ = f.db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id IN (?)`, bun.In(ids)).Exec(ctx)
+		}
+		_, _ = f.db.NewRaw(`DELETE FROM "MemoryNodes" WHERE concept = ? AND payload->>'requestId' LIKE ?`,
+			"v1:campaigns:delivery", f.suffix+"-page-%").Exec(ctx)
+	})
 	for i := 0; i < n; i++ {
 		at := first.Add(time.Duration(i) * time.Millisecond)
 		ids = append(ids, f.deliver(recipient, map[string]any{
@@ -722,13 +836,15 @@ func TestTheFirstRunWalksAtMostFortyPagesPerSource(t *testing.T) {
 		}))
 	}
 
-	if _, err := f.db.NewRaw(`DELETE FROM email_stat_watermark`).Exec(context.Background()); err != nil {
-		t.Fatal(err)
+	// Every source walks for the first time, from the first row: no watermark,
+	// and no start an earlier first walk moved.
+	for _, q := range []string{`DELETE FROM email_stat_watermark`, `DELETE FROM email_stat_walk_start`} {
+		if _, err := f.db.NewRaw(q).Exec(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() { walkFrom(t, f.db, time.Now()) })
-	// The horizon is now less the retention: the first row, which the walk's
-	// row.createdAt >= since reads.
-	now := first.Add(retention)
+	now := first.Add(time.Hour)
 
 	firstRun := rollup(t, f.eng, f.db, now)
 	if got := firstRun.Rows[sourceDelivery]; got != maxPagesPerRun*walkPageSize {
@@ -753,6 +869,20 @@ func TestTheFirstRunWalksAtMostFortyPagesPerSource(t *testing.T) {
 	if read := second.Rows[sourceDelivery]; behind(second, sourceDelivery) && read < 2*maxPagesPerRun*walkPageSize {
 		t.Errorf("the second run stopped at its page bound having read %d rows, eighty of them again: the pages it only read again were counted: %+v", read, second)
 	}
+}
+
+// newestPageBoundRow is the newest delivery an earlier run of
+// TestTheFirstRunWalksAtMostFortyPagesPerSource wrote, by the request id it
+// names its rows with, and the zero time when there is none.
+func newestPageBoundRow(t *testing.T, db *bun.DB) time.Time {
+	t.Helper()
+	var newest sql.NullTime
+	err := db.NewRaw(`SELECT max("createdAt") FROM "MemoryNodes" WHERE concept = ? AND payload->>'requestId' LIKE ?`,
+		"v1:campaigns:delivery", "estat-%-page-%").Scan(context.Background(), &newest)
+	if err != nil {
+		t.Fatalf("find the rows an earlier run of this test wrote: %v", err)
+	}
+	return newest.Time.UTC()
 }
 
 func behind(rep RollupReport, source string) bool {
@@ -841,6 +971,160 @@ func TestAConsentEventWithNoRecipientCountsOnlyInTotals(t *testing.T) {
 	if u.AccountID != f.account || u.AudienceID != "" {
 		t.Errorf("the unsubscribe is %+v, want it in %s under no audience", u, f.account)
 	}
+}
+
+// TEST RUNS ARE NOT STATISTICS. A test run is a campaign of its own, marked by
+// testSourceCampaignId from the write that creates it and sent to the
+// organization's testing audience, with its own deliveries, opens and clicks.
+// Counted, its sends would swell Sent and it would take a place in Top
+// campaigns, where the campaigns feed, which leaves test runs out, has no
+// campaign to show for it. So nothing of it makes a fact -- its send and the
+// provider's verdict, its opens and clicks, a consent event it gave rise to --
+// while the campaign it tests, in the same organization, counts as before.
+func TestATestRunsSendsOpensAndClicksMakeNoFact(t *testing.T) {
+	f := newFixture(t)
+	walkFrom(t, f.db, time.Now())
+
+	testing := f.newAudience()
+	run := f.testRun(testing)
+	tester := f.recipient(testing)
+	testSend := f.deliver(tester, map[string]any{"campaignId": run, "status": "sent", "sentAt": stamp(time.Now())})
+	f.providerReport(testSend, "delivered", time.Now())
+	testEvents := append(f.engageIn(run, testSend, "open", time.Now()), f.engageIn(run, testSend, "click", time.Now())...)
+	// A one-click withdraw from a forwarded test message names the run and no
+	// recipient, so only its campaign says it is a test's.
+	testWithdraw := f.consentFrom("recordConsentWithdraw", "", run, time.Now())
+
+	member := f.recipient(f.audience)
+	liveSend := f.deliver(member, map[string]any{"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now())})
+	f.providerReport(liveSend, "delivered", time.Now())
+	liveEvents := append(f.engage(liveSend, "open", time.Now()), f.engage(liveSend, "click", time.Now())...)
+	liveWithdraw := f.consentFrom("recordConsentWithdraw", "", f.campaign, time.Now())
+	now := time.Now()
+	rollup(t, f.eng, f.db, now)
+
+	ids := append(append([]string{testSend, liveSend, testWithdraw, liveWithdraw}, testEvents...), liveEvents...)
+	facts := storedFacts(t, f.db, ids...)
+	for _, fact := range facts {
+		if fact.CampaignID == run {
+			t.Errorf("the test run made a fact: %+v", fact)
+		}
+	}
+	for _, kind := range []string{kindSent, kindDelivered, kindOpenUnique, kindClickUnique} {
+		wantNoFact(t, facts, kind, testSend)
+		if fact := wantFact(t, facts, kind, liveSend); fact.CampaignID != f.campaign {
+			t.Errorf("the campaign's %s counts under %q, want %s", kind, fact.CampaignID, f.campaign)
+		}
+	}
+	if len(testEvents) != 2 || len(liveEvents) != 2 {
+		t.Fatalf("the opens and clicks are %v and %v, want one of each per send", testEvents, liveEvents)
+	}
+	wantNoFact(t, facts, kindOpen, testEvents[0])
+	wantNoFact(t, facts, kindClick, testEvents[1])
+	wantFact(t, facts, kindOpen, liveEvents[0])
+	wantFact(t, facts, kindClick, liveEvents[1])
+	wantNoFact(t, facts, kindUnsubscribe, testWithdraw)
+	wantFact(t, facts, kindUnsubscribe, liveWithdraw)
+
+	// What the Overview shows: one send, and the campaign alone in Top
+	// campaigns.
+	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Totals.Sent == nil || *got.Totals.Sent != 1 {
+		t.Errorf("the organization's sends are %s, want the campaign's one", num(got.Totals.Sent))
+	}
+	if len(got.Campaigns) != 1 || got.Campaigns[0].ID != f.campaign {
+		t.Errorf("Top campaigns is %s, want the campaign alone", figuresLine(got.Campaigns))
+	}
+}
+
+// THE TESTING AUDIENCE IS NOT STATISTICS. The people in an organization's
+// testing audience are its own staff, there to receive tests, not
+// subscribers: their joining, leaving, bounces and complaints make no fact,
+// while the same events in the organization's other audiences count as
+// before. The audience is judged when the walk reads the event, so a person
+// who joined it before it was chosen, whose joining the walk had not yet read,
+// is left out too.
+func TestTheTestingAudiencesConsentEventsMakeNoFact(t *testing.T) {
+	f := newFixture(t)
+	walkFrom(t, f.db, time.Now())
+
+	testing := f.newAudience()
+	early := f.recipient(testing)
+	joinedEarly := f.consent("recordConsentGrant", early, time.Now())
+	f.chooseTestingAudience(testing)
+	tester := f.recipient(testing)
+	joined := f.consent("recordConsentGrant", tester, time.Now())
+	left := f.consent("recordConsentWithdraw", tester, time.Now())
+	bounced := f.consent("recordConsentBounce", tester, time.Now())
+	complained := f.consent("recordConsentComplaint", tester, time.Now())
+
+	member := f.recipient(f.audience)
+	subscribed := f.consent("recordConsentGrant", member, time.Now())
+	memberBounced := f.consent("recordConsentBounce", member, time.Now())
+	now := time.Now()
+	rollup(t, f.eng, f.db, now)
+
+	facts := storedFacts(t, f.db, joinedEarly, joined, left, bounced, complained, subscribed, memberBounced)
+	wantNoFact(t, facts, kindSubscribe, joinedEarly)
+	wantNoFact(t, facts, kindSubscribe, joined)
+	wantNoFact(t, facts, kindUnsubscribe, left)
+	wantNoFact(t, facts, kindBounce, bounced)
+	wantNoFact(t, facts, kindComplaint, complained)
+	if s := wantFact(t, facts, kindSubscribe, subscribed); s.AudienceID != f.audience {
+		t.Errorf("the member's subscribe counts under audience %q, want %s", s.AudienceID, f.audience)
+	}
+	wantFact(t, facts, kindBounce, memberBounced)
+
+	got, err := readStatistics(context.Background(), f.db, staff(), []string{f.account}, statsperiod.Last7Days, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Totals.Subscribes == nil || *got.Totals.Subscribes != 1 {
+		t.Errorf("the organization's new subscribers are %s, want the member alone", num(got.Totals.Subscribes))
+	}
+	if len(got.Audiences) != 1 || got.Audiences[0].ID != f.audience {
+		t.Errorf("the audiences are %s, want the organization's own audience alone", audiencesLine(got.Audiences))
+	}
+}
+
+// NO WINDOW FOR A NEW TEST RUN. A test run's campaign row is written before its
+// send is started, so every delivery, open, click or consent event naming it
+// is written after the row. The walk asks which of a page's campaigns are test
+// runs AFTER reading the page, so the answer always knows the run: here the
+// run comes into being only once the delivery page has been read, after the
+// rollup began, and its send still makes no fact. Asked once at the start of
+// the run, the answer would not know it.
+func TestATestRunCreatedDuringARunIsStillLeftOut(t *testing.T) {
+	_, db := statsEngine(t)
+	suffix := fmt.Sprintf("newtest-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(context.Background())
+		walkFrom(t, db, time.Now())
+	})
+	at := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Hour)
+	walkFrom(t, db, at.Add(-time.Minute))
+	delivery := func(name, campaign string) any {
+		return map[string]any{"id": "v1:campaigns:delivery:" + suffix + "-" + name, "accountId": "v1:accounts:account:" + suffix + "-org",
+			"campaignId": "v1:campaigns:campaign:" + campaign, "status": "sent", "sentAt": stamp(at), "createdAt": at}
+	}
+	run := sha256Hex(suffix + "-run")
+	engine := &scriptedEngine{pages: map[string]map[string]scriptedPage{
+		"deliveriesWrittenSince": {"": {rows: []any{delivery("test", run), delivery("live", suffix+"-camp")}}},
+	}}
+	engine.before = func(construct, _ string) {
+		if construct == "deliveriesWrittenSince" {
+			engine.pages["campaignTestRunsByIds"] = map[string]scriptedPage{"": {rows: []any{map[string]any{"id": "v1:campaigns:campaign:" + run}}}}
+		}
+	}
+	if _, err := runRollup(principalCtx(t), engine, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	facts := storedFacts(t, db, suffix+"-test", suffix+"-live")
+	wantNoFact(t, facts, kindSent, suffix+"-test")
+	wantFact(t, facts, kindSent, suffix+"-live")
 }
 
 // scriptedEngine answers each walk query from pages keyed by the cursor it was
@@ -933,8 +1217,10 @@ func TestAFailedPageLeavesTheWatermarkAtTheLastWrittenPage(t *testing.T) {
 	if through, _ := watermarkOf(t, db, sourceDelivery); !through.Equal(t2) {
 		t.Errorf("the delivery watermark is %v, want the written page's newest row, %v", through, t2)
 	}
-	if through, _ := watermarkOf(t, db, sourceConsent); !through.Equal(t3) {
-		t.Errorf("the consent watermark is %v, want %v: one source's failure must not stop another", through, t3)
+	// The consent walk read its last page, so it is through the clock it asked
+	// that page by, past its one row (TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy).
+	if through, _ := watermarkOf(t, db, sourceConsent); through.Before(t3) || through.After(time.Now()) {
+		t.Errorf("the consent watermark is %v, want it past its row's %v and not past the clock: one source's failure must not stop another", through, t3)
 	}
 	facts := storedFacts(t, db, suffix+"-1", suffix+"-2", suffix+"-c")
 	wantFact(t, facts, kindSent, suffix+"-1")
@@ -954,13 +1240,15 @@ func TestAFailedPageLeavesTheWatermarkAtTheLastWrittenPage(t *testing.T) {
 
 	// A run that only reads rows older than the watermark -- the overlap, or
 	// a slower run on another replica finishing behind a faster one -- leaves
-	// the watermark where it was: a write never moves it back.
+	// the watermark where it was: a write never moves it back. The run's clock
+	// is a minute behind the watermark, as that slower replica's is, so the
+	// clock its last page records is behind it too.
 	ahead := t3.Add(time.Hour)
 	walkFrom(t, db, ahead)
 	behindOnly := &scriptedEngine{pages: map[string]map[string]scriptedPage{
 		"deliveriesWrittenSince": {"": {rows: []any{row(5, t1)}}},
 	}}
-	if _, err := runRollup(principalCtx(t), behindOnly, db, time.Now()); err != nil {
+	if _, err := runRollup(principalCtx(t), behindOnly, db, ahead.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if through, _ := watermarkOf(t, db, sourceDelivery); !through.Equal(ahead) {
@@ -968,8 +1256,8 @@ func TestAFailedPageLeavesTheWatermarkAtTheLastWrittenPage(t *testing.T) {
 	}
 }
 
-// Every read the rollup makes, the three walks and the two lookups alike, is
-// made with internal origin (the five queries are @serverOnly), as a fresh read
+// Every read the rollup makes, the three walks and the four lookups alike, is
+// made with internal origin (the seven queries are @serverOnly), as a fresh read
 // (a cached page could predate the rows it is looking for) and roots-only
 // (every shape it reads is a row's own fields; expanded, a page of deliveries
 // costs two statements per relationship per row).
@@ -987,6 +1275,7 @@ func TestEveryReadIsInternalFreshAndRootsOnly(t *testing.T) {
 		"deliveriesWrittenSince": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:delivery:" + suffix + "-d", "status": "sent", "sentAt": stamp(at), "createdAt": at,
 			"requestId": "journey-" + enrollment + "-welcome", "accountId": "v1:accounts:account:" + suffix + "-org",
+			"campaignId": "v1:campaigns:campaign:" + suffix + "-camp",
 		}}}},
 		"consentEventsWrittenSince": {"": {rows: []any{map[string]any{
 			"id": "v1:campaigns:consentEvent:" + suffix + "-c", "kind": "grant", "occurredAt": stamp(at), "createdAt": at,
@@ -1011,7 +1300,7 @@ func TestEveryReadIsInternalFreshAndRootsOnly(t *testing.T) {
 			t.Errorf("%s was read with internal origin %v, fresh %v, roots-only %v; want all three", c.construct, c.internal, c.fresh, c.rootsOnly)
 		}
 	}
-	for _, construct := range []string{"deliveriesWrittenSince", "engagementEventsWrittenSince", "consentEventsWrittenSince", "journeyEnrollmentsByIds", "recipientAudiencesByIds"} {
+	for _, construct := range []string{"deliveriesWrittenSince", "engagementEventsWrittenSince", "consentEventsWrittenSince", "journeyEnrollmentsByIds", "recipientAudiencesByIds", "campaignTestRunsByIds", "testingAudiencesByIds"} {
 		if !asked[construct] {
 			t.Errorf("the run never read %s", construct)
 		}
@@ -1043,7 +1332,9 @@ func (e *recordingEngine) Execute(ctx context.Context, query string) (*memql.Exe
 // The walk is handed what the facts read and nothing else. Least data is the
 // rule for anything about a recipient: no address and no address digest,
 // and no other field the facts do not use, reaches the rollup from any of the
-// five reads -- so a field added to one of their shapes has to be argued here.
+// seven reads -- so a field added to one of their shapes has to be argued here.
+// A test run and the testing audience are there so the two lookups that leave
+// them out answer rows too.
 func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
 	f := newFixture(t)
 	walkFrom(t, f.db, time.Now())
@@ -1054,6 +1345,11 @@ func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
 	sent := f.deliver(f.recipient(f.audience), map[string]any{"campaignId": f.campaign, "status": "sent", "sentAt": stamp(time.Now())})
 	f.engage(sent, "click", time.Now())
 	f.consent("recordConsentGrant", member, time.Now())
+	testing := f.newAudience()
+	run := f.testRun(testing)
+	tester := f.recipient(testing)
+	f.deliver(tester, map[string]any{"campaignId": run, "status": "sent", "sentAt": stamp(time.Now())})
+	f.consent("recordConsentGrant", tester, time.Now())
 
 	recorder := &recordingEngine{inner: f.eng, rows: map[string][]map[string]any{}}
 	if _, err := runRollup(principalCtx(t), recorder, f.db, time.Now()); err != nil {
@@ -1066,6 +1362,8 @@ func TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse(t *testing.T) {
 		"consentEventsWrittenSince":    {"id", "accountId", "campaignId", "recipientId", "kind", "occurredAt", "createdAt"},
 		"journeyEnrollmentsByIds":      {"id", "accountId", "journeyId"},
 		"recipientAudiencesByIds":      {"id", "audienceId"},
+		"campaignTestRunsByIds":        {"id"},
+		"testingAudiencesByIds":        {"id", "audienceId"},
 	}
 	for construct, fields := range read {
 		rows := recorder.rows[construct]
@@ -1190,5 +1488,331 @@ func TestThePlugInOffersTheRollupItsBuiltinNames(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no plug-in registered as emailStats, so integration.emailStats.rollup names nothing")
+	}
+}
+
+// THE POOL'S STATEMENT TIMEOUT STANDS for the rollup's own writes too: they
+// run on the request pool, whose 8 s server limit sits under pgdriver's 10 s
+// client read deadline, and a statement allowed past the second would be cut
+// off by the client and run on in the server. No statement the rollup issues
+// on this package's tables moves the server's limit.
+func TestTheRollupKeepsThePoolsStatementTimeout(t *testing.T) {
+	_, shared := statsEngine(t)
+	suffix := fmt.Sprintf("timeout-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = shared.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(context.Background())
+		walkFrom(t, shared, time.Now())
+	})
+	at := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Hour)
+	walkFrom(t, shared, at.Add(-time.Minute))
+	engine := &scriptedEngine{pages: map[string]map[string]scriptedPage{
+		"deliveriesWrittenSince": {"": {rows: []any{map[string]any{
+			"id": "v1:campaigns:delivery:" + suffix, "accountId": "org-x", "status": "sent", "sentAt": stamp(at), "createdAt": at,
+		}}}},
+	}}
+	db, rec := recordedDB(t)
+	if _, err := runRollup(principalCtx(t), engine, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	wantFact(t, storedFacts(t, shared, suffix), kindSent, suffix)
+	wantThePoolsTimeout(t, "the rollup", rec, "email_stat_fact")
+}
+
+// A WALK THAT READS ITS LAST PAGE IS THROUGH THE CLOCK IT ASKED BY, rows or
+// none: every row written before that instant had been read or was inside the
+// overlap the next run reads again. So a source with nothing new, or nothing
+// at all, records how far it was walked, and the statistics read can tell
+// "walked, nothing there" from "never walked" (statistics.go). A walk that
+// stops at its page bound with rows still to read is through the newest row
+// it wrote, not the clock: it has not read what comes after.
+func TestAWalkThatReadsItsLastPageRecordsTheClockItAskedBy(t *testing.T) {
+	_, db := statsEngine(t)
+	suffix := fmt.Sprintf("caughtup-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(context.Background())
+		walkFrom(t, db, time.Now())
+	})
+	ctx := context.Background()
+	// Whole milliseconds: the database keeps microseconds, and the bound
+	// below compares with these instants exactly.
+	base := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Hour)
+	walkFrom(t, db, base)
+	if _, err := db.NewRaw(`DELETE FROM email_stat_watermark WHERE source = ?`, sourceConsent).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row := func(n int, at time.Time) any {
+		return map[string]any{"id": fmt.Sprintf("v1:campaigns:delivery:%s-%d", suffix, n), "accountId": "org-x", "status": "sent", "sentAt": stamp(at), "createdAt": at}
+	}
+
+	// Deliveries: one page, the last, with a row an hour old. Engagement: a
+	// page with nothing new. Consent: never walked, and nothing there.
+	began := time.Now().UTC().Truncate(time.Microsecond)
+	caughtUp := &scriptedEngine{pages: map[string]map[string]scriptedPage{
+		"deliveriesWrittenSince": {"": {rows: []any{row(0, base.Add(10*time.Minute))}}},
+	}}
+	if _, err := runRollup(principalCtx(t), caughtUp, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ended := time.Now().UTC()
+	for _, source := range []string{sourceDelivery, sourceEngagement, sourceConsent} {
+		through, ok := watermarkOf(t, db, source)
+		if !ok {
+			t.Errorf("%s has no watermark after a walk that read its last page: walked with nothing there reads as never walked", source)
+			continue
+		}
+		if through.Before(began) || through.After(ended) {
+			t.Errorf("the %s watermark is %v, want the clock its walk asked its last page by, within [%v, %v]", source, through, began, ended)
+		}
+	}
+
+	// Forty-one pages of a row each: the run stops at forty, behind, through
+	// the fortieth page's row.
+	pages := map[string]scriptedPage{}
+	cursor := ""
+	var fortieth time.Time
+	for i := 1; i <= maxPagesPerRun+1; i++ {
+		at := base.Add(time.Duration(i) * time.Second)
+		next := fmt.Sprintf("page-%d", i+1)
+		pages[cursor] = scriptedPage{rows: []any{row(i, at)}, next: next}
+		if i == maxPagesPerRun {
+			fortieth = at
+		}
+		cursor = next
+	}
+	walkFrom(t, db, base)
+	rep, err := runRollup(principalCtx(t), &scriptedEngine{pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": pages}}, db, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !behind(rep, sourceDelivery) {
+		t.Fatalf("the run read %d deliveries without stopping at its page bound: %+v", rep.Rows[sourceDelivery], rep)
+	}
+	if through, _ := watermarkOf(t, db, sourceDelivery); !through.Equal(fortieth) {
+		t.Errorf("a walk stopped behind is through %v, want the newest row it wrote, %v", through, fortieth)
+	}
+}
+
+// MOVING A FIRST WALK'S START NEVER MOVES THE DELETE. A test puts a first
+// walk at its own rows through firstWalkFrom, and retention -- how long a fact
+// is kept, which the run's delete is counted from -- is a constant no test
+// moves: a fact dated yesterday, which a first walk starting an hour ago is
+// far past, survives the run. No test may delete facts it did not write.
+func TestMovingAFirstWalksStartMovesNoDelete(t *testing.T) {
+	_, db := statsEngine(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("seam-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(ctx)
+		walkFrom(t, db, time.Now())
+	})
+	start := time.Now().UTC().Truncate(time.Millisecond).Add(-time.Hour)
+	saved := firstWalkFrom
+	firstWalkFrom = func(time.Time) time.Time { return start }
+	t.Cleanup(func() { firstWalkFrom = saved })
+	yesterday := dayOf(time.Now()).AddDate(0, 0, -1)
+	if _, err := db.NewInsert().Model(&[]factRow{{Kind: kindSent, SourceID: suffix, AccountID: suffix + "-org", Day: dateArg(yesterday)}}).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	walkFrom(t, db, time.Now())
+	for _, q := range []string{`DELETE FROM email_stat_watermark WHERE source = ?`, `DELETE FROM email_stat_walk_start WHERE source = ?`} {
+		if _, err := db.NewRaw(q, sourceDelivery).Exec(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	engine := &scriptedEngine{pages: map[string]map[string]scriptedPage{}}
+	if _, err := runRollup(principalCtx(t), engine, db, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range engine.calls {
+		if c.construct == "deliveriesWrittenSince" {
+			if since := sinceOf(t, c.query); !since.Equal(start) {
+				t.Errorf("the first walk started at %v, want the start the test set, %v", since, start)
+			}
+		}
+	}
+	wantFact(t, storedFacts(t, db, suffix), kindSent, suffix)
+}
+
+// A START ONLY MOVES LATER. Two replicas whose first walks both failed, one
+// from a start the other has already moved past, leave the later of the two:
+// a lead that moves mid-run cannot send the walk back to a longer history.
+func TestAWalkStartNeverMovesBack(t *testing.T) {
+	_, db := statsEngine(t)
+	ctx := context.Background()
+	source := fmt.Sprintf("start-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source = ?`, source).Exec(ctx)
+	})
+	later := dayOf(time.Now()).AddDate(0, 0, -100)
+	for _, start := range []time.Time{later, later.AddDate(0, 0, -100)} {
+		if err := recordWalkStart(ctx, db, source, start); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, ok := walkStartOf(t, db, source); !ok || !got.Equal(later) {
+		t.Errorf("the start is %v (%v), want the later one, %v", got, ok, later)
+	}
+}
+
+// walkStartOf is where a source's first walk starts (email_stat_walk_start),
+// and false when nothing has moved it from four hundred days back.
+func walkStartOf(t *testing.T, db *bun.DB, source string) (time.Time, bool) {
+	t.Helper()
+	var at time.Time
+	err := db.NewRaw(`SELECT starts_at FROM email_stat_walk_start WHERE source = ?`, source).Scan(context.Background(), &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, false
+	}
+	if err != nil {
+		t.Fatalf("read the %s walk start: %v", source, err)
+	}
+	return at, true
+}
+
+// A FIRST WALK THAT CANNOT READ ITS FIRST PAGE STARTS LATER. On a cluster with
+// a long history the first page of a first walk reads every version written
+// in four hundred days, and can outlast the request pool's statement timeout;
+// a failed page writes no watermark, so every run would start over and fail
+// the same way, and the source's statistics would never begin. Instead each
+// failure moves the next first walk's start half way to the clock, to the UTC
+// day, durably, with a Warn naming the source and the start: four hundred
+// days back, then two hundred, then one hundred. The next run that reads the
+// page walks from there, and the read counts nothing before it for that
+// source's figures, while a source walked from further back is measured there.
+// The timeout and any other failure are said apart in the log.
+func TestAFirstWalkThatCannotReadItsFirstPageStartsLater(t *testing.T) {
+	_, db := statsEngine(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("cliff-%d", time.Now().UnixNano())
+	moved := []string{sourceDelivery, sourceConsent}
+	t.Cleanup(func() {
+		_, _ = db.NewRaw(`DELETE FROM email_stat_fact WHERE source_id LIKE ?`, suffix+"%").Exec(ctx)
+		_, _ = db.NewRaw(`DELETE FROM email_stat_walk_start WHERE source IN (?)`, bun.In(moved)).Exec(ctx)
+		walkFrom(t, db, time.Now())
+	})
+	// Noon, so each half way lands mid-day: the day it moves the start to is
+	// the same however long a run takes.
+	now := dayOf(time.Now()).Add(12 * time.Hour)
+	walkFrom(t, db, now)
+	for _, s := range moved {
+		for _, q := range []string{`DELETE FROM email_stat_watermark WHERE source = ?`, `DELETE FROM email_stat_walk_start WHERE source = ?`} {
+			if _, err := db.NewRaw(q, s).Exec(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var logs bytes.Buffer
+	runAt := func(engine Engine) error {
+		t.Helper()
+		i := NewIntegration(engine, func() *bun.DB { return db }, slog.New(slog.NewTextHandler(&logs, nil)))
+		i.now = func() time.Time { return now }
+		_, err := i.handleRollup(principalCtx(t), nil, 0)
+		return err
+	}
+
+	failing := &scriptedEngine{pages: map[string]map[string]scriptedPage{
+		"deliveriesWrittenSince":    {"": {err: errors.New("ERROR: canceling statement due to statement timeout (SQLSTATE=57014)")}},
+		"consentEventsWrittenSince": {"": {err: errors.New("the engine went away")}},
+	}}
+	horizon := now.Add(-retention)
+	halfWay := dayOf(horizon.Add(now.Sub(horizon) / 2))
+	threeQuarters := dayOf(halfWay.Add(now.Sub(halfWay) / 2))
+	for n, want := range []time.Time{halfWay, threeQuarters} {
+		if err := runAt(failing); err == nil {
+			t.Fatalf("failure %d: the run answered no error for two sources whose first page failed", n+1)
+		}
+		for _, s := range moved {
+			if got, ok := walkStartOf(t, db, s); !ok || !got.Equal(want) {
+				t.Errorf("after failure %d the %s first walk starts at %v (%v), want %v", n+1, s, got, ok, want)
+			}
+			if through, ok := watermarkOf(t, db, s); ok {
+				t.Errorf("a failed first page left a %s watermark at %v", s, through)
+			}
+		}
+	}
+	for _, line := range []string{
+		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, halfWay.Format(time.DateOnly)),
+		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history timed out", sourceDelivery, threeQuarters.Format(time.DateOnly)),
+		fmt.Sprintf("email statistics for %s start from %s: the first walk over a longer history failed", sourceConsent, threeQuarters.Format(time.DateOnly)),
+	} {
+		if !strings.Contains(logs.String(), line) {
+			t.Errorf("the log does not say %q:\n%s", line, logs.String())
+		}
+	}
+
+	// A run whose own context ends during the first page -- the node
+	// stopping, the lead moving -- moves nothing: it says nothing about how
+	// long the history is. It does not try to: a write on the ended context
+	// would fail anyway, so the error is what shows the attempt.
+	stopping, stop := context.WithCancel(principalCtx(t))
+	defer stop()
+	cancelled := &scriptedEngine{
+		pages: map[string]map[string]scriptedPage{"deliveriesWrittenSince": {"": {err: context.Canceled}}},
+		before: func(construct, _ string) {
+			if construct == "deliveriesWrittenSince" {
+				stop()
+			}
+		},
+	}
+	if _, err := runRollup(stopping, cancelled, db, now); err == nil || strings.Contains(err.Error(), "record where the next first walk starts") {
+		t.Errorf("a run stopped during the first page answered %v; want its failed read, and no attempt to move the start", err)
+	}
+	if got, _ := walkStartOf(t, db, sourceDelivery); !got.Equal(threeQuarters) {
+		t.Errorf("a run stopped during the first page moved the delivery start to %v, want it left at %v", got, threeQuarters)
+	}
+
+	// The next run that reads the first page walks from where the failures
+	// left the start, and is walked from then on.
+	reading := &scriptedEngine{pages: map[string]map[string]scriptedPage{}}
+	if err := runAt(reading); err != nil {
+		t.Fatal(err)
+	}
+	walked := 0
+	for _, c := range reading.calls {
+		if c.construct == "deliveriesWrittenSince" {
+			walked++
+			if since := sinceOf(t, c.query); !since.Equal(threeQuarters) {
+				t.Errorf("the deliveries' first walk started at %v, want the start the failures left, %v", since, threeQuarters)
+			}
+		}
+	}
+	if walked == 0 {
+		t.Fatal("the run never read the deliveries")
+	}
+	if _, ok := watermarkOf(t, db, sourceDelivery); !ok {
+		t.Error("the walk that read its first page left no delivery watermark")
+	}
+
+	// Before the start nothing of the deliveries is measured: a month that
+	// ends before it, or holds it, has null sends, though a fact is recorded
+	// there. The engagement events were walked from four hundred days back,
+	// so that month's opens are measured.
+	earlier := threeQuarters.AddDate(0, 0, -45)
+	if _, err := db.NewInsert().Model(&[]factRow{{Kind: kindSent, SourceID: suffix + "-old", AccountID: suffix + "-org", CampaignID: suffix + "-camp", Day: dateArg(earlier)}}).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readStatistics(ctx, db, staff(), nil, statsperiod.Last12Months, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MeasuredSince == nil || got.MeasuredSince.After(earlier) {
+		t.Fatalf("measuredSince is %v, want it on or before the earlier fact's %v for this to prove anything", got.MeasuredSince, earlier)
+	}
+	for _, p := range got.Series {
+		end := p.At.AddDate(0, 1, 0)
+		switch {
+		case p.At.Before(threeQuarters):
+			if p.Sent != nil {
+				t.Errorf("the month of %s, which starts before the deliveries' walk, has %d sends; want null", p.At.Format(time.DateOnly), *p.Sent)
+			}
+			if end.After(earlier) && p.UniqueOpens == nil {
+				t.Errorf("the month of %s has null opens; the engagement walk started at the horizon, so they are measured", p.At.Format(time.DateOnly))
+			}
+		default:
+			if p.Sent == nil {
+				t.Errorf("the month of %s, after the deliveries' walk began, has null sends; want them measured", p.At.Format(time.DateOnly))
+			}
+		}
 	}
 }

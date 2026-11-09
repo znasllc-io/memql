@@ -22,13 +22,13 @@
 //
 // The campaign rows are graph rows, and hand-written SQL over the graph is the
 // measured hazard the design rules out: the latest-version collapse, the id
-// spellings and the row admission live in the engine. The walk asks five
+// spellings and the row admission live in the engine. The walk asks seven
 // @serverOnly queries under the rollup's maintenance principal and internal
-// origin, and only this package's own two tables are written with SQL
-// (rollup.go). Each of the five projects only what the facts read -- no
+// origin, and only this package's own tables are written with SQL
+// (rollup.go). Each of the seven projects only what the facts read -- no
 // address, no address digest, no owner; the one reference to a recipient is
-// the id a subscription change is counted under -- because the walk reads
-// every organization's recipients and a figure needs none of the rest
+// the id a consent event is judged and counted under -- because the walk
+// reads every organization's recipients and a figure needs none of the rest
 // (TestTheWalkReadsNoAddressAndNothingTheFactsDoNotUse).
 //
 // # One fact per source record and kind
@@ -42,12 +42,15 @@
 // # Why the five-minute overlap
 //
 // Each source is walked from a watermark, the newest row.createdAt a run has
-// written past, less five minutes. A row's time is stamped by the clock of
-// the node that wrote it and the row commits after that, so a row can arrive
-// with a time before a watermark another run already moved past; reading five
-// minutes behind picks it up, and reading a row twice costs nothing. The
-// watermark never passes the clock of the run that writes it, so one row
-// stamped ahead cannot hide the rows after it (rollup.go).
+// written past -- or, once a walk has read its last page, the clock it asked
+// that page by, rows or none -- less five minutes. A row's time is stamped by
+// the clock of the node that wrote it and the row commits after that, so a
+// row can arrive with a time before a watermark another run already moved
+// past; reading five minutes behind picks it up, and reading a row twice
+// costs nothing. The watermark never passes the clock of the run that writes
+// it, so one row stamped ahead cannot hide the rows after it (rollup.go). It
+// is also how far the read counts: a figure whose sources' walks have not
+// reached a day is null there, never zero (statistics.go).
 //
 // # Attribution (D18)
 //
@@ -58,6 +61,16 @@
 // or an unsubscribe names a recipient, whose audience it is counted under.
 // The two lookups run once per page through the engine, in batches. Opens and
 // clicks exist for campaign mail only, because only campaign mail is tracked.
+//
+// # Test runs are not statistics
+//
+// A test run is a campaign of its own, sent to the organization's testing
+// audience. Nothing of it makes a fact -- its sends, opens and clicks, and the
+// consent events it gave rise to -- and neither do the consent events of the
+// testing audience's people, who are the organization's own staff. Two more
+// lookups a page, made after the page is read, say which of its campaigns are
+// test runs and which of its audiences are testing audiences (rollup.go, "Test
+// runs are not statistics").
 //
 // # The read, narrowed to the caller's organizations (D11)
 //
