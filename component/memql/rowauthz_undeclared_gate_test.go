@@ -219,6 +219,20 @@ const undeclared3324NodeTokenAdminReason = "memql#3324 -- role-gated node-creden
 // does not measure it.
 const undeclared3217SeedSweepReason = "memql#3217 -- system-actor startup sweep, uncaller-scopable by construction; v1:identity:user still declares no tier (epic Decision D)"
 
+// undeclared6451LegalAcceptanceReason covers userLegalAcceptanceById, added by
+// 09694d1f2 with the legal-acceptance record and filed as memql#6451 after this
+// gate refused it on main.
+//
+// Like usersForSeedSweep it cannot be caller-scoped: the identity service reads
+// it while minting a session (component/identity/legal_acceptance.go), inside
+// the request that is still authenticating the person, so there is no
+// actor.userId to filter on yet -- the circularity userByIdSystem has. The
+// handler scopes it to the session's subject instead, @serverOnly keeps it off
+// the wire, and its shape (userLegalAcceptance: row.id, legalAcceptance,
+// row.createdAt) carries none of userFull's directory fields. That bounds the
+// exposure; the concept still measures nothing, which is why it is listed.
+const undeclared6451LegalAcceptanceReason = "memql#6451 -- pre-actor legal-acceptance read at sign-in, @serverOnly and scoped by the handler to the session's subject; v1:identity:user still declares no tier (epic Decision D)"
+
 // undeclared3406PasskeyReason covers the two constructs memql#3406 added for
 // the WebAuthn passkey variant.
 //
@@ -880,6 +894,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"userByIdSystem":            {"v1:identity:user", undeclaredGrandfatherReason},
 	"userCount":                 {"v1:identity:user", undeclaredGrandfatherReason},
 	"userDisplayById":           {"v1:identity:user", undeclaredGrandfatherReason},
+	"userLegalAcceptanceById":   {"v1:identity:user", undeclared6451LegalAcceptanceReason},
 	"usersForSeedSweep":         {"v1:identity:user", undeclared3217SeedSweepReason},
 	"usersInDeletionCooldown":   {"v1:identity:user", undeclaredGrandfatherReason},
 	"usersScheduledForDeletion": {"v1:identity:user", undeclaredGrandfatherReason},
