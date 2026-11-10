@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
+import { useSessionIfPresent } from "../../../chrome/access";
 
 import { AutoRefresh, Caption, Fact, Facts, Notice, Subhead } from "../../../kit";
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
@@ -10,6 +11,7 @@ import { PageHelp } from "../../../kit/pageHelp";
 import { PeriodControl, RankedList, SITE_PERIODS, StatFigures, TimeChart, TimeChartSkeleton, periodLabel, previousComparable, type ChartPoint, type Period, type StatFigure } from "../../../kit/statistics";
 import { useWide } from "../../../kit/useWide";
 import { useOsConnection } from "../../../live/connection";
+import { holds } from "../../../system/roles";
 import type { SiteRow } from "../rows";
 import { useDeployablesSettings } from "../settingsContext";
 import {
@@ -225,6 +227,13 @@ function SiteStatisticsBody({ siteId, period, onShowAll }: { siteId: string; per
   const wide = useWide(root, 760);
   const [selected, setSelected] = useState("visitors");
   const [health, setHealth] = useState("requests");
+  // HEALTH IS FOR THE PEOPLE WHO RUN THE SITE (owner's direction, 2026-11-10):
+  // drawn only to a holder of the health part, owner and developer. The server
+  // sends a non-holder nulls for these figures (component/sitetraffic
+  // handleStatistics), so this is not the only thing keeping them back.
+  // `epoch` is the reactivity signal: the held set is read out of band.
+  const epoch = useSessionIfPresent()?.accessEpoch ?? 0;
+  const showHealth = useMemo(() => holds("execute", "app:deployables/health"), [epoch]);
   const [devices, setDevices] = useState<"device" | "browser" | "os">("device");
 
   const stats = reading.value;
@@ -238,7 +247,7 @@ function SiteStatisticsBody({ siteId, period, onShowAll }: { siteId: string; per
   return (
     <div ref={root} className="deployable-statistics">
       <AutoRefresh onRefresh={reading.reload} busy={reading.state === "loading"} enabled={connection !== null} intervalMs={statisticsRefreshMs(period)} />
-      <StatisticsHelp title="Statistics" />
+      <StatisticsHelp title="Statistics" health={showHealth} />
       {reading.state === "error" ? <StatisticsRefusal error={reading.error} /> : null}
       {nothing ? (
         <Caption>{nothingRecordedSentence(periodLabel(period).toLowerCase())}</Caption>
@@ -272,16 +281,18 @@ function SiteStatisticsBody({ siteId, period, onShowAll }: { siteId: string; per
             />
           </div>
 
-          <section className="deployable-statistics-health" aria-label="Health">
-            <Subhead>Health</Subhead>
-            <StatFigures label="Health figures" figures={figuresOf(HEALTH_FIGURES, stats)} selected={health} onSelect={setHealth} />
-            <FigureChart specs={HEALTH_FIGURES} selected={health} stats={stats} />
-            <Facts>
-              <Fact label="Data served" value={factOf(stats, (t) => t.bytes, formatBytes)} />
-              <Fact label="Median response" value={factOf(stats, (t) => t.medianMs, formatMs)} />
-              <Fact label="Bot requests" value={factOf(stats, (t) => t.botRequests, formatCount)} />
-            </Facts>
-          </section>
+          {showHealth ? (
+            <section className="deployable-statistics-health" aria-label="Health">
+              <Subhead>Health</Subhead>
+              <StatFigures label="Health figures" figures={figuresOf(HEALTH_FIGURES, stats)} selected={health} onSelect={setHealth} />
+              <FigureChart specs={HEALTH_FIGURES} selected={health} stats={stats} />
+              <Facts>
+                <Fact label="Data served" value={factOf(stats, (t) => t.bytes, formatBytes)} />
+                <Fact label="Median response" value={factOf(stats, (t) => t.medianMs, formatMs)} />
+                <Fact label="Bot requests" value={factOf(stats, (t) => t.botRequests, formatCount)} />
+              </Facts>
+            </section>
+          ) : null}
         </>
       )}
     </div>

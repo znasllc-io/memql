@@ -728,6 +728,20 @@ seed capability cap-owner-execute-app-deployables-access { roleSlug: "owner"  ve
 @description("developer: the access part of the Deployables app -- mint, regenerate, re-time and remove the access codes that open part of a deployable to a named visitor (deployable access codes, design record 2026-10-29).")
 seed capability cap-developer-execute-app-deployables-access { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/access"  predefined: true }
 
+// ---- app:deployables/health -- a deployable's Health figures on its Statistics page ----
+//
+// OWNER AND DEVELOPER (owner's direction, 2026-11-10): requests, errors, not
+// found, response time, bytes and bot requests are for the people who run the
+// site, not for a client reading their storefront's visitors. Admins and every
+// member role, a client's own scoped roles among them, read the visitor figures
+// without them. The part is enforced where the figures are produced
+// (component/sitetraffic handleStatistics blanks them for a caller without it),
+// and the OS draws the Health section only to a holder.
+@description("owner: the health part of the Deployables app -- a deployable's request, error, not-found, response-time, bytes and bot figures on its Statistics page.")
+seed capability cap-owner-execute-app-deployables-health { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/health"  predefined: true }
+@description("developer: the health part of the Deployables app -- a deployable's request, error, not-found, response-time, bytes and bot figures on its Statistics page.")
+seed capability cap-developer-execute-app-deployables-health { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/health"  predefined: true }
+
 // ---- app:deployables/reviews -- a store's reviews, in the Deployables app ----
 //
 // OWNER AND DEVELOPER, like the parts above, and its own part because it is a

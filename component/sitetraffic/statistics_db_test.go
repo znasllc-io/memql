@@ -1321,6 +1321,59 @@ func TestTheStatisticsBuiltinAnswersOneNode(t *testing.T) {
 	}
 }
 
+// HEALTH IS FOR THE PEOPLE WHO RUN THE SITE (owner's direction, 2026-11-10).
+// A caller without the health part (execute app:deployables/health, owner and
+// developer) reads the visitor figures and NO request, error, not-found, bytes,
+// bot or response-time figure, in the totals and in the series alike: the OS
+// hides the section, and this is what keeps it from being merely hidden.
+func TestHealthFiguresReachOnlyTheHealthPart(t *testing.T) {
+	eng, db := statisticsTest(t)
+	sfx := suffix(t)
+	owner := "user-health-" + sfx
+	site := seedDeployable(t, eng, owner, sfx)
+	now := time.Date(2038, 5, 2, 9, 0, 0, 0, time.UTC)
+	seedDailyStats(t, db, site, utcDay(2038, 5, 1), measured(2, 2, 1, 3, 4))
+	i := NewIntegration(eng, func() *bun.DB { return db }, nil, quietLogger())
+	i.now = func() time.Time { return now }
+
+	read := func(ctx context.Context) map[string]any {
+		t.Helper()
+		nodes, err := i.handleStatistics(ctx, map[string]any{"siteIds": []any{site}, "period": "7d"}, 0)
+		if err != nil || len(nodes) != 1 {
+			t.Fatalf("handleStatistics: %d nodes, %v", len(nodes), err)
+		}
+		var p map[string]any
+		if err := json.Unmarshal(nodes[0].Payload, &p); err != nil {
+			t.Fatalf("decode the payload: %v", err)
+		}
+		return p
+	}
+	health := []string{"requests", "errors", "notFound", "bytes", "botRequests", "medianMs", "p95Ms"}
+
+	member := read(userCtx(owner))
+	totals, _ := member["totals"].(map[string]any)
+	if totals["visitors"] != 2.0 {
+		t.Fatalf("a member reads %v visitors, want 2: hiding Health must not hide the visitors", totals["visitors"])
+	}
+	for _, key := range health {
+		if totals[key] != nil {
+			t.Errorf("a member without the health part reads totals.%s = %v, want null", key, totals[key])
+		}
+	}
+	for _, point := range member["series"].([]any) {
+		for _, key := range []string{"requests", "errors", "notFound", "p95Ms"} {
+			if v := point.(map[string]any)[key]; v != nil {
+				t.Fatalf("a member without the health part reads a series point's %s = %v, want null", key, v)
+			}
+		}
+	}
+
+	staff, _ := read(operatorCtx("operator-health-" + sfx))["totals"].(map[string]any)
+	if staff["requests"] != 4.0 {
+		t.Errorf("the owner reads %v requests, want 4: the health part must still see Health", staff["requests"])
+	}
+}
+
 // THE READ RUNS INSIDE THE REQUEST POOL'S STATEMENT LIMIT, NEVER ABOVE IT.
 //
 // The pool's limit (MEMQL_DB_STATEMENT_TIMEOUT_MS, 8 s by default) sits below

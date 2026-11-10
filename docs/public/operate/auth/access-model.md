@@ -259,7 +259,7 @@ stating floors, and `TestOsRegistryRequiresMatchTheAppSeeds`
 (`component/memql`) fails the build when a manifest names a resource no seed
 declares or a seeded app resource has no manifest. Deployables is the first app to
 carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`, `preview`,
-`store`, `access`, and the pipelines parts `connect`, `rerun`, `cancel`,
+`store`, `access`, `health`, and the pipelines parts `connect`, `rerun`, `cancel`,
 `channels`), all seeded on owner and developer; the mapping from part to
 construct is the table in the design record, and the pipelines builtins' in
 [Pipelines](../pipelines.md#connecting-a-pipeline). `access` -- the acts on a
