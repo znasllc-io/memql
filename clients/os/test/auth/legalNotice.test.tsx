@@ -15,7 +15,7 @@ const auth = vi.hoisted(() => ({
     status: "signed-in",
   } as { config: Record<string, unknown>; authSource: { bearer: () => Promise<string | null>; refresh: () => Promise<string | null> }; status: string },
 }));
-vi.mock("../../src/auth/AuthProvider", () => ({ useAuth: () => auth.value }));
+vi.mock("../../src/auth/AuthProvider", () => ({ useAuth: () => auth.value, useOptionalAuth: () => auth.value }));
 vi.mock("../../src/auth/roleTest", () => ({ isRoleTestTab: () => false }));
 
 const config = auth.value.config as unknown as OsRuntimeConfig;

@@ -42,6 +42,16 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
+/** The same context, or null outside an AuthProvider. For chrome the Shell
+ * draws on its own (LegalNoticeBanner): App always wraps the Shell in the
+ * provider, but the Shell's tests render it without one, and there "no
+ * provider" means "no sign-in to speak about", not a crash. A throw here took
+ * down every Shell test (2f0d5ebd5). Same rule as auth/context.tsx's source:
+ * the default is nothing, not a throw. */
+export function useOptionalAuth(): AuthContextValue | null {
+  return useContext(AuthContext);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<OsRuntimeConfig>(UNKNOWN_RUNTIME_CONFIG);
   const [status, setStatus] = useState<AuthStatus>("loading");

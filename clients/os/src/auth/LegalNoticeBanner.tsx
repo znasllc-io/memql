@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { Button, Notice } from "../kit";
-import { useAuth } from "./AuthProvider";
+import { useOptionalAuth } from "./AuthProvider";
 import { dismissLegalNotices, legalNoticeSentence, legalNoticesDismissed, loadLegalNotices, type LegalNotice } from "./legalNotice";
 import { identityLocation } from "./nativeIdentity";
 import { isRoleTestTab } from "./roleTest";
 import "./legalNotice.css";
 
 /** After sign-in, says which legal-document versions that sign-in accepted
- * (legalNotice.ts). Quiet, dismissible per tab, never in the way of signing in. */
+ * (legalNotice.ts). Quiet, dismissible per tab, never in the way of signing in.
+ * Outside an AuthProvider (the Shell's own tests) there is no sign-in, so it
+ * reads and draws nothing (useOptionalAuth). */
 export function LegalNoticeBanner() {
-  const { status, config, authSource } = useAuth();
+  const auth = useOptionalAuth();
+  const status = auth?.status;
+  const config = auth?.config;
+  const authSource = auth?.authSource;
   const [notices, setNotices] = useState<LegalNotice[]>([]);
   useEffect(() => {
-    if (status !== "signed-in" || !config.authEnabled || isRoleTestTab()) { setNotices([]); return; }
+    if (!config || !authSource || status !== "signed-in" || !config.authEnabled || isRoleTestTab()) { setNotices([]); return; }
     let cancelled = false;
     void loadLegalNotices(config, authSource).then(found => { if (!cancelled) setNotices(found); });
     return () => { cancelled = true; };
