@@ -60,6 +60,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
