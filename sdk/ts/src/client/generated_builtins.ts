@@ -829,7 +829,7 @@ export interface CampaignSaveJourneyArgs {
   description?: string;
   /** {kind: joined | confirmed, audienceId} */
   trigger: Record<string, unknown>;
-  /** Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?} */
+  /** Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, minutes?, timeoutDays?} */
   steps: Record<string, unknown>[];
   /** Exact revision from journeyById; omit when creating. */
   expectedRevision?: string;

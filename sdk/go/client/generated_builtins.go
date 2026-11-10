@@ -1057,7 +1057,7 @@ type CampaignSaveJourneyArgs struct {
 	Description string
 	// {kind: joined | confirmed, audienceId}
 	Trigger map[string]any
-	// Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}
+	// Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, minutes?, timeoutDays?}
 	Steps []map[string]any
 	// Exact revision from journeyById; omit when creating.
 	ExpectedRevision string
