@@ -152,12 +152,11 @@ func TestRankVisibleReadsPerRankPairAgainstARealDatabase(t *testing.T) {
 			rationale: "D2 includes peers (<=), and excludes every higher rung",
 		},
 		{
-			name:      "a developer sees both admins and their own, not the owner's",
+			name:      "a developer sees every account, the owner's included",
 			actor:     dev,
 			role:      auth.RoleDeveloper,
-			sees:      []string{acctAdmin, acctAdmin2, acctDev},
-			blind:     []string{acctOwner},
-			rationale: "developer (300) outranks admin (200) -- the flipped ladder, measured",
+			sees:      []string{acctAdmin, acctAdmin2, acctDev, acctOwner},
+			rationale: "developers and owners view and manage every account (owner's direction, 2026-11-10); the rank tier binds admins only (accountsStaff)",
 		},
 		{
 			name:      "an owner sees every rung",
@@ -185,6 +184,57 @@ func TestRankVisibleReadsPerRankPairAgainstARealDatabase(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A developer reads AND edits an account the owner created; an admin still
+// cannot see it (owner's direction, 2026-11-10: "developers and owners should
+// have access" to every account, to view and to manage).
+//
+// The by-id read is the one the email preview (component/campaigns
+// email_render.go), the template and layout checks and the Deployables Client
+// card make as the signed-in person. Before this, a developer got zero rows
+// there: the preview said "organization is not active or accessible" and the
+// card showed the account's id instead of its name.
+func TestADeveloperReadsAndEditsAnOwnersAccount(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	suffix := uniqueSuffix("staff1110")
+
+	owner := "sowner-" + suffix
+	dev := "sdev-" + suffix
+	admin := "sadmin-" + suffix
+	seedPrincipal(t, eng, owner, auth.RoleOwner)
+	seedPrincipal(t, eng, dev, auth.RoleDeveloper)
+	seedPrincipal(t, eng, admin, auth.RoleAdmin)
+
+	acct := "v1:accounts:account:s-" + suffix
+	seedAccountOwnedBy(t, eng, owner, auth.RoleOwner, acct, "Owner's client")
+	byId := fmt.Sprintf(`query clientAccountById(accountId: %s)`, langparser.QuoteString(BareShortId(acct)))
+
+	res, err := eng.Execute(rankActorCtx(dev, auth.RoleDeveloper), byId)
+	if err != nil {
+		t.Fatalf("a developer's by-id read of the owner's account was refused: %v", err)
+	}
+	if n := len(res.Bundle.GetNodes()); n != 1 {
+		t.Fatalf("a developer read %d rows of the owner's account by id, want 1", n)
+	}
+
+	rename := fmt.Sprintf(`mutation updateClientAccount(accountId: %s, name: "Renamed by a developer")`,
+		langparser.QuoteString(BareShortId(acct)))
+	if _, err := eng.Execute(rankActorCtx(dev, auth.RoleDeveloper), rename); err != nil {
+		t.Fatalf("a developer could not edit the owner's account: %v", err)
+	}
+	res, err = eng.Execute(rankActorCtx(owner, auth.RoleOwner), byId)
+	if err != nil || len(res.Bundle.GetNodes()) != 1 {
+		t.Fatalf("the owner's read-back failed: %v", err)
+	}
+	if name := res.Bundle.GetNodes()[0].GetPayload().AsMap()["name"]; name != "Renamed by a developer" {
+		t.Fatalf("after the developer's edit the account is named %v", name)
+	}
+
+	res, err = eng.Execute(rankActorCtx(admin, auth.RoleAdmin), byId)
+	if err == nil && len(res.Bundle.GetNodes()) != 0 {
+		t.Fatal("an admin can read an account owned above their rank; the rank tier must still bind admins")
 	}
 }
 

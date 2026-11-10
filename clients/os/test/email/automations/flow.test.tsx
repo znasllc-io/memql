@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { Flow } from "../../../src/apps/email/automations/Flow";
@@ -19,6 +19,11 @@ describe("Automation step model", () => {
   });
   it("explains the steps and counts waiting people by the next step", () => {
     expect(stepSentence({ id: "w", kind: "wait", days: 1, hours: 6 }, { template: "" })).toBe("Wait 1 day and 6 hours");
+    expect(stepSentence({ id: "w", kind: "wait", minutes: 5 }, { template: "" })).toBe("Wait 5 minutes");
+    expect(stepSentence({ id: "w", kind: "wait", minutes: 1 }, { template: "" })).toBe("Wait 1 minute");
+    expect(stepSentence({ id: "w", kind: "wait", days: 1, hours: 2, minutes: 3 }, { template: "" })).toBe("Wait 1 day, 2 hours and 3 minutes");
+    // Minutes go on the wire only when there are some, so a days-long wait is sent exactly as before.
+    expect(wireSteps([{ id: "w", kind: "wait", days: 0, hours: 0, minutes: 5 }])).toEqual([{ id: "w", kind: "wait", days: 0, hours: 0, minutes: 5 }]);
     const queries = countQueries("j", [{ id: "c", kind: "confirm" }, { id: "w", kind: "wait" }, { id: "s", kind: "send" }]);
     expect(queries.find(q => q.cardId === "w")?.args).toEqual({ journeyId: "j", status: "active", stepId: "s" });
     expect(queries.find(q => q.cardId === "c")?.args).toEqual({ journeyId: "j", status: "waiting", stepId: "c" });
@@ -51,7 +56,11 @@ describe("Automation step model", () => {
     expect(issues).toContainEqual({ stepId: "", text: "This audience asks people to confirm, so the first email must ask them to confirm." });
     expect(issues).toContainEqual({ stepId: "s1", text: "Publish “Welcome” before turning this on." });
     expect(issues).toContainEqual({ stepId: "s1", text: "Choose a sender in this organization." });
-    expect(issues).toContainEqual({ stepId: "w", text: "A wait lasts from one hour to 365 days." });
+    expect(issues).toContainEqual({ stepId: "w", text: "A wait lasts from one minute to 365 days." });
+    const wait = (step: Partial<FlowStep>) => journeyIssues({ accountId: "org", trigger: { kind: "joined", audienceId: "a" }, steps: [{ id: "w", kind: "wait", ...step }] }, feeds).filter(i => i.stepId === "w");
+    expect(wait({ minutes: 5 })).toEqual([]);
+    expect(wait({ minutes: 60 })).toEqual([{ stepId: "w", text: "A wait lasts from one minute to 365 days." }]);
+    expect(wait({ days: 365, minutes: 1 })).toEqual([{ stepId: "w", text: "A wait lasts from one minute to 365 days." }]);
     expect(journeyIssues({ accountId: "org", trigger: { kind: "confirmed", audienceId: "a" }, steps: [{ id: "c", kind: "confirm", templateId: "t" }] }, feeds)).toContainEqual({ stepId: "c", text: "Add {{confirmUrl}} to “Welcome” so people can confirm." });
   });
 });
@@ -64,6 +73,45 @@ describe("Flow keyboard", () => {
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown", altKey: true });
     const cards = [...document.querySelectorAll(".email-flow-card")]; expect(cards[0]?.textContent).toContain("Wait 3 days");
     fireEvent.keyDown(document.activeElement!, { key: "Delete" }); expect(screen.queryByRole("button", { name: /Send Welcome/ })).toBeNull();
+  });
+  // The Days / Minutes switch (owner's direction, 2026-11-10): testers turn a
+  // "5 days" wait into "5 minutes" to walk an automation end to end. Switching
+  // keeps the length of time; switching back rounds to whole days, at least 1.
+  it("switches a wait between days and minutes, converting the number", () => {
+    render(<Fixture />);
+    fireEvent.click(screen.getByRole("button", { name: "Wait 3 days" }));
+    const unit = screen.getByRole("radiogroup", { name: "Wait unit" });
+    const length = () => (screen.getByLabelText("Wait") as HTMLInputElement).value;
+    expect(within(unit).getByRole("radio", { name: "Days" }).getAttribute("aria-checked")).toBe("true");
+    expect(length()).toBe("3");
+    fireEvent.click(within(unit).getByRole("radio", { name: "Minutes" }));
+    expect(length()).toBe("4320");
+    expect(screen.getByRole("button", { name: "Wait 3 days" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Wait"), { target: { value: "5" } });
+    expect(screen.getByRole("button", { name: "Wait 5 minutes" })).toBeTruthy();
+    fireEvent.click(within(unit).getByRole("radio", { name: "Days" }));
+    expect(length()).toBe("1");
+    expect(screen.getByRole("button", { name: "Wait 1 day" })).toBeTruthy();
+  });
+  it("shows the step afresh when its length changes from outside, as Discard changes does", () => {
+    const original: FlowStep[] = [{ id: "w", kind: "wait", days: 3 }];
+    function Held({ steps: given }: { steps: FlowStep[] }) { const [held, setHeld] = useState(given); const [seen, setSeen] = useState(given); if (seen !== given) { setSeen(given); setHeld(given); } return <Flow trigger="When someone joins Newsletter" accountId="self" steps={held} templates={[]} senders={[]} editable onChange={setHeld} />; }
+    const view = render(<Held steps={original} />);
+    fireEvent.click(screen.getByRole("button", { name: "Wait 3 days" }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Wait unit" })).getByRole("radio", { name: "Minutes" }));
+    fireEvent.change(screen.getByLabelText("Wait"), { target: { value: "5" } });
+    expect(screen.getByRole("button", { name: "Wait 5 minutes" })).toBeTruthy();
+    view.rerender(<Held steps={[{ id: "w", kind: "wait", days: 3 }]} />);
+    expect(screen.getByRole("button", { name: "Wait 3 days" })).toBeTruthy();
+    expect((screen.getByLabelText("Wait") as HTMLInputElement).value).toBe("3");
+    expect(within(screen.getByRole("radiogroup", { name: "Wait unit" })).getByRole("radio", { name: "Days" }).getAttribute("aria-checked")).toBe("true");
+  });
+  it("opens a wait that is not whole days in minutes", () => {
+    function Odd() { const [held, setHeld] = useState<FlowStep[]>([{ id: "w", kind: "wait", days: 1, hours: 6 }]); return <Flow trigger="When someone joins Newsletter" accountId="self" steps={held} templates={[]} senders={[]} editable onChange={setHeld} />; }
+    render(<Odd />);
+    fireEvent.click(screen.getByRole("button", { name: "Wait 1 day and 6 hours" }));
+    expect(within(screen.getByRole("radiogroup", { name: "Wait unit" })).getByRole("radio", { name: "Minutes" }).getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByLabelText("Wait") as HTMLInputElement).value).toBe("1800");
   });
   it("inserts from the menu and readonly has no insertion or move controls", () => {
     const view = render(<Fixture />); fireEvent.click(screen.getByRole("button", { name: "Insert step 1" })); fireEvent.click(screen.getByRole("button", { name: "Ask to confirm" })); expect(screen.getByLabelText("Wait up to")).toBeTruthy();

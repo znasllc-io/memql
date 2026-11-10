@@ -857,7 +857,7 @@ schedules. The automatic welcome is separate from those campaigns.
 
 An automation starts when someone joins an audience or confirms their membership.
 Build a sequence of **Send email**, **Wait** and **Ask for confirmation** steps.
-It holds 1–20 steps and at least one email. A wait lasts one hour to 365 days.
+It holds 1–20 steps and at least one email. A wait lasts one minute to 365 days, set in days or in minutes (Email > Automations); minutes are there to walk an automation end to end in a test, then set back.
 Confirmation waits 1–30 days (seven by default), uses a published template
 containing `{{confirmUrl}}`, and may appear once. A joined automation for an
 audience requiring confirmation starts with that step; a confirmed trigger

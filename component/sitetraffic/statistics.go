@@ -180,6 +180,10 @@ type Statistics struct {
 // a DSL concept: nothing stores it, and the client reads the node's payload.
 const statisticsConcept = "integration:siteTraffic:statistics"
 
+// healthPart is the part whose holders read the Health figures (seeded on
+// owner and developer in dsl/rbac/seeds.memql; see handleStatistics).
+const healthPart = "app:deployables/health"
+
 // topEntriesKept is how many values each top list answers before the rest
 // fold into (other). The rollup keeps a hundred per day (topValuesKept), so a
 // value can reach these fifty on any day it was seen.
@@ -860,6 +864,35 @@ func (s Statistics) Payload() map[string]any {
 		p["measuredSince"] = s.MeasuredSince.UTC().Format(time.DateOnly)
 	}
 	return p
+}
+
+// WithoutHealth is the answer for a caller who does not hold the health part
+// (execute app:deployables/health): every Health figure nil -- requests,
+// errors, not found, bytes, bot requests and response times, in the totals and
+// in both series -- which the payload spells null, as it spells any unmeasured
+// figure. The visitor figures are untouched. handleStatistics applies it.
+func (s Statistics) WithoutHealth() Statistics {
+	s.Totals, s.Previous = s.Totals.withoutHealth(), s.Previous.withoutHealth()
+	s.Series, s.PreviousSeries = pointsWithoutHealth(s.Series), pointsWithoutHealth(s.PreviousSeries)
+	return s
+}
+
+func (t Totals) withoutHealth() Totals {
+	t.Requests, t.Errors, t.NotFound, t.Bytes, t.BotRequests = nil, nil, nil, nil, nil
+	t.MedianMs, t.P95Ms = nil, nil
+	return t
+}
+
+func pointsWithoutHealth(points []Point) []Point {
+	if points == nil {
+		return nil
+	}
+	out := make([]Point, len(points))
+	for i, p := range points {
+		p.Requests, p.Errors, p.NotFound, p.P95Ms = nil, nil, nil, nil
+		out[i] = p
+	}
+	return out
 }
 
 func (t Totals) payload() map[string]any {

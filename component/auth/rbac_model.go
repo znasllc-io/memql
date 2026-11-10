@@ -282,6 +282,11 @@ var appPartGrants = map[string][]Role{
 	// visitor into part of a site the public cannot see, and ends them, and a
 	// person may be trusted to deploy without being trusted to do that.
 	"app:deployables/access": {RoleOwner, RoleDeveloper},
+	// A deployable's Health figures on its Statistics page (owner's direction,
+	// 2026-11-10): for the people who run the site, not for a client reading
+	// their storefront's visitors. component/sitetraffic blanks the figures for
+	// a caller without the part; the OS draws the section only to a holder.
+	"app:deployables/health": {RoleOwner, RoleDeveloper},
 	// The reviews part: see a store's reviews and act on them in the
 	// Deployables app. Held by the cluster's operators so they can host and
 	// set a store up; the reviews pack still refuses an operator's moderation

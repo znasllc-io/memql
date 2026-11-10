@@ -338,6 +338,14 @@ func (i *Integration) handleInWindow(ctx context.Context, args map[string]any, _
 // with no traffic. Only a malformed call is refused -- more than 200 named
 // deployables, or a period the read does not offer, said in a sentence that
 // names the periods.
+//
+// HEALTH IS NARROWED BY PART. A caller without execute app:deployables/health
+// (owner and developer; owner's direction, 2026-11-10) gets the same answer
+// with every Health figure null (Statistics.WithoutHealth), so a client reading
+// their storefront's visitors never receives its error or response-time
+// figures. Regression: TestHealthFiguresReachOnlyTheHealthPart (db).
+// handleInWindow's errorCount is not narrowed: the Deployables list reads it
+// only for "served X ago", and the concept declares it required.
 func (i *Integration) handleStatistics(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	var db *bun.DB
 	if i.bunDB != nil {
@@ -357,6 +365,9 @@ func (i *Integration) handleStatistics(ctx context.Context, args map[string]any,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if subject, ok := auth.SubjectFromContext(ctx); !ok || !auth.CapableFor(ctx, subject, auth.VerbExecute, healthPart) {
+		stats = stats.WithoutHealth()
 	}
 	payload, err := json.Marshal(stats.Payload())
 	if err != nil {

@@ -1117,6 +1117,13 @@ organizations with `accountIds`.
   `(other)` remainder last; `sites`, each deployable with figures in the period
   and its own visitors, visits and page views, most visitors first; and
   `measuredSince`, the first day any of them has visitor figures.
+- **Health figures need the health part.** A caller without `execute
+  app:deployables/health` (seeded on owner and developer) gets every Health
+  figure `null` -- requests, errors, not found, bytes, bot requests and the
+  response times, in `totals`, `previous` and both series -- and the visitor
+  figures as usual; MemQL OS draws the Health section only to a holder. The
+  figures are for the people who run the site, not for a client reading their
+  storefront's visitors.
 - **A figure nothing measured is `null`, never 0**: the visitor figures before
   visitor counting began, every bucket before these deployables' first day of
   statistics, everything in a period with no rows at all, and a rate with no

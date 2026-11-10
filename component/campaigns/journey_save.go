@@ -26,8 +26,19 @@ type journeyStep struct {
 	SenderIdentityID string `json:"senderIdentityId,omitempty"`
 	Days             int    `json:"days,omitempty"`
 	Hours            int    `json:"hours,omitempty"`
-	TimeoutDays      int    `json:"timeoutDays,omitempty"`
+	// Minutes (0-59) lets a tester turn a days-long wait into minutes to walk
+	// an automation end to end, then turn it back (owner's direction,
+	// 2026-11-10). The OS's Days / Minutes switch saves a minutes total split
+	// into days, hours and minutes, so each field stays in its own range.
+	Minutes     int `json:"minutes,omitempty"`
+	TimeoutDays int `json:"timeoutDays,omitempty"`
 }
+
+// wait is how long a wait step holds a person before their next step.
+func (s journeyStep) wait() time.Duration {
+	return time.Duration(s.Days)*24*time.Hour + time.Duration(s.Hours)*time.Hour + time.Duration(s.Minutes)*time.Minute
+}
+
 type journeyDraft struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
@@ -86,7 +97,7 @@ func parseJourneyDraft(args map[string]any) (journeyDraft, error) {
 		case "confirm":
 			allowed["templateId"], allowed["senderIdentityId"], allowed["timeoutDays"] = true, true, true
 		case "wait":
-			allowed["days"], allowed["hours"] = true, true
+			allowed["days"], allowed["hours"], allowed["minutes"] = true, true, true
 		default:
 			return refuse("A step sends an email, asks for confirmation, or waits.")
 		}
@@ -97,15 +108,15 @@ func parseJourneyDraft(args map[string]any) (journeyDraft, error) {
 		}
 		var step journeyStep
 		if err := decodeJourneyValue(r, &step); err != nil {
-			return refuse("Use whole numbers for days and hours.")
+			return refuse("Use whole numbers for days, hours and minutes.")
 		}
 		if !journeyStepIDPattern.MatchString(step.ID) || seen[step.ID] {
 			return refuse("Give each step a unique id of up to 40 letters, digits, hyphens or underscores.")
 		}
 		seen[step.ID] = true
 		step.TemplateID, step.SenderIdentityID = bare(strings.TrimSpace(step.TemplateID)), bare(strings.TrimSpace(step.SenderIdentityID))
-		if step.Kind == "wait" && (step.Days < 0 || step.Days > 365 || step.Hours < 0 || step.Hours > 23 || step.Days*24+step.Hours < 1 || step.Days*24+step.Hours > 365*24) {
-			return refuse("A wait lasts from one hour to 365 days.")
+		if step.Kind == "wait" && (step.Days < 0 || step.Days > 365 || step.Hours < 0 || step.Hours > 23 || step.Minutes < 0 || step.Minutes > 59 || step.wait() < time.Minute || step.wait() > 365*24*time.Hour) {
+			return refuse("A wait lasts from one minute to 365 days.")
 		}
 		if step.Kind == "confirm" {
 			if _, exists := r["timeoutDays"]; !exists {

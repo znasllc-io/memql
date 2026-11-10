@@ -16,6 +16,7 @@ import { LIST_TRAFFIC_WINDOW, MAX_SITES_PER_READ, fetchTrafficSummaries, windowB
 import { SYSTEM_OWNED_TRAFFIC_NOTE, countingStartedSentence, formatMs, parseSiteStatistics, valueWord } from "../../src/apps/deployables/statistics/read";
 import { statisticsRefreshMs } from "../../src/apps/deployables/statistics/useSiteStatistics";
 import { chooseOption } from "../selectControl";
+import { seededAccessWithout } from "../seededAccess";
 import {
   PLATFORM_SITE,
   SHOP,
@@ -44,12 +45,13 @@ const HOST = "blog.memql.example.com";
 const BLOG = siteRow({ id: "site-blog", hostname: HOST, title: "Blog", status: "live", kind: "spa" });
 const SETTINGS_KEY = "memql-os-deployables-v1";
 
-function mount(connection: FakeConnection) {
+function mount(connection: FakeConnection, session: Parameters<typeof withSession>[1] = {}) {
   h.connection = connection;
   return render(
     withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} />, {
       role: "owner",
       userId: "u-me",
+      ...session,
     }),
   );
 }
@@ -60,10 +62,10 @@ function mount(connection: FakeConnection) {
  * Scoped to the page region rather than the document: a hostname matches the
  * list row, the head and the rail's address alike.
  */
-async function openStatistics(seed: FakeSeed, hostname = HOST, prepare?: (connection: FakeConnection) => void): Promise<{ connection: FakeConnection; page: HTMLElement }> {
+async function openStatistics(seed: FakeSeed, hostname = HOST, prepare?: (connection: FakeConnection) => void, session: Parameters<typeof withSession>[1] = {}): Promise<{ connection: FakeConnection; page: HTMLElement }> {
   const connection = fakeConnection(seed);
   prepare?.(connection);
-  mount(connection);
+  mount(connection, session);
   await waitFor(() => expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"));
   await click((await screen.findByText(hostname)).closest("button"));
   const deployable = await screen.findByRole("region", { name: `Deployable ${hostname}` });
@@ -382,6 +384,20 @@ describe("a deployable's Statistics", () => {
     expect(within(health).getByText("Data served").nextElementSibling?.textContent).toBe("12.4 MiB");
     expect(within(health).getByText("Median response").nextElementSibling?.textContent).toBe("48 ms");
     expect(within(health).getByText("Bot requests").nextElementSibling?.textContent).toBe("230");
+  });
+
+  // Health is for the people who run the site (owner's direction, 2026-11-10):
+  // a client looking at their storefront's visitors does not see request,
+  // error or response-time figures. The server blanks them too
+  // (component/sitetraffic handleStatistics), so this is not only hidden.
+  it("draws no Health for a role without the health part, and the help does not point at it", async () => {
+    const { page } = await openStatistics({ sites: [BLOG], siteStatistics: siteStatisticsRow() }, HOST, undefined, {
+      role: "developer",
+      capabilities: seededAccessWithout("developer", "app:deployables/health"),
+    });
+    await websiteFigures(page);
+    expect(within(page).queryByRole("region", { name: "Health" })).toBeNull();
+    expect(page.querySelector(".os-page-help-inline")?.textContent ?? "").not.toContain("Health");
   });
 
   it("says what a visitor, a visit and a bounce are, once, in the page's help", async () => {

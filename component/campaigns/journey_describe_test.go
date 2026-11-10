@@ -70,7 +70,7 @@ func TestDescribeJourneyNamesMissingTemplateAndRefusesInvalidProposal(t *testing
 	for _, tc := range []struct{ name, answer, want string }{
 		{"missing", strings.ReplaceAll(proposalFixture().answer, `"template":"t1"`, `"template":"Welcome note"`), "Create a template named “Welcome note”."},
 		{"unsupported", `{"action":"unsupported","explanation":"A purchase trigger isn't available."}`, "Couldn't draft this automation: A purchase trigger isn't available."},
-		{"zero wait", strings.ReplaceAll(proposalFixture().answer, `"kind":"confirm"`, `"kind":"wait"`), "The proposed automation was refused: A wait lasts from one hour to 365 days."},
+		{"zero wait", strings.ReplaceAll(proposalFixture().answer, `"kind":"confirm"`, `"kind":"wait"`), "The proposed automation was refused: A wait lasts from one minute to 365 days."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := proposalFixture()

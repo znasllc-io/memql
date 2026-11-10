@@ -77,14 +77,15 @@ type AccountScopeExpression struct {
 	RowID        bool
 	AllowUntied  bool
 	Resource     string
-	// NotOperator makes the node a fact about the CALLER rather than a row
-	// term: it lowers to true for a caller who is not an organization
-	// operator and to false for one who is, and the fields above are
-	// ignored. v1:accounts:account ORs it onto its declared tier so the tier
-	// binds operators only (enforceRowAuthzOnPlan). It asks
-	// organizationOperator, the predicate the row gate branches on, so the
-	// SQL half and the gate cannot disagree about who is an operator.
-	NotOperator bool
+	// RankExempt makes the node a fact about the CALLER rather than a row
+	// term: it lowers to true for a caller the declared tier does not bind --
+	// anyone who is not an organization operator (the boundary decides them)
+	// and accounts staff, developer and up (admitted outright) -- and to false
+	// for the rest, which today is an admin. The fields above are ignored.
+	// v1:accounts:account ORs it onto its declared tier (enforceRowAuthzOnPlan).
+	// It asks organizationOperator and accountsStaff, the predicates the row
+	// gate branches on, so the SQL half and the gate cannot disagree.
+	RankExempt bool
 }
 
 func (*AccountScopeExpression) isExpressionNode() {}
@@ -631,11 +632,11 @@ func treeHasAccountScope(expr ExpressionNode) bool {
 //	a set of accounts  -> the field contains any of them
 //	every account      -> the field is present and non-empty
 //
-// A NotOperator node is not a row term and answers its caller constant
+// A RankExempt node is not a row term and answers its caller constant
 // before any of them.
 func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScopeExpression) ExpressionNode {
-	if n.NotOperator {
-		return &constantBoolExpression{value: !organizationOperator(ctx)}
+	if n.RankExempt {
+		return &constantBoolExpression{value: !organizationOperator(ctx) || accountsStaff(ctx)}
 	}
 	field := strings.TrimSpace(n.Field)
 	if n.Organization && organizationOperator(ctx) {

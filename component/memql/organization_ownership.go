@@ -28,6 +28,30 @@ func organizationOperator(ctx context.Context) bool {
 	return ac != nil && (ac.Unranked && ac.IsClusterOwner() || auth.IsClusterOperator(ac.Role))
 }
 
+// accountsStaff is who views and manages EVERY organization's account row:
+// developer rank and up among cluster operators (owner's direction,
+// 2026-11-10). Before it, v1:accounts:account's rankVisible tier bound every
+// operator, so an owner-created account was invisible to a developer: the
+// Accounts list skipped it, Deployables showed its id for a name, and every
+// as-the-caller account read (the email preview among them) answered
+// "organization is not active or accessible".
+//
+// IsClusterOperator is the scoped-role fence: a role scoped to one client's
+// organization never qualifies, whatever rank its author gave it. Unranked
+// actors (maintenance, seeds, borrowed authority) are excluded so the server's
+// own readers keep the tier they had. Admins stay bound by the tier on purpose:
+// the direction named developers and owners. Both enforcement halves read this
+// one predicate -- the RankExempt arm in SQL and the row gate in
+// rowAuthzAdmitsMode -- so they cannot disagree about a row.
+// Regressions: TestADeveloperReadsAndEditsAnOwnersAccount (db),
+// TestAnAccountsReadCarriesTheTierForOperatorsOnly,
+// TestAScopedRoleIsNeverAccountsStaffWhateverItsRank.
+func accountsStaff(ctx context.Context) bool {
+	ac, _ := auth.AccessFromContext(ctx)
+	floor := auth.RoleRank(auth.RoleDeveloper)
+	return ac != nil && !ac.Unranked && auth.IsClusterOperator(ac.Role) && floor > 0 && auth.RoleRank(ac.Role) >= floor
+}
+
 // Operators default to the cluster's own organization. Other defaults resolve
 // from current shared memberships; multiple memberships require a choice.
 func organizationDefaultAccount(operator bool, scope *accountScope) (string, error) {
