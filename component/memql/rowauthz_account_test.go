@@ -297,48 +297,95 @@ func TestAnAccountsReadCarriesTheTierForOperatorsOnly(t *testing.T) {
 			"then drops: a short page reads as exhaustion and every account past it is unreachable")
 	}
 	if !holdsOperatorArmBesideTier(plan.Root) {
-		t.Fatal("the rank-bearing tier is not OR-ed with the NotOperator arm. Without the arm it " +
+		t.Fatal("the rank-bearing tier is not OR-ed with the RankExempt arm. Without the arm it " +
 			"narrows a member's read by rank, which the row gate never does to a member")
 	}
 
-	// The arm answers from organizationOperator, the predicate the row gate
-	// branches on. Both answers must occur, or the table measures one side only.
+	// The arm answers exactly who the row gate does NOT hold to the tier: every
+	// non-operator (the organization boundary decides them) and accounts staff
+	// (developer and owner, admitted outright). Only an admin is bound by it.
+	// All three answers must occur, or the table measures one side only.
 	eng := &MemQLEngine{}
-	arm := &AccountScopeExpression{NotOperator: true}
-	seen := map[bool]bool{}
-	for _, access := range []*auth.AccessContext{
-		{UserId: "u", Role: auth.RoleAdmin},
-		{UserId: "u", Role: auth.RoleDeveloper},
-		{UserId: "u", Role: auth.RoleOwner},
-		{UserId: "u", Role: auth.RoleWriter},
-		{UserId: "u", Role: auth.RoleReader},
-		auth.MaintenanceActor("seedSelfAccount"),
-	} {
-		ctx := auth.ContextWithAccess(context.Background(), access)
-		operator := organizationOperator(ctx)
-		seen[operator] = true
+	arm := &AccountScopeExpression{RankExempt: true}
+	want := map[auth.Role]bool{
+		auth.RoleAdmin:     false,
+		auth.RoleDeveloper: true,
+		auth.RoleOwner:     true,
+		auth.RoleWriter:    true,
+		auth.RoleReader:    true,
+	}
+	for role, exempt := range want {
+		ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u", Role: role})
+		if staff, operator := accountsStaff(ctx), organizationOperator(ctx); exempt != (!operator || staff) {
+			t.Fatalf("%s: operator=%v staff=%v, but the table says exempt=%v", role, operator, staff, exempt)
+		}
 		lowered, ok := eng.accountScopeComparison(ctx, arm).(*constantBoolExpression)
 		if !ok {
-			t.Fatalf("%s: the NotOperator arm lowered to %T, want a constant", access.Role, eng.accountScopeComparison(ctx, arm))
+			t.Fatalf("%s: the RankExempt arm lowered to %T, want a constant", role, eng.accountScopeComparison(ctx, arm))
 		}
-		if lowered.value == operator {
-			t.Fatalf("%s (operator=%v): the NotOperator arm lowered to %v", access.Role, operator, lowered.value)
+		if lowered.value != exempt {
+			t.Fatalf("%s: the RankExempt arm lowered to %v, want %v", role, lowered.value, exempt)
 		}
 	}
-	if !seen[true] || !seen[false] {
-		t.Fatalf("the cases cover operator=%v only", seen)
+	// The maintenance actor is an operator (unranked cluster owner) but never
+	// staff: a sweep keeps reading accounts through the tier, as it did before.
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
+	if accountsStaff(maintenance) {
+		t.Fatal("the unranked maintenance actor counts as accounts staff")
 	}
 }
 
+// accountsStaff is developer and up AMONG CLUSTER OPERATORS. A role scoped to
+// one client's organization never qualifies, whatever rank its author gave it:
+// a client moderator ranked 350 must not see every other client's account.
+func TestAScopedRoleIsNeverAccountsStaffWhateverItsRank(t *testing.T) {
+	cat := staffCatalog{}
+	auth.SetCapabilityCatalog(cat)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(nil) })
+
+	for slug, want := range map[string]bool{
+		"owner":           true,
+		"developer":       true,
+		"admin":           false,
+		"user":            false,
+		"client-lead-350": false,
+	} {
+		ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u", Role: auth.Role(slug)})
+		if got := accountsStaff(ctx); got != want {
+			t.Fatalf("%s: accountsStaff = %v, want %v", slug, got, want)
+		}
+	}
+}
+
+// staffCatalog is the seeded rungs plus a role scoped to organization "org-a"
+// whose rank sits between developer and owner.
+type staffCatalog struct{}
+
+var staffCatalogRanks = map[string]int{"owner": 400, "client-lead-350": 350, "developer": 300, "admin": 200, "user": 100, "viewer": 50}
+
+func (staffCatalog) Rank(slug string) (int, bool) { r, ok := staffCatalogRanks[slug]; return r, ok }
+func (staffCatalog) Name(slug string) string      { return slug }
+func (staffCatalog) Holds(string, string, string) bool {
+	return false
+}
+func (staffCatalog) Grants(string) []auth.VerbResource { return nil }
+func (staffCatalog) Scope(slug string) string {
+	if slug == "client-lead-350" {
+		return "org-a"
+	}
+	return ""
+}
+func (staffCatalog) Active(slug string) bool { _, ok := staffCatalogRanks[slug]; return ok }
+
 // holdsOperatorArmBesideTier reports whether a tree holds a disjunction whose
-// one side is the NotOperator arm and whose other side carries the rank term.
+// one side is the RankExempt arm and whose other side carries the rank term.
 func holdsOperatorArmBesideTier(expr ExpressionNode) bool {
 	n, ok := expr.(*LogicalExpression)
 	if !ok {
 		return false
 	}
 	if n.Op == LogicalOr {
-		if arm, isArm := n.Right.(*AccountScopeExpression); isArm && arm.NotOperator && treeHasRankScope(n.Left) {
+		if arm, isArm := n.Right.(*AccountScopeExpression); isArm && arm.RankExempt && treeHasRankScope(n.Left) {
 			return true
 		}
 	}

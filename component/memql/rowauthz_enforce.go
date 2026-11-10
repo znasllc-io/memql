@@ -273,19 +273,21 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 	if organizationOwnedConcept(conceptName) {
 		predicate = &LogicalExpression{Op: LogicalAnd, Left: predicate, Right: &AccountScopeExpression{Field: "accountId", Organization: true, AllowUntied: true, Resource: organizationApp(conceptName)}}
 	} else if conceptName == conceptAccountsAccount {
-		// THE DECLARED TIER STAYS IN THE PREDICATE, FOR OPERATORS. The row
-		// gate decides an account two ways (rowAuthzAdmitsMode): a member's
-		// by the organization boundary alone, an organization operator's
-		// (admin and up) by this tier -- owner, rank, unowned floor, cluster
-		// owner. The account node answers the first and lowers to a constant
-		// for an operator, so when it REPLACED the tier (87138fb3f0) no
-		// operator's rank term reached SQL. The gate then dropped
-		// higher-ranked rows after the scan window was cut, a short page read
-		// as exhaustion, and an admin lost every account past the first page
-		// whose window held one, their own included. The NotOperator arm is
-		// true for every non-operator, so the tier binds operators only and a
-		// member keeps the boundary's answer. Regressions:
-		// TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion (db) and
+		// THE DECLARED TIER STAYS IN THE PREDICATE, FOR THE OPERATORS IT BINDS.
+		// The row gate decides an account three ways (rowAuthzAdmitsMode): a
+		// member's by the organization boundary alone, accounts staff
+		// (developer and owner, accountsStaff) outright, and any other
+		// organization operator (an admin) by this tier -- owner, rank,
+		// unowned floor, cluster owner. The account node answers the first and
+		// lowers to a constant for an operator, so when it REPLACED the tier
+		// (87138fb3f0) no operator's rank term reached SQL. The gate then
+		// dropped higher-ranked rows after the scan window was cut, a short
+		// page read as exhaustion, and an admin lost every account past the
+		// first page whose window held one, their own included. The RankExempt
+		// arm is true for every caller the gate does not hold to the tier, so
+		// the tier binds exactly the callers the gate applies it to.
+		// Regressions: TestAPageFullOfHigherRankedRowsDoesNotReadAsExhaustion
+		// and TestADeveloperReadsAndEditsAnOwnersAccount (db), and
 		// TestAnAccountsReadCarriesTheTierForOperatorsOnly.
 		predicate = &LogicalExpression{
 			Op:   LogicalAnd,
@@ -293,7 +295,7 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 			Right: &LogicalExpression{
 				Op:    LogicalOr,
 				Left:  predicate,
-				Right: &AccountScopeExpression{NotOperator: true},
+				Right: &AccountScopeExpression{RankExempt: true},
 			},
 		}
 	}
@@ -460,6 +462,14 @@ func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payl
 	}
 	if organizationOperator(ctx) && HasOrganizationBoundary(conceptName) && !organizationAppAllowsRow(ctx, "", "") {
 		return rowAuthzDeny
+	}
+	// ACCOUNTS STAFF view and manage every organization's account (owner's
+	// direction, 2026-11-10), reads and writes alike. Below the line above on
+	// purpose, so a denied data read still wins; the construct floors
+	// (@requiresRank on the account mutations) still decide who may call.
+	// The SQL half is the RankExempt arm in enforceRowAuthzOnPlan.
+	if conceptName == conceptAccountsAccount && accountsStaff(ctx) {
+		return rowAuthzAdmit
 	}
 	if !organizationOperator(ctx) {
 		if conceptName == conceptAccountsAccount {

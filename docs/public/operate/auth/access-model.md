@@ -815,6 +815,15 @@ rows drift -- a developer hired next month is in no group until something adds
 them -- and a rule does not. Their scope lowers to "any tied row", and to no
 untied one. No query returns them, because there is nothing to return.
 
+The **account rows themselves** follow the same line: staff (developer and
+above among cluster operators, never a client-scoped role and never an unranked
+server actor; `accountsStaff` in `component/memql`) read and manage every
+client's `v1:accounts:account` row, whoever owns it. An admin's view of account
+rows stays bounded by the concept's rank tier (`rankVisible`): accounts owned at
+or below the admin's rank. The SQL filter and the row gate both ask
+`accountsStaff`, so they never disagree about a row (a disagreement reads as a
+short page, and a short page as the end of the list).
+
 ### Two ways a person lands in a group
 
 **An invitation carries them.** `IssueUserInvitationRequest.group_ids` names
