@@ -484,7 +484,7 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 		},
 		"campaignJourneyAdvance": func(_ context.Context, _ map[string]any) (any, error) { return nil, advance(0) },
 		"campaignJourneyWait": func(_ context.Context, _ map[string]any) (any, error) {
-			return nil, advance(time.Duration(step.Days)*24*time.Hour + time.Duration(step.Hours)*time.Hour)
+			return nil, advance(step.wait())
 		},
 		"campaignJourneyAwaitConfirmation": func(_ context.Context, _ map[string]any) (any, error) {
 			return nil, write(map[string]any{"status": "waiting", "nextAt": w.nowUTC().Add(time.Duration(step.TimeoutDays) * 24 * time.Hour).Format(time.RFC3339Nano), "lastError": "", "attempts": 0})

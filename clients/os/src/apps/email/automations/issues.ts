@@ -50,7 +50,7 @@ export function journeyIssues(draft: { accountId: string; trigger: Trigger | nul
   const ids = new Set<string>(); let confirms = 0;
   for (const step of draft.steps) {
     if (!STEP_ID.test(step.id) || ids.has(step.id)) add(step.id, "Give each step a unique id of up to 40 letters, digits, hyphens or underscores."); ids.add(step.id);
-    if (step.kind === "wait") { const days = step.days ?? 0, hours = step.hours ?? 0; if (!Number.isInteger(days) || !Number.isInteger(hours) || days < 0 || days > 365 || hours < 0 || hours > 23 || days * 24 + hours < 1 || days * 24 + hours > 365 * 24) add(step.id, "A wait lasts from one hour to 365 days."); continue; }
+    if (step.kind === "wait") { const days = step.days ?? 0, hours = step.hours ?? 0, minutes = step.minutes ?? 0, total = days * 1440 + hours * 60 + minutes; if (![days, hours, minutes].every(Number.isInteger) || days < 0 || days > 365 || hours < 0 || hours > 23 || minutes < 0 || minutes > 59 || total < 1 || total > 365 * 1440) add(step.id, "A wait lasts from one minute to 365 days."); continue; }
     if (step.kind === "confirm") {
       confirms++; if (confirms > 1) add(step.id, "An automation asks people to confirm once.");
       if (draft.trigger?.kind === "confirmed") add(step.id, "People in this automation have already confirmed. Remove this step.");

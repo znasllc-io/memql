@@ -1,13 +1,13 @@
 import { AddButton } from "../../../kit/AddButton";
 import { isPublished } from "../rows";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Clock, Mail, Trash2 } from "lucide-react";
-import { Field, Input, Select } from "../../../kit";
+import { ChoiceRow, Field, Input, Select } from "../../../kit";
 import { useWide } from "../../../kit/useWide";
 import { isOperatorOrganization } from "../organizations";
 import type { SenderIdentityRow, TemplateRow } from "../rows";
 import type { Issue } from "./issues";
-import { insertStep, moveStep, newStep, removeStep, stepSentence, updateStep, type FlowStep, type StepKind } from "./flowModel";
+import { insertStep, moveStep, newStep, removeStep, splitMinutes, stepSentence, updateStep, waitMinutes, type FlowStep, type StepKind } from "./flowModel";
 
 export interface FlowProps {
   trigger: string; triggerDetail?: ReactNode; steps: readonly FlowStep[]; accountId: string;
@@ -47,8 +47,7 @@ export function Flow({ trigger, triggerDetail, steps, accountId, templates, send
   const options = templates.filter(t => t.accountId === accountId && t.status !== "archived");
   const identities = senders.filter(s => s.accountId === accountId && s.status !== "disabled");
   const fields = inspector ? inspector(selected) : !target ? <><Field label="Name"><Input id="email-flow-name" label="Name" value={name} onChange={onName ?? (() => {})} /></Field><Field label="Description"><Input id="email-flow-description" label="Description" value={description} onChange={onDescription ?? (() => {})} /></Field></> : target.kind === "wait" ? <>
-    <Field label="Days"><Select id="email-flow-days" label="Days" value={String(target.days ?? 0)} onChange={v => patch({ days: Number(v) })}>{Array.from({ length: 366 }, (_, i) => <option key={i} value={i}>{i}</option>)}</Select></Field>
-    <Field label="Hours"><Select id="email-flow-hours" label="Hours" value={String(target.hours ?? 0)} onChange={v => patch({ hours: Number(v) })}>{Array.from({ length: 24 }, (_, i) => <option key={i} value={i}>{i}</option>)}</Select></Field>
+    <WaitFields key={target.id} step={target} patch={patch} />
   </> : <>
     <Field label="Template"><Select id="email-flow-template" label="Template" value={target.templateId ?? ""} onChange={templateId => patch({ templateId })}><option value="">Choose a template</option>{options.map(t => <option key={t.id} value={t.id}>{t.name}{isPublished(t) ? "" : " · Draft"}</option>)}</Select></Field>
     <Field label="Sender"><Select id="email-flow-sender" label="Sender" value={target.senderIdentityId ?? ""} onChange={senderIdentityId => patch({ senderIdentityId })}><option value="">{isOperatorOrganization(accountId) ? "This cluster's sender" : "Choose a sender"}</option>{identities.map(s => <option key={s.id} value={s.id}>{s.address}</option>)}</Select></Field>
@@ -76,4 +75,50 @@ export function Flow({ trigger, triggerDetail, steps, accountId, templates, send
       {insertion(steps.length)}<div className="email-flow-node email-flow-end"><button type="button" {...attrs("end")} className="email-flow-trigger" onClick={() => select("end")}>End{counts.get("end") ? <span className="os-caption">{counts.get("end")}</span> : null}</button>{!wide && selected === "end" ? inspection : null}</div>
     </div>{wide ? inspection : null}
   </div>;
+}
+
+type WaitUnit = "days" | "minutes";
+/**
+ * A wait's length, in days or in minutes (owner's direction, 2026-11-10):
+ * testers turn a "5 days" step into "5 minutes" to walk an automation end to
+ * end, then turn it back. Switching to Minutes keeps the length of time (5 days
+ * reads 7,200); switching to Days rounds to whole days, at least one, since a
+ * few minutes are no whole day. A wait that is not whole days opens in Minutes,
+ * so an older "1 day and 6 hours" is shown exactly. The unit is this field's
+ * own state, keyed by step: 7,200 minutes must not flip back to Days because it
+ * happens to divide. The engine stores days, hours and minutes (splitMinutes).
+ */
+function WaitFields({ step, patch }: { step: FlowStep; patch: (value: Partial<FlowStep>) => void }) {
+  const total = waitMinutes(step);
+  const wholeDays = total > 0 && total % 1440 === 0;
+  const [unit, setUnit] = useState<WaitUnit>(wholeDays ? "days" : "minutes");
+  const [text, setText] = useState(String(wholeDays ? total / 1440 : total));
+  // The length this field last wrote. A different one arriving is somebody
+  // else's (Discard changes, a reload), so the field shows it afresh.
+  const written = useRef(total);
+  useEffect(() => {
+    if (total === written.current) return;
+    written.current = total;
+    setUnit(wholeDays ? "days" : "minutes");
+    setText(String(wholeDays ? total / 1440 : total));
+  }, [total, wholeDays]);
+  function write(value: Partial<FlowStep>) { written.current = waitMinutes({ ...step, ...value }); patch(value); }
+  function change(value: string) {
+    setText(value);
+    const n = value.trim() === "" ? 0 : Number(value);
+    const length = Number.isFinite(n) ? n : 0;
+    write(unit === "days" ? { days: length, hours: 0, minutes: 0 } : splitMinutes(length));
+  }
+  function switchTo(next: WaitUnit) {
+    if (next === unit) return;
+    setUnit(next);
+    if (next === "minutes") { setText(String(total)); return; }
+    const days = Math.max(1, Math.round(total / 1440));
+    setText(String(days));
+    write({ days, hours: 0, minutes: 0 });
+  }
+  return <>
+    <Field label="Wait"><Input id="email-flow-wait" label="Wait" value={text} onChange={change} /></Field>
+    <Field label="Unit"><ChoiceRow label="Wait unit" value={unit} onChange={v => switchTo(v as WaitUnit)} options={[{ value: "days", label: "Days" }, { value: "minutes", label: "Minutes" }]} /></Field>
+  </>;
 }

@@ -72,6 +72,30 @@ func TestPendingRecipientsOnlyReceiveInternalConfirmationSends(t *testing.T) {
 		t.Fatalf("confirmation missing: %+v", sender.sent)
 	}
 }
+
+// A wait can be minutes long (owner's direction, 2026-11-10): testers turn a
+// "5 days" step into "5 minutes" to walk an automation end to end, then turn it
+// back. The minutes survive a save, and the runner waits exactly that long.
+func TestAWaitCanBeMinutes(t *testing.T) {
+	draft, err := parseJourneyDraft(map[string]any{
+		"name": "Welcome", "trigger": map[string]any{"kind": "joined", "audienceId": "a1"},
+		"steps": []map[string]any{{"id": "pause", "kind": "wait", "minutes": 5}, {"id": "s1", "kind": "send"}},
+	})
+	if err != nil {
+		t.Fatalf("a 5-minute wait was refused: %v", err)
+	}
+	if got := draft.Steps[0].wait(); got != 5*time.Minute {
+		t.Fatalf("a 5-minute wait waits %v", got)
+	}
+	steps, _ := journeyDraftValues(draft)["steps"].([]any)
+	if pause, _ := steps[0].(map[string]any); pause["minutes"] != 5.0 {
+		t.Fatalf("the saved wait step lost its minutes: %v", pause)
+	}
+	if got := (journeyStep{Kind: "wait", Days: 1, Hours: 2, Minutes: 3}).wait(); got != 26*time.Hour+3*time.Minute {
+		t.Fatalf("1 day 2 hours 3 minutes waits %v", got)
+	}
+}
+
 func TestJourneyDraftRefusesInvalidStructure(t *testing.T) {
 	base := func() map[string]any {
 		return map[string]any{"name": "Welcome", "trigger": map[string]any{"kind": "joined", "audienceId": "a1"}, "steps": []map[string]any{{"id": "s1", "kind": "send"}}}
@@ -92,6 +116,15 @@ func TestJourneyDraftRefusesInvalidStructure(t *testing.T) {
 			a["steps"] = []map[string]any{{"id": "s1", "kind": "send"}, {"id": "s1", "kind": "send"}}
 		}},
 		{"unused field", func(a map[string]any) { a["steps"] = []map[string]any{{"id": "s1", "kind": "send", "days": 0}} }},
+		{"minutes on a send step", func(a map[string]any) { a["steps"] = []map[string]any{{"id": "s1", "kind": "send", "minutes": 5}} }},
+		{"fractional minutes", func(a map[string]any) { a["steps"] = []map[string]any{{"id": "s1", "kind": "wait", "minutes": 2.5}} }},
+		{"negative minutes", func(a map[string]any) {
+			a["steps"] = []map[string]any{{"id": "s1", "kind": "wait", "hours": 1, "minutes": -1}}
+		}},
+		{"sixty minutes", func(a map[string]any) { a["steps"] = []map[string]any{{"id": "s1", "kind": "wait", "minutes": 60}} }},
+		{"a year and a minute", func(a map[string]any) {
+			a["steps"] = []map[string]any{{"id": "s1", "kind": "wait", "days": 365, "minutes": 1}}
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

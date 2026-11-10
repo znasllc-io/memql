@@ -736,7 +736,7 @@ concept journey {
   name         string!
   description  string
   trigger      object!   // {kind: "joined"|"confirmed", audienceId}
-  steps        []object! // [{id, kind: "send"|"confirm"|"wait", templateId?, senderIdentityId?, days?, hours?, timeoutDays?}]
+  steps        []object! // [{id, kind: "send"|"confirm"|"wait", templateId?, senderIdentityId?, days?, hours?, minutes?, timeoutDays?}]
   status       enum("draft", "active", "paused", "archived")!
   activatedAt  datetime  // first activation; enrollment starts from here
   retiredAt    datetime  // archive finished exiting every open enrollment

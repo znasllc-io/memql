@@ -510,7 +510,7 @@ builtin campaignSaveJourney {
   name              string!
   description       string
   trigger           object!   @description("{kind: joined | confirmed, audienceId}")
-  steps             []object! @description("Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}")
+  steps             []object! @description("Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, minutes?, timeoutDays?}")
   expectedRevision  string    @description("Exact revision from journeyById; omit when creating.")
 }
 
