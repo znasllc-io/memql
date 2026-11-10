@@ -20,8 +20,9 @@ You accept these terms when you sign in. The version in force and the
 date it took effect are shown at the top of this page.
 
 The operator may change these terms. When a change materially affects
-you, the operator gives notice in the platform and by email to the
-address on your account at least 30 days before the change takes effect.
+you, the operator gives notice by email to the address on your account
+at least 30 days before the change takes effect, and the platform shows
+you the change when the new version takes effect.
 A change that the law requires, or that only reduces your obligations,
 may take effect when it is posted. If you keep signing in after a new
 version takes effect, you accept it. If you do not agree, stop using the

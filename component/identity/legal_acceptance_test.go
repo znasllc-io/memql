@@ -29,6 +29,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -426,7 +427,7 @@ func TestLegalAcceptanceStatementsParseAgainstTheRealTree(t *testing.T) {
 	if _, err := store.RecordLegalAcceptance(context.Background(), user, legalInForce, "203.0.113.5", legalSession, legalNow); err != nil {
 		t.Fatalf("RecordLegalAcceptance: %v", err)
 	}
-	read := fmt.Sprintf(`query userLegalAcceptanceById(userId: %q)`, user)
+	read := fmt.Sprintf(`query userLegalAcceptanceById(userId: %s)`, langparser.QuoteString(user))
 	switch _, err := real.Parse(read); {
 	case err == nil:
 		t.Errorf("Parse accepted %s from a CLIENT origin; the query is meant to be @serverOnly", read)

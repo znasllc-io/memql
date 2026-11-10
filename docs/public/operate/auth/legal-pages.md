@@ -138,9 +138,9 @@ The page supplies the document's title, so the file begins with its first
 paragraph or section heading, not with a `# Title` line, which would show
 the title twice.
 
-Both documents promise notice in the platform and by email to each user's
-account address at least 30 days before a change that materially affects
-users takes effect. The engine does the platform half, after the fact: at a
+Both documents promise notice by email to each user's account address at
+least 30 days before a change that materially affects users takes effect,
+and a notice in the platform when the new version takes effect. The engine does the platform half, after the fact: at a
 person's first sign-in once a new version is in force, MemQL OS tells them
 the document changed, to which version and from which date, and that signing
 in accepted it ("What the service records" above). The engine sends no email

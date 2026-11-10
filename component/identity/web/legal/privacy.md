@@ -146,9 +146,9 @@ operator does not knowingly collect personal information from a child.
 
 The operator may change this notice. The version in force and its
 effective date are shown at the top of this page. When a change
-materially affects you, the operator gives notice in the platform and by
-email to the address on your account at least 30 days before the change
-takes effect.
+materially affects you, the operator gives notice by email to the address
+on your account at least 30 days before the change takes effect, and the
+platform shows you the change when the new version takes effect.
 
 ## 9. Contact
 
