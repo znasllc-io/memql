@@ -152,9 +152,12 @@ mutation entitlement writeEntitlementRow {
     state          string!  @enum("pending", "granted", "failed", "revoked")
     reference      string
     error          string   @maxLength(4000)
+    errorCode          string
+    shopifyCustomerId  string
+    customerCreated    bool
   }
   insert {
-    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error }
+    accept { ownerUserId, applicationId, storeId, buyerEmail, adapter, state, reference, error, errorCode, shopifyCustomerId, customerCreated }
     stamp {
       id: args.entitlementId
     }

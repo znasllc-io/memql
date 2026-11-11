@@ -8705,9 +8705,12 @@
         "adapter",
         "applicationId",
         "buyerEmail",
+        "customerCreated",
         "error",
+        "errorCode",
         "ownerUserId",
         "reference",
+        "shopifyCustomerId",
         "state",
         "storeId"
       ],

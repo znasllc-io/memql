@@ -82,6 +82,10 @@ type Outcome struct {
 	// Detail is one human sentence for an operator reading the row. Never
 	// a credential and never a token.
 	Detail string
+	// CustomerID is the Shopify customer the grant landed on, when the
+	// integration says; CustomerCreated is whether the grant had to create it.
+	CustomerID      string
+	CustomerCreated bool
 }
 
 // Caller is the ONLY thing an adapter may do besides compute.
@@ -126,6 +130,20 @@ type Adapter interface {
 const (
 	AdapterShopifyB2B  = "shopifyB2B"
 	AdapterCustomerTag = "customerTag"
+)
+
+// AdapterNone is what an entitlement row names when no adapter was ever
+// reached: the store had no settings or no route, so nothing was called.
+const AdapterNone = "none"
+
+// The causes an entitlement row names when it grants nothing (U2).
+const (
+	ErrorNoSettings      = "no_settings"
+	ErrorNoRoute         = "no_route"
+	ErrorScopeMissing    = "scope_missing"
+	ErrorPlanCeiling     = "plan_ceiling"
+	ErrorCustomerRefused = "customer_refused"
+	ErrorShopifyError    = "shopify_error"
 )
 
 // The four entitlement states, matching the concept's enum.
@@ -286,15 +304,6 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			"application has an entitlement to provision", applicationID, state)
 	}
 
-	adapterName, err := p.adapterFor(sys, storeID)
-	if err != nil {
-		return nil, err
-	}
-	adapter, err := AdapterByName(adapterName)
-	if err != nil {
-		return nil, err
-	}
-
 	grant := Grant{
 		StoreID:       storeID,
 		ApplicationID: applicationID,
@@ -302,26 +311,33 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		BuyerName:     trimmed(app["applicantName"]),
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
-	// THE PLAN IS READ, NOT ASKED FOR. A caller that supplied its own would
-	// be the one deciding whether an adapter is available, which is the
-	// check's whole content.
-	grant.Plan = p.storePlan(sys, storeID)
+	owner := trimmed(app["ownerUserId"])
+	var adapter Adapter
+	adapterName := ""
 
 	if revoking {
 		prior, err := p.entitlementRow(sys, applicationID)
 		if err != nil {
 			return nil, err
 		}
-		if prior == nil {
-			return nil, fmt.Errorf("wholesale: application %q has no entitlement to revoke",
-				applicationID)
+		was := ""
+		if prior != nil {
+			grant.Reference = trimmed(prior["reference"])
+			was = trimmed(prior["adapter"])
 		}
-		grant.Reference = trimmed(prior["reference"])
+		// NO ROW, OR A ROW THAT NEVER REACHED A STORE (X17). An approval
+		// that granted nothing has nothing to take back, and the decision
+		// log already says revoked; the row says so too, and no adapter is
+		// called against a store nobody was ever entitled on.
+		if prior == nil || was == AdapterNone {
+			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+				AdapterNone, EntitlementRevoked, Outcome{}, "", "")
+		}
 		// REVOKED THROUGH THE ADAPTER THAT GRANTED IT, read off the row --
 		// not through whatever the settings say TODAY. A merchant who
 		// switches adapters must still be able to take back what the old
 		// one gave, and the settings value has already moved on.
-		if was := trimmed(prior["adapter"]); was != "" && was != adapterName {
+		if was != "" {
 			adapter, err = AdapterByName(was)
 			if err != nil {
 				return nil, fmt.Errorf("wholesale: entitlement for %q was granted by %q, "+
@@ -331,6 +347,39 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			adapterName = was
 		}
 	}
+	if adapter == nil {
+		settings, err := p.settingsRow(sys, storeID)
+		if err != nil {
+			return nil, err
+		}
+		// A RETURNED ERROR LEAVES NO ROW SAYING WHY NOTHING HAPPENED (spec
+		// N3), so a store with no settings, or settings naming no route, is
+		// written as a failed entitlement on adapter "none" and answered
+		// with a nil error. The merchant's screen reads the row.
+		if settings == nil {
+			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoSettings,
+				fmt.Sprintf("wholesale: store %q has no wholesale settings, so no entitlement "+
+					"adapter is chosen", storeID))
+		}
+		adapterName = trimmed(settings["entitlementAdapter"])
+		if adapterName == "" {
+			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoRoute,
+				fmt.Sprintf("wholesale: store %q has no entitlement adapter configured; "+
+					"set entitlementAdapter in this store's wholesale settings to one of %s",
+					storeID, strings.Join(AdapterNames(), ", ")))
+		}
+		adapter, err = AdapterByName(adapterName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// THE PLAN IS READ, NOT ASKED FOR. A caller that supplied its own would
+	// be the one deciding whether an adapter is available, which is the
+	// check's whole content.
+	grant.Plan = p.storePlan(sys, storeID)
 
 	// AVAILABILITY IS PART OF THE ATTEMPT, NOT A GUARD IN FRONT OF IT, and
 	// the difference is a row. An earlier version returned this refusal
@@ -357,7 +406,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	if revoking {
 		entState = EntitlementRevoked
 	}
-	errText := ""
+	errText, errCode := "", ""
 	if applyErr != nil {
 		// PENDING, NOT FAILED, BY DEFAULT. The decision stands and the push
 		// is what is outstanding, so the row says what is true: somebody
@@ -374,18 +423,38 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 			entState = EntitlementFailed
 		}
 		errText = applyErr.Error()
+		errCode = errorCodeOf(applyErr)
 	}
 
-	node, err := p.writeEntitlement(merchant, applicationID, storeID, trimmed(app["ownerUserId"]),
-		grant, adapterName, entState, result, errText)
-	if err != nil {
-		return nil, err
-	}
 	// THE ROW IS WRITTEN EITHER WAY AND THE ERROR IS NOT RETURNED. A
 	// builtin that returned the error would leave no row at all, and the
 	// merchant would have an approved application with nothing anywhere
 	// saying a push had been attempted and failed. The row carries it.
-	return node, nil
+	return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+		adapterName, entState, result, errCode, errText)
+}
+
+// errorCodeOf names the cause of an adapter error for the entitlement row.
+// A refusal carries its own code; a refusal with none is the buyer's
+// customer record being refused; anything else is Shopify failing.
+func errorCodeOf(err error) string {
+	for e := err; e != nil; {
+		if r, ok := e.(*AdapterRefusal); ok {
+			if c := strings.TrimSpace(r.Code); c != "" {
+				return c
+			}
+			return ErrorCustomerRefused
+		}
+		u, ok := e.(interface{ Unwrap() error })
+		if !ok {
+			break
+		}
+		e = u.Unwrap()
+	}
+	if isAdapterRefusal(err) {
+		return ErrorCustomerRefused
+	}
+	return ErrorShopifyError
 }
 
 // asMerchant is ctx acting as the application's merchant: its ownerUserId,
@@ -402,29 +471,6 @@ func (p *Provider) asMerchant(ctx context.Context, app map[string]any) (context.
 			"merchant to act as", trimmed(app["id"]))
 	}
 	return auth.ContextWithUserActor(ctx, owner), nil
-}
-
-// adapterFor reads the store's chosen adapter name.
-func (p *Provider) adapterFor(ctx context.Context, storeID string) (string, error) {
-	settings, err := p.settingsRow(ctx, storeID)
-	if err != nil {
-		return "", err
-	}
-	if settings == nil {
-		return "", fmt.Errorf("wholesale: store %q has no wholesale settings, so no "+
-			"entitlement adapter is chosen", storeID)
-	}
-	name := trimmed(settings["entitlementAdapter"])
-	if name == "" {
-		// NAMED REFUSAL RATHER THAN A SILENT NO-OP. A merchant who approves
-		// an application and sees no wholesale prices appear is owed the
-		// reason, and "no adapter is configured" is a reason they can act
-		// on in one setting.
-		return "", fmt.Errorf("wholesale: store %q has no entitlement adapter configured; "+
-			"set entitlementAdapter in this store's wholesale settings to one of %s",
-			storeID, strings.Join(AdapterNames(), ", "))
-	}
-	return name, nil
 }
 
 // storePlan reads v1:shopify:store.plan, or "" when this caller cannot.
@@ -462,7 +508,7 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // and written as that merchant: a row owned by anybody else is invisible to
 // the merchant who granted it.
 func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID, ownerUserID string, g Grant,
-	adapterName, state string, result Outcome, errText string) ([]memorynodes.MemoryNode, error) {
+	adapterName, state string, result Outcome, errCode, errText string) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
 		// KEEP THE PRIOR REFERENCE ON A FAILURE. An adapter that errored
@@ -479,7 +525,13 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID,
 		"adapter":       adapterName,
 		"state":         state,
 		"reference":     reference,
+		"errorCode":     errCode,
 		"error":         errText,
+		// EVERY FIELD EXPLICIT, empty and false included: a write at an
+		// existing id merges into the current version, so an omitted field
+		// would carry the attempt before it.
+		"shopifyCustomerId": result.CustomerID,
+		"customerCreated":   result.CustomerCreated,
 	}); err != nil {
 		return nil, err
 	}
@@ -489,6 +541,7 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID,
 		"adapter":       adapterName,
 		"state":         state,
 		"reference":     reference,
+		"errorCode":     errCode,
 		"error":         errText,
 		"detail":        result.Detail,
 	})
@@ -506,6 +559,9 @@ func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID,
 type AdapterRefusal struct {
 	Adapter string
 	Reason  string
+	// Code is the cause the entitlement row names (one of the Error*
+	// constants); empty means the buyer's customer record was refused.
+	Code string
 }
 
 func (e *AdapterRefusal) Error() string {

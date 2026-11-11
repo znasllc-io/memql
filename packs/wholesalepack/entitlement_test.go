@@ -252,14 +252,18 @@ func TestNoAdapterConfiguredRefusesByName(t *testing.T) {
 	reader.settings["store-live"] = []map[string]any{{
 		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": "",
 	}}
-	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: &fakeWriter{}}
-	_, err := p.provisionEntitlement(internalAsMerchant(),
-		map[string]any{"applicationId": "app-1"}, 0)
-	if err == nil {
-		t.Fatal("a store with no adapter configured must refuse by name")
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: writer}
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("a store with no adapter configured is recorded on the row, not returned: %v", err)
 	}
-	if !strings.Contains(err.Error(), "entitlementAdapter") {
-		t.Fatalf("the refusal must name the setting to change, got: %v", err)
+	out := writer.only(t, "writeEntitlementRow")
+	if out["errorCode"] != ErrorNoRoute {
+		t.Fatalf("errorCode = %v, want %v", out["errorCode"], ErrorNoRoute)
+	}
+	if !strings.Contains(asString(out["error"]), "entitlementAdapter") {
+		t.Fatalf("the row must name the setting to change, got: %v", out["error"])
 	}
 }
 
@@ -646,5 +650,191 @@ func TestTheWriterStampsInternalOriginOnItsOneCall(t *testing.T) {
 	}
 	if auth.OriginFromContext(ctx).IsInternal() {
 		t.Fatal("the stamp leaked into the caller's own context")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// An approval that grants nothing says why (U2)
+// ---------------------------------------------------------------------------
+
+// provisionWith runs one provision against a fixture and returns the single
+// entitlement write and the caller, failing on a returned error.
+func provisionWith(t *testing.T, reader *fixtureReader, caller *fakeCaller) (map[string]any, *fakeCaller) {
+	t.Helper()
+	registerShippedAdapters()
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	if _, err := p.provisionEntitlement(internalAsMerchant(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("a grant that cannot happen is recorded, not returned: %v", err)
+	}
+	return writer.only(t, "writeEntitlementRow"), caller
+}
+
+func requireFailedWith(t *testing.T, out map[string]any, state, code string) {
+	t.Helper()
+	if out["state"] != state || out["errorCode"] != code {
+		t.Fatalf("state/errorCode = %v/%v, want %s/%s (error %v)",
+			out["state"], out["errorCode"], state, code, out["error"])
+	}
+	if asString(out["error"]) == "" {
+		t.Fatal("the row must carry a sentence saying why")
+	}
+}
+
+func TestAnApprovalOnAStoreWithNoSettingsLeavesAFailedRowNamingNoSettings(t *testing.T) {
+	reader := approvedFixture()
+	reader.settings = map[string][]map[string]any{}
+	out, caller := provisionWith(t, reader, &fakeCaller{})
+	requireFailedWith(t, out, EntitlementFailed, ErrorNoSettings)
+	if out["adapter"] != AdapterNone {
+		t.Fatalf("adapter = %v, want %v", out["adapter"], AdapterNone)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("no adapter may be called, got %v", caller.calls)
+	}
+}
+
+func TestAnApprovalOnAStoreWithNoRouteLeavesAFailedRowNamingNoRoute(t *testing.T) {
+	reader := approvedFixture()
+	reader.settings["store-live"] = []map[string]any{{
+		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": "",
+	}}
+	out, caller := provisionWith(t, reader, &fakeCaller{})
+	requireFailedWith(t, out, EntitlementFailed, ErrorNoRoute)
+	if out["adapter"] != AdapterNone {
+		t.Fatalf("adapter = %v, want %v", out["adapter"], AdapterNone)
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("no adapter may be called, got %v", caller.calls)
+	}
+}
+
+func TestAPlanThatCannotBeReadIsPlanCeiling(t *testing.T) {
+	reader := approvedFixture()
+	reader.settings["store-live"] = []map[string]any{{
+		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": AdapterShopifyB2B,
+	}}
+	reader.stores = map[string][]map[string]any{}
+	out, caller := provisionWith(t, reader, &fakeCaller{})
+	requireFailedWith(t, out, EntitlementFailed, ErrorPlanCeiling)
+	if len(caller.calls) != 0 {
+		t.Fatalf("got calls %v", caller.calls)
+	}
+}
+
+func TestAReplyNamingThePlanCeilingIsPlanCeiling(t *testing.T) {
+	reader := approvedFixture()
+	reader.settings["store-live"] = []map[string]any{{
+		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": AdapterShopifyB2B,
+	}}
+	out, _ := provisionWith(t, reader, &fakeCaller{replies: map[string]map[string]any{
+		"shopifyProvisionWholesale": {"status": "refused", "reason": "three catalogs already", "code": ErrorPlanCeiling},
+	}})
+	requireFailedWith(t, out, EntitlementFailed, ErrorPlanCeiling)
+}
+
+func TestARefusalCarryingScopeMissingIsRecordedAsScopeMissing(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{replies: map[string]map[string]any{
+		"shopifyTagWholesaleCustomer": {"status": "refused", "reason": "write_customers is not granted", "code": "scope_missing"},
+	}})
+	requireFailedWith(t, out, EntitlementFailed, ErrorScopeMissing)
+}
+
+func TestARefusalWithNoCodeIsCustomerRefused(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{replies: map[string]map[string]any{
+		"shopifyTagWholesaleCustomer": {"status": "refused", "reason": "no customer has that email"},
+	}})
+	requireFailedWith(t, out, EntitlementFailed, ErrorCustomerRefused)
+}
+
+func TestAnUnconfiguredConnectorIsAFailedShopifyError(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{replies: map[string]map[string]any{
+		"shopifyTagWholesaleCustomer": {"status": "unconfigured"},
+	}})
+	requireFailedWith(t, out, EntitlementFailed, ErrorShopifyError)
+	if !strings.Contains(asString(out["error"]), "not configured on this cluster") {
+		t.Fatalf("the existing sentence must be kept, got %v", out["error"])
+	}
+}
+
+func TestATransientErrorIsPendingWithShopifyError(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{err: errors.New("shopify: 503 from the Admin API")})
+	requireFailedWith(t, out, EntitlementPending, ErrorShopifyError)
+	if !strings.Contains(asString(out["error"]), "503") {
+		t.Fatalf("the error text must be on the row, got %v", out["error"])
+	}
+}
+
+func TestASuccessRecordsTheCustomerAndClearsTheCode(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{replies: map[string]map[string]any{
+		"shopifyTagWholesaleCustomer": {
+			"status": "ok", "reference": "customer=gid://shopify/Customer/1;tag=memql-wholesale",
+			"customerId": "gid://shopify/Customer/1", "customerCreated": true,
+		},
+	}})
+	if out["state"] != EntitlementGranted || out["errorCode"] != "" || out["error"] != "" {
+		t.Fatalf("a success carries no code or error, got %v/%v/%v", out["state"], out["errorCode"], out["error"])
+	}
+	if out["shopifyCustomerId"] != "gid://shopify/Customer/1" || out["customerCreated"] != true {
+		t.Fatalf("the customer must be recorded, got %v/%v", out["shopifyCustomerId"], out["customerCreated"])
+	}
+}
+
+func TestAGrantAfterAFailureWritesEveryFieldExplicitly(t *testing.T) {
+	out, _ := provisionWith(t, approvedFixture(), &fakeCaller{})
+	for _, k := range []string{"errorCode", "error", "shopifyCustomerId", "customerCreated"} {
+		if _, ok := out[k]; !ok {
+			t.Fatalf("the write omits %q, so a version would inherit the attempt before it", k)
+		}
+	}
+	if out["errorCode"] != "" || out["error"] != "" || out["customerCreated"] != false {
+		t.Fatalf("want empty/empty/false, got %v/%v/%v", out["errorCode"], out["error"], out["customerCreated"])
+	}
+}
+
+func revokedFixture(prior []map[string]any) *fixtureReader {
+	reader := approvedFixture()
+	reader.decisions["app-1"] = []map[string]any{{"transition": TransitionRevoke}}
+	if prior != nil {
+		reader.ents["app-1"] = prior
+	}
+	return reader
+}
+
+func TestRevokingAnEntitlementThatNeverReachedAStoreCallsNoAdapter(t *testing.T) {
+	registerShippedAdapters()
+	reader := revokedFixture([]map[string]any{{
+		"applicationId": "app-1", "storeId": "store-live", "adapter": AdapterNone, "state": EntitlementFailed,
+	}})
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if out["state"] != EntitlementRevoked || out["adapter"] != AdapterNone || out["errorCode"] != "" {
+		t.Fatalf("got %v/%v/%v", out["state"], out["adapter"], out["errorCode"])
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("no adapter may be called, got %v", caller.calls)
+	}
+}
+
+func TestRevokingWithNoEntitlementRowWritesRevoked(t *testing.T) {
+	registerShippedAdapters()
+	caller := &fakeCaller{}
+	writer := &fakeWriter{}
+	p := &Provider{reader: revokedFixture(nil), caller: caller, writer: writer}
+	if _, err := p.revokeEntitlement(internalAsMerchant(), map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
+	if out["state"] != EntitlementRevoked || out["adapter"] != AdapterNone {
+		t.Fatalf("got %v/%v", out["state"], out["adapter"])
+	}
+	if len(caller.calls) != 0 {
+		t.Fatalf("no adapter may be called, got %v", caller.calls)
 	}
 }

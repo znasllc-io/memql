@@ -88,6 +88,9 @@ shape entitlement entitlementFull {
   state
   reference
   error
+  errorCode
+  shopifyCustomerId
+  customerCreated
   row.createdAt
 }
 

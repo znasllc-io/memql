@@ -65,6 +65,7 @@ func (a *shopifyB2BAdapter) Available(plan string) error {
 	if strings.TrimSpace(plan) == "" {
 		return &AdapterRefusal{
 			Adapter: AdapterShopifyB2B,
+			Code:    ErrorPlanCeiling,
 			Reason: "this store's plan is not readable by the caller, so the catalog ceiling " +
 				"cannot be established. v1:shopify:store is readable by a cluster owner or a " +
 				"developer only. Provision as one of them, or choose the " +
@@ -139,15 +140,20 @@ func outcomeFromReply(adapter string, reply map[string]any) (Outcome, error) {
 	status := trimmed(reply["status"])
 	switch status {
 	case "ok":
+		created, _ := reply["customerCreated"].(bool)
 		return Outcome{
-			Reference: trimmed(reply["reference"]),
-			Detail:    trimmed(reply["detail"]),
+			Reference:       trimmed(reply["reference"]),
+			Detail:          trimmed(reply["detail"]),
+			CustomerID:      trimmed(reply["customerId"]),
+			CustomerCreated: created,
 		}, nil
 	case "refused":
-		return Outcome{}, &AdapterRefusal{Adapter: adapter, Reason: trimmed(reply["reason"])}
+		return Outcome{}, &AdapterRefusal{Adapter: adapter, Reason: trimmed(reply["reason"]),
+			Code: trimmed(reply["code"])}
 	case "unconfigured":
 		return Outcome{}, &AdapterRefusal{
 			Adapter: adapter,
+			Code:    ErrorShopifyError,
 			Reason: "the Shopify connector is not configured on this cluster, so there is no " +
 				"store to provision against",
 		}

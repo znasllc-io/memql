@@ -94,7 +94,7 @@ concept applicationDecision {
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
 }
 
-@version("1.0.0")
+@version("1.1.0")
 @description("What this pack granted, to whom, against which store, and through which adapter. STATE THE PACK OWNS, never inferred from Shopify: a company that exists over there says nothing about whether THIS pack granted it, and reading entitlement back out of somebody else's system would make an operator's own record of what they granted depend on an API call that can fail. ONE ROW PER APPLICATION at the derived id wholesale:entitlement:<applicationId>, so a re-provision is a new VERSION of one logical row rather than a second row a read would have to choose between -- and 'revoked when' is that version's own createdAt.")
 @displayCard(primary="state", secondary="buyerEmail", tertiary="adapter")
 @rowAuthz(owner="ownerUserId", clusterOwner)
@@ -107,6 +107,9 @@ concept entitlement {
   state         enum("pending", "granted", "failed", "revoked")!  @description("pending means the approval happened and the push has not succeeded yet. granted means the adapter reported success. failed means it reported an error, and the application STAYS APPROVED -- an approval is a decision somebody made, and a push that failed is not a reason to undo it (issue memql#5557). revoked means a later decision took it back.")
   reference     string   @description("What the adapter has to name to undo itself: the Shopify company GID for the native-B2B adapter, the tag it wrote for the plan-independent one. Opaque to the pack, which never parses it.")
   error         string   @description("Why provisioning failed, in the adapter's own words. Set with state failed and cleared on a later success, so a granted entitlement never carries the error of the attempt before it.")
+  errorCode         string  @description("Why nothing was granted, as a code a screen can show and offer a retry for: no_settings, no_route, scope_missing, plan_ceiling, customer_refused or shopify_error. Empty on a success; every write passes it, so a version never inherits the attempt before it.")
+  shopifyCustomerId string  @description("The Shopify customer GID the grant landed on, when the integration reported one.")
+  customerCreated   bool    @description("True when the grant had to create the Shopify customer rather than find it.")
 }
 
 @version("1.0.0")
