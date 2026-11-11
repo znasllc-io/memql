@@ -2,7 +2,9 @@ package datasync
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +110,9 @@ type SyncState struct {
 	// state SyncStateFor hands out for a domain nothing has written yet,
 	// which already carries the id it WOULD have.
 	Stored bool
+	// Version is the stored version's time (row.createdAt), the witness a
+	// partial write is fenced on (PatchSyncState). Zero for no row.
+	Version time.Time
 }
 
 // SyncStateID is the deterministic row id for one domain.
@@ -320,11 +325,119 @@ func (s *Store) WriteSyncState(ctx context.Context, st SyncState) error {
 	return err
 }
 
-// SetPaused flips one domain's pause switch.
-func (s *Store) SetPaused(ctx context.Context, stateID string, paused bool) error {
-	_, err := s.exec(ctx, call("mutation", "setSyncPaused",
-		arg{"stateId", stateID}, arg{"paused", paused}))
-	return err
+// syncStateConcept is the concept the health rows are versions of.
+const syncStateConcept = "v1:platform:syncState"
+
+// SyncPatch is the fields of one domain's health row that ONE writer owns,
+// by their DSL names: backfillCursor, backfillStatus, lastInboundAt,
+// lagSeconds, lastReconcileAt, lastAttemptAt, driftCount, paused, lastError.
+// A time is a time.Time.
+type SyncPatch map[string]any
+
+// maxPatchAttempts bounds how often a write overtaken by another writer of the
+// same row is decided again.
+const maxPatchAttempts = 5
+
+// PatchSyncState writes the fields one writer owns onto a domain's row, and
+// nothing else, so writers that run at once cannot erase each other's fields.
+//
+// WHY. The continuing pass, the sweep, the queue, the inbound dispatcher and
+// the pause switch all write one row, and they run at once (two schedules
+// fire in the same second, the scheduler runs automations in parallel). Each
+// used to write the whole row from a copy it had read earlier, so the sweep
+// put back the cursor it read before a backfill page, and every page put back
+// the watermark and error the sweep had just recorded.
+//
+// HOW. decide is handed the row as it is now (read fresh) and answers the
+// patch, or false to write nothing. On an existing row the patch is sent
+// through patchSyncState, whose omitted arguments the engine's read-merge
+// keeps; a domain with no row yet is created whole through upsertSyncState.
+// The read-merge is not atomic on its own -- the engine reads the prior
+// version outside the write's transaction (executeWrite) -- so the write
+// carries a row-version fence on the version decide was handed. A write that
+// another writer overtook is refused with memql.ErrRowVersionChanged, and the
+// patch is decided again on a fresh read, at most maxPatchAttempts times.
+// Deciding again matters as much as merging: the queue decides "not running"
+// and the clean-sweep rule decides "not running" on what it read.
+func (s *Store) PatchSyncState(ctx context.Context, conceptID, connector, direction, partition string, decide func(SyncState) (SyncPatch, bool)) error {
+	partition = strings.TrimSpace(partition)
+	for attempt := 0; attempt < maxPatchAttempts; attempt++ {
+		cur, err := s.SyncStateFor(memql.ContextWithFreshRead(ctx), conceptID, connector, direction, partition)
+		if err != nil {
+			return err
+		}
+		patch, ok := decide(cur)
+		if !ok || len(patch) == 0 {
+			return nil
+		}
+		id := SyncStateID(conceptID, connector, direction, partition)
+		fenced := memql.ContextWithRowVersionFence(ctx, syncStateConcept, id, cur.Version)
+		if cur.Stored {
+			_, err = s.exec(fenced, call("mutation", "patchSyncState", patchArgs(id, patch)...))
+		} else {
+			cur.ConceptID, cur.Connector, cur.Direction, cur.Partition = conceptID, connector, direction, partition
+			if cur.BackfillStatus == "" {
+				cur.BackfillStatus = "none"
+			}
+			err = s.WriteSyncState(fenced, applyPatch(cur, patch))
+		}
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("datasync: the health row of %s on %q%s kept changing under %d writes; nothing was written",
+		conceptID, connector, partitionSuffix(partition), maxPatchAttempts)
+}
+
+// patchArgs renders a patch in a stable order, times as RFC3339.
+func patchArgs(id string, patch SyncPatch) []arg {
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := []arg{{"stateId", id}}
+	for _, k := range keys {
+		v := patch[k]
+		switch t := v.(type) {
+		case time.Time:
+			v = t.UTC().Format(time.RFC3339)
+		case string:
+			if k == "lastError" {
+				v = truncateError(t)
+			}
+		}
+		args = append(args, arg{k, v})
+	}
+	return args
+}
+
+// applyPatch sets a patch's fields on a whole state, for a row's first write.
+func applyPatch(st SyncState, patch SyncPatch) SyncState {
+	for k, v := range patch {
+		switch k {
+		case "backfillCursor":
+			st.BackfillCursor, _ = v.(string)
+		case "backfillStatus":
+			st.BackfillStatus, _ = v.(string)
+		case "lastInboundAt":
+			st.LastInboundAt, _ = v.(time.Time)
+		case "lagSeconds":
+			st.LagSeconds, _ = v.(int)
+		case "lastReconcileAt":
+			st.LastReconcileAt, _ = v.(time.Time)
+		case "lastAttemptAt":
+			st.LastAttemptAt, _ = v.(time.Time)
+		case "driftCount":
+			st.DriftCount, _ = v.(int)
+		case "paused":
+			st.Paused, _ = v.(bool)
+		case "lastError":
+			st.LastError, _ = v.(string)
+		}
+	}
+	return st
 }
 
 // OperatorContext stamps the engine's own operator identity: a cluster
@@ -415,6 +528,7 @@ func syncStateFromRow(r map[string]any) SyncState {
 		DeadLetterCount: intField(r, "deadLetterCount"),
 		Paused:          boolField(r, "paused"),
 		LastError:       stringField(r, "lastError"),
+		Version:         timeField(r, "createdAt"),
 	}
 }
 

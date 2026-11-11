@@ -97,12 +97,13 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "queueBackfill",
-			Description: "Queue one domain's backfill: write `queued` and an empty cursor, and run nothing; the continuing pass starts it. A running backfill is left as it is. Refuses a call without internal origin.",
+			Description: "Queue one domain's backfill: write `queued` and an empty cursor, and run nothing; the continuing pass starts it. A running backfill is left as it is unless restart is set. Refuses a call without internal origin.",
 			Handler:     i.handleQueueBackfill,
 			ArgsSchema: map[string]string{
 				"connector":    "string - connector name",
 				"conceptId":    "string - canonical id of the concept to backfill",
 				"partitionKey": "string (optional) - one partition of a partitioned connector; absent queues every partition it names",
+				"restart":      "boolean (optional) - also reset a running backfill to queued with an empty cursor; for an origin that no longer holds what the cursor counted",
 			},
 		},
 		{
@@ -305,7 +306,11 @@ func (i *Integration) handleQueueBackfill(ctx context.Context, args map[string]a
 	if connector == "" || conceptID == "" {
 		return nil, fmt.Errorf("datasync: queueBackfill needs both connector and conceptId")
 	}
-	if err := i.runner.QueueBackfill(ctx, connector, conceptID, partition); err != nil {
+	queue := i.runner.QueueBackfill
+	if argBool(args, "restart") {
+		queue = i.runner.RestartBackfill
+	}
+	if err := queue(ctx, connector, conceptID, partition); err != nil {
 		return nil, err
 	}
 	return resultNode("queued", fmt.Sprintf("%s/%s%s", connector, conceptID, partitionSuffix(partition)))

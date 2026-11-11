@@ -309,7 +309,9 @@ func seedPartitionState(engine *fakeEngine, partition string, fields map[string]
 
 // upsertsFor returns the health writes onto one partition's row.
 func upsertsFor(engine *fakeEngine, partition string) []string {
-	return engine.callsContaining(`mutation upsertSyncState(stateId: "` + SyncStateID(testMirrorConcept, "shopify", "inbound", partition) + `"`)
+	id := SyncStateID(testMirrorConcept, "shopify", "inbound", partition)
+	return append(engine.callsContaining(`mutation upsertSyncState(stateId: "`+id+`"`),
+		engine.callsContaining(`mutation patchSyncState(stateId: "`+id+`"`)...)
 }
 
 func TestAPartitionedConnectorIsSweptOnePartitionAtATime(t *testing.T) {
@@ -335,10 +337,12 @@ func TestAPartitionedConnectorIsSweptOnePartitionAtATime(t *testing.T) {
 		t.Errorf("partitions swept in order %v, want [a b]", p.partOrder)
 	}
 	aw, bw := upsertsFor(engine, "a"), upsertsFor(engine, "b")
-	if len(aw) != 1 || !strings.Contains(aw[0], "driftCount: 1") || !strings.Contains(aw[0], `partitionKey: "a"`) {
+	// Each partition's row is named by its own id (upsertsFor), so its own
+	// sweep is the write onto it.
+	if len(aw) != 1 || !strings.Contains(aw[0], "driftCount: 1") {
 		t.Errorf("partition a's row did not record its own sweep: %v", aw)
 	}
-	if len(bw) != 1 || !strings.Contains(bw[0], "driftCount: 0") || !strings.Contains(bw[0], `partitionKey: "b"`) {
+	if len(bw) != 1 || !strings.Contains(bw[0], "driftCount: 0") {
 		t.Errorf("partition b's row did not record its own sweep: %v", bw)
 	}
 }
@@ -934,8 +938,8 @@ func TestARefusedQueuedBackfillIsAStandingAnswerNotAFailure(t *testing.T) {
 				t.Fatalf("a refused backfill failed the pass: %v", err)
 			}
 			st := keptState(t, engine, testMirrorConcept, "a")
-			if st.BackfillStatus != "none" || st.LastError != refusal.Error() || st.LastAttemptAt.IsZero() {
-				t.Fatalf("row = %s, lastError %q, attempt %v; want none with the reason and the attempt recorded", st.BackfillStatus, st.LastError, st.LastAttemptAt)
+			if st.BackfillStatus != "none" || st.LastError != refusal.Error() || !st.LastAttemptAt.IsZero() {
+				t.Fatalf("row = %s, lastError %q, attempt %v; want none with the reason, and the sweep's attempt stamp untouched", st.BackfillStatus, st.LastError, st.LastAttemptAt)
 			}
 			continueOnce(t, r)
 			if len(p.partBackfills) != 1 {
@@ -1162,5 +1166,247 @@ func TestARefusedDomainThatIsThenGrantedIsQueuedByItsFirstCleanSweep(t *testing.
 	}
 	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
 		t.Errorf("status = %q, want complete", st.BackfillStatus)
+	}
+}
+
+// ---- each writer of a domain's row writes only the fields it owns ----
+
+// rowWritesSince is the writes onto the shared row of testMirrorConcept made
+// after the first `skip` of them.
+func rowWritesSince(engine *stateEngine, skip int) []string {
+	id := SyncStateID(testMirrorConcept, "shopify", "inbound", "")
+	var out []string
+	for _, w := range engine.callsContaining(`stateId: "` + id + `"`) {
+		if strings.HasPrefix(w, "mutation ") {
+			out = append(out, w)
+		}
+	}
+	if skip > len(out) {
+		return nil
+	}
+	return out[skip:]
+}
+
+func writesCount(engine *stateEngine) int { return len(rowWritesSince(engine, 0)) }
+
+// assertWritesOmit fails when a write names a field its writer does not own.
+func assertWritesOmit(t *testing.T, who string, writes []string, fields ...string) {
+	t.Helper()
+	if len(writes) == 0 {
+		t.Fatalf("%s wrote nothing", who)
+	}
+	for _, w := range writes {
+		for _, f := range fields {
+			if strings.Contains(w, " "+f+": ") || strings.Contains(w, "("+f+": ") {
+				t.Errorf("%s wrote %s, a field it does not own: %s", who, f, w)
+			}
+		}
+	}
+}
+
+var (
+	backfillFields = []string{"backfillCursor", "backfillStatus"}
+	sweepFields    = []string{"lastReconcileAt", "lastAttemptAt", "driftCount"}
+	inboundFields  = []string{"lastInboundAt", "lagSeconds"}
+)
+
+func TestASweepThatStartedBeforeABackfillPageDoesNotPutBackItsCursorOrStatus(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-2"}, memqlsync.BackfillPage{Done: true})
+	c.reconcileReport = memqlsync.ReconcileReport{Checked: 1}
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-1"})
+	// The backfill finishes while the sweep is out asking the origin.
+	c.duringReconcile = func() {
+		if _, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+			t.Errorf("StartBackfill: %v", err)
+		}
+	}
+	before := writesCount(engine)
+
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "complete" || st.BackfillCursor != "" {
+		t.Errorf("after the sweep: %s at %q, want the backfill's complete -- the sweep put back what it read before the page", st.BackfillStatus, st.BackfillCursor)
+	}
+	if st.LastReconcileAt.IsZero() {
+		t.Error("the sweep's watermark was not written")
+	}
+	var sweep []string
+	for _, w := range rowWritesSince(engine, before) {
+		if strings.Contains(w, "lastReconcileAt") {
+			sweep = append(sweep, w)
+		}
+	}
+	assertWritesOmit(t, "the sweep", sweep, backfillFields...)
+}
+
+func TestABackfillPageWrittenDuringASweepKeepsTheSweepsErrorAndWatermark(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(
+		memqlsync.BackfillPage{NextCursor: "c-1"},
+		memqlsync.BackfillPage{NextCursor: "c-2"},
+		memqlsync.BackfillPage{Done: true},
+	)
+	r := stateRunner(engine, c)
+	old := testNow.Add(-3 * time.Hour)
+	writeKept(t, engine, SyncState{BackfillStatus: "queued", LastReconcileAt: old})
+	c.duringBackfill = func(cursor string) {
+		switch cursor {
+		case "": // a clean sweep moves the watermark
+			c.reconcileReport = memqlsync.ReconcileReport{Checked: 2}
+			if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+				t.Errorf("clean sweep: %v", err)
+			}
+		case "c-1": // a sweep fails and records why
+			c.reconcileErr = errors.New("shopify admin: HTTP 502")
+			_, _ = r.Reconcile(context.Background(), "shopify", testMirrorConcept, "")
+		}
+	}
+	before := writesCount(engine)
+
+	if _, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "complete" {
+		t.Fatalf("status = %q, want complete", st.BackfillStatus)
+	}
+	if want := testNow.Add(-reconcileOverlap); !st.LastReconcileAt.Equal(want) {
+		t.Errorf("lastReconcileAt = %v, want the sweep's %v -- a page put back the watermark it read at the start", st.LastReconcileAt, want)
+	}
+	if !strings.Contains(st.LastError, "HTTP 502") {
+		t.Errorf("lastError = %q, want the sweep's failure -- a page erased it", st.LastError)
+	}
+	var pages []string
+	for _, w := range rowWritesSince(engine, before) {
+		if strings.Contains(w, "backfillCursor") {
+			pages = append(pages, w)
+		}
+	}
+	assertWritesOmit(t, "a backfill page", pages, append(sweepFields, inboundFields...)...)
+}
+
+func TestAQueueWriteDoesNotDisturbTheSweepsFields(t *testing.T) {
+	engine := newStateEngine()
+	r := stateRunner(engine, mirrorConnector())
+	at := testNow.Add(-time.Hour)
+	writeKept(t, engine, SyncState{BackfillStatus: "complete", LastReconcileAt: at, LastAttemptAt: at, DriftCount: 4, LagSeconds: 9})
+	before := writesCount(engine)
+
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertWritesOmit(t, "the queue", rowWritesSince(engine, before), append(sweepFields, append(inboundFields, "paused")...)...)
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "queued" || !st.LastReconcileAt.Equal(at) || st.DriftCount != 4 || st.LagSeconds != 9 {
+		t.Errorf("row = %+v, want queued with the sweep's and inbound's fields untouched", st)
+	}
+}
+
+func TestAnInboundHealthWriteDuringABackfillLeavesCursorAndStatusAlone(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-1"}, memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	store := NewStore(engine)
+	d := NewDispatcher(store, NewApplier(store, newFakeWriter())).WithLogger(discardLogger())
+	d.now = func() time.Time { return testNow }
+	writeKept(t, engine, SyncState{BackfillStatus: "queued"})
+	var inbound []string
+	c.duringBackfill = func(cursor string) {
+		if cursor != "c-1" {
+			return
+		}
+		n := writesCount(engine)
+		d.recordInboundHealth(OperatorContext(context.Background()), c,
+			[]memqlsync.MirrorWrite{{Concept: testMirrorConcept, Version: testNow.Add(-40 * time.Second).Format(time.RFC3339)}}, testNow)
+		inbound = rowWritesSince(engine, n)
+	}
+
+	if _, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertWritesOmit(t, "the inbound health write", inbound, append(backfillFields, sweepFields...)...)
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "complete" || st.LagSeconds != 40 || st.LastInboundAt.IsZero() {
+		t.Errorf("row = %s, lag %d, lastInboundAt %v; want complete with the delivery's lag kept", st.BackfillStatus, st.LagSeconds, st.LastInboundAt)
+	}
+}
+
+func TestAPausedRunningDomainDoesNotHoldBackAQueuedSibling(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a")
+	p.domains = append(p.domains, memqlsync.DomainSpec{Concept: secondMirrorConcept, Direction: memqlsync.DirectionInbound})
+	r := stateRunner(engine, p)
+	writeKept(t, engine, SyncState{Partition: "a", BackfillStatus: "running", BackfillCursor: "op-1", Paused: true})
+	writeKept(t, engine, SyncState{ConceptID: secondMirrorConcept, Partition: "a", BackfillStatus: "queued"})
+
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("result = %+v, want the queued sibling started and completed", res)
+	}
+	if got := strings.Join(p.partBackfills, ","); got != "a/"+secondMirrorConcept {
+		t.Errorf("backfill steps = %s, want only the sibling: the paused domain neither runs nor holds the store", got)
+	}
+	if st := keptState(t, engine, testMirrorConcept, "a"); st.BackfillStatus != "running" || st.BackfillCursor != "op-1" {
+		t.Errorf("the paused domain became %s at %q", st.BackfillStatus, st.BackfillCursor)
+	}
+}
+
+func TestAQueuedDomainRefusedBeforeItRanIsNotCountedStarted(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a")
+	p.partErrs["a"] = memqlsync.NotRequested("shopify")
+	r := stateRunner(engine, p)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if res := continueOnce(t, r); res != (ContinueResult{}) {
+		t.Errorf("result = %+v, want nothing counted for a domain refused before it ran", res)
+	}
+}
+
+func TestQueueingClearsAStaleRefusalAndOnlyARefusal(t *testing.T) {
+	for name, tc := range map[string]struct{ lastError, want string }{
+		"not granted":      {memqlsync.NotGranted("shopify", "read_customers").Error(), ""},
+		"not requested":    {memqlsync.NotRequested("shopify").Error(), ""},
+		"a failure":        {"shopify admin: HTTP 502", "shopify admin: HTTP 502"},
+		"backfill refused": {backfillRefusedPrefix + "connector: not requested", backfillRefusedPrefix + "connector: not requested"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := newStateEngine()
+			r := stateRunner(engine, mirrorConnector())
+			writeKept(t, engine, SyncState{BackfillStatus: "none", LastError: tc.lastError})
+			if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+				t.Fatal(err)
+			}
+			if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.LastError != tc.want {
+				t.Errorf("row = %s, lastError %q; want queued with lastError %q", st.BackfillStatus, st.LastError, tc.want)
+			}
+		})
+	}
+}
+
+func TestARestartQueueResetsARunningBackfillAndAnOrdinaryOneDoesNot(t *testing.T) {
+	engine := newStateEngine()
+	r := stateRunner(engine, mirrorConnector())
+	i := &Integration{runner: r, logger: discardLogger()}
+	internal := auth.ContextWithInternalOrigin(context.Background())
+	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-7"})
+
+	if _, err := i.handleQueueBackfill(internal, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "running" || st.BackfillCursor != "c-7" {
+		t.Fatalf("an ordinary queue moved a running backfill to %s at %q", st.BackfillStatus, st.BackfillCursor)
+	}
+	args["restart"] = true
+	if _, err := i.handleQueueBackfill(internal, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.BackfillCursor != "" {
+		t.Errorf("a restart left %s at %q, want queued from the start", st.BackfillStatus, st.BackfillCursor)
 	}
 }

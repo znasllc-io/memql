@@ -2179,6 +2179,38 @@ mutation syncState upsertSyncState {
   }
 }
 
+/// Write the fields of one domain's health that ONE writer owns, onto a row that exists. Each
+/// writer -- the backfill runner, the sweep, the queue, the inbound dispatcher, the pause switch --
+/// names only its own fields, and the read-merge keeps every field the write omits: an omitted arg
+/// is left out of the delta, never defaulted, which is what upsertSyncState's stamps would do.
+/// The runtime guards each write with a row-version fence on the version it read, so a write
+/// decided on a read another writer has since overtaken is refused and decided again.
+///
+/// @serverOnly, and actor.userId scoping is not the fix, for upsertSyncState's reason: a
+/// sync-health row belongs to the DEPLOYMENT, not to a user, so there is no owner field to compare
+/// an actor against. Only the sync runtime writes it, under its own operator identity.
+@serverOnly
+mutation syncState patchSyncState {
+  args {
+    stateId          string!
+    backfillCursor   string
+    backfillStatus   string
+    lastInboundAt    datetime
+    lagSeconds       int
+    lastReconcileAt  datetime
+    lastAttemptAt    datetime
+    driftCount       int
+    paused           bool
+    lastError        string
+  }
+  update {
+    accept { backfillCursor, backfillStatus, lastInboundAt, lagSeconds, lastReconcileAt, lastAttemptAt, driftCount, paused, lastError }
+    stamp {
+      id:  args.stateId
+    }
+  }
+}
+
 /// Pause or resume one domain. Separate from upsertSyncState so an operator's pause cannot be
 /// clobbered by a runner's next health write -- read-merge preserves every field this one omits.
 ///

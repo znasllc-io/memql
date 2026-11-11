@@ -149,7 +149,7 @@ func TestPausingADomainWithNoHealthRowWritesOneCarryingThePause(t *testing.T) {
 		t.Fatalf("no health row carrying the pause was written: %v", writes)
 	}
 
-	// With a stored row, the pause is the update it always was.
+	// With a stored row, the pause is a partial write of `paused` alone.
 	engine.seed(`query syncStateById`, []map[string]any{{
 		"id":        SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
 		"conceptId": testMirrorConcept,
@@ -160,8 +160,9 @@ func TestPausingADomainWithNoHealthRowWritesOneCarryingThePause(t *testing.T) {
 	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, "", false); err != nil {
 		t.Fatal(err)
 	}
-	if n := engine.countContaining("mutation setSyncPaused"); n != 1 {
-		t.Errorf("a stored row was not flipped with setSyncPaused (%d)", n)
+	patches := engine.callsContaining("mutation patchSyncState")
+	if len(patches) != 1 || !strings.HasSuffix(patches[0], `, paused: false)`) || strings.Count(patches[0], ": ") != 2 {
+		t.Errorf("a stored row was not flipped by a write of paused alone: %v", patches)
 	}
 }
 

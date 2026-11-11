@@ -234,3 +234,76 @@ func TestAQueuedBackfillRunsToCompleteAgainstARealEngine(t *testing.T) {
 		t.Fatalf("syncStatesBackfilling still lists a complete row: %v -- a list returning an older version would continue it forever", rows)
 	}
 }
+
+// Two writers of one health row, interleaved on a real engine. A partial
+// write keeps every field it does not name (the read-merge), and a write
+// decided on a read that another writer has since overtaken is refused by the
+// row-version fence and decided again on a fresh read -- so the queue, which
+// must never write over a running backfill, sees the backfill the pass
+// started between its read and its write and leaves it alone.
+func TestTwoWritersOfOneSyncStateRowKeepEachOthersFields(t *testing.T) {
+	eng, db := healthEngine(t)
+	if eng == nil {
+		return
+	}
+	store := NewStore(engineSeam{eng})
+	ctx := OperatorContext(context.Background())
+	connector := fmt.Sprintf("dbtest-writers-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(),
+			`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1`, connector)
+	})
+	swept := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	if err := store.WriteSyncState(ctx, SyncState{
+		ConceptID: testMirrorConcept, Connector: connector, Direction: "inbound",
+		BackfillStatus: "complete", BackfillCursor: "c-9", LastReconcileAt: swept, DriftCount: 2, LastError: "sweep said so",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	read := func() SyncState {
+		t.Helper()
+		st, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+
+	// The partial write: only the inbound health is named, and nothing else moves.
+	if err := store.PatchSyncState(ctx, testMirrorConcept, connector, "inbound", "", func(SyncState) (SyncPatch, bool) {
+		return SyncPatch{"lagSeconds": 12}, true
+	}); err != nil {
+		t.Fatalf("a partial write: %v", err)
+	}
+	if st := read(); st.LagSeconds != 12 || st.BackfillStatus != "complete" || st.BackfillCursor != "c-9" ||
+		!st.LastReconcileAt.Equal(swept) || st.DriftCount != 2 || st.LastError != "sweep said so" {
+		t.Fatalf("a partial write did not keep the fields it does not name: %+v", st)
+	}
+
+	// The race: the queue reads the row complete, the pass starts the
+	// backfill, then the queue writes.
+	decided := 0
+	err := store.PatchSyncState(ctx, testMirrorConcept, connector, "inbound", "", func(cur SyncState) (SyncPatch, bool) {
+		decided++
+		if decided == 1 {
+			if err := store.PatchSyncState(ctx, testMirrorConcept, connector, "inbound", "", func(SyncState) (SyncPatch, bool) {
+				return SyncPatch{"backfillStatus": "running", "backfillCursor": "c-1"}, true
+			}); err != nil {
+				t.Fatalf("the other writer: %v", err)
+			}
+		}
+		if cur.BackfillStatus == "running" {
+			return nil, false
+		}
+		return SyncPatch{"backfillStatus": "queued", "backfillCursor": ""}, true
+	})
+	if err != nil {
+		t.Fatalf("the queue's write: %v", err)
+	}
+	if decided != 2 {
+		t.Errorf("the queue decided %d times, want twice: its first write rested on a read another writer had overtaken", decided)
+	}
+	if st := read(); st.BackfillStatus != "running" || st.BackfillCursor != "c-1" || st.LagSeconds != 12 || !st.LastReconcileAt.Equal(swept) {
+		t.Fatalf("after the race: %+v, want the pass's running backfill with every other writer's field kept", st)
+	}
+}

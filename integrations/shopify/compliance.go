@@ -516,9 +516,11 @@ func (c *Connector) PurgeStore(ctx context.Context, store Store) (int64, error) 
 	}
 	// The runtime's health rows for this connector's domains go too.
 	// Leaving them would have a re-install resume a backfill cursor into
-	// a mirror that no longer has the rows the cursor counted.
+	// a mirror that no longer has the rows the cursor counted. A store's
+	// rows are partitions of the mirror and carry it as partitionKey, not
+	// storeId; both are matched, so a row of either shape goes.
 	if _, err := db.ExecContext(ctx,
-		`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1 AND payload->>'storeId' = $2`,
+		`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1 AND (payload->>'storeId' = $2 OR payload->>'partitionKey' = $2)`,
 		ConnectorName, store.ID); err != nil {
 		return total, fmt.Errorf("shopify: purge sync state: %w", err)
 	}

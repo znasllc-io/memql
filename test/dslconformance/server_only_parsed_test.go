@@ -664,6 +664,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
 		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
 		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
+		// The partial health write each sync writer makes (the backfill
+		// runner, the sweep, the queue, the inbound dispatcher, the pause).
+		// Same argument as upsertSyncState: the row is the DEPLOYMENT's, with
+		// no owner field to scope an actor against.
+		{Path: "platform/mutations.memql", Name: "patchSyncState"}: true,
 		// memql#5707 review. The inbound receiver's ONE write, and the NDR
 		// poller's. A staged delivery has no owner to scope to: the sender is
 		// a third party that signed with a shared secret and the receiver

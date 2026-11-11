@@ -721,11 +721,12 @@ builtin datasyncReconcileDomains { }
 // read; the continueQueuedBackfills automation drives the second.
 
 @executor("integration.datasync.queueBackfill")
-@description("Queue one domain's backfill: write backfillStatus queued and an empty cursor on its v1:platform:syncState row, and run nothing -- the continuing pass starts it. A running backfill is left as it is; a complete one is queued again from the start. Only the engine reaches it: a call without internal origin is refused before anything is read.")
+@description("Queue one domain's backfill: write backfillStatus queued and an empty cursor on its v1:platform:syncState row, and run nothing -- the continuing pass starts it. A running backfill is left as it is unless restart is set; a complete one is queued again from the start. Only the engine reaches it: a call without internal origin is refused before anything is read.")
 builtin datasyncQueueBackfill {
   connector     string!
   conceptId     string!
   partitionKey  string  @description("One partition of a partitioned connector (one store). Absent queues every partition the connector names; a partition named on a connector without partitions is refused.")
+  restart       boolean  @description("Also reset a running backfill to queued with an empty cursor, so it starts again from nothing: for an origin that no longer holds what the cursor counted, such as a store reconnected after an uninstall or a purge. An ordinary queue leaves a running backfill alone.")
 }
 
 @executor("integration.datasync.continueBackfills")

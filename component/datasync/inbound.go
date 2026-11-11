@@ -435,15 +435,12 @@ func (d *Dispatcher) recordInboundHealth(
 			lag = int(now.Sub(origin).Seconds())
 		}
 
-		st, err := d.store.SyncStateFor(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition)
-		if err != nil {
-			continue
-		}
-		st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition
-		st.LastInboundAt = now
-		st.LagSeconds = lag
-		st.LastError = ""
-		if err := d.store.WriteSyncState(ctx, st); err != nil && d.logger != nil {
+		// The dispatcher owns lastInboundAt and lagSeconds, and writes
+		// nothing else: a backfill or a sweep of the same domain may be
+		// writing its own fields at this moment.
+		patch := SyncPatch{"lastInboundAt": now, "lagSeconds": lag}
+		if err := d.store.PatchSyncState(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition,
+			func(SyncState) (SyncPatch, bool) { return patch, true }); err != nil && d.logger != nil {
 			d.logger.Warn("datasync: could not record a domain's inbound health",
 				"connector", connector.Name(), "concept", conceptID, "partition", partition, "error", err)
 		}

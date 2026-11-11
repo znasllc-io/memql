@@ -479,3 +479,67 @@ func TestABulkRunRefusedAsInProgressIsBusy(t *testing.T) {
 		t.Errorf("an INVALID refusal = %v, want a failure that is not busy", err)
 	}
 }
+
+func TestBootQueuesADomainWhoseRowWasNeverBackfilled(t *testing.T) {
+	row := func(concept string, fields map[string]any) (string, map[string]any) {
+		id := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
+		r := map[string]any{"id": id, "conceptId": generated.ConceptID(concept), "connector": ConnectorName, "partitionKey": testStoreID}
+		for k, v := range fields {
+			r[k] = v
+		}
+		return id, r
+	}
+	cases := map[string]struct {
+		fields map[string]any
+		queued bool
+	}{
+		// A sweep or a pause wrote the row before the boot pass reached it.
+		"none, no cursor":       {map[string]any{"backfillStatus": "none", "lastReconcileAt": "2026-08-23T10:00:00Z"}, true},
+		"no status, no cursor":  {map[string]any{"paused": false}, true},
+		"none, a sweep failure": {map[string]any{"backfillStatus": "none", "lastError": "shopify admin: HTTP 502"}, true},
+		"none, not granted":     {map[string]any{"backfillStatus": "none", "lastError": memqlsync.NotGranted(ConnectorName, "read_customers").Error()}, false},
+		"none, not requested":   {map[string]any{"backfillStatus": "none", "lastError": memqlsync.NotRequested(ConnectorName).Error()}, false},
+		"none, with a cursor":   {map[string]any{"backfillStatus": "none", "backfillCursor": "c-1"}, false},
+		"queued":                {map[string]any{"backfillStatus": "queued"}, false},
+		"running":               {map[string]any{"backfillStatus": "running", "backfillCursor": "c-1"}, false},
+		"complete":              {map[string]any{"backfillStatus": "complete"}, false},
+		"failed":                {map[string]any{"backfillStatus": "failed", "lastError": "backfill refused: x"}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rows := map[string]map[string]any{}
+			for _, concept := range commerceBulkDomains {
+				id, r := row(concept, map[string]any{"backfillStatus": "complete"})
+				rows[id] = r
+			}
+			id, r := row("customer", tc.fields)
+			rows[id] = r
+			h := bootHarness(t, rows)
+			Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+			got := bootQueued(t, h)
+			if queued := slices.Contains(got, testStoreID+"/customer"); queued != tc.queued {
+				t.Errorf("customer queued = %t, want %t (queued %v)", queued, tc.queued, got)
+			}
+			if len(got) > 1 {
+				t.Errorf("boot queued domains that are complete: %v", got)
+			}
+		})
+	}
+}
+
+func TestBootStampsOrdersFromWhenItQueuesTheOrders(t *testing.T) {
+	h := bootHarness(t, nil)
+	Bootstrap(context.Background(), NewIntegration(h.conn), nil)
+	if !slices.Contains(bootQueued(t, h), testStoreID+"/order") {
+		t.Fatal("boot did not queue the orders, so it proves nothing")
+	}
+	var stamps []string
+	for _, q := range h.engine.callsTo("recordStoreHealth") {
+		if strings.Contains(q, `"ordersFrom"`) {
+			stamps = append(stamps, q)
+		}
+	}
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `"ordersFrom": "2026-06-24"`) || !strings.Contains(stamps[0], `storeId: "`+testStoreID+`"`) {
+		t.Fatalf("ordersFrom stamps at boot = %v, want one, 2026-06-24, sixty days before the boot on 2026-08-23", stamps)
+	}
+}

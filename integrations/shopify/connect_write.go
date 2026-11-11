@@ -246,7 +246,10 @@ const ordersWindowDays = 60
 //
 // A store that is new, was uninstalled or purged, or had no Admin token has
 // no past in the mirror that can be trusted, so every bulk domain of its
-// connection is queued, in apply order. Otherwise only what the new grant
+// connection is queued, in apply order, as a RESTART: a backfill left running
+// when the store went away starts again from an empty cursor rather than
+// resuming at one that counted rows the store no longer gave us. Otherwise
+// only what the new grant
 // unlocked is: the bulk domains the prior grant reached none of the scopes for
 // and the new grant reaches. A domain inside the connection that Shopify
 // refuses all the same is queued too; its refusal comes back as the origin's
@@ -254,7 +257,9 @@ const ordersWindowDays = 60
 //
 // When the orders are queued under a grant without read_all_orders, the
 // store's orders begin sixty days before now, and the store's health says so
-// once (ordersFrom): a later connect does not move it.
+// once (ordersFrom): a later connect does not move it. A purge is the
+// exception: it removed every mirrored order, so the mirror's orders now
+// begin sixty days before the reconnect and ordersFrom is stamped anew.
 //
 // It queues through the sync runtime's builtin, under operatorContext: this
 // integration does not import the runtime. A queue that fails is logged and
@@ -270,12 +275,12 @@ func (c *Connector) queueConnectBackfills(ctx context.Context, prior Store, foun
 		if !everything && (len(scopesMissingFor(prior, spec)) == 0 || len(scopesMissingFor(now, spec)) > 0) {
 			continue
 		}
-		if err := c.queueBackfill(ctx, now.ID, concept); err != nil {
-			c.logger.Warn("shopify: Connect could not queue a backfill; the next boot queues a domain that has no row", "store", now.ID, "concept", concept, "error", err.Error())
+		if err := c.queueBackfill(ctx, now.ID, concept, everything); err != nil {
+			c.logger.Warn("shopify: Connect could not queue a backfill; the next boot queues a domain that was never backfilled", "store", now.ID, "concept", concept, "error", err.Error())
 			continue
 		}
-		if concept == "order" && !grantIncludes(now.ScopesGranted)["read_all_orders"] {
-			c.stampOrdersFrom(ctx, now.ID)
+		if concept == "order" {
+			c.stampOrdersFrom(ctx, now, found && prior.RedactedAt != "")
 		}
 	}
 }
@@ -287,19 +292,30 @@ func bulkDomain(spec *generated.TypeSpec) bool {
 }
 
 // queueBackfill asks the sync runtime to backfill one domain of one store.
-func (c *Connector) queueBackfill(ctx context.Context, storeID, concept string) error {
-	_, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncQueueBackfill", map[string]any{
+// restart also resets a backfill left running to the start.
+func (c *Connector) queueBackfill(ctx context.Context, storeID, concept string, restart bool) error {
+	args := map[string]any{
 		"connector":    ConnectorName,
 		"conceptId":    generated.ConceptID(concept),
 		"partitionKey": storeID,
-	}))
+	}
+	if restart {
+		args["restart"] = true
+	}
+	_, err := c.engine.Execute(operatorContext(ctx), "builtin "+renderCall("datasyncQueueBackfill", args))
 	return err
 }
 
-// stampOrdersFrom records, once, the day the store's mirrored orders begin.
-func (c *Connector) stampOrdersFrom(ctx context.Context, storeID string) {
-	store, _, err := c.storeByID(memql.ContextWithFreshRead(operatorContext(ctx)), storeID)
-	if err == nil && mapString(store.Health, "ordersFrom") != "" {
+// stampOrdersFrom records the day the store's mirrored orders begin, when its
+// orders were just queued under a grant without read_all_orders: once, or
+// anew when renew is set (a purge removed the orders it counted from).
+func (c *Connector) stampOrdersFrom(ctx context.Context, store Store, renew bool) {
+	if grantIncludes(store.ScopesGranted)["read_all_orders"] {
+		return
+	}
+	storeID := store.ID
+	fresh, _, err := c.storeByID(memql.ContextWithFreshRead(operatorContext(ctx)), storeID)
+	if err == nil && !renew && mapString(fresh.Health, "ordersFrom") != "" {
 		return
 	}
 	if err == nil {

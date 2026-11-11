@@ -119,12 +119,17 @@ type fakeConnector struct {
 	backfillPages []memqlsync.BackfillPage
 	backfillErr   error
 	backfillSeen  []string
+	// duringBackfill runs inside Backfill, before the page is answered and
+	// outside the connector's lock, so a test can have another writer of
+	// the domain's row act while a page is in flight.
+	duringBackfill func(cursor string)
 
 	reconcileReport memqlsync.ReconcileReport
 	reconcileErr    error
 	reconcileSince  []time.Time
-	// duringReconcile runs inside Reconcile, so a test can move its clock
-	// forward while a sweep is in flight.
+	// duringReconcile runs inside Reconcile, outside the connector's lock, so
+	// a test can move its clock forward, or have another writer of the
+	// domain's row act, while a sweep is in flight.
 	duringReconcile func()
 
 	mu sync.Mutex
@@ -149,6 +154,12 @@ func (c *fakeConnector) Apply(_ context.Context, req memqlsync.InboundRequest) (
 
 func (c *fakeConnector) Backfill(_ context.Context, conceptName, cursor string) (memqlsync.BackfillPage, error) {
 	c.mu.Lock()
+	during := c.duringBackfill
+	c.mu.Unlock()
+	if during != nil {
+		during(cursor)
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.backfillSeen = append(c.backfillSeen, cursor)
 	if c.backfillErr != nil {
@@ -164,11 +175,14 @@ func (c *fakeConnector) Backfill(_ context.Context, conceptName, cursor string) 
 
 func (c *fakeConnector) Reconcile(_ context.Context, _ string, since time.Time) (memqlsync.ReconcileReport, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.reconcileSince = append(c.reconcileSince, since)
-	if c.duringReconcile != nil {
-		c.duringReconcile()
+	during := c.duringReconcile
+	c.mu.Unlock()
+	if during != nil {
+		during()
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.reconcileReport, c.reconcileErr
 }
 
@@ -279,7 +293,7 @@ func (s *stateEngine) Execute(ctx context.Context, q string) (any, error) {
 	defer s.stateMu.Unlock()
 	args := renderedArgs(q)
 	switch {
-	case strings.HasPrefix(q, "mutation upsertSyncState("):
+	case strings.HasPrefix(q, "mutation upsertSyncState("), strings.HasPrefix(q, "mutation patchSyncState("):
 		id, _ := args["stateId"].(string)
 		row := s.states[id]
 		if row == nil {

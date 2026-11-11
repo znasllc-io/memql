@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
@@ -96,11 +97,18 @@ func Bootstrap(ctx context.Context, i *Integration, logger *slog.Logger) {
 
 // queueUnstartedBackfills is how a store connected before backfills were
 // queued gets its past: for each store that ingests, every bulk domain of its
-// connection that has no sync-state row of that store's own is queued for
-// the continuing pass.
+// connection that was never backfilled is queued for the continuing pass.
 //
-// A domain that has its row is left alone, whatever the row says -- complete,
-// refused, paused -- so a second boot and a second node queue nothing more.
+// Never backfilled is no row of that store's own, OR a row no backfill ever
+// wrote: no status or `none`, no cursor, and no refusal on it. A sweep or a
+// pause can write a domain's row before this pass reaches it, and "no row"
+// alone would leave that store without its past for good. A row queued,
+// running, complete or failed, or carrying the origin's refusal, is left
+// alone, so a second boot and a second node queue nothing more.
+//
+// When it queues the orders under a grant without read_all_orders, it stamps
+// ordersFrom as a connect does, if the store has none.
+//
 // Each domain's row is read BY ID (memqlsync.StateID), as store health reads
 // it, never by walking syncStatesAll: those rows are the append-only history.
 func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
@@ -124,12 +132,34 @@ func (c *Connector) queueUnstartedBackfills(ctx context.Context) {
 				c.logger.Warn("shopify: could not read a domain's sync state at boot; it is not queued", "store", store.ID, "concept", concept, "error", err.Error())
 				continue
 			}
-			if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" {
+			if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" && !neverBackfilled(rows[0]) {
 				continue
 			}
-			if err := c.queueBackfill(ctx, store.ID, concept); err != nil {
+			if err := c.queueBackfill(ctx, store.ID, concept, false); err != nil {
 				c.logger.Warn("shopify: could not queue a backfill at boot", "store", store.ID, "concept", concept, "error", err.Error())
+				continue
+			}
+			if concept == "order" {
+				c.stampOrdersFrom(ctx, store, false)
 			}
 		}
 	}
+}
+
+// neverBackfilled reports whether a domain's sync-state row is one no backfill
+// ever wrote: no status or `none`, no cursor, and no refusal of the origin's
+// recorded on it (a refused domain is queued again by its first clean sweep,
+// not at boot).
+func neverBackfilled(row map[string]any) bool {
+	switch mapString(row, "backfillStatus") {
+	case "", "none":
+	default:
+		return false
+	}
+	if mapString(row, "backfillCursor") != "" {
+		return false
+	}
+	lastError := mapString(row, "lastError")
+	return !strings.HasPrefix(lastError, memqlsync.ErrNotGranted.Error()) &&
+		!strings.HasPrefix(lastError, memqlsync.ErrNotRequested.Error())
 }

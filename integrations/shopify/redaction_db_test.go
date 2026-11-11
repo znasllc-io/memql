@@ -274,3 +274,53 @@ func TestPurgeStoreRemovesEveryVersionAndItsSyncState(t *testing.T) {
 		t.Error("markStoreRedacted carried no timestamp")
 	}
 }
+
+// A store's health rows are partitions of the mirror: they carry the store as
+// partitionKey and no storeId. The purge removes them too, so a reinstall
+// starts every backfill from nothing, and leaves another store's alone.
+func TestAPurgedStoreHasNoSyncStateRowsLeftPartitionedOnesIncluded(t *testing.T) {
+	db := openTestDB(t, "shop/redact purge of partitioned sync state")
+	if db == nil {
+		return
+	}
+	ctx := context.Background()
+	seed := func(id, partition string) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"connector": ConnectorName, "partitionKey": partition, "conceptId": generated.ConceptID("order"),
+			"direction": "inbound", "backfillStatus": "running", "backfillCursor": "c-4",
+		})
+		for _, at := range []time.Time{time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC), time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)} {
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", concept, type, schema, payload)
+				 VALUES ($1, $2, $3, 'v1:platform:syncState', 'object', '{"type":"object"}'::jsonb, $4::jsonb)
+				 ON CONFLICT (id, "createdAt") DO UPDATE SET payload = EXCLUDED.payload`,
+				id, at, "system:datasync", string(payload)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE id = $1`, id) })
+	}
+	mine, other := "syn-part-"+redactTestStore, "syn-part-other-"+redactTestStore
+	seed(mine, redactTestStore)
+	seed(other, "store-b")
+
+	h := newHarness(t)
+	h.conn.WithDatabase(func() *sql.DB { return db })
+	if _, err := h.conn.PurgeStore(ctx, Store{ID: redactTestStore, Domain: "acme.myshopify.com"}); err != nil {
+		t.Fatal(err)
+	}
+	count := func(id string) int {
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(mine); n != 0 {
+		t.Errorf("%d version(s) of the store's partitioned sync state survived the purge: a reinstall would resume at the old cursor", n)
+	}
+	if n := count(other); n != 2 {
+		t.Errorf("another store's sync state lost %d of its 2 versions to this store's purge", 2-n)
+	}
+}

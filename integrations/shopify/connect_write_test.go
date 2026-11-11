@@ -815,3 +815,82 @@ func TestOrdersFromIsStampedOnceSixtyDaysBack(t *testing.T) {
 		t.Errorf("a grant with read_all_orders was stamped: %v", got)
 	}
 }
+
+// ---- after an uninstall or a purge nothing of the old backfill survives ----
+
+// restarts is, per queued domain, whether its queue asked for a restart.
+func (h *writeHarness) restarts(t *testing.T) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	for _, c := range h.engine.callsNamed("datasyncQueueBackfill") {
+		m := queuedConceptRE.FindStringSubmatch(c.query)
+		if m == nil {
+			t.Fatalf("a queue names no mirrored concept: %s", c.query)
+		}
+		out[m[1]] = strings.Contains(c.query, "restart: true")
+	}
+	return out
+}
+
+func TestAConnectThatQueuesEverythingRestartsARunningBackfill(t *testing.T) {
+	for name, fields := range map[string]map[string]any{
+		"uninstalled":    {"uninstalledAt": "2026-09-01T00:00:00Z"},
+		"purged":         {"redactedAt": "2026-09-01T00:00:00Z"},
+		"no Admin token": {"adminTokenRef": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fields["scopesGranted"] = commerceScopesAny()
+			h := reconnectHarness(t, managedRow(fields))
+			h.managedConnect(t, managedConnectScopes())
+			got := h.restarts(t)
+			if len(got) != len(commerceBulkDomains) {
+				t.Fatalf("queued %d domains, want %d", len(got), len(commerceBulkDomains))
+			}
+			for concept, restart := range got {
+				if !restart {
+					t.Errorf("%s was queued without a restart: a backfill left running would resume at its old cursor", concept)
+				}
+			}
+		})
+	}
+	t.Run("a new store", func(t *testing.T) {
+		h := newWriteHarness(t)
+		h.managedConnect(t, managedConnectScopes())
+		for concept, restart := range h.restarts(t) {
+			if !restart {
+				t.Errorf("%s was queued without a restart", concept)
+			}
+		}
+	})
+}
+
+func TestAWiderGrantLeavesARunningBackfillAlone(t *testing.T) {
+	h := reconnectHarness(t, managedRow(map[string]any{"scopesGranted": olderManagedScopes()}))
+	h.managedConnect(t, managedConnectScopes())
+	got := h.restarts(t)
+	if len(got) != 4 {
+		t.Fatalf("queued %v, want the four the grant unlocked", got)
+	}
+	for concept, restart := range got {
+		if restart {
+			t.Errorf("%s was queued with a restart: a wider grant must not reset a backfill in flight", concept)
+		}
+	}
+}
+
+func TestOrdersFromMovesAfterAPurge(t *testing.T) {
+	h := reconnectHarness(t, managedRow(map[string]any{
+		"redactedAt": "2026-09-01T00:00:00Z", "scopesGranted": commerceScopesAny(),
+		"health": map[string]any{"ordersFrom": "2026-05-01"},
+	}))
+	h.managedConnect(t, managedConnectScopes())
+	var stamps []string
+	for _, c := range h.engine.callsNamed("recordStoreHealth") {
+		if strings.Contains(c.query, `"ordersFrom"`) {
+			stamps = append(stamps, c.query)
+		}
+	}
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `"ordersFrom": "2026-07-25"`) {
+		t.Fatalf("ordersFrom stamps after a purge = %v, want one, 2026-07-25: the mirror's orders now begin sixty days before the reconnect", stamps)
+	}
+}
