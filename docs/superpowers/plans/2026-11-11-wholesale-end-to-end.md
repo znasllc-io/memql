@@ -555,6 +555,40 @@ func TestRowMessageStatusAnswersEachRequestId(t *testing.T)
 - [ ] **Step 4:** Run the same command, `./component/campaigns/` and `./component/emailrules/` whole and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `campaigns: one message to the person a pack row names, with no unsubscribe, stopped by a bounce`.
 
+### Task 11b: Previews and the test send show a transactional template as the lane sends it
+
+Added at the review of Task 10 (2026-11-11). The engine judges a template by its purpose when it is saved and published, but three surfaces a person looks at still judge every template as marketing: the email editor's preview (and so its Publish act, which is absent while the preview shows any issue), the composer's preview tool, and the author's test send. A transactional layout template with no unsubscribe link therefore shows a missing-unsubscribe issue in the editor and cannot be published from it, and its test send arrives with an unsubscribe footer the real message never carries.
+
+**Files:**
+- Modify: `editors/productivity/src/emailEditor.ts` (the preview's call), the editor file that builds the preview request (`buildEmailRender`), `component/campaigns/compose_tools.go` (the preview tool), `component/campaigns/test_send.go`
+- Test: the editor's test for the preview and the bar, `component/campaigns/compose_tools_test.go` (or the file that holds the preview tool's tests), `component/campaigns/test_send_test.go`
+
+**Interfaces:**
+- Consumes: Task 10's `purpose` on the template and on `emailRender`; Task 11's `RenderOptions.Transactional` on the send render.
+
+Decisions:
+- The editor's preview names the purpose of the template it is editing (the stored one; a template not yet saved is marketing), so its issues and its Publish act agree with what the save will say.
+- The composer's preview tool renders with the purpose its submit already judges by.
+- The author's test send of a transactional template is rendered as the lane renders it: no appended footer, no List-Unsubscribe pair. It still goes to the one address the author names and nowhere else.
+- Nothing changes for a marketing template on any of the three.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestThePreviewToolJudgesATemplateByItsPurpose(t *testing.T)            // a transactional template with no unsubscribe link: no issue; with one: unsubscribe_present
+func TestATestSendOfATransactionalTemplateCarriesNoUnsubscribe(t *testing.T) // no footer, no List-Unsubscribe header; a marketing one unchanged
+```
+
+```ts
+it("previews a transactional template with no missing-unsubscribe issue, and offers Publish")
+it("previews a marketing template exactly as before")
+```
+
+- [ ] **Step 2:** Run `MEMQL_DATABASE_DSN="$WHOLESALE_DSN" go test -count=1 -timeout 45m ./component/campaigns/ -run 'PreviewToolJudges|TransactionalTemplateCarriesNoUnsubscribe'` and the editor package's test command for its preview tests. Expected: FAIL.
+- [ ] **Step 3:** Implement.
+- [ ] **Step 4:** Run the same commands and the editor package's whole suite and typecheck. Expected: PASS.
+- [ ] **Step 5: Commit** `email: a transactional template previews and test-sends as it is sent`.
+
 ### Task 12: Terms documents, and applications open only once they exist (U8, first half)
 
 **Files:**
