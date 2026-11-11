@@ -72,7 +72,7 @@ both; no candidate selection or promotion is needed for storefronts.
 When ready, change only Production to the client's store. Store selection does
 not copy products, customers, orders or credentials between stores. Product
 handles and collections needed by the storefront must exist in the selected store.
-Fylo keeps carts separate by store domain. A production-store label describes the
+The storefront keeps carts separate by store domain. A production-store label describes the
 store type, not payment readiness: verify products, payment configuration and
 checkout in Shopify before accepting orders.
 

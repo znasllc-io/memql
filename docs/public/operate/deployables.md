@@ -747,7 +747,8 @@ recorded, from Production's store, or Testing's when Production has none:
 | the store, then Recording, Starting, Paused or Needs attention | The store is connected; the word is the store's verdict ([the Shopify connector](shopify-connector.md#the-storefronts-store-panel)). |
 | the store, then Uninstalled, or Data removed | Shopify reported the app uninstalled, or removed the store's data. |
 | the store, then Setup needed | The store's Admin authorization or its own Storefront token is not in place. |
-| the store, then Status unknown | Whether the store is being recorded could not be read. |
+| the store, then Not connected | The engine's verdict says not connected while the store's own row still reads connected. |
+| the store, then Status unknown | Whether the store is being recorded could not be read, or the answer named no state the page knows. |
 | The store could not be read | The store's row could not be read. |
 | Names a store that is not on this cluster | The binding names a store this cluster does not have. |
 
@@ -782,7 +783,10 @@ has three parts:
    that list is a fault.
 
 The bar carries "Pause recording" or "Resume" for the store the page leads
-with, for the store's owner and a cluster owner. Every state, reason, act and
+with, for the store's owner and a cluster owner; both call
+`shopifyStoreSetRecording`, which refuses a store that is not connected. The
+engine serves a store's state and reasons only to its owner, a cluster owner,
+or a caller who may read store rows. Every state, reason, act and
 email is in [the Shopify connector](shopify-connector.md#operating-it).
 
 ---
