@@ -122,6 +122,18 @@ export function verdictWord(state: VerdictState): string {
   }
 }
 
+/**
+ * A CONNECTED store's word once its verdict has been asked for (ruling 39):
+ * the verdict's word; "Not connected" when the engine says so over a row that
+ * still reads connected; "Status unknown" when the read failed or its reply
+ * named no state this client knows; "" while it is first read. Never
+ * "Connected": a store whose verdict was asked is said by its verdict.
+ */
+export function connectedStoreWord(verdict: StoreVerdict | null, read: "unread" | "reading" | "read" | "failed"): string {
+  if (verdict !== null) return verdict.state === "not connected" ? "Not connected" : verdictWord(verdict.state);
+  return read === "read" || read === "failed" ? "Status unknown" : "";
+}
+
 function toReason(value: unknown): VerdictReason {
   const r = record(value);
   const count = r["count"];

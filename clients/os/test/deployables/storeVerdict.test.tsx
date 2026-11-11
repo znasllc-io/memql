@@ -361,3 +361,163 @@ describe("what speaks before the verdict", () => {
     expect(connection.callsNamed("shopifyStoreVerdict")).toHaveLength(0);
   });
 });
+
+// FIX ROUND 1 (rulings 39 and 40, and the minors).
+
+describe("a verdict that names no state is not Connected", () => {
+  async function unknownEverywhere(connection: FakeConnection) {
+    const row = await productionRow("Status unknown");
+    expect(row.textContent).not.toContain("Connected");
+    expect(row.querySelector('[data-tone="accent"]')).toBeNull();
+    expect(bar().getAttribute("data-tone")).not.toBe("live");
+    expect(bar().querySelector(".os-actbar-word")?.textContent).toBe("Status unknown");
+    expect(within(bar()).queryByRole("button", { name: "Pause recording" })).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Resume" })).toBeNull();
+    const box = (await screen.findByText("Whether the store is being recorded could not be read.")).closest(".os-notice") as HTMLElement;
+    const before = connection.callsNamed("shopifyStoreVerdict").length;
+    await click(within(box).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreVerdict").length).toBeGreaterThan(before));
+  }
+
+  it("reads Status unknown for a reply that names no state", async () => {
+    // Nothing seeded: the harness answers {status: "unconfigured"}, as an
+    // engine with no Shopify connector does.
+    await unknownEverywhere(openPage(seedFor()));
+  });
+
+  it("reads Status unknown for a reply naming a state this client does not know", async () => {
+    await unknownEverywhere(openPage(seedFor({ storeVerdict: verdict({ state: "humming" }) })));
+  });
+
+  it("says Status unknown on the slot for a reply that names no state", async () => {
+    mountApp(connect(seedFor()));
+    const page = await openDeployable("shop.memql.example.com");
+    const slot = storeSlot(page)!;
+    await waitFor(() => expect(slot.textContent).toContain("Status unknown"));
+    expect(slot.textContent).not.toContain("Connected");
+  });
+
+  it("draws Not connected over a row whose connection still reads connected", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "not connected" }) }));
+    const row = await productionRow("Not connected");
+    expect(row.textContent?.replace("Not connected", "")).not.toContain("onnected");
+    expect(bar().getAttribute("data-tone")).not.toBe("live");
+    expect(bar().querySelector(".os-actbar-word")?.textContent).toBe("Not connected");
+  });
+
+  it("says Not connected on the slot over a connection that reads connected", async () => {
+    mountApp(connect(seedFor({ storeVerdict: verdict({ state: "not connected" }) })));
+    const page = await openDeployable("shop.memql.example.com");
+    const slot = storeSlot(page)!;
+    await waitFor(() => expect(slot.textContent).toContain("Not connected"));
+    expect(slot.textContent?.replace("Not connected", "")).not.toContain("onnected");
+  });
+});
+
+describe("an act that fails in its reply says so", () => {
+  const REGISTER = { state: "needs attention", reasons: [verdictReasonRow({ code: "events_not_registered", sentence: "Shopify is not sending every change.", act: "register", actLabel: "Register again" })] };
+  const RETRY = { state: "needs attention", reasons: [verdictReasonRow({ code: "changes_not_recorded", sentence: "2 changes could not be recorded.", count: 2, act: "retry", actLabel: "Try again" })] };
+
+  it("shows the engine's detail of a failed register and runs the builtin once", async () => {
+    const connection = openPage(seedFor({ storeVerdict: verdict(REGISTER), storeRegisterEventsReply: { status: "failed", detail: "orders/edited: Shopify answered 422", storeId: ID } as never }));
+    await productionRow("Needs attention");
+    const before = connection.callsNamed("shopifyStoreVerdict").length;
+    await click(within(noticeWith("Shopify is not sending every change.")).getByRole("button", { name: "Register again" }));
+    const refusal = await screen.findByText("orders/edited: Shopify answered 422");
+    expect(refusal.closest(".os-notice")?.getAttribute("data-tone")).toBe("error");
+    expect(connection.callsNamed("shopifyStoreRegisterEvents")).toHaveLength(1);
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreVerdict").length).toBeGreaterThan(before));
+  });
+
+  it("shows no error for a register that passed, and reads the verdict again", async () => {
+    const connection = openPage(seedFor({ storeVerdict: verdict(REGISTER) }));
+    await productionRow("Needs attention");
+    const before = connection.callsNamed("shopifyStoreVerdict").length;
+    await click(within(noticeWith("Shopify is not sending every change.")).getByRole("button", { name: "Register again" }));
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreVerdict").length).toBeGreaterThan(before));
+    expect(connection.callsNamed("shopifyStoreRegisterEvents")).toHaveLength(1);
+    expect(document.querySelector('.os-notice[data-tone="error"]')).toBeNull();
+  });
+
+  it("does not read a register an unconfigured engine answered as done", async () => {
+    openPage(seedFor({ storeVerdict: verdict(REGISTER), storeRegisterEventsReply: { status: "unconfigured" } as never }));
+    await productionRow("Needs attention");
+    await click(within(noticeWith("Shopify is not sending every change.")).getByRole("button", { name: "Register again" }));
+    await waitFor(() => expect(document.querySelector('.os-notice[data-tone="error"]')).not.toBeNull());
+    expect(document.querySelector('.os-notice[data-tone="error"]')?.textContent).toContain("unconfigured");
+  });
+
+  it("does not read a retry an unconfigured engine answered as done", async () => {
+    const connection = openPage(seedFor({ storeVerdict: verdict(RETRY), storeRetryDeliveriesReply: { status: "unconfigured" } as never }));
+    await productionRow("Needs attention");
+    await click(within(noticeWith("2 changes could not be recorded.")).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(document.querySelector('.os-notice[data-tone="error"]')).not.toBeNull());
+    expect(document.querySelector('.os-notice[data-tone="error"]')?.textContent).toContain("unconfigured");
+    expect(connection.callsNamed("shopifyStoreRetryDeliveries")).toHaveLength(1);
+  });
+});
+
+describe("each reason's act", () => {
+  it("draws an act address that is not http or https as plain text, never a link", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "needs attention", reasons: [verdictReasonRow({ code: "approval_outdated", sentence: "This store approved an older list of permissions.", act: "approve", actLabel: "Open MemQL OS from the store's Shopify admin and approve", actUrl: "javascript:alert(1)" })] }) }));
+    await productionRow("Needs attention");
+    const notice = noticeWith("This store approved an older list of permissions.");
+    expect(within(notice).queryByRole("link")).toBeNull();
+    expect(notice.textContent).toContain("Open MemQL OS from the store's Shopify admin and approve");
+    expect(notice.querySelector("a")).toBeNull();
+  });
+
+  it("gives reconnect its label and leads to Settings", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "needs attention", reasons: [verdictReasonRow({ code: "grant_lost", sentence: "MemQL can no longer reach this store.", detail: "401 Unauthorized", act: "reconnect", actLabel: "Reconnect in Settings" })] }) }));
+    await productionRow("Needs attention");
+    const notice = noticeWith("MemQL can no longer reach this store.");
+    await click(within(notice).getByRole("button", { name: "Reconnect in Settings" }));
+    expect(h.openApp).toHaveBeenCalledWith("deployables", "settings", { provider: "shopify" });
+  });
+
+  it("gives declare a link to its address, in a new tab", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "needs attention", reasons: [verdictReasonRow({ code: "data_not_declared", domain: "customers", sentence: "Shopify refuses customers for this app, because the app has not declared the customer data it uses.", act: "declare", actLabel: "Declare the customer data", actUrl: "https://shopify.dev/docs/apps/launch/protected-customer-data" })] }) }));
+    await productionRow("Needs attention");
+    const link = within(noticeWith(/Shopify refuses customers/)).getByRole("link", { name: "Declare the customer data" });
+    expect(link.getAttribute("href")).toBe("https://shopify.dev/docs/apps/launch/protected-customer-data");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("sets the alert's reason as a caption, like every reason's detail", async () => {
+    openPage(seedFor({ storeVerdict: verdict({ state: "needs attention", reasons: [verdictReasonRow({ code: "check_failing", sentence: "The last check of orders failed", detail: "the next check runs at 10:00" })], alert: { state: "failed", reason: "the mail server refused the message" } }) }));
+    await productionRow("Needs attention");
+    const reason = within(noticeWith("The alert could not be sent.")).getByText("the mail server refused the message");
+    expect(reason.className).toBe("os-caption");
+    expect(within(noticeWith("The last check of orders failed")).getByText("the next check runs at 10:00").className).toBe("os-caption");
+  });
+});
+
+describe("which store a notice is about", () => {
+  const OTHER: Row = { ...OWN, id: "acme-widgets-dev", domain: "acme-widgets-dev.myshopify.com", isDevelopment: true };
+  const reasonFor = (sentence: string) => ({ state: "needs attention", reasons: [verdictReasonRow({ code: "check_failing", sentence })] });
+
+  it("names the store on each notice when the destinations use two different stores", async () => {
+    const site = siteRow({ ...SHOP, binding: { storeId: ID }, previewBinding: { storeId: "acme-widgets-dev" } } as never);
+    openPage({
+      sites: [site],
+      stores: [OWN as never, OTHER as never],
+      previewReadiness: { "site-shop": previewReadinessRow({ siteId: "site-shop", storeId: ID, storeReadable: true, storeHasStorefrontToken: true, previewStoreHasStorefrontToken: true } as never) },
+      storeVerdict: {
+        [ID]: storeVerdictRow({ storeId: ID, ...reasonFor("The last check of orders failed") }),
+        "acme-widgets-dev": storeVerdictRow({ storeId: "acme-widgets-dev", ...reasonFor("The last check of products failed"), alert: { state: "failed", reason: "no owner address" } }),
+      },
+    });
+    await productionRow("Needs attention");
+    await waitFor(() => expect(screen.getByText("The last check of products failed")).toBeTruthy());
+    expect(within(noticeWith("The last check of orders failed")).getByText("acme-widgets.myshopify.com")).toBeTruthy();
+    expect(within(noticeWith("The last check of products failed")).getByText("acme-widgets-dev.myshopify.com")).toBeTruthy();
+    expect(within(noticeWith("The alert could not be sent.")).getByText("acme-widgets-dev.myshopify.com")).toBeTruthy();
+  });
+
+  it("names no store when one store is bound to both", async () => {
+    openPage(seedFor({ both: true, storeVerdict: verdict({ ...reasonFor("The last check of orders failed"), alert: { state: "failed", reason: "no owner address" } }) }));
+    await productionRow("Needs attention");
+    expect(noticeWith("The last check of orders failed").textContent).not.toContain("acme-widgets.myshopify.com");
+    expect(noticeWith("The alert could not be sent.").textContent).not.toContain("acme-widgets.myshopify.com");
+  });
+});

@@ -23,6 +23,7 @@ import {
   previewReadinessRow,
   siteRow,
   storeHealthRow,
+  storeVerdictRow,
   withSession,
   type FakeConnection,
   type FakeSeed,
@@ -113,9 +114,9 @@ describe("the store is a connection on the deployable, not a build setting", () 
   // storeHasStorefrontToken (or previewStoreHasStorefrontToken for a store
   // bound to Testing alone).
   it.each([
-    { store: STORE, testingOnly: false, served: true, word: "Connected" },
-    { store: DEV_STORE, testingOnly: false, served: true, word: "Connected" },
-    { store: DEV_STORE, testingOnly: true, served: true, word: "Connected" },
+    { store: STORE, testingOnly: false, served: true, word: "Recording" },
+    { store: DEV_STORE, testingOnly: false, served: true, word: "Recording" },
+    { store: DEV_STORE, testingOnly: true, served: true, word: "Recording" },
     { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, served: true, word: "Setup needed" },
     { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, served: false, word: "Setup needed" },
     // A TOKEN THE EDGE WILL NOT SERVE IS NOT CONNECTED: it names a secret
@@ -131,6 +132,8 @@ describe("the store is a connection on the deployable, not a build setting", () 
     const connection = fakeConnection({
       ...BOUND,
       stores: [store],
+      // A CONNECTED STORE IS SAID BY ITS VERDICT (U7): Recording here.
+      storeVerdict: { [String(store.id)]: storeVerdictRow({ storeId: String(store.id) }) },
       sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }],
       previewReadiness: {
         "site-shop": previewReadinessRow({
@@ -148,7 +151,7 @@ describe("the store is a connection on the deployable, not a build setting", () 
     // row id: the domain is what somebody came to check.
     await waitFor(() => expect(slot?.textContent).toContain(store.domain));
     await waitFor(() => expect(slot?.textContent).toContain(word));
-    expect(slot?.hasAttribute("data-os-setup")).toBe(word !== "Connected");
+    expect(slot?.hasAttribute("data-os-setup")).toBe(word !== "Recording");
     if (store.isDevelopment) expect(slot?.textContent).toContain("Sandbox");
     if (testingOnly) expect(slot?.textContent).toContain("Testing");
   });

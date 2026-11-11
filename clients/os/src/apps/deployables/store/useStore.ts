@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
@@ -316,13 +317,20 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
 
   // THE VERDICT'S TWO ACTS. What each did is read back in the verdict the
   // write re-reads, in the engine's words, so neither leaves a note of its own.
+  // A pass that FAILS IS A REPLY, NOT A THROW: Register again answers
+  // `{status: "failed", detail}` when Shopify refused a topic, and either act
+  // answers `{status: "unconfigured"}` on an engine with no Shopify connector.
+  // Only the status each one names as done is done; anything else is shown as
+  // a refusal, the engine's detail when it gave one.
   const registerEvents = useCallback(
-    (storeId: string) => run("register", () => connection!.query.shopifyStoreRegisterEvents({ storeId }), ""),
+    (storeId: string) =>
+      run("register", async () => actDone("shopifyStoreRegisterEvents", "registered", await connection!.query.shopifyStoreRegisterEvents({ storeId })), ""),
     [connection, run],
   );
 
   const retryDeliveries = useCallback(
-    (storeId: string) => run("retry", () => connection!.query.shopifyStoreRetryDeliveries({ storeId }), ""),
+    (storeId: string) =>
+      run("retry", async () => actDone("shopifyStoreRetryDeliveries", "requeued", await connection!.query.shopifyStoreRetryDeliveries({ storeId })), ""),
     [connection, run],
   );
 
@@ -338,6 +346,19 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
     registerEvents,
     retryDeliveries,
   };
+}
+
+/**
+ * Throws unless an act's reply names the status that means it was done: the
+ * engine's `detail` when it gave one, else the builtin and the status it
+ * answered ("unconfigured" when the cluster has no Shopify connector).
+ */
+function actDone(builtin: string, done: string, result: { rows(): Row[] }): void {
+  const row = result.rows()[0] ?? null;
+  const status = rowString(row, "status");
+  if (status === done) return;
+  const detail = rowString(row, "detail").trim();
+  throw new Error(detail !== "" ? detail : `shopify: ${builtin} answered ${status === "" ? "nothing" : status}`);
 }
 
 function omitBlank(key: string, value: string): Record<string, string> {

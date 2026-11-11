@@ -16,7 +16,7 @@ import type { StorePanelProps } from "./StorePanel";
 import { StoreValues } from "./StoreValuesPanel";
 import { connectionWord, storeConnection, storeLabel, type StoreConnection, type StoreRow } from "./rows";
 import { useStore, useStoreList, useStoreVerdict, useStoreWrites, type StoreWrites } from "./useStore";
-import { verdictWord, type StoreVerdict, type VerdictReason } from "./verdict";
+import { connectedStoreWord, type StoreVerdict, type VerdictReason } from "./verdict";
 
 type Destination = "testing" | "production";
 type Props = StorePanelProps & { result?: string; revision?: number; onWritten: () => void; runs?: readonly DeploymentRow[]; can?: PartsHeld };
@@ -104,7 +104,11 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
     bound.push({ store, state, verdict: verdictOf(store.id) });
   }
   const recording = bound.filter(held => held.state === "connected");
-  const unread = recording.filter(held => held.verdict?.state === "failed");
+  // A verdict asked for and not had: the read failed, or its reply named no
+  // state. Either way the store is not said to be recorded, and is asked again.
+  const unread = recording.filter(held => held.verdict !== null && held.verdict.verdict === null && (held.verdict.state === "failed" || held.verdict.state === "read"));
+  // Two different stores: each notice says which one it is about.
+  const labelOf = (store: StoreRow): string | undefined => bound.length > 1 ? storeLabel(store) : undefined;
   const lead = production.store !== null ? { store: production.store, state: productionState } : testing.store !== null ? { store: testing.store, state: testingState } : null;
   const leadReading = lead === null ? null : verdictOf(lead.store.id);
   const leadVerdict = leadReading?.verdict ?? null;
@@ -114,7 +118,7 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
   };
   const readingBindings = [production, testing].some(reading => reading.state === "reading" && !reading.store) || (Boolean(boundStoreId(site)) && production.state === "unread") || (Boolean(previewStoreId(site)) && testing.state === "unread");
   const state = readingBindings ? "" : productionState !== null ? barWord(productionState, connectedWord(productionVerdict)) : testingState !== null ? barWord(testingState, "Testing") : "Design preview";
-  const leadLive = lead !== null && lead.state === "connected" && leadReading?.state !== "failed" && (leadVerdict === null || leadVerdict.state === "recording" || leadVerdict.state === "starting");
+  const leadLive = lead !== null && lead.state === "connected" && leadVerdict !== null && (leadVerdict.state === "recording" || leadVerdict.state === "starting");
   // PAUSE OR RESUME, NEVER BOTH (DESIGN.md rule 12): the act the store's state
   // allows, for somebody the engine says may act on it, and absent otherwise.
   // A store that is not connected is recorded by neither: its act is the
@@ -140,14 +144,17 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
     </Notice>)}
     {readiness.state === "failed" && (production.store || testing.store) ? <Notice sentence="Whether each store's token is served could not be read."><Button onClick={readiness.reread}>Try again</Button></Notice> : null}
     {readiness.readiness?.goLiveRefusal.code ? <RefusalNotice refusal={readiness.readiness.goLiveRefusal} storefront={false} onOpenStore={() => {}} compact /> : null}
-    {unread.length > 0 ? <Notice sentence="Whether the store is being recorded could not be read." detail={unread[0]!.verdict!.error}><div><Button onClick={() => unread.forEach(held => held.verdict!.reread())}>Try again</Button></div></Notice> : null}
+    {unread.map(({ store, verdict }) => <Notice key={`${store.id}:unread`} sentence="Whether the store is being recorded could not be read.">
+      <StoreCaptions label={labelOf(store)} detail={verdict!.error} />
+      <div><Button onClick={verdict!.reread}>Try again</Button></div>
+    </Notice>)}
     {/* THE ENGINE'S REASONS, ONE NOTICE EACH, in its words and with its one
         act. A paused or disconnected store carries none. */}
     {recording.flatMap(({ store, verdict }) => verdict?.verdict?.state === "needs attention"
-      ? verdict.verdict.reasons.map((reason, index) => <ReasonNotice key={`${store.id}:${reason.code}:${index}`} storeId={store.id} reason={reason} mayAct={verdict.verdict!.may.act} write={write} onReconnect={openSettings} />)
+      ? verdict.verdict.reasons.map((reason, index) => <ReasonNotice key={`${store.id}:${reason.code}:${index}`} storeId={store.id} label={labelOf(store)} reason={reason} mayAct={verdict.verdict!.may.act} write={write} onReconnect={openSettings} />)
       : [])}
-    {bound.map(({ store, verdict }) => alertFailed(verdict?.verdict ?? null) ? <Notice key={`${store.id}:alert`} tone="warn" sentence="The alert could not be sent." detail={verdict!.verdict!.alert.reason} /> : null)}
-    {recording.map(({ store, verdict }) => verdict?.verdict ? <Recorded key={`${store.id}:recorded`} verdict={verdict.verdict} label={recording.length > 1 ? storeLabel(store) : undefined} /> : null)}
+    {bound.map(({ store, verdict }) => alertFailed(verdict?.verdict ?? null) ? <Notice key={`${store.id}:alert`} tone="warn" sentence="The alert could not be sent."><StoreCaptions label={labelOf(store)} detail={verdict!.verdict!.alert.reason} /></Notice> : null)}
+    {recording.map(({ store, verdict }) => verdict?.verdict ? <Recorded key={`${store.id}:recorded`} verdict={verdict.verdict} label={labelOf(store)} /> : null)}
     <p className="os-caption">Both websites share the same design. Connect either to any of your stores, including the same sandbox. An unconnected website shows design preview.</p>
     {/* VALUES THAT BELONG TO ONE STORE (memql#5602), beside the stores they
         belong to. App values' own gate: these are runtime values like those,
@@ -158,11 +165,7 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
 
 type VerdictReading = ReturnType<typeof useStoreVerdict>;
 
-/**
- * A connected store's word: the verdict's once it is read. "Status unknown"
- * when it could not be, and "Connected" when the engine names no state (it
- * has no Shopify connector), which is all that is then known.
- */
+/** A connected store's word (`connectedStoreWord`), a skeleton while first read. */
 function connectedState(reading: VerdictReading | null): ReactNode {
   const word = connectedWord(reading);
   return word === "" ? <InlineSkeleton label="Loading store status" /> : word;
@@ -170,16 +173,28 @@ function connectedState(reading: VerdictReading | null): ReactNode {
 
 /** The same word as text, for the bar. "" while the verdict is first read. */
 function connectedWord(reading: VerdictReading | null): string {
-  if (reading === null) return "Connected";
-  if (reading.verdict !== null) return verdictWord(reading.verdict.state) || "Connected";
-  if (reading.state === "failed") return "Status unknown";
-  return reading.state === "read" ? "Connected" : "";
+  return reading === null ? "Status unknown" : connectedStoreWord(reading.verdict, reading.state);
 }
 
+/** Accent only for a store the verdict says is recorded or starting. */
 function verdictTone(reading: VerdictReading | null): "accent" | "warn" | "muted" {
   const state = reading?.verdict?.state;
-  if (reading !== null && reading.verdict === null && reading.state === "failed") return "muted";
-  return state === "needs attention" ? "warn" : state === "paused" || state === "not connected" ? "muted" : "accent";
+  return state === "needs attention" ? "warn" : state === "recording" || state === "starting" ? "accent" : "muted";
+}
+
+/** Which store a notice is about (two stores only), then the engine's detail, both as captions. */
+function StoreCaptions({ label, detail }: { label?: string; detail?: string }) {
+  return <>{label ? <p className="os-caption">{label}</p> : null}{detail ? <p className="os-caption">{detail}</p> : null}</>;
+}
+
+/** An act's address, only when it is a web page: anything else is no link. */
+function webAddress(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -191,15 +206,17 @@ function alertFailed(verdict: StoreVerdict | null): boolean {
 }
 
 /** One reason, in the engine's words, with its one act for somebody who may take it. */
-function ReasonNotice({ storeId, reason, mayAct, write, onReconnect }: { storeId: string; reason: VerdictReason; mayAct: boolean; write: StoreWrites; onReconnect: () => void }) {
+function ReasonNotice({ storeId, label, reason, mayAct, write, onReconnect }: { storeId: string; label?: string; reason: VerdictReason; mayAct: boolean; write: StoreWrites; onReconnect: () => void }) {
   const press = (act: (id: string) => Promise<boolean>) => () => { if (write.busy === "") void act(storeId); };
   let act: ReactNode = null;
   if (mayAct && reason.actLabel !== "") {
     switch (reason.act) {
       case "approve":
-      case "declare":
-        act = reason.actUrl === "" ? null : <a className="os-link" href={reason.actUrl} target="_blank" rel="noreferrer">{reason.actLabel}</a>;
+      case "declare": {
+        const href = webAddress(reason.actUrl);
+        act = href === null ? <span>{reason.actLabel}</span> : <a className="os-link" href={href} target="_blank" rel="noreferrer">{reason.actLabel}</a>;
         break;
+      }
       case "reconnect":
         act = <Button onClick={onReconnect}>{reason.actLabel}</Button>;
         break;
@@ -212,7 +229,7 @@ function ReasonNotice({ storeId, reason, mayAct, write, onReconnect }: { storeId
     }
   }
   return <Notice tone="warn" sentence={reason.sentence}>
-    {reason.detail ? <p className="os-caption">{reason.detail}</p> : null}
+    <StoreCaptions label={label} detail={reason.detail} />
     {act ? <div>{act}</div> : null}
   </Notice>;
 }

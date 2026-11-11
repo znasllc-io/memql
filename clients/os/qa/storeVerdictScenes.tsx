@@ -19,6 +19,8 @@ import { fakeConnection, previewReadinessRow, SHOP, siteRow, storeVerdictRow, ve
 //   view=store-verdict-readonly     the same, for somebody who may not act
 //   view=store-verdict-uninstalled  Shopify uninstalled the app: not connected
 //   view=store-verdict-unknown      the verdict could not be read
+//   view=store-verdict-nostate      the reply named no state (no Shopify connector)
+//   view=store-verdict-two-stores   two different stores, each notice naming its own
 //   view=store-verdict-slot         the deployable's page, its Store slot
 //   view=settings-shopify-alert     Settings > Shopify with the alert wait
 //
@@ -35,6 +37,9 @@ const OWN: Row = {
   status: "live",
   isDevelopment: false,
 } as unknown as Row;
+const DEV_ID = "acme-widgets-dev";
+const DEV: Row = { ...OWN, id: DEV_ID, domain: "acme-widgets-dev.myshopify.com", isDevelopment: true } as unknown as Row;
+const TWO_SITE = siteRow({ ...SHOP, binding: { storeId: ID }, previewBinding: { storeId: DEV_ID } } as never);
 const SITE = siteRow({ ...SHOP, binding: { storeId: ID }, previewBinding: { storeId: ID } } as never);
 
 const RECORDED = [
@@ -76,6 +81,20 @@ export function storeVerdictScenes(Frame: Frame) {
     "store-verdict-readonly": page(seed({ state: "needs attention", reasons: REASONS, recorded: RECORDED, may: { act: false } })),
     "store-verdict-uninstalled": page(seed({ state: "not connected", alert: { state: "failed", reason: "the store has no owner with an address" } }, {}, { ...OWN, adminTokenRef: "", uninstalledAt: "2026-11-10T08:00:00Z" } as unknown as Row)),
     "store-verdict-unknown": page(seed(null, { storeVerdictError: "shopify: the store's sync state could not be read" })),
+    "store-verdict-nostate": page(seed(null)),
+    "store-verdict-two-stores": {
+      connect: () => fakeConnection({
+        sites: [TWO_SITE],
+        stores: [OWN, DEV],
+        previewReadiness: { [TWO_SITE["id"] as string]: previewReadinessRow({ siteId: String(TWO_SITE["id"]), storeId: ID, storeReadable: true, storeHasStorefrontToken: true, previewStoreHasStorefrontToken: true } as never) },
+        storeVerdict: {
+          [ID]: storeVerdictRow({ storeId: ID, state: "needs attention", reasons: REASONS.slice(3, 4), recorded: RECORDED.slice(0, 2) }),
+          [DEV_ID]: storeVerdictRow({ storeId: DEV_ID, state: "needs attention", reasons: REASONS.slice(2, 3), recorded: RECORDED.slice(0, 2), alert: { state: "failed", reason: "the store has no owner with an address" } }),
+        },
+      }),
+      wrap: (element: ReactElement, role: string) => withSession(element, { role, userId: "u-me" }),
+      render: () => <Frame fallback="Deployables"><ShopifyStorePanel site={siteFromRow(TWO_SITE)} canBind trail={[{ label: "Deployables" }, { label: "shop.memql.example.com" }, { label: "Store" }]} back={{ label: "shop.memql.example.com", onSelect: () => {} }} onWritten={() => {}} /></Frame>,
+    },
     "store-verdict-slot": {
       connect: () => fakeConnection(seed({ state: "needs attention", reasons: REASONS.slice(2, 3) })),
       wrap: (element: ReactElement, role: string) => withSession(element, { role, userId: "u-me" }),

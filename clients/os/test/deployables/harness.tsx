@@ -191,6 +191,15 @@ export interface FakeSeed {
   /** Fails every `shopifyStoreVerdict` read with this server message. */
   storeVerdictError?: string;
   /**
+   * What `shopifyStoreRegisterEvents` answers instead of a clean pass: the
+   * handler REPLIES `{status: "failed", detail}` when Shopify refused a
+   * topic or the subscriptions could not be read, and `{status:
+   * "unconfigured"}` with no connector -- neither is thrown.
+   */
+  storeRegisterEventsReply?: Row;
+  /** What `shopifyStoreRetryDeliveries` answers instead of `requeued`. */
+  storeRetryDeliveriesReply?: Row;
+  /**
    * What `shopifyStoreAlertWait` answers, and what `shopifyStoreAlertWaitSet`
    * changes. Absent is the unset wait read by somebody who may not set it.
    * A set is refused as the engine refuses it: anybody `maySet` is not true
@@ -972,10 +981,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin shopifyStoreRegisterEvents(")) {
         const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.storeRegisterEventsReply !== undefined) return builtinReply("shopifyStoreRegisterEvents", [seed.storeRegisterEventsReply]);
         return builtinReply("shopifyStoreRegisterEvents", [{ status: "registered", detail: "", storeId: id, desired: 12, existing: 12, created: [], failed: [] } as unknown as Row]);
       }
       if (call.startsWith("builtin shopifyStoreRetryDeliveries(")) {
         const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.storeRetryDeliveriesReply !== undefined) return builtinReply("shopifyStoreRetryDeliveries", [seed.storeRetryDeliveriesReply]);
         return builtinReply("shopifyStoreRetryDeliveries", [{ status: "requeued", storeId: id, source: `shopify-${id}` } as unknown as Row]);
       }
       if (call.startsWith("builtin shopifyStoreAlertWait(")) {

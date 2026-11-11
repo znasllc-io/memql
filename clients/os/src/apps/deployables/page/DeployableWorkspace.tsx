@@ -19,7 +19,7 @@ import type { PreviewReadiness } from "../preview/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
 import { useStore, useStoreVerdict } from "../store/useStore";
-import { verdictWord } from "../store/verdict";
+import { connectedStoreWord } from "../store/verdict";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "statistics" | "statisticsList" | "access" | "store" | "reviews" | "visit" | "version";
@@ -145,11 +145,11 @@ function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeI
   const served = readiness === null ? null : storeId ? readiness.storeHasStorefrontToken : readiness.previewStoreHasStorefrontToken;
   const state = connection.store === null ? null : storeConnection(connection.store, served);
   // WHERE THE STORE IS CONNECTED, THE VERDICT SAYS WHETHER IT IS RECORDED
-  // (U7): Recording, Starting, Paused or Needs attention. "Connected" is left
-  // only for an engine that names no state, and "Status unknown" for a verdict
-  // that could not be read.
+  // (U7): Recording, Starting, Paused, Needs attention, or Not connected over a
+  // row that still reads connected; "Status unknown" when it could not be read
+  // or named no state. Never "Connected" (ruling 39).
   const verdict = useStoreVerdict(storeId || testingId);
-  const connectedWord = verdict.verdict !== null ? verdictWord(verdict.verdict.state) || "Connected" : verdict.state === "failed" ? "Status unknown" : verdict.state === "read" ? "Connected" : "";
+  const connectedWord = connectedStoreWord(verdict.verdict, verdict.state);
   const word = state === "connected" ? connectedWord : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
   const pending = state === "unknown" || (state === "connected" && connectedWord === "");
   const detail =
