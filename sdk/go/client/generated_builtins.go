@@ -1618,6 +1618,7 @@ func ClusterStorageStatusBuild(args ClusterStorageStatusArgs) string {
 
 // CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCompanyArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId    string
 	CompanyGid string
 	From       string
@@ -1664,6 +1665,7 @@ func CommerceCompanyBuild(args CommerceCompanyArgs) string {
 
 // CommerceCustomers -- Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceCustomersArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	From    string
 	To      string
@@ -1702,6 +1704,7 @@ func CommerceCustomersBuild(args CommerceCustomersArgs) string {
 
 // CommerceSold -- What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceSoldArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	From    string
 	To      string
@@ -1748,6 +1751,7 @@ func CommerceSoldBuild(args CommerceSoldArgs) string {
 
 // CommerceStock -- Inventory levels below a threshold at one location. Shopify models inventory as NAMED quantities (available, committed, on_hand), so the threshold is applied in Go and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type CommerceStockArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId     string
 	LocationGid string
 	Threshold   int
@@ -9145,6 +9149,7 @@ func ShopifyEnsureSubscriptionsBuild(args ShopifyEnsureSubscriptionsArgs) string
 
 // ShopifyFetchProduct -- Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.
 type ShopifyFetchProductArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	Id      string
 	Handle  string
@@ -9377,6 +9382,7 @@ func ShopifyStoreAppSaveBuild(args ShopifyStoreAppSaveArgs) string {
 
 // ShopifyStoreHealth -- Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.
 type ShopifyStoreHealthArgs struct {
+	// One store. When omitted, every store the caller may read.
 	StoreId string
 }
 
@@ -9439,7 +9445,7 @@ func ShopifyStoreRetryDeliveriesBuild(args ShopifyStoreRetryDeliveriesArgs) stri
 	return b.String()
 }
 
-// ShopifyStoreSetRecording -- Pause recording, or resume it: move one store between live and paused, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. A store in any other status is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read.
+// ShopifyStoreSetRecording -- Pause recording, or resume it: a store being recorded (configured, backfilling or live) moves to paused, and a paused one to live, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. Each pause and resume is audited under the caller. A store that is not connected (error, uninstalled, purged) is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read.
 type ShopifyStoreSetRecordingArgs struct {
 	// The store.
 	StoreId string
@@ -9617,6 +9623,7 @@ func ShopifyWholesaleCatalogHeadroomBuild(args ShopifyWholesaleCatalogHeadroomAr
 
 // Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.
 type ShopifyqlArgs struct {
+	// The store. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 	Query   string
 }
@@ -10440,7 +10447,7 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 // IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
 // The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.
 type StorefrontProbeArgs struct {
-	// The store to ask. When omitted: the only configured store for a cluster owner, and otherwise the one store the caller owns.
+	// The store to ask. When omitted: the only configured store for a cluster owner; for anybody else the one store they own, and a storeId is asked for when they own several.
 	StoreId string
 }
 

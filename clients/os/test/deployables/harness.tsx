@@ -998,6 +998,13 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       if (call.startsWith("builtin shopifyStoreSetRecording(")) {
         if (seed.storeSetRecordingError !== undefined) throw new Error(seed.storeSetRecordingError);
         const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        // As the handler refuses: a store that neither ingests (configured,
+        // backfilling, live) nor is paused, or one uninstalled or purged.
+        const held = (seed.stores ?? []).find((row) => row["id"] === id);
+        const status = String(held?.["status"] ?? "");
+        if (held === undefined || held["uninstalledAt"] || held["redactedAt"] || !["configured", "backfilling", "live", "paused"].includes(status)) {
+          throw new Error("shopify: a store that is not connected cannot be paused or resumed");
+        }
         const recording = /recording: (true|false)/.exec(call)?.[1] === "true";
         return builtinReply("shopifyStoreSetRecording", [{ status: recording ? "live" : "paused", storeId: id } as unknown as Row]);
       }

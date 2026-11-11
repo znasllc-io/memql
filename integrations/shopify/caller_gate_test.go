@@ -158,13 +158,24 @@ func TestSetRecordingDeclaresTheStorePart(t *testing.T) {
 	}
 }
 
-func TestSetRecordingMovesOnlyBetweenLiveAndPaused(t *testing.T) {
+// auditOf is the one createAuditEvent a recording act wrote, as its call.
+func auditOf(t *testing.T, h *testHarness, what string) string {
+	t.Helper()
+	events := h.engine.callsTo("createAuditEvent")
+	if len(events) != 1 {
+		t.Fatalf("%s wrote %d audit events, want 1: %v", what, len(events), events)
+	}
+	return events[0]
+}
+
+// A store that is being recorded can be paused whatever its status word: every
+// status it ingests under. A paused one is resumed to live. Anything else --
+// an error, an uninstalled store, a purged one -- is refused before any write.
+func TestSetRecordingPausesWhatIsRecordedAndResumesWhatIsPaused(t *testing.T) {
 	refusal := "shopify: a store that is not connected cannot be paused or resumed"
 	for name, row := range map[string]map[string]any{
 		"uninstalled": {"uninstalledAt": "2026-08-20T10:00:00Z"},
 		"purged":      {"redactedAt": "2026-08-20T10:00:00Z", "status": StatusPaused},
-		"configured":  {"status": StatusConfigured},
-		"backfilling": {"status": StatusBackfilling},
 		"error":       {"status": StatusError},
 	} {
 		for _, recording := range []bool{true, false} {
@@ -177,30 +188,70 @@ func TestSetRecordingMovesOnlyBetweenLiveAndPaused(t *testing.T) {
 			if w := h.engine.callsTo("setStoreStatus"); len(w) != 0 {
 				t.Errorf("%s: a store that is not connected was written: %v", name, w)
 			}
+			if a := h.engine.callsTo("createAuditEvent"); len(a) != 0 {
+				t.Errorf("%s: a refusal was audited: %v", name, a)
+			}
+		}
+	}
+
+	for _, from := range []string{StatusConfigured, StatusBackfilling, StatusLive} {
+		h := newHarness(t)
+		withStoreRow(h, map[string]any{"status": from})
+		reply := invoke(t, actorCtx("user-1", auth.RoleDeveloper), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": false})
+		if reply["status"] != StatusPaused {
+			t.Errorf("a pause of a %s store answered %v, want paused", from, reply)
+		}
+		if w := h.engine.callsTo("setStoreStatus"); len(w) != 1 || !strings.Contains(w[0], `status: "paused"`) {
+			t.Errorf("a pause of a %s store wrote %v, want one setStoreStatus to paused", from, w)
+		}
+		audit := auditOf(t, h, "a pause of a "+from+" store")
+		for _, want := range []string{`action: "shopify_store_paused"`, `actorUserId: "user-1"`, `targetType: "shopifyStore"`,
+			`targetId: "` + testStoreID + `"`, `"from": "` + from + `"`, `"to": "paused"`, `outcome: "success"`} {
+			if !strings.Contains(audit, want) {
+				t.Errorf("a pause of a %s store: the audit event lacks %s:\n%s", from, want, audit)
+			}
 		}
 	}
 
 	h := newHarness(t)
 	withStoreRow(h, map[string]any{"status": StatusPaused})
-	reply := invoke(t, actorCtx("user-1", auth.RoleDeveloper), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": true})
+	reply := invoke(t, actorCtx("user-9", auth.RoleOwner), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": true})
 	if reply["status"] != StatusLive {
 		t.Errorf("resume answered %v, want live", reply)
 	}
 	if w := h.engine.callsTo("setStoreStatus"); len(w) != 1 || !strings.Contains(w[0], `status: "live"`) {
 		t.Errorf("resume wrote %v, want one setStoreStatus to live", w)
 	}
+	audit := auditOf(t, h, "a resume")
+	for _, want := range []string{`action: "shopify_store_resumed"`, `actorUserId: "user-9"`, `targetId: "` + testStoreID + `"`, `"from": "paused"`, `"to": "live"`} {
+		if !strings.Contains(audit, want) {
+			t.Errorf("the resume's audit event lacks %s:\n%s", want, audit)
+		}
+	}
 }
 
 func TestSetRecordingToTheSameStateWritesNothing(t *testing.T) {
-	for status, recording := range map[string]bool{StatusLive: true, StatusPaused: false} {
+	for _, tc := range []struct {
+		status    string
+		recording bool
+		reply     string
+	}{
+		{StatusConfigured, true, StatusLive},
+		{StatusBackfilling, true, StatusLive},
+		{StatusLive, true, StatusLive},
+		{StatusPaused, false, StatusPaused},
+	} {
 		h := newHarness(t)
-		withStoreRow(h, map[string]any{"status": status})
-		reply := invoke(t, actorCtx("user-1", auth.RoleDeveloper), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": recording})
-		if reply["status"] != status || reply["storeId"] != testStoreID {
-			t.Errorf("%s: reply = %v, want {status: %s, storeId: %s}", status, reply, status, testStoreID)
+		withStoreRow(h, map[string]any{"status": tc.status})
+		reply := invoke(t, actorCtx("user-1", auth.RoleDeveloper), NewIntegration(h.conn).handleStoreSetRecording, map[string]any{"storeId": testStoreID, "recording": tc.recording})
+		if reply["status"] != tc.reply || reply["storeId"] != testStoreID {
+			t.Errorf("%s, recording %t: reply = %v, want {status: %s, storeId: %s}", tc.status, tc.recording, reply, tc.reply, testStoreID)
 		}
 		if w := h.engine.callsTo("setStoreStatus"); len(w) != 0 {
-			t.Errorf("%s: asking for the state the store is in wrote %v", status, w)
+			t.Errorf("%s: asking for the state the store is in wrote %v", tc.status, w)
+		}
+		if a := h.engine.callsTo("createAuditEvent"); len(a) != 0 {
+			t.Errorf("%s: a write that did nothing was audited: %v", tc.status, a)
 		}
 	}
 }
@@ -377,6 +428,15 @@ func TestANonOwnerWhoNamesNoStoreIsNotToldHowManyThereAre(t *testing.T) {
 		if got := fmt.Sprint(reply["storeId"]); got != testStoreID {
 			t.Errorf("%s: the caller's own store was not the default: storeId %q, reply %v", tc.builtin, got, reply)
 		}
+
+		// Two stores, both the caller's: told to name one, and no count.
+		h = newHarness(t)
+		withTwoGateStores(h, map[string]any{"ownerUserId": "user-3"})
+		_, err = tc.handle(NewIntegration(h.conn))(actorCtx("user-3", auth.RoleWriter), tc.args, 0)
+		if want := "shopify: " + tc.builtin + " needs a storeId"; err == nil || err.Error() != want {
+			t.Errorf("%s: an owner of two who names neither: err = %v, want %q", tc.builtin, err, want)
+		}
+		onlyTheStoreRowWasRead(t, h, tc.builtin+" for an owner of two who names neither")
 
 		// A cluster owner may be told.
 		h = newHarness(t)

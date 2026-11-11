@@ -49,10 +49,10 @@ const OWN: Row = {
   isDevelopment: false,
 };
 
-function seedFor(state: string, over: Partial<FakeSeed> = {}): FakeSeed {
+function seedFor(state: string, over: Partial<FakeSeed> = {}, status = state === "paused" ? "paused" : "live"): FakeSeed {
   return {
     sites: [siteRow({ ...SHOP, binding: { storeId: ID } } as never)],
-    stores: [{ ...OWN, status: state === "paused" ? "paused" : "live" } as never],
+    stores: [{ ...OWN, status } as never],
     previewReadiness: {
       "site-shop": previewReadinessRow({ siteId: "site-shop", storeId: ID, storeReadable: true, storeHasStorefrontToken: true } as never),
     },
@@ -92,6 +92,15 @@ describe("the Store page's pause and resume", () => {
     expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain(`storeId: "${ID}"`);
     expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain("recording: false");
     expect(connection.callsNamed("setStoreStatus")).toHaveLength(0);
+  });
+
+  it("pauses a store Connect Shopify left configured, whose verdict says recording", async () => {
+    const connection = openPage(seedFor("recording", {}, "configured"));
+    await press("Pause recording");
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreSetRecording")).toHaveLength(1));
+    expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain("recording: false");
+    expect(document.querySelector(".os-notice[data-tone='error']")).toBeNull();
+    expect(screen.queryByText(/cannot be paused or resumed/)).toBeNull();
   });
 
   it("resumes through shopifyStoreSetRecording", async () => {

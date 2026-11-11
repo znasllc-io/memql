@@ -44,7 +44,7 @@ func (i *Integration) verdictCapabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "storeSetRecording",
-			Description: "Pause or resume recording one store: move it between live and paused, written as the deployment. A store that is not connected is refused, and asking for the state it is in writes nothing. For the store's owner or a cluster owner.",
+			Description: "Pause or resume recording one store: a store being recorded (configured, backfilling or live) moves to paused, a paused one to live, written as the deployment and audited under the caller. A store that is not connected (error, uninstalled, purged) is refused, and asking for the state it is in writes nothing. For the store's owner or a cluster owner.",
 			Handler:     i.handleStoreSetRecording,
 			ArgsSchema:  map[string]string{"storeId": "string - the store", "recording": "boolean - true resumes recording, false pauses it"},
 		},
@@ -174,17 +174,24 @@ func (i *Integration) handleStoreRetryDeliveries(ctx context.Context, args map[s
 }
 
 // notConnectedRefusal refuses a pause or a resume of a store that is not
-// connected: uninstalled, purged, or in a status other than live or paused.
+// connected: uninstalled, purged, or in a status it neither ingests under nor
+// is paused in (error).
 const notConnectedRefusal = "shopify: a store that is not connected cannot be paused or resumed"
 
-// handleStoreSetRecording moves one store between live and paused: the Store
-// page's Pause recording and Resume.
+// handleStoreSetRecording is the Store page's Pause recording and Resume.
+//
+// A STORE THAT IS BEING RECORDED CAN BE PAUSED WHATEVER ITS STATUS WORD: every
+// status it ingests under (Store.Ingests: configured, backfilling, live) moves
+// to paused -- createStore stamps configured and nothing moves a connected
+// store on to live, so most stores that are recorded say configured. A paused
+// store resumes to live. Asking for the state the store is in writes nothing.
 //
 // THE WRITE IS THE DEPLOYMENT'S. setStoreStatus's row is a cluster owner's
 // (@rowAuthz(clusterOwner)), so a store's owner who is not one would be offered
 // the act and refused by the row. The caller is asked here instead -- the
 // store's owner or a cluster owner, before anything but the store row is read
 // -- and the write runs as the operator, so the row's own gate is not widened.
+// The person is kept on an audit event of their own, one per pause or resume.
 // It changes the status only: the next verdict says the store resumed, and the
 // next watch pass records it.
 func (i *Integration) handleStoreSetRecording(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -203,20 +210,55 @@ func (i *Integration) handleStoreSetRecording(ctx context.Context, args map[stri
 	if !ok {
 		return nil, fmt.Errorf("shopify: shopifyStoreSetRecording needs recording, true or false")
 	}
-	if store.UninstalledAt != "" || store.RedactedAt != "" || (store.Status != StatusLive && store.Status != StatusPaused) {
+	paused := store.Status == StatusPaused
+	if store.RedactedAt != "" || store.UninstalledAt != "" || (!store.Ingests() && !paused) {
 		return nil, fmt.Errorf("%s", notConnectedRefusal)
 	}
-	want := StatusPaused
-	if recording {
-		want = StatusLive
+	switch {
+	case recording && paused:
+		err = c.writeRecording(ctx, store, StatusLive, "shopify_store_resumed")
+	case !recording && !paused:
+		err = c.writeRecording(ctx, store, StatusPaused, "shopify_store_paused")
 	}
-	if store.Status != want {
-		if _, err := c.engine.Execute(operatorContext(ctx), renderCall("setStoreStatus", map[string]any{"storeId": store.ID, "status": want})); err != nil {
-			return nil, fmt.Errorf("shopify: the store's status could not be written: %w", err)
-		}
-		c.stores.Invalidate()
+	if err != nil {
+		return nil, err
 	}
-	return resultNode("shopify", map[string]any{"status": want, "storeId": store.ID})
+	reply := StatusLive
+	if !recording {
+		reply = StatusPaused
+	}
+	return resultNode("shopify", map[string]any{"status": reply, "storeId": store.ID})
+}
+
+// writeRecording moves the store to `to` as the operator and records who did,
+// as markReconnected does: an audit event naming the caller, the store and the
+// two statuses, and nothing else. A failed audit write is loud and does not
+// undo the act.
+func (c *Connector) writeRecording(ctx context.Context, store Store, to, action string) error {
+	if _, err := c.engine.Execute(operatorContext(ctx), renderCall("setStoreStatus", map[string]any{"storeId": store.ID, "status": to})); err != nil {
+		return fmt.Errorf("shopify: the store's status could not be written: %w", err)
+	}
+	c.stores.Invalidate()
+	person := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		person = strings.TrimSpace(ac.UserId)
+	}
+	at := c.now().UTC()
+	call := renderCall("createAuditEvent", map[string]any{
+		"eventId":     "aud" + MirrorRowID(store.ID, action+"\x00"+person+"\x00"+at.Format(time.RFC3339Nano)),
+		"occurredAt":  at.Format(time.RFC3339),
+		"category":    "configuration",
+		"action":      action,
+		"actorUserId": person,
+		"targetType":  "shopifyStore",
+		"targetId":    store.ID,
+		"detail":      map[string]any{"from": store.Status, "to": to},
+		"outcome":     "success",
+	})
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
+		c.logger.Error("shopify: could not write a recording audit event", "store", store.ID, "action", action, "error", err)
+	}
+	return nil
 }
 
 // storeVerdict gathers one store's verdict input and computes it: the rows

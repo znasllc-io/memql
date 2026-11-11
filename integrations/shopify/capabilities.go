@@ -54,7 +54,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Read a mirrored Shopify product by GID or handle. Answers from the mirror, so it costs no Admin API call and no cost points. Tokens never appear in the reply. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleFetchProduct,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store; the only configured store when omitted",
+				"storeId": "string (optional) - the store; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"id":      "string (optional) - the product GID",
 				"handle":  "string (optional) - the storefront handle",
 			},
@@ -64,7 +64,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Run a ShopifyQL analytics query against a store, for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2; refused with a reason below that. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.",
 			Handler:     i.handleShopifyQL,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store to query; for a caller who is not a cluster owner, the one store they own when omitted",
+				"storeId": "string (optional) - the store to query; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"query":   "string - the ShopifyQL statement",
 			},
 		},
@@ -73,7 +73,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin call and no cost points. Reports units and orders per line, and says so when the walk hit its page cap rather than returning a smaller number. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceSold,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store; the only configured one when omitted",
+				"storeId": "string (optional) - the store; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"from":    "string (optional) - RFC3339 window start; 30 days back when omitted",
 				"to":      "string (optional) - RFC3339 window end; now when omitted",
 				"groupBy": "string (optional) - product (default) or variant",
@@ -84,7 +84,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Inventory levels below a threshold at one location. The threshold is applied here because Shopify models inventory as NAMED quantities and a level with no `available` count reads as unknown rather than as a stockout. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceStock,
 			ArgsSchema: map[string]string{
-				"storeId":     "string (optional) - the store",
+				"storeId":     "string (optional) - the store; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"locationGid": "string - the location to check",
 				"threshold":   "integer (optional) - default 5",
 			},
@@ -94,7 +94,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Repeat-customer and refund rates for a window, from the mirror. Repeat rate is customers with more than one order over customers with any; refund rate is refunds over orders. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceCustomers,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store",
+				"storeId": "string (optional) - the store; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"from":    "string (optional) - RFC3339 window start; 30 days back when omitted",
 				"to":      "string (optional) - RFC3339 window end; now when omitted",
 			},
@@ -104,7 +104,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "One B2B account: its orders in a window, how many have payment terms still outstanding, and its MemQL-owned credit limit. The two halves come from different systems and the question a rep asks -- can this account order -- needs both. For the store's owner or a cluster owner; anybody else is refused before the mirror is read.",
 			Handler:     i.handleCommerceCompany,
 			ArgsSchema: map[string]string{
-				"storeId":    "string (optional) - the store",
+				"storeId":    "string (optional) - the store; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 				"companyGid": "string - the mirrored company",
 				"from":       "string (optional) - RFC3339 window start; 30 days back when omitted",
 				"to":         "string (optional) - RFC3339 window end; now when omitted",
@@ -115,7 +115,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back (epic memql#5531, issue memql#5547). Writes nothing and buys nothing -- it creates a cart and reads the URL a shopper would be sent to, and the payment walk itself happens in a browser and is not something this cluster can observe. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}. For the store's owner, a cluster owner, or a caller who may read stores; anybody else is refused before Shopify is asked.",
 			Handler:     i.handleStorefrontProbe,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store to ask; when omitted, the only configured store for a cluster owner and otherwise the one store the caller owns",
+				"storeId": "string (optional) - the store to ask; when omitted, the only configured store for a cluster owner; for anybody else the one store they own, and when they own several, refused as needing a storeId",
 			},
 		},
 		{
@@ -123,7 +123,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Report the status, subscription reconcile time, per-domain sync state and drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.",
 			Handler:     i.handleStoreHealth,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - one store; every store when omitted",
+				"storeId": "string (optional) - one store; when omitted, every store the caller may read",
 			},
 		},
 	}
@@ -547,9 +547,10 @@ func (c *Connector) mirrorStoreForCaller(ctx context.Context, storeID, builtin s
 // omitted.
 //
 // A CALLER WHO IS NOT A CLUSTER OWNER AND NAMES NO STORE IS NEVER TOLD HOW MANY
-// STORES ARE CONFIGURED: the default is the one store they own, and otherwise
-// the refusal -- the same words a store they may not reach answers. A cluster
-// owner may know, and is defaulted as resolveStoreArg defaults.
+// STORES ARE CONFIGURED: the default is the one store they own; an owner of
+// several is asked to name one; anybody else gets the refusal -- the same words
+// a store they may not reach answers. A cluster owner may know, and is
+// defaulted as resolveStoreArg defaults.
 func (c *Connector) storeForCallerOrDefault(ctx context.Context, storeID, builtin, refused string, may func(Store) bool) (Store, error) {
 	if storeID != "" {
 		return c.storeForCaller(ctx, storeID, builtin, refused, may)
@@ -567,7 +568,11 @@ func (c *Connector) storeForCallerOrDefault(ctx context.Context, storeID, builti
 			owned = append(owned, s)
 		}
 	}
-	if len(owned) != 1 || !may(owned[0]) {
+	switch {
+	case len(owned) > 1:
+		// They own every one of them, so naming them tells nothing new.
+		return Store{}, fmt.Errorf("shopify: %s needs a storeId", builtin)
+	case len(owned) == 0 || !may(owned[0]):
 		return Store{}, fmt.Errorf("shopify: %s %s", builtin, refused)
 	}
 	return owned[0], nil

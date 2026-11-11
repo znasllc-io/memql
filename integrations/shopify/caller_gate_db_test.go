@@ -35,9 +35,30 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "example.test")
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	storeID, owner := "dbtest-recording-"+suffix, "dbtest-recording-owner-"+suffix
+	// Seeded the way Connect Shopify leaves a store: createStore's status,
+	// configured, which nothing moves to live.
 	seedOwnedStore(t, eng, db, storeID, owner)
-	if _, err := eng.Execute(seedCtx(), renderCall("setStoreStatus", map[string]any{"storeId": storeID, "status": StatusLive})); err != nil {
-		t.Fatalf("make the store live: %v", err)
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:identity:auditEvent' AND payload->>'targetId' = $1`, storeID)
+	})
+	audits := func() [][2]string {
+		t.Helper()
+		rows, err := db.QueryContext(context.Background(),
+			`SELECT payload->>'action', payload->>'actorUserId' FROM "MemoryNodes" WHERE concept = 'v1:identity:auditEvent' AND payload->>'targetId' = $1 ORDER BY "createdAt"`, storeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out [][2]string
+		for rows.Next() {
+			var action, actor string
+			if err := rows.Scan(&action, &actor); err != nil {
+				t.Fatal(err)
+			}
+			// The engine stores the actor canonical; the person is the bare id.
+			out = append(out, [2]string{action, memql.BareShortId(actor)})
+		}
+		return out
 	}
 
 	registry := NewStoreRegistry(eng, nil)
@@ -65,10 +86,13 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 		return builtinReply(t, eng, person, fmt.Sprintf("builtin shopifyStoreSetRecording(storeId: %q, recording: %t)", storeID, recording))
 	}
 
+	if got := status(); got != StatusConfigured {
+		t.Fatalf("a newly connected store reads %q, want configured", got)
+	}
 	// The store row's own gate is not widened: the owner's own setStoreStatus
 	// still changes nothing.
 	_, _ = eng.Execute(person, renderCall("setStoreStatus", map[string]any{"storeId": storeID, "status": StatusPaused}))
-	if got := status(); got != StatusLive {
+	if got := status(); got != StatusConfigured {
 		t.Fatalf("the owner's own setStoreStatus moved the store to %q; the row's gate was widened", got)
 	}
 
@@ -78,8 +102,11 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 		!strings.Contains(err.Error(), "shopify: shopifyStoreSetRecording "+actRefusal) {
 		t.Fatalf("another developer: err = %v, want the refusal", err)
 	}
-	if got := status(); got != StatusLive {
+	if got := status(); got != StatusConfigured {
 		t.Fatalf("a refused pause moved the store to %q", got)
+	}
+	if got := audits(); len(got) != 0 {
+		t.Fatalf("a refusal was audited: %v", got)
 	}
 
 	if reply := set(false); reply["status"] != StatusPaused || reply["storeId"] != storeID {
@@ -87,6 +114,11 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	}
 	if got := status(); got != StatusPaused {
 		t.Fatalf("after Pause recording the row reads %q, want paused", got)
+	}
+	// Asking again writes nothing, and audits nothing.
+	set(false)
+	if got := audits(); len(got) != 1 || got[0] != [2]string{"shopify_store_paused", owner} {
+		t.Fatalf("after a pause and a repeated pause the audit trail reads %v, want one pause by %s", got, owner)
 	}
 
 	// The watch records the paused verdict, as its pass would.
@@ -107,6 +139,9 @@ func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T) {
 	}
 	if got := status(); got != StatusLive {
 		t.Fatalf("after Resume the row reads %q, want live", got)
+	}
+	if got := audits(); len(got) != 2 || got[1] != [2]string{"shopify_store_resumed", owner} {
+		t.Fatalf("after the resume the audit trail reads %v, want a resume by %s", got, owner)
 	}
 
 	// The next verdict says when the store left paused, and the next watch
