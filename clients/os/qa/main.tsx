@@ -17,6 +17,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
+import { storeVerdictScenes } from "./storeVerdictScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
 import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
 import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
@@ -1060,6 +1061,8 @@ const VIEWS: Record<
   ...mapScenes(WindowBody),
   // A deployable's Statistics and the Overview's Websites (deployableStatisticsScenes.tsx).
   ...deployableStatisticsScenes(WindowBody),
+  // The Store page saying whether a store is being recorded (storeVerdictScenes.tsx).
+  ...storeVerdictScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.

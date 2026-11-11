@@ -18,7 +18,8 @@ import { storeConnection, storeLabel } from "../store/rows";
 import type { PreviewReadiness } from "../preview/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
-import { useStore } from "../store/useStore";
+import { useStore, useStoreVerdict } from "../store/useStore";
+import { verdictWord } from "../store/verdict";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "statistics" | "statisticsList" | "access" | "store" | "reviews" | "visit" | "version";
@@ -126,7 +127,8 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * labelled "Store" tells them only that a binding exists, which they can see
  * from the slot being drawn at all.
  *
- * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound reads Not
+ * FOUR STATES AND THEY ARE DIFFERENT ANSWERS, and a connected store's is
+ * the verdict's word. Nothing bound reads Not
  * connected. Publication and Shopify connection are independent.
  * A read in flight says so. A store that reads back gets its domain and its
  * state. A store that does not read back is NOT drawn as unbound -- that
@@ -142,18 +144,25 @@ function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeI
   // until the engine has answered, and never Connected by default.
   const served = readiness === null ? null : storeId ? readiness.storeHasStorefrontToken : readiness.previewStoreHasStorefrontToken;
   const state = connection.store === null ? null : storeConnection(connection.store, served);
-  const word = state === "connected" ? "Connected" : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
+  // WHERE THE STORE IS CONNECTED, THE VERDICT SAYS WHETHER IT IS RECORDED
+  // (U7): Recording, Starting, Paused or Needs attention. "Connected" is left
+  // only for an engine that names no state, and "Status unknown" for a verdict
+  // that could not be read.
+  const verdict = useStoreVerdict(storeId || testingId);
+  const connectedWord = verdict.verdict !== null ? verdictWord(verdict.verdict.state) || "Connected" : verdict.state === "failed" ? "Status unknown" : verdict.state === "read" ? "Connected" : "";
+  const word = state === "connected" ? connectedWord : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
+  const pending = state === "unknown" || (state === "connected" && connectedWord === "");
   const detail =
     !storeId && !testingId
       ? "Not connected"
       : connection.state === "failed"
         ? "The store could not be read"
         : connection.store !== null
-          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{state === "unknown" ?  <InlineSkeleton label="Loading store status" /> : null}</>
+          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{pending ? <InlineSkeleton label="Loading store status" /> : null}</>
           : connection.state === "read"
             ? "Names a store that is not on this cluster"
             : <InlineSkeleton label="Loading store" />;
-  const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown");
+  const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown") || (state === "connected" && verdict.verdict?.state === "needs attention");
   return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={needsSetup ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
