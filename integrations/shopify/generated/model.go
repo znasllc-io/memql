@@ -348,6 +348,7 @@ query ShopifyFetchAbandonedCheckout($id: ID!) {
     __typename
     ... on AbandonedCheckout {
       id
+      updatedAt
       abandonedCheckoutUrl
       billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
       completedAt
@@ -376,6 +377,7 @@ query ShopifyListAbandonedCheckout($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       abandonedCheckoutUrl
       billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
       completedAt
@@ -410,6 +412,7 @@ query ShopifyBulkAbandonedCheckout($query: String) {
     edges {
       node {
         id
+        updatedAt
         abandonedCheckoutUrl
         billingAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
         completedAt
@@ -488,6 +491,7 @@ query ShopifyFetchArticle($id: ID!) {
     __typename
     ... on Article {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -507,6 +511,7 @@ query ShopifyFetchArticle($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -528,6 +533,7 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -547,6 +553,7 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -571,6 +578,7 @@ query ShopifyPageArticleComments($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -632,6 +640,7 @@ query ShopifyFetchArticleComment($id: ID!) {
     __typename
     ... on Comment {
       id
+      updatedAt
       article { id }
       author { email name }
       body
@@ -651,6 +660,7 @@ query ShopifyListArticleComment($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       article { id }
       author { email name }
       body
@@ -709,6 +719,7 @@ query ShopifyFetchBlog($id: ID!) {
     __typename
     ... on Blog {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -722,6 +733,7 @@ query ShopifyFetchBlog($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -748,6 +760,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -761,6 +774,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -790,6 +804,7 @@ query ShopifyPageBlogArticles($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -822,6 +837,7 @@ query ShopifyBulkBlog($query: String) {
     edges {
       node {
         id
+        updatedAt
         articlesCount { count precision }
         commentPolicy
         feed { location path }
@@ -835,6 +851,7 @@ query ShopifyBulkBlog($query: String) {
           edges {
             node {
             id
+            updatedAt
             author { name }
             blog { id }
             body
@@ -1096,6 +1113,7 @@ query ShopifyFetchCollection($id: ID!) {
     __typename
     ... on Collection {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description
@@ -1124,6 +1142,7 @@ query ShopifyListCollection($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activeOperations { duplicate { collectionRole } }
       availablePublicationsCount { count precision }
       description
@@ -1158,6 +1177,7 @@ query ShopifyBulkCollection($query: String) {
     edges {
       node {
         id
+        updatedAt
         activeOperations { duplicate { collectionRole } }
         availablePublicationsCount { count precision }
         description
@@ -1234,6 +1254,7 @@ query ShopifyFetchCompany($id: ID!) {
     __typename
     ... on Company {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -1255,6 +1276,7 @@ query ShopifyFetchCompany($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -1281,6 +1303,7 @@ query ShopifyFetchCompany($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -1299,6 +1322,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -1320,6 +1344,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -1346,6 +1371,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -1367,6 +1393,7 @@ query ShopifyPageCompanyLocations($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -1401,6 +1428,7 @@ query ShopifyPageCompanyContacts($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -1425,6 +1453,7 @@ query ShopifyBulkCompany($query: String) {
     edges {
       node {
         id
+        updatedAt
         contactsCount { count precision }
         customerSince
         defaultCursor
@@ -1444,6 +1473,7 @@ query ShopifyBulkCompany($query: String) {
           edges {
             node {
             id
+            updatedAt
             billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
             buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
             catalogsCount { count precision }
@@ -1469,6 +1499,7 @@ query ShopifyBulkCompany($query: String) {
           edges {
             node {
             id
+            updatedAt
             company { id }
             customer { id }
             isMainContact
@@ -1525,6 +1556,7 @@ query ShopifyFetchCompanyContact($id: ID!) {
     __typename
     ... on CompanyContact {
       id
+      updatedAt
       company { id }
       customer { id }
       isMainContact
@@ -1591,6 +1623,7 @@ query ShopifyFetchCompanyLocation($id: ID!) {
     __typename
     ... on CompanyLocation {
       id
+      updatedAt
       billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
       buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
       catalogsCount { count precision }
@@ -1620,6 +1653,7 @@ query ShopifyListCompanyLocation($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
       buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
       catalogsCount { count precision }
@@ -1655,6 +1689,7 @@ query ShopifyBulkCompanyLocation($query: String) {
     edges {
       node {
         id
+        updatedAt
         billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
         buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
         catalogsCount { count precision }
@@ -1747,6 +1782,7 @@ query ShopifyFetchCustomer($id: ID!) {
     __typename
     ... on Customer {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }
@@ -1806,6 +1842,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }
@@ -1905,6 +1942,7 @@ query ShopifyBulkCustomer($query: String) {
     edges {
       node {
         id
+        updatedAt
         amountSpent { amount currencyCode }
         canDelete
         dataSaleOptOut
@@ -2365,6 +2403,7 @@ query ShopifyFetchDraftOrder($id: ID!) {
     __typename
     ... on DraftOrder {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout
@@ -2428,6 +2467,7 @@ query ShopifyListDraftOrder($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       acceptAutomaticDiscounts
       allVariantPricesOverridden
       allowDiscountCodesInCheckout
@@ -2497,6 +2537,7 @@ query ShopifyBulkDraftOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         acceptAutomaticDiscounts
         allVariantPricesOverridden
         allowDiscountCodesInCheckout
@@ -2607,6 +2648,7 @@ query ShopifyFetchFulfillment($id: ID!) {
     __typename
     ... on Fulfillment {
       id
+      updatedAt
       deliveredAt
       displayStatus
       estimatedDeliveryAt
@@ -2677,6 +2719,7 @@ query ShopifyFetchFulfillmentOrder($id: ID!) {
     __typename
     ... on FulfillmentOrder {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2703,6 +2746,7 @@ query ShopifyListFulfillmentOrder($first: Int!, $after: String, $query: String) 
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2735,6 +2779,7 @@ query ShopifyBulkFulfillmentOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
         deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
         destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -2805,6 +2850,7 @@ query ShopifyFetchGiftCard($id: ID!) {
     __typename
     ... on GiftCard {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }
@@ -2830,6 +2876,7 @@ query ShopifyListGiftCard($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       balance { amount currencyCode }
       crossCurrencyRedemptionStrategy
       customer { id }
@@ -2861,6 +2908,7 @@ query ShopifyBulkGiftCard($query: String) {
     edges {
       node {
         id
+        updatedAt
         balance { amount currencyCode }
         crossCurrencyRedemptionStrategy
         customer { id }
@@ -2933,6 +2981,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
     __typename
     ... on InventoryItem {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -2952,6 +3001,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -2969,6 +3019,7 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -2988,6 +3039,7 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -3008,6 +3060,7 @@ query ShopifyPageInventoryItemInventoryLevels($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -3031,6 +3084,7 @@ query ShopifyBulkInventoryItem($query: String) {
     edges {
       node {
         id
+        updatedAt
         countryCodeOfOrigin
         duplicateSkuCount
         harmonizedSystemCode
@@ -3049,6 +3103,7 @@ query ShopifyBulkInventoryItem($query: String) {
           edges {
             node {
             id
+            updatedAt
             canDeactivate
             deactivationAlert
             isActive
@@ -3103,6 +3158,7 @@ query ShopifyFetchInventoryLevel($id: ID!) {
     __typename
     ... on InventoryLevel {
       id
+      updatedAt
       canDeactivate
       deactivationAlert
       isActive
@@ -3389,6 +3445,7 @@ query ShopifyFetchLocation($id: ID!) {
     __typename
     ... on Location {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified
@@ -3418,6 +3475,7 @@ query ShopifyListLocation($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activatable
       address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
       addressVerified
@@ -3453,6 +3511,7 @@ query ShopifyBulkLocation($query: String) {
     edges {
       node {
         id
+        updatedAt
         activatable
         address { address1 address2 city country countryCode formatted latitude longitude phone province provinceCode zip }
         addressVerified
@@ -3703,6 +3762,7 @@ query ShopifyFetchMarketingActivity($id: ID!) {
     __typename
     ... on MarketingActivity {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -3736,6 +3796,7 @@ query ShopifyListMarketingActivity($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       activityListUrl
       adSpend { amount currencyCode }
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -4022,6 +4083,7 @@ query ShopifyFetchMetaobject($id: ID!) {
     __typename
     ... on Metaobject {
       id
+      updatedAt
       capabilities { onlineStore { templateSuffix } publishable { status } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       createdByStaff { id }
@@ -4083,6 +4145,7 @@ query ShopifyFetchMetaobjectDefinition($id: ID!) {
     __typename
     ... on MetaobjectDefinition {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -4105,6 +4168,7 @@ query ShopifyListMetaobjectDefinition($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       access { admin customerAccount storefront }
       capabilities { onlineStore { enabled } publishable { enabled } renderable { enabled } translatable { enabled } }
       createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
@@ -4161,6 +4225,7 @@ query ShopifyFetchOnlineStoreTheme($id: ID!) {
     __typename
     ... on OnlineStoreTheme {
       id
+      updatedAt
       name
       prefix
       processing
@@ -4177,6 +4242,7 @@ query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       name
       prefix
       processing
@@ -4343,6 +4409,7 @@ query ShopifyFetchOrder($id: ID!) {
     __typename
     ... on Order {
       id
+      updatedAt
       additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
       agreements(first: 25) { nodes { id } }
       alerts { actions { primary show title url } content dismissibleHandle icon severity title }
@@ -4537,6 +4604,7 @@ query ShopifyFetchOrder($id: ID!) {
       }
       refunds {
         id
+        updatedAt
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
@@ -4549,6 +4617,7 @@ query ShopifyFetchOrder($id: ID!) {
       }
       fulfillments {
         id
+        updatedAt
         deliveredAt
         displayStatus
         estimatedDeliveryAt
@@ -4594,6 +4663,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
       agreements(first: 25) { nodes { id } }
       alerts { actions { primary show title url } content dismissibleHandle icon severity title }
@@ -4788,6 +4858,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       }
       refunds {
         id
+        updatedAt
         duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
         legacyResourceId
         note
@@ -4800,6 +4871,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       }
       fulfillments {
         id
+        updatedAt
         deliveredAt
         displayStatus
         estimatedDeliveryAt
@@ -4927,6 +4999,7 @@ query ShopifyBulkOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
         alerts { actions { primary show title url } content dismissibleHandle icon severity title }
         app { icon { altText height id thumbhash url width } id name }
@@ -5118,6 +5191,7 @@ query ShopifyBulkOrder($query: String) {
         }
         refunds {
           id
+          updatedAt
           duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
           legacyResourceId
           note
@@ -5130,6 +5204,7 @@ query ShopifyBulkOrder($query: String) {
         }
         fulfillments {
           id
+          updatedAt
           deliveredAt
           displayStatus
           estimatedDeliveryAt
@@ -5420,6 +5495,7 @@ query ShopifyFetchPage($id: ID!) {
     __typename
     ... on Page {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor
@@ -5439,6 +5515,7 @@ query ShopifyListPage($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       body
       bodySummary
       defaultCursor
@@ -5464,6 +5541,7 @@ query ShopifyBulkPage($query: String) {
     edges {
       node {
         id
+        updatedAt
         body
         bodySummary
         defaultCursor
@@ -5832,6 +5910,7 @@ query ShopifyFetchProduct($id: ID!) {
     __typename
     ... on Product {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -5881,6 +5960,7 @@ query ShopifyFetchProduct($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -5920,6 +6000,7 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -5969,6 +6050,7 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -6011,6 +6093,7 @@ query ShopifyPageProductVariants($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -6056,6 +6139,7 @@ query ShopifyBulkProduct($query: String) {
     edges {
       node {
         id
+        updatedAt
         availablePublicationsCount { count precision }
         bundleConsolidatedOptions { name selections { value } }
         category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -6101,6 +6185,7 @@ query ShopifyBulkProduct($query: String) {
           edges {
             node {
             id
+            updatedAt
             availableForSale
             availablePublicationsCount { count precision }
             barcode
@@ -6257,6 +6342,7 @@ query ShopifyFetchProductVariant($id: ID!) {
     __typename
     ... on ProductVariant {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode
@@ -6294,6 +6380,7 @@ query ShopifyListProductVariant($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availableForSale
       availablePublicationsCount { count precision }
       barcode
@@ -6337,6 +6424,7 @@ query ShopifyBulkProductVariant($query: String) {
     edges {
       node {
         id
+        updatedAt
         availableForSale
         availablePublicationsCount { count precision }
         barcode
@@ -6520,6 +6608,7 @@ query ShopifyFetchRefund($id: ID!) {
     __typename
     ... on Refund {
       id
+      updatedAt
       duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
       legacyResourceId
       note
@@ -7022,6 +7111,7 @@ query ShopifyBulkSellingPlanGroup($query: String) {
 query ShopifyFetchShop {
   shop {
     id
+    updatedAt
     accountOwner { id }
     alerts { action { title url } description }
     allProductCategoriesList { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -7149,6 +7239,7 @@ query ShopifyFetchShopPolicy($id: ID!) {
     __typename
     ... on ShopPolicy {
       id
+      updatedAt
       body
       createdAt
       type
@@ -7612,6 +7703,7 @@ query ShopifyFetchSubscriptionContract($id: ID!) {
     __typename
     ... on SubscriptionContract {
       id
+      updatedAt
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       appAdminUrl
       billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }
@@ -7640,6 +7732,7 @@ query ShopifyListSubscriptionContract($first: Int!, $after: String, $query: Stri
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       appAdminUrl
       billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }
@@ -7674,6 +7767,7 @@ query ShopifyBulkSubscriptionContract($query: String) {
     edges {
       node {
         id
+        updatedAt
         app { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
         appAdminUrl
         billingPolicy { anchors { cutoffDay day month type } interval intervalCount maxCycles minCycles }

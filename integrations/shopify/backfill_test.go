@@ -121,7 +121,7 @@ func TestBackfillResumesFromTheLineOffset(t *testing.T) {
 	}
 	url := h.admin.serveJSONL("/download/five.jsonl", bulkLines(lines...))
 
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 3}
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: url, Line: 3, Rule: originVersionRule}
 	page, err := h.conn.BackfillStore(ctx, store, "v1:shopify:product", cur.encode())
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,9 @@ func TestAnExpiredOperationRestarts(t *testing.T) {
 func TestAnEmptyDomainCompletes(t *testing.T) {
 	h := newHarness(t)
 	h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/1", "COMPLETED", ""))
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}
+	// A backfill this build began: its cursor carries the rule it began
+	// under, so its end is the end (finished).
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", Rule: originVersionRule}
 	page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
 	if err != nil {
 		t.Fatal(err)

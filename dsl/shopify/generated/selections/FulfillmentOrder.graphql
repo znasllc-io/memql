@@ -9,6 +9,7 @@ query ShopifyFetchFulfillmentOrder($id: ID!) {
     __typename
     ... on FulfillmentOrder {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }
@@ -35,6 +36,7 @@ query ShopifyListFulfillmentOrder($first: Int!, $after: String, $query: String) 
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       assignedLocation { address1 address2 city countryCode location { id } name phone province zip }
       deliveryMethod { additionalInformation { instructions phone } brandedPromise { handle name } id maxDeliveryDateTime methodType minDeliveryDateTime presentedName serviceCode sourceReference }
       destination { address1 address2 city company countryCode email firstName id lastName location { id } phone province zip }

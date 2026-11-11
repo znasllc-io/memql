@@ -5855,7 +5855,8 @@
         "totalLineItemsPriceSet",
         "totalPriceSet",
         "totalTaxSet",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -5888,7 +5889,8 @@
         "tags",
         "templateSuffix",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -5917,7 +5919,8 @@
         "storeId",
         "syncedAt",
         "updatedAt",
-        "userAgent"
+        "userAgent",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -5953,7 +5956,8 @@
         "tags",
         "templateSuffix",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -5984,7 +5988,8 @@
         "shopifyPaymentsAccount",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6006,7 +6011,8 @@
         "storeId",
         "syncedAt",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6041,7 +6047,8 @@
         "storeId",
         "supportsFuturePublishing",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6077,7 +6084,8 @@
         "syncedAt",
         "templateSuffix",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6124,7 +6132,8 @@
         "storeId",
         "syncedAt",
         "totalSpent",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6149,7 +6158,8 @@
         "storeId",
         "syncedAt",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6188,7 +6198,8 @@
         "syncedAt",
         "taxSettings",
         "totalSpent",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6266,7 +6277,8 @@
         "taxExemptions",
         "taxSettings",
         "updatedAt",
-        "verifiedEmail"
+        "verifiedEmail",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6304,7 +6316,8 @@
         "revokedReason",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6352,7 +6365,8 @@
         "storeId",
         "supportsServiceDiscovery",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6375,7 +6389,8 @@
         "storeId",
         "syncedAt",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6403,6 +6418,7 @@
         "unassignedLocationsGids",
         "updatedAt",
         "version",
+        "versionSource",
         "zoneCountryCount"
       ],
       "required": [
@@ -6422,7 +6438,8 @@
         "metafields",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6492,6 +6509,7 @@
         "totalWeight",
         "transformerFingerprint",
         "updatedAt",
+        "versionSource",
         "visibleToCustomer",
         "warnings"
       ],
@@ -6535,7 +6553,8 @@
         "syncedAt",
         "totalQuantity",
         "trackingInfo",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6598,7 +6617,8 @@
         "storeId",
         "supportedActions",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6652,7 +6672,8 @@
         "storeId",
         "syncedAt",
         "templateSuffix",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6691,7 +6712,8 @@
         "trackedEditable",
         "unitCost",
         "updatedAt",
-        "variantsGids"
+        "variantsGids",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6715,7 +6737,8 @@
         "sourceCreatedAt",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6745,7 +6768,8 @@
         "totalReceivedQuantity",
         "totalRejectedQuantity",
         "tracking",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6784,7 +6808,8 @@
         "syncedAt",
         "tags",
         "totalQuantity",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6831,7 +6856,8 @@
         "storeId",
         "suggestedAddresses",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6859,7 +6885,8 @@
         "status",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6895,7 +6922,8 @@
         "storeId",
         "subfolderSuffix",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -6937,7 +6965,8 @@
         "title",
         "updatedAt",
         "urlParameterValue",
-        "utmParameters"
+        "utmParameters",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7033,7 +7062,8 @@
         "updatedAt",
         "utmCampaign",
         "utmMedium",
-        "utmSource"
+        "utmSource",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7078,7 +7108,8 @@
         "storeId",
         "syncedAt",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7111,7 +7142,8 @@
         "updatedAt",
         "useAsCollectionCondition",
         "validationStatus",
-        "validations"
+        "validations",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7174,7 +7206,8 @@
         "syncedAt",
         "thumbnailField",
         "updatedAt",
-        "values"
+        "values",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7204,7 +7237,8 @@
         "standardTemplate",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7228,7 +7262,8 @@
         "storeId",
         "syncedAt",
         "themeStoreId",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7371,7 +7406,8 @@
         "totalWeight",
         "transactionsCount",
         "unpaid",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7465,6 +7501,7 @@
         "variantGid",
         "variantTitle",
         "vendor",
+        "versionSource",
         "weight"
       ],
       "required": [
@@ -7515,7 +7552,8 @@
         "test",
         "totalUnsettledSet",
         "updatedAt",
-        "userGid"
+        "userGid",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7563,7 +7601,8 @@
         "syncedAt",
         "templateSuffix",
         "title",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7585,7 +7624,8 @@
         "storeId",
         "syncedAt",
         "translatedName",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7616,7 +7656,8 @@
         "parent",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7638,7 +7679,8 @@
         "storeId",
         "syncedAt",
         "updatedAt",
-        "variantGid"
+        "variantGid",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7707,7 +7749,8 @@
         "tracksInventory",
         "updatedAt",
         "variantsCount",
-        "vendor"
+        "vendor",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7740,7 +7783,8 @@
         "status",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7792,7 +7836,8 @@
         "title",
         "unitPrice",
         "unitPriceMeasurement",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7821,7 +7866,8 @@
         "storeId",
         "supportsFuturePublishing",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7845,7 +7891,8 @@
         "productVariantGid",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7879,7 +7926,8 @@
         "storeId",
         "syncedAt",
         "totalRefundedSet",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7900,7 +7948,8 @@
         "reverseFulfillmentOrderGid",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7922,7 +7971,8 @@
         "storeId",
         "syncedAt",
         "thirdPartyConfirmation",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7951,7 +8001,8 @@
         "query",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -7980,7 +8031,8 @@
         "sourceCreatedAt",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8018,7 +8070,8 @@
         "storeId",
         "summary",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8081,6 +8134,7 @@
         "unitSystem",
         "updatedAt",
         "url",
+        "versionSource",
         "weightUnit"
       ],
       "required": [
@@ -8120,7 +8174,8 @@
         "published",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8142,7 +8197,8 @@
         "syncedAt",
         "title",
         "updatedAt",
-        "url"
+        "url",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8184,7 +8240,8 @@
         "syncedAt",
         "test",
         "transactionDate",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8223,7 +8280,8 @@
         "status",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8262,7 +8320,8 @@
         "summary",
         "syncedAt",
         "transactionType",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8304,7 +8363,8 @@
         "syncedAt",
         "totalQuantity",
         "transactionsGids",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8344,7 +8404,8 @@
         "privateData",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8418,7 +8479,8 @@
         "parentGid",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8455,7 +8517,8 @@
         "status",
         "storeId",
         "syncedAt",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8499,7 +8562,8 @@
         "test",
         "transactionDetails",
         "updatedAt",
-        "userGid"
+        "userGid",
+        "versionSource"
       ],
       "required": [
         "gid",
@@ -8518,7 +8582,8 @@
         "storeId",
         "syncedAt",
         "target",
-        "updatedAt"
+        "updatedAt",
+        "versionSource"
       ],
       "required": [
         "gid",

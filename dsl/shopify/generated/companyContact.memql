@@ -34,6 +34,10 @@ concept companyContact {
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.
   updatedAt  datetime!
+  /// Where updatedAt came from: "origin", Shopify's own version (or, on a tombstone, when the row was found gone), or
+  /// "read", when MemQL read a row Shopify publishes no version for. Empty on a row written before every write said; its
+  /// updatedAt is then a time MemQL read it, and the guard reads it as holding no version.
+  versionSource string
   /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that
   /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.
   syncedAt   datetime!

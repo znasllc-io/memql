@@ -145,15 +145,15 @@ func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.D
 	}
 	row := rows[0]
 
-	if field := strings.TrimSpace(spec.VersionField); field != "" {
-		// The origin's own version, kept on the row. Exact. It is a PAYLOAD
-		// field (DomainSpec.VersionField says so), and the raw read above
-		// answers bundle rows whose top level holds only the intrinsics: read
-		// there, it was empty on every row and the guard refused nothing
-		// (memql#5638). The connector stamps this field and MirrorWrite.Version
-		// from one value, so both sides of the comparison are the origin's
-		// clock -- never the row's createdAt, which is MemQL's.
-		return payloadField(row, field), true, nil
+	if strings.TrimSpace(spec.VersionField) != "" {
+		// The origin's own version, kept on the row. It is a PAYLOAD field
+		// (DomainSpec.VersionField says so), and the raw read above answers
+		// bundle rows whose top level holds only the intrinsics: read there,
+		// it was empty on every row and the guard refused nothing
+		// (memql#5638). Which stored value counts as a version at all is the
+		// contract's rule (memqlsync.StoredVersion): a row written before the
+		// connector said where its versions come from holds none.
+		return memqlsync.StoredVersion(spec, payloadOf(row)), true, nil
 	}
 	// The fallback (D6): the origin publishes no version, so the version
 	// is when MemQL last applied a delivery for this row.
@@ -174,4 +174,13 @@ func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.D
 	// recoverable by the next reconciliation, while refusing every write
 	// to such a row is not.
 	return "", true, nil
+}
+
+// payloadOf is a raw read's row payload: the bundle row's `payload`, or the
+// row itself when it arrives flat.
+func payloadOf(row map[string]any) map[string]any {
+	if payload, ok := row["payload"].(map[string]any); ok {
+		return payload
+	}
+	return row
 }

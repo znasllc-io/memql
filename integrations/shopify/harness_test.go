@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	stdsync "sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/shopify/generated"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -154,6 +156,14 @@ type fakeAdmin struct {
 	// replyFns answers an operation from its variables, ahead of replies:
 	// a paged answer whose every page differs.
 	replyFns map[string]func(vars map[string]any) any
+	// bulkDocuments are the bulk queries the fake was asked to run, in order:
+	// what a download it serves answers.
+	bulkDocuments []string
+	// unselected is told of every version field a scripted reply or a served
+	// bulk line carried that the document did not select (answerSelected).
+	// It fails the test; TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect
+	// replaces it to watch it fire.
+	unselected func(message string)
 }
 
 type adminRequest struct {
@@ -174,6 +184,7 @@ func newFakeAdmin(t *testing.T) *fakeAdmin {
 		downloads: map[string]string{},
 		throttle:  ThrottleStatus{MaximumAvailable: 2000, CurrentlyAvailable: 1800, RestoreRate: 100},
 	}
+	f.unselected = func(message string) { t.Errorf("%s", message) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/graphql", f.serveGraphQL)
 	mux.HandleFunc("/download/", f.serveDownload)
@@ -200,9 +211,18 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		Operation: op, Query: body.Query, Variables: body.Variables,
 		Token: r.Header.Get("X-Shopify-Access-Token"),
 	})
+	fn := f.replyFns[op]
+	f.mu.Unlock()
+	// Called outside the lock, so an answer may itself call the origin: a
+	// delivery that lands while a sweep's page is out.
+	var fnReply any
+	if fn != nil {
+		fnReply = fn(body.Variables)
+	}
+	f.mu.Lock()
 	reply, hasReply := f.replies[op]
-	if fn := f.replyFns[op]; fn != nil {
-		reply, hasReply = fn(body.Variables), true
+	if fn != nil {
+		reply, hasReply = fnReply, true
 	}
 	errs := f.errors[op]
 	if queue := f.errorOnce[op]; len(queue) > 0 {
@@ -223,9 +243,20 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if op == "ShopifyBulkRun" {
+		if document, ok := body.Variables["query"].(string); ok {
+			f.bulkDocuments = append(f.bulkDocuments, document)
+		}
+	}
 	status := f.status[op]
 	throttle := f.throttle
+	unselected := f.unselected
 	f.mu.Unlock()
+	if hasReply {
+		reply = answerSelected(reply, []string{body.Query}, func(field string) {
+			unselected(fmt.Sprintf("fake Admin: the reply scripted for %s carries %s, which the document it was sent does not select", op, field))
+		})
+	}
 
 	if status != 0 && status != http.StatusOK {
 		w.WriteHeader(status)
@@ -254,12 +285,92 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 func (f *fakeAdmin) serveDownload(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	body, ok := f.downloads[r.URL.Path]
+	documents := append([]string(nil), f.bulkDocuments...)
+	unselected := f.unselected
 	f.mu.Unlock()
 	if !ok {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	_, _ = w.Write([]byte(body))
+	if len(documents) == 0 {
+		// A test that resumes from a cursor naming the download never had the
+		// fake start its operation; the line answers the export the generated
+		// bulk documents would run.
+		for _, spec := range generated.Types {
+			if spec.BulkDocument != "" {
+				documents = append(documents, spec.BulkDocument)
+			}
+		}
+	}
+	var out strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var obj any
+		dec := json.NewDecoder(strings.NewReader(line))
+		dec.UseNumber()
+		if err := dec.Decode(&obj); err != nil {
+			out.WriteString(line + "\n")
+			continue
+		}
+		raw, _ := json.Marshal(answerSelected(obj, documents, func(field string) {
+			unselected(fmt.Sprintf("fake Admin: a bulk line served from %s carries %s, which no bulk document it was sent selects", r.URL.Path, field))
+		}))
+		out.Write(raw)
+		out.WriteByte('\n')
+	}
+	_, _ = w.Write([]byte(out.String()))
+}
+
+// versionFields are the Admin fields a mirrored type's version is read from.
+var versionFields = []string{"updatedAt", "createdAt"}
+
+// answerSelected is a reply as the origin would send it: a version field the
+// documents do not select is not in it. A scripted reply that carries one is
+// told to `unselected`, once per field, because a fake that answers what was
+// never asked for is how the mirror stamped its own clock for months with a
+// green suite: every generated document left updatedAt out, and every fake
+// handed it back anyway. The check is a document line that is the field and
+// nothing else, which is how the generator writes a top-level selection.
+func answerSelected(reply any, documents []string, unselected func(field string)) any {
+	selected := map[string]bool{}
+	for _, field := range versionFields {
+		for _, document := range documents {
+			for _, line := range strings.Split(document, "\n") {
+				if strings.TrimSpace(line) == field {
+					selected[field] = true
+				}
+			}
+		}
+	}
+	told := map[string]bool{}
+	var strip func(v any) any
+	strip = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(x))
+			for k, item := range x {
+				if slices.Contains(versionFields, k) && !selected[k] {
+					if !told[k] {
+						told[k] = true
+						unselected(k)
+					}
+					continue
+				}
+				out[k] = strip(item)
+			}
+			return out
+		case []any:
+			out := make([]any, len(x))
+			for i, item := range x {
+				out[i] = strip(item)
+			}
+			return out
+		}
+		return v
+	}
+	return strip(reply)
 }
 
 // failOnce answers the NEXT request for op with errs and no data, and the

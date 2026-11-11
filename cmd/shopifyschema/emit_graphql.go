@@ -86,6 +86,16 @@ func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk 
 	if p.HasID {
 		lines = append(lines, indent+"id")
 	}
+	// The ORIGIN's version, which the apply guard compares (originVersion).
+	// Selection only: it is the row's updatedAt, never a payload field
+	// (planType keeps updatedAt out of Fields), so nothing else puts it in the
+	// document. Without it the connector stamped the time it read the object,
+	// or streamed a bulk line, and an older snapshot could replace a newer
+	// delivery. A type whose version is a field it also mirrors (createdAt)
+	// already selects it.
+	if p.VersionField != "" && !p.selectsField(p.VersionField, bulk) {
+		lines = append(lines, indent+p.VersionField)
+	}
 	for _, f := range p.Fields {
 		sel := f.Selection
 		if sel == "" {
@@ -143,6 +153,27 @@ func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk 
 		lines = append(lines, indent+"}")
 	}
 	return lines
+}
+
+// selectsField reports whether the type's own field selections already ask
+// for `name` bare, in the document form given (bulk omits some fields).
+func (p *TypePlan) selectsField(name string, bulk bool) bool {
+	for _, f := range p.Fields {
+		if bulk && (f.Kind == KindRefs || f.OmitFromBulk) {
+			continue
+		}
+		sel := f.Selection
+		if bulk && f.SelectionBulk != "" {
+			sel = f.SelectionBulk
+		}
+		if sel == "" {
+			sel = f.GraphQL
+		}
+		if strings.TrimSpace(sel) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // pageOpName names the operation that reads one further page of a paged

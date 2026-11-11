@@ -9,6 +9,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
     __typename
     ... on InventoryItem {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -28,6 +29,7 @@ query ShopifyFetchInventoryItem($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -45,6 +47,7 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       countryCodeOfOrigin
       duplicateSkuCount
       harmonizedSystemCode
@@ -64,6 +67,7 @@ query ShopifyListInventoryItem($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive
@@ -84,6 +88,7 @@ query ShopifyPageInventoryItemInventoryLevels($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           canDeactivate
           deactivationAlert
           isActive

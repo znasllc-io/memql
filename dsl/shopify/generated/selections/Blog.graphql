@@ -9,6 +9,7 @@ query ShopifyFetchBlog($id: ID!) {
     __typename
     ... on Blog {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -22,6 +23,7 @@ query ShopifyFetchBlog($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -48,6 +50,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       articlesCount { count precision }
       commentPolicy
       feed { location path }
@@ -61,6 +64,7 @@ query ShopifyListBlog($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body
@@ -90,6 +94,7 @@ query ShopifyPageBlogArticles($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           author { name }
           blog { id }
           body

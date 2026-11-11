@@ -45,7 +45,16 @@ func MirrorRowID(storeID, gid string) string {
 // Children come AFTER their parent in the returned slice, so a caller that
 // applies in order never writes a child whose parentGid names a row that is
 // not there yet.
+//
+// `at` is when the object was read: the row's syncedAt, and its version only
+// where the origin gives none (originVersion).
 func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, parentGID string, at time.Time) []memqlsync.MirrorWrite {
+	return mapObjectUnder(spec, storeID, obj, parentGID, "", at)
+}
+
+// mapObjectUnder is mapObject for an object whose parent's origin version is
+// known: a child that publishes no version of its own carries its parent's.
+func mapObjectUnder(spec *generated.TypeSpec, storeID string, obj map[string]any, parentGID, parentVersion string, at time.Time) []memqlsync.MirrorWrite {
 	if spec == nil || obj == nil {
 		return nil
 	}
@@ -53,13 +62,14 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	if gid == "" {
 		return nil
 	}
-	version := originVersion(spec, obj, at)
+	version, source := originVersion(spec, obj, parentVersion, at)
 	payload := map[string]any{
-		"storeId":   storeID,
-		"gid":       gid,
-		"updatedAt": version,
-		"syncedAt":  at.UTC().Format(time.RFC3339),
-		"deleted":   false,
+		"storeId":       storeID,
+		"gid":           gid,
+		"updatedAt":     version,
+		"versionSource": source,
+		"syncedAt":      at.UTC().Format(time.RFC3339),
+		"deleted":       false,
 	}
 	// A directly-fetched child resolves its own lineage: the selection
 	// carries the parent as a reference, so a webhook naming a fulfilment
@@ -117,13 +127,21 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 		Partition: storeID,
 	}}
 
+	// The children carry this row's version where they have none of their
+	// own -- an order's lines move with the order's updatedAt -- and only
+	// when it is the origin's: a read time handed down would stamp the
+	// children with a clock the origin never used.
+	inherited := ""
+	if source == memqlsync.VersionFromOrigin {
+		inherited = version
+	}
 	for _, child := range spec.Children {
 		childSpec := generated.Types[child.Concept]
 		if childSpec == nil {
 			continue
 		}
 		for _, item := range childItems(obj, child) {
-			out = append(out, mapObject(childSpec, storeID, item, gid, at)...)
+			out = append(out, mapObjectUnder(childSpec, storeID, item, gid, inherited, at)...)
 		}
 	}
 	return out
@@ -199,15 +217,23 @@ func idlessChildOf(parent *generated.TypeSpec, obj map[string]any) *generated.Ty
 // retirement path adds the `deleted` marker, and re-sending a payload we
 // no longer have a source for would be inventing the row's contents at
 // the moment we learned it does not exist.
+//
+// `at` is its version, and it is the origin's in the sense the guard needs:
+// a moment by which the record was gone -- the delete's event time, when a
+// fetch found nothing, or when the listing that did not name it began. Any
+// state of the record the origin ever published is older, so the tombstone
+// refuses a snapshot taken before the delete, and is itself refused by a
+// state written after `at`.
 func tombstone(conceptName, storeID, gid string, at time.Time) memqlsync.MirrorWrite {
 	return memqlsync.MirrorWrite{
 		Concept: generated.ConceptID(conceptName),
 		RowId:   MirrorRowID(storeID, gid),
 		Payload: map[string]any{
-			"storeId":   storeID,
-			"gid":       gid,
-			"updatedAt": at.UTC().Format(time.RFC3339),
-			"syncedAt":  at.UTC().Format(time.RFC3339),
+			"storeId":       storeID,
+			"gid":           gid,
+			"updatedAt":     at.UTC().Format(time.RFC3339),
+			"versionSource": memqlsync.VersionFromOrigin,
+			"syncedAt":      at.UTC().Format(time.RFC3339),
 		},
 		Version:   at.UTC().Format(time.RFC3339),
 		Retire:    true,
@@ -263,27 +289,33 @@ func objectsOf(v any) []map[string]any {
 	return out
 }
 
-// originVersion reads the origin's own version of a row.
+// originVersion reads the origin's own version of a row, and says where it
+// came from (memqlsync.VersionFromOrigin or VersionFromRead).
 //
-// A type carrying neither updatedAt nor createdAt falls back to the FETCH
-// TIME, which makes that domain last-write-wins. That is a property of
-// Shopify's schema rather than a choice -- about forty of the sixty-five
-// mirrored types publish no version at all -- and it is recorded on the
-// TypeSpec so an operator reading the runbook learns which domains have
-// it rather than discovering it from a surprising overwrite.
+// The type's VersionField, which every generated document selects for that
+// purpose (emit_graphql.go); else, for a child with none of its own, its
+// parent's origin version; else the READ TIME, which makes that domain
+// last-write-wins. That last is a property of Shopify's schema rather than a
+// choice -- about forty of the sixty-five mirrored types publish no version
+// at all -- and it is recorded on the TypeSpec so an operator reading the
+// runbook learns which domains have it rather than discovering it from a
+// surprising overwrite.
 //
 // The value is a STRING because that is what the contract's version guard
 // compares. RFC3339 in UTC compares lexicographically in chronological
 // order, which is what makes a string comparison correct here.
-func originVersion(spec *generated.TypeSpec, obj map[string]any, at time.Time) string {
+func originVersion(spec *generated.TypeSpec, obj map[string]any, parentVersion string, at time.Time) (string, string) {
 	if spec.VersionField != "" {
 		if raw, _ := obj[spec.VersionField].(string); raw != "" {
 			if t, err := time.Parse(time.RFC3339, raw); err == nil {
-				return t.UTC().Format(time.RFC3339)
+				return t.UTC().Format(time.RFC3339), memqlsync.VersionFromOrigin
 			}
 		}
 	}
-	return at.UTC().Format(time.RFC3339)
+	if parentVersion != "" {
+		return parentVersion, memqlsync.VersionFromOrigin
+	}
+	return at.UTC().Format(time.RFC3339), memqlsync.VersionFromRead
 }
 
 // normalizeJSON converts json.Number back to a plain number so the renderer

@@ -9,6 +9,7 @@ query ShopifyFetchArticle($id: ID!) {
     __typename
     ... on Article {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -28,6 +29,7 @@ query ShopifyFetchArticle($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -49,6 +51,7 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       author { name }
       blog { id }
       body
@@ -68,6 +71,7 @@ query ShopifyListArticle($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body
@@ -92,6 +96,7 @@ query ShopifyPageArticleComments($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           article { id }
           author { email name }
           body

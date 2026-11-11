@@ -113,6 +113,14 @@ type DomainSpec struct {
 	// the connector stamps MirrorWrite.Version itself and the runtime
 	// compares against the stored row's recorded version.
 	VersionField string
+	// VersionSourceField, when set, names the payload field the connector
+	// writes on every row to say where VersionField's value came from
+	// (VersionFromOrigin or VersionFromRead). A stored row on which it is
+	// empty was written before the connector stamped it, and its version is
+	// a clock of MemQL's that orders nothing against the origin's: the guard
+	// reads it as holding no version (StoredVersion). Empty means every
+	// stored version is compared, as before the field existed.
+	VersionSourceField string
 	// ReconcileInterval is how often the reconciliation runner should
 	// sweep this domain. Zero means "do not schedule" -- reconciliation
 	// is then operator-driven only.

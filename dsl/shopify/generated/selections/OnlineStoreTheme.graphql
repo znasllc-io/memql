@@ -9,6 +9,7 @@ query ShopifyFetchOnlineStoreTheme($id: ID!) {
     __typename
     ... on OnlineStoreTheme {
       id
+      updatedAt
       name
       prefix
       processing
@@ -25,6 +26,7 @@ query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       name
       prefix
       processing

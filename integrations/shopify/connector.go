@@ -208,19 +208,9 @@ func (c *Connector) Domains() []memqlsync.DomainSpec {
 		if spec == nil {
 			continue
 		}
-		out = append(out, memqlsync.DomainSpec{
-			Concept: generated.ConceptID(concept),
-			// The ORIGIN's own version, which the runtime compares
-			// against the stored row before applying. Every mirrored
-			// concept carries it in `updatedAt`; for a type Shopify
-			// publishes no version for, the connector stamps the fetch
-			// time into that field and the guard degrades to
-			// last-write-wins -- recorded on the TypeSpec rather than
-			// discovered at runtime.
-			VersionField:      "updatedAt",
-			ReconcileInterval: parseCadence(spec.Cadence, spec.Reconcile),
-			Direction:         memqlsync.DirectionInbound,
-		})
+		d := mirrorDomain(generated.ConceptID(concept))
+		d.ReconcileInterval = parseCadence(spec.Cadence, spec.Reconcile)
+		out = append(out, d)
 	}
 	for _, concept := range originDomains {
 		out = append(out, memqlsync.DomainSpec{
@@ -229,6 +219,25 @@ func (c *Connector) Domains() []memqlsync.DomainSpec {
 		})
 	}
 	return out
+}
+
+// mirrorDomain is a mirrored concept's version guard as the runtime and the
+// connector's own heal both read it.
+//
+// The ORIGIN's own version, compared against the stored row before a write.
+// Every mirrored concept carries it in `updatedAt`; for a type Shopify
+// publishes no version for, the connector stamps the time of reading into
+// that field and the guard degrades to last-write-wins -- recorded on the
+// TypeSpec rather than discovered at runtime. `versionSource` says which of
+// the two a row holds, and a row without it was written before every write
+// said: it holds no version (memqlsync.StoredVersion).
+func mirrorDomain(conceptID string) memqlsync.DomainSpec {
+	return memqlsync.DomainSpec{
+		Concept:            conceptID,
+		VersionField:       "updatedAt",
+		VersionSourceField: "versionSource",
+		Direction:          memqlsync.DirectionInbound,
+	}
 }
 
 // parseCadence turns the allowlist's duration string into the interval

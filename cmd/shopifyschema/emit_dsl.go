@@ -126,7 +126,7 @@ func childLabel(p *TypePlan) string {
 	return "partOf" + strings.ToUpper(p.ParentConcept[:1]) + p.ParentConcept[1:]
 }
 
-// mirrorColumns are the five (six with a parent) fields every mirror row
+// mirrorColumns are the six (seven with a parent) fields every mirror row
 // carries regardless of type.
 func mirrorColumns(p *TypePlan) string {
 	var b strings.Builder
@@ -141,6 +141,10 @@ func mirrorColumns(p *TypePlan) string {
 	b.WriteString("  gid        string!\n")
 	b.WriteString("  /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.\n")
 	b.WriteString("  updatedAt  datetime!\n")
+	b.WriteString("  /// Where updatedAt came from: \"origin\", Shopify's own version (or, on a tombstone, when the row was found gone), or\n")
+	b.WriteString("  /// \"read\", when MemQL read a row Shopify publishes no version for. Empty on a row written before every write said; its\n")
+	b.WriteString("  /// updatedAt is then a time MemQL read it, and the guard reads it as holding no version.\n")
+	b.WriteString("  versionSource string\n")
 	b.WriteString("  /// When MemQL last wrote a change to this row: a delivery, or a reconciliation pass that found it different. A pass that\n")
 	b.WriteString("  /// finds the row unchanged writes nothing, so this is not when it was last checked; the domain's sync state (lastReconcileAt) is.\n")
 	b.WriteString("  syncedAt   datetime!\n")

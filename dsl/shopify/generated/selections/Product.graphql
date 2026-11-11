@@ -9,6 +9,7 @@ query ShopifyFetchProduct($id: ID!) {
     __typename
     ... on Product {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -58,6 +59,7 @@ query ShopifyFetchProduct($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -97,6 +99,7 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       availablePublicationsCount { count precision }
       bundleConsolidatedOptions { name selections { value } }
       category { ancestorIds childrenIds fullName id isArchived isLeaf isRoot level name parentId }
@@ -146,6 +149,7 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode
@@ -188,6 +192,7 @@ query ShopifyPageProductVariants($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           availableForSale
           availablePublicationsCount { count precision }
           barcode

@@ -195,7 +195,14 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		// no longer has is the RACE this arm exists for: the delete
 		// delivery may arrive later, out of order, or never. Tombstoning
 		// on an empty fetch is what makes the mirror converge without it.
-		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, deliveredAt(req, c.now()))}, nil
+		//
+		// Its version is the FETCH's time, not this delivery's event time:
+		// the fetch is what proves the record gone, and by then every state
+		// the origin published of it is older. The event time is not: a
+		// delivery retried after a later one landed carries an event older
+		// than the state that later one wrote, and its tombstone was refused
+		// as stale, leaving a deleted record live.
+		return []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, c.now())}, nil
 	}
 	return writes, nil
 }
@@ -339,8 +346,8 @@ func deliveredGID(body []byte, graphqlType string) string {
 }
 
 // deliveredAt reads the origin's own timestamp for the delivery, falling back
-// to now. Used as the version on a tombstone, where there is no object left
-// to read a version from.
+// to now. Used as the version on a delete topic's tombstone, where there is
+// no object left to read a version from: the delete's own event time.
 func deliveredAt(req memqlsync.InboundRequest, fallback time.Time) time.Time {
 	if raw := header(req, HeaderTriggeredAt); raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {

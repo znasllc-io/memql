@@ -9,6 +9,7 @@ query ShopifyFetchCompany($id: ID!) {
     __typename
     ... on Company {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -30,6 +31,7 @@ query ShopifyFetchCompany($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -56,6 +58,7 @@ query ShopifyFetchCompany($id: ID!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -74,6 +77,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       contactsCount { count precision }
       customerSince
       defaultCursor
@@ -95,6 +99,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -121,6 +126,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact
@@ -142,6 +148,7 @@ query ShopifyPageCompanyLocations($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
           buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
@@ -176,6 +183,7 @@ query ShopifyPageCompanyContacts($id: ID!, $after: String!) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          updatedAt
           company { id }
           customer { id }
           isMainContact

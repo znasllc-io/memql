@@ -9,6 +9,7 @@ query ShopifyBulkOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         additionalFees { id name price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } taxLines { channelLiable priceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } rate ratePercentage source title } }
         alerts { actions { primary show title url } content dismissibleHandle icon severity title }
         app { icon { altText height id thumbhash url width } id name }
@@ -200,6 +201,7 @@ query ShopifyBulkOrder($query: String) {
         }
         refunds {
           id
+          updatedAt
           duties { amountSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } originalDuty { countryCodeOfOrigin harmonizedSystemCode id price { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } } } }
           legacyResourceId
           note
@@ -212,6 +214,7 @@ query ShopifyBulkOrder($query: String) {
         }
         fulfillments {
           id
+          updatedAt
           deliveredAt
           displayStatus
           estimatedDeliveryAt

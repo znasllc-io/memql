@@ -44,6 +44,14 @@ import (
 //     for an origin that publishes no version is the best available
 //     answer rather than a bug.
 //
+// A connector may also name DomainSpec.VersionSourceField, the payload
+// field it writes on every row to say where the version came from. A stored
+// row without it was written before the connector said, and holds no version
+// (memqlsync.StoredVersion): the Shopify connector stamped such rows with the
+// time it read them, a clock that would refuse every honest origin version.
+// The rule and the comparison live in the contract, so a connector's own
+// sweep (which heals without the applier) calls the same functions.
+//
 // A write that loses the comparison is RECORDED as stale and skipped,
 // never applied. Recorded rather than dropped because a mirror that
 // keeps rejecting stale writes is a webhook stream that is reordering,
@@ -116,63 +124,27 @@ func (a *Applier) Apply(
 	return out, nil
 }
 
-// isStale reports whether this write is older than what MemQL holds.
+// isStale reports whether this write is older than what MemQL holds, by the
+// contract's one comparison (memqlsync.Stale), which a connector's own sweep
+// calls too.
 //
 // A row MemQL does not have is never stale: a first delivery has nothing
 // to be older than, and refusing it would leave the mirror permanently
 // empty. Same for a write carrying no version -- a connector that cannot
 // say when a change happened gets last-write-wins, which is what it had
-// before the guard existed.
+// before the guard existed -- and for a row holding none (StoredVersion).
 func (a *Applier) isStale(ctx context.Context, spec memqlsync.DomainSpec, w memqlsync.MirrorWrite) (bool, error) {
-	incoming := strings.TrimSpace(w.Version)
-	if incoming == "" {
+	if strings.TrimSpace(w.Version) == "" {
 		return false, nil
 	}
 	stored, exists, err := a.writer.StoredVersion(ctx, spec, w.RowId)
 	if err != nil {
 		return false, err
 	}
-	if !exists || strings.TrimSpace(stored) == "" {
+	if !exists {
 		return false, nil
 	}
-	return compareVersions(incoming, stored) < 0, nil
-}
-
-// compareVersions orders two version strings.
-//
-// RFC3339 timestamps are compared as INSTANTS, not as strings: the two
-// orders agree only while both sides use the same precision and offset,
-// and an origin that sends "+00:00" where MemQL stored "Z" would compare
-// wrong for every row. Anything that does not parse as a timestamp falls
-// back to a lexicographic compare, which is the right answer for a
-// zero-padded sequence and an honest guess for anything else.
-func compareVersions(a, b string) int {
-	ta, aok := parseVersionTime(a)
-	tb, bok := parseVersionTime(b)
-	if aok && bok {
-		switch {
-		case ta.Before(tb):
-			return -1
-		case ta.After(tb):
-			return 1
-		default:
-			return 0
-		}
-	}
-	return strings.Compare(a, b)
-}
-
-func parseVersionTime(s string) (time.Time, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC(), true
-		}
-	}
-	return time.Time{}, false
+	return memqlsync.Stale(w.Version, stored), nil
 }
 
 // Dispatcher routes a staged inbound request to its connector.
@@ -496,7 +468,7 @@ func (d *Dispatcher) recordInboundHealth(
 		seen[key] = struct{}{}
 
 		origin := receivedAt
-		if t, ok := parseVersionTime(w.Version); ok {
+		if t, ok := memqlsync.VersionTime(w.Version); ok {
 			origin = t
 		}
 		lag := 0

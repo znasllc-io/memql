@@ -381,6 +381,15 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 	if spec.ListQuery == "" || spec.ListOp == "" {
 		return report, nil
 	}
+	// When the listing began: the version of every tombstone it writes. A
+	// row a delivery wrote after this moment is not in the listing and not
+	// gone, and its version is later, so heal refuses the tombstone. A second
+	// earlier, because versions are kept to the second and a tie applies: a
+	// row created in the second the listing began would otherwise tie with
+	// its tombstone and be retired. The cost is the other way and is the one
+	// a relist already prefers -- a row last changed in that second and gone
+	// since is kept until the next pass.
+	begun := c.now().Add(-time.Second)
 	seen := map[string]bool{}
 	after := ""
 	complete := false
@@ -431,13 +440,12 @@ func (c *Connector) relist(ctx context.Context, store Store, spec *generated.Typ
 		return report, err
 	}
 	for _, gid := range absent {
-		if err := c.writeMirror(ctx, tombstone(spec.Concept, store.ID, gid, c.now())); err != nil {
-			c.logger.Warn("shopify: could not tombstone an absent row",
-				"store", store.ID, "concept", spec.Concept, "gid", gid, "error", err)
-			continue
+		// heal logs a row it could not write; a tombstone it refused is a
+		// row written after the listing began.
+		if healed, _ := c.heal(ctx, []memqlsync.MirrorWrite{tombstone(spec.Concept, store.ID, gid, begun)}); healed > 0 {
+			report.Drifted++
+			report.Healed++
 		}
-		report.Drifted++
-		report.Healed++
 	}
 	return report, nil
 }

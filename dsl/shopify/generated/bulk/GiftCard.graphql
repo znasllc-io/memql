@@ -9,6 +9,7 @@ query ShopifyBulkGiftCard($query: String) {
     edges {
       node {
         id
+        updatedAt
         balance { amount currencyCode }
         crossCurrencyRedemptionStrategy
         customer { id }

@@ -9,6 +9,7 @@ query ShopifyBulkProductVariant($query: String) {
     edges {
       node {
         id
+        updatedAt
         availableForSale
         availablePublicationsCount { count precision }
         barcode

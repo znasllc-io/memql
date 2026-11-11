@@ -9,6 +9,7 @@ query ShopifyFetchCustomer($id: ID!) {
     __typename
     ... on Customer {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }
@@ -68,6 +69,7 @@ query ShopifyListCustomer($first: Int!, $after: String, $query: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
+      updatedAt
       amountSpent { amount currencyCode }
       canDelete
       companyContactProfiles { id }

@@ -334,6 +334,10 @@ func bootHarness(t *testing.T, rows map[string]map[string]any) *testHarness {
 	return h
 }
 
+// completedUnderTheRule is the cursor a backfill begun on this build
+// completes with (finished): the rule it read the domain under.
+var completedUnderTheRule = backfillCursor{Rule: originVersionRule}.encode()
+
 var bootQueuedRE = regexp.MustCompile(`conceptId: "v1:shopify:(\w+)", connector: "shopify", partitionKey: "([^"]*)"`)
 
 // bootQueued is the domains queued, as store/concept.
@@ -366,7 +370,8 @@ func TestAStoreConnectedBeforeThisVersionHasItsBackfillsQueuedAtBoot(t *testing.
 func TestBootQueuesNothingForADomainThatHasItsRow(t *testing.T) {
 	has := func(concept string) (string, map[string]any) {
 		id := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), testStoreID)
-		return id, map[string]any{"id": id, "conceptId": generated.ConceptID(concept), "connector": ConnectorName, "partitionKey": testStoreID, "backfillStatus": "complete"}
+		return id, map[string]any{"id": id, "conceptId": generated.ConceptID(concept), "connector": ConnectorName, "partitionKey": testStoreID,
+			"backfillStatus": "complete", "backfillCursor": completedUnderTheRule}
 	}
 	rows := map[string]map[string]any{}
 	for _, concept := range []string{"order", "customer"} {
@@ -502,14 +507,17 @@ func TestBootQueuesADomainWhoseRowWasNeverBackfilled(t *testing.T) {
 		"none, with a cursor":   {map[string]any{"backfillStatus": "none", "backfillCursor": "c-1"}, false},
 		"queued":                {map[string]any{"backfillStatus": "queued"}, false},
 		"running":               {map[string]any{"backfillStatus": "running", "backfillCursor": "c-1"}, false},
-		"complete":              {map[string]any{"backfillStatus": "complete"}, false},
-		"failed":                {map[string]any{"backfillStatus": "failed", "lastError": "backfill refused: x"}, false},
+		"complete":              {map[string]any{"backfillStatus": "complete", "backfillCursor": completedUnderTheRule}, false},
+		// Read whole before every write carried the origin's version: read
+		// once more (TestADomainReadBeforeThisRuleIsQueuedOnceMore).
+		"complete before the rule": {map[string]any{"backfillStatus": "complete"}, true},
+		"failed":                   {map[string]any{"backfillStatus": "failed", "lastError": "backfill refused: x"}, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			rows := map[string]map[string]any{}
 			for _, concept := range commerceBulkDomains {
-				id, r := row(concept, map[string]any{"backfillStatus": "complete"})
+				id, r := row(concept, map[string]any{"backfillStatus": "complete", "backfillCursor": completedUnderTheRule})
 				rows[id] = r
 			}
 			id, r := row("customer", tc.fields)

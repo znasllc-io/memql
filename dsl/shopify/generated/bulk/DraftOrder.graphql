@@ -9,6 +9,7 @@ query ShopifyBulkDraftOrder($query: String) {
     edges {
       node {
         id
+        updatedAt
         acceptAutomaticDiscounts
         allVariantPricesOverridden
         allowDiscountCodesInCheckout

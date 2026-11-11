@@ -96,6 +96,58 @@ func TestAWriteCarryingNoVersionIsAlwaysApplied(t *testing.T) {
 	}
 }
 
+// A ROW WRITTEN BEFORE ITS CONNECTOR SAID WHERE ITS VERSIONS COME FROM holds
+// a clock of MemQL's where the version should be: the Shopify connector
+// stamped the time it read an object, or streamed a bulk line, because no
+// document selected the origin's updatedAt. Compared against the origin's own
+// version, that clock refuses every honest write -- the read time is later
+// than the last change it read -- so such a row holds no version, and the
+// first write carrying the origin's replaces it. A row the connector did
+// stamp is guarded as always, from either source.
+func TestAStoredRowWithNoOriginVersionNeverRefusesOneThatHasIt(t *testing.T) {
+	spec := memqlsync.DomainSpec{Concept: testMirrorConcept, VersionField: "updatedAt", VersionSourceField: "versionSource", Direction: memqlsync.DirectionInbound}
+	specs := map[string]memqlsync.DomainSpec{testMirrorConcept: spec}
+	read := `concept==` + testMirrorConcept + ` && id=="p1"`
+	stored := func(payload map[string]any) *Applier {
+		engine := newFakeEngine()
+		engine.seed(read, []map[string]any{{"id": "p1", "payload": payload}})
+		return NewApplier(NewStore(engine), NewEngineMirrorWriter(engine))
+	}
+	older := []memqlsync.MirrorWrite{{Concept: testMirrorConcept, RowId: "p1", Version: "2026-08-23T11:00:00Z", Payload: map[string]any{"versionSource": "origin"}}}
+
+	// Written before the rule: updatedAt is the time it was read.
+	res, err := stored(map[string]any{"updatedAt": "2026-08-23T12:00:00Z", "syncedAt": "2026-08-23T12:00:00Z"}).
+		Apply(context.Background(), "shopify", specs, older)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Applied != 1 || res.Stale != 0 {
+		t.Fatalf("applied=%d stale=%d over a row written before the rule, want 1/0: its read time is no version", res.Applied, res.Stale)
+	}
+
+	// Written under the rule, from either source: guarded as always.
+	for _, source := range []string{memqlsync.VersionFromOrigin, memqlsync.VersionFromRead} {
+		res, err := stored(map[string]any{"updatedAt": "2026-08-23T12:00:00Z", "syncedAt": "2026-08-23T12:00:05Z", "versionSource": source}).
+			Apply(context.Background(), "shopify", specs, older)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if res.Applied != 0 || res.Stale != 1 {
+			t.Errorf("applied=%d stale=%d over a row whose version came from %q, want 0/1", res.Applied, res.Stale, source)
+		}
+	}
+
+	// A spec that names no source field compares every stored version, as before.
+	plain := map[string]memqlsync.DomainSpec{testMirrorConcept: {Concept: testMirrorConcept, VersionField: "updatedAt", Direction: memqlsync.DirectionInbound}}
+	res, err = stored(map[string]any{"updatedAt": "2026-08-23T12:00:00Z"}).Apply(context.Background(), "shopify", plain, older)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if res.Stale != 1 {
+		t.Errorf("stale=%d with no source field named, want 1", res.Stale)
+	}
+}
+
 // Timestamps are compared as INSTANTS. Two spellings of one moment must
 // order equal, or every row with a differently-formatted origin version
 // compares wrong.
@@ -112,8 +164,8 @@ func TestVersionsAreComparedAsInstantsNotStrings(t *testing.T) {
 		{"000000123", "000000124", -1},
 	}
 	for _, tc := range cases {
-		if got := compareVersions(tc.a, tc.b); got != tc.want {
-			t.Errorf("compareVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		if got := memqlsync.CompareVersions(tc.a, tc.b); got != tc.want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
 		}
 	}
 }
