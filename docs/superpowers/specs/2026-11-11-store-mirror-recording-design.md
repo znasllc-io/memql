@@ -52,9 +52,13 @@ Checked in the code at `6a43368be` and on the owner's instance.
 | F9 | Suspected: an order selects `lineItems(first: 100)` and nothing pages a child connection, so an order with more lines would lose the rest. | `integrations/shopify/generated/model.go` |
 | F10 | Suspected: the generated reads require `actor.isClusterOwner`, and the connector's actor has the role `connector`. The connector's own reads of the mirror would answer nothing: no tombstone on a full re-list, empty `commerceSold`. | `dsl/shopify/generated/order.memql:317`; `component/auth/connector_actor.go` |
 | F11 | Nobody is told. A broken mirror is a row in Cluster > Data. | |
+| F12 | No webhook was ever registered. Every creation carried `apiVersion` inside `WebhookSubscriptionInput`, which the type does not define, and Shopify refused the whole call. The store's health read 66 desired, none existing, 66 failed; the mirror moved only when a sweep ran, so a new order waited up to an hour. Found on 2026-11-11 by placing an order and watching it not arrive. **Fixed on `main` in `177cf52bb` (0.31.33)**, ahead of the rest of this record. | `subscriptionInput` (`integrations/shopify/subscriptions.go`) |
 
 F9 and F10 come from reading the code. Each gets a failing test before any fix, and
 is dropped from this record if the test passes.
+
+F12 is why the verdict's `events_not_registered` reason matters: the failure sat on
+the store's health for weeks, and no screen draws that record.
 
 ## 3. Shape of the solution
 
@@ -267,7 +271,11 @@ only if a kit piece is added.
 1. **Settings, with no release.** The operator makes the data declaration (D3). The
    development store's owner opens MemQL OS from the store's admin and approves, which
    also brings the grant up to today's list (F3). Orders arrive with the next hourly
-   sweep, or at once with the operator's Backfill button.
+   sweep, or at once with the operator's Backfill button. Done on the owner's instance
+   on 2026-11-11: the store's 20 orders were recorded a minute after the approval, by
+   the sweep, with no backfill pressed.
+1a. **The webhook fix, released by itself** (F12, 0.31.33), so that a new order arrives
+   within seconds while the rest is built.
 2. **The release** carrying U1 to U8.
 3. **The store approves once more**, for the scopes of D1. The backfill starts by
    itself.
@@ -278,7 +286,42 @@ only if a kit piece is added.
    rest is built. If it is still open when a merchant is ready, the private app of
    section 4 is the fallback.
 
-## 13. Not in this version
+## 13. Settled while planning
+
+The plan (`docs/superpowers/plans/2026-11-11-store-mirror-recording.md`) read the code
+this record names and settled what it left open. Where the two differ, the plan holds.
+
+- **A third standing answer.** Besides "not granted", a domain can be "not requested":
+  outside the store's connection, or refused by Shopify for a scope the connection
+  never asks for (inventory shipments and transfers, for one). Neither is an error, and
+  neither keeps a store from reading Recording.
+- **`check_failing`** means no clean sweep of the domain within twice its interval, the
+  same threshold `recording` uses. Nothing counts failed sweeps, and no field is added
+  to count them.
+- **"Orders since"** is stamped on the store's health when the order backfill is first
+  queued, 60 days back, because the store row holds no connect time.
+- **A store connected before this version** gets its backfills queued at boot, for the
+  domains it never backfilled.
+- **A retried delivery fetches again.** The connector forgets a webhook id whose apply
+  failed, or its own 15-minute duplicate guard would swallow the retries at 1 and 5
+  minutes.
+- **The continuing pass** runs one domain of a store on a tick and yields when a
+  running bulk operation made no progress.
+- **"Try again"** for deliveries sits beside the dead letters in Cluster > Data, one line
+  for each store, because a delivery belongs to a store and not to a domain.
+- **The alert wait** is read and set through two builtins and one field on Settings >
+  Shopify, which is where a value outside 1 minute to 24 hours is refused.
+- **F9's fix** is in the generator: the fetch document selects the first hundred lines
+  with no page info, so the model is regenerated.
+- **The scope list is also stated in `docs/public/operate/shopify-connect.md`**, and a
+  test holds that sentence to the list. Both move together.
+- **What a store approves is what Connect asks for.** The app's configuration at Shopify
+  uses the legacy install flow, so the list in the authorization request decides: on
+  2026-11-11 a store was offered "Edit products" although the app's own version listed
+  only read access. The app version's list is kept in line for the record, and its
+  Webhooks API version is the pinned one.
+
+## 14. Not in this version
 
 - The statistics screen for a storefront's purchases. It has its own record and reads
   what this one records.
