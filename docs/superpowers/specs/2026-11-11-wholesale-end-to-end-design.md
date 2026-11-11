@@ -746,7 +746,7 @@ U10, in that order, because they share `concepts.memql`, `mutations.memql` and
 uses the engine test database the repository's tests already require.
 
 **N5 and N1 first.** U1 opens with a failing database test of the client's grant
-automation (N1). U4 includes the direct call that settles N5. G6 is settled by U7's
+automation (N1). U4 includes the direct call that proves N5 closed (X22). G6 is settled by U7's
 first test. A suspicion whose test passes is struck from section 2 in the plan.
 
 **Live, against a development store** (E7), skipped without credentials:
@@ -759,8 +759,8 @@ first test. A suspicion whose test passes is struck from section 2 in the plan.
 5. Provision again re-tags.
 6. The automation path: an approve decision written through the pack, with the
    client's grant automation loaded, leaves a `granted` row and the tag on.
-7. A signed-in non-owner calls `shopifyTagWholesaleCustomer` directly; the answer
-   is recorded and settles N5.
+7. A signed-in non-owner calls `shopifyTagWholesaleCustomer` directly and is
+   refused before any Admin call (X22), which closes N5.
 8. U13: suspend untags, reinstate re-tags, revoke from suspended untags.
 
 **The walk, on the owner's instance**, against a development store, after the
