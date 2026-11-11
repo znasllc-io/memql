@@ -159,7 +159,7 @@ Each is marked so the owner can spot it.
 | X7 | One private-link row per application and purpose, at a derived id. Minting writes a new version with a new hash, which ends the old link (its hash no longer matches). A link to the terms ends at expiry, at acceptance, or when the application is no longer submitted. A link to the price sheet has no expiry; it works while the application is approved and its access granted, and always shows the current price sheet. | One row is one answer to "what link does this person hold". A price sheet a buyer rereads in month three must still open; removal ends it. |
 | X8 | `termsRequired` absent means false. Turning it on while applications are open, or opening while it is on, is refused when any of the three documents has no version. | A second client without terms keeps today's behaviour; the client turns it on once its documents are published. |
 | X9 | The lane skips an address whose suppression reason is `hard_bounce`, `complaint` or `manual`, cluster-wide or in the organization, and ignores `unsubscribed`. | E1: a newsletter unsubscribe must not block a person's own application mail; a dead address, a complaint and an operator's block must. |
-| X10 | A template gains `purpose` (`marketing` or `transactional`; absent is marketing). The lane sends only a published transactional template. A campaign or a journey refuses a transactional template. | G8. The lane has no unsubscribe, so its templates must not be reachable from the bulk path, and the bulk path's must not be reachable from it. |
+| X10 | A template gains `purpose` (`marketing` or `transactional`; absent is marketing). The lane sends only a published transactional template. A campaign, a journey step and an event email rule (`component/emailrules`, when armed and when it fires) each refuse a transactional template. | G8. The lane has no unsubscribe, so its templates must not be reachable from the bulk path, and the bulk path's must not be reachable from it. |
 | X11 | The template for each email kind is a settings field the client's staff set, from the organization's published transactional templates. The sender identity is a settings field the cluster's operators set; empty means the organization's configured sender. | Same split as reviews (`reviewspack/dsl/builtins.memql:56-72`): wording is the store's, the mailbox the mail leaves from is an operator's. |
 | X12 | The staff notice is staged by the pack through `stageServerOutboundRequest` to the settings' `staffEmail`, which must be on the outbound allowlist. The client's DSL passes subject and body with a closed set of placeholders the pack fills. | W4 says the client writes the wording; the outbox is the operational lane and already has the allowlist control. |
 | X13 | The acceptance sentence is a settings field (`acceptanceText`) with an engine default, shown by the terms page and copied into the record. | The record must hold the exact sentence shown, and that sentence is the client's. |
@@ -261,7 +261,7 @@ created by the engine with a generated id, never updated. The newest per
 | `usedAt` | datetime, set when a terms link is accepted |
 
 **`acceptance`** (new). One per application, at `wholesale-acceptance-<slug(applicationId)>`,
-`@createOnly`: a second acceptance of one application is refused. Tier as above.
+A second acceptance of one application is refused: the construct reads the acceptance first and answers `link_used` when one exists, and the write carries a row-version fence that requires the row to be absent (`ContextWithRowVersionFence` with a zero version), so of two posts at once one writes and the other answers `link_used`. Tier as above.
 
 | Field | Type |
 | --- | --- |
@@ -309,7 +309,7 @@ All `@serverOnly`. Existing ones keep their names and gain arguments.
 | `putWholesaleSettingsRow` (new) | The whole merged settings row at `SettingsRowID(storeId)`, every field of 5.1, as `putReviewSettings` does. |
 | `appendDocumentVersion` (new) | Insert with a generated id. |
 | `putPrivateLinkRow` (new) | Insert at the derived id. |
-| `putAcceptanceRow` (new) | Insert at the derived id, `@createOnly`. |
+| `putAcceptanceRow` (new) | Insert at the derived id; the caller fences it to an absent row (5.1). |
 | `putEmailSendRow` (new) | Insert at the derived id. |
 | `backfillWholesaleRow` (new) | One per concept (`backfillApplicationRow`, `backfillDecisionRow`, `backfillEntitlementRow`, `backfillSettingsRow`): writes the row at its own id with every field it held plus `accountId` (and `ownerUserId` for a decision). |
 
@@ -357,11 +357,11 @@ authority with client origin.
 | `wholesaleRemoveBuyer` (new) | gated | application | applicationId, note | records a revoke decision; the tag comes off through the client's automation (N4), and `wholesaleRetryAccess` takes it off if that automation is not wired |
 | `wholesaleResendEmail` (new) | gated | application | applicationId, kind (`terms` or `approved`) | the new `emailSend` row |
 | `wholesaleExportStore` (new) | gated | site | siteId, storeId | `{fileName, json}`: applications, the extension's fields, acceptances, decisions, entitlements, email sends, document versions, settings; never a token hash |
-| `wholesaleSendTermsEmail` (new) | internal | | applicationId | mints the terms link, sends email 1; skipped with a reason when terms are not required, the template is unset, or the application is not submitted |
-| `wholesaleSendBuyerEmail` (new) | internal | | applicationId, kind | sends email 3, 4 or 5; `approved` needs state approved and the entitlement granted (W3), mints the price-sheet link; `rejected` and `revoked` need that state |
+| `wholesaleSendTermsEmail` (new) | internal | | applicationId | sends email 1 through the lane, whose resolver mints the terms link at hand-over; skipped with a reason when terms are not required, the template is unset, or the application is not submitted |
+| `wholesaleSendBuyerEmail` (new) | internal | | applicationId, kind | sends email 3, 4 or 5; `approved` needs state approved and the entitlement granted (W3), and the resolver mints the price-sheet link at hand-over; `rejected` and `revoked` need that state |
 | `wholesaleNotifyStaff` (new) | internal | | applicationId, event, subject, body, decisionId | stages one staff notice (section 7.3) |
 | `wholesaleTermsForLink` (new) | shopper read | | requestToken | the company, the current terms and MAP policy (kind, label, body, fingerprint), the acceptance sentence, the expiry; or a named refusal |
-| `wholesaleAcceptTerms` (new) | shopper form | | requestToken, acceptTerms, acceptMap, signedName, plus stamped evidence | writes the acceptance; or a named refusal |
+| `wholesaleAcceptTerms` (new) | shopper form | | requestToken, acceptTerms, acceptMap, signedName, plus the evidence the handler puts on the request's context | writes the acceptance; or a named refusal |
 | `wholesalePriceSheetForLink` (new) | shopper read | | requestToken | the company and the current price sheet; or a named refusal |
 | `wholesaleBackfillAccounts` (new) | cluster owners and internal only | | storeId (optional) | counts: tied, already tied, left untied with why (X19) |
 
@@ -387,7 +387,7 @@ pages; they call the reads.
 | --- | --- |
 | `component/memql/shopper_surface.go` | `accountId`, `clientAddress` and `userAgent` join the reserved names. `ShopperForm` gains `Evidence bool`. |
 | `component/memql/shopper_extension.go` | `ShopperExtension` gains `AcceptsAccount bool`, set by the loader when the extension's mutation declares an `accountId` argument. |
-| `component/server/shopper_handler.go` | `ShopperSite` gains `AccountID`. The handler stamps `accountId` into the pack's arguments, and into the extension's when `AcceptsAccount`. For an `Evidence` form it stamps `clientAddress` from the edge's header and `userAgent` from the request (cut to 512). |
+| `component/server/shopper_handler.go` | `ShopperSite` gains `AccountID`. The handler stamps `accountId` into the pack's arguments, and into the extension's when `AcceptsAccount`. For an `Evidence` form it puts `clientAddress` from the edge's header and `userAgent` from the request (cut to 512) on the context it executes the construct with, never in the arguments, so a direct call of the construct carries no evidence. |
 | `app/transport_shopper_surface.go` | Reads `accountId` off the site row into `ShopperSite`. |
 | `component/edge/shopper.go` | Sets `X-Memql-Shopper-Client` to `shopperClientAddress(r)` on the proxied request, after deleting any inbound copy, beside the three stamp headers. |
 | `component/auth/rbac_model.go`, `dsl/rbac/seeds.memql` | `"app:deployables/wholesale": {RoleOwner, RoleDeveloper}` and its two seeds. |
@@ -423,17 +423,21 @@ builtin campaignSendRowMessage {
   accountId         string!  // the row's organization; template and sender must be its
   templateId        string!  // a published transactional template
   requestId         string!  // one message; a retry returns its receipt
-  fields            object   // values for {{fields.<key>}}
+  kind              string!  // which message about the row; handed to the row's resolver
   senderIdentityId  string   // omit for the organization's sender
 }
 ```
 
-**One person, never an address.** No argument names a recipient. A pack registers,
-from Go at init, which concept and field hold the address:
+**One person, never an address.** No argument names a recipient or carries the
+message's fields. A pack registers, from Go, a resolver for its row concept:
 `campaigns.RegisterRowAddress(RowAddress{Concept: "v1:wholesale:application",
-EmailField: "applicantEmail", AccountField: "accountId"})`. A DSL file cannot
-register one. The lane reads the row under the system actor, takes the address
-from that field, and refuses when the row's account is not `accountId`.
+Resolve: ...})`. A DSL file cannot register one. The lane calls the resolver only
+when it is about to hand a message to the provider, with the concept, the row id,
+the account, the `kind` and the request id; the resolver answers the recipient's
+address, the row's account and the `{{fields.<key>}}` values for that kind, or
+withdraws the message with a reason (ledgered `skipped`). The lane refuses when
+the resolved account is not `accountId`. The wholesale pack registers it when its
+provider is built, so a cluster where the pack is disabled registers nothing.
 
 **For trusted jobs only.** A call without internal origin is refused before
 anything is read, as order mail does (`send_order.go:53-55`). The wholesale pack
@@ -461,9 +465,13 @@ resolution and the delivery ledger are the existing ones. What differs:
 - **Transactional templates only.** `tmpl.Status == "ready"` and
   `tmpl.Purpose == "transactional"`, else the send is held with the template named
   (`templateHeld`), which the pack records as `skipped` with that sentence.
-- **Replay knows the row.** `v1:campaigns:delivery` gains `rowConcept` and `rowId`
-  (string). The deferred-send replay rebuilds a row recipient from them instead of
-  reading a recipient row (G6). U7's first test settles whether order sends share
+- **Replay knows the row, and asks again.** `v1:campaigns:delivery` gains
+  `rowConcept`, `rowId` and `rowKind` (string), and never the fields. The
+  deferred-send replay rebuilds a row send from them instead of reading a recipient
+  row (G6), and the replayed send calls the resolver again, so a rate-limited
+  message goes out later with fresh fields (a link minted then) and no token is
+  ever stored. The receipt check comes before the resolver: a second call with the
+  same request id sends nothing and mints nothing. U7's first test settles whether order sends share
   the gap; if they do, the same two fields are set for them (`rowConcept:
   "v1:shopify:order"`) and that is recorded in the plan as a fix.
 
@@ -473,8 +481,9 @@ published in the Email app by anyone that app lets edit the organization's
 templates; the client's staff can when the organization grants them the Email app.
 `campaignSaveTemplate` gains an optional `purpose`; the Email app's template page
 shows it as a choice ("Marketing" / "About one person's own request: no unsubscribe").
-The campaign and journey pickers leave transactional templates out, and starting a
-campaign or a journey step with one is refused (X10). Each template uses
+The campaign, journey and event-rule pickers leave transactional templates out,
+and starting a campaign, saving a journey step, or arming or firing an event email
+rule with one is refused (X10). Each template uses
 `{{fields.<key>}}` tags from a closed set the pack fills:
 `companyName`, `applicantName`, `signInEmail`, `termsUrl`, `termsExpiresOn`,
 `priceSheetUrl`, `storeName`.
@@ -504,9 +513,13 @@ is the next attempt.
 
 ### 7.1 Private links (E2)
 
-- **Minted** by `wholesaleSendTermsEmail`, `wholesaleResendEmail(kind: terms)` and,
-  for the price sheet, `wholesaleSendBuyerEmail(kind: approved)` and its resend.
-  The token is 32 random bytes, base64url (`packs/reviewspack/request.go:52-59`
+- **Minted** by the pack's row resolver (section 6) at the moment the lane hands
+  the email to the provider: the terms link for a `terms` send
+  (`wholesaleSendTermsEmail`, `wholesaleResendEmail(kind: terms)`), the price-sheet
+  link for an `approved` send (`wholesaleSendBuyerEmail(kind: approved)` and its
+  resend). The send builtins themselves never mint, and a send whose request id
+  already has a receipt reaches no resolver, so a repeated event mints nothing.
+  A deferred email that is replayed mints a fresh link then. The token is 32 random bytes, base64url (`packs/reviewspack/request.go:52-59`
   is the code to copy). It is in the email only.
 - **Stored** as a new version of the one `privateLink` row for that application
   and purpose: the hash, `issuedAt`, and for terms `expiresAt = issuedAt +
@@ -526,8 +539,11 @@ is the next attempt.
   refuses an empty one (`link_invalid` is not used for that: an empty name answers
   `invalid` from the handler's own required-field check), reads the current versions
   of both documents again, and writes the acceptance and the link's `usedAt` in that
-  order. A crash between the two leaves an acceptance and a link that still opens;
-  the next post is refused by `@createOnly` and answers `link_used`.
+  order. It reads the acceptance first and answers `link_used` when one exists, and
+  the acceptance write is fenced to an absent row (`ContextWithRowVersionFence`
+  with a zero version), so of two posts at once one writes and the other answers
+  `link_used`. A crash between the two writes leaves an acceptance and a link that
+  still opens; the next post finds the acceptance and answers `link_used`.
 
 Both reads are `Private` (`component/memql/shopper_surface.go:284-289`): never
 cached, and the edge's existing rules keep the token out of a Referer.
@@ -554,7 +570,7 @@ cached, and the edge's existing rules keep the token out of a Referer.
 - `subject` and `body` are the client's text. The pack replaces a closed set of
   placeholders: `{{companyName}}`, `{{applicantName}}`, `{{applicantEmail}}`,
   `{{state}}`, `{{decidedBy}}` (the person's name), `{{note}}`, `{{adminUrl}}` (the
-  OS address of this application). Nothing from the client's extension row is
+  OS address, built as reviews builds it; there is no deep link to one application). Nothing from the client's extension row is
   reachable, so a tax number cannot travel by accident.
 - Staged with `stageServerOutboundRequest`, request id
   `wholesale-staff-<event>-<slug(applicationId)>[-<slug(decisionId)>]`, so a
@@ -613,7 +629,7 @@ them out.
 3. *Terms*: accepted by the typed name, when, the two versions with their labels
    and the first eight characters of each fingerprint, the address and browser; or
    "Not accepted yet. The link expires on 12 December." or "The link has expired."
-4. *Access*: Granted on the customer, Not granted yet, or Failed, each with the
+4. *Access*: Trade prices on (on the customer), Not granted yet, or Failed, each with the
    sentence for its `errorCode`: `no_route` "No access route is chosen in
    Settings."; `no_settings` "This store has no wholesale settings."; `scope_missing`
    "The store has not allowed MemQL to change customers. Its owner approves the new
@@ -705,7 +721,7 @@ client's grant and revoke automations wired.
 | U3 Customer find-or-create, scopes and the origin refusal (E4, W10, W13, X22) | The four Shopify wholesale builtins refuse a call without internal origin and the pack's `engineCaller` stamps it (X22). `TagWholesaleCustomer` finds by email, else creates (email, split name, no marketing consent), then tags; a duplicate-email refusal from `customerCreate` re-reads and continues; returns whether it created. Untag of a missing customer succeeds. `write_customers` joins `ConnectScopes`. The guide's `failed` claim is corrected. | `integrations/shopify/{wholesale,wholesale_calls,wholesale_capabilities,connect}.go`, `dsl/shopify/overlay/builtins.memql`, `packs/wholesalepack/adapter_customer_tag.go`, `docs/public/build/consuming-the-wholesale-pack.md` | `TagWholesaleCustomer(ctx, store, email, name, tag) (gid string, created bool, err error)` | mirror branch landed | Unit tests with a fake Admin transport: missing customer created once; second run creates nothing and adds no second tag; a client-origin call to each of the four builtins is refused before any Admin call. |
 | U4 Live test (E7) | `integrations/shopify/wholesale_live_test.go`, skipped without development-store credentials: create a missing customer, tag, untag, re-tag, re-provision with no change, report a grant without `write_customers`, and call `shopifyTagWholesaleCustomer` as a signed-in non-owner to settle N5. A pack e2e that runs a client automation on an approve decision against the same store. | `integrations/shopify/wholesale_live_test.go`, `packs/wholesalepack/live_e2e_test.go` | the mirror plan's live harness where it exists | U1, U3 | Passes against a development store; the default suite skips cleanly. |
 | U5 Account stamping and backfill (W8 data half) | `accountId` on the four existing concepts; reserved names; `ShopperSite.AccountID`; handler stamps it into the pack's and the extension's arguments; `AcceptsAccount`; `wholesaleBackfillAccounts`. | `component/memql/{shopper_surface,shopper_extension}.go`, `component/server/shopper_handler.go`, `app/transport_shopper_surface.go`, `packs/wholesalepack/*` | section 5.6 | U1 | A database test: a form post on a site of organization A writes both rows with A; an extension without an `accountId` argument still writes; the backfill ties a pre-version row, its decisions and its entitlement, and reports a row with no resolvable site. |
-| U6 The part and the gated builtins (W8 access half, N2, X4, X5) | The part, its seeds, the organization gate cases; `applicationDecision`'s new tier; the read builtins, `wholesaleRetryAccess`, `wholesaleUpdateSettings`, `wholesaleStoreSettings`, `wholesaleBuyers`, `wholesaleDecisionLog`, `wholesaleExportStore`; operator refusal on decisions. | `component/auth/rbac_model.go`, `dsl/rbac/seeds.memql`, `component/memql/organization_action_capabilities.go`, `packs/wholesalepack/{reads,settings,export}.go` (new), `dsl/*.memql`, `clients/os/src/apps/deployables/parts.ts` | section 5.4 | U5 | A database test: a person in organization A holding the part lists and approves A's application and is refused on B's; a cluster operator reads and cannot decide; the site owner reads the moderator's decision. `TestTheDeployablesPartsAreDeclaredOnTheirConstructs` gains the part. |
+| U6 The part and the gated builtins (W8 access half, N2, X4, X5) | The part, its seeds, the organization gate cases; `applicationDecision`'s new tier; the read builtins, `wholesaleRetryAccess`, `wholesaleUpdateSettings`, `wholesaleStoreSettings`, `wholesaleBuyers`, `wholesaleDecisionLog`, `wholesaleExportStore`; operator refusal on decisions. | `component/auth/rbac_model.go`, `dsl/rbac/seeds.memql`, `component/memql/organization_action_capabilities.go`, `packs/wholesalepack/{reads,settings,export}.go` (new), `dsl/*.memql`, `clients/os/src/apps/deployables/parts.ts` | section 5.4 | U5 | A database test: a person in organization A holding the part lists and approves A's application and is refused on B's; a cluster operator reads and cannot decide; the site owner reads the moderator's decision. The part is pinned as reviews' is, by `component/memql/wholesale_capability_test.go` and the pack's own gate test; `TestTheDeployablesPartsAreDeclaredOnTheirConstructs` loads only the platform tree and cannot see the pack. |
 | U7 The lane (E1, X9, X10) | `campaignSendRowMessage`, `RegisterRowAddress`, `RenderOptions.Transactional`, `BlockingSuppression`, template `purpose`, the pickers' filter, delivery `rowConcept` and `rowId`, the replay, `campaignRowMessageStatus`. | `component/campaigns/{send_row,render,suppression,deferred_send,template}.go`, `dsl/campaigns/{concepts,builtins}.memql`, `clients/os/src/apps/email` (purpose choice, picker filter) | section 6 | none (parallel from the start) | Unit: no List-Unsubscribe header and no footer; a client-origin call refused; an unregistered concept refused; a marketing template held. Database: an address with an organization `unsubscribed` row is sent; one with `hard_bounce` is skipped; a rate-limited send is replayed with its row recipient; a second call with the same request id sends nothing. |
 | U8 Terms (E2, W5, X6 to X8, X13, X20) | The three new concepts; `wholesalePublishDocument`, `wholesaleDocuments`; the link mint and verify; the form and two reads; the evidence stamp in the edge and the handler; the two rules. | `packs/wholesalepack/{documents,links,acceptance}.go` (new), `shopper.go`, `dsl/*.memql`, `component/edge/shopper.go`, `component/server/shopper_handler.go` | sections 5.1, 5.5, 7.1, 7.2 | U5 | Unit: the token is never stored; expired, used, replaced and other-store tokens refused by name; a resend ends the old token; the acceptance holds every field; approve refused without one; opening refused without three documents; versions append-only, newest current. |
 | U9 Emails and staff notices (E6, W3, W4, W11, X11, X12) | `emailSend`; `wholesaleSendTermsEmail`, `wholesaleSendBuyerEmail`, `wholesaleResendEmail`, `wholesaleNotifyStaff`; the price-sheet link; `outbound.EmailAdmitted`; delivery status in `wholesaleGet`. | `packs/wholesalepack/{email,notify}.go` (new), `dsl/*.memql`, `component/outbound/config.go` | sections 6, 7.3 | U6, U7, U8 | Unit and database: no template, no send; approved refused while the entitlement is pending; a second granted version sends nothing; a resend of terms ends the old link and is attempt 2; a staff notice with no address is skipped; placeholders filled, extension fields unreachable. |
@@ -864,7 +880,10 @@ Named here so the engine side is complete; the client builds it.
 2. **Release one: U1 to U6 and U11.** The operator runs `wholesaleBackfillAccounts`
    once and reads its report; grants the wholesale part to the client's
    organization group on the Users > Groups page; creates the store's settings with
-   its site. The client wires its grant and revoke automations and moves its pin.
+   its site (from the Wholesale section's Settings tab, or `wholesaleSetSettings`).
+   The client wires its grant and revoke automations, adds `accountId` (stamped) and
+   `account="accountId"` to its extension concept and mutation so its staff read
+   its own fields (section 13), and moves its pin.
    From here the client's staff approve in the OS and buyers are tagged.
 3. **Release two: U7 to U10 and U12.** Staff publish the documents; templates are
    published as transactional and chosen; the staff address is allowlisted; the
