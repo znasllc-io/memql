@@ -1,5 +1,5 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { AutoRefresh, Button, Caption, Head, Notice, Panel, Subhead, RecordList, RecordRow } from "../../../kit";
@@ -56,13 +56,17 @@ export function OriginsSection() {
   );
 
   const readHealth = useCallback(
-    async (signal: AbortSignal): Promise<Row[]> => {
+    async (signal: AbortSignal): Promise<HealthRead> => {
       if (connection === null) throw new Error("not connected");
       // To the last page, with the cursor each page hands back: a connector
       // that serves several stores writes a row per domain per store, and a
       // page that stopped at the first answer would draw the rest as never
       // reported.
-      return readPages((cursor) => connection.query.syncStatesAll({}, { signal, ...(cursor ? { cursor } : {}) }), Infinity).then((read) => read.rows);
+      // Bounded all the same, and a read that stopped short -- at the bound,
+      // or on a cursor handed back twice -- says so rather than passing for
+      // the whole list.
+      const read = await readPages((cursor) => connection.query.syncStatesAll({}, { signal, ...(cursor ? { cursor } : {}) }), HEALTH_PAGES);
+      return { rows: read.rows, incomplete: read.more };
     },
     [connection],
   );
@@ -71,18 +75,26 @@ export function OriginsSection() {
     "cluster:origins:inventory",
     connection === null ? null : readInventory,
   );
-  const health = useReading<Row[]>(
+  const health = useReading<HealthRead>(
     "cluster:origins:health",
     connection === null ? null : readHealth,
   );
 
   const join = useMemo(
-    () => joinOrigins(inventory.value ?? [], health.value ?? []),
+    () => joinOrigins(inventory.value ?? [], health.value?.rows ?? []),
     [inventory.value, health.value],
   );
 
   const coverage = useMemo(() => connectorCoverage(join.rows), [join.rows]);
   const groups = useMemo(() => groupByPartition(join.rows), [join.rows]);
+  // DISTINCT concepts: one concept on two stores is one concept, as the
+  // caption's "N of M declared concepts" counts it.
+  const conceptCount = useMemo(() => new Set(join.rows.map((row) => row.conceptId)).size, [join.rows]);
+  const keepsStores = coverage.some((c) => c.stores > 0);
+  // NO ACT WITHOUT A WHOLE HEALTH READ (ruling 45). Without it the page cannot
+  // tell a store's row from a shared one, and a pause that names no store
+  // reaches every store. Absent, not disabled.
+  const mayAct = health.value !== null && !health.value.incomplete;
   const [givenUpOpen, setGivenUpOpen] = useState(false);
 
   const [openConnector, setOpenConnector] = useState("");
@@ -132,7 +144,7 @@ export function OriginsSection() {
           together: they describe one subject, and a page where half the
           numbers were refreshed and half were not is worse than one where
           none were. */}
-      <Head title="Data origins" meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>
+      <Head title="Data origins" meta={inventory.state === "read" && !inventory.error ? conceptCount : undefined}>
         <AutoRefresh
           busy={inventory.state === "reading" || health.state === "reading"}
 
@@ -157,6 +169,9 @@ export function OriginsSection() {
           sentence="The cluster did not answer the connector health. The declarations below are still what every concept says about itself."
           detail={health.error}
         />
+      ) : null}
+      {health.value?.incomplete ? (
+        <Caption>The connector health was not read to its end, so this list is incomplete.</Caption>
       ) : null}
       {refusal === "" ? null : (
         <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
@@ -194,7 +209,7 @@ export function OriginsSection() {
               is true but irrelevant is the kind a reader learns to skip,
               taking the useful half with it. */}
           <Caption>
-            Reported means something has written a health row for that concept.
+            Reported means something has written a health row for that concept{keepsStores ? ", on each store." : "."}
             {coverage.some((c) => coverageTone(c) === "silent")
               ? " Nothing here says a silent connector is broken, because this page cannot tell a connector that has not run from one that is running and reading nothing."
               : ""}
@@ -204,9 +219,9 @@ export function OriginsSection() {
 
       {join.rows.length === 0 ? null : (
         <Panel label="Concepts">
-          <Subhead meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>Concepts with a connector</Subhead>
+          <Subhead meta={inventory.state === "read" && !inventory.error ? conceptCount : undefined}>Concepts with a connector</Subhead>
           {groups.map((group) => (
-            <PartitionLines key={group.partition} group={group} busyKey={busyKey} onAct={(row, which) => void act(row, which)} />
+            <PartitionLines key={`${group.connector}|${group.partition}`} group={group} busyKey={busyKey} mayAct={mayAct} onAct={(row, which) => void act(row, which)} />
           ))}
           <Caption>
             An em dash is not a zero. It means nothing has reported that figure yet -- a connector
@@ -323,17 +338,19 @@ function CoverageLine({ coverage }: { coverage: ConnectorCoverage }) {
 function PartitionLines({
   group,
   busyKey,
+  mayAct,
   onAct,
 }: {
   group: PartitionGroup;
   busyKey: string;
+  mayAct: boolean;
   onAct: (row: OriginRow, which: "backfill" | "pause" | "resume") => void;
 }) {
   const list = (
     <>
       <RecordList as="ul" label={group.partition === "" ? "Data origins" : group.partition}>
         {group.rows.map((row) => (
-          <OriginLine key={row.key} row={row} busyKey={busyKey} onAct={(which) => onAct(row, which)} />
+          <OriginLine key={row.key} row={row} busyKey={busyKey} mayAct={mayAct} onAct={(which) => onAct(row, which)} />
         ))}
       </RecordList>
       {group.outside.length === 0 ? null : (
@@ -344,13 +361,22 @@ function PartitionLines({
       )}
     </>
   );
-  if (group.partition === "") return list;
+  if (group.partition === "") return <div className="os-cluster-partition">{list}</div>;
   return (
-    <div role="group" aria-label={group.partition}>
+    <div className="os-cluster-partition" role="group" aria-label={group.partition}>
       <Subhead>{group.partition}</Subhead>
       {list}
     </div>
   );
+}
+
+/** At most this many pages of connector health are read. */
+const HEALTH_PAGES = 200;
+
+interface HealthRead {
+  rows: Row[];
+  /** The read stopped short: at HEALTH_PAGES, or on a cursor handed back twice. */
+  incomplete: boolean;
 }
 
 /** At most this many pages of given-up deliveries are read (ruling 42). */
@@ -381,10 +407,14 @@ function GivenUpBand() {
   );
   const [busy, setBusy] = useState("");
   const [refusal, setRefusal] = useState("");
+  // One requeue at a time: while one runs, a press on any source does
+  // nothing. A ref, because two presses can land before the busy state renders.
+  const running = useRef(false);
 
   const tryAgain = useCallback(
     async (source: string) => {
-      if (connection === null) return;
+      if (connection === null || running.current) return;
+      running.current = true;
       setBusy(source);
       setRefusal("");
       try {
@@ -393,6 +423,7 @@ function GivenUpBand() {
       } catch (err: unknown) {
         setRefusal(err instanceof Error ? err.message : String(err));
       } finally {
+        running.current = false;
         setBusy("");
       }
     },
@@ -404,7 +435,7 @@ function GivenUpBand() {
   return (
     <div className="os-cluster-band">
       {reading.state === "failed" ? (
-        <Notice tone="error" sentence="The cluster did not answer the changes that could not be recorded." detail={reading.error} />
+        <Notice tone="error" sentence="The list could not be read." detail={reading.error} />
       ) : null}
       {refusal === "" ? null : (
         <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
@@ -430,8 +461,9 @@ function GivenUpBand() {
 
 /**
  * Read a paginated query page by page, with the cursor each page hands back,
- * up to `limit` pages. `more` is true when the last page read still handed
- * one back. A cursor seen twice stops the walk rather than looping on it.
+ * up to `limit` pages. `more` is true when the walk stopped short of the end:
+ * the last page read still handed a cursor back, or a cursor came back twice
+ * (which stops the walk rather than looping on it).
  */
 async function readPages(
   page: (cursor: string) => Promise<{ rows: () => Row[]; meta: () => { cursor?: string } | null | undefined }>,
@@ -444,7 +476,8 @@ async function readPages(
     const result = await page(cursor);
     rows.push(...result.rows());
     cursor = result.meta()?.cursor ?? "";
-    if (cursor === "" || seen.has(cursor)) return { rows, more: false };
+    if (cursor === "") return { rows, more: false };
+    if (seen.has(cursor)) return { rows, more: true };
     seen.add(cursor);
   }
   return { rows, more: true };
@@ -453,19 +486,21 @@ async function readPages(
 function OriginLine({
   row,
   busyKey,
+  mayAct,
   onAct,
 }: {
   row: OriginRow;
   busyKey: string;
+  mayAct: boolean;
   onAct: (which: "backfill" | "pause" | "resume") => void;
 }) {
-  const acts = originActs(row);
+  const acts = mayAct ? originActs(row) : [];
   return (
     <RecordRow name={row.conceptId} secondary={`${row.connector}${row.direction ? ` · ${row.direction}` : ""}`}
       state={row.paused ? "paused" : row.dataState || "undeclared"}
       stateTitle={dataStateSentence(row.dataState, row.origin, row.mirroredTo)}
       tone={row.paused || row.lastError ? "warn" : row.dataState === "mirror" ? "accent" : "muted"}
-      actions={acts.map(which => <Button key={which} tone="quiet" busy={busyKey === `${row.key}:${which}`} busyLabel="Working"
+      actions={acts.length === 0 ? undefined : acts.map(which => <Button key={which} tone="quiet" busy={busyKey === `${row.key}:${which}`} busyLabel="Working"
         ariaLabel={`${actLabel(which)} ${row.conceptId} on ${row.connector}`} onClick={() => onAct(which)}>{actLabel(which)}</Button>)}>
       <span className="os-record-facts">
       <span title="Seconds between the origin's write and MemQL applying it.">Lag <Measure figure={row.lagSeconds} suffix="s" /></span>

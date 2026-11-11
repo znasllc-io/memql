@@ -617,3 +617,215 @@ describe("data origins, by store", () => {
     expect(within(section).getByText("datasync: requeue refused: not a cluster owner")).toBeTruthy();
   });
 });
+
+// FIX ROUND 1 (rulings 44 and 45). Nothing outside a connection is counted
+// anywhere; a count of concepts counts concepts, not one concept per store;
+// and no act is offered while the page cannot tell a store's row from a
+// shared one.
+describe("data origins, by store: the numbers and the acts", () => {
+  const STORE = "acme-widgets";
+  const DEV = "acme-widgets-dev";
+  const NOT_REQUESTED = "connector: not requested";
+
+  const mirror = (conceptId: string, connector = "shopify") =>
+    dataOriginRow({ conceptId, dataState: "mirror", origin: connector, connectors: [connector] });
+  const shopify = (name: string, partitionKey: string, over: Record<string, unknown> = {}) =>
+    syncStateRow({
+      id: `v1:platform:syncState:${name}-${partitionKey}`,
+      conceptId: `v1:shopify:${name}`,
+      connector: "shopify",
+      partitionKey,
+      lagSeconds: 1,
+      paused: false,
+      ...over,
+    });
+  const books = (name: string) => syncStateRow({ conceptId: `v1:books:${name}`, connector: "quickBooks", lagSeconds: 2 });
+
+  // The QA scene: two QuickBooks concepts; five Shopify concepts on two
+  // stores, two of them not requested on each.
+  const SCENE_ORIGINS = [
+    ...["order", "customer", "product", "abandonedCheckout", "company"].map((n) => mirror(`v1:shopify:${n}`)),
+    ...["invoice", "payment"].map((n) => mirror(`v1:books:${n}`, "quickBooks")),
+  ];
+  const SCENE_HEALTH = [
+    ...["order", "customer", "product"].map((n) => shopify(n, STORE)),
+    ...["abandonedCheckout", "company"].map((n) => shopify(n, STORE, { lastError: NOT_REQUESTED })),
+    shopify("order", DEV, { lastError: "the Admin API answered 503" }),
+    shopify("customer", DEV, { paused: true }),
+    shopify("product", DEV),
+    ...["abandonedCheckout", "company"].map((n) => shopify(n, DEV, { lastError: NOT_REQUESTED })),
+    books("invoice"),
+    books("payment"),
+  ];
+
+  const coverageRow = (connector: string) =>
+    screen.getAllByText(connector, { selector: ".os-row-name" })
+      .map((el) => el.closest(".os-record-row") as HTMLElement)
+      .find((row) => row.querySelector(".os-record-status")?.textContent?.includes("reported")) as HTMLElement;
+
+  it("counts concepts, and nothing outside a connection, in the scene's numbers", async () => {
+    mount(fakeConnection({ dataOrigins: SCENE_ORIGINS, syncStatesAll: SCENE_HEALTH }));
+    await screen.findByRole("group", { name: STORE });
+    const head = screen.getByRole("heading", { name: "Data origins" }).closest(".os-head") as HTMLElement;
+    expect(head.querySelector(".os-head-meta")?.textContent).toBe("7");
+    expect(screen.getByRole("heading", { name: /^Concepts with a connector/ }).textContent).toBe("Concepts with a connector 7");
+    const shop = coverageRow("shopify");
+    expect(within(shop).getByText("6 of 6 reported")).toBeTruthy();
+    expect(within(shop).getByText("All 6 concepts of its 2 stores have reported; 1 is paused.")).toBeTruthy();
+    expect(within(shop).getByText(/1 of them carries an error/)).toBeTruthy();
+    expect(within(coverageRow("quickBooks")).getByText("2 of 2 reported")).toBeTruthy();
+    expect(screen.getByText("Reported means something has written a health row for that concept, on each store.")).toBeTruthy();
+  });
+
+  it("keeps the caption as it was when no connector keeps its stores apart", async () => {
+    mount(fakeConnection({ dataOrigins: [mirror("v1:books:invoice", "quickBooks")], syncStatesAll: [books("invoice")] }));
+    expect(await screen.findByText("Reported means something has written a health row for that concept.")).toBeTruthy();
+  });
+
+  it("reads a store's connector as all paused although what it never asked for is not", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [mirror("v1:shopify:order"), mirror("v1:shopify:company")],
+        syncStatesAll: [shopify("order", STORE, { paused: true }), shopify("company", STORE, { lastError: NOT_REQUESTED })],
+      }),
+    );
+    expect(await screen.findByText("Every concept of its store is paused. Deliveries are staged and nothing is being applied.")).toBeTruthy();
+    expect(screen.getByText("1 of 1 reported")).toBeTruthy();
+  });
+
+  it("does not read a connector whose every row is outside its connection as reporting", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [mirror("v1:shopify:company")],
+        syncStatesAll: [shopify("company", STORE, { lastError: NOT_REQUESTED })],
+      }),
+    );
+    const shop = await screen.findByText("0 of 0 reported");
+    expect(shop.getAttribute("data-tone")).toBe("warn");
+    expect(screen.getByText("None of its concepts is part of the connection of its store.")).toBeTruthy();
+    expect(screen.queryByText(/have reported/)).toBeNull();
+  });
+
+  it("names the stores in the partial and the silent sentences", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [mirror("v1:shopify:order"), mirror("v1:shopify:product")],
+        syncStatesAll: [shopify("order", STORE), shopify("order", DEV)],
+      }),
+    );
+    expect(await screen.findByText("2 of 4 concepts of its 2 stores have reported. The rest have no measurement, which is not the same as no lag.")).toBeTruthy();
+  });
+
+  it("offers no act while the health read has not landed, and offers them once it has", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    let land!: (rows: unknown) => void;
+    connection.query.syncStatesAll.mockImplementationOnce(() => new Promise((resolve) => { land = resolve; }));
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    expect(screen.queryByRole("button", { name: /^(Backfill now|Pause|Resume)/ })).toBeNull();
+    const { rowsResult } = await import("./harness");
+    await act(async () => land(rowsResult([shopify("order", STORE)])));
+    const group = await screen.findByRole("group", { name: STORE });
+    expect(within(group).getByRole("button", { name: /^Backfill now/ })).toBeTruthy();
+    expect(within(group).getByRole("button", { name: /^Pause/ })).toBeTruthy();
+  });
+
+  it("offers no act when the health read failed", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    connection.query.syncStatesAll.mockRejectedValueOnce(new Error("syncStatesAll: the cluster is busy"));
+    mount(connection);
+    expect(await screen.findByText("syncStatesAll: the cluster is busy")).toBeTruthy();
+    expect(screen.getByText("v1:shopify:order")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^(Backfill now|Pause|Resume)/ })).toBeNull();
+  });
+
+  it("says the list is incomplete when a cursor comes back twice, and offers no act", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    const { rowsResult } = await import("./harness");
+    connection.query.syncStatesAll.mockImplementation(async () => rowsResult([shopify("order", STORE)], "again"));
+    mount(connection);
+    expect(await screen.findByText("The connector health was not read to its end, so this list is incomplete.")).toBeTruthy();
+    expect(connection.query.syncStatesAll).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: /^(Backfill now|Pause|Resume)/ })).toBeNull();
+  });
+
+  it("stops the health read at 200 pages and says the list is incomplete", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    const { rowsResult } = await import("./harness");
+    let n = 0;
+    connection.query.syncStatesAll.mockImplementation(async () => rowsResult([shopify("order", STORE)], `c${++n}`));
+    mount(connection);
+    expect(await screen.findByText("The connector health was not read to its end, so this list is incomplete.")).toBeTruthy();
+    expect(connection.query.syncStatesAll).toHaveBeenCalledTimes(200);
+  });
+
+  it("draws a failing later page as a failed read: the Notice, no store groups, no acts", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    const { rowsResult } = await import("./harness");
+    connection.query.syncStatesAll.mockImplementation(async (_a: unknown, opts?: { cursor?: string }) => {
+      if (opts?.cursor) throw new Error("syncStatesAll: page two timed out");
+      return rowsResult([shopify("order", STORE)], "p1");
+    });
+    mount(connection);
+    expect(await screen.findByText("syncStatesAll: page two timed out")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: STORE })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Backfill now|Pause|Resume)/ })).toBeNull();
+  });
+
+  it("never puts two connectors that share a store key in one group", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [mirror("v1:shopify:order"), mirror("v1:shopify:company"), mirror("v1:books:invoice", "quickBooks"), mirror("v1:books:vendor", "quickBooks")],
+        syncStatesAll: [
+          shopify("order", STORE),
+          shopify("company", STORE, { lastError: NOT_REQUESTED }),
+          syncStateRow({ conceptId: "v1:books:invoice", connector: "quickBooks", partitionKey: STORE }),
+          syncStateRow({ conceptId: "v1:books:vendor", connector: "quickBooks", partitionKey: STORE, lastError: NOT_REQUESTED }),
+        ],
+      }),
+    );
+    await screen.findAllByRole("group", { name: STORE });
+    const groups = screen.getAllByRole("group", { name: STORE });
+    expect(groups).toHaveLength(2);
+    for (const group of groups) {
+      const lines = group.querySelectorAll("details");
+      expect(lines).toHaveLength(1);
+      const own = within(group).queryByText("v1:shopify:order") ? "shopify" : "books";
+      expect(lines[0]!.textContent).toContain(own === "shopify" ? "v1:shopify:company" : "v1:books:vendor");
+      expect(lines[0]!.textContent).not.toContain(own === "shopify" ? "v1:books:vendor" : "v1:shopify:company");
+    }
+  });
+
+  it("runs one Try again at a time", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [mirror("v1:shopify:order")],
+      inboundRequestsGivenUp: [
+        inboundRequestRow({ id: "in-2", source: "shopify-acme-widgets" }),
+        inboundRequestRow({ id: "in-1", source: "shopify-acme-widgets-dev" }),
+      ],
+    });
+    connection.query.datasyncRequeueInbound.mockImplementation(() => new Promise(() => {}));
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    const list = await within(section).findByRole("list", { name: "Changes that could not be recorded" });
+    const own = within(list).getByText("shopify-acme-widgets").closest("li") as HTMLElement;
+    const dev = within(list).getByText("shopify-acme-widgets-dev").closest("li") as HTMLElement;
+    const press = within(own).getByRole("button", { name: "Try again" });
+    await act(async () => { press.click(); press.click(); });
+    await click(within(dev).getByRole("button", { name: "Try again" }));
+    expect(connection.query.datasyncRequeueInbound).toHaveBeenCalledTimes(1);
+  });
+
+  it("says plainly that the list of changes could not be read", async () => {
+    const connection = fakeConnection({ dataOrigins: [mirror("v1:shopify:order")] });
+    connection.query.inboundRequestsGivenUp.mockRejectedValueOnce(new Error("inboundRequestsGivenUp: the cluster is busy"));
+    mount(connection);
+    await screen.findByText("v1:shopify:order");
+    const section = screen.getByRole("region", { name: "Changes that could not be recorded" });
+    await click(within(section).getByRole("button", { name: "Check" }));
+    expect(await within(section).findByText("The list could not be read.")).toBeTruthy();
+    expect(within(section).getByText("inboundRequestsGivenUp: the cluster is busy")).toBeTruthy();
+  });
+});

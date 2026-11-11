@@ -269,6 +269,13 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
  */
 export interface ConnectorCoverage {
   connector: string;
+  /** The stores of a connector that keeps them apart; 0 for one that does
+   *  not. Its sentences then name the stores, so a row per domain per store
+   *  is not read as that many concepts. */
+  stores: number;
+  /** Rows the connection never asked for. Counted in nothing below: only
+   *  kept so a connector that reaches nothing is not read as reporting. */
+  outside: number;
   /** Pairings the declarations name for this connector. */
   concepts: number;
   /** Pairings something has actually reported on. A MEASURED count, not a
@@ -291,23 +298,37 @@ export interface ConnectorCoverage {
  */
 export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage[] {
   const byConnector = new Map<string, ConnectorCoverage>();
+  const stores = new Map<string, Set<string>>();
   for (const row of rows) {
     if (row.connector === "") continue;
     const held = byConnector.get(row.connector) ?? {
       connector: row.connector,
+      stores: 0,
+      outside: 0,
       concepts: 0,
       reported: 0,
       paused: 0,
       withError: 0,
     };
+    byConnector.set(row.connector, held);
+    if (row.partition !== "") {
+      const own = stores.get(row.connector) ?? new Set<string>();
+      own.add(row.partition);
+      stores.set(row.connector, own);
+      held.stores = own.size;
+    }
+    // What the connection never asked for is outside it: not a concept it
+    // carries, not reported, not paused and not a failure of it.
+    if (row.notRequested) {
+      held.outside += 1;
+      continue;
+    }
     held.concepts += 1;
     if (row.hasHealth) {
       held.reported += 1;
       if (row.paused) held.paused += 1;
-      // What the connection never asked for is not a failure of it.
-      if (row.lastError !== "" && !row.notRequested) held.withError += 1;
+      if (row.lastError !== "") held.withError += 1;
     }
-    byConnector.set(row.connector, held);
   }
   return [...byConnector.values()].sort((a, b) => a.connector.localeCompare(b.connector));
 }
@@ -331,19 +352,28 @@ export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage
  * on an em dash not being a zero that would be the one unforgivable line.
  */
 export function coverageSentence(c: ConnectorCoverage): string {
-  if (c.concepts === 0) return "";
+  // " of its 2 stores" for a connector that keeps its stores apart, and
+  // nothing for one that does not, whose sentences stay as they always were.
+  const ofStores = c.stores === 0 ? "" : c.stores === 1 ? " of its store" : ` of its ${c.stores} stores`;
+  if (c.concepts === 0) {
+    if (c.outside === 0) return "";
+    return c.stores === 0
+      ? "None of its concepts is part of its connection."
+      : `None of its concepts is part of the connection${ofStores}.`;
+  }
   const noun = c.concepts === 1 ? "concept" : "concepts";
   if (c.reported === 0) {
-    return `Nothing has reported on any of its ${c.concepts} ${noun}. A connector that has not run yet and one that is running and reading nothing look the same from here -- the difference is in the connector's own configuration.`;
+    const what = c.stores === 0 ? `any of its ${c.concepts} ${noun}` : `any of the ${c.concepts} ${noun}${ofStores}`;
+    return `Nothing has reported on ${what}. A connector that has not run yet and one that is running and reading nothing look the same from here -- the difference is in the connector's own configuration.`;
   }
   if (c.reported < c.concepts) {
-    return `${c.reported} of ${c.concepts} ${noun} have reported. The rest have no measurement, which is not the same as no lag.`;
+    return `${c.reported} of ${c.concepts} ${noun}${ofStores} have reported. The rest have no measurement, which is not the same as no lag.`;
   }
   if (c.paused === c.concepts) {
-    return `Every concept is paused. Deliveries are staged and nothing is being applied.`;
+    return `Every concept${ofStores} is paused. Deliveries are staged and nothing is being applied.`;
   }
   if (c.paused > 0) {
-    return `All ${c.concepts} ${noun} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;
+    return `All ${c.concepts} ${noun}${ofStores} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;
   }
   return "";
 }
@@ -396,6 +426,9 @@ export function isNotRequested(lastError: string): boolean {
 /** One store's domains: those its connection reaches, and -- apart, because
  *  neither is a fault -- those it never asked for. */
 export interface PartitionGroup {
+  /** The connector a store's group belongs to; "" for the shared group of
+   *  connectors that keep no stores apart. */
+  connector: string;
   /** The store, or "" for the rows of connectors that keep no stores apart. */
   partition: string;
   rows: OriginRow[];
@@ -412,27 +445,32 @@ export interface PartitionGroup {
  * above the table counts exactly what the table draws.
  */
 export function groupByPartition(rows: readonly OriginRow[]): PartitionGroup[] {
+  // Keyed by connector AND store: two connectors that happen to name a store
+  // alike never share a group or its closed line.
   const groups = new Map<string, PartitionGroup>();
   for (const row of rows) {
-    const group = groups.get(row.partition) ?? { partition: row.partition, rows: [], outside: [] };
+    const connector = row.partition === "" ? "" : row.connector;
+    const key = `${connector}|${row.partition}`;
+    const group = groups.get(key) ?? { connector, partition: row.partition, rows: [], outside: [] };
     (row.notRequested ? group.outside : group.rows).push(row);
-    groups.set(row.partition, group);
+    groups.set(key, group);
   }
-  return [...groups.values()].sort((a, b) => a.partition.localeCompare(b.partition));
+  return [...groups.values()].sort((a, b) => a.partition.localeCompare(b.partition) || a.connector.localeCompare(b.connector));
 }
 
 /** One inbound source's deliveries that used their four tries. */
 export interface GivenUpSource {
   source: string;
   count: number;
-  /** The reason the most recently written one gave up, as the engine wrote it. */
+  /** The reason on the source's most recently received delivery, as the engine wrote it. */
   lastError: string;
 }
 
 /**
  * `inboundRequestsGivenUp` by source, in the order the sources first appear.
- * The query answers most recently written first, so a source's first row is
- * its last reason, and the most recent source leads.
+ * The query answers the most recently received delivery first, so a source's
+ * first row carries the reason on its most recently received delivery, and
+ * the source received from most recently leads.
  */
 export function givenUpBySource(rows: readonly Row[]): GivenUpSource[] {
   const bySource = new Map<string, GivenUpSource>();
