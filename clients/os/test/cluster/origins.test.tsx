@@ -547,6 +547,47 @@ describe("data origins, by store", () => {
     });
   });
 
+  it("starts a failed backfill again from the start", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [ORDER, INVOICE],
+      syncStatesAll: [
+        state("v1:shopify:order", STORE, {
+          backfillStatus: "failed",
+          lastError: "backfill failed: shopify: bulk download HTTP 403",
+        }),
+        INVOICE_HEALTH,
+      ],
+    });
+    mount(connection);
+    const own = await screen.findByRole("group", { name: STORE });
+    await click(within(own).getByRole("button", { name: /^Backfill now/ }));
+    expect(connection.query.datasyncStartBackfill).toHaveBeenLastCalledWith({
+      connector: "shopify",
+      conceptId: "v1:shopify:order",
+      partitionKey: STORE,
+      restart: true,
+    });
+  });
+
+  it("continues any other backfill from where it stopped", async () => {
+    const connection = fakeConnection({
+      dataOrigins: [ORDER, CHECKOUT, INVOICE],
+      syncStatesAll: [
+        state("v1:shopify:order", STORE, { backfillStatus: "running" }),
+        state("v1:shopify:abandonedCheckout", STORE, { backfillStatus: "queued" }),
+        INVOICE_HEALTH,
+      ],
+    });
+    mount(connection);
+    for (const conceptId of ["v1:shopify:order", "v1:shopify:abandonedCheckout", "v1:books:invoice"]) {
+      const row = await rowFor(conceptId);
+      await click(within(row).getByRole("button", { name: /^Backfill now/ }));
+      const sent = connection.query.datasyncStartBackfill.mock.lastCall?.[0] as Record<string, unknown>;
+      expect(sent.conceptId).toBe(conceptId);
+      expect(sent).not.toHaveProperty("restart");
+    }
+  });
+
   it("does not read given-up deliveries until somebody asks", async () => {
     const connection = fakeConnection({ dataOrigins: [ORDER] });
     mount(connection);

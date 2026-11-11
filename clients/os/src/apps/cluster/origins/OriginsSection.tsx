@@ -109,10 +109,14 @@ export function OriginsSection() {
       const store = row.partition === "" ? {} : { partitionKey: row.partition };
       try {
         if (which === "backfill") {
+          // A failed backfill's cursor may hold a download link that has
+          // expired, so it starts again from the start; any other continues
+          // from where it stopped.
           await connection.query.datasyncStartBackfill({
             connector: row.connector,
             conceptId: row.conceptId,
             ...store,
+            ...(row.backfillFailed ? { restart: true } : {}),
           });
         } else {
           // The row's own store: a pause with no partition is fanned out to

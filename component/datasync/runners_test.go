@@ -1620,3 +1620,113 @@ func TestACompletingBackfillKeepsTheSweepsOwnError(t *testing.T) {
 		t.Errorf("row = %s, %q; want complete with the sweep's error kept", st.BackfillStatus, st.LastError)
 	}
 }
+
+// ---- a failed backfill started again from the start (Task 13b) ----
+
+func TestStartingFromTheStartClearsAFailedBackfillsCursor(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-1"}, memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	i := &Integration{runner: r, logger: discardLogger()}
+	writeKept(t, engine, SyncState{
+		BackfillStatus: "failed", BackfillCursor: "c-9",
+		LastError: "backfill failed: shopify: bulk download HTTP 403 (a signed URL expires after one week; restart the operation)",
+	})
+
+	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept, "restart": true}
+	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+		t.Fatalf("startBackfill with restart: %v", err)
+	}
+	if len(c.backfillSeen) == 0 || c.backfillSeen[0] != "" {
+		t.Fatalf("the connector was asked from %q, want an empty cursor: the backfill starts from nothing", c.backfillSeen)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" || st.BackfillCursor != "" || st.LastError != "" {
+		t.Errorf("row = %s at %q, lastError %q; want complete with its failure cleared", st.BackfillStatus, st.BackfillCursor, st.LastError)
+	}
+	queued := false
+	for _, w := range rowWritesSince(engine, 0) {
+		if strings.Contains(w, `"queued"`) {
+			queued = true
+		}
+	}
+	if !queued {
+		t.Error("the row was never reset to queued: a restart writes through the queue's fenced write")
+	}
+}
+
+func TestStartingFromTheStartIsRefusedWhileTheBackfillRuns(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-7"})
+	before := writesCount(engine)
+
+	_, err := r.StartBackfillFromTheStart(context.Background(), "shopify", testMirrorConcept, "")
+	if err == nil || err.Error() != "datasync: this backfill is running; it can be started again once it has stopped" {
+		t.Fatalf("err = %v, want the running refusal", err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "running" || st.BackfillCursor != "c-7" {
+		t.Errorf("a refused restart moved the running backfill to %s at %q", st.BackfillStatus, st.BackfillCursor)
+	}
+	if got := rowWritesSince(engine, before); len(got) != 0 {
+		t.Errorf("a refused restart wrote: %v", got)
+	}
+	if len(c.backfillSeen) != 0 {
+		t.Error("a refused restart ran the backfill")
+	}
+}
+
+// A partitioned connector asked to start again with no partition is refused:
+// pressing one row must never re-read every store's history.
+func TestStartingFromTheStartNamesOnePartition(t *testing.T) {
+	engine := newStateEngine()
+	p := newFakePartitioned("a", "b")
+	r := stateRunner(engine, p)
+	_, err := r.StartBackfillFromTheStart(context.Background(), "shopify", testMirrorConcept, "")
+	if err == nil || !strings.Contains(err.Error(), "one partition at a time") {
+		t.Fatalf("err = %v, want a refusal naming one partition", err)
+	}
+	if n := engine.countContaining("mutation "); n != 0 {
+		t.Errorf("a refused restart wrote %d rows", n)
+	}
+
+	writeKept(t, engine, SyncState{Partition: "a", BackfillStatus: "failed", BackfillCursor: "c-9"})
+	writeKept(t, engine, SyncState{Partition: "b", BackfillStatus: "complete", BackfillCursor: "c-4"})
+	if _, err := r.StartBackfillFromTheStart(context.Background(), "shopify", testMirrorConcept, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.partCursors["a"]; len(got) == 0 || got[0] != "" {
+		t.Errorf("partition a was asked from %q, want from nothing", got)
+	}
+	if len(p.partCursors["b"]) != 0 {
+		t.Error("starting partition a again ran partition b")
+	}
+	if st := keptState(t, engine, testMirrorConcept, "b"); st.BackfillStatus != "complete" || st.BackfillCursor != "c-4" {
+		t.Errorf("partition b = %s at %q, want it left as it was", st.BackfillStatus, st.BackfillCursor)
+	}
+}
+
+func TestAnOrdinaryStartStillContinuesFromTheCursor(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	i := &Integration{runner: r, logger: discardLogger()}
+	writeKept(t, engine, SyncState{BackfillStatus: "failed", BackfillCursor: "c-9", LastError: "backfill failed: shopify admin: HTTP 502"})
+
+	args := map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}
+	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.backfillSeen) != 1 || c.backfillSeen[0] != "c-9" {
+		t.Errorf("the connector was asked from %q, want the stored cursor c-9", c.backfillSeen)
+	}
+	args["restart"] = false
+	writeKept(t, engine, SyncState{BackfillStatus: "failed", BackfillCursor: "c-9"})
+	c.backfillPages = []memqlsync.BackfillPage{{Done: true}}
+	if _, err := i.handleStartBackfill(context.Background(), args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.backfillSeen) != 2 || c.backfillSeen[1] != "c-9" {
+		t.Errorf("restart false was asked from %q, want the stored cursor c-9", c.backfillSeen)
+	}
+}

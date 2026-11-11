@@ -133,6 +133,50 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, pa
 	return out, errors.Join(errs...)
 }
 
+// errBackfillRunning refuses to start a running backfill again from the start:
+// its invocation would abandon at its next write, and the one started here
+// would race it for the origin's one export at a time.
+var errBackfillRunning = errors.New("datasync: this backfill is running; it can be started again once it has stopped")
+
+// StartBackfillFromTheStart starts one domain's backfill again from nothing:
+// it resets the row to `queued` with an empty cursor -- the queue's own patch
+// (queuePatch), behind the same row-version fence -- and then runs it as StartBackfill does. It is the
+// way out of a backfill whose cursor no longer leads anywhere -- a failed one
+// whose download link expired -- and re-reading the origin's history is safe
+// because every mirror write is idempotent on the row id.
+//
+// It is refused for a backfill that is `running`. It names one partition of a
+// partitioned connector, and is refused without one: StartBackfill and
+// RestartBackfill fan a missing partition out to every partition, and starting
+// every store's backfill again from nothing is never what pressing one row
+// means.
+func (r *Runner) StartBackfillFromTheStart(ctx context.Context, connectorName, conceptID, partition string) (BackfillResult, error) {
+	partition = strings.TrimSpace(partition)
+	connector, _, _, err := r.resolve(ctx, connectorName, conceptID, partition)
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	if _, ok := connector.(memqlsync.Partitioned); ok && partition == "" {
+		return BackfillResult{}, fmt.Errorf("datasync: a backfill of %q is started again from the start one partition at a time; name the partition", connectorName)
+	}
+	running := false
+	err = r.store.PatchSyncState(OperatorContext(ctx), conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition,
+		func(cur SyncState) (SyncPatch, bool) {
+			running = cur.BackfillStatus == "running"
+			if running {
+				return nil, false
+			}
+			return queuePatch(cur), true
+		})
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	if running {
+		return BackfillResult{}, errBackfillRunning
+	}
+	return r.StartBackfill(ctx, connectorName, conceptID, partition)
+}
+
 // resolve finds the connector, checks it serves the concept and the
 // partition named, and -- for a partitioned connector asked for no
 // partition -- lists the partitions a call fans out over.
@@ -815,12 +859,18 @@ func (r *Runner) queueOne(ctx context.Context, connectorName, conceptID, partiti
 			if cur.BackfillStatus == "running" && !restart {
 				return nil, false
 			}
-			p := SyncPatch{"backfillStatus": "queued", "backfillCursor": ""}
-			if standingRefusal(cur.LastError) {
-				p["lastError"] = ""
-			}
-			return p, true
+			return queuePatch(cur), true
 		})
+}
+
+// queuePatch is what a queue writes on a row: `queued`, an empty cursor, and a
+// stale refusal -- and only a refusal -- cleared.
+func queuePatch(cur SyncState) SyncPatch {
+	p := SyncPatch{"backfillStatus": "queued", "backfillCursor": ""}
+	if standingRefusal(cur.LastError) {
+		p["lastError"] = ""
+	}
+	return p
 }
 
 // ContinueResult is what one continuing pass did. Started counts domains

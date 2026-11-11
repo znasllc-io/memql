@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,27 @@ type backfillCursor struct {
 	// URL is the signed download, remembered so a resume does not have to
 	// re-poll a completed operation.
 	URL string `json:"url,omitempty"`
+	// Restarts counts the operations this backfill started again because the
+	// origin refused a download as gone (bulkDownloadGone). It is the
+	// backfill's, not one operation's: it is carried across the parts of a
+	// multi-part domain and bounded by maxDownloadRestarts.
+	Restarts int `json:"r,omitempty"`
+}
+
+// maxDownloadRestarts is how many times one backfill starts an operation again
+// after its download was refused as gone. The next refusal fails the backfill:
+// a link that is refused on a fresh operation too is not an expired link, and
+// starting again forever would hide it.
+const maxDownloadRestarts = 2
+
+// bulkDownloadGone is a bulk download the origin refused as no longer there
+// (400, 403, 404 or 410): the signed link has expired, or the file with it.
+// Only a fresh operation recovers from it. Any other failure of the download
+// -- a 5xx, a 429, a broken connection -- is not this error.
+type bulkDownloadGone struct{ Status int }
+
+func (e bulkDownloadGone) Error() string {
+	return fmt.Sprintf("shopify: bulk download HTTP %d (a signed URL expires after one week; restart the operation)", e.Status)
 }
 
 func (c backfillCursor) encode() string {
@@ -183,7 +205,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 			// expires a week after that. Restarting is the only recovery,
 			// and it is safe: every write is idempotent on the row id.
 			c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode)
-			return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex}.encode()}, nil
+			return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts}.encode()}, nil
 		default:
 			return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
 		}
@@ -191,6 +213,17 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 
 	// 3. Stream the next batch of lines.
 	writes, consumed, eof, err := c.streamBulk(ctx, store, spec, cur.URL, cur.Line, backfillBatchLines)
+	var gone bulkDownloadGone
+	if errors.As(err, &gone) && cur.Restarts < maxDownloadRestarts {
+		// The link outlived its week (a backfill paused or stopped past it),
+		// or the file went with it. The operation and its link are dropped and
+		// the SAME part starts again on the next step, from its first line:
+		// every write is idempotent on the row id, so re-reading what was
+		// already applied changes nothing.
+		c.logger.Warn("shopify: the bulk download is gone; starting the operation again",
+			"store", store.ID, "concept", spec.Concept, "status", gone.Status, "restart", cur.Restarts+1)
+		return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1}.encode()}, nil
+	}
 	if err != nil {
 		return memqlsync.BackfillPage{}, err
 	}
@@ -211,7 +244,7 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 func (c *Connector) advanceOperation(cur backfillCursor, spec *generated.TypeSpec, note string) (memqlsync.BackfillPage, error) {
 	if cur.OpIndex+1 < len(spec.BulkOps) {
 		return memqlsync.BackfillPage{
-			NextCursor: backfillCursor{OpIndex: cur.OpIndex + 1}.encode()}, nil
+			NextCursor: backfillCursor{OpIndex: cur.OpIndex + 1, Restarts: cur.Restarts}.encode()}, nil
 	}
 	return memqlsync.BackfillPage{Done: true}, nil
 }
@@ -325,9 +358,15 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		// A signed URL is valid for one week. Past that the download 403s,
-		// and the only recovery is a fresh operation -- said as an error
-		// the runner turns into a restart rather than as a silent zero.
+		// A signed URL is valid for one week. Past that the download is
+		// refused (403, or 400, 404, 410), and the only recovery is a fresh
+		// operation -- said as bulkDownloadGone, which BackfillStore turns
+		// into a restart of the operation, rather than as a silent zero.
+		// Anything else is the download failing, not the link being gone.
+		switch resp.StatusCode {
+		case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusGone:
+			return nil, 0, false, bulkDownloadGone{Status: resp.StatusCode}
+		}
 		return nil, 0, false, fmt.Errorf("shopify: bulk download HTTP %d (a signed URL expires after one week; restart the operation)", resp.StatusCode)
 	}
 

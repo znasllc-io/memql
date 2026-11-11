@@ -1780,12 +1780,14 @@ QueryClient.prototype.datasyncSetSyncPaused = function (this: QueryClient, args:
   return this.executeNamed("datasyncSetSyncPaused", buildDatasyncSetSyncPaused(args), opts);
 };
 
-/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it. */
+/** Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it. */
 export interface DatasyncStartBackfillArgs {
   connector: string;
   conceptId: string;
   /** One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor. */
   partitionKey?: string;
+  /** Start the backfill again from nothing: reset its row to queued with an empty cursor, then run it. For a backfill whose cursor no longer leads anywhere, such as a failed one whose download link expired. Refused while the backfill is running, and for a partitioned connector without a partition. */
+  restart?: boolean;
 }
 
 export function buildDatasyncStartBackfill(args: DatasyncStartBackfillArgs): string {
@@ -1793,6 +1795,7 @@ export function buildDatasyncStartBackfill(args: DatasyncStartBackfillArgs): str
   parts.push("connector: " + renderMemQLValue(args.connector));
   parts.push("conceptId: " + renderMemQLValue(args.conceptId));
   if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
+  if (args.restart !== undefined) parts.push("restart: " + renderMemQLValue(args.restart));
   return "builtin datasyncStartBackfill(" + parts.join(", ") + ")";
 }
 

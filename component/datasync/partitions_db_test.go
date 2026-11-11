@@ -235,6 +235,71 @@ func TestAQueuedBackfillRunsToCompleteAgainstARealEngine(t *testing.T) {
 	}
 }
 
+// A failed backfill started again from the start, through a real engine: the
+// reset lands as queued with an empty cursor on the store's own row, the
+// connector is asked from nothing, and the backfill runs to complete with its
+// failure cleared, while the other store's row is left as it was.
+func TestAFailedBackfillStartedAgainRunsFromNothingToItsEnd(t *testing.T) {
+	eng, db := healthEngine(t)
+	if eng == nil {
+		return
+	}
+	store := NewStore(engineSeam{eng})
+	ctx := OperatorContext(context.Background())
+	connector := fmt.Sprintf("dbtest-restart-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(),
+			`DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'connector' = $1`, connector)
+	})
+
+	const failedStore, otherStore = "acme-widgets.myshopify.com", "second-store.myshopify.com"
+	for _, st := range []SyncState{
+		{Partition: failedStore, BackfillStatus: "failed", BackfillCursor: `{"op":"gid://shopify/BulkOperation/1","line":1500,"url":"https://files.example.test/old.jsonl"}`,
+			LastError: "backfill failed: shopify: bulk download HTTP 403 (a signed URL expires after one week; restart the operation)"},
+		{Partition: otherStore, BackfillStatus: "complete", BackfillCursor: "c-4"},
+	} {
+		st.ConceptID, st.Connector, st.Direction = testMirrorConcept, connector, "inbound"
+		if err := store.WriteSyncState(ctx, st); err != nil {
+			t.Fatalf("WriteSyncState(%s): %v", st.Partition, err)
+		}
+	}
+
+	p := newFakePartitioned(failedStore, otherStore)
+	p.name = connector
+	p.partPages[failedStore] = []memqlsync.BackfillPage{{NextCursor: "c-1"}, {NextCursor: "c-2"}, {Done: true}}
+	r := NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger())
+	r.lookup = func(name string) (memqlsync.Connector, bool) { return p, name == connector }
+	r.bound = func() []string { return []string{connector} }
+
+	res, err := r.StartBackfillFromTheStart(ctx, connector, testMirrorConcept, failedStore)
+	if err != nil {
+		t.Fatalf("StartBackfillFromTheStart: %v", err)
+	}
+	if !res.Done || res.Pages != 3 {
+		t.Errorf("result = %+v, want done after three pages", res)
+	}
+	if got := p.partCursors[failedStore]; len(got) != 3 || got[0] != "" || got[1] != "c-1" || got[2] != "c-2" {
+		t.Errorf("the connector was asked from %q, want from nothing and then each cursor in turn", got)
+	}
+	if len(p.partCursors[otherStore]) != 0 {
+		t.Error("starting one store again ran the other")
+	}
+	st, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", failedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.BackfillStatus != "complete" || st.LastError != "" {
+		t.Errorf("row = %s, lastError %q; want complete with its failure cleared", st.BackfillStatus, st.LastError)
+	}
+	other, err := store.SyncStateFor(ctx, testMirrorConcept, connector, "inbound", otherStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.BackfillStatus != "complete" || other.BackfillCursor != "c-4" {
+		t.Errorf("the other store = %s at %q, want it left as it was", other.BackfillStatus, other.BackfillCursor)
+	}
+}
+
 // Two writers of one health row, interleaved on a real engine. A partial
 // write keeps every field it does not name (the read-merge), and a write
 // decided on a read that another writer has since overtaken is refused by the

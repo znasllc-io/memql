@@ -1,8 +1,14 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -127,11 +133,12 @@ func TestBackfillResumesFromTheLineOffset(t *testing.T) {
 }
 
 // A signed URL is valid for one week. Past that the download 403s, and the
-// only recovery is a fresh operation -- said as an error the runner turns
-// into a restart rather than as a silent zero.
+// only recovery is a fresh operation. The connector starts it again itself,
+// twice per backfill; past that the refusal is an error rather than a silent
+// zero.
 func TestAnExpiredDownloadIsAnErrorNotAnEmptyPage(t *testing.T) {
 	h := newHarness(t)
-	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: h.admin.server.URL + "/download/gone.jsonl"}
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: h.admin.server.URL + "/download/gone.jsonl", Restarts: maxDownloadRestarts}
 	_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
 	if err == nil || !strings.Contains(err.Error(), "one week") {
 		t.Fatalf("err = %v, want an expiry explanation", err)
@@ -255,5 +262,93 @@ func TestTheBulkDownloadGuardIsConsulted(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be https") {
 		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+}
+
+// ---- a download the origin no longer keeps (Task 13b) ----
+
+// twoPartProduct makes the product domain a two-part one for the test, so a
+// restart can show it keeps the operation it was on rather than the domain's
+// first. No generated domain is multi-part today.
+func twoPartProduct(t *testing.T) {
+	t.Helper()
+	orig := generated.Types["product"]
+	cp := *orig
+	cp.BulkOps = []string{orig.BulkOps[0], orig.BulkOps[0]}
+	generated.Types["product"] = &cp
+	t.Cleanup(func() { generated.Types["product"] = orig })
+}
+
+func TestADownloadTheOriginNoLongerKeepsStartsTheOperationAgain(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusGone} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			twoPartProduct(t)
+			h := newHarness(t)
+			var logs bytes.Buffer
+			h.conn.logger = slog.New(slog.NewTextHandler(&logs, nil))
+			gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+			t.Cleanup(gone.Close)
+
+			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", OpIndex: 1, Line: 1500, URL: gone.URL + "/download/old.jsonl"}
+			page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+			if err != nil {
+				t.Fatalf("a download the origin no longer keeps failed the backfill: %v", err)
+			}
+			if page.Done || len(page.Writes) != 0 {
+				t.Fatalf("page = %+v, want a step that starts the operation again", page)
+			}
+			next := decodeBackfillCursor(page.NextCursor)
+			want := backfillCursor{OpIndex: 1, Restarts: 1}
+			if next != want {
+				t.Errorf("next cursor = %+v, want %+v: no operation, no link, line 0, the same part, one restart", next, want)
+			}
+			if got := decodeBackfillCursor(next.encode()); got != next {
+				t.Errorf("the restart count did not survive the cursor's encode and decode: %+v", got)
+			}
+			line := logs.String()
+			for _, needle := range []string{"level=WARN", "store=" + testStoreID, "concept=product", "status=" + strconv.Itoa(status)} {
+				if !strings.Contains(line, needle) {
+					t.Errorf("the warning does not carry %q:\n%s", needle, line)
+				}
+			}
+		})
+	}
+}
+
+func TestAThirdGoneDownloadFailsTheBackfill(t *testing.T) {
+	h := newHarness(t)
+	gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	t.Cleanup(gone.Close)
+
+	cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/3", URL: gone.URL + "/download/old.jsonl", Restarts: maxDownloadRestarts}
+	_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+	if err == nil {
+		t.Fatal("a third refused download did not fail the backfill: the restarts would never end")
+	}
+	if !strings.Contains(err.Error(), "HTTP 403") || !strings.Contains(err.Error(), "one week") {
+		t.Errorf("err = %v, want the error as today, with the status", err)
+	}
+	var goneErr bulkDownloadGone
+	if !errors.As(err, &goneErr) || goneErr.Status != http.StatusForbidden {
+		t.Errorf("err = %v, want a bulkDownloadGone carrying 403", err)
+	}
+}
+
+func TestAServerErrorOnTheDownloadIsNotARestart(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			h := newHarness(t)
+			down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+			t.Cleanup(down.Close)
+
+			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: down.URL + "/download/file.jsonl", Restarts: 1}
+			page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+			if err == nil || !strings.Contains(err.Error(), "HTTP "+strconv.Itoa(status)) {
+				t.Fatalf("err = %v, want the error as today", err)
+			}
+			if page.NextCursor != "" {
+				t.Errorf("a server error moved the cursor to %q; the restart count must stay as it was", page.NextCursor)
+			}
+		})
 	}
 }

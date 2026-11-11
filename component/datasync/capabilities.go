@@ -91,12 +91,13 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "startBackfill",
-			Description: "Drive one domain's backfill page by page from its stored cursor, persisting progress after every page so a restart resumes. Operator-driven; nothing schedules it.",
+			Description: "Drive one domain's backfill page by page from its stored cursor, persisting progress after every page so a restart resumes; with restart, start it again from nothing first. Operator-driven; nothing schedules it.",
 			Handler:     i.handleStartBackfill,
 			ArgsSchema: map[string]string{
 				"connector":    "string - connector name",
 				"conceptId":    "string - canonical id of the concept to backfill",
 				"partitionKey": "string (optional) - one partition of a partitioned connector; absent backfills every partition it names",
+				"restart":      "boolean (optional) - reset the backfill to queued with an empty cursor and run it from nothing; refused while it is running, and for a partitioned connector without a partition",
 			},
 		},
 		{
@@ -337,7 +338,11 @@ func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]a
 	if connector == "" || conceptID == "" {
 		return nil, fmt.Errorf("datasync: startBackfill needs both connector and conceptId")
 	}
-	res, err := i.runner.StartBackfill(ctx, connector, conceptID, partition)
+	start := i.runner.StartBackfill
+	if argBool(args, "restart") {
+		start = i.runner.StartBackfillFromTheStart
+	}
+	res, err := start(ctx, connector, conceptID, partition)
 	if err != nil {
 		return nil, err
 	}

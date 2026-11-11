@@ -2393,12 +2393,15 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 	return b.String()
 }
 
-// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.
+// DatasyncStartBackfill -- Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. With restart, start it again from nothing first. Operator-driven; nothing schedules it.
 type DatasyncStartBackfillArgs struct {
 	Connector string
 	ConceptId string
 	// One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor.
 	PartitionKey string
+	// Start the backfill again from nothing: reset its row to queued with an empty cursor, then run it. For a backfill whose cursor no longer leads anywhere, such as a failed one whose download link expired. Refused while the backfill is running, and for a partitioned connector without a partition.
+	Restart    bool
+	RestartSet bool // set true to send restart; required because zero-value bool is ambiguous
 }
 
 // DatasyncStartBackfill calls the engine builtin datasyncStartBackfill.
@@ -2423,6 +2426,13 @@ func DatasyncStartBackfillBuild(args DatasyncStartBackfillArgs) string {
 		}
 		b.WriteString("partitionKey: ")
 		b.WriteString(quoteMemQL(args.PartitionKey))
+	}
+	if args.RestartSet {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("restart: ")
+		b.WriteString(fmt.Sprintf("%v", args.Restart))
 	}
 	b.WriteString(")")
 	return b.String()

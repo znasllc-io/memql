@@ -58,6 +58,10 @@ export interface OriginRow {
    *  reason the row exists at all. */
   hasHealth: boolean;
   backfillStatus: string;
+  /** The row's backfill status is `failed`. Its cursor may lead nowhere (a
+   *  download link that expired), so "Backfill now" starts it again from the
+   *  start rather than from the cursor. */
+  backfillFailed: boolean;
   backfillCursor: string;
   lagSeconds: Figure;
   driftCount: Figure;
@@ -203,6 +207,7 @@ function unmeasuredRow(declaration: OriginDeclaration, connector: string, partit
     direction: impliedDirection(declaration.dataState, declaration.origin, connector),
     hasHealth: false,
     backfillStatus: "",
+    backfillFailed: false,
     backfillCursor: "",
     // EVERY figure absent, and this is the line the whole module exists for.
     // Nothing has reported on this pairing, so there is no lag, no drift, no
@@ -233,6 +238,7 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
     direction,
     hasHealth: true,
     backfillStatus: stringOf(row, "backfillStatus"),
+    backfillFailed: stringOf(row, "backfillStatus") === "failed",
     backfillCursor: stringOf(row, "backfillCursor"),
     // Per FIELD, not per row: a health row that reported a depth and never a
     // drift count has one measurement and one absence, and folding them into
