@@ -87,6 +87,11 @@ func (f *fixtureReader) RowsWithList(ctx context.Context, query string, _ map[st
 	return nil, nil
 }
 
+func (f *fixtureReader) RowsPage(ctx context.Context, query string, args map[string]string, _ string) ([]map[string]any, string, error) {
+	rows, err := f.Rows(ctx, query, args)
+	return rows, "", err
+}
+
 // fakeWriter records what the pack PERSISTED.
 //
 // IT IS A SEPARATE FAKE FROM fixtureReader ON PURPOSE. The write path and

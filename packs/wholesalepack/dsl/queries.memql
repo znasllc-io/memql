@@ -65,6 +65,18 @@ query applicationDecision decisionsForApplications {
   shape   applicationDecisionFull
 }
 
+@description("This store's decisions, newest first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads.")
+@actor
+query applicationDecision decisionsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   applicationDecisionFull
+}
+
 @description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state. An entitlement row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
 @actor
 query entitlement entitlementForApplication {

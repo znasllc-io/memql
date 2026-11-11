@@ -9,6 +9,7 @@ package wholesalepack
 
 import (
 	"io/fs"
+	"time"
 
 	"embed"
 
@@ -63,6 +64,14 @@ type Provider struct {
 	reader rowReader
 	writer rowWriter
 	caller Caller
+	// extensions reads a client's own fields on an application (the engine's
+	// ShopperExtensionRow); nil on an engine handle that has none.
+	extensions extensionReader
+	// hasExtension reports whether a client extends the application form; nil
+	// asks the engine's extension registry. A test seam.
+	hasExtension func() bool
+	// now is the clock an export is dated by; nil is the wall clock.
+	now func() time.Time
 	// backfillWindow is how many applications the backfill takes from each
 	// page of its walk; zero is the query's own window. A test seam, so a
 	// walk over more than one window needs no more than a handful of rows.
@@ -144,6 +153,62 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "list",
+			Description: "One store's applications as the caller reads them, with their stages, every stage's " +
+				"count and the two facts a client's own fields show first.",
+			Handler: p.list,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose applications to list",
+				"stage":   "string (optional) - waitingForTerms, readyToReview (default), approved, rejected, revoked or all",
+				"search":  "string (optional) - a part of the company, applicant or email",
+				"limit":   "int (optional) - rows per page, 50 by default, at most 200",
+				"after":   "string (optional) - the previous page's next",
+			},
+		},
+		{
+			Name: "get",
+			Description: "One application with its state, the client's own fields, its decisions, its " +
+				"entitlement and the acts open to the caller.",
+			Handler: p.get,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application to open, bare or canonical",
+			},
+		},
+		{
+			Name:        "decisionLog",
+			Description: "One store's decisions, newest first, on the applications the caller reads.",
+			Handler:     p.decisionLog,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose decisions to list",
+				"search":  "string (optional) - a part of the company, applicant, email, decider or note",
+				"limit":   "int (optional) - rows per page, 50 by default, at most 200",
+				"after":   "string (optional) - the previous page's next",
+			},
+		},
+		{
+			Name:        "buyers",
+			Description: "One store's approved applications with their access.",
+			Handler:     p.buyers,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose buyers to list",
+				"search":  "string (optional) - a part of the company, applicant or email",
+				"limit":   "int (optional) - rows per page, 50 by default, at most 200",
+				"after":   "string (optional) - the previous page's next",
+			},
+		},
+		{
+			Name:        "exportStore",
+			Description: "One store's wholesale record as one JSON file, with no token hash.",
+			Handler:     p.exportStore,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose record to export",
+			},
+		},
+		{
 			Name:        "setWholesaleSettings",
 			Description: "Set a store up: write one store's wholesale settings. Cluster operators and internal origin only. Data, not source -- no rebuild.",
 			Handler:     p.setWholesaleSettings,
@@ -190,11 +255,15 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 
 // NewProvider builds the pack IntegrationProvider.
 func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+	// The engine shows a client's own fields back through ShopperExtensionRow;
+	// a handle without it shows none.
+	extensions, _ := pctx.Engine.(extensionReader)
 	return &Provider{
-		engine: pctx.Engine,
-		reader: &engineRowReader{engine: pctx.Engine},
-		writer: &engineWriter{engine: pctx.Engine},
-		caller: &engineCaller{engine: pctx.Engine},
+		engine:     pctx.Engine,
+		reader:     &engineRowReader{engine: pctx.Engine},
+		writer:     &engineWriter{engine: pctx.Engine},
+		caller:     &engineCaller{engine: pctx.Engine},
+		extensions: extensions,
 	}, nil
 }
 

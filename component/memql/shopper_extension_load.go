@@ -71,6 +71,7 @@ func shopperExtensionFromFunction(fn *Function) (ShopperExtension, error) {
 		Form:        strings.TrimSpace(fn.ShopperFormExtension.Form),
 		Construct:   fn.Name,
 		Description: fn.Description,
+		Concept:     strings.TrimSpace(fn.BoundConcept),
 	}
 
 	// D7: the field list is the args block MINUS the stamped names. The

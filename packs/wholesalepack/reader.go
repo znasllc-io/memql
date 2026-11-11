@@ -38,6 +38,9 @@ type rowReader interface {
 	// fold over a page of applications needs and no other read here does.
 	RowsWithList(ctx context.Context, query string, args map[string]string,
 		listName string, list []string) ([]map[string]any, error)
+	// RowsPage is one page of a paginated query from cursor ("" is the first
+	// page), with the cursor of the next ("" when this page was the last).
+	RowsPage(ctx context.Context, query string, args map[string]string, cursor string) (rows []map[string]any, next string, err error)
 }
 
 // engineRowReader is the production implementation.
@@ -54,8 +57,31 @@ func (e *engineRowReader) RowsWithList(ctx context.Context, query string, args m
 	return e.rows(ctx, query, args, listName, list)
 }
 
+func (e *engineRowReader) RowsPage(ctx context.Context, query string, args map[string]string, cursor string) ([]map[string]any, string, error) {
+	result, err := e.execute(memql.ContextWithCursor(ctx, cursor), query, args, "", nil)
+	if err != nil {
+		return nil, "", err
+	}
+	// A page that says there is more and names no cursor is refused, never
+	// read as the last one: that would turn a bounded read into a whole one.
+	next, err := memql.ResultPageCursor(result)
+	if err != nil {
+		return nil, "", fmt.Errorf("wholesale: %s: %w", query, err)
+	}
+	return memql.MaterializeRows(result), next, nil
+}
+
 func (e *engineRowReader) rows(ctx context.Context, query string, args map[string]string,
 	listName string, list []string) ([]map[string]any, error) {
+	result, err := e.execute(ctx, query, args, listName, list)
+	if err != nil {
+		return nil, err
+	}
+	return memql.MaterializeRows(result), nil
+}
+
+func (e *engineRowReader) execute(ctx context.Context, query string, args map[string]string,
+	listName string, list []string) (*memql.ExecuteResult, error) {
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle")
 	}
@@ -98,7 +124,7 @@ func (e *engineRowReader) rows(ctx context.Context, query string, args map[strin
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: %s: %w", query, err)
 	}
-	return memql.MaterializeRows(result), nil
+	return result, nil
 }
 
 // rowsFor runs one of the pack's own queries through the seam.
@@ -107,6 +133,14 @@ func (p *Provider) rowsFor(ctx context.Context, query string, args map[string]st
 		return nil, fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
 	}
 	return p.reader.Rows(ctx, query, args)
+}
+
+// rowsPage runs one page of one of the pack's own paginated queries.
+func (p *Provider) rowsPage(ctx context.Context, query string, args map[string]string, cursor string) ([]map[string]any, string, error) {
+	if p.reader == nil {
+		return nil, "", fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
+	}
+	return p.reader.RowsPage(ctx, query, args, cursor)
 }
 
 // asString narrows a payload value to text.
@@ -322,6 +356,46 @@ func (p *Provider) rowsForApplication(ctx context.Context, query, applicationID 
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return rowTime(out[i]["createdAt"]).After(rowTime(out[j]["createdAt"])) })
+	return out, nil
+}
+
+// rowsForApplications is rowsForApplication for many applications of one store
+// at once: one read of decisionsForApplications naming BOTH forms of every id,
+// its rows grouped by the application's bare id, without repeats, each group
+// newest first. The batch form, for a read over a store's applications, where
+// two reads per application would be two thousand reads for one list.
+func (p *Provider) rowsForApplications(ctx context.Context, storeID string, applicationIDs []string) (map[string][]map[string]any, error) {
+	out := map[string][]map[string]any{}
+	if len(applicationIDs) == 0 {
+		return out, nil
+	}
+	if p.reader == nil {
+		return nil, fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
+	}
+	var forms []string
+	for _, id := range applicationIDs {
+		forms = append(forms, uniqueForms(bareID(strings.TrimSpace(id)), applicationRef(id))...)
+	}
+	rows, err := p.reader.RowsWithList(ctx, "decisionsForApplications", map[string]string{"storeId": storeID},
+		"applicationIds", forms)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if id := trimmed(row["id"]); id != "" {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+		}
+		key := bareID(trimmed(row["applicationId"]))
+		out[key] = append(out[key], row)
+	}
+	for key := range out {
+		group := out[key]
+		sort.SliceStable(group, func(i, j int) bool { return rowTime(group[i]["createdAt"]).After(rowTime(group[j]["createdAt"])) })
+	}
 	return out, nil
 }
 

@@ -3,6 +3,9 @@ package memql
 import (
 	"strings"
 	"testing"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func validForm() ShopperForm {
@@ -206,5 +209,65 @@ func TestAccountIdIsAReservedShopperName(t *testing.T) {
 	}
 	if !listed {
 		t.Fatalf("accountId is not among the reserved shopper names: %v", ReservedShopperFieldNames())
+	}
+}
+
+// AN EXTENSION ROW IS SHOWN BY ITS FIELD NAMES IN PLAIN WORDS (X14): every
+// declared field but the stamped names, labelled by its name split at its case
+// boundaries, and the concept's display card picks the two facts a list shows.
+func TestAnExtensionRowIsLabelledByItsFieldNamesInPlainWords(t *testing.T) {
+	src := `@version("1.0.0")
+@description("A client's own fields on an application.")
+@displayCard(primary="taxNumber", secondary="tradeName")
+concept acmeDetail {
+  ownerUserId    string!
+  storeId        string!
+  submissionId   string
+  accountId      string
+  applicationId  string!
+  taxNumber      string!
+  tradeName      string
+}
+`
+	file, err := langparser.ParseFile(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var concept *memoryNodes.Concept
+	for _, def := range file.Definitions {
+		if decl, ok := def.(*langparser.ConceptDecl); ok {
+			if concept, err = memoryNodes.BuildConceptFromDecl(decl, "v1:acme:acmeDetail"); err != nil {
+				t.Fatalf("build: %v", err)
+			}
+		}
+	}
+	if concept == nil {
+		t.Fatal("no concept in the source")
+	}
+	row := extensionRowOf(concept, map[string]any{
+		"ownerUserId": "v1:identity:user:u1", "storeId": "store-1", "submissionId": "sub-1", "accountId": "acct-1",
+		"applicationId": "sub-1", "taxNumber": "12-3456789", "tradeName": "Acme Trade",
+	})
+	if row.Concept != "v1:acme:acmeDetail" || row.Primary != "12-3456789" || row.Secondary != "Acme Trade" {
+		t.Fatalf("row = %+v, want the concept and its display card's two facts", row)
+	}
+	labels := map[string]string{}
+	for _, f := range row.Fields {
+		labels[f.Name] = f.Label
+	}
+	for _, stamped := range []string{"storeId", "submissionId", "ownerUserId", "accountId"} {
+		if _, shown := labels[stamped]; shown {
+			t.Errorf("%s is a stamped name and is shown: %+v", stamped, row.Fields)
+		}
+	}
+	for name, want := range map[string]string{"taxNumber": "Tax number", "tradeName": "Trade name", "applicationId": "Application id"} {
+		if labels[name] != want {
+			t.Errorf("%s is labelled %q, want %q", name, labels[name], want)
+		}
+	}
+	for name, want := range map[string]string{"ein": "Ein", "shopifyCustomerID": "Shopify customer id", "vatNumber2": "Vat number 2"} {
+		if got := extensionFieldLabel(name); got != want {
+			t.Errorf("extensionFieldLabel(%q) = %q, want %q", name, got, want)
+		}
 	}
 }

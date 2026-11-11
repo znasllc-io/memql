@@ -537,6 +537,11 @@ func (r refusingReader) RowsWithList(_ context.Context, query string, _ map[stri
 	return nil, nil
 }
 
+func (r refusingReader) RowsPage(_ context.Context, query string, _ map[string]string, _ string) ([]map[string]any, string, error) {
+	r.t.Fatalf("a call refused for its origin still read %s", query)
+	return nil, "", nil
+}
+
 // THE STORE'S AUTOMATION, AND NOTHING ELSE. Both builtins read as the
 // deployment and act as the application's merchant, so a client that could
 // call them would provision any application it can name; a call without

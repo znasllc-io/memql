@@ -108,3 +108,57 @@ builtin wholesaleRevokeEntitlement {
 builtin wholesaleBackfillAccounts {
   storeId  string  @description("Only this store's rows. Empty: every store's.")
 }
+
+@executor("integration.wholesale.list")
+@args(profile="object")
+@description("The Wholesale section's list: one store's applications as the caller reads them, each with its stage, and every stage's count. stage is waitingForTerms, readyToReview (the default), approved, rejected, revoked or all; readyToReview is oldest first, every other stage newest first. search is a case-insensitive part of the company, the applicant or the email. Each row is {applicationId, companyName, applicantName, applicantEmail, stage, primary, secondary, createdAt}: primary and secondary are the two facts a client's own fields show first (their concept's display card), empty when there are none. A stage is folded from the application's whole decision log, read as the deployment once the caller has been admitted; the applications themselves are read under the caller, so an application they cannot read is not listed and not counted. At most a thousand applications are read per call; truncated is true when the store has more. The caller holds the wholesale part in the site's organization, or is a cluster operator (the organization gate judges it), and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleList {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose applications to list.")
+  stage    string  @description("waitingForTerms, readyToReview (the default), approved, rejected, revoked or all.")
+  search   string  @description("A case-insensitive part of the company, the applicant's name or the email.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.get")
+@args(profile="object")
+@description("One application as the Wholesale section opens it: the application, its state and stage, the client's own fields (details: shown with its fields; none for an application the store's people added or a store with no client fields; unreadable when the caller cannot read the client's row), every decision newest first with the decider's name, the entitlement (null when there is none), whether the caller is one of the cluster's operators, and the acts open to the caller (reject, approve, remove, retryAccess). The application is read under the caller, so a caller who cannot read it is answered nothing; its decisions and entitlement are then read as the deployment, so the state is judged against the whole log. The caller holds the wholesale part in the application's organization (the organization gate judges it).")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleGet {
+  applicationId  string!  @description("The application to open, bare or canonical. The organization gate judges the call against its organization.")
+}
+
+@executor("integration.wholesale.decisionLog")
+@args(profile="object")
+@description("One store's decision log, newest first: {applicationId, companyName, transition, decidedBy, decidedByName, note, createdAt} for each decision on an application the caller reads, read under the caller. search is a case-insensitive part of the company, the applicant, the email, the decider's name or the note. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleDecisionLog {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose decisions to list.")
+  search   string  @description("A case-insensitive part of the company, the applicant, the email, the decider's name or the note.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.buyers")
+@args(profile="object")
+@description("One store's buyers: every application the caller reads whose state is approved, newest first, as {applicationId, companyName, applicantEmail, accessState, errorCode, grantedAt, shopifyCustomerId}. accessState is the entitlement's state, or none when nothing was granted; grantedAt is when a granted entitlement was granted. The state and the entitlement are read as the deployment once the caller has been admitted. At most a thousand applications are read per call; truncated is true when the store has more. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleBuyers {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose buyers to list.")
+  search   string  @description("A case-insensitive part of the company, the applicant's name or the email.")
+  limit    int  @description("Rows per page: 50 when omitted, at most 200.")
+  after    string  @description("The cursor the previous page answered as next.")
+}
+
+@executor("integration.wholesale.exportStore")
+@args(profile="object")
+@description("One store's wholesale record as one JSON file, {fileName, json}: every application the caller reads, each with the client's own fields, their decisions and entitlements (read as the deployment once the caller has been admitted), and the store's settings. It never carries a token hash. The file is named wholesale-<store>-<YYYYMMDD>.json. The caller holds the wholesale part in the site's organization, or is a cluster operator, and the site must serve the store.")
+@requiresCapability("execute", "app:deployables/wholesale")
+builtin wholesaleExportStore {
+  siteId   string!  @description("The store's site: the organization gate judges the read against its organization, and the store must be bound to it.")
+  storeId  string!  @description("The store whose record to export.")
+}

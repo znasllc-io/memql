@@ -39,6 +39,13 @@ type accessStore struct {
 // site's organization.
 func newAccessStore(t *testing.T, eng *memql.MemQLEngine, label string) accessStore {
 	t.Helper()
+	return newAccessStoreWith(t, eng, label, nil)
+}
+
+// newAccessStoreWith is newAccessStore with fields of a client's extension
+// posted beside the pack's own.
+func newAccessStoreWith(t *testing.T, eng *memql.MemQLEngine, label string, extra url.Values) accessStore {
+	t.Helper()
 	merchant, store, _ := wholesaleScope()
 	n := strconv.FormatInt(time.Now().UnixNano(), 36)
 	s := accessStore{merchant: merchant + "-" + label, store: store + "-" + label,
@@ -53,9 +60,13 @@ func newAccessStore(t *testing.T, eng *memql.MemQLEngine, label string) accessSt
 	seedSiteIn(t, eng, s.site, s.merchant, s.store, s.account)
 	s.owner = siteOwnerOf(t, eng, s.site)
 	openApplications(t, eng, asSiteOwner(s.owner), s.store, wholesalepack.AdapterCustomerTag)
-	rec := postApplication(t, eng, s.site, s.store, s.owner, url.Values{
+	form := url.Values{
 		"companyName": {"Trading " + label}, "applicantName": {"Sam Rivers"}, "applicantEmail": {"sam@" + label + ".example.com"},
-	})
+	}
+	for k, v := range extra {
+		form[k] = v
+	}
+	rec := postApplication(t, eng, s.site, s.store, s.owner, form)
 	if loc := rec.Header().Get("Location"); rec.Code != http.StatusSeeOther || !strings.HasPrefix(loc, "/wholesale/thank-you") {
 		t.Fatalf("the post answered %d %q, want 303 to the thank-you page", rec.Code, loc)
 	}
