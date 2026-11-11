@@ -294,7 +294,7 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	states, err := c.syncStates(ctx)
+	statesByStore, err := c.syncStates(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +304,9 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 		if only != "" && store.ID != only {
 			continue
 		}
+		// Each store is a partition of the mirror: its domains are the rows
+		// of its own partition, and no other store's.
+		states := statesByStore[store.ID]
 		domains := make([]any, 0, len(states))
 		drift := 0
 		for _, st := range states {
@@ -385,33 +388,46 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 	return resultNode("shopify", map[string]any{"status": "ok", "stores": out})
 }
 
-// syncStates reads the runtime's health rows for this connector.
+// syncStates reads the runtime's health rows for this connector, every page
+// of them, grouped by the store whose partition each row is.
 //
 // Read through the runtime's own declared query rather than a second one
 // of this connector's: v1:platform:syncState belongs to
 // component/datasync, and a connector that declared a parallel read of
 // it would be a second answer to a question the runtime already answers.
-func (c *Connector) syncStates(ctx context.Context) ([]map[string]any, error) {
-	res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStatesAll", map[string]any{"connector": ConnectorName}))
+//
+// A row with no partition -- the shared row written before stores were
+// partitions -- belongs to no store and is left out.
+func (c *Connector) syncStates(ctx context.Context) (map[string][]map[string]any, error) {
+	query := renderCall("syncStatesAll", map[string]any{"connector": ConnectorName})
+	// The rows are the append-only history, newest first, and the row id
+	// is deterministic per (domain, store) -- so the TIP of each is that
+	// store's current health for the domain and everything behind it is
+	// timeline.
+	seen := map[[2]string]bool{}
+	out := map[string][]map[string]any{}
+	err := memql.WalkQueryPages(operatorContext(ctx), c.engine.Execute, query, syncStatePageBudget, func(res *memql.ExecuteResult) error {
+		for _, r := range memql.MaterializeRows(res) {
+			concept := mapString(r, "conceptId")
+			partition := strings.TrimSpace(mapString(r, "partitionKey"))
+			key := [2]string{partition, concept}
+			if concept == "" || partition == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out[partition] = append(out[partition], r)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("shopify: read sync state: %w", err)
 	}
-	rows := memql.MaterializeRows(res)
-	// The rows are the append-only history, newest first, and the row id
-	// is deterministic per domain -- so the TIP of each id is that
-	// domain's current health and everything behind it is timeline.
-	seen := map[string]bool{}
-	out := make([]map[string]any, 0, len(rows))
-	for _, r := range rows {
-		concept := mapString(r, "conceptId")
-		if concept == "" || seen[concept] {
-			continue
-		}
-		seen[concept] = true
-		out = append(out, r)
-	}
 	return out, nil
 }
+
+// syncStatePageBudget bounds the health read: a hundred rows a page, with
+// the history behind each tip, across every store.
+const syncStatePageBudget = 10000
 
 // phaseOf renders the runtime's syncState fields as the one word the
 // Stores page shows.
@@ -433,7 +449,9 @@ func phaseOf(st map[string]any) string {
 		return "error"
 	}
 	switch mapString(st, "backfillStatus") {
-	case "running":
+	case "running", "queued":
+		// A queued backfill is one the store is waiting on, and reads as
+		// backfilling: the domain is not yet whole.
 		return "backfilling"
 	case "failed":
 		return "error"

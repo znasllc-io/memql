@@ -47,22 +47,20 @@ const (
 // Reconcile implements sync.Connector: sweep one domain across every
 // ingesting store, healing as it goes.
 //
+// The runtime never calls it: the connector is partitioned, and a sweep runs
+// one store at a time through ReconcilePartition. It stays for the contract,
+// as a loop over Partitions that answers for the stores together.
+//
 // The contract's report carries COUNTS rather than writes, so the sweep
 // performs its own writes -- see mirror.go for why that is a local write
 // rather than the runtime's. `since` is the previous sweep's time, which
 // an updated_at domain narrows on and a re-list ignores.
 func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.Time) (memqlsync.ReconcileReport, error) {
-	spec := generated.Types[generated.ConceptFromID(conceptID)]
-	if spec == nil {
-		return memqlsync.ReconcileReport{}, memqlsync.NotImplemented(ConnectorName, "Reconcile of "+conceptID)
+	spec, err := reconcileSpec(conceptID)
+	if err != nil || spec == nil {
+		return memqlsync.ReconcileReport{}, err
 	}
-	if spec.Reconcile == generated.ReconcileNone {
-		// A child materialised with its parent, or a singleton. Not a
-		// failure and not a not-implemented: there is genuinely nothing
-		// to sweep, and the runtime records a clean pass.
-		return memqlsync.ReconcileReport{}, nil
-	}
-	stores, err := c.stores.Stores(ctx)
+	parts, err := c.Partitions(ctx)
 	if err != nil {
 		return memqlsync.ReconcileReport{}, err
 	}
@@ -70,39 +68,26 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 	var swept int
 	var missingScopes []string
 	var refused, notRequested error
-	for _, store := range stores {
-		if !store.Ingests() {
-			continue
-		}
-		if !domainInConnection(store, spec) {
-			// The store's connection never asks for any scope this domain
-			// reads under. Nothing to grant and nothing to ask: the domain
-			// is not requested.
-			notRequested = memqlsync.NotRequested(ConnectorName)
-			continue
-		}
-		if missing := scopesMissingFor(store, spec); len(missing) > 0 {
-			// The store was connected without any scope this domain reads
-			// under. Asking would get ACCESS_DENIED, as it did once per
-			// tick for 22 domains on one store; the answer is known here.
-			// Named are the scopes the connection asks for, which are the
-			// ones a person can approve.
-			missingScopes = append(missingScopes, askedOf(store, spec.Scopes)...)
-			continue
-		}
-		one, err := c.reconcileStore(ctx, store, spec, since)
-		if memqlsync.IsNotGranted(err) {
-			// The origin said what the recorded grant could not: this
-			// store does not have the domain. The other stores still get
-			// their sweep.
-			if refusalIsFixable(store, err.Error()) {
-				refused = err
-			} else {
-				notRequested = memqlsync.NotRequested(ConnectorName)
-			}
-			continue
-		}
+	for _, part := range parts {
+		store, err := c.ingestingStore(ctx, part)
 		if err != nil {
+			// Stopped ingesting since it was listed: not swept.
+			continue
+		}
+		one, missing, err := c.sweepStore(ctx, store, spec, since)
+		switch {
+		case len(missing) > 0:
+			missingScopes = append(missingScopes, missing...)
+			continue
+		case memqlsync.IsNotRequested(err):
+			notRequested = err
+			continue
+		case memqlsync.IsNotGranted(err):
+			// This store does not have the domain. The other stores still
+			// get their sweep.
+			refused = err
+			continue
+		case err != nil:
 			return report, err
 		}
 		swept++
@@ -123,6 +108,46 @@ func (c *Connector) Reconcile(ctx context.Context, conceptID string, since time.
 		}
 	}
 	return report, nil
+}
+
+// reconcileSpec is the mirrored type a sweep of conceptID walks. A concept
+// this build does not mirror is not implemented; one with nothing to sweep --
+// a child materialised with its parent, or a singleton -- is nil with no
+// error, which the runtime records as a clean pass.
+func reconcileSpec(conceptID string) (*generated.TypeSpec, error) {
+	spec := generated.Types[generated.ConceptFromID(conceptID)]
+	if spec == nil {
+		return nil, memqlsync.NotImplemented(ConnectorName, "Reconcile of "+conceptID)
+	}
+	if spec.Reconcile == generated.ReconcileNone {
+		return nil, nil
+	}
+	return spec, nil
+}
+
+// sweepStore is one store's sweep of one domain, in the order its answer is
+// decided:
+//
+//  1. The store's connection never asks for any scope the domain reads
+//     under: nothing to grant and nothing to ask, so not requested.
+//  2. The store was connected without any scope the domain reads under:
+//     asking would get ACCESS_DENIED, as it did once per tick for 22 domains
+//     on one store, so the origin is not asked. The scopes the connection
+//     asks for -- the ones a person can approve -- come back as missing.
+//  3. The sweep itself. The origin's root refusal stays not granted when a
+//     person can fix it, and is not requested otherwise.
+func (c *Connector) sweepStore(ctx context.Context, store Store, spec *generated.TypeSpec, since time.Time) (memqlsync.ReconcileReport, []string, error) {
+	if !domainInConnection(store, spec) {
+		return memqlsync.ReconcileReport{}, nil, memqlsync.NotRequested(ConnectorName)
+	}
+	if missing := scopesMissingFor(store, spec); len(missing) > 0 {
+		return memqlsync.ReconcileReport{}, askedOf(store, spec.Scopes), nil
+	}
+	report, err := c.reconcileStore(ctx, store, spec, since)
+	if memqlsync.IsNotGranted(err) && !refusalIsFixable(store, err.Error()) {
+		return report, nil, memqlsync.NotRequested(ConnectorName)
+	}
+	return report, nil, err
 }
 
 // domainInConnection reports whether the store's own connection asks for any

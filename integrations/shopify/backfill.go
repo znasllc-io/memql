@@ -100,21 +100,17 @@ type bulkOperation struct {
 
 // Backfill implements sync.Connector for one store's domain.
 //
-// The concept is a canonical id; the store is resolved from the id's row
-// scope by the caller through BackfillStore, which is the entry point the
-// runner uses. This signature exists to satisfy the contract; a connector
-// serving many tenants needs the store, so it backfills EVERY ingesting store
-// for the concept, one step each.
+// The runtime never calls it: the connector is partitioned, and each store is
+// backfilled from its own cursor through BackfillPartition. It stays for the
+// contract, as a loop over Partitions that takes one step for the first store
+// with work left, under the one cursor it is handed.
 func (c *Connector) Backfill(ctx context.Context, concept, cursor string) (memqlsync.BackfillPage, error) {
-	stores, err := c.stores.Stores(ctx)
+	parts, err := c.Partitions(ctx)
 	if err != nil {
 		return memqlsync.BackfillPage{}, err
 	}
-	for _, store := range stores {
-		if !store.Ingests() {
-			continue
-		}
-		page, err := c.BackfillStore(ctx, store, concept, cursor)
+	for _, part := range parts {
+		page, err := c.BackfillPartition(ctx, part, concept, cursor)
 		if err != nil {
 			return page, err
 		}
@@ -126,6 +122,7 @@ func (c *Connector) Backfill(ctx context.Context, concept, cursor string) (memql
 }
 
 // BackfillStore advances one store's backfill of one domain by one step.
+// Every write it returns carries the store as its partition (mapObject).
 func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cursor string) (memqlsync.BackfillPage, error) {
 	spec := generated.Types[generated.ConceptFromID(concept)]
 	if spec == nil {

@@ -38,7 +38,8 @@ func MirrorRowID(storeID, gid string) string {
 }
 
 // mapObject turns one fetched object into a MirrorWrite plus the writes for
-// every child materialised under it.
+// every child materialised under it. Each carries its store as its
+// partition, so the runtime records its health on that store's row.
 //
 // parentGID is the GID of the row that carried this one, empty at the top.
 // Children come AFTER their parent in the returned slice, so a caller that
@@ -109,10 +110,11 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	}
 
 	out := []memqlsync.MirrorWrite{{
-		Concept: generated.ConceptID(spec.Concept),
-		RowId:   MirrorRowID(storeID, gid),
-		Payload: payload,
-		Version: version,
+		Concept:   generated.ConceptID(spec.Concept),
+		RowId:     MirrorRowID(storeID, gid),
+		Payload:   payload,
+		Version:   version,
+		Partition: storeID,
 	}}
 
 	for _, child := range spec.Children {
@@ -190,7 +192,8 @@ func idlessChildOf(parent *generated.TypeSpec, obj map[string]any) *generated.Ty
 	return match
 }
 
-// tombstone is the write that marks a mirrored row gone at the origin.
+// tombstone is the write that marks a mirrored row gone at the origin, on
+// its store's partition.
 //
 // It carries the identity fields and nothing else: the runtime's
 // retirement path adds the `deleted` marker, and re-sending a payload we
@@ -206,8 +209,9 @@ func tombstone(conceptName, storeID, gid string, at time.Time) memqlsync.MirrorW
 			"updatedAt": at.UTC().Format(time.RFC3339),
 			"syncedAt":  at.UTC().Format(time.RFC3339),
 		},
-		Version: at.UTC().Format(time.RFC3339),
-		Retire:  true,
+		Version:   at.UTC().Format(time.RFC3339),
+		Retire:    true,
+		Partition: storeID,
 	}
 }
 
