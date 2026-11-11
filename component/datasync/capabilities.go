@@ -285,6 +285,9 @@ func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]a
 	if err != nil {
 		return nil, err
 	}
+	if res.Abandoned {
+		return resultNode("abandoned", "the backfill was not run to its end: its row was queued again, or another backfill of this domain holds it; nothing more was written")
+	}
 	if res.Waiting {
 		return resultNode("waiting", fmt.Sprintf("the backfill is waiting behind another export of this origin; it is queued and the continuing pass starts it (pages=%d applied=%d)", res.Pages, res.Applied))
 	}

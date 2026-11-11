@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -278,6 +279,9 @@ type stateEngine struct {
 	*fakeEngine
 	stateMu sync.Mutex
 	states  map[string]map[string]any
+	// loseFences makes that many health writes lose the row-version fence,
+	// as a write another writer overtook does on a real engine.
+	loseFences int
 }
 
 func newStateEngine() *stateEngine {
@@ -291,6 +295,10 @@ func (s *stateEngine) Execute(ctx context.Context, q string) (any, error) {
 	}
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	if s.loseFences > 0 && (strings.HasPrefix(q, "mutation upsertSyncState(") || strings.HasPrefix(q, "mutation patchSyncState(")) {
+		s.loseFences--
+		return nil, fmt.Errorf("execute: %w", memql.ErrRowVersionChanged)
+	}
 	args := renderedArgs(q)
 	switch {
 	case strings.HasPrefix(q, "mutation upsertSyncState("), strings.HasPrefix(q, "mutation patchSyncState("):

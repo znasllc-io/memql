@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"time"
@@ -51,10 +52,18 @@ type Engine interface {
 }
 
 // Store issues the sync domain's named constructs.
-type Store struct{ engine Engine }
+type Store struct {
+	engine Engine
+	// retryWait is the pause before a write that lost its row-version fence
+	// is decided again (PatchSyncState); a test replaces it so it does not
+	// sleep.
+	retryWait func(attempt int)
+}
 
 // NewStore wraps an engine.
-func NewStore(engine Engine) *Store { return &Store{engine: engine} }
+func NewStore(engine Engine) *Store {
+	return &Store{engine: engine, retryWait: func(attempt int) { time.Sleep(retryWaitFor(attempt)) }}
+}
 
 // OutboxEntry is one row of v1:platform:outboxEntry, in the shape the
 // drain worker works with.
@@ -362,6 +371,13 @@ const maxPatchAttempts = 5
 func (s *Store) PatchSyncState(ctx context.Context, conceptID, connector, direction, partition string, decide func(SyncState) (SyncPatch, bool)) error {
 	partition = strings.TrimSpace(partition)
 	for attempt := 0; attempt < maxPatchAttempts; attempt++ {
+		if attempt > 0 && s.retryWait != nil {
+			// The last write lost the fence: another writer of this row
+			// committed first. Deciding again at once could lose to the next
+			// write of a burst (inbound deliveries arrive in bursts) every
+			// time, so each fresh decision waits a little longer, jittered.
+			s.retryWait(attempt)
+		}
 		cur, err := s.SyncStateFor(memql.ContextWithFreshRead(ctx), conceptID, connector, direction, partition)
 		if err != nil {
 			return err
@@ -388,6 +404,25 @@ func (s *Store) PatchSyncState(ctx context.Context, conceptID, connector, direct
 	}
 	return fmt.Errorf("datasync: the health row of %s on %q%s kept changing under %d writes; nothing was written",
 		conceptID, connector, partitionSuffix(partition), maxPatchAttempts)
+}
+
+// retryWaitBounds is the range the wait before fresh decision `attempt`
+// (1-based) is drawn from: 2-4 ms, then 4-8, 8-16 and 16-32. A few
+// milliseconds is longer than one health write takes, and the whole budget of
+// four waits stays under a tenth of a second.
+func retryWaitBounds(attempt int) (time.Duration, time.Duration) {
+	if attempt < 1 {
+		attempt = 1
+	}
+	lo := 2 * time.Millisecond << (attempt - 1)
+	return lo, 2 * lo
+}
+
+// retryWaitFor draws one wait from retryWaitBounds, so writers that lost to
+// each other do not decide again in step.
+func retryWaitFor(attempt int) time.Duration {
+	lo, hi := retryWaitBounds(attempt)
+	return lo + time.Duration(rand.Int64N(int64(hi-lo)))
 }
 
 // patchArgs renders a patch in a stable order, times as RFC3339.

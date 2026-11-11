@@ -83,6 +83,10 @@ type BackfillResult struct {
 	// kind and took none of this one. The row is left queued (or running,
 	// when it already was) with no error, and the continuing pass asks again.
 	Waiting bool
+	// Abandoned says the row stopped being this invocation's while it ran --
+	// queued again from the start, or taken by another invocation -- and the
+	// invocation stopped, writing nothing more and recording no error.
+	Abandoned bool
 }
 
 // StartBackfill drives Connector.Backfill for one domain, resuming from
@@ -118,6 +122,9 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, pa
 		}
 		if res.Waiting {
 			out.Waiting = true
+		}
+		if res.Abandoned {
+			out.Abandoned = true
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -202,15 +209,65 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 	}
 
 	// The runner owns backfillCursor and backfillStatus, and lastError only
-	// when it fails or is refused (or to clear its own refusal once it
+	// when it fails or is refused (or to clear its own failure once it
 	// completes). Every write below names those and nothing else, so a sweep
 	// or a delivery recorded while a page is out is never put back.
-	priorStatus := st.BackfillStatus
-	set := func(p SyncPatch) { r.setState(opCtx, conceptID, connectorName, partition, p) }
-	set(SyncPatch{"backfillStatus": "running"})
-
+	//
+	// AND IT WRITES ONLY ONTO THE ROW IT IS STILL RUNNING. Each write is
+	// decided on the row as it is now, and lands only while the row is as this
+	// invocation last read or wrote it: the status and the cursor it holds.
+	// Anything else means the row is no longer this invocation's -- a restart
+	// queued it again from nothing (a store reconnected after an uninstall),
+	// or another invocation took it (a leader change mid-pass, an operator's
+	// start beside the pass) -- and the invocation abandons at once: it writes
+	// nothing more, records no error, and counts nothing. Without this, the
+	// next page would write the old cursor back over a restart, and a fetch
+	// made with a revoked token would write `failed`, which nothing retries.
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	cursor := st.BackfillCursor
+	priorStatus := st.BackfillStatus
+	heldStatus, heldCursor := st.BackfillStatus, st.BackfillCursor
+	claim := func(decide func(cur SyncState) SyncPatch) bool {
+		mine := false
+		var patch SyncPatch
+		err := r.store.PatchSyncState(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition,
+			func(cur SyncState) (SyncPatch, bool) {
+				mine = cur.BackfillStatus == heldStatus && cur.BackfillCursor == heldCursor
+				if !mine {
+					return nil, false
+				}
+				patch = decide(cur)
+				return patch, true
+			})
+		if err != nil {
+			r.logger.Warn("datasync: could not record a domain's health; the backfill stops here and resumes from what was recorded",
+				"connector", connectorName, "concept", conceptID, "partition", partition, "error", err)
+			return false
+		}
+		if !mine {
+			return false
+		}
+		if v, ok := patch["backfillStatus"].(string); ok {
+			heldStatus = v
+		}
+		if v, ok := patch["backfillCursor"].(string); ok {
+			heldCursor = v
+		}
+		return true
+	}
+	set := func(p SyncPatch) bool { return claim(func(SyncState) SyncPatch { return p }) }
+	abandon := func() (BackfillResult, error) {
+		r.logger.Info("datasync backfill: the row is no longer this invocation's (queued again, or held by another); abandoned, nothing written",
+			"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
+		out.Cursor, out.Abandoned = cursor, true
+		return out, nil
+	}
+	// The start: only a row still as it was read -- queued, or, when
+	// continuing, running at the cursor read.
+	if !set(SyncPatch{"backfillStatus": "running"}) {
+		return abandon()
+	}
+
 	fetch := func(cursor string) (memqlsync.BackfillPage, error) {
 		if partition != "" {
 			return connector.(memqlsync.Partitioned).BackfillPartition(connCtx, partition, conceptID, cursor)
@@ -244,7 +301,9 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			if priorStatus != "running" && out.Pages == 0 {
 				status = "queued"
 			}
-			set(SyncPatch{"backfillStatus": status, "backfillCursor": cursor})
+			if !set(SyncPatch{"backfillStatus": status, "backfillCursor": cursor}) {
+				return abandon()
+			}
 			r.logger.Info("datasync backfill: the origin is busy with another operation; waiting for the next tick",
 				"connector", connectorName, "concept", conceptID, "partition", partition, "reason", pageErr.Error())
 			out.Cursor, out.Waiting = cursor, true
@@ -268,20 +327,24 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			// It is failed, worded so that neither the refusal checks nor the
 			// clean-sweep rule read it as a refusal.
 			failed := false
-			r.patchState(opCtx, conceptID, connectorName, partition, func(cur SyncState) (SyncPatch, bool) {
+			if !claim(func(cur SyncState) SyncPatch {
 				failed = !cur.LastReconcileAt.IsZero() && !standingRefusal(cur.LastError)
 				if failed {
-					return SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillRefusedPrefix + pageErr.Error()}, true
+					return SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillRefusedPrefix + pageErr.Error()}
 				}
-				return SyncPatch{"backfillStatus": "none", "backfillCursor": cursor, "lastError": pageErr.Error()}, true
-			})
+				return SyncPatch{"backfillStatus": "none", "backfillCursor": cursor, "lastError": pageErr.Error()}
+			}) {
+				return abandon()
+			}
 			if failed {
 				return out, fmt.Errorf("datasync: backfilling %s from %q%s: %s%v", conceptID, connectorName, partitionSuffix(partition), backfillRefusedPrefix, pageErr)
 			}
 			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
 		}
 		if pageErr != nil {
-			set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": pageErr.Error()})
+			if !set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + pageErr.Error()}) {
+				return abandon()
+			}
 			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
 		}
 		out.Pages++
@@ -290,7 +353,9 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 		out.Applied += applied.Applied
 		out.Stale += applied.Stale
 		if applyErr != nil {
-			set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": applyErr.Error()})
+			if !set(SyncPatch{"backfillStatus": "failed", "backfillCursor": cursor, "lastError": backfillFailedPrefix + applyErr.Error()}) {
+				return abandon()
+			}
 			return out, applyErr
 		}
 
@@ -303,10 +368,12 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			break
 		}
 
-		cursor = page.NextCursor
 		// Persisted per PAGE. See the file header: a restart mid-backfill
 		// has to resume, not restart.
-		set(SyncPatch{"backfillCursor": cursor})
+		if !set(SyncPatch{"backfillCursor": page.NextCursor}) {
+			return abandon()
+		}
+		cursor = page.NextCursor
 
 		if page.Done || strings.TrimSpace(cursor) == "" {
 			out.Done = true
@@ -326,15 +393,17 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 				"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
 		}
 	}
-	r.patchState(opCtx, conceptID, connectorName, partition, func(cur SyncState) (SyncPatch, bool) {
+	if !claim(func(cur SyncState) SyncPatch {
 		p := SyncPatch{"backfillStatus": status, "backfillCursor": cursor}
-		if out.Done && strings.HasPrefix(cur.LastError, backfillRefusedPrefix) {
-			// The backfill's own refusal, answered by a backfill that
-			// completed. Any other error is a sweep's, and stays.
+		if out.Done && backfillOwnError(cur.LastError) {
+			// The backfill's own failure or refusal, answered by a backfill
+			// that completed. Any other error is a sweep's, and stays.
 			p["lastError"] = ""
 		}
-		return p, true
-	})
+		return p
+	}) {
+		return abandon()
+	}
 
 	r.logger.Info("datasync backfill: pass complete",
 		"connector", connectorName, "concept", conceptID, "partition", partition,
@@ -510,7 +579,7 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 			"lastAttemptAt":   r.now().UTC(),
 			"driftCount":      report.Drifted,
 		}
-		if cur.BackfillStatus != "failed" || !strings.HasPrefix(cur.LastError, backfillRefusedPrefix) {
+		if cur.BackfillStatus != "failed" || !backfillOwnError(cur.LastError) {
 			// A clean sweep clears the sweep's own error. A backfill the
 			// origin refused while the sweep reads the domain keeps its
 			// reason: the sweep being clean is what made that refusal a
@@ -675,6 +744,17 @@ func (r *Runner) setPausedOne(ctx context.Context, connectorName, conceptID, par
 // although the sweep reads the domain: a failure, which standingRefusal and
 // the connector's phase reading must not take for a standing answer.
 const backfillRefusedPrefix = "backfill refused: "
+
+// backfillFailedPrefix opens the lastError of any other backfill failure, so
+// the backfill can tell its own failure from a sweep's error on the same row.
+const backfillFailedPrefix = "backfill failed: "
+
+// backfillOwnError reports whether a stored lastError is the backfill's own:
+// the only text a completing backfill clears, and the text a clean sweep keeps
+// while the backfill is failed.
+func backfillOwnError(lastError string) bool {
+	return strings.HasPrefix(lastError, backfillRefusedPrefix) || strings.HasPrefix(lastError, backfillFailedPrefix)
+}
 
 // standingRefusal reports whether a stored lastError is the origin's standing
 // answer -- not granted, or not requested -- rather than a failure. The row
@@ -842,8 +922,9 @@ func (r *Runner) continueOne(ctx context.Context, connector memqlsync.Connector,
 	}
 
 	res, err := r.backfillOne(ctx, connector, specs, pick.ConceptID, partition)
-	if res.Waiting {
-		// The origin is busy: nothing moved, so nothing is counted.
+	if res.Waiting || res.Abandoned {
+		// The origin is busy, or the row stopped being this pass's: nothing
+		// moved for this pass, so nothing is counted.
 		return out, nil
 	}
 	if err != nil && (memqlsync.IsNotGranted(err) || memqlsync.IsNotRequested(err)) {

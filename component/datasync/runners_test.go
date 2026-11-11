@@ -3,6 +3,8 @@ package datasync
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"testing"
@@ -36,7 +38,7 @@ func mirrorConnector(pages ...memqlsync.BackfillPage) *fakeConnector {
 
 // A backfill pages through the origin and applies every page.
 func TestABackfillPagesThroughTheOriginAndApplies(t *testing.T) {
-	engine := newFakeEngine()
+	engine := newStateEngine()
 	writer := newFakeWriter()
 	c := mirrorConnector(
 		memqlsync.BackfillPage{
@@ -48,7 +50,8 @@ func TestABackfillPagesThroughTheOriginAndApplies(t *testing.T) {
 			Done:   true,
 		},
 	)
-	r := testRunner(engine, writer, c)
+	r := stateRunner(engine, c)
+	r.applier = NewApplier(r.store, writer)
 
 	res, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, "")
 	if err != nil {
@@ -71,18 +74,18 @@ func TestABackfillPagesThroughTheOriginAndApplies(t *testing.T) {
 // to resume, not restart -- a backfill that can never finish is worse
 // than one that is slow.
 func TestABackfillPersistsItsCursorAfterEveryPage(t *testing.T) {
-	engine := newFakeEngine()
+	engine := newStateEngine()
 	c := mirrorConnector(
 		memqlsync.BackfillPage{NextCursor: "cursor-1"},
 		memqlsync.BackfillPage{NextCursor: "cursor-2"},
 		memqlsync.BackfillPage{Done: true},
 	)
-	r := testRunner(engine, newFakeWriter(), c)
+	r := stateRunner(engine, c)
 
 	if _, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatalf("StartBackfill: %v", err)
 	}
-	writes := engine.callsContaining("upsertSyncState")
+	writes := engine.callsContaining("SyncState(")
 	var sawFirst, sawSecond bool
 	for _, w := range writes {
 		if strings.Contains(w, `backfillCursor: "cursor-1"`) {
@@ -101,17 +104,10 @@ func TestABackfillPersistsItsCursorAfterEveryPage(t *testing.T) {
 // A backfill resumes from the cursor syncState holds, which is what
 // makes a restart a resume.
 func TestABackfillResumesFromTheStoredCursor(t *testing.T) {
-	engine := newFakeEngine()
-	engine.seed(`query syncStateById`, []map[string]any{{
-		"id":             SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
-		"conceptId":      testMirrorConcept,
-		"connector":      "shopify",
-		"direction":      "inbound",
-		"backfillCursor": "cursor-after-crash",
-		"backfillStatus": "running",
-	}})
+	engine := newStateEngine()
+	writeKept(t, engine, SyncState{BackfillCursor: "cursor-after-crash", BackfillStatus: "running"})
 	c := mirrorConnector(memqlsync.BackfillPage{Done: true})
-	r := testRunner(engine, newFakeWriter(), c)
+	r := stateRunner(engine, c)
 
 	if _, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatalf("StartBackfill: %v", err)
@@ -388,13 +384,13 @@ func TestAPartitionTheConnectorLeavesOutKeepsItsWatermark(t *testing.T) {
 }
 
 func TestTheRunnerNeverCallsAPartitionedConnectorsSharedSweep(t *testing.T) {
-	engine := newFakeEngine()
+	engine := newStateEngine()
 	p := newFakePartitioned("a", "b")
 	p.partReports["a"] = memqlsync.ReconcileReport{Checked: 4, Drifted: 2, Healed: 2}
 	p.partReports["b"] = memqlsync.ReconcileReport{Checked: 6, Drifted: 1, Healed: 1}
 	p.partPages["a"] = []memqlsync.BackfillPage{{NextCursor: "a-1"}, {Done: true}}
 	p.partPages["b"] = []memqlsync.BackfillPage{{Done: true}}
-	r := testPartitionedRunner(engine, p)
+	r := stateRunner(engine, p)
 
 	// The sweep.
 	sweepOnce(t, testSweep(r, p))
@@ -428,16 +424,19 @@ func TestTheRunnerNeverCallsAPartitionedConnectorsSharedSweep(t *testing.T) {
 }
 
 func TestAFanOutBackfillIsDoneOnlyWhenEveryPartitionIs(t *testing.T) {
-	engine := newFakeEngine()
+	engine := newStateEngine()
 	p := newFakePartitioned("a", "b")
 	p.partPages["a"] = []memqlsync.BackfillPage{{Done: true}}
 	p.partPages["b"] = []memqlsync.BackfillPage{{NextCursor: "b-1"}, {NextCursor: "b-2"}}
-	r := testPartitionedRunner(engine, p)
+	r := stateRunner(engine, p)
 	r.maxPages = 2
 
 	res, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.Abandoned || res.Pages != 3 {
+		t.Errorf("fan-out = %+v, want three pages run and nothing abandoned", res)
 	}
 	if res.Done {
 		t.Errorf("reported done while partition b has pages left: %+v", res)
@@ -1408,5 +1407,216 @@ func TestARestartQueueResetsARunningBackfillAndAnOrdinaryOneDoesNot(t *testing.T
 	}
 	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.BackfillCursor != "" {
 		t.Errorf("a restart left %s at %q, want queued from the start", st.BackfillStatus, st.BackfillCursor)
+	}
+}
+
+// ---- an in-flight backfill writes only onto the row it is still running ----
+
+func TestARestartThatLandsBetweenTwoPagesIsNotOverwritten(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-1"}, memqlsync.BackfillPage{NextCursor: "c-2"}, memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	after := -1
+	c.duringBackfill = func(cursor string) {
+		if cursor == "c-1" {
+			if err := r.RestartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+				t.Errorf("RestartBackfill: %v", err)
+			}
+			after = writesCount(engine)
+		}
+	}
+
+	res := continueOnce(t, r)
+	if res != (ContinueResult{}) {
+		t.Errorf("result = %+v, want nothing counted for an abandoned invocation", res)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.BackfillCursor != "" || st.LastError != "" {
+		t.Errorf("row = %s at %q, lastError %q; want the restart's queued with an empty cursor", st.BackfillStatus, st.BackfillCursor, st.LastError)
+	}
+	if got := rowWritesSince(engine, after); len(got) != 0 {
+		t.Errorf("the abandoned invocation wrote after the restart: %v", got)
+	}
+	if n := len(c.backfillSeen); n != 2 {
+		t.Errorf("the connector was asked %d times, want 2: the invocation stops once its row is not its own", n)
+	}
+}
+
+func TestAFailureReturnedAfterARestartDoesNotWriteFailed(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	c.duringBackfill = func(string) {
+		// The store reconnects while a fetch made with the old token is
+		// out; the fetch then fails.
+		if err := r.RestartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+			t.Errorf("RestartBackfill: %v", err)
+		}
+		c.backfillErr = errors.New("shopify admin: HTTP 401")
+	}
+
+	if _, err := r.ContinueBackfills(context.Background()); err != nil {
+		t.Errorf("an abandoned invocation reported an error: %v", err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.LastError != "" {
+		t.Errorf("row = %s, lastError %q; want the restart's queued, not failed -- nothing retries a failed backfill", st.BackfillStatus, st.LastError)
+	}
+}
+
+func TestTwoInvocationsOnOneQueuedDomainOnlyOneProceeds(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{NextCursor: "c-1"}, memqlsync.BackfillPage{Done: true})
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	var second BackfillResult
+	once := false
+	c.duringBackfill = func(string) {
+		if once {
+			return
+		}
+		once = true
+		// An operator's start beside the pass, while the pass's first page is out.
+		var err error
+		if second, err = r.StartBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+			t.Errorf("the second invocation: %v", err)
+		}
+	}
+
+	first, err := r.StartBackfill(context.Background(), "shopify", testMirrorConcept, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Abandoned == second.Abandoned {
+		t.Fatalf("first abandoned %t, second abandoned %t; want exactly one to proceed", first.Abandoned, second.Abandoned)
+	}
+	done := first
+	if first.Abandoned {
+		done = second
+	}
+	if !done.Done {
+		t.Errorf("the invocation that proceeded did not complete: %+v", done)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" || st.BackfillCursor != "" {
+		t.Errorf("row = %s at %q, want complete", st.BackfillStatus, st.BackfillCursor)
+	}
+
+	i := &Integration{runner: r, logger: discardLogger()}
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-5"})
+	c.duringBackfill = func(string) { writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-6"}) }
+	nodes, err := i.handleStartBackfill(context.Background(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), "abandoned") {
+		t.Errorf("an operator's start that lost its row does not say so: %v", nodes)
+	}
+}
+
+// ---- a write that loses the fence waits before it decides again ----
+
+func TestAWriteThatLosesTheFenceWaitsThenSucceeds(t *testing.T) {
+	engine := newStateEngine()
+	r := stateRunner(engine, mirrorConnector())
+	var waits []int
+	r.store.retryWait = func(attempt int) { waits = append(waits, attempt) }
+	engine.loseFences = 3
+
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatalf("a write that lost the fence 3 times: %v", err)
+	}
+	if got := fmt.Sprint(waits); got != "[1 2 3]" {
+		t.Errorf("waits = %s, want one before each fresh decision: [1 2 3]", got)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" {
+		t.Errorf("status = %q, want queued", st.BackfillStatus)
+	}
+
+	// Five losses: it gives up, and the runner says so.
+	var logs strings.Builder
+	r.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	waits = nil
+	engine.loseFences = 5
+	c := mirrorConnector()
+	c.reconcileReport = memqlsync.ReconcileReport{Checked: 1}
+	r.lookup = func(string) (memqlsync.Connector, bool) { return c, true }
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(waits); got != "[1 2 3 4]" {
+		t.Errorf("waits = %s, want [1 2 3 4] before the four fresh decisions", got)
+	}
+	if !strings.Contains(logs.String(), "could not record a domain's health") {
+		t.Errorf("a write given up after five losses was not logged:\n%s", logs.String())
+	}
+}
+
+func TestTheFenceRetryWaitIsShortJitteredAndGrows(t *testing.T) {
+	for attempt := 1; attempt < maxPatchAttempts; attempt++ {
+		lo, hi := retryWaitBounds(attempt)
+		if lo < time.Millisecond || hi > 80*time.Millisecond || lo >= hi {
+			t.Errorf("attempt %d waits in [%v, %v), want a few milliseconds to a few tens", attempt, lo, hi)
+		}
+		if attempt > 1 {
+			if plo, _ := retryWaitBounds(attempt - 1); lo <= plo {
+				t.Errorf("attempt %d's wait does not grow: %v after %v", attempt, lo, plo)
+			}
+		}
+		for i := 0; i < 50; i++ {
+			if d := retryWaitFor(attempt); d < lo || d >= hi {
+				t.Fatalf("attempt %d waited %v, outside [%v, %v)", attempt, d, lo, hi)
+			}
+		}
+	}
+}
+
+// ---- the backfill clears only its own failure text ----
+
+func TestAFailedThenCompletedBackfillEndsWithNoError(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	c.backfillErr = errors.New("shopify admin: HTTP 502")
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "queued", LastReconcileAt: testNow.Add(-time.Hour)})
+	if _, err := r.ContinueBackfills(context.Background()); err == nil {
+		t.Fatal("the failure was not reported")
+	}
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "failed" || !strings.HasPrefix(st.LastError, "backfill failed: ") || standingRefusal(st.LastError) {
+		t.Fatalf("after a failure: %s, %q; want failed with the backfill's own prefix", st.BackfillStatus, st.LastError)
+	}
+
+	// A clean sweep keeps the backfill's reason while the backfill is failed.
+	c.reconcileReport = memqlsync.ReconcileReport{Checked: 1}
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); !strings.HasPrefix(st.LastError, "backfill failed: ") {
+		t.Fatalf("a clean sweep erased the failed backfill's reason: %q", st.LastError)
+	}
+
+	c.backfillErr = nil
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	continueOnce(t, r)
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" || st.LastError != "" {
+		t.Errorf("after the backfill completed: %s, %q; want complete with its own failure cleared", st.BackfillStatus, st.LastError)
+	}
+}
+
+func TestACompletingBackfillKeepsTheSweepsOwnError(t *testing.T) {
+	engine := newStateEngine()
+	r := stateRunner(engine, mirrorConnector())
+	writeKept(t, engine, SyncState{BackfillStatus: "queued", LastError: "shopify admin: HTTP 502"})
+	continueOnce(t, r)
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" || st.LastError != "shopify admin: HTTP 502" {
+		t.Errorf("row = %s, %q; want complete with the sweep's error kept", st.BackfillStatus, st.LastError)
 	}
 }
