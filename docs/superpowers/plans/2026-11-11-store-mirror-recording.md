@@ -471,6 +471,61 @@ it("shows the engine's refusal for a wait of zero")
 - [ ] **Step 4:** Run the same command, then `npm run typecheck` and `npx vitest run test/deployables test/settings`. Expected: PASS. Check the Store page for each state in both themes and at both widths.
 - [ ] **Step 5: Commit** `os: the Store page says whether a store is being recorded`.
 
+### Task 10b: A store's acts and reads are for its owner or a cluster owner
+
+Added at the review of Tasks 13 and 14 (2026-11-11). Two findings share one cause: a Shopify builtin a client can call resolved any configured store and never asked who was calling.
+
+**Files:**
+- Create: `integrations/shopify/caller_gate_test.go`, `integrations/shopify/caller_gate_db_test.go`, `clients/os/test/deployables/storeRecording.test.tsx`
+- Modify: `integrations/shopify/verdict_capabilities.go`, `integrations/shopify/capabilities.go`, `integrations/shopify/reconcile.go` (`relistListsPartially`), `dsl/shopify/overlay/builtins.memql`, `clients/os/src/apps/deployables/store/useStore.ts`, `clients/os/src/apps/deployables/store/ShopifyStorePanel.tsx`, `clients/os/test/deployables/harness.tsx`, then the generated files `make sdk-gen` and `make platform-graph` name
+
+**Interfaces:**
+- Consumes: `storeForCaller`, `mayActOnStore`, `mayReadStores`, `actRefusal`, `mirrorStoreForCaller`, `requireInternalOrigin`, `isClusterOwner`, `operatorContext`.
+- Produces, in the DSL: `@sdk @requiresCapability("execute", "app:deployables/store") builtin shopifyStoreSetRecording { storeId string!, recording boolean! }`, replying `{status: "live" | "paused", storeId}`.
+- Produces, in `useStore.ts`: `setRecording(storeId: string, recording: boolean)` on `StoreWrites`; the Store page's "Pause recording" and "Resume" call it, and no longer the client mutation `setStoreStatus`.
+
+Decisions:
+- `shopifyStoreSetRecording` is for the store's owner or a cluster owner (`storeForCaller` with `mayActOnStore`, the refusal `actRefusal`). It moves a store only between `live` and `paused`: a store in any other status is refused with "shopify: a store that is not connected cannot be paused or resumed", before any write. It writes through the existing `setStoreStatus` as the operator. Asking for the state the store is already in is not an error and writes nothing. The store row's own gate is not widened.
+- `shopifyql`: the store's owner or a cluster owner, through `mirrorStoreForCaller`, before any call to Shopify.
+- `storefrontProbe`: the store's owner, a cluster owner, or a caller who may read stores, before any call to Shopify.
+- `shopifyStoreHealth`: answers only the stores the caller may read: every store for a cluster owner or a caller who may read stores; a store's owner their own; anybody else an empty list, never a refusal that names a store.
+- `shopifyEnsureSubscriptions` and `shopifyRunComplianceJobs`: a call with internal origin (the scheduled automations) or a cluster owner; anybody else is refused before anything runs, with "shopify: <builtin> is for a cluster owner".
+- A caller who is not a cluster owner and names no store never learns how many stores are configured: the default is the one store they own, and otherwise the refusal.
+- `mirroredProduct` by handle does not depend on the product being among the 100 newest: it reads by handle, or pages to the end.
+- The tombstone pass is also skipped for `sellingPlanGroup`, `marketingActivity` and `marketingEvent`, whose origin listings may be scoped to the calling app.
+- The four wholesale builtins and the catalog headroom are closed by the wholesale plan (its unit U3), not here.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+// caller_gate_test.go
+func TestSetRecordingIsForTheStoresOwnerOrAClusterOwner(t *testing.T)        // a non-owner is refused before any write
+func TestSetRecordingMovesOnlyBetweenLiveAndPaused(t *testing.T)             // uninstalled, purged: refused, nothing written
+func TestSetRecordingToTheSameStateWritesNothing(t *testing.T)
+func TestShopifyqlRefusesANonOwnerBeforeItCallsShopify(t *testing.T)         // zero Admin calls
+func TestTheStorefrontProbeRefusesACallerWhoMayNotReadTheStore(t *testing.T) // zero Storefront calls
+func TestStoreHealthAnswersOnlyTheStoresTheCallerMayRead(t *testing.T)       // owner: own store; cluster owner: all; another person: none
+func TestTheTwoPassesAreForACallWithInternalOriginOrAClusterOwner(t *testing.T) // both builtins; a writer is refused, nothing runs
+func TestANonOwnerWhoNamesNoStoreIsNotToldHowManyThereAre(t *testing.T)
+func TestAProductIsFoundByItsHandlePastTheFirstPage(t *testing.T)
+func TestAnAppScopedListingIsNeverTombstoned(t *testing.T)                   // the three concepts
+// caller_gate_db_test.go, database lane
+func TestAStoresOwnerWhoIsNotAClusterOwnerPausesAndResumesIt(t *testing.T)   // the row reads paused, then live; resumedAt follows on the next verdict
+func TestTheScheduledPassesStillRunFromTheirAutomations(t *testing.T)        // internal origin, the automation's reader actor
+```
+
+```ts
+// storeRecording.test.tsx
+it("pauses through shopifyStoreSetRecording, never through setStoreStatus")
+it("resumes through shopifyStoreSetRecording")
+it("shows the engine's refusal when a pause is refused")
+```
+
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -p 1 -count=1 ./integrations/shopify/ -run 'SetRecording|ShopifyqlRefuses|StorefrontProbeRefuses|StoreHealthAnswersOnly|TwoPassesAreFor|NamesNoStore|HandlePastTheFirstPage|AppScopedListing|PausesAndResumes|ScheduledPassesStillRun'` and, in `clients/os`, `npx vitest run test/deployables/storeRecording.test.tsx`. Expected: FAIL.
+- [ ] **Step 3:** Implement, then `make sdk-gen` and `make platform-graph`.
+- [ ] **Step 4:** Run the same commands, `./integrations/shopify/` whole in the database lane, `npm run typecheck` and `npx vitest run test/deployables`, and the generated-file gates. Expected: PASS.
+- [ ] **Step 5: Commit** `shopify: a store's acts and reads are for its owner or a cluster owner`.
+
 ### Task 11: Cluster > Data, by store (U7)
 
 **Files:**
