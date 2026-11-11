@@ -286,7 +286,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 203 -> 204: continueQueuedBackfills, the five-minute pass that carries every
 // queued or running backfill on by one page budget (2026-11-11). One added,
 // none removed; measured by the strict loader.
-const shippedAutomationCount = 204
+// 204 -> 205: retryFailedInboundDeliveries, the one-minute pass that tries
+// again the failed inbound deliveries whose next try has come (2026-11-11).
+// One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 205
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

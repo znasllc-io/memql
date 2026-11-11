@@ -605,6 +605,8 @@ var BoundConcepts = map[string]string{
 	"inboundRequestByDedupeKey":                        "v1:platform:inboundRequest",
 	"inboundRequestById":                               "v1:platform:inboundRequest",
 	"inboundRequestsByStatus":                          "v1:platform:inboundRequest",
+	"inboundRequestsDueForRetry":                       "v1:platform:inboundRequest",
+	"inboundRequestsGivenUp":                           "v1:platform:inboundRequest",
 	"insertOutputScreening":                            "v1:safety:outputScreening",
 	"insertSafetyClassification":                       "v1:safety:classification",
 	"invitationById":                                   "v1:identity:invitation",

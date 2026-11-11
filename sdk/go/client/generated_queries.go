@@ -4876,6 +4876,53 @@ func InboundRequestsByStatusBuild(args InboundRequestsByStatusArgs) string {
 	return b.String()
 }
 
+// InboundRequestsDueForRetry -- The failed deliveries whose next try has come, oldest first: what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
+// Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never the inbox.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsDueForRetry"] in generated_concepts.go).
+type InboundRequestsDueForRetryArgs struct {
+	AsOf string
+}
+
+// InboundRequestsDueForRetry calls the engine query inboundRequestsDueForRetry.
+func (qc *QueryClient) InboundRequestsDueForRetry(ctx context.Context, args InboundRequestsDueForRetryArgs) (*Result, error) {
+	call := InboundRequestsDueForRetryBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsDueForRetry", call)
+}
+
+func InboundRequestsDueForRetryBuild(args InboundRequestsDueForRetryArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsDueForRetry(")
+	b.WriteString("asOf: ")
+	b.WriteString(quoteMemQL(args.AsOf))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestsGivenUp -- The failed deliveries that used their four tries, newest first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsGivenUp"] in generated_concepts.go).
+type InboundRequestsGivenUpArgs struct {
+	Source string
+}
+
+// InboundRequestsGivenUp calls the engine query inboundRequestsGivenUp.
+func (qc *QueryClient) InboundRequestsGivenUp(ctx context.Context, args InboundRequestsGivenUpArgs) (*Result, error) {
+	call := InboundRequestsGivenUpBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestsGivenUp", call)
+}
+
+func InboundRequestsGivenUpBuild(args InboundRequestsGivenUpArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestsGivenUp(")
+	if args.Source != "" {
+		b.WriteString("source: ")
+		b.WriteString(quoteMemQL(args.Source))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // InvitationById -- Returns the invitation with the given id. Zero or one result.
 //
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationById"] in generated_concepts.go).

@@ -224,7 +224,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest)
 	if !ok {
 		return DispatchResult{}, nil
 	}
-	return d.dispatchTo(ctx, connector, req)
+	return d.dispatchTo(ctx, connector, req, 0)
 }
 
 // StagedRequest is one staged row as the dispatcher read it
@@ -243,6 +243,15 @@ type StagedRequest struct {
 	// SignatureVerified is the receiver's verdict: false on a row staged by a
 	// source configured to verify nothing (scheme none).
 	SignatureVerified bool
+	// Attempts is how many times the dispatcher has tried the delivery; 0 on
+	// a row nobody has tried, or one an operator put back in line.
+	Attempts int
+	// Status is the row's handling status as read: `received` until the row
+	// is worked.
+	Status string
+	// Version is the stored version's time (row.createdAt), the witness the
+	// retry pass's claim is fenced on.
+	Version time.Time
 }
 
 // Staged reads one staged delivery by its row id, under the operator
@@ -278,7 +287,7 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 	if tier := strings.TrimSpace(staged.VerifiedBy); tier != "" && tier != memqlsync.VerifiedByConnector {
 		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery was verified by the %s tier's secret, not the connector's; "+
 			"rename or remove the env or registered source that verified it", strings.TrimSpace(staged.Source), connector.Name(), tier)
-		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		d.stampFailed(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
 	// THE RECEIVER'S VERDICT, OR NOTHING (epic memql#5477). The tier above says
@@ -294,15 +303,15 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery's signature was not verified; "+
 			"a connector applies only a delivery a secret verified, so its source must not be configured scheme none",
 			strings.TrimSpace(staged.Source), connector.Name())
-		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		d.stampFailed(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
 	req, reason := staged.parse(d.now)
 	if reason != "" {
-		d.stamp(OperatorContext(ctx), req.RequestId, "failed", reason)
+		d.stampFailed(OperatorContext(ctx), req.RequestId, staged.Attempts, reason, false)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
-	return d.dispatchTo(ctx, connector, req)
+	return d.dispatchTo(ctx, connector, req, staged.Attempts)
 }
 
 // parse turns the staged strings into the connector's InboundRequest, or
@@ -342,8 +351,9 @@ func (d *Dispatcher) connectorFor(ctx context.Context, source string) (memqlsync
 	return connector, true
 }
 
-// dispatchTo works a request its connector has already claimed.
-func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest) (DispatchResult, error) {
+// dispatchTo works a request its connector has already claimed. prior is how
+// many times it was tried before this one.
+func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest, prior int) (DispatchResult, error) {
 	out := DispatchResult{Handled: true}
 	source := strings.TrimSpace(req.Source)
 
@@ -359,7 +369,7 @@ func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connect
 
 	writes, err := connector.Apply(connCtx, req)
 	if err != nil {
-		d.stamp(opCtx, req.RequestId, "failed", err.Error())
+		d.failed(connCtx, opCtx, connector, req, prior, err)
 		return out, fmt.Errorf("datasync: %q applying inbound request %q: %w", source, req.RequestId, err)
 	}
 	if len(writes) == 0 {
@@ -367,34 +377,89 @@ func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connect
 		// `processed` rather than left alone: the row HAS been worked,
 		// and leaving it `received` makes the staged queue grow without
 		// bound and lose its meaning as a to-do list.
-		d.stamp(opCtx, req.RequestId, "processed", "")
+		d.stampProcessed(opCtx, req.RequestId, prior)
 		return out, nil
 	}
 
 	res, applyErr := d.applier.Apply(connCtx, connector.Name(), specs, writes)
 	out.Applied, out.Stale = res.Applied, res.Stale
 	if applyErr != nil {
-		d.stamp(opCtx, req.RequestId, "failed", applyErr.Error())
+		d.failed(connCtx, opCtx, connector, req, prior, applyErr)
 		return out, applyErr
 	}
-	d.stamp(opCtx, req.RequestId, "processed", "")
+	d.stampProcessed(opCtx, req.RequestId, prior)
 
 	d.recordInboundHealth(opCtx, connector, writes, req.ReceivedAt)
 	return out, nil
 }
 
+// failed records a try that failed, and when the failure is worth another try,
+// tells a connector with a short-circuit to forget the delivery
+// (memqlsync.InboundForgetter): the connector may have recorded it as handled
+// before the failure -- an applier failure comes after Apply returned -- and
+// would answer the retry "already seen".
+func (d *Dispatcher) failed(connCtx, opCtx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest, prior int, err error) {
+	retry := worthAnotherTry(err)
+	if forgetter, ok := connector.(memqlsync.InboundForgetter); ok && retry {
+		forgetter.ForgetInbound(connCtx, req)
+	}
+	d.stampFailed(opCtx, req.RequestId, prior, err.Error(), retry)
+}
+
+// worthAnotherTry reports whether a failure may go differently on a later try.
+// Everything is, except what the contract says will recur: a permanent
+// refusal, a grant that does not cover the domain, a domain the connector was
+// not asked for and a capability it does not have. A busy origin
+// (memqlsync.IsBusy) is worth another try like any other transient failure.
+// The refusals DispatchStaged makes before the connector is asked -- another
+// tier's secret, no verified signature, metadata that does not parse -- are
+// facts about the stored row, which no retry changes, and stamp no next try.
+func worthAnotherTry(err error) bool {
+	return !(memqlsync.IsPermanent(err) || memqlsync.IsNotGranted(err) ||
+		memqlsync.IsNotRequested(err) || memqlsync.IsNotImplemented(err))
+}
+
+// stampProcessed records a try that worked: the try is counted and no next
+// try is left on the row.
+func (d *Dispatcher) stampProcessed(ctx context.Context, requestID string, prior int) {
+	d.stamp(ctx, requestID, "processed", "",
+		arg{"attempts", prior + 1}, arg{"nextAttemptAt", ""})
+}
+
+// stampFailed records a failed try: attempts is the try count, and
+// nextAttemptAt is when the next try is due -- inboundRetryAfter after this
+// one, while retry holds and fewer than maxInboundAttempts were made -- or ""
+// for none. A next time is always named, because the retry pass's claim may
+// have moved it forward and a stale one would make the row due again.
+// The engine stores "" as written, which is why inboundRequestsDueForRetry
+// requires a set nextAttemptAt as well as one at or before its asOf.
+func (d *Dispatcher) stampFailed(ctx context.Context, requestID string, prior int, reason string, retry bool) {
+	attempts := prior + 1
+	next := ""
+	if retry && attempts < maxInboundAttempts {
+		next = d.now().UTC().Add(inboundRetryAfter[attempts-1]).Format(time.RFC3339)
+	}
+	d.stamp(ctx, requestID, "failed", reason, arg{"attempts", attempts}, arg{"nextAttemptAt", next})
+}
+
 // stamp records the request's handling outcome. Best effort: a failure
 // to stamp must not turn a successful apply into a reported failure, and
 // the delivery is durable either way.
-func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string) {
+//
+// It names only the fields it means to write: updateInboundRequestStatus keeps
+// every one it is not handed, so a stamp cannot reset what another writer of
+// the row recorded.
+func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError string, fields ...arg) {
 	if strings.TrimSpace(requestID) == "" {
 		return
 	}
-	_, _ = d.store.exec(ctx, call("mutation", "updateInboundRequestStatus",
-		arg{"requestId", requestID},
-		arg{"status", status},
-		arg{"lastError", truncateError(lastError)},
-		arg{"processedAt", d.now().UTC().Format(time.RFC3339)}))
+	args := append([]arg{
+		{"requestId", requestID},
+		{"status", status},
+		{"lastError", truncateError(lastError)},
+		{"processedAt", d.now().UTC().Format(time.RFC3339)},
+	}, fields...)
+	_, _ = d.store.exec(ctx, call("mutation", "updateInboundRequestStatus", args...))
 }
 
 // recordInboundHealth updates lastInboundAt and lagSeconds for every
@@ -459,4 +524,111 @@ func domainSpecsByConcept(c memqlsync.Connector) map[string]memqlsync.DomainSpec
 		}
 	}
 	return out
+}
+
+// ---- A failed delivery is tried again (store mirror, U4) ----
+//
+// A delivery whose try failed for a reason worth another (worthAnotherTry) is
+// stamped with when that try is due, and the retry pass -- the
+// retryFailedInboundDeliveries automation, every minute -- tries it then,
+// through DispatchStaged, so a retry passes the same judgement as the first
+// try. Four tries at most; the hourly sweep stays the net under all of them.
+
+// maxInboundAttempts is how many tries a delivery gets, the first included.
+const maxInboundAttempts = 4
+
+// inboundRetryAfter is the wait before each retry, counted from the try
+// before it: the second try comes a minute after the first, the third five
+// minutes after the second, the fourth thirty minutes after the third.
+var inboundRetryAfter = [3]time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute}
+
+// inboundRetryClaim is how far a claim moves a row's next try: long enough for
+// one dispatch, an Admin fetch that may wait out a throttle included, so a
+// second pass does not take the row while this one works it. A pass that dies
+// mid-dispatch leaves the row due again when the window passes.
+const inboundRetryClaim = 10 * time.Minute
+
+// maxRequeuePages bounds one Requeue call: fifty rows a page.
+const maxRequeuePages = 100
+
+// RetryResult is what one retry pass did.
+type RetryResult struct {
+	// Tried counts the deliveries this pass claimed and dispatched.
+	Tried int
+	// Recovered counts the ones of those a connector worked.
+	Recovered int
+}
+
+// RetryDue tries again ONE page of the failed deliveries whose next try has
+// come. Each is claimed first (Store.ClaimInboundRetry) and skipped when the
+// claim loses, so a pass that overlaps the last, or a second cron leader for a
+// moment during a failover, never dispatches one row from two places at once.
+// The scheduler does not prevent the overlap: a cron firing runs in its own
+// goroutine whether or not the previous one has returned, and the automation's
+// @mode(single) holds only within one process. A row of the page that cannot
+// be claimed or dispatched does not stop the rest; its row says what happened.
+func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
+	opCtx := OperatorContext(ctx)
+	now := d.now().UTC()
+	due, err := d.store.InboundRequestsDueForRetry(opCtx, now)
+	if err != nil {
+		return RetryResult{}, err
+	}
+	var out RetryResult
+	for _, staged := range due {
+		claimed, err := d.store.ClaimInboundRetry(opCtx, staged, now.Add(inboundRetryClaim))
+		if err != nil {
+			if d.logger != nil {
+				d.logger.Warn("datasync: could not claim a failed delivery for its retry; the next pass tries again",
+					"request", staged.RequestId, "source", staged.Source, "error", err)
+			}
+			continue
+		}
+		if !claimed {
+			continue
+		}
+		out.Tried++
+		res, err := d.DispatchStaged(ctx, staged)
+		if err == nil && res.Handled {
+			out.Recovered++
+		}
+	}
+	return out, nil
+}
+
+// Requeue puts every given-up delivery of one source back in line -- failed,
+// with its four tries spent -- and returns how many. Its tries start again from
+// none and it is due now. A delivery still waiting for its next try is not
+// given up and is left as it is. The given-up page is read again until it
+// holds nothing this call has not already requeued, so a write that did not
+// take cannot keep the call reading.
+func (d *Dispatcher) Requeue(ctx context.Context, source string) (int, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return 0, fmt.Errorf("datasync: requeueInbound needs the source whose given-up deliveries go back in line")
+	}
+	opCtx := OperatorContext(ctx)
+	at := d.now().UTC()
+	done := map[string]bool{}
+	for page := 0; page < maxRequeuePages; page++ {
+		rows, err := d.store.InboundRequestsGivenUp(opCtx, source)
+		if err != nil {
+			return len(done), err
+		}
+		progressed := false
+		for _, r := range rows {
+			if done[r.RequestId] || strings.TrimSpace(r.Source) != source {
+				continue
+			}
+			if err := d.store.RequeueInboundRequest(opCtx, r.RequestId, at); err != nil {
+				return len(done), err
+			}
+			done[r.RequestId] = true
+			progressed = true
+		}
+		if !progressed {
+			break
+		}
+	}
+	return len(done), nil
 }

@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 
-use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains, datasyncContinueBackfills }
+use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains, datasyncContinueBackfills, datasyncRetryInbound }
 
 // ---- The sync runtime's automations (epic memql#4378) ----
 //
@@ -44,6 +44,17 @@ automation reconcileMirroredDomains {
 @trigger(schedule="0 */5 * * * *")
 automation continueQueuedBackfills {
   continued := builtin datasyncContinueBackfills()
+}
+
+/// Try again the failed deliveries whose next try has come. Every minute, because the first retry
+/// is due one minute after a failure; a pass with nothing due is one bounded read. Each row is
+/// claimed before it is dispatched, so a pass that overlaps the last, or a second cron leader during
+/// a failover, never tries one delivery twice at once; single keeps this process from starting a
+/// second pass while one runs.
+@trigger(schedule="0 * * * * *")
+@mode(single)
+automation retryFailedInboundDeliveries {
+  retried := builtin datasyncRetryInbound()
 }
 
 // ---- Custom domains (epic memql#4805) ----

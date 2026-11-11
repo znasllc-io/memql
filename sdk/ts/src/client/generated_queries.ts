@@ -4674,6 +4674,51 @@ QueryClient.prototype.inboundRequestsByStatus = function (this: QueryClient, arg
   return this.executeNamed("inboundRequestsByStatus", buildInboundRequestsByStatus(args), opts);
 };
 
+/** The failed deliveries whose next try has come, oldest first: what the datasync retry pass (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a reason no retry changes -- and a row at four tries are never answered. One bounded page; the next minute's pass takes the rest. The full shape, because a retry needs the body.
+Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never the inbox. */
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsDueForRetry"] in generated_concepts.ts).
+export interface InboundRequestsDueForRetryArgs {
+  asOf: string;
+}
+
+export function buildInboundRequestsDueForRetry(args: InboundRequestsDueForRetryArgs): string {
+  const parts: string[] = [];
+  parts.push("asOf: " + renderMemQLValue(args.asOf));
+  return "query inboundRequestsDueForRetry(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inboundRequestsDueForRetry(args: InboundRequestsDueForRetryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inboundRequestsDueForRetry = function (this: QueryClient, args: InboundRequestsDueForRetryArgs = {} as InboundRequestsDueForRetryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inboundRequestsDueForRetry", buildInboundRequestsDueForRetry(args), opts);
+};
+
+/** The failed deliveries that used their four tries, newest first, of one source when one is named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read through the failed-delivery lookup, as inboundRequestsDueForRetry is. */
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestsGivenUp"] in generated_concepts.ts).
+export interface InboundRequestsGivenUpArgs {
+  source?: string;
+}
+
+export function buildInboundRequestsGivenUp(args: InboundRequestsGivenUpArgs): string {
+  const parts: string[] = [];
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  return "query inboundRequestsGivenUp(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    inboundRequestsGivenUp(args: InboundRequestsGivenUpArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.inboundRequestsGivenUp = function (this: QueryClient, args: InboundRequestsGivenUpArgs = {} as InboundRequestsGivenUpArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("inboundRequestsGivenUp", buildInboundRequestsGivenUp(args), opts);
+};
+
 /** Returns the invitation with the given id. Zero or one result. */
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["invitationById"] in generated_concepts.ts).
 export interface InvitationByIdArgs {

@@ -185,6 +185,8 @@ concept inboundRequest {
   verifiedBy    enum("env", "registered", "connector") @description("Which tier's secret verified the delivery (memql#5795): an operator's env pin, a source the cluster registered for itself, or the connector that owns the source. The dispatcher applies a row whose source a connector claims only when this is 'connector', so a store connected between staging and dispatch never receives a body another secret verified as its own. Kept from the delivery that created the row. Absent on a row the mailbox reader staged and on rows staged before the field existed, which are dispatched as before: only server-side code can stage a row.")
   processedAt   datetime @description("When the product finished handling the row.")
   lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
+  attempts      int     @description("How many times a connector's dispatcher has tried this delivery, every try counted, the first included. A connector's source gets four at most: the first, then retries 1, 5 and 30 minutes after the try before. Absent on a row no connector has tried. A requeue sets it back to 0.")
+  nextAttemptAt datetime @description("When the retry pass may try this failed delivery again. Set only on a failed try worth another one, before the fourth; absent once a delivery is processed, refused for a reason no retry changes, or given up. While a pass works a row it is moved forward by the claim window, so a second pass leaves it alone.")
 }
 
 /// A web surface this cluster serves at a hostname -- a single-page app, a static website, or the

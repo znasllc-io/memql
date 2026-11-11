@@ -18,7 +18,6 @@ package shopify
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -352,8 +351,10 @@ func (c *Connector) adminCall(ctx context.Context, store Store, document, operat
 		// Refused rather than attempted. A store pinned to a different
 		// version answers with fields the concepts do not declare and
 		// omits fields they require, and the resulting mirror is wrong
-		// in a way no error message would explain.
-		return nil, fmt.Errorf("shopify: store %q is pinned to Admin API %s but the mirror was generated from %s -- regenerate (see the quarterly bump) or repin the store",
+		// in a way no error message would explain. Permanent: every try is
+		// refused the same way until somebody regenerates or repins, so a
+		// retry would spend its tries on nothing.
+		return nil, memqlsync.Permanentf("shopify: store %q is pinned to Admin API %s but the mirror was generated from %s -- regenerate (see the quarterly bump) or repin the store",
 			store.ID, store.APIVersion, generated.APIVersion)
 	}
 	return c.admin.Do(ctx, storeWithVersion(store), token, document, operation, variables)

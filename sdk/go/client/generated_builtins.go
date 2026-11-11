@@ -2307,6 +2307,27 @@ func DatasyncDiscardOutboxEntryBuild(args DatasyncDiscardOutboxEntryArgs) string
 	return b.String()
 }
 
+// DatasyncRequeueInbound -- Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else.
+type DatasyncRequeueInboundArgs struct {
+	// The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).
+	Source string
+}
+
+// DatasyncRequeueInbound calls the engine builtin datasyncRequeueInbound.
+func (qc *QueryClient) DatasyncRequeueInbound(ctx context.Context, args DatasyncRequeueInboundArgs) (*Result, error) {
+	call := DatasyncRequeueInboundBuild(args)
+	return qc.executeNamed(ctx, "datasyncRequeueInbound", call)
+}
+
+func DatasyncRequeueInboundBuild(args DatasyncRequeueInboundArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin datasyncRequeueInbound(")
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DatasyncRetryOutboxEntry -- Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight.
 type DatasyncRetryOutboxEntryArgs struct {
 	EntryId string

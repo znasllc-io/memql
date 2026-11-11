@@ -164,6 +164,7 @@
 {"id":"automation:retireDeclaredConceptVersions","kind":"automation","label":"retireDeclaredConceptVersions","attrs":{"origin":"platform/automations.memql","schedule":"0 40 * * * *","stratum":"0"}},
 {"id":"automation:retirePipelineArtifacts","kind":"automation","label":"retirePipelineArtifacts","attrs":{"origin":"pipelines/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:retireProcedures","kind":"automation","label":"retireProcedures","attrs":{"origin":"procedure/automations.memql","schedule":"0 30 3 * * *","stratum":"0"}},
+{"id":"automation:retryFailedInboundDeliveries","kind":"automation","label":"retryFailedInboundDeliveries","attrs":{"mode":"single","origin":"platform/automations.memql","schedule":"0 * * * * *","stratum":"0"}},
 {"id":"automation:reviseLibraryDocument","kind":"automation","label":"reviseLibraryDocument","attrs":{"origin":"library/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:routeRequest","kind":"automation","label":"routeRequest","attrs":{"origin":"forge/automations.memql","stratum":"0","trigger":"before.create.v1:forge:request","triggerConcept":"v1:forge:request","triggerKind":"before.create"}},
 {"id":"automation:routingEvidenceFold","kind":"automation","label":"routingEvidenceFold","attrs":{"origin":"router/automations.memql","schedule":"0 30 3 * * *","stratum":"0"}},

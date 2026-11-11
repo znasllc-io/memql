@@ -691,6 +691,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and product automations draining a source, whose tree-loaded step
 		// context carries internal origin; none of them is a client.
 		{Path: "platform/mutations.memql", Name: "updateInboundRequestStatus"}: true,
+		// Store mirror, U4: putting a given-up delivery back in line resets its
+		// try count and makes it due. Same row, same reason: no owner to scope
+		// to, and the one writer is the datasync runtime under its operator
+		// identity, reached through datasyncRequeueInbound, whose handler admits
+		// only a cluster owner or the engine itself.
+		{Path: "platform/mutations.memql", Name: "requeueInboundRequest"}: true,
 		// memql#5480. A webhook delivery whose URL is a credential (a Discord
 		// webhook's token is in its path) names the globalSecret holding it,
 		// and the outbound worker POSTs the row's body to whatever that secret

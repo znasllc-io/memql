@@ -557,8 +557,8 @@ builtin dateKeyInTimezone {
 
 // ---- The data-origins inventory (epic memql#4378) ----
 //
-// @sdk on this and on the four datasync builtins below: most builtins are
-// internal and stay out of the generated SDKs, but these five ARE the
+// @sdk on this and on the five datasync builtins below: most builtins are
+// internal and stay out of the generated SDKs, but these six ARE the
 // operator surface. The portal's Data origins page reads the inventory and
 // drives backfill / pause / retry / discard through them, and a typed
 // method is what keeps that page from hand-building call strings.
@@ -733,6 +733,13 @@ builtin datasyncQueueBackfill {
 @description("Continue every queued or running backfill. For each partition of each bound connector it advances at most one domain by one page budget -- the one running, else the first queued -- so one store runs one backfill at a time. Leaves paused domains alone; a domain the origin refuses is recorded with the reason and leaves the queue. Only the engine reaches it: a call without internal origin is refused.")
 builtin datasyncContinueBackfills { }
 
+// Driven by the engine too: the retryFailedInboundDeliveries automation runs it
+// every minute, so it carries no @sdk and refuses a call without internal origin
+// in its handler.
+@executor("integration.datasync.retryInbound")
+@description("Try again the failed inbound deliveries whose next try has come: one page of inboundRequestsDueForRetry, each row claimed behind its row version (a second pass that claims it first leaves it alone) and dispatched as dispatchInbound dispatches a staged row. A delivery gets four tries, 1, 5 and 30 minutes apart; a refusal no retry changes is not tried again. Refuses a call without internal origin.")
+builtin datasyncRetryInbound { }
+
 @sdk
 @executor("integration.datasync.startBackfill")
 @description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.")
@@ -765,6 +772,13 @@ builtin datasyncRetryOutboxEntry {
 builtin datasyncDiscardOutboxEntry {
   entryId  string!
   reason   string
+}
+
+@sdk
+@executor("integration.datasync.requeueInbound")
+@description("Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else.")
+builtin datasyncRequeueInbound {
+  source  string!  @description("The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>).")
 }
 
 // ---- Pulling a model onto one of your machines (epic memql#5103) ----

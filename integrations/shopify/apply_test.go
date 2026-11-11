@@ -283,3 +283,71 @@ func TestTopicHeaderMapsOntoTheEnumSpelling(t *testing.T) {
 		t.Error("the enum spelling must route too -- both reach this function")
 	}
 }
+
+// A RETRY IS FETCHED AGAIN (U4). The short-circuit remembers a webhook id for
+// fifteen minutes, and the runtime retries a failed delivery one and five
+// minutes later. Were a failed fetch remembered, both retries would be
+// answered "already seen" and the change never fetched. So a delivery is
+// remembered only once it applied, and the runtime can tell the connector to
+// forget one whose writes it could not apply.
+func TestARetriedDeliveryIsFetchedAgainNotSwallowedAsADuplicate(t *testing.T) {
+	t.Run("the first fetch fails", func(t *testing.T) {
+		h := newHarness(t)
+		h.admin.reply("ShopifyFetchProduct", productReply("gid://shopify/Product/1", "Linen shirt", "2026-08-23T11:00:00Z"))
+		h.admin.failOnce("ShopifyFetchProduct", GraphQLError{Message: "internal error", Extensions: map[string]any{"code": "INTERNAL_SERVER_ERROR"}})
+		req := delivery("products/update", "gid://shopify/Product/1")
+
+		if _, err := h.conn.Apply(context.Background(), req); err == nil {
+			t.Fatal("the failed fetch reported success")
+		}
+		writes, err := h.conn.Apply(context.Background(), req)
+		if err != nil {
+			t.Fatalf("the retry: %v", err)
+		}
+		if len(writes) == 0 || h.admin.countOp("ShopifyFetchProduct") != 2 {
+			t.Fatalf("the retry produced %d writes from %d fetches; want the same webhook id fetched again",
+				len(writes), h.admin.countOp("ShopifyFetchProduct"))
+		}
+	})
+	t.Run("the runtime could not apply what was fetched", func(t *testing.T) {
+		h := newHarness(t)
+		h.admin.reply("ShopifyFetchProduct", productReply("gid://shopify/Product/1", "Linen shirt", "2026-08-23T11:00:00Z"))
+		req := delivery("products/update", "gid://shopify/Product/1")
+
+		if _, err := h.conn.Apply(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		var forgetter memqlsync.InboundForgetter = h.conn
+		forgetter.ForgetInbound(context.Background(), req)
+		writes, err := h.conn.Apply(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(writes) == 0 || h.admin.countOp("ShopifyFetchProduct") != 2 {
+			t.Fatalf("after ForgetInbound the delivery produced %d writes from %d fetches; want it fetched again",
+				len(writes), h.admin.countOp("ShopifyFetchProduct"))
+		}
+	})
+}
+
+// A store pinned to another Admin API version is refused on every try the
+// same way until somebody regenerates or repins, so the refusal is permanent:
+// the retry pass must not spend four tries on it.
+func TestAStorePinnedToAnotherVersionIsAPermanentRefusal(t *testing.T) {
+	h := newHarness(t)
+	h.engine.setRows("stores", []map[string]any{{
+		"id": testStoreID, "domain": "acme-widgets.myshopify.com", "name": "Acme Widgets",
+		"adminTokenRef": "ACME_ADMIN", "webhookSecretRef": "ACME_WEBHOOK", "apiVersion": "2020-01",
+		"protectedDataLevel": ProtectedLevel1, "status": StatusLive, "ownerUserId": "user-1",
+	}})
+	_, err := h.conn.Apply(context.Background(), delivery("products/update", "gid://shopify/Product/1"))
+	if err == nil || !strings.Contains(err.Error(), "pinned to Admin API 2020-01") {
+		t.Fatalf("err = %v, want the version refusal", err)
+	}
+	if !memqlsync.IsPermanent(err) {
+		t.Fatalf("err = %v is not permanent; a pinned store is refused the same way on every retry", err)
+	}
+	if n := h.admin.countOp("ShopifyFetchProduct"); n != 0 {
+		t.Fatalf("the Admin API was called %d times for a store pinned to another version", n)
+	}
+}

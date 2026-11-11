@@ -80,6 +80,24 @@ shape inboundRequest inboundRequestFull {
   receivedAt
   processedAt
   lastError
+  attempts
+  nextAttemptAt
+  row.createdAt
+}
+
+/// An inbound request without its body: what a list of failed deliveries shows and routes on.
+/// headersJson stays, because a given-up delivery is routed by its topic header, and the body --
+/// often the largest thing on the row -- is read only when a delivery is tried again.
+@row
+shape inboundRequest inboundRequestBrief {
+  row.id
+  source
+  status
+  attempts
+  nextAttemptAt
+  lastError
+  receivedAt
+  headersJson
   row.createdAt
 }
 

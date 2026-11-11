@@ -32,6 +32,10 @@ import (
 //	                 or running backfill on by one page budget per tick.
 //	setSyncPaused    OPERATOR-DRIVEN, and the switch that stops the
 //	                 others for one domain.
+//	retryInbound     SCHEDULED. A cron automation tries again the failed
+//	                 deliveries whose next try has come.
+//	requeueInbound   OPERATOR-DRIVEN. A cluster owner putting one source's
+//	                 given-up deliveries back in line.
 //
 // The scheduled and event-driven ones are no-ops on a node whose build has no
 // connector bound,
@@ -112,6 +116,17 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleContinueBackfills,
 		},
 		{
+			Name:        "retryInbound",
+			Description: "Try again the failed inbound deliveries whose next try has come: one page, each row claimed behind its row version before it is dispatched as dispatchInbound dispatches a staged row. Four tries at most, 1, 5 and 30 minutes apart. Refuses a call without internal origin.",
+			Handler:     i.handleRetryInbound,
+		},
+		{
+			Name:        "requeueInbound",
+			Description: "Put one source's given-up inbound deliveries -- failed, their four tries spent -- back in line: no tries counted, due now. Admits a cluster owner or internal origin and refuses anybody else.",
+			Handler:     i.handleRequeueInbound,
+			ArgsSchema:  map[string]string{"source": "string (required) - the inbound source whose given-up deliveries go back in line"},
+		},
+		{
 			Name:        "retryOutboxEntry",
 			Description: "Return one dead-lettered entry to the queue. Attempts reset to zero, because the operator has presumably fixed what was wrong and carrying the old count forward would dead-letter it again on the first hiccup.",
 			Handler:     i.handleRetryOutboxEntry,
@@ -183,6 +198,17 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	if source == "" {
 		return resultNode("skipped", "no source on the staged row")
 	}
+	// ONLY A DELIVERY NOBODY HAS WORKED. The automation fires on every write
+	// of the row, not only its first -- every write publishes node.created --
+	// so it also fires for the dispatcher's own stamps, the retry pass's
+	// claims and a requeue. The stamps' echoes share the first fire's
+	// correlation and are deduplicated; a retry pass's writes carry the pass's
+	// own and are not. A worked row is therefore left alone here: a failed one
+	// is the retry pass's, and dispatching it from here as well would try it
+	// from two places at once.
+	if status := strings.TrimSpace(staged.Status); status != "" && status != "received" {
+		return resultNode("skipped", fmt.Sprintf("the delivery is already %s; a failed one is tried again by the retry pass", status))
+	}
 	// The row is judged INSIDE DispatchStaged, after the connector lookup, so
 	// a row of a source no connector serves stays the no-op Dispatch's
 	// contract promises whatever its tier, its verdict or its metadata say; a
@@ -198,6 +224,36 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 		return resultNode("skipped", "no connector serves source "+source)
 	}
 	return resultNode("processed", fmt.Sprintf("applied=%d stale=%d", res.Applied, res.Stale))
+}
+
+// handleRetryInbound is the scheduled retry pass.
+func (i *Integration) handleRetryInbound(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "retryInbound"); err != nil {
+		return nil, err
+	}
+	res, err := i.dispatcher.RetryDue(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resultNode("retried", fmt.Sprintf("tried=%d recovered=%d", res.Tried, res.Recovered))
+}
+
+// handleRequeueInbound is an operator putting given-up deliveries back in
+// line. A builtin takes no @serverOnly, so the gate is here, before anything is
+// read: the engine's own call, or a cluster owner -- the tier the inbound rows
+// are read at -- and nobody else.
+func (i *Integration) handleRequeueInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	access, _ := auth.AccessFromContext(ctx)
+	if !auth.OriginFromContext(ctx).IsInternal() && (access == nil || !access.IsClusterOwner()) {
+		return nil, fmt.Errorf("datasync: requeueInbound is a cluster owner's to call")
+	}
+	source := strings.TrimSpace(argString(args, "source"))
+	n, err := i.dispatcher.Requeue(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	i.logger.Info("datasync: given-up inbound deliveries were put back in line", "source", source, "requeued", n)
+	return resultNode("requeued", fmt.Sprintf("source=%s requeued=%d", source, n))
 }
 
 // handleReconcileDomains is the scheduled sweep. A connector that

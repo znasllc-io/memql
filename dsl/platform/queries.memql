@@ -196,6 +196,45 @@ query inboundRequest inboundRequestsByStatus {
   shape   inboundRequestFull
 }
 
+// ---- queries/v1/platform/inboundRequestsDueForRetry.memql ----
+
+/// The failed deliveries whose next try has come, oldest first: what the datasync retry pass
+/// (retryFailedInboundDeliveries) works each minute. A row with no nextAttemptAt -- refused for a
+/// reason no retry changes -- and a row at four tries are never answered. One bounded page; the
+/// next minute's pass takes the rest. The full shape, because a retry needs the body.
+///
+/// Read through the failed-delivery lookup (memory_nodes_inbound_failed_lookup_idx), which the
+/// `status == "failed"` conjunct engages: the read enumerates the deliveries that ever failed, never
+/// the inbox.
+@actor
+query inboundRequest inboundRequestsDueForRetry {
+  args {
+    asOf  datetime!
+  }
+  filter  row => actor.isClusterOwner == true && row.status == "failed" && row.attempts < 4
+              && row.nextAttemptAt != "" && row.nextAttemptAt <= args.asOf
+  sort     "row.createdAt", "asc"
+  paginate 50
+  shape   inboundRequestFull
+}
+
+// ---- queries/v1/platform/inboundRequestsGivenUp.memql ----
+
+/// The failed deliveries that used their four tries, newest first, of one source when one is
+/// named: what an operator puts back in line with datasyncRequeueInbound. Without the body. Read
+/// through the failed-delivery lookup, as inboundRequestsDueForRetry is.
+@actor
+query inboundRequest inboundRequestsGivenUp {
+  args {
+    source  string
+  }
+  filter  row => actor.isClusterOwner == true && row.status == "failed" && row.attempts >= 4
+              && (args.source == nil || args.source == "" || row.source == args.source)
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   inboundRequestBrief
+}
+
 // ---- queries/v1/platform/inboundRequestById.memql ----
 
 /// One staged inbound request by its row id. The read a product's handler does when an automation

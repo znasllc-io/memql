@@ -216,7 +216,11 @@ func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (Sta
 	if err != nil || len(rows) == 0 {
 		return StagedRequest{}, false, err
 	}
-	row := rows[0]
+	return stagedFromRow(rows[0], requestID), true, nil
+}
+
+// stagedFromRow reads one inbound request row as the dispatcher works it.
+func stagedFromRow(row map[string]any, requestID string) StagedRequest {
 	return StagedRequest{
 		RequestId:         requestID,
 		Source:            argString(row, "source"),
@@ -225,7 +229,72 @@ func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (Sta
 		ReceivedAt:        argString(row, "receivedAt"),
 		VerifiedBy:        argString(row, "verifiedBy"),
 		SignatureVerified: boolField(row, "signatureVerified"),
-	}, true, nil
+		Attempts:          intField(row, "attempts"),
+		Status:            argString(row, "status"),
+		Version:           timeField(row, "createdAt"),
+	}
+}
+
+// stagedFromRows reads a page of inbound request rows, each under its own id.
+func stagedFromRows(rows []map[string]any) []StagedRequest {
+	out := make([]StagedRequest, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, stagedFromRow(row, stringField(row, "id")))
+	}
+	return out
+}
+
+// inboundRequestConcept is the concept the staged deliveries are rows of.
+const inboundRequestConcept = "v1:platform:inboundRequest"
+
+// InboundRequestsDueForRetry reads ONE page of the failed deliveries whose
+// next try has come by asOf, oldest first, bodies included. Read fresh: a
+// cached page could hand back rows another pass has already claimed.
+func (s *Store) InboundRequestsDueForRetry(ctx context.Context, asOf time.Time) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsDueForRetry",
+		arg{"asOf", asOf.UTC().Format(time.RFC3339)}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// ClaimInboundRetry moves a due delivery's next try to until, fenced on the
+// version the due read returned, and reports whether this caller holds it. A
+// claim another writer overtook -- another pass's claim, or any write of the
+// row since it was read -- answers false and writes nothing. The claim names
+// only the status (still failed) and the next try, so the try count is the
+// row's: a pass that dies mid-dispatch leaves the row due again once until
+// passes, with nothing spent.
+func (s *Store) ClaimInboundRetry(ctx context.Context, staged StagedRequest, until time.Time) (bool, error) {
+	fenced := memql.ContextWithRowVersionFence(ctx, inboundRequestConcept, staged.RequestId, staged.Version)
+	_, err := s.exec(fenced, call("mutation", "updateInboundRequestStatus",
+		arg{"requestId", staged.RequestId},
+		arg{"status", "failed"},
+		arg{"nextAttemptAt", until.UTC().Format(time.RFC3339)}))
+	if errors.Is(err, memql.ErrRowVersionChanged) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// InboundRequestsGivenUp reads one page of one source's given-up deliveries,
+// newest first and without their bodies. Read fresh, because Requeue reads it
+// again after putting the last page back in line.
+func (s *Store) InboundRequestsGivenUp(ctx context.Context, source string) ([]StagedRequest, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "inboundRequestsGivenUp", arg{"source", source}))
+	if err != nil {
+		return nil, err
+	}
+	return stagedFromRows(rows), nil
+}
+
+// RequeueInboundRequest puts one delivery back in line: no tries counted, due
+// at at.
+func (s *Store) RequeueInboundRequest(ctx context.Context, requestID string, at time.Time) error {
+	_, err := s.exec(ctx, call("mutation", "requeueInboundRequest",
+		arg{"requestId", requestID}, arg{"nextAttemptAt", at.UTC().Format(time.RFC3339)}))
+	return err
 }
 
 // SyncStateFor reads one domain's health -- one partition's, for a

@@ -1705,6 +1705,28 @@ QueryClient.prototype.datasyncDiscardOutboxEntry = function (this: QueryClient, 
   return this.executeNamed("datasyncDiscardOutboxEntry", buildDatasyncDiscardOutboxEntry(args), opts);
 };
 
+/** Put the given-up inbound deliveries of one source back in line: every failed delivery of that source that used its four tries has its tries set back to none and is due now, so the retry pass tries it again within a minute. A delivery still waiting for its next try is left alone. Admits a cluster owner or the engine's own call and refuses anybody else. */
+export interface DatasyncRequeueInboundArgs {
+  /** The inbound source whose given-up deliveries go back in line, as the staged rows name it (for Shopify, shopify-<store>). */
+  source: string;
+}
+
+export function buildDatasyncRequeueInbound(args: DatasyncRequeueInboundArgs): string {
+  const parts: string[] = [];
+  parts.push("source: " + renderMemQLValue(args.source));
+  return "builtin datasyncRequeueInbound(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    datasyncRequeueInbound(args: DatasyncRequeueInboundArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.datasyncRequeueInbound = function (this: QueryClient, args: DatasyncRequeueInboundArgs = {} as DatasyncRequeueInboundArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("datasyncRequeueInbound", buildDatasyncRequeueInbound(args), opts);
+};
+
 /** Return one DEAD-lettered outbox entry to the queue with its attempts reset. Refuses an entry that is not dead: a pending or failed one is still the drain worker's, and acting on it would race a delivery in flight. */
 export interface DatasyncRetryOutboxEntryArgs {
   entryId: string;

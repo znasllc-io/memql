@@ -76,7 +76,23 @@ func (a *applied) check(id string, now time.Time) bool {
 	return false
 }
 
+// forget drops one id, so the next delivery carrying it is worked again. A
+// delivery is remembered when it is first checked, before its fetch; one whose
+// fetch or write then failed must not stay remembered, or the runtime's retry a
+// minute later is answered "already seen" and the change is never fetched.
+func (a *applied) forget(id string) {
+	if id == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.seen, id)
+}
+
 // Apply implements sync.Connector.
+//
+// A delivery the short-circuit recorded is forgotten again when Apply fails,
+// so the short-circuit holds only deliveries this connector applied.
 func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]memqlsync.MirrorWrite, error) {
 	if c == nil || c.stores == nil {
 		return nil, nil
@@ -171,6 +187,7 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 
 	writes, err := c.fetchAndMap(ctx, store, spec, gid)
 	if err != nil {
+		c.forgetDelivery(req, gid)
 		return nil, err
 	}
 	if writes == nil {
@@ -184,17 +201,50 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 }
 
 func (c *Connector) deduped(req memqlsync.InboundRequest, gid string) bool {
-	if c.applied == nil {
+	key := dedupeKey(req, gid)
+	if c.applied == nil || key == "" {
 		return false
 	}
-	key := header(req, HeaderWebhookID)
-	if key == "" {
-		key = header(req, HeaderWebhookID)
+	return c.applied.check(key, c.now())
+}
+
+// dedupeKey is what the short-circuit records a delivery under: its webhook id
+// and the object it names, or "" for a delivery carrying no webhook id.
+func dedupeKey(req memqlsync.InboundRequest, gid string) string {
+	id := header(req, HeaderWebhookID)
+	if id == "" {
+		return ""
 	}
-	if key == "" {
-		return false
+	return id + "\x00" + gid
+}
+
+// forgetDelivery drops one delivery from the short-circuit.
+func (c *Connector) forgetDelivery(req memqlsync.InboundRequest, gid string) {
+	if c.applied != nil {
+		c.applied.forget(dedupeKey(req, gid))
 	}
-	return c.applied.check(key+"\x00"+gid, c.now())
+}
+
+// ForgetInbound implements memqlsync.InboundForgetter. The runtime calls it
+// when a delivery this connector answered could not be written, and will be
+// tried again: Apply returned, so the delivery is recorded as handled, and the
+// retry would otherwise be answered from the short-circuit with nothing.
+func (c *Connector) ForgetInbound(_ context.Context, req memqlsync.InboundRequest) {
+	topic := req.Topic
+	if topic == "" {
+		topic = header(req, HeaderTopic)
+	}
+	route, known := generated.Topics[generated.TopicHeaderToEnum(topic)]
+	if !known {
+		return
+	}
+	spec := generated.Types[route.Concept]
+	if spec == nil {
+		return
+	}
+	if gid := deliveredGID(req.Body, spec.GraphQLType); gid != "" {
+		c.forgetDelivery(req, gid)
+	}
 }
 
 // FetchByGID reads one object with the generated selection set and maps it.
