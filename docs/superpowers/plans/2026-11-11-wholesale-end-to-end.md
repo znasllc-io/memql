@@ -359,7 +359,7 @@ it("shows a failed read as a Notice with Try again")
 
 **Interfaces:**
 - Consumes: Task 3's reply contract.
-- Produces: `func (c *Connector) TagWholesaleCustomer(ctx context.Context, store Store, email, name, tag string) (gid string, created bool, err error)`; `func (c *Connector) findOrCreateCustomer(ctx context.Context, store Store, email, name string) (gid string, created bool, err error)`; `UntagWholesaleCustomer` returns nil when no customer has the email (X17); `func requireWholesaleCaller(ctx context.Context, construct string) error` (refuses without internal origin: `shopify: <construct> is called by the wholesale pack, never by a client`), called first in `handleTagWholesaleCustomer`, `handleUntagWholesaleCustomer`, `handleProvisionWholesale`, `handleRevokeWholesale` (X22); refusals carry a code through `type codedRefusal interface { RefusalCode() string }`, and `refusalNode` adds `code`; the tag reply adds `customerId` and `customerCreated`.
+- Produces: `func (c *Connector) TagWholesaleCustomer(ctx context.Context, store Store, email, name, tag string) (gid string, created bool, err error)`; `func (c *Connector) findOrCreateCustomer(ctx context.Context, store Store, email, name string) (gid string, created bool, err error)`; `UntagWholesaleCustomer` returns nil when no customer has the email (X17); `func requireWholesaleCaller(ctx context.Context, construct string) error` (refuses without internal origin: `shopify: <construct> is called by the wholesale pack, never by a client`), called first in `handleTagWholesaleCustomer`, `handleUntagWholesaleCustomer`, `handleProvisionWholesale`, `handleRevokeWholesale` (X22) and in the handler of `shopifyWholesaleCatalogHeadroom` (an ungated builtin is callable by every signed-in role, and the headroom reads a store's catalogs with its Admin token; if the pack reads the headroom, it does so through the same stamped caller); refusals carry a code through `type codedRefusal interface { RefusalCode() string }`, and `refusalNode` adds `code`; the tag reply adds `customerId` and `customerCreated`.
 - Produces, in the DSL: `shopifyTagWholesaleCustomer` gains `buyerName string`. `ConnectScopes()` includes `write_customers`.
 - Produces, in the pack: `engineCaller.Call` stamps `auth.ContextWithInternalOrigin` inline on its one `Execute`, after the pack's own checks; the customer-tag adapter passes `buyerName: g.BuyerName` and fills `Outcome.CustomerID` and `CustomerCreated` from the reply.
 
@@ -376,7 +376,7 @@ func TestASecondTagCreatesNothingAndAddsNoSecondTag(t *testing.T)             //
 func TestADuplicateEmailRefusalFromCreateReadsAgainAndTags(t *testing.T)
 func TestUntaggingAnAddressWithNoCustomerSucceeds(t *testing.T)
 func TestACustomerAccessDeniedIsScopeMissing(t *testing.T)                    // reply status refused, code scope_missing
-func TestEachWholesaleBuiltinRefusesACallWithoutInternalOrigin(t *testing.T)  // all four; zero Admin calls
+func TestEachWholesaleBuiltinRefusesACallWithoutInternalOrigin(t *testing.T)  // all five, the headroom included; zero Admin calls
 func TestTheCustomAppPathAsksForWriteCustomers(t *testing.T)
 func TestACompanyMadeUnderEitherFormOfTheApplicationIdIsFoundAgain(t *testing.T)   // a company at the bare form, then at the canonical form: a provision handed the canonical id creates no second company in either case
 // packs/wholesalepack
