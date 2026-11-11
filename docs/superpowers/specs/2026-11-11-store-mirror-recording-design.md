@@ -142,7 +142,7 @@ a store that was in sync re-reads its catalog once and writes nothing.
 
 | Reason | When | What the Store page says | The one act |
 | --- | --- | --- | --- |
-| `data_not_declared` | Shopify refuses a domain in the connection with its protected-customer-data answer. | "Shopify refuses orders for this app, because the app has not declared the customer data it uses." | For the operator: the declaration, with a link to the runbook. |
+| `data_not_declared` | Shopify refuses a domain in the connection with its protected-customer-data answer. | "Shopify refuses orders for this app, because the app has not declared the customer data it uses." | For the operator: the declaration. The act links to Shopify's own page on protected customer data, since the OS has no helper for linking to the docs; the steps are in `shopify-connector.md`. |
 | `approval_outdated` | The store's grant lacks a scope its connection asks for. | "This store approved an older list of permissions." | For the store's owner: "Open MemQL OS from the store's Shopify admin and approve", with a link to that admin's apps page. |
 | `grant_lost` | The offline grant cannot be renewed, or Shopify answers 401. | "MemQL can no longer reach this store." | Reconnect in Settings. |
 | `events_not_registered` | The last subscription pass failed, or a topic of a domain in the connection is missing. | "Shopify is not sending every change." | "Register again", which runs the subscription pass for this store. |
