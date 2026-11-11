@@ -42,7 +42,7 @@ func (c *Connector) completeChildren(ctx context.Context, store Store, spec *gen
 			}
 			if pages >= maxChildPages {
 				c.logger.Warn("shopify: a child connection is longer than its page ceiling; the rest is not mirrored",
-					"store", store.ID, "concept", spec.Concept, "gid", parentGID,
+					"store", store.ID, "concept", spec.Concept,
 					"connection", child.Connection, "pages", maxChildPages)
 				break
 			}
@@ -66,16 +66,49 @@ func (c *Connector) completeChildren(ctx context.Context, store Store, spec *gen
 			}
 			nodes, _ := conn["nodes"].([]any)
 			more, _ := page["nodes"].([]any)
-			conn["nodes"] = append(nodes, more...)
+			conn["nodes"] = appendUnseen(nodes, more)
 			conn["pageInfo"] = page["pageInfo"]
 			if len(more) == 0 {
 				// A page with nothing on it: the origin is not advancing,
 				// and neither should this loop.
 				break
 			}
+			if _, next := pageInfoOf(conn); next == cursor {
+				// The page hands back the cursor it was asked with: asking
+				// again would answer the same page, to the ceiling.
+				c.logger.Warn("shopify: a child connection's page repeated its cursor; the rest is not mirrored",
+					"store", store.ID, "concept", spec.Concept, "connection", child.Connection, "pages", pages+1)
+				break
+			}
 		}
 	}
 	return nil
+}
+
+// appendUnseen appends the nodes whose id is not already among nodes, so a
+// page the origin repeats is not mapped twice. A node with no id (a price
+// list's price) is appended as it comes.
+func appendUnseen(nodes, more []any) []any {
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		if obj, ok := n.(map[string]any); ok {
+			if id, _ := obj["id"].(string); id != "" {
+				seen[id] = true
+			}
+		}
+	}
+	for _, n := range more {
+		if obj, ok := n.(map[string]any); ok {
+			if id, _ := obj["id"].(string); id != "" {
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+			}
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes
 }
 
 // pageInfoOf reads a connection's pageInfo.

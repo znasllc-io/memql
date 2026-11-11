@@ -1,8 +1,10 @@
 package shopify
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -117,13 +119,29 @@ func TestASweepReadsAnOrdersLinesPastTheFirstPage(t *testing.T) {
 	}
 }
 
+// capturedLog points the connector's log at a buffer the test reads.
+func capturedLog(h *testHarness) *bytes.Buffer {
+	var buf bytes.Buffer
+	h.conn.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return &buf
+}
+
+// pagedLines answers each page request with the next line and a new
+// cursor, always promising more.
+func pagedLines(vars map[string]any) any {
+	var n int
+	_, _ = fmt.Sscanf(fmt.Sprint(vars["after"]), "cursor-%d", &n)
+	return orderWithLines(lineItemPage(n+1, n+1, true, fmt.Sprintf("cursor-%d", n+1)))
+}
+
 // The ceiling: a connection that always promises more is read fifty pages
-// deep, the first and forty-nine after it, and the order is still written
-// with every line those pages carried.
+// deep, the first and forty-nine after it, every page a different line;
+// the order is written with each of them and the log says it was cut.
 func TestAChildConnectionStopsAtItsPageCeiling(t *testing.T) {
 	h := newHarness(t)
+	logged := capturedLog(h)
 	h.admin.reply("ShopifyFetchOrder", orderWithLines(lineItemPage(1, 1, true, "cursor-1")))
-	h.admin.reply("ShopifyPageOrderLineItems", orderWithLines(lineItemPage(2, 2, true, "cursor-2")))
+	h.admin.replyWith("ShopifyPageOrderLineItems", pagedLines)
 
 	writes, err := h.conn.Apply(context.Background(), delivery("orders/updated", orderGID))
 	if err != nil {
@@ -132,14 +150,43 @@ func TestAChildConnectionStopsAtItsPageCeiling(t *testing.T) {
 	if n := h.admin.countOp("ShopifyPageOrderLineItems"); n != maxChildPages-1 {
 		t.Errorf("asked for %d further pages, want %d", n, maxChildPages-1)
 	}
+	lines := lineItemGIDs(writes)
+	if len(lines) != maxChildPages || !lines[fmt.Sprintf("gid://shopify/LineItem/%d", maxChildPages)] {
+		t.Errorf("wrote %d distinct lines, want one per page read (%d)", len(lines), maxChildPages)
+	}
+	if out := logged.String(); !strings.Contains(out, "longer than its page ceiling") ||
+		!strings.Contains(out, "concept=order") || !strings.Contains(out, "connection=lineItems") {
+		t.Errorf("the ceiling was not said in the log, naming the concept and the child:\n%s", out)
+	}
+}
+
+// A page that hands back the cursor it was asked with is the origin not
+// advancing: the read stops there, with no line taken twice, and says so.
+func TestAChildPageThatRepeatsItsCursorStops(t *testing.T) {
+	h := newHarness(t)
+	logged := capturedLog(h)
+	h.admin.reply("ShopifyFetchOrder", orderWithLines(lineItemPage(1, 1, true, "cursor-1")))
+	h.admin.reply("ShopifyPageOrderLineItems", orderWithLines(lineItemPage(2, 2, true, "cursor-1")))
+
+	writes, err := h.conn.Apply(context.Background(), delivery("orders/updated", orderGID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := h.admin.countOp("ShopifyPageOrderLineItems"); n != 1 {
+		t.Errorf("asked for %d further pages, want the one that repeated its cursor", n)
+	}
 	lines := 0
 	for _, w := range writes {
 		if w.Concept == generated.ConceptID("orderLineItem") {
 			lines++
 		}
 	}
-	if lines != maxChildPages {
-		t.Errorf("wrote %d lines, want one per page read (%d)", lines, maxChildPages)
+	if lines != 2 {
+		t.Errorf("wrote %d line rows, want the two distinct lines once each", lines)
+	}
+	if out := logged.String(); !strings.Contains(out, "repeated its cursor") ||
+		!strings.Contains(out, "concept=order") || !strings.Contains(out, "connection=lineItems") {
+		t.Errorf("the repeated cursor was not said in the log, naming the concept and the child:\n%s", out)
 	}
 }
 

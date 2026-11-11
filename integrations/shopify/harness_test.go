@@ -151,6 +151,9 @@ type fakeAdmin struct {
 	status    map[string]int
 	throttle  ThrottleStatus
 	downloads map[string]string
+	// replyFns answers an operation from its variables, ahead of replies:
+	// a paged answer whose every page differs.
+	replyFns map[string]func(vars map[string]any) any
 }
 
 type adminRequest struct {
@@ -198,6 +201,9 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 		Token: r.Header.Get("X-Shopify-Access-Token"),
 	})
 	reply, hasReply := f.replies[op]
+	if fn := f.replyFns[op]; fn != nil {
+		reply, hasReply = fn(body.Variables), true
+	}
 	errs := f.errors[op]
 	if queue := f.errorOnce[op]; len(queue) > 0 {
 		// One refused answer per queued entry, then the scripted reply:
@@ -284,6 +290,16 @@ func (f *fakeAdmin) denyField(op, field string, data any) {
 func (f *fakeAdmin) fail(op string, errs ...GraphQLError) {
 	f.mu.Lock()
 	f.errors[op] = errs
+	f.mu.Unlock()
+}
+
+// replyWith answers op from each request's variables.
+func (f *fakeAdmin) replyWith(op string, fn func(vars map[string]any) any) {
+	f.mu.Lock()
+	if f.replyFns == nil {
+		f.replyFns = map[string]func(map[string]any) any{}
+	}
+	f.replyFns[op] = fn
 	f.mu.Unlock()
 }
 
