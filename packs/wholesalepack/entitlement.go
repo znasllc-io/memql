@@ -2,6 +2,7 @@ package wholesalepack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -312,83 +313,73 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		BuyerEmail:    trimmed(app["applicantEmail"]),
 	}
 	owner := trimmed(app["ownerUserId"])
+	write := func(adapterName, state string, res Outcome, code, text string) ([]memorynodes.MemoryNode, error) {
+		return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
+			adapterName, state, res, code, text)
+	}
+
+	prior, err := p.entitlementRow(sys, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	var priorAdapter, priorRef, priorCustomerID string
+	var priorCreated bool
+	if prior != nil {
+		priorAdapter = trimmed(prior["adapter"])
+		priorRef = trimmed(prior["reference"])
+		priorCustomerID = trimmed(prior["shopifyCustomerId"])
+		priorCreated, _ = prior["customerCreated"].(bool)
+	}
+	priorGranted := prior != nil && trimmed(prior["state"]) == EntitlementGranted
+	// WHAT THE GRANT RECORDED IS NEVER LOST. A revoke, and a provision over a
+	// row that is already granted, write the prior adapter, reference and
+	// customer back whenever the attempt does not replace them, so a later
+	// revoke always finds the adapter that put the access on.
+	keep := revoking || priorGranted
+	kept := Outcome{Reference: priorRef, CustomerID: priorCustomerID, CustomerCreated: priorCreated}
+
 	var adapter Adapter
 	adapterName := ""
-	// A revoke keeps the customer the grant landed on: the prior row's values
-	// are written back explicitly, since the write would otherwise blank them.
-	priorCustomerID, priorCreated := "", false
-
 	if revoking {
-		prior, err := p.entitlementRow(sys, applicationID)
-		if err != nil {
-			return nil, err
-		}
-		was := ""
-		if prior != nil {
-			grant.Reference = trimmed(prior["reference"])
-			was = trimmed(prior["adapter"])
-			priorCustomerID = trimmed(prior["shopifyCustomerId"])
-			priorCreated, _ = prior["customerCreated"].(bool)
-		}
-		// NO ROW, OR A ROW THAT NEVER REACHED A STORE (X17). An approval
-		// that granted nothing has nothing to take back, and the decision
-		// log already says revoked; the row says so too, and no adapter is
-		// called against a store nobody was ever entitled on.
-		if prior == nil || was == AdapterNone {
-			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-				AdapterNone, EntitlementRevoked,
+		grant.Reference = priorRef
+		// NO ROW, A ROW THAT NEVER REACHED A STORE, OR ONE NAMING NO ADAPTER
+		// (X17). An approval that granted nothing has nothing to take back,
+		// and the decision log already says revoked; the row says so too, and
+		// no adapter is called against a store nobody was ever entitled on.
+		if priorAdapter == "" || priorAdapter == AdapterNone {
+			return write(AdapterNone, EntitlementRevoked,
 				Outcome{CustomerID: priorCustomerID, CustomerCreated: priorCreated}, "", "")
 		}
 		// REVOKED THROUGH THE ADAPTER THAT GRANTED IT, read off the row --
 		// not through whatever the settings say TODAY. A merchant who
 		// switches adapters must still be able to take back what the old
 		// one gave, and the settings value has already moved on.
-		if was != "" {
-			adapter, err = AdapterByName(was)
-			if err != nil {
-				// NOT CLAIMED REVOKED. An adapter this engine no longer has
-				// cannot take the grant back, so the row stays pending (the
-				// un-grant has not landed) naming no_route, with its adapter,
-				// reference and customer kept. A row, not an error, for the
-				// reason the no-settings case gives (spec N3).
-				return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-					was, EntitlementPending,
-					Outcome{CustomerID: priorCustomerID, CustomerCreated: priorCreated},
-					ErrorNoRoute, unknownRouteSentence(was))
-			}
-			adapterName = was
+		var err error
+		adapter, err = AdapterByName(priorAdapter)
+		if err != nil {
+			// NOT CLAIMED REVOKED. An adapter this engine no longer has
+			// cannot take the grant back, so the row stays pending (the
+			// un-grant has not landed) naming no_route, with its adapter,
+			// reference and customer kept. A row, not an error, for the
+			// reason routeFor gives (spec N3).
+			return write(priorAdapter, EntitlementPending, kept, ErrorNoRoute,
+				unknownRouteSentence(priorAdapter))
 		}
-	}
-	if adapter == nil {
-		settings, err := p.settingsRow(sys, storeID)
+		adapterName = priorAdapter
+	} else {
+		var fail *routeFailure
+		adapter, adapterName, fail, err = p.routeFor(sys, storeID)
 		if err != nil {
 			return nil, err
 		}
-		// A RETURNED ERROR LEAVES NO ROW SAYING WHY NOTHING HAPPENED (spec
-		// N3), so a store with no settings, or settings naming no route, is
-		// written as a failed entitlement on adapter "none" and answered
-		// with a nil error. The merchant's screen reads the row.
-		if settings == nil {
-			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoSettings,
-				fmt.Sprintf("wholesale: store %q has no wholesale settings, so no entitlement "+
-					"adapter is chosen", storeID))
-		}
-		adapterName = trimmed(settings["entitlementAdapter"])
-		if adapterName == "" {
-			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoRoute,
-				fmt.Sprintf("wholesale: store %q has no entitlement adapter configured; "+
-					"set entitlementAdapter in this store's wholesale settings to one of %s",
-					storeID, strings.Join(AdapterNames(), ", ")))
-		}
-		adapter, err = AdapterByName(adapterName)
-		if err != nil {
-			// A ROUTE THIS ENGINE DOES NOT HAVE is the same nothing-to-call
-			// case as no route: a row naming it, never a returned error (N3).
-			return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-				AdapterNone, EntitlementFailed, Outcome{}, ErrorNoRoute,
-				unknownRouteSentence(adapterName))
+		if fail != nil {
+			if priorGranted {
+				// A FAILED RE-PROVISION CANNOT ERASE A GRANT. The attempt
+				// reached no adapter, so the granted row is left exactly as
+				// it is and answered as it stands.
+				return confirmRow(prior)
+			}
+			return write(AdapterNone, EntitlementFailed, Outcome{}, fail.code, fail.text)
 		}
 	}
 
@@ -440,17 +431,72 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		}
 		errText = applyErr.Error()
 		errCode = errorCodeOf(applyErr)
+		result = Outcome{}
+		if keep {
+			// The attempt that failed replaced nothing; keep the adapter
+			// that put the access on along with its reference and customer.
+			result = kept
+			if priorAdapter != "" && priorAdapter != AdapterNone {
+				adapterName = priorAdapter
+			}
+		}
+	} else if keep && result.CustomerID == "" {
+		result.CustomerID, result.CustomerCreated = priorCustomerID, priorCreated
 	}
 
 	// THE ROW IS WRITTEN EITHER WAY AND THE ERROR IS NOT RETURNED. A
 	// builtin that returned the error would leave no row at all, and the
 	// merchant would have an approved application with nothing anywhere
 	// saying a push had been attempted and failed. The row carries it.
-	if revoking && result.CustomerID == "" {
-		result.CustomerID, result.CustomerCreated = priorCustomerID, priorCreated
+	return write(adapterName, entState, result, errCode, errText)
+}
+
+// routeFailure is a store whose settings leave no adapter to call.
+type routeFailure struct{ code, text string }
+
+// routeFor resolves the store's route: the adapter and its name, or the
+// ready failure decision when there is none to call.
+//
+// A RETURNED ERROR LEAVES NO ROW SAYING WHY NOTHING HAPPENED (spec N3), so a
+// store with no settings, settings naming no route, or a route this engine
+// does not have is a failure the caller writes as a row on adapter "none"
+// and answers with a nil error. The merchant's screen reads the row.
+func (p *Provider) routeFor(ctx context.Context, storeID string) (Adapter, string, *routeFailure, error) {
+	settings, err := p.settingsRow(ctx, storeID)
+	if err != nil {
+		return nil, "", nil, err
 	}
-	return p.writeEntitlement(merchant, applicationID, storeID, owner, grant,
-		adapterName, entState, result, errCode, errText)
+	if settings == nil {
+		return nil, "", &routeFailure{ErrorNoSettings,
+			fmt.Sprintf("wholesale: store %q has no wholesale settings, so no entitlement "+
+				"adapter is chosen", storeID)}, nil
+	}
+	name := trimmed(settings["entitlementAdapter"])
+	if name == "" {
+		return nil, "", &routeFailure{ErrorNoRoute,
+			fmt.Sprintf("wholesale: store %q has no entitlement adapter configured; "+
+				"set entitlementAdapter in this store's wholesale settings to one of %s",
+				storeID, strings.Join(AdapterNames(), ", "))}, nil
+	}
+	adapter, err := AdapterByName(name)
+	if err != nil {
+		return nil, "", &routeFailure{ErrorNoRoute, unknownRouteSentence(name)}, nil
+	}
+	return adapter, name, nil, nil
+}
+
+// confirmRow answers an existing entitlement row without writing a version.
+func confirmRow(row map[string]any) ([]memorynodes.MemoryNode, error) {
+	return confirm("wholesale:entitlement:written", map[string]any{
+		"applicationId": trimmed(row["applicationId"]),
+		"storeId":       trimmed(row["storeId"]),
+		"adapter":       trimmed(row["adapter"]),
+		"state":         trimmed(row["state"]),
+		"reference":     trimmed(row["reference"]),
+		"errorCode":     trimmed(row["errorCode"]),
+		"error":         trimmed(row["error"]),
+		"detail":        "",
+	})
 }
 
 // unknownRouteSentence says which route a store's settings name that this
@@ -464,18 +510,16 @@ func unknownRouteSentence(name string) string {
 // A refusal carries its own code; a refusal with none is the buyer's
 // customer record being refused; anything else is Shopify failing.
 func errorCodeOf(err error) string {
-	for e := err; e != nil; {
-		if r, ok := e.(*AdapterRefusal); ok {
-			if c := strings.TrimSpace(r.Code); c != "" {
-				return c
-			}
-			return ErrorCustomerRefused
+	var r *AdapterRefusal
+	if errors.As(err, &r) {
+		switch c := strings.TrimSpace(r.Code); c {
+		case ErrorNoSettings, ErrorNoRoute, ErrorScopeMissing, ErrorPlanCeiling,
+			ErrorCustomerRefused, ErrorShopifyError:
+			return c
 		}
-		u, ok := e.(interface{ Unwrap() error })
-		if !ok {
-			break
-		}
-		e = u.Unwrap()
+		// A code that is not one of the six is recorded as the buyer's
+		// customer record being refused; the reply's reason stays in error.
+		return ErrorCustomerRefused
 	}
 	if isAdapterRefusal(err) {
 		return ErrorCustomerRefused
