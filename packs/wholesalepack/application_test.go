@@ -586,7 +586,9 @@ func TestAStaffAddressWithoutAnAtIsRefused(t *testing.T) {
 
 // THE SETTINGS OWNER IS READ AT THE ID THE WRITE GOES TO. Two store ids that slug
 // alike share one row id, so a lookup by the storeId field would miss the row
-// the write then replaces, and hand it to somebody else.
+// the write then replaces, and hand it to somebody else. Since ruling 36 the row
+// is another store's and not this one's: the set-up is refused, and nothing is
+// written over it.
 func TestTheSettingsOwnerIsReadAtTheIdTheWriteGoesTo(t *testing.T) {
 	writer := &fakeWriter{}
 	p := &Provider{writer: writer, reader: &fixtureReader{
@@ -594,13 +596,13 @@ func TestTheSettingsOwnerIsReadAtTheIdTheWriteGoesTo(t *testing.T) {
 			"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1", "createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}},
 		sites: []map[string]any{{"id": "site-9", "ownerUserId": "merchant-9", "binding": map[string]any{"storeId": "store-live"}}},
 	}}
-	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live",
-		"applicationsOpen": false}, 0); err != nil {
-		t.Fatalf("setWholesaleSettings: %v", err)
+	_, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live",
+		"applicationsOpen": false}, 0)
+	if err == nil || !strings.Contains(err.Error(), "slug alike") {
+		t.Fatalf("a set-up at an id another store's row holds: %v, want refused", err)
 	}
-	if got := writer.only(t, "setWholesaleSettingsRow"); got["ownerUserId"] != "v1:identity:user:merchant-1" ||
-		got["accountId"] != "acct-north" {
-		t.Fatalf("the write at the existing row's id took owner %v and account %v; the row's own stay", got["ownerUserId"], got["accountId"])
+	if len(writer.writes) != 0 {
+		t.Fatalf("the other store's row was written over: %+v", writer.writes)
 	}
 }
 
@@ -1649,5 +1651,118 @@ func TestASetUpIsFencedOnWhatItRead(t *testing.T) {
 	if _, err := lost.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0); err == nil ||
 		err.Error() != ChangedWhileEditingSentence {
 		t.Fatalf("a set-up that lost its fence: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 6, fix round 3: a store with two settings rows
+// ---------------------------------------------------------------------------
+
+// A ROW FOUND AT A STORE'S SETTINGS ID IS COUNTED ONLY WHEN IT IS THAT STORE'S:
+// two store ids that slug alike derive one id, and must never share a row.
+func TestASettingsRowOfAStoreThatSlugsAlikeIsNotTheStoresRow(t *testing.T) {
+	if SettingsRowID("store.live") != SettingsRowID("store-live") {
+		t.Fatal("the case needs two store ids that slug alike")
+	}
+	reader := &fixtureReader{settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live",
+		"ownerUserId": "merchant-1", "applicationsOpen": true, "accountId": "acct-north"}}}}
+	p := &Provider{reader: reader}
+	row, err := p.settingsRowAt(context.Background(), "store.live")
+	if err != nil || row != nil {
+		t.Fatalf("store.live resolves %+v (%v), want no row: the one at its id is store-live's", row, err)
+	}
+	if row, _ := p.settingsRowAt(context.Background(), "v1:shopify:store:store-live"); row == nil {
+		t.Fatal("the canonical form of store-live does not resolve its row")
+	}
+}
+
+// twoSettingsRows is a store holding a row under each spelling of its id.
+func twoSettingsRows(bareAccount, canonicalAccount string) *fixtureReader {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	south := map[string]any{"id": "site-s", "ownerUserId": "merchant-2", "accountId": "acct-south",
+		"binding": map[string]any{"storeId": "store-live"}}
+	return &fixtureReader{sites: []map[string]any{settingsSite(), south}, settings: map[string][]map[string]any{
+		"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1", "applicationsOpen": true,
+			"accountId": bareAccount, "introText": "the bare row", "createdAt": at}},
+		"v1:shopify:store:store-live": {{"storeId": "v1:shopify:store:store-live", "ownerUserId": "merchant-2",
+			"applicationsOpen": false, "accountId": canonicalAccount, "introText": "the canonical row", "createdAt": at}},
+	}}
+}
+
+// TWO ROWS TIED TO TWO ORGANIZATIONS: a site of either is refused, because the
+// store's settings name the other too. The bare row is the one read.
+func TestTwoSettingsRowsTiedToTwoOrganizationsRefuseBoth(t *testing.T) {
+	registerShippedAdapters()
+	p := &Provider{reader: twoSettingsRows("acct-north", "acct-south"), writer: &fakeWriter{}}
+	for _, site := range []string{"site-1", "site-s"} {
+		if _, err := p.siteForStore(staffCtx("staff"), site, "store-live"); err == nil || !strings.Contains(err.Error(), "another organization") {
+			t.Errorf("through %s: %v, want refused for another organization", site, err)
+		}
+	}
+	if row, _ := p.settingsRowAt(context.Background(), "v1:shopify:store:store-live"); row == nil || row["introText"] != "the bare row" {
+		t.Fatalf("the store resolves %+v, want the bare row", row)
+	}
+}
+
+// THE BARE ROW TIED, THE CANONICAL ONE UNTIED: the bare row's organization is
+// admitted, the other refused, and the save lands on the bare row.
+func TestTwoSettingsRowsWithOneUntiedAdmitTheTiedOrganization(t *testing.T) {
+	registerShippedAdapters()
+	writer := &fakeWriter{}
+	p := &Provider{reader: twoSettingsRows("acct-north", ""), writer: writer}
+	if _, err := p.siteForStore(staffCtx("staff"), "site-s", "store-live"); err == nil || !strings.Contains(err.Error(), "another organization") {
+		t.Errorf("the other organization's site: %v, want refused", err)
+	}
+	if _, err := p.siteForStore(staffCtx("staff"), "site-1", "v1:shopify:store:store-live"); err != nil {
+		t.Fatalf("the tied organization's site: %v", err)
+	}
+	if _, err := p.updateSettings(staffCtx("staff"), map[string]any{"siteId": "site-1", "storeId": "v1:shopify:store:store-live",
+		"introText": "saved"}, 0); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if got := writer.only(t, "putWholesaleSettingsRow"); got["settingsId"] != SettingsRowID("store-live") || got["storeId"] != "store-live" {
+		t.Fatalf("the save wrote %+v, want the bare row", got)
+	}
+}
+
+// THE BACKFILL TIES THE STORE'S ROW AND NAMES THE SECOND ONE, tying nothing of
+// it; a store whose applications use both spellings is handled once.
+func TestTheBackfillNamesASecondSettingsRowAndHandlesTheStoreOnce(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	app := func(id, store string, i int) map[string]any {
+		return map[string]any{"id": id, "ownerUserId": "merchant-1", "storeId": store, "siteId": "site-1", "companyName": "C",
+			"applicantName": "N", "applicantEmail": "e@example.com", "createdAt": at.Add(time.Duration(i) * time.Second)}
+	}
+	reader := backfillFixture(app("app-bare", "store-1", 0), app("app-canon", "v1:shopify:store:store-1", 1))
+	reader.settings = map[string][]map[string]any{
+		"store-1": {{"storeId": "store-1", "ownerUserId": "merchant-1", "applicationsOpen": true, "createdAt": at}},
+		"v1:shopify:store:store-1": {{"storeId": "v1:shopify:store:store-1", "ownerUserId": "merchant-1",
+			"applicationsOpen": false, "createdAt": at}},
+	}
+	writer := &fakeWriter{}
+	report := backfillReport(t, &Provider{writer: writer, reader: reader})
+	var ties []map[string]any
+	for _, w := range writer.writes {
+		if w.mutation == "backfillSettingsRow" {
+			ties = append(ties, w.args)
+		}
+	}
+	if len(ties) != 1 || ties[0]["settingsId"] != SettingsRowID("store-1") {
+		t.Fatalf("the settings ties are %+v, want the bare row's alone", ties)
+	}
+	untied, _ := report["untied"].([]any)
+	second := 0
+	for _, u := range untied {
+		m := u.(map[string]any)
+		if m["reason"] == UntiedSecondSettings {
+			second++
+			if m["id"] != SettingsRowID("v1:shopify:store:store-1") {
+				t.Errorf("the second row is reported as %v", m["id"])
+			}
+		}
+	}
+	// Two applications, their settings row once: three rows tied, none twice.
+	if second != 1 || report["tied"] != float64(3) || report["alreadyTied"] != float64(0) {
+		t.Fatalf("the report is %+v, want three tied, none already tied, and the second row named once", report)
 	}
 }

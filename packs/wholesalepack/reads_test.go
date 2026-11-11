@@ -754,3 +754,17 @@ func TestAStoreWideReadRefusesASiteOfAnotherOrganizationUnderEitherForm(t *testi
 		}
 	}
 }
+
+// AN APPLICATION WITH NO EXTENSION ROW HAS NO FURTHER DETAILS: none, not an
+// empty shown.
+func TestAnApplicationWithNoExtensionRowHasNoDetails(t *testing.T) {
+	f := newStoreFake()
+	id := f.app(1, "No Row", "A", "a@example.com", 1)
+	if d := detailsOf(t, decodedBy(t)(f.provider().get(staffReads(), map[string]any{"applicationId": id}, 0))); d["state"] != "none" {
+		t.Fatalf("details are %+v, want none", d)
+	}
+	f.extensions[id] = memql.ExtensionRow{}
+	if d := detailsOf(t, decodedBy(t)(f.provider().get(staffReads(), map[string]any{"applicationId": id}, 0))); d["state"] != "shown" {
+		t.Fatalf("a readable row with no field to show is %+v, want shown", d)
+	}
+}

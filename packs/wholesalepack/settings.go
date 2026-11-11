@@ -106,12 +106,24 @@ func (p *Provider) storeSettingsRows(ctx context.Context, storeID string) ([]map
 		}
 	}
 	forms := settingsStoreForms(storeID)
+	isForm := map[string]bool{}
+	for _, form := range forms {
+		isForm[form] = true
+	}
 	for _, form := range forms {
 		rows, err := p.rowsFor(ctx, "wholesaleSettingsById", map[string]string{"settingsId": SettingsRowID(form)})
 		if err != nil {
 			return nil, err
 		}
-		add(rows)
+		// A ROW AT THE ID IS THIS STORE'S ONLY WHEN IT SAYS SO: two store ids
+		// that slug alike derive one id, and must never share a row.
+		var own []map[string]any
+		for _, row := range rows {
+			if isForm[trimmed(row["storeId"])] {
+				own = append(own, row)
+			}
+		}
+		add(own)
 	}
 	for _, form := range forms {
 		rows, err := p.rowsFor(ctx, "wholesaleSettingsForStore", map[string]string{"storeId": form})
@@ -293,6 +305,17 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	}
 	if place.rowID == "" {
 		place.rowID = newSettingsRowID(storeID)
+		// THE ID A NEW ROW GOES TO MAY BE HELD BY ANOTHER STORE'S ROW: two store
+		// ids that slug alike derive one id. That row is not this store's, and
+		// is never written over or handed to it.
+		held, err := p.settingsRowByID(sys, place.rowID)
+		if err != nil {
+			return settingsPlace{}, err
+		}
+		if held != nil {
+			return settingsPlace{}, fmt.Errorf("wholesale: store %q's settings would be written at %s, which holds "+
+				"store %q's settings; the two store ids slug alike", storeID, place.rowID, trimmed(held["storeId"]))
+		}
 	}
 	if place.storeID == "" {
 		place.storeID = bareID(storeID)

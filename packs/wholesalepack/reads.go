@@ -515,8 +515,10 @@ func (p *Provider) admitStore(ctx context.Context, args map[string]any) (storeID
 // details is a client's own fields on one application, read under ctx.
 //
 // none for an application the store's people added (no shopper filled in a
-// client's fields) or a store whose form no client extends; unreadable when the
-// caller reads no row there and the deployment does; shown otherwise.
+// client's fields), a store whose form no client extends, or an application
+// with no extension row; unreadable when the caller reads no row there and the
+// deployment does; shown for a row the caller reads, even one with no field to
+// show.
 func (p *Provider) details(ctx context.Context, app map[string]any) (map[string]any, error) {
 	fields := []map[string]any{}
 	if sourceOf(app) == SourceStaff || p.extensions == nil || !p.extensionDeclared() {
@@ -535,6 +537,9 @@ func (p *Provider) details(ctx context.Context, app map[string]any) (map[string]
 		if exists {
 			return map[string]any{"state": "unreadable", "fields": fields}, nil
 		}
+		// No row at all: an application with no extension row has no further
+		// details.
+		return map[string]any{"state": "none", "fields": fields}, nil
 	}
 	for _, f := range row.Fields {
 		fields = append(fields, map[string]any{"name": f.Name, "label": f.Label, "value": f.Value})

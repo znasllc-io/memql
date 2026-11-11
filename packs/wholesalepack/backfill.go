@@ -61,6 +61,9 @@ const (
 	// and for one that names no merchant to write it as.
 	UntiedForeignSite = "its site does not serve this store"
 	UntiedNoOwner     = "it names no merchant"
+	// A store's settings row beside the one every path reads: held under the
+	// other spelling of the store id. Reported, never tied, merged or deleted.
+	UntiedSecondSettings = "a second settings row for this store"
 )
 
 // The concepts the backfill fences its writes on.
@@ -399,15 +402,26 @@ func (r *backfillRun) tieEntitlement(merchant context.Context, appID, account st
 
 // tieSettings ties the store's settings once per run, with the site they were
 // made for: the one they name, or else the application's.
+//
+// ONCE PER STORE, whichever spelling of its id an application holds (the memo
+// is keyed by the bare id). The row tied is the store's one row, the one every
+// path reads (settingsRowAt); ANY OTHER settings row of the store -- held under
+// the other spelling -- is reported with UntiedSecondSettings for the operator
+// to remove, and never tied, merged or deleted here.
 func (r *backfillRun) tieSettings(merchant context.Context, storeID, account, siteID string) error {
-	if r.settings[storeID] {
+	key := bareID(storeID)
+	if r.settings[key] {
 		return nil
 	}
-	settings, err := r.p.settingsRowAt(r.sys, storeID)
-	if err != nil || settings == nil {
+	rows, err := r.p.storeSettingsRows(r.sys, storeID)
+	if err != nil || len(rows) == 0 {
 		return err
 	}
-	r.settings[storeID] = true
+	r.settings[key] = true
+	for _, other := range rows[1:] {
+		r.leave(settingsRowIDOf(other, storeID), UntiedSecondSettings)
+	}
+	settings := rows[0]
 	if trimmed(settings["accountId"]) != "" {
 		r.alreadyTied++
 		return nil
