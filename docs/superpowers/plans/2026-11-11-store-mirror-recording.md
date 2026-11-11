@@ -646,6 +646,54 @@ it("continues any other backfill from where it stopped")
 - [ ] **Step 4:** Run the same commands, both Go packages whole in the database lane, `npm run typecheck` and `npx vitest run test/cluster`, and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `datasync: a failed backfill can be started again from the start, and an expired download starts itself again`.
 
+### Task 13c: Every mirror write carries the origin's own version
+
+Added at the review of Task 15 (2026-11-11), which traced a fault the test's author noticed. The design record's section 2 gains it as a row.
+
+The mirror refuses a write that is older than the row it holds, by comparing versions. Every versioned Shopify type declares `updatedAt` as its version, and no generated document selects `updatedAt`: the generator leaves it out as a payload field and nothing puts it back in the selection. So every path stamps a clock of this engine instead: the time the object was read (a delivery, a sweep), the time a bulk line is streamed, the time a tombstone is written. Sweeps and relists write through `heal`, which does not ask the guard at all. The result, traced line by line: a bulk backfill page that holds an older snapshot of an order replaces the state a later delivery recorded, and brings a record deleted after the snapshot back to life; it can stay wrong until the origin changes that record again. The suite cannot see it, because its fakes answer `updatedAt` whether or not the document asked for it.
+
+**Files:**
+- Modify: `cmd/shopifyschema/emit_graphql.go`, `cmd/shopifyschema/mapping.go` (only if the selection is decided there), `integrations/shopify/mapper.go`, `integrations/shopify/mirror.go` (`heal`), `integrations/shopify/reconcile.go` (the relist tombstone's version), `component/datasync/inbound.go` and `component/datasync/mirror_writer.go` (reading a stored row's version), the place that queues backfills at boot (`queueUnstartedBackfills`), the package's fake Admin in `integrations/shopify/harness_test.go`, then regenerate `integrations/shopify/generated/*` and `dsl/shopify/generated/selections/*` with `go run ./cmd/shopifyschema`
+- Test: `cmd/shopifyschema/` (the invariant), `integrations/shopify/version_test.go` (new), `integrations/shopify/version_db_test.go` (new, database lane), `component/datasync/inbound_test.go`
+
+**Interfaces:**
+- Produces, in the generator: every fetch, list, page and bulk document of a type selects that type's `VersionField` at the object's top level, as a selection that feeds the version and is not mapped as a payload field.
+- Produces, in the connector: a child row whose type declares no version field takes its parent's origin version; `heal` refuses a write older than the row the mirror holds, by the same comparison the inbound applier uses; a relist tombstone's version is the time its listing began.
+- Produces, in `component/datasync`: a stored row whose version is this engine's own clock and not the origin's (a row written before this change) counts as holding no version, so an incoming write that carries the origin's version always replaces it.
+
+Decisions:
+- The version of a mirror write is the origin's, on every path: a delivery, a sweep, a relist, a bulk page. Where the origin gives none (a type with no version field and no parent), the time of reading stays, as today.
+- A delivery's tombstone keeps the origin's event time. A relist's tombstone carries the time its listing began, so a record a delivery wrote after the listing started is not retired by that listing.
+- Rows written before this change hold a read time where the version should be. The implementer establishes how such a row is told from one written after (the review read that the row's `updatedAt` equals its `syncedAt`), and that rule is the only place the two are told apart. A row so marked never refuses an incoming origin-versioned write.
+- One re-read heals what the old rule may already have replaced: a domain whose last complete backfill began before this rule is queued again from the start, once, by the existing boot pass and its criterion, never restarting a backfill that is running. What marks a domain as read under the rule is recorded on its sync-state row with the fenced partial write every other writer uses.
+- The package's fake Admin answers only what a document selects for the version field: a test that hands back `updatedAt` for a document that did not ask for it fails, so this fault cannot hide again.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+// cmd/shopifyschema
+func TestEveryDocumentSelectsItsTypesVersionField(t *testing.T)            // fetch, list, page and bulk, every type with a VersionField
+// integrations/shopify/version_test.go
+func TestAWriteCarriesTheOriginsUpdatedAt(t *testing.T)                    // delivery, sweep, relist, bulk line
+func TestAChildWithNoVersionOfItsOwnTakesItsParents(t *testing.T)
+func TestAnOlderBulkSnapshotDoesNotReplaceANewerDelivery(t *testing.T)     // T1 snapshot applied at T3 after a T2 delivery: the row is T2's, stale counts one
+func TestABulkSnapshotDoesNotBringBackADeletedRecord(t *testing.T)
+func TestASweepDoesNotReplaceWhatADeliveryWroteMeanwhile(t *testing.T)
+func TestARelistDoesNotRetireWhatADeliveryWroteAfterItBegan(t *testing.T)
+func TestARetriedDeleteStillRetiresTheRecord(t *testing.T)
+func TestTheFakeAdminRefusesAVersionTheDocumentDidNotSelect(t *testing.T)
+// component/datasync
+func TestAStoredRowWithNoOriginVersionNeverRefusesOneThatHasIt(t *testing.T)
+// version_db_test.go, database lane
+func TestARowWrittenBeforeThisRuleIsReplacedByTheOriginsState(t *testing.T)
+func TestADomainReadBeforeThisRuleIsQueuedOnceMore(t *testing.T)           // queued once; not again after it completes; a running backfill is left alone
+```
+
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -p 1 -count=1 ./cmd/shopifyschema/ ./integrations/shopify/ ./component/datasync/ -run 'VersionField|OriginsUpdatedAt|TakesItsParents|OlderBulkSnapshot|BringBackADeleted|DeliveryWroteMeanwhile|WroteAfterItBegan|RetriedDelete|DidNotSelect|NoOriginVersion|BeforeThisRule'`. Expected: FAIL.
+- [ ] **Step 3:** Implement; regenerate with `go run ./cmd/shopifyschema`; fix every existing test whose fake leaned on an unselected `updatedAt`.
+- [ ] **Step 4:** Run the same command, the three packages whole in the database lane (`TestGeneratedTreeIsNotStale` included), and the generated-file gates. Expected: PASS.
+- [ ] **Step 5: Commit** `shopify: every mirror write carries the origin's own version, on every path`.
+
 ### Task 14: Documentation
 
 **Files:**
