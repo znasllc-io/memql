@@ -874,7 +874,7 @@ func TestANewEpisodeStartsWithNoAlert(t *testing.T) {
 		return Store{Health: map[string]any{"verdict": map[string]any{"state": state, "alert": map[string]any{"state": AlertSent, "reason": ""}}}}
 	}
 	for state, want := range map[string]string{VerdictRecording: AlertNone, VerdictPaused: AlertNone, VerdictStarting: AlertNone, VerdictNeedsAttention: AlertSent, VerdictNotConnected: AlertSent} {
-		if got := recordedAlert(sent(state))["state"]; got != want {
+		if got := recordedAlert(sent(state), state)["state"]; got != want {
 			t.Errorf("%s: the reply's alert = %v, want %s", state, got, want)
 		}
 	}
@@ -969,5 +969,29 @@ func TestTheWatchKeepsOneEpisodeAcrossPasses(t *testing.T) {
 	if len(got) != 2 || !strings.Contains(got[1], "shopify-store-recovered-acme-20261111T120000Z") ||
 		!strings.Contains(got[1], "from "+start.Format(time.RFC1123)+" to") {
 		t.Fatalf("staged %v, want one recovery counted from %s", got, start.Format(time.RFC1123))
+	}
+}
+
+// TestTheReplyServesTheAlertOnlyWhileBothStatesAreInAnEpisode: for up to one
+// pass the recorded state and the live one differ, and the reply pairs a live
+// state with an alert only when both are part of an episode.
+func TestTheReplyServesTheAlertOnlyWhileBothStatesAreInAnEpisode(t *testing.T) {
+	recorded := func(state, alert, reason string) Store {
+		return Store{Health: map[string]any{"verdict": map[string]any{"state": state, "alert": map[string]any{"state": alert, "reason": reason}}}}
+	}
+	for name, c := range map[string]struct {
+		store Store
+		live  string
+	}{
+		"recorded needs attention, live recording": {recorded(VerdictNeedsAttention, AlertFailed, noOwnerToTell), VerdictRecording},
+		"recorded recording, live needs attention": {recorded(VerdictRecording, AlertSent, ""), VerdictNeedsAttention},
+	} {
+		got := recordedAlert(c.store, c.live)
+		if got["state"] != AlertNone || got["reason"] != "" {
+			t.Errorf("%s: the reply's alert = %v, want none with no reason", name, got)
+		}
+	}
+	if got := recordedAlert(recorded(VerdictNeedsAttention, AlertFailed, noOwnerToTell), VerdictNotConnected); got["state"] != AlertFailed || got["reason"] != noOwnerToTell {
+		t.Errorf("both states in an episode: the reply's alert = %v, want the recorded one", got)
 	}
 }

@@ -32,8 +32,11 @@ import (
 // another; starting, paused and recording end it. The record carries its
 // start (`episode`), which episode was mailed (mailedFor) and which was told
 // it is over (recoveredFor), so each email is staged once whatever the number
-// of passes. The outbox ids are derived from the episode's start, so a pass
-// that staged and then failed to record re-stages onto the same row. `since`
+// of passes. The request id is derived from the episode's start, so a pass
+// that staged and then could not record stages onto the same row on the next
+// pass. The one case this does not cover is an episode first seen already
+// past the wait whose first record is lost and which moves to the other state
+// before the next pass: that pass dates the episode anew. `since`
 // stays what it is, when the current state began: the Store page reads it.
 //
 // WHAT TO MAIL is planWatch's, a pure function of the verdict last recorded,
@@ -520,12 +523,14 @@ func (c *Connector) watchStoreVerdict(ctx context.Context, store Store, v Verdic
 }
 
 // recordedAlert is the alert last recorded on a store, for the verdict's
-// reply: served only while the store is in an episode, since outside one the
-// recorded alert describes an episode that is over.
-func recordedAlert(store Store) map[string]any {
+// reply: served only while both the recorded state and the live one the
+// handler computed are part of an episode. For up to one pass the two
+// differ, and outside an episode the recorded alert describes one that is
+// over.
+func recordedAlert(store Store, live string) map[string]any {
 	previous, _ := store.Health["verdict"].(map[string]any)
 	rec := readRecorded(previous)
-	if !alertable(rec.State) {
+	if !alertable(rec.State) || !alertable(live) {
 		return map[string]any{"state": AlertNone, "reason": ""}
 	}
 	return map[string]any{"state": rec.AlertState, "reason": rec.AlertReason}
