@@ -327,7 +327,7 @@ Added. Row tier decides what each answers, as today.
 | `acceptanceForApplication` | applicationId | |
 | `emailSendsForApplication` | applicationId | Newest first. |
 | `decisionsForStore` | storeId | Newest first, paginated; the decision log. |
-| `applicationsWithoutAccount` | (none) | `@serverOnly`; the backfill. |
+| `applicationsForBackfill` | (none) | `@serverOnly`; the backfill. |
 
 ### 5.4 Builtins in `packs/wholesalepack/dsl/builtins.memql`
 
