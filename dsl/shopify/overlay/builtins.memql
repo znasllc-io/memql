@@ -77,6 +77,33 @@ builtin shopifyStoreRetryDeliveries {
   storeId  string!  @description("The store whose given-up deliveries are tried again.")
 }
 
+/// The store watch: one pass computes every store's verdict, records it on the store's health as
+/// `verdict` {state, reasons, since, resumedAt, mailedFor, recoveredFor, alert {state, reason}}, and
+/// stages one email to the store's owner when the store has needed attention or been disconnected for
+/// the alert wait, and one when it is recording again. Driven by the watchShopifyStores automation, so
+/// it carries no @sdk and refuses a call without internal origin in its handler.
+@executor("integration.shopify.watchStores")
+@description("One pass of the store watch: compute every store's verdict, record it on the store's health, and email the store's owner once when it has needed attention or been disconnected for the alert wait and once when it is recording again. Only the engine reaches it: a call without internal origin is refused.")
+builtin shopifyWatchStores { }
+
+/// The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is
+/// emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range.
+@sdk
+@executor("integration.shopify.storeAlertWait")
+@requiresCapability("read", "app:settings/connections")
+@description("The minutes a store needs attention before its owner is emailed. Returns {minutes, isDefault, maySet}; isDefault is true when nothing valid is set (30 minutes), maySet whether the caller, a cluster owner, may change it.")
+builtin shopifyStoreAlertWait { }
+
+/// Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES.
+/// A cluster owner's; anybody else, and any value out of range, is refused before anything is read.
+@sdk
+@executor("integration.shopify.storeAlertWaitSet")
+@requiresCapability("execute", "app:settings/connections")
+@description("Cluster owners only. Set the minutes a store needs attention before its owner is emailed, from 1 to 1440. Returns {minutes, isDefault, maySet}.")
+builtin shopifyStoreAlertWaitSet {
+  minutes  int!  @description("Minutes, from 1 to 1440.")
+}
+
 @sdk
 @executor("integration.shopify.commerceSold")
 @description("What sold in a window, grouped by product or by variant, read entirely from the mirror -- no Admin API call and no cost points. Reports units and orders per line, and reports truncated=true when the walk hit its page cap rather than returning a smaller number and letting the caller believe it.")

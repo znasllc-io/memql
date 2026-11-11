@@ -1,6 +1,6 @@
 // The connector's own schedule.
 //
-// Only two, and the shortness is the point: the data-origins runtime
+// Only three, and the shortness is the point: the data-origins runtime
 // (component/datasync) already owns inbound dispatch, the reconciliation
 // runner and the outbox drain, and it drives them from
 // dsl/platform/automations.memql for EVERY connector. What is left here
@@ -21,6 +21,15 @@
 @trigger(schedule="0 15 3 * * *")
 automation reconcileShopifySubscriptions {
   ensure := builtin shopifyEnsureSubscriptions()
+}
+
+/// Watch every store's verdict every five minutes: record it on the store, and tell the store's
+/// owner once when it has needed attention for the alert wait and once when it is recording again.
+/// single: a pass that outlasts five minutes is not overlapped by the next one in this process.
+@trigger(schedule="0 */5 * * * *")
+@mode(single)
+automation watchShopifyStores {
+  watch := builtin shopifyWatchStores()
 }
 
 /// Run the queued privacy jobs whose hold has elapsed, hourly.

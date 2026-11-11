@@ -289,7 +289,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 204 -> 205: retryFailedInboundDeliveries, the one-minute pass that tries
 // again the failed inbound deliveries whose next try has come (2026-11-11).
 // One added, none removed; measured by the strict loader.
-const shippedAutomationCount = 205
+// 205 -> 206: watchShopifyStores, the five-minute pass that records every
+// store's verdict and tells its owner when it stops being recorded and when it
+// is back (2026-11-11). One added, none removed; measured by the strict loader.
+const shippedAutomationCount = 206
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

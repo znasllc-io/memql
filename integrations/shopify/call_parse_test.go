@@ -175,6 +175,13 @@ func connectorCallSites() []struct {
 			"value": "", "description": "cleared", "active": false,
 		}},
 		{"updateSiteStoreBinding", map[string]any{"siteId": "s1", "storeId": "acme"}},
+		// watch.go -- the store watch's two emails and the alert's outcome.
+		{"stageServerOutboundRequest", map[string]any{
+			"requestId": "shopify-store-alert-acme-20261111T101500Z", "medium": "email", "target": "owner@example.com",
+			"subject": "acme.myshopify.com is not being recorded", "body": "MemQL has not been recording acme.myshopify.com.",
+			"dedupeKey": "shopify-store-alert-acme-20261111T101500Z", "requestedBy": "shopify:storeWatch",
+		}},
+		{"outboundRequestById", map[string]any{"requestId": "shopify-store-alert-acme-20261111T101500Z"}},
 	}
 	// Every generated READ, for one representative root type and one
 	// materialised child -- the two shapes the emitter produces. There are

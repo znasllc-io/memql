@@ -7129,6 +7129,47 @@ QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, ar
   return this.executeNamed("shopifyRunComplianceJobs", buildShopifyRunComplianceJobs(args), opts);
 };
 
+/** The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range. */
+export interface ShopifyStoreAlertWaitArgs {
+}
+
+export function buildShopifyStoreAlertWait(args: ShopifyStoreAlertWaitArgs): string {
+  void args;
+  return "builtin shopifyStoreAlertWait()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAlertWait(args?: ShopifyStoreAlertWaitArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAlertWait = function (this: QueryClient, args: ShopifyStoreAlertWaitArgs = {} as ShopifyStoreAlertWaitArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAlertWait", buildShopifyStoreAlertWait(args), opts);
+};
+
+/** Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES. A cluster owner's; anybody else, and any value out of range, is refused before anything is read. */
+export interface ShopifyStoreAlertWaitSetArgs {
+  /** Minutes, from 1 to 1440. */
+  minutes: number;
+}
+
+export function buildShopifyStoreAlertWaitSet(args: ShopifyStoreAlertWaitSetArgs): string {
+  const parts: string[] = [];
+  parts.push("minutes: " + renderMemQLValue(args.minutes));
+  return "builtin shopifyStoreAlertWaitSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAlertWaitSet(args: ShopifyStoreAlertWaitSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAlertWaitSet = function (this: QueryClient, args: ShopifyStoreAlertWaitSetArgs = {} as ShopifyStoreAlertWaitSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAlertWaitSet", buildShopifyStoreAlertWaitSet(args), opts);
+};
+
 /** Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
 PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify.
 Reserved to a cluster owner (memql#5638): any other caller is refused before anything is read. */

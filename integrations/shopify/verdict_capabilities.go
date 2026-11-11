@@ -98,7 +98,7 @@ func (i *Integration) handleStoreVerdict(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	reply := verdictPayload(v)
-	reply["alert"] = map[string]any{"state": "", "reason": ""}
+	reply["alert"] = recordedAlert(store)
 	reply["may"] = map[string]any{"act": c.mayActOnStore(ctx, store)}
 	return resultNode("shopify", reply)
 }

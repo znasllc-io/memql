@@ -9302,6 +9302,42 @@ func ShopifyRunComplianceJobsBuild(args ShopifyRunComplianceJobsArgs) string {
 	return "builtin shopifyRunComplianceJobs()"
 }
 
+// ShopifyStoreAlertWait -- The alert wait: how many minutes a store needs attention, or is disconnected, before its owner is emailed. 30 when SHOPIFY_STORE_ALERT_MINUTES is unset, unreadable or out of range.
+type ShopifyStoreAlertWaitArgs struct {
+}
+
+// ShopifyStoreAlertWait calls the engine builtin shopifyStoreAlertWait.
+func (qc *QueryClient) ShopifyStoreAlertWait(ctx context.Context, args ShopifyStoreAlertWaitArgs) (*Result, error) {
+	call := ShopifyStoreAlertWaitBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreAlertWait", call)
+}
+
+func ShopifyStoreAlertWaitBuild(args ShopifyStoreAlertWaitArgs) string {
+	_ = args
+	return "builtin shopifyStoreAlertWait()"
+}
+
+// ShopifyStoreAlertWaitSet -- Set the alert wait, from 1 to 1440 minutes, in the global variable SHOPIFY_STORE_ALERT_MINUTES. A cluster owner's; anybody else, and any value out of range, is refused before anything is read.
+type ShopifyStoreAlertWaitSetArgs struct {
+	// Minutes, from 1 to 1440.
+	Minutes int
+}
+
+// ShopifyStoreAlertWaitSet calls the engine builtin shopifyStoreAlertWaitSet.
+func (qc *QueryClient) ShopifyStoreAlertWaitSet(ctx context.Context, args ShopifyStoreAlertWaitSetArgs) (*Result, error) {
+	call := ShopifyStoreAlertWaitSetBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreAlertWaitSet", call)
+}
+
+func ShopifyStoreAlertWaitSetBuild(args ShopifyStoreAlertWaitSetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreAlertWaitSet(")
+	b.WriteString("minutes: ")
+	b.WriteString(fmt.Sprintf("%v", args.Minutes))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyStoreAppSave -- Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
 // PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify.
 // Reserved to a cluster owner (memql#5638): any other caller is refused before anything is read.
