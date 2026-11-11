@@ -150,7 +150,24 @@ func TestACSSendReceiptReconcilesOnAnotherReplicaWithoutReposting(t *testing.T) 
 	if _, err = engines[0].Execute(owner, `insert("v1:email:sendOperation", id="forged", payload={"accountId":"self","status":"succeeded","nextPollAt":"2026-10-01T00:00:00Z","encryptedValue":"forged"})`); err == nil {
 		t.Fatal("raw owner forged provider receipt")
 	}
-	outsider := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: account + "-other", Role: auth.RoleDeveloper})
+	// A developer who does not own this client is accounts staff: since
+	// 68edabfcd, developers and owners view and manage every client account
+	// (owner's direction, 2026-11-10; accountsStaff in component/memql), and
+	// Azure setup is for owners and developers. Before it, the only thing that
+	// refused this developer was the account row's rank tier hiding an
+	// owner-created account, the bug that change fixed. So staff read the
+	// receipts, still without a recipient address or a delivery state.
+	staff := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: account + "-staff", Role: auth.RoleDeveloper})
+	staffStatus, err := instances[0].handleAzureSetup(staff, map[string]any{"accountId": account, "action": "operations"}, 0)
+	if err != nil {
+		t.Fatalf("accounts staff could not read the client's send receipts: %v", err)
+	}
+	if len(staffStatus) != 1 || strings.Contains(string(staffStatus[0].Payload), msg.To) || strings.Contains(string(staffStatus[0].Payload), "delivered") {
+		t.Fatalf("unsafe status for staff: %v", staffStatus)
+	}
+	// Anyone else is still refused: an admin is an operator the account tier
+	// binds and a role Azure setup does not admit.
+	outsider := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: account + "-other", Role: auth.RoleAdmin})
 	if _, err = instances[0].handleAzureSetup(outsider, map[string]any{"accountId": account, "action": "operations"}, 0); err == nil {
 		t.Fatal("another actor read client send receipts")
 	}
