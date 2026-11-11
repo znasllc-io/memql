@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { History } from "lucide-react";
 
 import { Button, Caption, ContentSkeleton, Details, DetailsSection, Fact, Facts, Head, Notice, TextArea, useNow } from "../../../kit";
@@ -48,6 +48,18 @@ export function ApplicationPage({ applicationId, listedName, writes, trail, back
   const [note, setNote] = useState("");
 
   const value = reading.value;
+  // AN ASK LIVES ONLY AS LONG AS THE ACT THAT OPENED IT: when the page reads
+  // again (after a refusal, say, because somebody decided first) and the
+  // engine no longer offers that act, the ask closes. Offered still -- a
+  // refusal for another reason -- it stays, with the note as typed.
+  const offered = ask !== null && value !== null && value.acts.includes(ask);
+  useEffect(() => {
+    if (ask !== null && value !== null && !value.acts.includes(ask)) {
+      setAsk(null);
+      setNote("");
+    }
+  }, [ask, value]);
+
   const name = value?.application.companyName || listedName || "Application";
   const head = <Head navigationKey={`wholesale-application:${applicationId}`} title={name} breadcrumbs={[...trail, { label: name }]} back={back} />;
   const context = { page: "Wholesale application", applicationId, stage: value?.stage ?? "" };
@@ -56,7 +68,7 @@ export function ApplicationPage({ applicationId, listedName, writes, trail, back
     return (
       <ReviewsPane heading={head} bar={<ActionBar state="" tone={reading.state === "failed" ? "none" : "busy"} />} context={context}>
         {reading.state === "failed" ? (
-          <Notice tone="error" sentence={reading.error || "This application could not be read."}><Button onClick={reading.reread}>Try again</Button></Notice>
+          <Notice tone="error" sentence={reading.error}><Button onClick={reading.reread}>Try again</Button></Notice>
         ) : (
           <ContentSkeleton label="Reading the application" kind="detail" />
         )}
@@ -92,10 +104,11 @@ export function ApplicationPage({ applicationId, listedName, writes, trail, back
   const busy = writes.busy !== null;
   const known = value.acts.filter((act) => actLabel(act) !== null);
   const lead = [...known].reverse().find((act) => tone(act) === "primary") ?? known[known.length - 1] ?? null;
-  const acts: Act[] = ask !== null
+  const open = offered ? ask : null;
+  const acts: Act[] = open !== null
     ? [
-        { label: ASKS[ask].no, text: true, onAct: close },
-        { label: ASKS[ask].yes, tone: "danger", busy, onAct: () => void answer(ask) },
+        { label: ASKS[open].no, text: true, onAct: close },
+        { label: ASKS[open].yes, tone: "danger", busy, onAct: () => void answer(open) },
       ]
     : [
         ...known.filter((act) => act !== lead).map((act) => ({ label: actLabel(act) ?? act, text: true, onAct: () => press(act) })),
@@ -104,15 +117,15 @@ export function ApplicationPage({ applicationId, listedName, writes, trail, back
   const submitted = value.stage === "readyToReview" || value.stage === "waitingForTerms";
   const barTone: ActionBarTone = busy ? "busy" : value.stage === "readyToReview" ? "paused" : value.stage === "approved" ? "live" : "none";
   const bar = (
-    <ActionBar state={stageWords(value.stage)} detail={submitted ? waitedWords(value.application.createdAt, now) : undefined} tone={barTone} acts={acts} scope={`wholesale:${applicationId}:${ask ?? ""}`}>
-      {ask !== null ? <span className="os-actbar-detail">{ASKS[ask].question}</span> : null}
+    <ActionBar state={stageWords(value.stage)} meta={submitted ? waitedWords(value.application.createdAt, now) : undefined} tone={barTone} acts={acts} scope={`wholesale:${applicationId}:${open ?? ""}`}>
+      {open !== null ? <span className="os-actbar-detail">{ASKS[open].question}</span> : null}
     </ActionBar>
   );
 
   return (
     <ReviewsPane heading={head} bar={bar} context={context}>
-      {ask !== null ? (
-        <TextArea id={`wholesale-note-${ask}`} label="Note" rows={3} value={note} onChange={setNote} placeholder="A note for the decision log (optional)" />
+      {open !== null ? (
+        <TextArea id={`wholesale-note-${open}`} label="Note" rows={3} value={note} onChange={setNote} placeholder="A note for the decision log (optional)" />
       ) : null}
       <ApplicationDetails value={value} />
       {/* THE ENGINE'S REFUSAL, standing on the bar it answers. */}

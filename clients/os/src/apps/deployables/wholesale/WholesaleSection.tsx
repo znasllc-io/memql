@@ -76,7 +76,8 @@ export function WholesaleSection({ site, storeId, trail, back }: WholesaleSectio
       back={{ label: tabName(tab), onSelect: toList }} />;
   }
 
-  const closed = settings.value !== null && !settings.value.applicationsOpen;
+  // A store that is not set up is not "closed": Settings says it is not set up.
+  const closed = settings.value !== null && settings.value.exists && !settings.value.applicationsOpen;
   // The deployable's crumb leads back to it; the Wholesale crumb leads to the
   // first view, and stays plain while that view is the page.
   const heading = (actions?: ReactNode) => <>

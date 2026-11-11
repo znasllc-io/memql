@@ -1,5 +1,5 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { isTransportInterruption, type Connection, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { isTransportInterruption, type QueryClient, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { usePagedCollection } from "../../../live/useLiveCollection";
 import { LiveReadVisibility } from "../../../live/useGraphRevision";
@@ -37,33 +37,20 @@ export interface WholesaleScope {
   storeId: string;
 }
 
-async function answerOf(query: QueryClient, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<Row | null> {
+/**
+ * One read's answer. A read that fails says so in the engine's words, or, with
+ * none, names what could not be read (`what`: "the applications", "this
+ * application", "the settings").
+ */
+async function answerOf(query: QueryClient, name: string, what: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<Row | null> {
   try {
     const result = await query.executeNamed(name, builtinCall(name, args), signal ? { signal } : undefined);
     return result.rows()[0] ?? null;
   } catch (err: unknown) {
-    if (isTransportInterruption(err)) throw new Error("The connection to the cluster dropped, so the applications could not be read.");
-    throw new Error(refusalWords(err, name) || "The applications could not be read.");
+    if (isTransportInterruption(err)) throw new Error(`The connection to the cluster dropped, so ${what} could not be read.`);
+    const said = refusalWords(err, name);
+    throw new Error(said || `${what.charAt(0).toUpperCase()}${what.slice(1)} could not be read.`);
   }
-}
-
-// A write invalidates the store's lists, including pages a tab has released,
-// so going back to a list reads what the engine holds now.
-type ListRevision = { value: number; listeners: Set<() => void> };
-const listRevisions = new WeakMap<Connection, Map<string, ListRevision>>();
-function revisionFor(connection: Connection | null, scope: WholesaleScope): ListRevision {
-  if (!connection) return { value: 0, listeners: new Set() };
-  let scopes = listRevisions.get(connection);
-  if (!scopes) { scopes = new Map(); listRevisions.set(connection, scopes); }
-  const key = JSON.stringify([scope.siteId, scope.storeId]);
-  let revision = scopes.get(key);
-  if (!revision) { revision = { value: 0, listeners: new Set() }; scopes.set(key, revision); }
-  return revision;
-}
-function invalidateLists(connection: Connection, scope: WholesaleScope) {
-  const revision = revisionFor(connection, scope);
-  revision.value += 1;
-  for (const notify of revision.listeners) notify();
 }
 
 type Entry = { id: string; item?: WholesaleRow; metadata?: Omit<WholesalePage, "rows" | "next">; revision?: number };
@@ -74,18 +61,20 @@ const METADATA = "wholesale-list-metadata";
  * Ready to review oldest first, every other stage newest first. `next` pages
  * it through the kit's `LoadMore`, as the Reviews lists page.
  */
-export function useWholesaleList(scope: WholesaleScope, stage: WholesaleFilter, search: string, _revision: number) {
-  const connection = useOsConnection();
+export function useWholesaleList(scope: WholesaleScope, stage: WholesaleFilter, search: string, revision: number) {
   const visible = useContext(LiveReadVisibility);
   const query = useDebouncedValue(search.trim(), 250);
-  const revision = useMemo(() => revisionFor(connection, scope), [connection, scope.siteId, scope.storeId]);
-  const currentRevision = useSyncExternalStore(useCallback(notify => { revision.listeners.add(notify); return () => { revision.listeners.delete(notify); }; }, [revision]), () => revision.value);
+  // THE WRITES' REVISION IS THE ONE INVALIDATION: each page remembers the
+  // revision it was read at, and a list read before the latest write -- one a
+  // tab released and kept, say -- is read again when it is next shown.
+  const current = useRef(revision);
+  current.current = revision;
   const key = JSON.stringify([scope.siteId, scope.storeId, stage, query]);
   const feed = usePagedCollection<Entry>(scope.storeId ? `wholesale:list:${key}` : null, connection => ({
     concept: "v1:wholesale:application", actions: [],
     seed: async (cursor, signal) => {
-      const readRevision = revision.value;
-      const page = wholesalePageFrom(await answerOf(connection.query, "wholesaleList", { ...scope, stage, search: query || undefined, limit: 10, after: cursor || undefined }, signal));
+      const readRevision = current.current;
+      const page = wholesalePageFrom(await answerOf(connection.query, "wholesaleList", "the applications", { ...scope, stage, search: query || undefined, limit: 10, after: cursor || undefined }, signal));
       return {
         rows: [{ id: METADATA, metadata: { counts: page.counts, truncated: page.truncated }, revision: readRevision }, ...page.rows.map(item => ({ id: item.id, item }))],
         nextCursor: page.next,
@@ -93,8 +82,8 @@ export function useWholesaleList(scope: WholesaleScope, stage: WholesaleFilter, 
     },
   }));
   const metadata = feed.snapshot.rows.find(row => row.id === METADATA);
-  // Writes invalidate the scope; an inactive window does no network work.
-  useEffect(() => { if (visible && metadata && metadata.revision !== currentRevision) feed.reseed(); }, [visible, metadata?.revision, currentRevision, feed.reseed]);
+  // An inactive window does no network work.
+  useEffect(() => { if (visible && metadata && metadata.revision !== revision) feed.reseed(); }, [visible, metadata?.revision, revision, feed.reseed]);
   const rows = feed.snapshot.rows.flatMap(row => row.item ? [row.item] : []);
   return {
     ...feed,
@@ -110,7 +99,7 @@ export function useWholesaleApplication(applicationId: string, revision: number)
   const read = useMemo(() => {
     if (connection === null || applicationId === "") return null;
     // THE ID AS THE LIST GAVE IT, whole.
-    return async (signal: AbortSignal) => wholesaleApplicationFrom(await answerOf(connection.query, "wholesaleGet", { applicationId }, signal));
+    return async (signal: AbortSignal) => wholesaleApplicationFrom(await answerOf(connection.query, "wholesaleGet", "this application", { applicationId }, signal));
   }, [connection, applicationId]);
   return useReading(`wholesale-application:${applicationId}`, read, revision);
 }
@@ -120,7 +109,7 @@ export function useWholesaleSettings(scope: WholesaleScope, revision: number): R
   const read = useMemo(() => {
     if (connection === null || scope.storeId === "") return null;
     return async (signal: AbortSignal) =>
-      wholesaleSettingsFrom(await answerOf(connection.query, "wholesaleStoreSettings", { siteId: scope.siteId, storeId: scope.storeId }, signal));
+      wholesaleSettingsFrom(await answerOf(connection.query, "wholesaleStoreSettings", "the settings", { siteId: scope.siteId, storeId: scope.storeId }, signal));
   }, [connection, scope.storeId, scope.siteId]);
   return useReading(`wholesale-settings:${scope.siteId}:${scope.storeId}`, read, revision);
 }
@@ -172,10 +161,9 @@ export function useWholesaleWrites(scope: WholesaleScope): WholesaleWrites {
         inFlight.current = false;
         setBusy(null);
         setRevision((n) => n + 1);
-        invalidateLists(connection, scope);
       }
     },
-    [connection, scope.siteId, scope.storeId],
+    [connection],
   );
 
   // THE DECIDER IS NEVER SENT: the engine records the caller, and ignores

@@ -33,15 +33,15 @@ const ago = (days: number): string => new Date(Date.now() - days * 86_400_000).t
 const id = (slug: string) => `v1:wholesale:application:${slug}`;
 
 const READY = [
-  { applicationId: id("north"), companyName: "Northwind Dental Supply", applicantName: "Avery Stone", applicantEmail: "avery@northwind.example.com", stage: "readyToReview", primary: "Dental practice", secondary: "12 locations", createdAt: ago(9) },
-  { applicationId: id("harbor"), companyName: "Harbor Pediatric Dentistry and Orthodontics Group", applicantName: "Sam Okafor", applicantEmail: "sam.okafor@harbor-pediatric.example.com", stage: "readyToReview", primary: "Pediatric practice", secondary: "3 locations", createdAt: ago(4) },
-  { applicationId: id("blue"), companyName: "Bluebird Clinic", applicantName: "Jordan Reyes", applicantEmail: "jordan@bluebird.example.com", stage: "readyToReview", primary: "", secondary: "", createdAt: ago(0.2) },
+  { applicationId: id("kestrel"), companyName: "Kestrel Cycles", applicantName: "Avery Stone", applicantEmail: "avery@kestrel.example.com", stage: "readyToReview", primary: "Repair workshop", secondary: "12 locations", createdAt: ago(9) },
+  { applicationId: id("harbor"), companyName: "Harbor Wheelworks and Touring Bicycle Cooperative", applicantName: "Sam Okafor", applicantEmail: "sam.okafor@harbor-wheelworks.example.com", stage: "readyToReview", primary: "Retail shop", secondary: "3 locations", createdAt: ago(4) },
+  { applicationId: id("blue"), companyName: "Bluebird Bikes", applicantName: "Jordan Reyes", applicantEmail: "jordan@bluebird.example.com", stage: "readyToReview", primary: "", secondary: "", createdAt: ago(0.2) },
 ];
 const APPROVED = [
-  { applicationId: id("cedar"), companyName: "Cedar Smile Studio", applicantName: "Riley Chen", applicantEmail: "riley@cedarsmile.example.com", stage: "approved", primary: "Dental practice", secondary: "1 location", createdAt: ago(21) },
+  { applicationId: id("cedar"), companyName: "Cedar Spoke Studio", applicantName: "Riley Chen", applicantEmail: "riley@cedarspoke.example.com", stage: "approved", primary: "Repair workshop", secondary: "1 location", createdAt: ago(21) },
 ];
 const REMOVED = [
-  { applicationId: id("maple"), companyName: "Maple Street Dental", applicantName: "Casey Morgan", applicantEmail: "casey@maplestreet.example.com", stage: "revoked", primary: "Dental practice", secondary: "2 locations", createdAt: ago(60) },
+  { applicationId: id("maple"), companyName: "Maple Street Bicycles", applicantName: "Casey Morgan", applicantEmail: "casey@maplestreet-bikes.example.com", stage: "revoked", primary: "Repair workshop", secondary: "2 locations", createdAt: ago(60) },
 ];
 const COUNTS = { waitingForTerms: 0, readyToReview: 3, approved: 1, rejected: 4, revoked: 1 };
 
@@ -53,7 +53,7 @@ function detail(row: (typeof READY)[number], over: Record<string, unknown> = {})
     details: {
       state: "shown",
       fields: row.primary
-        ? [{ name: "practiceType", label: "Practice type", value: row.primary }, { name: "locations", label: "Locations", value: row.secondary }, { name: "website", label: "Website", value: "https://www.example.com" }]
+        ? [{ name: "shopType", label: "Shop type", value: row.primary }, { name: "locations", label: "Locations", value: row.secondary }, { name: "website", label: "Website", value: "https://www.example.com" }]
         : [],
     },
     decisions: [],
@@ -82,7 +82,7 @@ function seed(over: { operator?: boolean; settings?: Record<string, unknown> } =
         [APPROVED[0]!.applicationId]: detail(APPROVED[0]!, {
           state: "approved", stage: "approved", operator,
           entitlement: { state: "failed", errorCode: "plan_ceiling", error: "catalog limit reached" },
-          decisions: [{ transition: "approve", decidedBy: "v1:identity:user:u-carol", decidedByName: "Carol Reyes", note: "Known clinic, verified by phone.", createdAt: ago(20) }],
+          decisions: [{ transition: "approve", decidedBy: "v1:identity:user:u-carol", decidedByName: "Carol Reyes", note: "Known shop, verified by phone.", createdAt: ago(20) }],
           acts: staffActs(["remove", "retryAccess"]),
         }),
         [REMOVED[0]!.applicationId]: detail(REMOVED[0]!, {
@@ -111,9 +111,9 @@ const staff = (el: JSX.Element) => withSession(el, {
 const operator = (el: JSX.Element) => withSession(el, { role: "owner", userId: "u-me" });
 
 export const WHOLESALE_CLICKS: Record<string, string> = {
-  "wholesale-application": "Open Northwind Dental Supply",
-  "wholesale-access-failed": "Refine applications|Approved|Open Cedar Smile Studio",
-  "wholesale-removed": "Refine applications|Removed|Open Maple Street Dental",
+  "wholesale-application": "Open Kestrel Cycles",
+  "wholesale-access-failed": "Refine applications|Approved|Open Cedar Spoke Studio",
+  "wholesale-removed": "Refine applications|Removed|Open Maple Street Bicycles",
   "wholesale-settings": "Settings",
   "wholesale-not-set-up": "Settings",
   "wholesale-not-set-up-operator": "Settings",

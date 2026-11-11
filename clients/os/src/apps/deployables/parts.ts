@@ -7,7 +7,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // grants design, section 2's table and section 4 "A missing part").
 //
 // An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
-// Deployables is the first app to carry the vocabulary. Twelve parts, each
+// Deployables is the first app to carry the vocabulary. Fourteen parts, each
 // the name of a thing a person does here, each grantable to a person or a
 // group by name:
 //
@@ -35,7 +35,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // the organization capability table does not name them -- so reading them
 // through `partsForOrganization` would hide an act its owner holds.
 //
-// ALL TWELVE ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// ALL FOURTEEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
 // (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
 // developer holding the part would have been drawn the control and served no
 // rows, a refusal rendered as an empty panel (memql#5216). The store concept

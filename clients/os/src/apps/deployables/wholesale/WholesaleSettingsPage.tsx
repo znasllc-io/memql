@@ -57,7 +57,7 @@ export function WholesaleSettingsPage({ heading, settings, writes, onWritten }: 
     return (
       <ReviewsPane heading={heading} bar={<ActionBar state="" tone={settings.state === "failed" ? "none" : "busy"} />} context={context}>
         {settings.state === "failed" ? (
-          <Notice tone="error" sentence={settings.error || "The settings could not be read."}><Button onClick={settings.reread}>Try again</Button></Notice>
+          <Notice tone="error" sentence={settings.error}><Button onClick={settings.reread}>Try again</Button></Notice>
         ) : (
           <ContentSkeleton label="Reading the settings" kind="form" />
         )}

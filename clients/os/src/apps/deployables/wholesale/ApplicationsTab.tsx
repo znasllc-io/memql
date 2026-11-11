@@ -36,7 +36,10 @@ export function ApplicationsTab({ scope, heading, writes, operator, stage, onSta
   const now = useNow(60_000);
   const page = list.value;
   const rows = page?.rows ?? [];
-  const count = page === null ? undefined : countFor(page.counts, stage);
+  // THE ENGINE COUNTS A STAGE, never a search: while one is asked, the bar
+  // claims no count over rows that are not the stage's.
+  const searching = search.trim() !== "";
+  const count = page === null || searching ? undefined : countFor(page.counts, stage);
   const queue = stage === "readyToReview";
 
   const chips: RefineChip[] = stage === "readyToReview" ? [] : [{ id: "stage", label: stageWords(stage), onRemove: () => onStage("readyToReview") }];
@@ -48,14 +51,16 @@ export function ApplicationsTab({ scope, heading, writes, operator, stage, onSta
   const bar = <ActionBar
     state={count === undefined ? "" : count === 0 ? emptyWords(stage) : `${count} ${stage === "all" ? (count === 1 ? "application" : "applications") : stageWords(stage).toLowerCase()}`}
     detail={count ? (queue ? "oldest first" : "newest first") : undefined}
-    tone={list.state === "reading" ? "busy" : queue && count ? "paused" : "live"} />;
+    tone={list.state === "reading" ? "busy" : !count ? "none" : queue ? "paused" : "live"} />;
 
   return (
     <ReviewsPane heading={heading(refine)} bar={bar} context={{ page: "Wholesale", view: "Applications", stage, siteId: scope.siteId, storeId: scope.storeId }}>
       {operator ? <Caption>You can read this store's applications. Its own people decide them.</Caption> : null}
-      {list.state === "failed" && page === null ? (
-        <Notice tone="error" sentence={list.error || "The applications could not be read."}><Button onClick={list.reread}>Try again</Button></Notice>
-      ) : page === null ? (
+      {/* A FAILED READ IS SAID, whether or not an earlier one left rows: those
+          rows stand under it, as what could not be refreshed. */}
+      {list.state === "failed" ? <Notice tone="error" sentence={list.error}><Button onClick={list.reread}>Try again</Button></Notice> : null}
+      {page === null ? (
+        list.state === "failed" ? null :
         <RecordListSkeleton label="Reading applications" rows={3} />
       ) : rows.length === 0 ? (
         <EmptyState title={search ? "No matching applications" : emptyWords(stage)} icon={Building2}>{null}</EmptyState>
@@ -84,7 +89,10 @@ function ApplicationRow({ row, now, mixed, onOpen }: { row: WholesaleRow; now: D
     <RecordRow
       icon={<Building2 size={18} aria-hidden />}
       name={row.companyName}
-      secondary={who}
+      // ONE LINE, NEVER BROKEN MID-WORD: the kit's excerpt ellipsizes a long
+      // email and keeps the whole of it on `title`. It needs a grid of no
+      // minimum width around it to shrink in, which is the row identity's own.
+      secondary={who ? <span className="os-record-identity"><span className="os-record-excerpt" title={who}>{who}</span></span> : undefined}
       state={mixed ? stageWords(row.stage) : undefined}
       trailing={when ? <span className="os-caption">{when}</span> : undefined}
       onOpen={onOpen}

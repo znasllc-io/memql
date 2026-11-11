@@ -16,7 +16,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, fakeConnection, siteRow, type as typeInto, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // A STORE'S WHOLESALE APPLICATIONS, AS A SECTION OF ITS DEPLOYABLE
 // (apps/deployables/wholesale).
@@ -34,25 +34,25 @@ const HOST = "shop.memql.example.com";
 const ACCOUNT = "acct-acme";
 const SHOP = siteRow({ id: "site-shop", hostname: HOST, kind: "shopify_storefront", binding: { storeId: "store-live" }, packageId: "pkg-shop", packageDeployableName: "storefront", accountId: ACCOUNT });
 
-const NORTH_ID = "v1:wholesale:application:app-north";
+const KESTREL_ID = "v1:wholesale:application:app-kestrel";
 const BLUE_ID = "v1:wholesale:application:app-blue";
 
-const NORTH = {
-  applicationId: NORTH_ID, companyName: "Northwind Dental Supply", applicantName: "Avery Stone", applicantEmail: "avery@northwind.example.com",
-  stage: "readyToReview", primary: "Dental practice", secondary: "12 locations", createdAt: "2026-11-01T12:00:00Z",
+const KESTREL = {
+  applicationId: KESTREL_ID, companyName: "Kestrel Cycles", applicantName: "Avery Stone", applicantEmail: "avery@kestrel.example.com",
+  stage: "readyToReview", primary: "Repair workshop", secondary: "12 locations", createdAt: "2026-11-01T12:00:00Z",
 };
 const BLUE = {
-  applicationId: BLUE_ID, companyName: "Bluebird Clinic", applicantName: "Jordan Reyes", applicantEmail: "jordan@bluebird.example.com",
+  applicationId: BLUE_ID, companyName: "Bluebird Bikes", applicantName: "Jordan Reyes", applicantEmail: "jordan@bluebird.example.com",
   stage: "readyToReview", primary: "", secondary: "", createdAt: "2026-11-08T12:00:00Z",
 };
 
 /** wholesaleGet's answer for one application, ready to review unless told otherwise. */
-function detail(row: typeof NORTH, over: Record<string, unknown> = {}): Row {
+function detail(row: typeof KESTREL, over: Record<string, unknown> = {}): Row {
   return {
     application: { id: row.applicationId, companyName: row.companyName, applicantName: row.applicantName, applicantEmail: row.applicantEmail, source: "storefront", createdAt: row.createdAt },
     state: "submitted",
     stage: "readyToReview",
-    details: { state: "shown", fields: [{ name: "practiceType", label: "Practice type", value: "Dental practice" }] },
+    details: { state: "shown", fields: [{ name: "shopType", label: "Shop type", value: "Repair workshop" }] },
     decisions: [],
     entitlement: null,
     operator: false,
@@ -67,8 +67,8 @@ function wholesaleSeed(over: Partial<NonNullable<FakeSeed["wholesale"]>> = {}): 
   return {
     sites: [SHOP],
     wholesale: {
-      list: { readyToReview: { rows: [NORTH, BLUE], counts: { waitingForTerms: 0, readyToReview: 2, approved: 3, rejected: 1, revoked: 0 }, next: "", truncated: false } as unknown as Row },
-      get: { [NORTH_ID]: detail(NORTH), [BLUE_ID]: detail(BLUE) },
+      list: { readyToReview: { rows: [KESTREL, BLUE], counts: { waitingForTerms: 0, readyToReview: 2, approved: 3, rejected: 1, revoked: 0 }, next: "", truncated: false } as unknown as Row },
+      get: { [KESTREL_ID]: detail(KESTREL), [BLUE_ID]: detail(BLUE) },
       settings: SET_UP as unknown as Row,
       ...over,
     },
@@ -161,10 +161,10 @@ describe("the applications", () => {
     expect(first).toContain('stage: "readyToReview"');
     const list = await applications();
     // The engine's order, oldest first: how long each has waited, in days.
-    expect(within(list).getAllByRole("button").map((r) => r.getAttribute("aria-label"))).toEqual(["Open Northwind Dental Supply", "Open Bluebird Clinic"]);
+    expect(within(list).getAllByRole("button").map((r) => r.getAttribute("aria-label"))).toEqual(["Open Kestrel Cycles", "Open Bluebird Bikes"]);
     expect(within(list).getByText("waited 10 days")).toBeTruthy();
     expect(within(list).getByText("waited 3 days")).toBeTruthy();
-    expect(within(list).getByText("Avery Stone · avery@northwind.example.com")).toBeTruthy();
+    expect(within(list).getByText("Avery Stone · avery@kestrel.example.com")).toBeTruthy();
     // The view names its stage once; no row says it again.
     expect(within(list).queryByText("Ready to review")).toBeNull();
     expect(bar().textContent).toContain("2 ready to review");
@@ -187,8 +187,8 @@ describe("the applications", () => {
   it("draws the extension's two display facts as plain text, with no badge", async () => {
     await openWholesale();
     const list = await applications();
-    const north = within(list).getByRole("button", { name: "Open Northwind Dental Supply" });
-    expect(within(north).getByText("Dental practice").tagName).toBe("SPAN");
+    const north = within(list).getByRole("button", { name: "Open Kestrel Cycles" });
+    expect(within(north).getByText("Repair workshop").tagName).toBe("SPAN");
     expect(within(north).getByText("12 locations").tagName).toBe("SPAN");
     expect(list.querySelector(".os-chip, .os-badge, .os-record-status")).toBeNull();
   });
@@ -199,11 +199,11 @@ describe("the applications", () => {
   });
 
   it("tells an operator once that the store's people decide, and draws no decide act", async () => {
-    const seed = wholesaleSeed({ get: { [NORTH_ID]: detail(NORTH, { operator: true, acts: [] }), [BLUE_ID]: detail(BLUE, { operator: true, acts: [] }) } });
+    const seed = wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { operator: true, acts: [] }), [BLUE_ID]: detail(BLUE, { operator: true, acts: [] }) } });
     await openWholesale(seed, OPERATOR);
     await applications();
     expect(screen.getAllByText("You can read this store's applications. Its own people decide them.")).toHaveLength(1);
-    await openApplication("Northwind Dental Supply");
+    await openApplication("Kestrel Cycles");
     expect(within(bar()).queryByRole("button", { name: "Reject" })).toBeNull();
     expect(within(bar()).queryByRole("button", { name: "Approve" })).toBeNull();
     expect(within(bar()).queryByRole("button", { name: "Remove" })).toBeNull();
@@ -231,7 +231,7 @@ describe("the applications", () => {
 });
 
 describe("one application", () => {
-  async function open(seed: FakeSeed = wholesaleSeed(), company = "Northwind Dental Supply", session: Parameters<typeof withSession>[1] = STAFF): Promise<FakeConnection> {
+  async function open(seed: FakeSeed = wholesaleSeed(), company = "Kestrel Cycles", session: Parameters<typeof withSession>[1] = STAFF): Promise<FakeConnection> {
     const connection = await openWholesale(seed, session);
     await openApplication(company);
     return connection;
@@ -241,17 +241,17 @@ describe("one application", () => {
     await open();
     expect(barButtons()).toEqual(["Reject", "Approve"]);
     expect(bar().textContent).toContain("Ready to review");
-    expect(screen.getByText("Practice type")).toBeTruthy();
+    expect(screen.getByText("Shop type")).toBeTruthy();
   });
 
   it("draws only Reject for an application waiting for terms", async () => {
-    await open(wholesaleSeed({ get: { [NORTH_ID]: detail(NORTH, { stage: "waitingForTerms", acts: ["reject"] }) } }));
+    await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { stage: "waitingForTerms", acts: ["reject"] }) } }));
     expect(barButtons()).toEqual(["Reject"]);
     expect(bar().textContent).toContain("Waiting for terms");
   });
 
   it("draws no button for an act it does not know", async () => {
-    await open(wholesaleSeed({ get: { [NORTH_ID]: detail(NORTH, { acts: ["reject", "resendTerms", "approve", "resendApproved"] }) } }));
+    await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { acts: ["reject", "resendTerms", "approve", "resendApproved"] }) } }));
     expect(barButtons()).toEqual(["Reject", "Approve"]);
   });
 
@@ -261,7 +261,7 @@ describe("one application", () => {
     await click(within(bar()).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(1));
     const call = connection.callsNamed("wholesaleRecordDecision")[0];
-    expect(call).toContain(`applicationId: "${NORTH_ID}"`);
+    expect(call).toContain(`applicationId: "${KESTREL_ID}"`);
     expect(call).toContain('transition: "approve"');
     expect(call).not.toContain("principalKind");
     expect(call).not.toContain("decidedBy");
@@ -277,14 +277,14 @@ describe("one application", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(0);
     await act(async () => {
-      fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Not a dental business" } });
+      fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Not a bicycle business" } });
     });
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Reject it" }));
     await waitFor(() => expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(1));
     const call = connection.callsNamed("wholesaleRecordDecision")[0];
     expect(call).toContain('transition: "reject"');
-    expect(call).toContain('note: "Not a dental business"');
+    expect(call).toContain('note: "Not a bicycle business"');
   });
 
   it("shows the engine's refusal as a Notice above the bar when somebody decided first", async () => {
@@ -302,19 +302,19 @@ describe("one application", () => {
   });
 
   it("offers Retry access on an approved application with no access recorded", async () => {
-    const approved = detail(NORTH, { state: "approved", stage: "approved", entitlement: null, acts: ["remove", "retryAccess"] });
-    const connection = await open(wholesaleSeed({ get: { [NORTH_ID]: approved } }));
+    const approved = detail(KESTREL, { state: "approved", stage: "approved", entitlement: null, acts: ["remove", "retryAccess"] });
+    const connection = await open(wholesaleSeed({ get: { [KESTREL_ID]: approved } }));
     expect(barButtons()).toEqual(["Remove", "Retry access"]);
     expect(screen.getByText("Not granted yet")).toBeTruthy();
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Retry access" }));
     await waitFor(() => expect(connection.callsNamed("wholesaleRetryAccess")).toHaveLength(1));
-    expect(connection.callsNamed("wholesaleRetryAccess")[0]).toBe(`builtin wholesaleRetryAccess(applicationId: "${NORTH_ID}")`);
+    expect(connection.callsNamed("wholesaleRetryAccess")[0]).toBe(`builtin wholesaleRetryAccess(applicationId: "${KESTREL_ID}")`);
   });
 
   it("asks in place before removing a buyer, and removes them as a revoke", async () => {
-    const approved = detail(NORTH, { state: "approved", stage: "approved", entitlement: { state: "granted", errorCode: "", error: "" }, acts: ["remove"] });
-    const connection = await open(wholesaleSeed({ get: { [NORTH_ID]: approved } }));
+    const approved = detail(KESTREL, { state: "approved", stage: "approved", entitlement: { state: "granted", errorCode: "", error: "" }, acts: ["remove"] });
+    const connection = await open(wholesaleSeed({ get: { [KESTREL_ID]: approved } }));
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Remove" }));
     expect(barButtons()).toEqual(["Keep them", "Remove them"]);
@@ -325,22 +325,22 @@ describe("one application", () => {
   });
 
   it("draws Retry access on a removed application only while the tag is still on", async () => {
-    const stillOn = { ...NORTH, stage: "revoked" };
+    const stillOn = { ...KESTREL, stage: "revoked" };
     const off = { ...BLUE, stage: "revoked" };
     const seed = wholesaleSeed({
       list: { revoked: { rows: [stillOn, off], counts: { revoked: 2 }, next: "", truncated: false } as unknown as Row },
       get: {
-        [NORTH_ID]: detail(NORTH, { state: "revoked", stage: "revoked", entitlement: { state: "granted", errorCode: "", error: "" }, acts: ["retryAccess"] }),
+        [KESTREL_ID]: detail(KESTREL, { state: "revoked", stage: "revoked", entitlement: { state: "granted", errorCode: "", error: "" }, acts: ["retryAccess"] }),
         [BLUE_ID]: detail(BLUE, { state: "revoked", stage: "revoked", entitlement: { state: "revoked", errorCode: "", error: "" }, acts: [] }),
       },
     });
     await openWholesale(seed);
     await refineTo("Removed");
-    await openApplication("Northwind Dental Supply");
+    await openApplication("Kestrel Cycles");
     expect(bar().textContent).toContain("Removed");
     expect(barButtons()).toEqual(["Retry access"]);
     await click(screen.getByRole("button", { name: "Back to Applications" }));
-    await openApplication("Bluebird Clinic");
+    await openApplication("Bluebird Bikes");
     expect(barButtons()).toEqual([]);
   });
 
@@ -355,7 +355,7 @@ describe("one application", () => {
       [{ state: "granted", errorCode: "", error: "" }, "Trade prices on"],
     ];
     for (const [entitlement, sentence] of cases) {
-      await open(wholesaleSeed({ get: { [NORTH_ID]: detail(NORTH, { state: "approved", stage: "approved", entitlement, acts: [] }) } }));
+      await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { state: "approved", stage: "approved", entitlement, acts: [] }) } }));
       const access = screen.getByRole("region", { name: "Access" });
       expect(within(access).getByText(sentence)).toBeTruthy();
       cleanup();
@@ -363,10 +363,10 @@ describe("one application", () => {
   });
 
   it("draws No further details when the client's fields hold nothing, and says when they cannot be read", async () => {
-    await open(wholesaleSeed({ get: { [NORTH_ID]: detail(NORTH, { details: { state: "shown", fields: [] } }), [BLUE_ID]: detail(BLUE, { details: { state: "unreadable", fields: [] } }) } }));
+    await open(wholesaleSeed({ get: { [KESTREL_ID]: detail(KESTREL, { details: { state: "shown", fields: [] } }), [BLUE_ID]: detail(BLUE, { details: { state: "unreadable", fields: [] } }) } }));
     expect(within(screen.getByRole("region", { name: "Their details" })).getByText("No further details")).toBeTruthy();
     await click(screen.getByRole("button", { name: "Back to Applications" }));
-    await openApplication("Bluebird Clinic");
+    await openApplication("Bluebird Bikes");
     expect(within(screen.getByRole("region", { name: "Their details" })).getByText("These details are not readable to you")).toBeTruthy();
   });
 });
@@ -437,5 +437,155 @@ describe("the settings", () => {
     expect(barButtons()).toEqual([]);
     expect(screen.queryAllByRole("radio")).toHaveLength(0);
     expect(document.querySelector(".os-setting-row")).toBeNull();
+  });
+});
+
+/** Answers each call through `before` first, then the fake as it was: the engine moving under the page. */
+function meanwhile(connection: FakeConnection, before: (name: string, call: string) => string | void) {
+  const original = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+  vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, options) => original(name, before(name, call) ?? call, options));
+}
+
+describe("the section, further", () => {
+  async function openApp(seed: FakeSeed = wholesaleSeed(), company = "Kestrel Cycles"): Promise<FakeConnection> {
+    const connection = await openWholesale(seed);
+    await openApplication(company);
+    return connection;
+  }
+
+  it("closes the ask when the re-read no longer offers the act that opened it", async () => {
+    const seed = wholesaleSeed({ decideError: "wholesale: an application that is approved is final; \"reject\" is refused." });
+    const connection = await openApp(seed);
+    meanwhile(connection, (name) => {
+      if (name === "wholesaleRecordDecision") seed.wholesale!.get![KESTREL_ID] = detail(KESTREL, { state: "approved", stage: "approved", acts: ["remove"] });
+    });
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Reject" }));
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Reject it" }));
+    expect(await screen.findByText(/an application that is approved is final/)).toBeTruthy();
+    await waitFor(() => expect(barButtons()).toEqual(["Remove"]));
+    expect(screen.getByText(/an application that is approved is final/)).toBeTruthy();
+    expect(screen.queryByLabelText("Note")).toBeNull();
+  });
+
+  it("keeps the ask and its note when the re-read still offers the act", async () => {
+    const seed = wholesaleSeed({ decideError: "wholesale: the store's people could not be told; try again" });
+    await openApp(seed);
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Reject" }));
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Note"), { target: { value: "Not a bicycle business" } });
+    });
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Reject it" }));
+    expect(await screen.findByText(/could not be told/)).toBeTruthy();
+    expect(barButtons()).toEqual(["Keep it", "Reject it"]);
+    expect((screen.getByLabelText("Note") as HTMLTextAreaElement).value).toBe("Not a bicycle business");
+  });
+
+  it("pages the list with the engine's next", async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ ...KESTREL, applicationId: `v1:wholesale:application:shop-${i}`, companyName: `Shop ${String(i).padStart(2, "0")}`, createdAt: `2026-10-${String(10 + i).padStart(2, "0")}T12:00:00Z` }));
+    const connection = await openWholesale(wholesaleSeed({ list: { readyToReview: { rows, counts: { readyToReview: 12 }, next: "", truncated: false } as unknown as Row } }));
+    await waitFor(async () => expect(within(await applications()).getAllByRole("button")).toHaveLength(10));
+    expect(connection.callsNamed("wholesaleList")[0]).toContain("limit: 10");
+    expect(connection.callsNamed("wholesaleList")[0]).not.toContain("after:");
+    await click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(async () => expect(within(await applications()).getAllByRole("button")).toHaveLength(12));
+    expect(connection.callsNamed("wholesaleList")[1]).toContain('after: "10"');
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
+  it("sends the search to the engine and filters nothing itself", async () => {
+    const connection = await openWholesale();
+    await applications();
+    // The engine's answer is the list: here it answers both rows whatever is asked.
+    meanwhile(connection, (name, call) => (name === "wholesaleList" ? call.replace(/, search: "[^"]*"/, "") : undefined));
+    await click(screen.getByRole("button", { name: "Refine applications" }));
+    await typeInto(screen.getByLabelText("Search applications") as HTMLInputElement, "Bluebird");
+    // What was asked, before the fake's answer ignored it.
+    const asked = () => vi.mocked(connection.query.executeNamed).mock.calls.map((c) => String(c[1])).filter((c) => c.startsWith("builtin wholesaleList(") && c.includes("search:"));
+    await waitFor(() => expect(asked()).toEqual([expect.stringContaining('search: "Bluebird"')]));
+    const list = await applications();
+    await waitFor(() => expect(within(list).getAllByRole("button")).toHaveLength(2));
+    // Nor does the footer claim the stage's count over a searched list.
+    expect(bar()?.textContent ?? "").not.toContain("2 ready to review");
+  });
+
+  it("draws no operator caption for the store's own people", async () => {
+    await openWholesale();
+    await applications();
+    expect(screen.queryByText("You can read this store's applications. Its own people decide them.")).toBeNull();
+  });
+
+  it("sends one decision for a double press", async () => {
+    const connection = await openApp();
+    await readTheBar();
+    const approve = within(bar()).getByRole("button", { name: "Approve" });
+    await act(async () => {
+      fireEvent.click(approve);
+      fireEvent.click(approve);
+    });
+    await waitFor(() => expect(connection.callsNamed("wholesaleGet").length).toBeGreaterThan(1));
+    expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(1);
+  });
+
+  it("draws no Wholesale button on a storefront that fronts no store, nor on a system-owned one", async () => {
+    const unbound = siteRow({ id: "site-shop", hostname: HOST, kind: "shopify_storefront", packageId: "pkg-shop", packageDeployableName: "storefront", accountId: ACCOUNT });
+    const first = await openDeployable({ ...wholesaleSeed(), sites: [unbound] });
+    expect(within(first.page).getByRole("button", { name: "Statistics" })).toBeTruthy();
+    expect(within(first.page).queryByRole("button", { name: "Wholesale" })).toBeNull();
+    cleanup();
+    const system = siteRow({ ...SHOP, systemOwned: true } as never);
+    const second = await openDeployable({ ...wholesaleSeed(), sites: [system] });
+    expect(within(second.page).queryByRole("button", { name: "Wholesale" })).toBeNull();
+  });
+
+  it("says nothing of a stage's count while searching, and draws no live dot for an empty stage", async () => {
+    await openWholesale(wholesaleSeed({ list: { readyToReview: { rows: [], counts: { readyToReview: 0 }, next: "", truncated: false } as unknown as Row } }));
+    await screen.findByRole("region", { name: "Nothing ready to review" });
+    expect(bar().getAttribute("data-tone")).toBe("none");
+  });
+
+  it("puts how long an application has waited in the bar's meta", async () => {
+    await openApp();
+    expect(bar().querySelector(".os-actbar-meta")?.textContent).toBe("waited 10 days");
+    expect(bar().querySelector(".os-actbar-detail")).toBeNull();
+  });
+
+  it("keeps the rows it could not refresh under a Notice with Try again", async () => {
+    const seed = wholesaleSeed();
+    const connection = await openApp(seed);
+    seed.wholesale!.listError = "wholesale: the store could not be read";
+    await readTheBar();
+    await click(within(bar()).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(connection.callsNamed("wholesaleRecordDecision")).toHaveLength(1));
+    await click(screen.getByRole("button", { name: "Back to Applications" }));
+    expect(await screen.findByText("the store could not be read")).toBeTruthy();
+    const list = await applications();
+    expect(within(list).getAllByRole("button")).toHaveLength(2);
+    const notice = screen.getByText("the store could not be read").closest(".os-notice") as HTMLElement;
+    expect(within(notice).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(notice.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("draws no Closed meta for a store that is not set up", async () => {
+    await openWholesale(wholesaleSeed({ settings: { exists: false, applicationsOpen: false, entitlementAdapter: "", adapters: [], may: { setUp: false, update: false } } as unknown as Row }));
+    await applications();
+    expect(screen.queryByText("Closed to new applications")).toBeNull();
+  });
+
+  it("says the settings could not be read, in the settings' own words", async () => {
+    await openWholesale(wholesaleSeed({ settingsReadError: "" }));
+    await click(tab("Settings"));
+    expect(await screen.findByText("The settings could not be read.")).toBeTruthy();
+    expect(screen.queryByText("The applications could not be read.")).toBeNull();
+  });
+
+  it("never breaks an applicant's email mid-word: the line ends in an ellipsis and holds the whole text", async () => {
+    await openWholesale();
+    const line = within(await applications()).getByText("Avery Stone · avery@kestrel.example.com");
+    expect(line.classList.contains("os-record-excerpt")).toBe(true);
+    expect(line.getAttribute("title")).toBe("Avery Stone · avery@kestrel.example.com");
   });
 });

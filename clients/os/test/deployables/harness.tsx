@@ -260,13 +260,15 @@ export interface FakeSeed {
     list?: Record<string, Row>;
     get?: Record<string, Row>;
     settings?: Row;
-    /** Fails every `wholesaleList` read with this server message. */
+    /** Fails every `wholesaleList` read with this server message, until removed. */
     listError?: string;
-    /** Fails the next decision with this server message. */
+    /** Fails every `wholesaleStoreSettings` read with this server message, until removed. */
+    settingsReadError?: string;
+    /** Fails every decision with this server message, until removed. */
     decideError?: string;
-    /** Fails the next retry with this server message. */
+    /** Fails every retry with this server message, until removed. */
     retryError?: string;
-    /** Fails the next settings save with this server message. */
+    /** Fails every settings save with this server message, until removed. */
     settingsError?: string;
   };
   /** v1:platform:package rows `packagesAll` answers with. */
@@ -624,6 +626,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("wholesaleGet", [answer]);
       }
       if (call.startsWith("builtin wholesaleStoreSettings(")) {
+        if (seed.wholesale?.settingsReadError !== undefined) throw new Error(seed.wholesale.settingsReadError);
         return builtinReply("wholesaleStoreSettings", [seed.wholesale?.settings ?? ({ exists: false, applicationsOpen: false, entitlementAdapter: "", adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: false } } as unknown as Row)]);
       }
       if (call.startsWith("builtin wholesaleRecordDecision(")) {
