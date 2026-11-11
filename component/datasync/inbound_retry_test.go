@@ -503,4 +503,108 @@ func TestAnUnservedDueRowLeavesTheDueSetWithOneWrite(t *testing.T) {
 	if res.Tried != 0 || c.applyCalls != 0 {
 		t.Fatalf("an unserved row was tried: %+v, applyCalls=%d", res, c.applyCalls)
 	}
+	if got := engine.fenced["req-gone"]; len(got) != 1 || !got[0] {
+		t.Fatalf("fences = %v, want the park write fenced on the version the due read returned", got)
+	}
+}
+
+// tenantConnector is a bound connector that serves one tenant's source,
+// <name>-store1, through the real contract: InboundSource answers it while the
+// tenant list can be read, and ClaimsInboundSource says it cannot tell while
+// the list cannot -- as Shopify's StoreRegistry does when its refresh fails.
+type tenantConnector struct {
+	*fakeConnector
+	readFails bool
+}
+
+func (c *tenantConnector) tenant() string { return c.name + "-store1" }
+
+func (c *tenantConnector) InboundSource(_ context.Context, name string) (memqlsync.InboundSource, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.readFails || name != c.tenant() {
+		return memqlsync.InboundSource{}, false
+	}
+	return memqlsync.InboundSource{Name: name}, true
+}
+
+func (c *tenantConnector) ClaimsInboundSource(_ context.Context, name string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !strings.HasPrefix(name, c.name+"-") {
+		return false, nil // not a tenant name at all: definitely not this connector's
+	}
+	if c.readFails {
+		return false, errors.New("the tenant list could not be read")
+	}
+	return name == c.tenant(), nil
+}
+
+// ONLY A DEFINITE "NOT MINE" RETIRES A ROW. A connector that cannot read its
+// tenant list cannot say whether a tenant's source is its own; the row is left
+// as it is for the pass -- no write, no claim, no dispatch -- and judged again
+// on the next. A source nothing claims, said definitely, is still parked with
+// one write, and a served row beside them is retried.
+func TestARowWhoseOwnerCannotBeToldIsLeftForTheNextPass(t *testing.T) {
+	name := fmt.Sprintf("dbtest-tenants-%d", time.Now().UnixNano())
+	memqlsync.Declare(name)
+	c := &tenantConnector{fakeConnector: &fakeConnector{name: name}, readFails: true}
+	if err := memqlsync.Bind(c); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(name) })
+
+	engine := newRetryEngine()
+	store := NewStore(engine)
+	d := NewDispatcher(store, NewApplier(store, newFakeWriter())) // the real routing and claim questions
+	d.now = func() time.Time { return testNow }
+	tenantRow, goneRow, servedRow := dueRow("req-tenant", 1), dueRow("req-gone", 1), dueRow("req-served", 1)
+	tenantRow["source"], goneRow["source"], servedRow["source"] = c.tenant(), "nobody-serves-"+name, name
+	engine.seed("query inboundRequestsDueForRetry", []map[string]any{tenantRow, goneRow, servedRow})
+
+	writesTo := func(id string) []map[string]any {
+		var out []map[string]any
+		for _, call := range engine.callsContaining("mutation updateInboundRequestStatus(") {
+			if args := renderedArgs(call); args["requestId"] == id {
+				out = append(out, args)
+			}
+		}
+		return out
+	}
+	appliedTo := func(id string) int {
+		n := 0
+		for _, req := range c.applied {
+			if req.RequestId == id {
+				n++
+			}
+		}
+		return n
+	}
+	for pass := 1; pass <= 3; pass++ {
+		if _, err := d.RetryDue(context.Background()); err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
+		}
+		if w := writesTo("req-tenant"); len(w) != 0 || appliedTo("req-tenant") != 0 {
+			t.Fatalf("pass %d: a row whose owner could not be told was written %v or dispatched %d times", pass, w, appliedTo("req-tenant"))
+		}
+		if appliedTo("req-served") != pass {
+			t.Fatalf("pass %d: the served row beside it was dispatched %d times", pass, appliedTo("req-served"))
+		}
+	}
+	if w := writesTo("req-gone"); len(w) == 0 || !clearsNextAttempt(w[0]) || w[0]["attempts"] != nil {
+		t.Fatalf("a source nothing claims was written %v, want parked with no next time", w)
+	}
+
+	c.mu.Lock()
+	c.readFails = false
+	c.mu.Unlock()
+	if _, err := d.RetryDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if appliedTo("req-tenant") != 1 {
+		t.Fatalf("once the tenant list could be read the row was dispatched %d times, want once", appliedTo("req-tenant"))
+	}
+	if w := writesTo("req-tenant"); len(w) != 2 || !engine.fenced["req-tenant"][0] {
+		t.Fatalf("writes = %v, want the fenced claim and the outcome", w)
+	}
 }

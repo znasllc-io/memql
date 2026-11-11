@@ -67,6 +67,13 @@ func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 	var out RetryResult
 	for _, staged := range due {
 		if _, served := d.connectorFor(ctx, staged.Source); !served {
+			if !d.definitelyUnclaimed(ctx, staged.Source) {
+				// Nobody could say whether the source is a connector's -- a
+				// tenant list that could not be read answers "not served"
+				// above -- so the row is left as it is and judged again on
+				// the next pass.
+				continue
+			}
 			if err := d.store.ParkUnservedInbound(opCtx, staged); err != nil && d.logger != nil {
 				d.logger.Warn("datasync: could not take a delivery no connector serves out of the retries; the next pass tries again",
 					"request", staged.RequestId, "source", staged.Source, "error", err)
@@ -93,6 +100,31 @@ func (d *Dispatcher) RetryDue(ctx context.Context) (RetryResult, error) {
 		}
 	}
 	return out, nil
+}
+
+// definitelyUnclaimed reports whether no bound connector claims source, said
+// definitely. The routing answer (connectorFor) is two-valued: a connector
+// that could not read its tenants answers "not mine" there, and retiring a
+// row on that answer would retire every tenant's row on the page for good
+// whenever the read failed. memqlsync.SourceClaimed is three-valued -- a
+// connector implementing InboundSourceClaimer returns an error when it cannot
+// tell -- and only its definite "nobody" retires a row. A connector that
+// claims a source it did not route (its secret could not be resolved just
+// now) is "could not tell" as well. One with no claimer is asked through
+// InboundSource, as before.
+func (d *Dispatcher) definitelyUnclaimed(ctx context.Context, source string) bool {
+	if d.claimed == nil {
+		return true
+	}
+	_, claimed, err := d.claimed(ctx, strings.TrimSpace(source))
+	if err != nil {
+		if d.logger != nil {
+			d.logger.Warn("datasync: could not tell whether a connector serves a failed delivery's source; it waits for the next pass",
+				"source", source, "error", err)
+		}
+		return false
+	}
+	return !claimed
 }
 
 // Requeue puts every given-up delivery of one source back in line -- failed,

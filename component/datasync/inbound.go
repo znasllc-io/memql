@@ -180,13 +180,17 @@ type Dispatcher struct {
 	store   *Store
 	applier *Applier
 	lookup  func(ctx context.Context, name string) (memqlsync.Connector, bool)
+	// claimed answers whether any bound connector claims a source, or that
+	// one could not tell (memqlsync.SourceClaimed); the retry pass asks it
+	// before it retires a row whose source nothing serves.
+	claimed func(ctx context.Context, name string) (memqlsync.Connector, bool, error)
 	now     func() time.Time
 	logger  *slog.Logger
 }
 
 // NewDispatcher builds the inbound router.
 func NewDispatcher(store *Store, applier *Applier) *Dispatcher {
-	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.ConnectorForSource, now: time.Now}
+	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.ConnectorForSource, claimed: memqlsync.SourceClaimed, now: time.Now}
 }
 
 // WithLogger gives the dispatcher somewhere to say that a health write was
