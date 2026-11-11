@@ -91,6 +91,7 @@ var (
 // the call began.
 type composingTemplate struct {
 	id, accountID, name string
+	purpose             string // the template's, which judges the composed email
 	composition         composition
 }
 
@@ -129,7 +130,7 @@ func (w *Worker) composingTemplate(ctx context.Context, args map[string]any) (co
 	if c.State != compositionWriting || !sameGoal(c.GoalID, goalID) {
 		return composingTemplate{}, errCompositionNotWriting
 	}
-	return composingTemplate{id: id, accountID: accountID, name: str(rows[0], "name"), composition: c}, nil
+	return composingTemplate{id: id, accountID: accountID, name: str(rows[0], "name"), purpose: str(rows[0], "purpose"), composition: c}, nil
 }
 
 // sameGoal reports whether a composition's goal and a call's are one goal,
@@ -249,7 +250,7 @@ func (w *Worker) renderComposed(ctx context.Context, t composingTemplate, c emai
 	if err != nil {
 		return nil, nil, err
 	}
-	rendered, err := w.renderInSlot(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc})
+	rendered, err := w.renderInSlot(ctx, templateRequest{templateID: t.id, accountID: t.accountID, name: t.name, action: "save", document: doc, storedPurpose: t.purpose})
 	if err != nil {
 		return nil, nil, err
 	}

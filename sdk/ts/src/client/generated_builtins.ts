@@ -913,9 +913,9 @@ export interface CampaignSaveTemplateArgs {
   sourceArtifactId?: string;
   /** Exact createdAt from templateById or templateForSource; empty only when creating. */
   expectedRevision: string;
-  /** save (default), publish, archive or restore. Publishing is an explicit human action. */
+  /** save (default), publish, archive, restore or classify. Publishing is an explicit human action. classify changes the template's purpose and nothing else: it needs the exact revision and the purpose, ignores the content, returns a published template to draft and answers the issues the template has under its new purpose. */
   action?: string;
-  /** marketing or transactional, for a save or a publish; empty keeps the template's purpose (none is marketing). A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it. Archive and restore ignore it. Anything else is refused. */
+  /** marketing or transactional. For a save or a publish, empty keeps the template's purpose (none is marketing); classify needs one. A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it, a layout needs no unsubscribe link, and {{unsubscribeUrl}} or {{preferencesUrl}} anywhere in it is an issue that keeps it from being published. Archive and restore ignore it. Anything else is refused. */
   purpose?: string;
 }
 
@@ -2047,6 +2047,8 @@ export interface EmailRenderArgs {
   accountId: string;
   /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
   sample?: Record<string, unknown>;
+  /** marketing (the default) or transactional: the issues are the ones a save of the email with this purpose would answer. */
+  purpose?: string;
 }
 
 export function buildEmailRender(args: EmailRenderArgs): string {
@@ -2054,6 +2056,7 @@ export function buildEmailRender(args: EmailRenderArgs): string {
   parts.push("document: " + renderMemQLValue(args.document));
   parts.push("accountId: " + renderMemQLValue(args.accountId));
   if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  if (args.purpose !== undefined) parts.push("purpose: " + renderMemQLValue(args.purpose));
   return "builtin emailRender(" + parts.join(", ") + ")";
 }
 

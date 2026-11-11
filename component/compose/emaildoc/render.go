@@ -2,7 +2,9 @@ package emaildoc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -16,6 +18,10 @@ type RenderOptions struct {
 	Preview        bool              // data-block attributes
 	Sample         map[string]string // "displayName", "email", "accountName", "campaignName", "fields.<key>"
 	RequireConfirm bool              // report confirm_missing when {{confirmUrl}} is absent
+	// Transactional judges a message about one person's own request: it has no
+	// unsubscribe, so a layout is not asked for the link (no unsubscribe_missing)
+	// and the link's tags anywhere are unsubscribe_present.
+	Transactional bool
 }
 
 // Issue is something about a document that keeps it from being sent as it is.
@@ -44,6 +50,7 @@ const (
 	IssueUnsubscribeMissing = "unsubscribe_missing" // a layout without a {{unsubscribeUrl}} link
 	IssueConfirmMissing     = "confirm_missing"     // no {{confirmUrl}} link, when RequireConfirm
 	IssueEmailTooLarge      = "email_too_large"     // more HTML than sending takes, its pictures embedded
+	IssueUnsubscribePresent = "unsubscribe_present" // {{unsubscribeUrl}} or {{preferencesUrl}} in a transactional email
 )
 
 // MaxRenderBytes is the most a render returns of each part: the subject, the
@@ -121,8 +128,8 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 		// ceiling the HTML was written within bounds the text part too.
 		plain = layoutText(d.Blocks)
 		// Only a layout must carry the link: sending appends a footer with
-		// one to custom HTML that has none.
-		if !r.linked[TagUnsubscribeURL] {
+		// one to custom HTML that has none. A transactional email has none.
+		if !opts.Transactional && !r.linked[TagUnsubscribeURL] {
 			r.issue(IssueUnsubscribeMissing, "", "Add an unsubscribe link ("+TagUnsubscribeURL+") to the footer.")
 		}
 	} else {
@@ -130,6 +137,9 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 			return Result{}, err
 		}
 		plain = d.TextBody
+	}
+	if opts.Transactional && carriesListLink(d, markup, plain) {
+		r.issue(IssueUnsubscribePresent, "", UnsubscribePresentMessage)
 	}
 	confirmable := r.linked[TagConfirmURL]
 	if d.Mode() == ModeCustom && d.HTMLBody == "" {
@@ -151,6 +161,29 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 		}
 	}
 	return result, nil
+}
+
+// UnsubscribePresentMessage is the unsubscribe_present issue's sentence.
+const UnsubscribePresentMessage = "A message about one person's own request carries no unsubscribe link. Remove it."
+
+// listLinkTag is {{unsubscribeUrl}} or {{preferencesUrl}}, spaces inside the
+// braces allowed: a tag a person wrote is a tag they meant, filled or not.
+var listLinkTag = regexp.MustCompile(`\{\{\s*(unsubscribeUrl|preferencesUrl)\s*\}\}`)
+
+// carriesListLink says whether the unsubscribe or preferences tag is anywhere
+// in the email: the subject, the preheader, either body as written, the parts
+// as rendered, or the layout's blocks (a word in a footer line included).
+func carriesListLink(d Document, markup, plain string) bool {
+	for _, part := range []string{d.Subject, d.Preheader, d.HTMLBody, d.TextBody, markup, plain} {
+		if listLinkTag.MatchString(part) {
+			return true
+		}
+	}
+	if len(d.Blocks) == 0 {
+		return false
+	}
+	blocks, err := json.Marshal(d.Blocks)
+	return err == nil && listLinkTag.Match(blocks)
 }
 
 // fill fills the merge tags of s, refusing a result past MaxRenderBytes as it

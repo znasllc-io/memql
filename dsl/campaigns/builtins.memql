@@ -246,8 +246,8 @@ builtin campaignSaveTemplate {
   content object! @description("The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.")
   sourceArtifactId string @description("The Library file the email is written in. Keeps one template per organization and file; see above.")
   expectedRevision string! @description("Exact createdAt from templateById or templateForSource; empty only when creating.")
-  action string @description("save (default), publish, archive or restore. Publishing is an explicit human action.")
-  purpose string @description("marketing or transactional, for a save or a publish; empty keeps the template's purpose (none is marketing). A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it. Archive and restore ignore it. Anything else is refused.")
+  action string @description("save (default), publish, archive, restore or classify. Publishing is an explicit human action. classify changes the template's purpose and nothing else: it needs the exact revision and the purpose, ignores the content, returns a published template to draft and answers the issues the template has under its new purpose.")
+  purpose string @description("marketing or transactional. For a save or a publish, empty keeps the template's purpose (none is marketing); classify needs one. A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it, a layout needs no unsubscribe link, and {{unsubscribeUrl}} or {{preferencesUrl}} anywhere in it is an issue that keeps it from being published. Archive and restore ignore it. Anything else is refused.")
 }
 
 @description("Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.")
@@ -285,6 +285,7 @@ builtin emailRender {
   document   object!  @description("The *.email.json document, in layout or custom mode.")
   accountId  string!  @description("The organization the email is for. You need read access to its data.")
   sample     object   @description("Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).")
+  purpose    string   @description("marketing (the default) or transactional: the issues are the ones a save of the email with this purpose would answer.")
 }
 
 @description("Save an organization's brand kit with an exact revision precondition. The kit is the look a layout takes when an email is made from it: {theme, logo, signature, follow, social, footer, reply}. A picture in it is a data: PNG, JPEG or GIF, or artifact:<id> for a Library picture you uploaded, which is read as you read it and stored in the kit as a data: picture, so every member can use it. The footer must link {{unsubscribeUrl}}. A kit that is not valid is refused with a sentence that names the field. Contrast never refuses: each text and background colour the built-in layouts draw below WCAG AA comes back as a warning, and so do pictures over 512 KiB together. Answers {revision, warnings: [{code, message}]}. Empty expectedRevision creates the organization's kit. Needs the same organization write permission as campaignSaveTemplate. Templates already made with the kit do not change.")

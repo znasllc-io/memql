@@ -2913,3 +2913,42 @@ func TestAButtonToARecipientLinkIsALinkInOutlookToo(t *testing.T) {
 		}
 	}
 }
+
+// A message about one person's own request carries no unsubscribe (X10): with
+// Transactional a layout is not asked for the link, and the link's tags,
+// {{unsubscribeUrl}} and {{preferencesUrl}}, anywhere in the email are a
+// blocking issue, for a layout and custom HTML alike. Without it nothing
+// changes.
+func TestATransactionalEmailCarriesNoUnsubscribeLink(t *testing.T) {
+	const sentence = "A message about one person's own request carries no unsubscribe link. Remove it."
+	without := Document{Subject: "Hello", Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}
+	if r := mustRender(t, without, nil, RenderOptions{Transactional: true}); len(r.Issues) != 0 {
+		t.Fatalf("a transactional layout without the link: %+v", r.Issues)
+	}
+	if r := mustRender(t, without, nil, RenderOptions{}); !hasIssue(r.Issues, IssueUnsubscribeMissing) {
+		t.Fatalf("a marketing layout without the link must still be told: %+v", r.Issues)
+	}
+	for _, c := range []struct {
+		name string
+		doc  Document
+	}{
+		{"a footer link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Links: []Link{{Label: "Leave", Href: TagUnsubscribeURL}}}}}},
+		{"a preferences link", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "t", Type: "text", Text: "[Settings](" + TagPreferencesURL + ")"}}}},
+		{"a footer line", Document{Subject: "x", Theme: neutral(), Blocks: []Block{{ID: "f", Type: "footer", Lines: []string{"Leave: " + TagUnsubscribeURL}}}}},
+		{"the subject", Document{Subject: "Leave " + TagUnsubscribeURL, Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}},
+		{"the preheader", Document{Subject: "x", Preheader: "{{ preferencesUrl }}", Theme: neutral(), Blocks: []Block{{ID: "h", Type: "heading", Text: "Hi"}}}},
+		{"custom HTML", Document{Subject: "x", HTMLBody: `<p><a href="` + TagUnsubscribeURL + `">Leave</a></p>`, TextBody: "Hello."}},
+		{"a custom text body", Document{Subject: "x", HTMLBody: "<p>Hello.</p>", TextBody: "Settings: " + TagPreferencesURL}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := mustRender(t, c.doc, nil, RenderOptions{Transactional: true})
+			want := Issue{Code: IssueUnsubscribePresent, Message: sentence}
+			if len(r.Issues) != 1 || r.Issues[0] != want {
+				t.Fatalf("want only %+v, got %+v", want, r.Issues)
+			}
+			if m := mustRender(t, c.doc, nil, RenderOptions{}); hasIssue(m.Issues, IssueUnsubscribePresent) {
+				t.Fatalf("a marketing email was told to remove its link: %+v", m.Issues)
+			}
+		})
+	}
+}

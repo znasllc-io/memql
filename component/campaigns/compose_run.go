@@ -248,7 +248,7 @@ func (w *Worker) claimComposition(ctx context.Context, templateID, goalID string
 	if !w.mayWriteTemplates(ctx, accountID) {
 		return composingTemplate{}, false, errTemplateNeedsWrite
 	}
-	t := composingTemplate{id: templateID, accountID: accountID, name: str(row, "name")}
+	t := composingTemplate{id: templateID, accountID: accountID, name: str(row, "name"), purpose: str(row, "purpose")}
 	c, ok := compositionFromRow(row)
 	if !ok {
 		return t, false, nil

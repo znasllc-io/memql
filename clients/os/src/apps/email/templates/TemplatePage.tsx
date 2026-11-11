@@ -53,8 +53,10 @@ const LOST: Record<Lifecycle, string> = {
 
 // WHAT THE TEMPLATE IS FOR (X10): a message about one person's own request has
 // no unsubscribe, and campaigns and automations do not offer it. Choosing is a
-// change the bar saves, with the email as it is stored; a save makes the
-// template a draft, as every save does.
+// change the bar saves as an act of its own (classify, like archive and
+// restore): the engine changes the purpose of the email it holds and nothing
+// else, and a published template is a draft after it, which the page says
+// before it is saved. The preview judges the email as the purpose chosen.
 const PURPOSES: readonly { value: TemplatePurpose; label: string }[] = [
   { value: "marketing", label: "Marketing" },
   { value: "transactional", label: "About one person's own request: no unsubscribe" },
@@ -106,7 +108,11 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
   // ---- the email, as it is sent -------------------------------------------
   const record = useTemplateRecord(template.id, template.createdAt);
   const content = useMemo(() => (record.value === null ? null : lifecycleContent(record.value)), [record.value]);
-  const render = useEmailRender(content, template.accountId);
+  // The purpose chosen and not yet saved; null when it is the template's own.
+  const [purpose, setPurpose] = useState<TemplatePurpose | null>(null);
+  const ownPurpose: TemplatePurpose = template.purpose ?? "marketing";
+  const shownPurpose = purpose ?? ownPurpose;
+  const render = useEmailRender(content, template.accountId, shownPurpose);
 
   // ---- the bar -------------------------------------------------------------
   const lifecycle = useTemplateLifecycle();
@@ -137,10 +143,6 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
   const stopListening = useRef<() => void>(() => {});
   useEffect(() => () => stopListening.current(), []);
 
-  // The purpose chosen and not yet saved; null when it is the template's own.
-  const [purpose, setPurpose] = useState<TemplatePurpose | null>(null);
-  const ownPurpose: TemplatePurpose = template.purpose ?? "marketing";
-  const shownPurpose = purpose ?? ownPurpose;
   const purposeChanged = purpose !== null && purpose !== ownPurpose;
   useEffect(() => {
     if (purpose !== null && purpose === ownPurpose) setPurpose(null);
@@ -151,7 +153,7 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
 
   const specs =
     landing !== null ? [landing.spec]
-    : purposeChanged && purposeEditable ? (record.value === null ? [DISCARD] : [DISCARD, SAVE])
+    : purposeChanged && purposeEditable ? [DISCARD, SAVE]
     : templateActs(template, askingNow, viewer);
 
   async function change(spec: ActSpec, act: Lifecycle) {
@@ -167,7 +169,7 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
       const done =
         act === "archive" ? await lifecycle.archive(template)
         : act === "restore" ? await lifecycle.restore(template)
-        : act === "purpose" ? record.value !== null && purpose !== null && (await lifecycle.setPurpose(template, lifecycleContent(record.value), purpose))
+        : act === "purpose" ? purpose !== null && (await lifecycle.setPurpose(template, purpose))
         : act === "cancel" ? await cancelling.run(template.id)
         : await retrying.run(template.id);
       if (done) {
@@ -312,7 +314,7 @@ export function TemplatePage({ template, layouts, automations = NO_AUTOMATIONS, 
     <div className="os-action-pane" data-os-dividers="none" data-os-page-context={JSON.stringify({ page: "Template", name, id: template.id })}>
       <div className="os-action-body os-app-stack">
         <Head navigationKey={`template:${template.id}`} title={name} back={{ label: "Templates", onSelect: onBack }} />
-        {automations.held.length + automations.unsent.length > 0 && !archived ? <Notice tone="warn" sentence={holdWarning(automations)} /> : null}
+        {(automations.held.length + automations.unsent.length > 0 && !archived) || (purposeChanged && purposeEditable && isPublished(template)) ? <Notice tone="warn" sentence={holdWarning(automations)} /> : null}
         {editorSilent ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
         {outcomeNotice()}
         <Panel label="Template details">

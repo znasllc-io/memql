@@ -686,9 +686,16 @@ func TestPublishingAFileAgainUpdatesItsTemplate(t *testing.T) {
 		if keys, held := tw.gate.snapshot(); fmt.Sprint(keys) != "[source:acme:art-9 t1]" || held != 0 {
 			t.Errorf("gate keys %v, still held %d", keys, held)
 		}
-		if reads := tw.engine.calls("query templateForSource"); len(reads) != 1 || !reads[0].fresh ||
-			!strings.Contains(reads[0].query, `accountId: "acme"`) || !strings.Contains(reads[0].query, `sourceArtifactId: "art-9"`) {
-			t.Errorf("the file's template must be read fresh, in the organization: %+v", reads)
+		// Read twice: before the locks, for the purpose that judges the email
+		// (a save that names none is judged by the stored one), and under them.
+		reads := tw.engine.calls("query templateForSource")
+		if len(reads) != 2 {
+			t.Errorf("the file's template is read %d times, want before the locks and under them: %+v", len(reads), reads)
+		}
+		for _, read := range reads {
+			if !read.fresh || !strings.Contains(read.query, `accountId: "acme"`) || !strings.Contains(read.query, `sourceArtifactId: "art-9"`) {
+				t.Errorf("the file's template must be read fresh, in the organization: %+v", read)
+			}
 		}
 	})
 
@@ -734,8 +741,14 @@ func TestPublishingAFileAgainUpdatesItsTemplate(t *testing.T) {
 			a["templateId"] = ""
 			a["sourceArtifactId"] = "v1:library:artifact:" + templateSource
 		}))
-		if got := tw.engine.calls("query templateForSource"); len(got) != 1 || !strings.Contains(got[0].query, `sourceArtifactId: "`+templateSource+`"`) {
-			t.Errorf("the lookup is %+v", got)
+		got := tw.engine.calls("query templateForSource")
+		if len(got) == 0 {
+			t.Errorf("the file's template was never looked up")
+		}
+		for _, read := range got {
+			if !strings.Contains(read.query, `sourceArtifactId: "`+templateSource+`"`) {
+				t.Errorf("the lookup is %+v", read)
+			}
 		}
 		if keys, _ := tw.gate.snapshot(); keys[0] != "source:acme:art-9" {
 			t.Errorf("gate keys %v", keys)
@@ -2337,5 +2350,170 @@ func TestSaveTemplateRefusesAPurposeOutsideTheTwo(t *testing.T) {
 		if want := map[string]any{"": nil, "marketing": "marketing", "transactional": "transactional"}[purpose]; args["purpose"] != want {
 			t.Errorf("purpose %q was written as %v, want %v", purpose, args["purpose"], want)
 		}
+	}
+}
+
+// withoutListLinks takes the unsubscribe and preferences links out of a built-in
+// layout's footer: the email a transactional template is.
+func withoutListLinks(t *testing.T, doc map[string]any) map[string]any {
+	t.Helper()
+	setBlock(t, doc, "footer", func(b map[string]any) {
+		kept := []any{}
+		for _, item := range b["links"].([]any) {
+			if href := item.(map[string]any)["href"]; href != emaildoc.TagUnsubscribeURL && href != emaildoc.TagPreferencesURL {
+				kept = append(kept, item)
+			}
+		}
+		b["links"] = kept
+	})
+	return doc
+}
+
+const transactionalLinkSentence = "A message about one person's own request carries no unsubscribe link. Remove it."
+
+// A transactional template is judged by the same validation as a marketing one
+// (ruling 40): a layout is not asked for an unsubscribe link, and one carrying
+// the link's tags cannot be published, layout or custom HTML. A marketing
+// layout with no link is still told, as before.
+func TestATransactionalTemplateIsPublishableWithNoUnsubscribeLinkAndNotWithOne(t *testing.T) {
+	transactional := func(a map[string]any) { a["purpose"] = "transactional" }
+
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	doc := withoutListLinks(t, readyConfirmation(t))
+	saved := tw.saved(saveTemplateArgs(doc, transactional))
+	if len(saved.Issues) != 0 {
+		t.Fatalf("a transactional layout with no unsubscribe link: issues %+v", saved.Issues)
+	}
+	if published := tw.saved(saveTemplateArgs(doc, transactional, revised(saved.Revision, "publish"))); published.Status != "ready" {
+		t.Fatalf("publication = %+v", published)
+	}
+	// A save that names no purpose is judged by the template's stored one.
+	saved = tw.saved(saveTemplateArgs(doc, revised(tw.engine.template["createdAt"].(string), "save")))
+	if len(saved.Issues) != 0 {
+		t.Fatalf("a save of the transactional template that named no purpose: issues %+v", saved.Issues)
+	}
+
+	marketing := newTemplateWorld(t)
+	if saved := marketing.saved(saveTemplateArgs(withoutListLinks(t, readyConfirmation(t)))); !saved.hasIssue(emaildoc.IssueUnsubscribeMissing, "") {
+		t.Fatalf("a marketing layout with no unsubscribe link: issues %+v", saved.Issues)
+	}
+
+	preferences := withoutListLinks(t, readyConfirmation(t))
+	setBlock(t, preferences, "footer", func(b map[string]any) {
+		b["links"] = append(b["links"].([]any), map[string]any{"label": "Settings", "href": emaildoc.TagPreferencesURL})
+	})
+	for name, content := range map[string]any{
+		"a layout with the unsubscribe link":   readyConfirmation(t),
+		"a layout with the preferences link":   preferences,
+		"custom HTML with the unsubscribe tag": map[string]any{"subject": "Your application", "textBody": "We have it.", "htmlBody": `<p>We have it. <a href="{{unsubscribeUrl}}">Leave</a></p>`},
+	} {
+		tw := newTemplateWorld(t)
+		tw.engine.stateful = true
+		saved := tw.saved(saveTemplateArgs(content, transactional))
+		if !saved.hasIssue(emaildoc.IssueUnsubscribePresent, "") {
+			t.Errorf("%s: issues %+v", name, saved.Issues)
+			continue
+		}
+		_, err := tw.save(saveTemplateArgs(content, transactional, revised(saved.Revision, "publish")))
+		if err == nil || !strings.Contains(err.Error(), transactionalLinkSentence) {
+			t.Errorf("%s: publishing err = %v", name, err)
+		}
+	}
+}
+
+// The preview the OS shows judges the purpose as the save does.
+func TestAnEmailPreviewReportsTheIssuesTheSaveDoes(t *testing.T) {
+	for _, content := range []map[string]any{withoutListLinks(t, readyConfirmation(t)), readyConfirmation(t)} {
+		for _, purpose := range []string{"", "transactional"} {
+			tw := newTemplateWorld(t)
+			saved := tw.saved(saveTemplateArgs(content, func(a map[string]any) { a["purpose"] = purpose }))
+			args := map[string]any{"document": content, "accountId": templateOrg}
+			if purpose != "" {
+				args["purpose"] = purpose
+			}
+			nodes, err := tw.w.handleRenderEmail(importCtx(), args, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var preview struct{ Issues []emaildoc.Issue }
+			if err := json.Unmarshal(nodes[0].Payload, &preview); err != nil {
+				t.Fatal(err)
+			}
+			if !sameJSON(t, preview.Issues, saved.Issues) {
+				t.Errorf("purpose %q: the preview says %+v, the save %+v", purpose, preview.Issues, saved.Issues)
+			}
+		}
+	}
+	if _, err := newTemplateWorld(t).w.handleRenderEmail(importCtx(), map[string]any{"document": readyConfirmation(t), "accountId": templateOrg, "purpose": "newsletter"}, 0); !errors.Is(err, errTemplatePurpose) {
+		t.Errorf("a preview with a purpose outside the two: err = %v", err)
+	}
+}
+
+// Changing a template's purpose is an act of its own, like archive and restore
+// (ruling 39): it changes the purpose and nothing else of the template the
+// engine holds, whatever content the call carries; it is fenced on the
+// revision; it returns a published template to draft; and its receipt carries
+// the issues the template has under its new purpose.
+func TestClassifyChangesOnlyThePurpose(t *testing.T) {
+	stored := canonicalDocument(t, readyConfirmation(t))
+	row := func() map[string]any {
+		return storedTemplateRow("t1", "ready", map[string]any{"document": stored, "layoutId": "builtin:confirmation", "htmlBody": "<p>As it was sent.</p>"})
+	}
+	classify := func(revision, purpose string) map[string]any {
+		return saveTemplateArgs(map[string]any{"subject": "Planted", "textBody": "Planted.", "htmlBody": "<p>Planted.</p>"}, func(a map[string]any) {
+			a["action"], a["expectedRevision"], a["purpose"] = "classify", revision, purpose
+		})
+	}
+
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	tw.engine.fakeEngine.template = row()
+	receipt := tw.saved(classify(templateStored.Format(time.RFC3339Nano), "transactional"))
+	if receipt.Status != "draft" {
+		t.Errorf("a published template changed purpose and is %q, want draft", receipt.Status)
+	}
+	if !receipt.hasIssue(emaildoc.IssueUnsubscribePresent, "") {
+		t.Errorf("the receipt does not name the link the template now may not carry: %+v", receipt.Issues)
+	}
+	writes := tw.engine.writes()
+	if len(writes) != 1 || !strings.HasPrefix(writes[0].query, "mutation updateTemplate(") {
+		t.Fatalf("writes = %v", writes)
+	}
+	after := tw.engine.fakeEngine.template
+	before := row()
+	for _, field := range []string{"name", "subject", "textBody", "htmlBody", "layoutId", "preheader", "sourceArtifactId"} {
+		if str(after, field) != str(before, field) {
+			t.Errorf("%s changed: %q -> %q", field, str(before, field), str(after, field))
+		}
+	}
+	if !sameJSON(t, after["document"], stored) {
+		t.Errorf("the document changed: %v", after["document"])
+	}
+	if str(after, "purpose") != "transactional" || str(after, "status") != "draft" {
+		t.Errorf("purpose %q status %q", str(after, "purpose"), str(after, "status"))
+	}
+
+	// A stale revision is refused as an archive's is, and nothing is written.
+	stale := newTemplateWorld(t)
+	stale.engine.fakeEngine.template = row()
+	if _, err := stale.save(classify("2028-01-01T00:00:00Z", "transactional")); !errors.Is(err, errTemplateChanged) {
+		t.Errorf("a stale revision: err = %v", err)
+	}
+	// A purpose outside the two, or none, is refused.
+	for _, purpose := range []string{"", "newsletter"} {
+		if _, err := stale.save(classify(templateStored.Format(time.RFC3339Nano), purpose)); !errors.Is(err, errTemplatePurpose) {
+			t.Errorf("purpose %q: err = %v", purpose, err)
+		}
+	}
+	if writes := stale.engine.writes(); len(writes) != 0 {
+		t.Errorf("a refused change of purpose wrote: %v", writes)
+	}
+
+	// The purpose it already has is answered with the receipt it has.
+	same := newTemplateWorld(t)
+	same.engine.fakeEngine.template = row()
+	if receipt := same.saved(classify(templateStored.Format(time.RFC3339Nano), "marketing")); receipt.Status != "ready" || len(same.engine.writes()) != 0 {
+		t.Errorf("classifying a template as what it is: %+v, writes %v", receipt, same.engine.writes())
 	}
 }

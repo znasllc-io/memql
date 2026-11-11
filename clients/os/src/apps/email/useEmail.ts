@@ -39,6 +39,7 @@ import {
   type CampaignStats,
   type EmailRender,
   type LayoutRow,
+  type TemplatePurpose,
   type TemplateRecord,
 } from "./rows";
 
@@ -1230,16 +1231,19 @@ function shareLayouts(before: readonly LayoutRow[] | null, after: readonly Layou
  *
  * `error` is the call's own text; a surface shows it through `refusalSentence`.
  */
-export function useEmailRender(document: Record<string, unknown> | null, accountId: string): Reading<EmailRender | null> {
+export function useEmailRender(document: Record<string, unknown> | null, accountId: string, purpose: TemplatePurpose = "marketing"): Reading<EmailRender | null> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => {
     if (query === null || document === null || accountId === "") return null;
+    // The issues are the ones a save with this purpose answers (ruling 40);
+    // marketing is the engine's default, so it is not named.
+    const judged = purpose === "transactional" ? { purpose } : {};
     return async (signal: AbortSignal) => {
-      const row = (await query.emailRender({ document, accountId }, { signal })).rows()[0];
+      const row = (await query.emailRender({ document, accountId, ...judged }, { signal })).rows()[0];
       return row === undefined ? null : renderFromRow(row);
     };
-  }, [query, document, accountId]);
+  }, [query, document, accountId, purpose]);
   return useLastAnswer(useReading<EmailRender | null>(null, read, [read]));
 }
 

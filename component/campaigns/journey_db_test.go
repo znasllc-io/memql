@@ -246,10 +246,7 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 func TestAJourneyStepRefusesATransactionalTemplate(t *testing.T) {
 	f := newDigestFixture(t)
 	n := f.newEmptyNewsletter(t, "journey-purpose")
-	for _, w := range []*Worker{n.worker} {
-		wired := NewWorker(w.store.engine, nil, nil, quietLogger(), gatePoolFor(t))
-		w.journeyGate = wired.journeyGate
-	}
+	n.worker.journeyGate = NewWorker(n.worker.store.engine, nil, nil, quietLogger(), gatePoolFor(t)).journeyGate
 	template := n.suffix + "-tpl"
 	setPurpose := func(purpose string) {
 		t.Helper()

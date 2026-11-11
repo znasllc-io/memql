@@ -1205,9 +1205,9 @@ type CampaignSaveTemplateArgs struct {
 	SourceArtifactId string
 	// Exact createdAt from templateById or templateForSource; empty only when creating.
 	ExpectedRevision string
-	// save (default), publish, archive or restore. Publishing is an explicit human action.
+	// save (default), publish, archive, restore or classify. Publishing is an explicit human action. classify changes the template's purpose and nothing else: it needs the exact revision and the purpose, ignores the content, returns a published template to draft and answers the issues the template has under its new purpose.
 	Action string
-	// marketing or transactional, for a save or a publish; empty keeps the template's purpose (none is marketing). A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it. Archive and restore ignore it. Anything else is refused.
+	// marketing or transactional. For a save or a publish, empty keeps the template's purpose (none is marketing); classify needs one. A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it, a layout needs no unsubscribe link, and {{unsubscribeUrl}} or {{preferencesUrl}} anywhere in it is an issue that keeps it from being published. Archive and restore ignore it. Anything else is refused.
 	Purpose string
 }
 
@@ -2798,6 +2798,8 @@ type EmailRenderArgs struct {
 	AccountId string
 	// Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).
 	Sample map[string]any
+	// marketing (the default) or transactional: the issues are the ones a save of the email with this purpose would answer.
+	Purpose string
 }
 
 // EmailRender calls the engine builtin emailRender.
@@ -2822,6 +2824,13 @@ func EmailRenderBuild(args EmailRenderArgs) string {
 		}
 		b.WriteString("sample: ")
 		b.WriteString(renderMemQLValue(args.Sample))
+	}
+	if args.Purpose != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("purpose: ")
+		b.WriteString(quoteMemQL(args.Purpose))
 	}
 	b.WriteString(")")
 	return b.String()

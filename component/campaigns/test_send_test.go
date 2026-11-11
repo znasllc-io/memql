@@ -383,3 +383,22 @@ func TestTestSendStillSendsAPlainTextEmail(t *testing.T) {
 		})
 	}
 }
+
+// The author's own test send keeps working for a transactional template: it is
+// one message to the address the author names, not a list. It goes through the
+// marketing render as every test send does, so it shows the appended footer
+// and the inert List-Unsubscribe pair; the next task's lane is what drops them.
+func TestATestSendOfATransactionalTemplateStillGoes(t *testing.T) {
+	engine := testSendFixture()
+	engine.template["purpose"] = "transactional"
+	w, sender := testSendWorker(t, engine)
+	if _, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "author@example.test"}, 0); err != nil {
+		t.Fatalf("testSend: %v", err)
+	}
+	if sender.count() != 1 {
+		t.Fatalf("expected one message, got %d", sender.count())
+	}
+	if msg := sender.sent[0]; !strings.Contains(msg.TextBody, "Unsubscribe:") || msg.Headers[headerListUnsubscribe] == "" {
+		t.Errorf("the test send's footer and header are not what this test records: %q %v", msg.TextBody, msg.Headers)
+	}
+}
