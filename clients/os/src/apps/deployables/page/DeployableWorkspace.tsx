@@ -21,7 +21,7 @@ import { NO_PARTS, type PartsHeld } from "../parts";
 import { useStore } from "../store/useStore";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
-export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "statistics" | "statisticsList" | "access" | "store" | "reviews" | "visit" | "version";
+export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "statistics" | "statisticsList" | "access" | "store" | "reviews" | "wholesale" | "visit" | "version";
 
 export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onOpenSourceSettings, onOpenVersion, onUpdate, deployChoice, readiness = null }: {
   onUpdate?: () => void;

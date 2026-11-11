@@ -248,6 +248,27 @@ export interface FakeSeed {
     /** Fails the next settings save with this server message. */
     settingsError?: string;
   };
+  /**
+   * The wholesale pack's answers (packs/wholesalepack): `wholesaleList` keyed
+   * by the stage asked, `wholesaleGet` keyed by the application id as the
+   * list gave it, and the store's settings. ABSENT IS EMPTY: a store nobody
+   * has applied to, and one that is not set up. THE SETTINGS ARE THE STORE
+   * ITSELF: setting a store up and saving its settings write to them, so a
+   * read after the write answers what was written.
+   */
+  wholesale?: {
+    list?: Record<string, Row>;
+    get?: Record<string, Row>;
+    settings?: Row;
+    /** Fails every `wholesaleList` read with this server message. */
+    listError?: string;
+    /** Fails the next decision with this server message. */
+    decideError?: string;
+    /** Fails the next retry with this server message. */
+    retryError?: string;
+    /** Fails the next settings save with this server message. */
+    settingsError?: string;
+  };
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
   registerSourceError?: string;
@@ -584,6 +605,48 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call.startsWith("builtin reviewsExportStore(")) {
         return builtinReply("reviewsExportStore", [{ fileName: "reviews-store-live-2026-11-04.json", json: "{\"format\":\"memql.reviews.export/v1\"}" } as unknown as Row]);
+      }
+      // ---- wholesale (packs/wholesalepack) ----
+      if (call.startsWith("builtin wholesaleList(")) {
+        if (seed.wholesale?.listError !== undefined) throw new Error(seed.wholesale.listError);
+        const args = parseCall(call).args;
+        const stage = String(args.stage ?? "readyToReview");
+        const held = seed.wholesale?.list?.[stage] ?? { rows: [], counts: {}, next: "", truncated: false };
+        const query = String(args.search ?? "").toLowerCase();
+        const rows = ((held.rows ?? []) as Record<string, unknown>[]).filter(row => !query || [row.companyName, row.applicantName, row.applicantEmail].join(" ").toLowerCase().includes(query));
+        const offset = Number(args.after ?? 0), limit = Number(args.limit ?? 50);
+        return builtinReply("wholesaleList", [{ ...held, rows: rows.slice(offset, offset + limit), next: offset + limit < rows.length ? String(offset + limit) : "" }]);
+      }
+      if (call.startsWith("builtin wholesaleGet(")) {
+        const id = String(parseCall(call).args.applicationId ?? "");
+        const answer = seed.wholesale?.get?.[id];
+        if (answer === undefined) throw new Error(`wholesale: application "${id}" is not readable by this caller`);
+        return builtinReply("wholesaleGet", [answer]);
+      }
+      if (call.startsWith("builtin wholesaleStoreSettings(")) {
+        return builtinReply("wholesaleStoreSettings", [seed.wholesale?.settings ?? ({ exists: false, applicationsOpen: false, entitlementAdapter: "", adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: false } } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin wholesaleRecordDecision(")) {
+        if (seed.wholesale?.decideError !== undefined) throw new Error(seed.wholesale.decideError);
+        const args = parseCall(call).args;
+        return builtinReply("wholesaleRecordDecision", [{ applicationId: String(args.applicationId ?? ""), transition: String(args.transition ?? "") } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleRetryAccess(")) {
+        if (seed.wholesale?.retryError !== undefined) throw new Error(seed.wholesale.retryError);
+        return builtinReply("wholesaleRetryAccess", [{ applicationId: String(parseCall(call).args.applicationId ?? "") } as unknown as Row]);
+      }
+      if (call.startsWith("builtin wholesaleUpdateSettings(")) {
+        if (seed.wholesale?.settingsError !== undefined) throw new Error(seed.wholesale.settingsError);
+        const { siteId: _site, storeId: _store, ...changes } = parseCall(call).args;
+        const held = (seed.wholesale ??= {});
+        held.settings = { ...(held.settings ?? {}), ...changes } as Row;
+        return builtinReply("wholesaleUpdateSettings", [changes as Row]);
+      }
+      if (call.startsWith("builtin wholesaleSetSettings(")) {
+        const args = parseCall(call).args;
+        const held = (seed.wholesale ??= {});
+        held.settings = { exists: true, applicationsOpen: args.applicationsOpen === true, entitlementAdapter: String(args.entitlementAdapter ?? ""), adapters: ["customerTag", "shopifyB2B"], may: { setUp: false, update: true } } as unknown as Row;
+        return builtinReply("wholesaleSetSettings", [{ storeId: String(args.storeId ?? "") } as unknown as Row]);
       }
 
       // ---- pipelines (epic memql#5479) ----

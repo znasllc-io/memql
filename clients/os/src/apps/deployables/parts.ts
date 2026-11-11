@@ -26,6 +26,8 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 //   rerun     re-run a pipeline run, whole or only its failed steps
 //   cancel    stop a queued or running pipeline run
 //   channels  name where a pipeline's notify stage delivers (epic memql#5480)
+//   wholesale read and decide a store's wholesale applications, retry a
+//             buyer's access, change the store's wholesale settings
 //
 // The last four are the pipelines parts (epic memql#5479, task memql#5498).
 // They are GLOBAL, never per organization: a pipeline is acted on by its
@@ -69,7 +71,7 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // version and exercise it end to end against a development store, and still
 // not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "reviews", "connect", "rerun", "cancel", "channels"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "access", "reviews", "wholesale", "connect", "rerun", "cancel", "channels"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -95,6 +97,7 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   preview: false,
   access: false,
   reviews: false,
+  wholesale: false,
   connect: false,
   rerun: false,
   cancel: false,
@@ -112,6 +115,7 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   preview: true,
   access: true,
   reviews: true,
+  wholesale: true,
   connect: true,
   rerun: true,
   cancel: true,

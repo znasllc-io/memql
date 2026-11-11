@@ -17,6 +17,7 @@ import { profileScenes } from "./profileScenes";
 import { fleetDeviceScenes } from "./fleetDeviceScenes";
 import { mapScenes } from "./mapScenes";
 import { deployableStatisticsScenes } from "./deployableStatisticsScenes";
+import { wholesaleScenes, WHOLESALE_CLICKS } from "./wholesaleScenes";
 import { emailOverviewScenes } from "./emailOverviewScenes";
 import { CONCEPT_PAGED_VIEWS } from "./conceptsPagedScene";
 import { NEXUS_PAGED_VIEWS } from "./nexusPagedScenes";
@@ -1060,6 +1061,8 @@ const VIEWS: Record<
   ...mapScenes(WindowBody),
   // A deployable's Statistics and the Overview's Websites (deployableStatisticsScenes.tsx).
   ...deployableStatisticsScenes(WindowBody),
+  // A store's Wholesale section (wholesaleScenes.tsx).
+  ...wholesaleScenes(WindowBody),
   ...fleetEquipmentScenes(WindowBody),
   ...setupWizardScenes(WindowBody),
   // Your profile (memql#6220): `profile`, `profile-photo`, `profile-quiet`.
@@ -2396,7 +2399,7 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? REVIEWS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? ACCESS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? REVIEWS_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? WHOLESALE_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204
