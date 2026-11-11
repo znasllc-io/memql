@@ -3236,6 +3236,7 @@ export interface CreateStoreArgs {
   scopesGranted?: string[];
   isDevelopment?: boolean;
   developmentOfStoreId?: string;
+  connectedAt?: string;
 }
 
 export function buildCreateStore(args: CreateStoreArgs): string {
@@ -3254,6 +3255,7 @@ export function buildCreateStore(args: CreateStoreArgs): string {
   if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
   if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
   if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
+  if (args.connectedAt !== undefined) parts.push("connectedAt: " + renderMemQLValue(args.connectedAt));
   return "mutation createStore(" + parts.join(", ") + ")";
 }
 
@@ -8605,6 +8607,7 @@ export interface UpdateStoreArgs {
   ownerUserId?: string;
   isDevelopment?: boolean;
   developmentOfStoreId?: string;
+  connectedAt?: string;
 }
 
 export function buildUpdateStore(args: UpdateStoreArgs): string {
@@ -8622,6 +8625,7 @@ export function buildUpdateStore(args: UpdateStoreArgs): string {
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
   if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
   if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
+  if (args.connectedAt !== undefined) parts.push("connectedAt: " + renderMemQLValue(args.connectedAt));
   return "mutation updateStore(" + parts.join(", ") + ")";
 }
 

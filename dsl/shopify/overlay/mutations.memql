@@ -28,6 +28,7 @@ mutation store createStore {
     scopesGranted       []string
     isDevelopment         boolean
     developmentOfStoreId  string
+    connectedAt           datetime
   }
   insert {
     stamp {
@@ -47,6 +48,7 @@ mutation store createStore {
       health:             {}
       isDevelopment:        args.isDevelopment ?? false
       developmentOfStoreId: args.developmentOfStoreId ?? ""
+      connectedAt:          args.connectedAt ?? ""
     }
   }
 }
@@ -69,9 +71,10 @@ mutation store updateStore {
     ownerUserId         string
     isDevelopment         boolean
     developmentOfStoreId  string
+    connectedAt           datetime
   }
   update {
-    accept { name, appClientId, adminTokenRef, storefrontTokenRef, webhookSecretRef, apiVersion, protectedDataLevel, plan, scopesGranted, ownerUserId, isDevelopment, developmentOfStoreId }
+    accept { name, appClientId, adminTokenRef, storefrontTokenRef, webhookSecretRef, apiVersion, protectedDataLevel, plan, scopesGranted, ownerUserId, isDevelopment, developmentOfStoreId, connectedAt }
     stamp {
       id:                 args.storeId
     }

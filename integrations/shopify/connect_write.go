@@ -118,6 +118,11 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		scopes = []string{}
 	}
 	update := map[string]any{"storeId": storeID, "adminTokenRef": adminRef, "apiVersion": generated.APIVersion, "scopesGranted": scopes}
+	if startsAfresh(prior, found) {
+		// The store's recording starts here: the clock a late check is
+		// measured from. A connect that only widens the grant keeps it.
+		update["connectedAt"] = c.now().UTC().Format(time.RFC3339)
+	}
 	if promoted {
 		webhookRef, err := seedSecret(opCtx, c.engine, storeSecretName(storeID, suffixWebhookSecret), grant.ClientSecret, connectSealDescription, person)
 		if err != nil {
@@ -266,7 +271,7 @@ const ordersWindowDays = 60
 // the rest still queue; the boot pass (queueUnstartedBackfills) queues a
 // domain that never got its row.
 func (c *Connector) queueConnectBackfills(ctx context.Context, prior Store, found bool, now Store) {
-	everything := !found || prior.UninstalledAt != "" || prior.RedactedAt != "" || prior.AdminTokenRef == ""
+	everything := startsAfresh(prior, found)
 	for _, concept := range generated.ApplyOrder {
 		spec := generated.Types[concept]
 		if !bulkDomain(spec) || !domainInConnection(now, spec) {
@@ -283,6 +288,14 @@ func (c *Connector) queueConnectBackfills(ctx context.Context, prior Store, foun
 			c.stampOrdersFrom(ctx, now, found && prior.RedactedAt != "")
 		}
 	}
+}
+
+// startsAfresh reports whether a connect starts the store's recording from
+// nothing: a new store, one Shopify reported uninstalled or purged, or one
+// with no Admin token. Such a connect queues every domain, restarts a running
+// backfill and stamps connectedAt; any other only widens what is recorded.
+func startsAfresh(prior Store, found bool) bool {
+	return !found || prior.UninstalledAt != "" || prior.RedactedAt != "" || prior.AdminTokenRef == ""
 }
 
 // bulkDomain reports whether a mirrored type is backfilled by a bulk

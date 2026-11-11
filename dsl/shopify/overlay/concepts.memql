@@ -86,6 +86,12 @@ concept store {
   /// The mirror stays until shop/redact purges it. Cleared by a verified
   /// reinstall.
   uninstalledAt       datetime
+  /// When a connect last started this store's recording afresh: its first
+  /// connect, or one after an uninstall, a purge, or with no Admin token. A
+  /// connect that only widens the grant leaves it alone. The verdict measures
+  /// a late check from it, so a store that has just connected is not late at
+  /// its first error. Empty for a store connected before it was recorded.
+  connectedAt         datetime
   /// True when this store is a DEVELOPMENT store -- the one a storefront is
   /// exercised against before it serves shoppers (design D8). It is attached
   /// and mirrored like any other store: a second row, its own storeId, and

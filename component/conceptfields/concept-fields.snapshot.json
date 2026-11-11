@@ -8372,6 +8372,7 @@
         "adminTokenRef",
         "apiVersion",
         "appClientId",
+        "connectedAt",
         "developmentOfStoreId",
         "domain",
         "health",

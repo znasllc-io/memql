@@ -28,6 +28,7 @@ shape store storeFull {
   subscriptionsCheckedAt
   redactedAt
   uninstalledAt
+  connectedAt
   isDevelopment
   developmentOfStoreId
   row.createdAt

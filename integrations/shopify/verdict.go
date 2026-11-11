@@ -81,6 +81,7 @@ type Verdict struct {
 	StoreID, Domain, State string
 	Since                  time.Time
 	ResumedAt              time.Time
+	ConnectedAt            time.Time
 	Reasons                []VerdictReason
 	Recorded               []RecordedKind
 	Outside, Withheld      []string
@@ -120,12 +121,13 @@ func computeVerdict(in verdictInput) Verdict {
 	store := in.Store
 	rows := rowsByConcept(in.States)
 	v := Verdict{
-		StoreID:    store.ID,
-		Domain:     store.Domain,
-		OrdersFrom: healthString(store.Health, "ordersFrom"),
-		Recorded:   recordedOf(store, rows),
-		Outside:    outsideOf(store, rows),
-		Withheld:   withheldOf(in.Denied),
+		StoreID:     store.ID,
+		Domain:      store.Domain,
+		OrdersFrom:  healthString(store.Health, "ordersFrom"),
+		ConnectedAt: in.ConnectedAt,
+		Recorded:    recordedOf(store, rows),
+		Outside:     outsideOf(store, rows),
+		Withheld:    withheldOf(in.Denied),
 	}
 	switch {
 	case store.UninstalledAt != "" || store.RedactedAt != "":

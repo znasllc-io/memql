@@ -5932,6 +5932,7 @@ type CreateStoreArgs struct {
 	IsDevelopment        bool
 	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
 	DevelopmentOfStoreId string
+	ConnectedAt          string
 }
 
 // CreateStore calls the engine mutation createStore.
@@ -6034,6 +6035,11 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		b.WriteString("developmentOfStoreId: ")
 		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("connectedAt: ")
+	b.WriteString(quoteMemQL(args.ConnectedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -14672,6 +14678,7 @@ type UpdateStoreArgs struct {
 	IsDevelopment        bool
 	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
 	DevelopmentOfStoreId string
+	ConnectedAt          string
 }
 
 // UpdateStore calls the engine mutation updateStore.
@@ -14769,6 +14776,11 @@ func UpdateStoreBuild(args UpdateStoreArgs) string {
 		b.WriteString("developmentOfStoreId: ")
 		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("connectedAt: ")
+	b.WriteString(quoteMemQL(args.ConnectedAt))
 	b.WriteString(")")
 	return b.String()
 }

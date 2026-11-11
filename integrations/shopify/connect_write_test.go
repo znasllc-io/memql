@@ -894,3 +894,46 @@ func TestOrdersFromMovesAfterAPurge(t *testing.T) {
 		t.Fatalf("ordersFrom stamps after a purge = %v, want one, 2026-07-25: the mirror's orders now begin sixty days before the reconnect", stamps)
 	}
 }
+
+// connectedAtStamped reports whether the connect's store-row write stamped
+// connectedAt.
+func (h *writeHarness) connectedAtStamped() bool {
+	for _, name := range []string{"createStore", "updateStore"} {
+		for _, c := range h.engine.callsNamed(name) {
+			if strings.Contains(c.query, "connectedAt: ") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestAConnectThatStartsRecordingAfreshStampsConnectedAt(t *testing.T) {
+	h := newWriteHarness(t)
+	h.managedConnect(t, managedConnectScopes())
+	if !h.connectedAtStamped() {
+		t.Error("a first connect did not stamp connectedAt")
+	}
+	for name, fields := range map[string]map[string]any{
+		"uninstalled":    {"uninstalledAt": "2026-09-01T00:00:00Z", "connectedAt": "2026-08-01T00:00:00Z"},
+		"purged":         {"redactedAt": "2026-09-01T00:00:00Z", "connectedAt": "2026-08-01T00:00:00Z"},
+		"no Admin token": {"adminTokenRef": "", "connectedAt": "2026-08-01T00:00:00Z"},
+	} {
+		fields["scopesGranted"] = commerceScopesAny()
+		h := reconnectHarness(t, managedRow(fields))
+		h.managedConnect(t, managedConnectScopes())
+		if !h.connectedAtStamped() {
+			t.Errorf("%s: a reconnect that starts recording afresh did not move connectedAt", name)
+		}
+	}
+}
+
+func TestAWiderGrantDoesNotMoveConnectedAt(t *testing.T) {
+	for _, scopes := range [][]any{olderManagedScopes(), commerceScopesAny()} {
+		h := reconnectHarness(t, managedRow(map[string]any{"scopesGranted": scopes, "connectedAt": "2026-08-01T00:00:00Z"}))
+		h.managedConnect(t, managedConnectScopes())
+		if h.connectedAtStamped() {
+			t.Errorf("a connect of a recording store (granted %d scopes before) moved connectedAt", len(scopes))
+		}
+	}
+}

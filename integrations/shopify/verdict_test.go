@@ -709,7 +709,7 @@ func TestTheVerdictReplyCarriesEveryKey(t *testing.T) {
 	if err := json.Unmarshal(nodes[0].Payload, &reply); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"storeId", "domain", "state", "since", "resumedAt", "reasons", "recorded", "outside", "withheld", "ordersFrom", "alert", "may"} {
+	for _, key := range []string{"storeId", "domain", "state", "since", "resumedAt", "connectedAt", "reasons", "recorded", "outside", "withheld", "ordersFrom", "alert", "may"} {
 		if _, ok := reply[key]; !ok {
 			t.Errorf("reply has no %q: %v", key, reply)
 		}
@@ -862,14 +862,31 @@ func TestResumedAtIsCarriedWhileTheStateHolds(t *testing.T) {
 	}
 }
 
-// The row records no connect time; its one stable trace is ordersFrom, the
-// connect day less sixty days. Absent, there is none.
-func TestTheConnectTimeIsTheStartOfTheDayOrdersFromCountsBackFrom(t *testing.T) {
+// connectedAt is the store row's own; a store connected before it existed
+// has none.
+func TestTheConnectTimeIsTheStoreRowsConnectedAt(t *testing.T) {
 	store := verdictStore()
-	if got, want := connectedAtOf(store), time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+	store.ConnectedAt = "2026-11-11T11:59:00Z"
+	if got, want := connectedAtOf(store), time.Date(2026, 11, 11, 11, 59, 0, 0, time.UTC); !got.Equal(want) {
 		t.Errorf("connectedAtOf = %v, want %v", got, want)
 	}
-	if got := connectedAtOf(managedStore(commerceSet...)); !got.IsZero() {
-		t.Errorf("connectedAtOf with no ordersFrom = %v, want zero", got)
+	if got := connectedAtOf(verdictStore()); !got.IsZero() {
+		t.Errorf("connectedAtOf with no connectedAt = %v, want zero: ordersFrom is not a connect time", got)
+	}
+}
+
+// A store connected before connectedAt existed, with no clean sweep and never
+// resumed, is judged as it was before the baseline: an attempted domain with
+// no clean sweep is late.
+func TestAStoreWithNoBaselineIsJudgedAsBefore(t *testing.T) {
+	store := verdictStore()
+	rows := setRow(cleanRows(store), "order", func(r map[string]any) {
+		r["lastError"] = "shopify admin: HTTP 503"
+		delete(r, "lastReconcileAt")
+		delete(r, "lastAttemptAt")
+	})
+	r := reasonNamed(t, computeVerdict(verdictInputOf(store, rows)), ReasonCheckFailing)
+	if r.Domain != "orders" || !strings.Contains(r.Detail, "HTTP 503") {
+		t.Errorf("reason = %+v", r)
 	}
 }
