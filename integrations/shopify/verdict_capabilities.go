@@ -12,13 +12,15 @@ import (
 )
 
 // verdict_capabilities.go -- the verdict's builtins: the read that gathers a
-// store's verdict input, the reply, and the two acts. The rules themselves
-// are verdict.go's, which reads nothing.
+// store's verdict input, the reply, the two acts its reasons offer, and the
+// Store page's pause and resume. The rules themselves are verdict.go's, which
+// reads nothing.
 
-// verdictCapabilities is the Store page's verdict and its two acts. Each is
-// declared with @requiresCapability("execute", "app:deployables/store") in
-// dsl/shopify/overlay/builtins.memql, which the engine asks before the
-// handler runs; who may see or act on THIS store is asked in the handler.
+// verdictCapabilities is the Store page's verdict, its two acts, and pause and
+// resume. Each is declared with @requiresCapability("execute",
+// "app:deployables/store") in dsl/shopify/overlay/builtins.memql, which the
+// engine asks before the handler runs; who may see or act on THIS store is
+// asked in the handler.
 func (i *Integration) verdictCapabilities() []memql.IntegrationCapability {
 	store := map[string]string{"storeId": "string - the store"}
 	return []memql.IntegrationCapability{
@@ -40,6 +42,12 @@ func (i *Integration) verdictCapabilities() []memql.IntegrationCapability {
 			Handler:     i.handleStoreRetryDeliveries,
 			ArgsSchema:  store,
 		},
+		{
+			Name:        "storeSetRecording",
+			Description: "Pause or resume recording one store: move it between live and paused, written as the deployment. A store that is not connected is refused, and asking for the state it is in writes nothing. For the store's owner or a cluster owner.",
+			Handler:     i.handleStoreSetRecording,
+			ArgsSchema:  map[string]string{"storeId": "string - the store", "recording": "boolean - true resumes recording, false pauses it"},
+		},
 	}
 }
 
@@ -51,12 +59,14 @@ const registerAgainWait = time.Minute
 // mayActOnStore reports whether the caller may act on a store: its owner, or
 // a cluster owner -- who may connect it.
 func (c *Connector) mayActOnStore(ctx context.Context, store Store) bool {
+	return isClusterOwner(ctx) || ownsStore(ctx, store)
+}
+
+// ownsStore reports whether the caller is the store's owner.
+func ownsStore(ctx context.Context, store Store) bool {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac == nil {
 		return false
-	}
-	if ac.IsClusterOwner() {
-		return true
 	}
 	caller := strings.TrimSpace(ac.UserId)
 	owner := strings.TrimSpace(store.OwnerUserID)
@@ -82,14 +92,23 @@ func (c *Connector) storeForCaller(ctx context.Context, storeID, builtin, refuse
 
 const actRefusal = "is for the store's owner or a cluster owner"
 
+// readRefusal is the refusal of a read for the store's owner, a cluster owner,
+// or a caller who may read stores.
+const readRefusal = "is for the store's owner, a cluster owner, or a caller who may read stores"
+
+// mayReadStore reports whether the caller may read a store: its owner, a
+// cluster owner, or a caller the store tier lets read every store.
+func (c *Connector) mayReadStore(ctx context.Context, store Store) bool {
+	return c.mayActOnStore(ctx, store) || c.mayReadStores(ctx)
+}
+
 func (i *Integration) handleStoreVerdict(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	c := i.connector
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.storeForCaller(ctx, argString(args, "storeId"), "shopifyStoreVerdict",
-		"is for the store's owner, a cluster owner, or a caller who may read stores",
-		func(s Store) bool { return c.mayActOnStore(ctx, s) || c.mayReadStores(ctx) })
+	store, err := c.storeForCaller(ctx, argString(args, "storeId"), "shopifyStoreVerdict", readRefusal,
+		func(s Store) bool { return c.mayReadStore(ctx, s) })
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +171,52 @@ func (i *Integration) handleStoreRetryDeliveries(ctx context.Context, args map[s
 		return nil, fmt.Errorf("shopify: the store's deliveries could not be put back in line: %w", err)
 	}
 	return resultNode("shopify", map[string]any{"status": "requeued", "storeId": store.ID, "source": source})
+}
+
+// notConnectedRefusal refuses a pause or a resume of a store that is not
+// connected: uninstalled, purged, or in a status other than live or paused.
+const notConnectedRefusal = "shopify: a store that is not connected cannot be paused or resumed"
+
+// handleStoreSetRecording moves one store between live and paused: the Store
+// page's Pause recording and Resume.
+//
+// THE WRITE IS THE DEPLOYMENT'S. setStoreStatus's row is a cluster owner's
+// (@rowAuthz(clusterOwner)), so a store's owner who is not one would be offered
+// the act and refused by the row. The caller is asked here instead -- the
+// store's owner or a cluster owner, before anything but the store row is read
+// -- and the write runs as the operator, so the row's own gate is not widened.
+// It changes the status only: the next verdict says the store resumed, and the
+// next watch pass records it.
+func (i *Integration) handleStoreSetRecording(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	c := i.connector
+	if c == nil {
+		return resultNode("shopify", map[string]any{"status": "unconfigured"})
+	}
+	// Read fresh: the status decides what is written, and another node may
+	// have moved it.
+	store, err := c.storeForCaller(memql.ContextWithFreshRead(ctx), argString(args, "storeId"), "shopifyStoreSetRecording", actRefusal,
+		func(s Store) bool { return c.mayActOnStore(ctx, s) })
+	if err != nil {
+		return nil, err
+	}
+	recording, ok := args["recording"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("shopify: shopifyStoreSetRecording needs recording, true or false")
+	}
+	if store.UninstalledAt != "" || store.RedactedAt != "" || (store.Status != StatusLive && store.Status != StatusPaused) {
+		return nil, fmt.Errorf("%s", notConnectedRefusal)
+	}
+	want := StatusPaused
+	if recording {
+		want = StatusLive
+	}
+	if store.Status != want {
+		if _, err := c.engine.Execute(operatorContext(ctx), renderCall("setStoreStatus", map[string]any{"storeId": store.ID, "status": want})); err != nil {
+			return nil, fmt.Errorf("shopify: the store's status could not be written: %w", err)
+		}
+		c.stores.Invalidate()
+	}
+	return resultNode("shopify", map[string]any{"status": want, "storeId": store.ID})
 }
 
 // storeVerdict gathers one store's verdict input and computes it: the rows

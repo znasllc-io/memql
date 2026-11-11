@@ -127,8 +127,8 @@ export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }
   if (lead !== null && leadVerdict !== null && leadVerdict.may.act && leadVerdict.state !== "not connected") {
     const storeId = lead.store.id;
     barActs.push(leadVerdict.state === "paused"
-      ? { label: "Resume", tone: "primary", busy: write.busy === "status", onAct: () => { if (!busy) void write.setStatus(storeId, "live"); } }
-      : { label: "Pause recording", busy: write.busy === "status", onAct: () => { if (!busy) void write.setStatus(storeId, "paused"); } });
+      ? { label: "Resume", tone: "primary", busy: write.busy === "recording", onAct: () => { if (!busy) void write.setRecording(storeId, true); } }
+      : { label: "Pause recording", busy: write.busy === "recording", onAct: () => { if (!busy) void write.setRecording(storeId, false); } });
   }
   return <section className="os-action-pane"><div className="os-action-body os-app-stack"><Head title="Store" breadcrumbs={trail} back={back} />{notices}
     <Panel label="Store connections"><Subhead>Connections</Subhead>

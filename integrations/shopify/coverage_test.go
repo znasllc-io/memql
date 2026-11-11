@@ -1,7 +1,6 @@
 package shopify
 
 import (
-	"context"
 	"encoding/json"
 	"slices"
 	"testing"
@@ -120,7 +119,7 @@ func TestADomainOutsideTheConnectionIsNeverInScopesMissing(t *testing.T) {
 	h := newHarness(t)
 	withManagedScopes(t, h, oldManagedList...)
 
-	nodes, err := NewIntegration(h.conn).handleStoreHealth(context.Background(), map[string]any{"storeId": testStoreID}, 0)
+	nodes, err := NewIntegration(h.conn).handleStoreHealth(clusterOwnerCall(), map[string]any{"storeId": testStoreID}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

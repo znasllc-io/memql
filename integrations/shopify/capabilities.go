@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
@@ -40,12 +41,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	base := []memql.IntegrationCapability{
 		{
 			Name:        "ensureSubscriptions",
-			Description: "Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones that drifted, and remove ours that the allowlist no longer wants. Records the outcome on each store's health. Safe to run on boot and daily.",
+			Description: "Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones that drifted, and remove ours that the allowlist no longer wants. Records the outcome on each store's health. Safe to run on boot and daily. For the scheduled automation (internal origin) or a cluster owner; anybody else is refused before anything runs.",
 			Handler:     i.handleEnsureSubscriptions,
 		},
 		{
 			Name:        "runComplianceJobs",
-			Description: "Run the privacy jobs whose hold has elapsed: export a customer's data, scrub a redacted customer across every version, purge a redacted shop. Every action is audited.",
+			Description: "Run the privacy jobs whose hold has elapsed: export a customer's data, scrub a redacted customer across every version, purge a redacted shop. Every action is audited. For the scheduled automation (internal origin) or a cluster owner; anybody else is refused before anything runs.",
 			Handler:     i.handleRunComplianceJobs,
 		},
 		{
@@ -60,10 +61,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "shopifyql",
-			Description: "Run a ShopifyQL analytics query against a store, for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2; refused with a reason below that.",
+			Description: "Run a ShopifyQL analytics query against a store, for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2; refused with a reason below that. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.",
 			Handler:     i.handleShopifyQL,
 			ArgsSchema: map[string]string{
-				"storeId": "string - the store to query",
+				"storeId": "string (optional) - the store to query; for a caller who is not a cluster owner, the one store they own when omitted",
 				"query":   "string - the ShopifyQL statement",
 			},
 		},
@@ -111,15 +112,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "storefrontProbe",
-			Description: "Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back (epic memql#5531, issue memql#5547). Writes nothing and buys nothing -- it creates a cart and reads the URL a shopper would be sent to, and the payment walk itself happens in a browser and is not something this cluster can observe. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}.",
+			Description: "Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back (epic memql#5531, issue memql#5547). Writes nothing and buys nothing -- it creates a cart and reads the URL a shopper would be sent to, and the payment walk itself happens in a browser and is not something this cluster can observe. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}. For the store's owner, a cluster owner, or a caller who may read stores; anybody else is refused before Shopify is asked.",
 			Handler:     i.handleStorefrontProbe,
 			ArgsSchema: map[string]string{
-				"storeId": "string (optional) - the store to ask; the only configured store when omitted",
+				"storeId": "string (optional) - the store to ask; when omitted, the only configured store for a cluster owner and otherwise the one store the caller owns",
 			},
 		},
 		{
 			Name:        "storeHealth",
-			Description: "Report every configured store's status, subscription reconcile time, per-domain sync state and drift counters. The read behind the portal's Stores page.",
+			Description: "Report the status, subscription reconcile time, per-domain sync state and drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.",
 			Handler:     i.handleStoreHealth,
 			ArgsSchema: map[string]string{
 				"storeId": "string (optional) - one store; every store when omitted",
@@ -138,7 +139,21 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append(base, i.wholesaleCapabilities()...)
 }
 
+// requireInternalOriginOrClusterOwner admits the engine's own call -- the
+// scheduled automation, whose actor is a reader and whose step carries
+// internal origin because its source is the registered tree -- and a cluster
+// owner, and refuses anybody else before anything runs.
+func requireInternalOriginOrClusterOwner(ctx context.Context, builtin string) error {
+	if auth.OriginFromContext(ctx).IsInternal() || isClusterOwner(ctx) {
+		return nil
+	}
+	return fmt.Errorf("shopify: %s is for a cluster owner", builtin)
+}
+
 func (i *Integration) handleEnsureSubscriptions(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOriginOrClusterOwner(ctx, "shopifyEnsureSubscriptions"); err != nil {
+		return nil, err
+	}
 	if i.connector == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
@@ -149,6 +164,9 @@ func (i *Integration) handleEnsureSubscriptions(ctx context.Context, _ map[strin
 }
 
 func (i *Integration) handleRunComplianceJobs(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOriginOrClusterOwner(ctx, "shopifyRunComplianceJobs"); err != nil {
+		return nil, err
+	}
 	if i.connector == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
@@ -188,7 +206,7 @@ func (i *Integration) handleShopifyQL(ctx context.Context, args map[string]any, 
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.mirrorStoreForCaller(ctx, argString(args, "storeId"), "shopifyql")
 	if err != nil {
 		return nil, err
 	}
@@ -296,10 +314,18 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
+	// ONLY THE STORES THE CALLER MAY READ, and never a refusal that names one:
+	// every store for a cluster owner or a caller the store tier lets read
+	// them, a store's owner their own, anybody else an empty list. Asked
+	// before anything but the store rows is read.
+	every := isClusterOwner(ctx) || c.mayReadStores(ctx)
 	only := argString(args, "storeId")
 	out := make([]any, 0, len(stores))
 	for _, store := range stores {
 		if only != "" && store.ID != only {
+			continue
+		}
+		if !every && !ownsStore(ctx, store) {
 			continue
 		}
 		// Each store is a partition of the mirror: its domains are the rows
@@ -503,30 +529,48 @@ func fieldsDeniedAny(in map[string][]string) map[string]any {
 	return out
 }
 
-// mirrorStoreForCaller resolves the store a mirror-reading builtin names --
-// or, when it names none, the store resolveStoreArg defaults to -- and
-// refuses, before any mirror read, a caller who is neither that store's
-// owner nor a cluster owner.
+// mirrorStoreForCaller resolves the store a builtin that reads the mirror or
+// asks Shopify names -- or, naming none, the store it defaults to -- and
+// refuses, before any mirror read or call to Shopify, a caller who is neither
+// that store's owner nor a cluster owner.
 //
 // The mirror reads run as the operator (F10), and the generated reads'
 // actor.isClusterOwner conjunct then admits every one of them; this is
 // what keeps a caller to the stores they may act on. There is no
 // internal-origin escape: no automation or connector pass reaches these
-// builtins, and one that did would run as a system actor, which is a
-// cluster owner.
+// builtins, and an automation's own actor is a reader, which this refuses.
 func (c *Connector) mirrorStoreForCaller(ctx context.Context, storeID, builtin string) (Store, error) {
-	may := func(s Store) bool { return c.mayActOnStore(ctx, s) }
+	return c.storeForCallerOrDefault(ctx, storeID, builtin, actRefusal, func(s Store) bool { return c.mayActOnStore(ctx, s) })
+}
+
+// storeForCallerOrDefault is storeForCaller for a builtin whose storeId may be
+// omitted.
+//
+// A CALLER WHO IS NOT A CLUSTER OWNER AND NAMES NO STORE IS NEVER TOLD HOW MANY
+// STORES ARE CONFIGURED: the default is the one store they own, and otherwise
+// the refusal -- the same words a store they may not reach answers. A cluster
+// owner may know, and is defaulted as resolveStoreArg defaults.
+func (c *Connector) storeForCallerOrDefault(ctx context.Context, storeID, builtin, refused string, may func(Store) bool) (Store, error) {
 	if storeID != "" {
-		return c.storeForCaller(ctx, storeID, builtin, actRefusal, may)
+		return c.storeForCaller(ctx, storeID, builtin, refused, may)
 	}
-	store, err := c.resolveStoreArg(ctx, "")
+	if isClusterOwner(ctx) {
+		return c.resolveStoreArg(ctx, "")
+	}
+	stores, err := c.stores.Stores(ctx)
 	if err != nil {
 		return Store{}, err
 	}
-	if !may(store) {
-		return Store{}, fmt.Errorf("shopify: %s %s", builtin, actRefusal)
+	var owned []Store
+	for _, s := range stores {
+		if ownsStore(ctx, s) {
+			owned = append(owned, s)
+		}
 	}
-	return store, nil
+	if len(owned) != 1 || !may(owned[0]) {
+		return Store{}, fmt.Errorf("shopify: %s %s", builtin, refused)
+	}
+	return owned[0], nil
 }
 
 // resolveStoreArg resolves the store a capability call names, defaulting to
@@ -575,16 +619,46 @@ func (c *Connector) mirroredProduct(ctx context.Context, store Store, gid, handl
 		}
 		return rows[0], true, nil
 	}
-	res, err := c.engine.Execute(operatorContext(ctx), renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID}))
-	if err != nil {
-		return nil, false, err
-	}
-	for _, row := range memql.MaterializeRows(res) {
-		if mapString(row, "handle") == handle {
-			return row, true, nil
+	// BY HANDLE, TO THE END. The generated read has no handle argument and
+	// pages 100 rows newest first, so a product outside the newest hundred is
+	// on a later page: every page is read until one has it or there are no
+	// more. A cursor that does not move, or a mirror past the page bound, is
+	// said rather than answered as not mirrored.
+	opCtx := operatorContext(ctx)
+	call := renderCall(spec.ForStoreFn, map[string]any{"storeId": store.ID})
+	cursor := ""
+	seen := map[string]bool{}
+	for page := 0; page < liveRowPageCap; page++ {
+		pageCtx := opCtx
+		if cursor != "" {
+			pageCtx = memql.ContextWithCursor(opCtx, cursor)
 		}
+		res, err := c.engine.Execute(pageCtx, call)
+		if err != nil {
+			return nil, false, err
+		}
+		rows := memql.MaterializeRows(res)
+		for _, row := range rows {
+			if mapString(row, "handle") == handle {
+				return row, true, nil
+			}
+		}
+		next := ""
+		if res != nil {
+			if meta := res.GetMeta(); meta != nil {
+				next = strings.TrimSpace(meta.Cursor)
+			}
+		}
+		if next == "" || len(rows) == 0 {
+			return nil, false, nil
+		}
+		if next == cursor || seen[next] {
+			return nil, false, fmt.Errorf("shopify: read mirrored products by handle: the cursor did not advance")
+		}
+		seen[next] = true
+		cursor = next
 	}
-	return nil, false, nil
+	return nil, false, fmt.Errorf("shopify: read mirrored products by handle: the mirror holds more than %d pages", liveRowPageCap)
 }
 
 const shopifyQLQuery = `query ShopifyQL($query: String!) {
@@ -705,7 +779,8 @@ func (i *Integration) handleStorefrontProbe(ctx context.Context, args map[string
 	if c == nil {
 		return resultNode("shopify", map[string]any{"status": "unconfigured"})
 	}
-	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	store, err := c.storeForCallerOrDefault(ctx, argString(args, "storeId"), "storefrontProbe", readRefusal,
+		func(s Store) bool { return c.mayReadStore(ctx, s) })
 	if err != nil {
 		return nil, err
 	}

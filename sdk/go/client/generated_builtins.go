@@ -9128,7 +9128,7 @@ func ShopifyConnectionProviderStatusBuild(args ShopifyConnectionProviderStatusAr
 	return "builtin shopifyConnectionProviderStatus()"
 }
 
-// ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.
+// ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
 type ShopifyEnsureSubscriptionsArgs struct {
 }
 
@@ -9287,7 +9287,7 @@ func ShopifyRevokeWholesaleBuild(args ShopifyRevokeWholesaleArgs) string {
 	return b.String()
 }
 
-// ShopifyRunComplianceJobs -- Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.
+// ShopifyRunComplianceJobs -- Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs.
 type ShopifyRunComplianceJobsArgs struct {
 }
 
@@ -9375,7 +9375,7 @@ func ShopifyStoreAppSaveBuild(args ShopifyStoreAppSaveArgs) string {
 	return b.String()
 }
 
-// ShopifyStoreHealth -- Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.
+// ShopifyStoreHealth -- Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page.
 type ShopifyStoreHealthArgs struct {
 	StoreId string
 }
@@ -9435,6 +9435,34 @@ func ShopifyStoreRetryDeliveriesBuild(args ShopifyStoreRetryDeliveriesArgs) stri
 	b.WriteString("builtin shopifyStoreRetryDeliveries(")
 	b.WriteString("storeId: ")
 	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStoreSetRecording -- Pause recording, or resume it: move one store between live and paused, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. A store in any other status is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read.
+type ShopifyStoreSetRecordingArgs struct {
+	// The store.
+	StoreId string
+	// True resumes recording; false pauses it.
+	Recording bool
+}
+
+// ShopifyStoreSetRecording calls the engine builtin shopifyStoreSetRecording.
+func (qc *QueryClient) ShopifyStoreSetRecording(ctx context.Context, args ShopifyStoreSetRecordingArgs) (*Result, error) {
+	call := ShopifyStoreSetRecordingBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreSetRecording", call)
+}
+
+func ShopifyStoreSetRecordingBuild(args ShopifyStoreSetRecordingArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreSetRecording(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recording: ")
+	b.WriteString(fmt.Sprintf("%v", args.Recording))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9587,7 +9615,7 @@ func ShopifyWholesaleCatalogHeadroomBuild(args ShopifyWholesaleCatalogHeadroomAr
 	return b.String()
 }
 
-// Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not.
+// Shopifyql -- Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked.
 type ShopifyqlArgs struct {
 	StoreId string
 	Query   string
@@ -10412,7 +10440,7 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 // IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
 // The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.
 type StorefrontProbeArgs struct {
-	// The store to ask. The only configured store when omitted.
+	// The store to ask. When omitted: the only configured store for a cluster owner, and otherwise the one store the caller owns.
 	StoreId string
 }
 

@@ -157,9 +157,9 @@ describe("the store's word", () => {
     expect(within(bar()).queryByRole("button", { name: "Pause recording" })).toBeNull();
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Resume" }));
-    await waitFor(() => expect(connection.callsNamed("setStoreStatus")).toHaveLength(1));
-    expect(connection.callsNamed("setStoreStatus")[0]).toContain('status: "live"');
-    expect(connection.callsNamed("setStoreStatus")[0]).toContain(`storeId: "${ID}"`);
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreSetRecording")).toHaveLength(1));
+    expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain("recording: true");
+    expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain(`storeId: "${ID}"`);
   });
 
   it("offers Pause recording, and only that, to a store being recorded", async () => {
@@ -169,7 +169,7 @@ describe("the store's word", () => {
     expect(within(bar()).queryByRole("button", { name: "Resume" })).toBeNull();
     await readTheBar();
     await click(within(bar()).getByRole("button", { name: "Pause recording" }));
-    await waitFor(() => expect(connection.callsNamed("setStoreStatus")[0]).toContain('status: "paused"'));
+    await waitFor(() => expect(connection.callsNamed("shopifyStoreSetRecording")[0]).toContain("recording: false"));
   });
 
   it("says Status unknown when the verdict cannot be read, and offers to read it again", async () => {

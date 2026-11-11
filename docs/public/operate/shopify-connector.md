@@ -900,10 +900,16 @@ the page leads with (Production's, else Testing's): **"Pause recording"**
 while it is recording, starting or needs attention, and **"Resume"** while it
 is paused -- never both. A store that is not connected has neither; its act
 is the reconnect its notice offers. The page draws them for the store's owner
-and for a cluster owner. The write underneath is `setStoreStatus`, which sets
-the store's status to `paused`, or back to `live`; changing a store's status
-is a cluster owner's act (see
+and for a cluster owner, and both call `shopifyStoreSetRecording(storeId,
+recording)`. It refuses anybody else before anything but the store row is
+read, refuses a store that is not connected, and writes nothing when the store
+is already in the state asked for; otherwise it sets the store's status to
+`paused`, or back to `live`, through `setStoreStatus` written as the
+deployment. The store row's own gate is unchanged: `setStoreStatus` called
+directly is still a cluster owner's act (see
 [Who may read and change a store row](#step-3----attach-the-store-to-its-storefront)).
+The builtin changes the status only: the next verdict reads the store as
+resumed from that moment (`resumedAt`), and the next watch pass records it.
 
 While a store is paused:
 
@@ -990,7 +996,7 @@ a real one. It is the end-to-end proof, in the order things can break:
    panel ([Connect Shopify](shopify-connect.md)), and confirm the panel shows
    it connected with no missing scopes. Mark it a development store if that is what it is, and name the
    live store it stands in for.
-3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
+3. **Subscriptions.** As a cluster owner, run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.
    Cross-check that the subscriptions point at
    `https://api.<domain>/inbound/shopify-<storeId>`, and that the health shows

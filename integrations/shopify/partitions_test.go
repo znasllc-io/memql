@@ -231,7 +231,7 @@ func TestStoreHealthShowsEachStoreItsOwnDomains(t *testing.T) {
 	}
 	h.conn.engine = engine
 
-	nodes, err := NewIntegration(h.conn).handleStoreHealth(context.Background(), map[string]any{}, 0)
+	nodes, err := NewIntegration(h.conn).handleStoreHealth(clusterOwnerCall(), map[string]any{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

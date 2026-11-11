@@ -200,6 +200,12 @@ export interface FakeSeed {
   /** What `shopifyStoreRetryDeliveries` answers instead of `requeued`. */
   storeRetryDeliveriesReply?: Row;
   /**
+   * Fails every `shopifyStoreSetRecording` -- the Store page's Pause recording
+   * and Resume -- with this server message. Absent, it answers as the handler
+   * does: `{status, storeId}`, live for a resume and paused for a pause.
+   */
+  storeSetRecordingError?: string;
+  /**
    * What `shopifyStoreAlertWait` answers, and what `shopifyStoreAlertWaitSet`
    * changes. Absent is the unset wait read by somebody who may not set it.
    * A set is refused as the engine refuses it: anybody `maySet` is not true
@@ -988,6 +994,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
         if (seed.storeRetryDeliveriesReply !== undefined) return builtinReply("shopifyStoreRetryDeliveries", [seed.storeRetryDeliveriesReply]);
         return builtinReply("shopifyStoreRetryDeliveries", [{ status: "requeued", storeId: id, source: `shopify-${id}` } as unknown as Row]);
+      }
+      if (call.startsWith("builtin shopifyStoreSetRecording(")) {
+        if (seed.storeSetRecordingError !== undefined) throw new Error(seed.storeSetRecordingError);
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const recording = /recording: (true|false)/.exec(call)?.[1] === "true";
+        return builtinReply("shopifyStoreSetRecording", [{ status: recording ? "live" : "paused", storeId: id } as unknown as Row]);
       }
       if (call.startsWith("builtin shopifyStoreAlertWait(")) {
         return builtinReply("shopifyStoreAlertWait", [alertWait]);

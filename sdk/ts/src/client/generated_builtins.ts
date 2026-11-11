@@ -6998,7 +6998,7 @@ QueryClient.prototype.shopifyConnectionProviderStatus = function (this: QueryCli
   return this.executeNamed("shopifyConnectionProviderStatus", buildShopifyConnectionProviderStatus(args), opts);
 };
 
-/** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
+/** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
 export interface ShopifyEnsureSubscriptionsArgs {
 }
 
@@ -7110,7 +7110,7 @@ QueryClient.prototype.shopifyRevokeWholesale = function (this: QueryClient, args
   return this.executeNamed("shopifyRevokeWholesale", buildShopifyRevokeWholesale(args), opts);
 };
 
-/** Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. */
+/** Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. For the scheduled automation or a cluster owner; anybody else is refused before anything runs. */
 export interface ShopifyRunComplianceJobsArgs {
 }
 
@@ -7200,7 +7200,7 @@ QueryClient.prototype.shopifyStoreAppSave = function (this: QueryClient, args: S
   return this.executeNamed("shopifyStoreAppSave", buildShopifyStoreAppSave(args), opts);
 };
 
-/** Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page. */
+/** Report the status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters of each store the caller may read: every store for a cluster owner or a caller who may read stores, a store's owner their own, anybody else none. The read behind the portal's Stores page. */
 export interface ShopifyStoreHealthArgs {
   storeId?: string;
 }
@@ -7263,6 +7263,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyStoreRetryDeliveries = function (this: QueryClient, args: ShopifyStoreRetryDeliveriesArgs = {} as ShopifyStoreRetryDeliveriesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyStoreRetryDeliveries", buildShopifyStoreRetryDeliveries(args), opts);
+};
+
+/** Pause recording, or resume it: move one store between live and paused, through setStoreStatus written as the deployment, so a store's owner who is not a cluster owner may take the Store page's two acts without the store row's own gate being widened. A store in any other status is refused before anything is written, and asking for the state the store is in writes nothing. For the store's owner or a cluster owner; anyone else is refused before anything else is read. */
+export interface ShopifyStoreSetRecordingArgs {
+  /** The store. */
+  storeId: string;
+  /** True resumes recording; false pauses it. */
+  recording: boolean;
+}
+
+export function buildShopifyStoreSetRecording(args: ShopifyStoreSetRecordingArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("recording: " + renderMemQLValue(args.recording));
+  return "builtin shopifyStoreSetRecording(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreSetRecording(args: ShopifyStoreSetRecordingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreSetRecording = function (this: QueryClient, args: ShopifyStoreSetRecordingArgs = {} as ShopifyStoreSetRecordingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreSetRecording", buildShopifyStoreSetRecording(args), opts);
 };
 
 /** One store's verdict (U6): whether it is being recorded, and when it is not, why and the one act that fixes each reason. Computed in the engine from the store row, its sync state and its given-up deliveries, so a screen draws it without a copy of the rules.
@@ -7392,7 +7417,7 @@ QueryClient.prototype.shopifyWholesaleCatalogHeadroom = function (this: QueryCli
   return this.executeNamed("shopifyWholesaleCatalogHeadroom", buildShopifyWholesaleCatalogHeadroom(args), opts);
 };
 
-/** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. */
+/** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. For the store's owner or a cluster owner; anybody else is refused before Shopify is asked. */
 export interface ShopifyqlArgs {
   storeId?: string;
   query?: string;
@@ -8105,7 +8130,7 @@ IT CREATES A CART, and saying so is part of the contract rather than a footnote.
 IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
 The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from. */
 export interface StorefrontProbeArgs {
-  /** The store to ask. The only configured store when omitted. */
+  /** The store to ask. When omitted: the only configured store for a cluster owner, and otherwise the one store the caller owns. */
   storeId?: string;
 }
 

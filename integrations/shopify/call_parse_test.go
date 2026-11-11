@@ -175,6 +175,8 @@ func connectorCallSites() []struct {
 			"value": "", "description": "cleared", "active": false,
 		}},
 		{"updateSiteStoreBinding", map[string]any{"siteId": "s1", "storeId": "acme"}},
+		// verdict_capabilities.go -- pause and resume, written as the operator.
+		{"setStoreStatus", map[string]any{"storeId": "acme", "status": "paused"}},
 		// watch.go -- the store watch's two emails and the alert's outcome.
 		{"stageServerOutboundRequest", map[string]any{
 			"requestId": "shopify-store-alert-acme-20261111T101500Z", "medium": "email", "target": "owner@example.com",

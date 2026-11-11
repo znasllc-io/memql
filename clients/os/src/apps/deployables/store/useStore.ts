@@ -213,6 +213,12 @@ export interface StoreWrites {
   registerEvents: (storeId: string) => Promise<boolean>;
   /** Try again: the store's given-up deliveries, back in line. Busy as "retry". */
   retryDeliveries: (storeId: string) => Promise<boolean>;
+  /**
+   * Pause recording (false) or Resume (true), through the engine's
+   * `shopifyStoreSetRecording`, which asks who is calling and writes as the
+   * deployment. Busy as "recording".
+   */
+  setRecording: (storeId: string, recording: boolean) => Promise<boolean>;
 }
 
 function describe(err: unknown): string {
@@ -222,8 +228,9 @@ function describe(err: unknown): string {
 /**
  * The writes a storefront's Store panel owns.
  *
- * FOUR, AND THE SHORTNESS IS STILL THE POINT -- six now, with the verdict's
- * Register again and Try again, which are this store's alone too. Backfill, reconciliation and
+ * FOUR, AND THE SHORTNESS IS STILL THE POINT -- seven now, with the verdict's
+ * Register again and Try again and the Store page's pause and resume, which
+ * are this store's alone too. Backfill, reconciliation and
  * the per-domain pause switch belong to EVERY connector, so the data-origins
  * runtime owns them and Cluster > Data origins drives them. What is here is
  * what is Shopify's alone -- the store-wide pause and the subscription
@@ -334,6 +341,22 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
     [connection, run],
   );
 
+  // PAUSE AND RESUME ARE THE ENGINE'S BUILTIN, NOT THE ROW'S MUTATION. The
+  // store row's write is a cluster owner's, so a store's owner who is not one
+  // was offered both and refused by the row; the builtin asks who is calling
+  // and writes as the deployment. Done is the status it names; the verdict the
+  // write re-reads says the rest.
+  const setRecording = useCallback(
+    (storeId: string, recording: boolean) =>
+      run(
+        "recording",
+        async () =>
+          actDone("shopifyStoreSetRecording", recording ? "live" : "paused", await connection!.query.shopifyStoreSetRecording({ storeId, recording })),
+        "",
+      ),
+    [connection, run],
+  );
+
   return {
     busy,
     error,
@@ -345,6 +368,7 @@ export function useStoreWrites(onWritten: () => void): StoreWrites {
     bindSite,
     registerEvents,
     retryDeliveries,
+    setRecording,
   };
 }
 

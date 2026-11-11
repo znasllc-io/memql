@@ -359,6 +359,12 @@ var relistListsPartially = map[string]string{
 		"Shopify answers recent order data only, so an older checkout is absent without being gone",
 	"tenderTransaction": "order data read under read_orders; without read_all_orders, which is not requested, " +
 		"Shopify answers recent order data only, so an older transaction is absent without being gone",
+	"sellingPlanGroup": "sellingPlanGroups may answer only the groups the calling app created, " +
+		"so a group another app made is absent without being gone",
+	"marketingActivity": "marketingActivities may answer only the activities the calling app created, " +
+		"so an activity another app made is absent without being gone",
+	"marketingEvent": "marketingEvents may answer only the events the calling app created, " +
+		"so an event another app made is absent without being gone",
 }
 
 // relist walks a whole domain and tombstones what the origin no longer
