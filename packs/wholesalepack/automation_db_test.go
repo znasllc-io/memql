@@ -165,7 +165,7 @@ func TestAClientGrantAutomationProvisionsAnApprovedApplication(t *testing.T) {
 
 	openApplications(t, eng, ctx, storeLive, automationFakeAdapter)
 	appID := submit(t, eng, ctx, storeLive, "Automated Trading", "buyer@automated.example")
-	decide(t, eng, ctx, appID, wholesalepack.TransitionApprove, merchant, "approved by the merchant")
+	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved by the merchant")
 
 	var ent map[string]any
 	deadline := time.Now().Add(10 * time.Second)

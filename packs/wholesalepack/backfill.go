@@ -407,18 +407,28 @@ func (r *backfillRun) tieSettings(merchant context.Context, storeID, account, si
 		r.alreadyTied++
 		return nil
 	}
-	_, err = r.tieRow(merchant, settingsConcept, SettingsRowID(storeID), settings, account,
-		func() (map[string]any, error) { return r.p.settingsRow(r.sys, storeID) },
+	// THE ROW IT READ IS THE ROW IT TIES: at that row's own id, with that row's
+	// own storeId, never an id rebuilt from the application's store id.
+	rowID := bareID(trimmed(settings["id"]))
+	if rowID == "" {
+		rowID = SettingsRowID(storeID)
+	}
+	_, err = r.tieRow(merchant, settingsConcept, rowID, settings, account,
+		func() (map[string]any, error) { return r.p.settingsRowByID(r.sys, rowID) },
 		func(row map[string]any) (string, map[string]any) {
 			site := siteID
 			if named := trimmed(row["siteId"]); named != "" {
 				site = named
 			}
+			rowStore := trimmed(row["storeId"])
+			if rowStore == "" {
+				rowStore = storeID
+			}
 			open, _ := row["applicationsOpen"].(bool)
 			return "backfillSettingsRow", map[string]any{
-				"settingsId":         SettingsRowID(storeID),
+				"settingsId":         rowID,
 				"ownerUserId":        userRef(trimmed(row["ownerUserId"])),
-				"storeId":            storeID,
+				"storeId":            rowStore,
 				"applicationsOpen":   open,
 				"entitlementAdapter": trimmed(row["entitlementAdapter"]),
 				"introText":          asString(row["introText"]),

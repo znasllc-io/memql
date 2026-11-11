@@ -487,7 +487,7 @@ func TestABackfillSetsOffNoClientAutomation(t *testing.T) {
 	ctx := asSiteOwner(merchant)
 	openApplications(t, eng, ctx, store, automationFakeAdapter)
 	appID := submit(t, eng, ctx, store, "Quiet Trading", "buyer@quiet.example.com")
-	decide(t, eng, ctx, appID, wholesalepack.TransitionApprove, merchant, "approved")
+	decide(t, eng, asDecider(t, eng, merchant), appID, wholesalepack.TransitionApprove, merchant, "approved")
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && (len(fakeAdapter.callsFor(appID)) < 1 || contosoReviewVersions(t, appID) < 1) {

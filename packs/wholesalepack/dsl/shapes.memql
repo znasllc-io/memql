@@ -110,5 +110,6 @@ shape wholesaleSettings wholesaleSettingsFull {
   introText
   accountId
   siteId
+  staffEmail
   row.createdAt
 }

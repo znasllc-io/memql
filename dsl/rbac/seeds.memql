@@ -757,6 +757,22 @@ seed capability cap-owner-execute-app-deployables-reviews { roleSlug: "owner"  v
 @description("developer: the reviews part of the Deployables app -- a store's reviews, its moderation list, settings and links. The reviews pack refuses an operator's moderation decision; the store's own people decide.")
 seed capability cap-developer-execute-app-deployables-reviews { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/reviews"  predefined: true }
 
+// ---- app:deployables/wholesale -- a store's wholesale applications, in the Deployables app ----
+//
+// OWNER AND DEVELOPER, like the reviews part, and its own part because it is a
+// different CONSEQUENCE: approving an application gives a business trade prices
+// in the store. The cluster's operators hold it to host a store and change its
+// settings, and the wholesale pack still REFUSES their decisions -- the store
+// decides, through its own people, each granted the part in the store's
+// organization. Setting a store up is the operators' alone and needs no part.
+// The shared organization gate judges every act against the organization of
+// the application or the site it names
+// (component/memql/organization_action_capabilities.go).
+@description("owner: the wholesale part of the Deployables app -- a store's wholesale applications, their decisions, the buyers' access and the store's settings. The wholesale pack refuses an operator's decision; the store's own people decide.")
+seed capability cap-owner-execute-app-deployables-wholesale { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/wholesale"  predefined: true }
+@description("developer: the wholesale part of the Deployables app -- a store's wholesale applications, their decisions, the buyers' access and the store's settings. The wholesale pack refuses an operator's decision; the store's own people decide.")
+seed capability cap-developer-execute-app-deployables-wholesale { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/wholesale"  predefined: true }
+
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
 // OWNER AND DEVELOPER, like the parts above (Connect Shopify design, D3). It

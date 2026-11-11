@@ -293,6 +293,13 @@ var appPartGrants = map[string][]Role{
 	// decision -- the store decides, through its own people granted the part
 	// in its organization.
 	"app:deployables/reviews": {RoleOwner, RoleDeveloper},
+	// The wholesale part: see a store's wholesale applications and act on them
+	// in the Deployables app. Held by the cluster's operators so they can host
+	// a store and change its settings; the wholesale pack still refuses an
+	// operator's decision -- the store decides, through its own people granted
+	// the part in its organization -- and setting a store up is the operators'
+	// alone, not the part's.
+	"app:deployables/wholesale": {RoleOwner, RoleDeveloper},
 	// Attaching the Shopify store a storefront fronts (memql#5541). Owner
 	// alone until v1:shopify:store took a read floor at developer (Connect
 	// Shopify, D3): before it, a developer holding the part would have been

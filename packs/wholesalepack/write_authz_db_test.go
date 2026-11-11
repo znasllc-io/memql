@@ -186,14 +186,16 @@ func TestLiveE2E_TwoSubmissionsAtOneIdAtOnceLeaveOneRow(t *testing.T) {
 }
 
 // A CALLER WHO CANNOT READ AN APPLICATION CANNOT DECIDE IT. The decision's
-// write is no longer owner-checked, so the read under the caller is the check.
+// write is no longer owner-checked, so the read under the caller is the check
+// -- even for a person holding the wholesale part, whom the organization gate
+// admits to an application tied to no organization.
 func TestLiveE2E_ACallerWhoCannotReadAnApplicationCannotDecideIt(t *testing.T) {
 	eng := liveWholesaleEngine(t)
 	merchant, storeLive, _ := wholesaleScope()
 	openApplications(t, eng, asSiteOwner(merchant), storeLive, wholesalepack.AdapterCustomerTag)
 	appID := submit(t, eng, asSiteOwner(merchant), storeLive, "Not Yours", "buyer@notyours.example")
 
-	stranger := asSiteOwner(merchant + "-stranger")
+	stranger := asDecider(t, eng, merchant+"-stranger")
 	_, err := eng.Execute(stranger, `builtin wholesaleRecordDecision(applicationId: `+wsQuote(appID)+
 		`, decidedBy: "stranger", principalKind: "client", transition: "approve")`)
 	if err == nil || !strings.Contains(err.Error(), "not readable by this caller") {

@@ -33,10 +33,21 @@
 //     accountId refused unless it is the named site's, then the id
 //     established absent (read as the system) and the write fenced on "row
 //     absent", so no application is ever written over;
-//   - wholesaleRecordDecision: the application read under the CALLER, so a
-//     caller who cannot read it cannot decide it, then the legality fold;
-//   - wholesaleSetSettings: internal origin or a cluster operator only,
-//     and an existing row keeps its owner;
+//   - wholesaleRecordDecision: the wholesale part, judged by the organization
+//     gate against the APPLICATION's organization; then a signed-in person
+//     who is not one of the cluster's operators (the decider is always the
+//     caller); then the application read under the CALLER, so a caller who
+//     cannot read it cannot decide it; then the legality fold;
+//   - wholesaleRetryAccess: the part against the application's organization,
+//     the application read under the caller, then the decision log and the
+//     entitlement row decide whether there is access to retry;
+//   - wholesaleUpdateSettings: the part against the SITE's organization, the
+//     site checked to serve the store (siteForStore), and a store with no
+//     settings row refused -- it merges into the row the operators set up;
+//   - wholesaleSetSettings: internal origin or a cluster operator only, never
+//     the part. An existing row keeps its owner. A NEW ROW'S OWNER is the
+//     named site's owner (checked to serve the store), or else the one owner
+//     of the deployables bound to the store; two owners, or none, are refused;
 //   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
 //     origin only (the store's automation), then the decision log.
 //   - wholesaleBackfillAccounts: internal origin or a cluster operator
@@ -138,6 +149,33 @@ mutation wholesaleSettings setWholesaleSettingsRow {
   }
   insert {
     accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, accountId, siteId }
+    stamp {
+      id: args.settingsId
+    }
+  }
+}
+
+/// Write one store's settings WHOLE: every field, the empty and false ones
+/// included, at the derived id. wholesaleUpdateSettings merges a change into
+/// the row it read and writes the result here, so a field the caller did not
+/// name keeps the value it held. The owner, organization and site are the
+/// row's own, never the caller's.
+@serverOnly
+@actor
+mutation wholesaleSettings putWholesaleSettingsRow {
+  args {
+    settingsId          string!
+    ownerUserId         string!
+    storeId             string!
+    applicationsOpen    bool!
+    entitlementAdapter  string
+    introText           string   @maxLength(2000)
+    staffEmail          string   @maxLength(320)
+    accountId           string
+    siteId              string
+  }
+  insert {
+    accept { ownerUserId, storeId, applicationsOpen, entitlementAdapter, introText, staffEmail, accountId, siteId }
     stamp {
       id: args.settingsId
     }

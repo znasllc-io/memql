@@ -84,15 +84,15 @@ concept application {
 }
 
 @version("1.1.0")
-@description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is a Client principal -- a Provider operator is refused on the write path exactly as reviewspack's ClientMayModerate refuses one. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
+@description("An append-only decision on a wholesale application, in the manner of v1:reviews:moderationAction. A new row is a new decision; there is no in-place update and no undo-by-overwrite, so WHY an application was refused survives the next decision. decidedBy is the person on the store's side who called -- the cluster's own operators are refused on the write path exactly as the reviews pack refuses their moderation. The row belongs to the application's merchant and its organization, so the merchant and the store's people read every decision whoever made it. WHO may approve, in what order and against what threshold is deliberately NOT here: dsl/commerce already ships approvalChain for a client that wants one, and a client that does not must not have to edit this pack to say so.")
 @displayCard(primary="transition", secondary="applicationId", tertiary="decidedBy")
-@rowAuthz(owner="decidedBy", clusterOwner)
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept applicationDecision {
   applicationId string!  @description("v1:wholesale:application.id this decision applies to.")
   storeId       string!  @description("The store the decided application belongs to (design D9), copied from that application by the Go capability rather than supplied. A decision scoped to a store its subject is not on would be a decision against somebody else's trade desk.")
   transition    enum("approve", "reject", "revoke")!  @description("The act, not the resulting state. approve and reject are legal from submitted; revoke is legal only from approved. The Go capability folds the decision log to find the current state and refuses an illegal transition by name -- a cross-row read no mutation body can make.")
-  decidedBy     string!  @description("v1:identity:user.id of the Client principal that authored this decision. Provider operators are refused on the write path.")
-  ownerUserId   string   @description("The application's merchant, copied off it.")
+  decidedBy     string!  @description("v1:identity:user.id of the person who authored this decision: always the caller, stamped from the actor and never taken from an argument. The cluster's own operators are refused on the write path.")
+  ownerUserId   string   @description("The application's merchant, copied off it. The tier's owner arm: the merchant reads every decision on their applications, whoever decided. Empty on a row written before this version, until wholesaleBackfillAccounts names it.")
   accountId     string   @description("The application's organization, copied off it, never supplied. Empty for a decision on an untied application.")
   principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
   note          string   @description("Optional client-visible reason. THE ONE FREE-TEXT FIELD IN THE PACK, and it earns its place: append-only storage is only worth having if the reason a decision was made is still there after the next one.")
@@ -129,4 +129,5 @@ concept wholesaleSettings {
   introText          string   @description("Optional client-authored copy the storefront shows above its application form. Data, not source. It is the only presentation this pack carries, and it carries it for the same reason reviewSettings.criteriaText does: the alternative is a client editing the pack to change a sentence.")
   accountId          string   @description("The organization of the store's site, so its people read the store's settings. Empty on a row written before this version, until wholesaleBackfillAccounts ties it.")
   siteId             string   @description("The v1:platform:site these settings were made for, which the organization gate judges an act on them against. Empty on a row written before this version, until the backfill.")
+  staffEmail         string   @description("The address the store's own people are told at about their wholesale program. One address or none: at most 320 characters with exactly one @, or empty, which means the store names no address.")
 }

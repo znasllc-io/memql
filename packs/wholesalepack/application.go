@@ -39,13 +39,14 @@ import (
 //
 // dsl/commerce already ships approvalChain for a client that wants a
 // threshold and an order, and a client that does NOT must not have to edit
-// this pack to say so (design record, section 7). So this pack refuses a
-// Provider operator, refuses an illegal transition and refuses a decision
-// on an unreadable application -- and takes no view at all on which of the
-// merchant's own people may make one, in what order, or who is told
-// afterwards. A client attaches that from its own repository with
-// @trigger over v1:wholesale:applicationDecision. memql#5560 is the test
-// that two clients really can.
+// this pack to say so (design record, section 7). So this pack admits a
+// person holding the wholesale part in the application's organization (the
+// organization gate's), refuses the cluster's own operators, refuses an
+// illegal transition and refuses a decision on an unreadable application --
+// and takes no view at all on which of the store's own people may make one,
+// in what order, or who is told afterwards. A client attaches that from its
+// own repository with @trigger over v1:wholesale:applicationDecision.
+// memql#5560 is the test that two clients really can.
 //
 // # State is DERIVED, never stored
 //
@@ -74,8 +75,18 @@ const (
 	TransitionRevoke  = "revoke"
 )
 
-// PrincipalClient is the only expressible decidedBy kind.
+// PrincipalClient is the only principalKind a decision row carries. The
+// builtin's principalKind argument is ignored: the decider is the caller.
 const PrincipalClient = "client"
+
+// The stages an application is shown in. Both are of state submitted: an
+// application waits for its terms while the store requires them and they are
+// not accepted, and is ready to review otherwise. Every other state is its own
+// stage.
+const (
+	StageWaitingForTerms = "waitingForTerms"
+	StageReadyToReview   = "readyToReview"
+)
 
 // How an application arrived: a shopper's form post, or a person of the store
 // adding it. An application that names neither arrived on the storefront.
@@ -110,19 +121,37 @@ var stateAfter = map[string]string{
 	TransitionRevoke:  StateRevoked,
 }
 
-// ClientMayDecide reports whether principalKind may author a decision.
-//
-// Provider operators are inexpressible: only "client" is admitted, which is
-// the write-path half of what reviewspack's ClientMayModerate refuses. A
-// Provider operator running a cluster can READ every merchant's
-// applications -- that is what makes an operator surface possible at all --
-// and cannot decide one.
-func ClientMayDecide(principalKind string) error {
-	if strings.TrimSpace(principalKind) != PrincipalClient {
-		return fmt.Errorf("wholesale: decidedBy must be a Client principal; a Provider " +
-			"operator cannot decide a merchant's application")
+// StageOf is the stage an application in state is shown in. termsRequired is
+// whether the store requires its terms accepted, accepted whether this
+// application has accepted them.
+func StageOf(state string, termsRequired, accepted bool) string {
+	if state != StateSubmitted {
+		return state
 	}
-	return nil
+	if termsRequired && !accepted {
+		return StageWaitingForTerms
+	}
+	return StageReadyToReview
+}
+
+// deciderOf is the person a decision is recorded for: the calling user.
+//
+// A PERSON ON THE STORE'S SIDE DECIDES (X4). The cluster's own operators --
+// the people who host the store's applications and read every one of them --
+// never record a decision: the store holds the decision, and the people who run
+// the platform must not be able to make it for them. A call with no signed-in
+// person, or one acting as a synthetic actor, decides nothing either. The same
+// rule, in the same words, as packs/reviewspack/decide.go's moderatorOf.
+func deciderOf(ctx context.Context) (string, error) {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac.Synthetic || strings.TrimSpace(ac.UserId) == "" {
+		return "", errors.New("wholesale: a decision needs a signed-in person")
+	}
+	if auth.IsClusterOperator(ac.Role) {
+		return "", errors.New("wholesale: the cluster's operators host the store's applications and do not " +
+			"decide them; a person on the store's side decides")
+	}
+	return strings.TrimSpace(ac.UserId), nil
 }
 
 // ValidTransition reports whether transition is in the closed set.
@@ -180,16 +209,6 @@ func FoldState(decisionsNewestFirst []map[string]any) string {
 		}
 	}
 	return StateSubmitted
-}
-
-// SettingsRowID derives the one settings row id for a store.
-//
-// DERIVED RATHER THAN GENERATED, so the row is a singleton per store and a
-// second write is a new VERSION of one logical row rather than a second row
-// the read would have to choose between. reviewspack.SettingsRowID is the
-// same decision for the same reason.
-func SettingsRowID(storeID string) string {
-	return "wholesale-settings-" + slugOf(storeID)
 }
 
 // --------------------------------------------------------------------------
@@ -253,7 +272,8 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	}
 	owner := ""
 	if ac, ok := auth.AccessFromContext(ctx); ok {
-		owner = strings.TrimSpace(ac.UserId)
+		// CANONICAL, like every other owner this pack writes (userRef).
+		owner = userRef(ac.UserId)
 	}
 	if owner == "" {
 		return nil, fmt.Errorf("wholesale: an application is written as the site owner, and " +
@@ -368,8 +388,15 @@ func (p *Provider) existingSubmission(ctx context.Context, applicationID string)
 }
 
 // recordDecision appends one decision to an application's log.
+//
+// THE ORGANIZATION GATE ADMITTED THE CALLER before this runs: they hold the
+// wholesale part in the application's organization. Then, before anything is
+// read, the caller must be a person who is not one of the cluster's operators
+// (deciderOf). The principalKind and decidedBy arguments are declared for old
+// callers and ignored.
 func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := ClientMayDecide(asString(args["principalKind"])); err != nil {
+	decider, err := deciderOf(ctx)
+	if err != nil {
 		return nil, err
 	}
 	transition := trimmed(args["transition"])
@@ -377,9 +404,8 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 		return nil, err
 	}
 	applicationID := trimmed(args["applicationId"])
-	decidedBy := trimmed(args["decidedBy"])
-	if applicationID == "" || decidedBy == "" {
-		return nil, fmt.Errorf("wholesale: applicationId and decidedBy are required")
+	if applicationID == "" {
+		return nil, fmt.Errorf("wholesale: applicationId is required")
 	}
 	// THE STORE IS READ OFF THE APPLICATION, never supplied (design D9).
 	// The read runs under the CALLER'S own actor, so a caller who cannot
@@ -391,10 +417,6 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err != nil {
 		return nil, err
 	}
-	storeID := trimmed(app["storeId"])
-	if storeID == "" {
-		return nil, fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
-	}
 	// LEGALITY IS CHECKED AGAINST THE LOG, not against an argument. The
 	// caller does not say what state it believes the application is in,
 	// because a caller that could would be the one deciding.
@@ -405,32 +427,60 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err := LegalTransition(state, transition); err != nil {
 		return nil, err
 	}
-	// decidedBy IS NOT PASSED ON. The capability requires it -- a caller
-	// must say who is deciding, and refusing a Provider principal is what
-	// that argument is FOR -- but the row records the ACTOR, because a
-	// caller-supplied decider on an append-only log is a way to attribute
-	// somebody else's approval to them permanently. mutations.memql says
-	// the same thing from the other side.
-	// ownerUserId IS THE APPLICATION'S MERCHANT, copied off it like storeId,
-	// so the decision says whose trade desk it belongs to whoever decided.
-	// accountId IS THE APPLICATION'S ORGANIZATION, copied off it, so the
-	// people who read the application read what was decided about it.
-	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
+	// THE DECISION NAMES THE APPLICATION AS THE CALLER DID, which is the form
+	// the caller then reads its log by (decisionsForApplication compares the
+	// field as written).
+	subject := make(map[string]any, len(app))
+	for k, v := range app {
+		subject[k] = v
+	}
+	subject["id"] = applicationID
+	if err := p.appendDecision(ctx, subject, transition, asString(args["note"])); err != nil {
+		return nil, err
+	}
+	after := StateAfter(transition)
+	return confirm("wholesale:decision:recorded", map[string]any{
+		"applicationId": applicationID,
+		"storeId":       trimmed(app["storeId"]),
+		"transition":    transition,
+		"decidedBy":     decider,
+		"state":         after,
+		"stage":         StageOf(after, false, false),
+	})
+}
+
+// appendDecision is THE ONE WRITE PATH OF A DECISION: one new row in the
+// application's log, as ctx's actor, whom the row stamps as its decider.
+//
+// Its callers have established who ctx is and that the transition is legal.
+// What the row is ABOUT is copied off the application, never supplied:
+// storeId, so a decision is scoped to its subject's store (design D9);
+// ownerUserId, the application's merchant, so the merchant reads every
+// decision whoever made it; accountId, the application's organization, so the
+// people who read the application read what was decided about it.
+//
+// decidedBy IS NOT PASSED ON. The row records the ACTOR, because a
+// caller-supplied decider on an append-only log is a way to attribute
+// somebody else's approval to them permanently. mutations.memql says the same
+// thing from the other side.
+//
+// The row's applicationId is app's "id" exactly as app carries it.
+func (p *Provider) appendDecision(ctx context.Context, app map[string]any, transition, note string) error {
+	applicationID := trimmed(app["id"])
+	storeID := trimmed(app["storeId"])
+	if applicationID == "" {
+		return fmt.Errorf("wholesale: the application being decided carries no id")
+	}
+	if storeID == "" {
+		return fmt.Errorf("wholesale: application %q carries no storeId", applicationID)
+	}
+	return p.write(ctx, "appendApplicationDecision", map[string]any{
 		"applicationId": applicationID,
 		"ownerUserId":   userRef(trimmed(app["ownerUserId"])),
 		"accountId":     trimmed(app["accountId"]),
 		"storeId":       storeID,
 		"transition":    transition,
-		"note":          asString(args["note"]),
-	}); err != nil {
-		return nil, err
-	}
-	return confirm("wholesale:decision:recorded", map[string]any{
-		"applicationId": applicationID,
-		"storeId":       storeID,
-		"transition":    transition,
-		"claimedBy":     decidedBy,
-		"state":         StateAfter(transition),
+		"note":          note,
 	})
 }
 
@@ -447,7 +497,9 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 	payload, err := json.Marshal(map[string]any{
 		"applicationId": applicationID,
 		"state":         state,
-		"legalNext":     legalFrom[state],
+		// No store requires its terms yet, so a submitted application is ready.
+		"stage":     StageOf(state, false, false),
+		"legalNext": legalFrom[state],
 	})
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: marshal state: %w", err)
@@ -459,154 +511,6 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}, nil
-}
-
-// setWholesaleSettings writes one store's settings row.
-//
-// THE CLUSTER'S OPERATORS AND TRUSTED SERVER CODE ONLY, refused before
-// anything is read. The write runs at internal origin, which the row gate
-// does not owner-check, so the tier on the settings row protects nothing
-// here: without this check any caller who reaches the builtin could open,
-// close or re-route any store's program at its derived id.
-func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if err := mayConfigureStores(ctx); err != nil {
-		return nil, err
-	}
-	storeID := trimmed(args["storeId"])
-	if storeID == "" {
-		return nil, fmt.Errorf("wholesale: storeId is required; settings are per store")
-	}
-	open, ok := args["applicationsOpen"].(bool)
-	if !ok {
-		return nil, fmt.Errorf("wholesale: applicationsOpen must be a bool")
-	}
-	adapter := trimmed(args["entitlementAdapter"])
-	// AN UNKNOWN ADAPTER IS REFUSED AT SETTINGS TIME, not at approval time.
-	// A merchant who typed it wrong learns now, rather than when the first
-	// approved application fails to provision -- which is the moment they
-	// are least able to act on it.
-	if adapter != "" {
-		if _, err := AdapterByName(adapter); err != nil {
-			return nil, err
-		}
-	}
-	place, err := p.settingsOwner(ctx, storeID)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
-		"settingsId":         SettingsRowID(storeID),
-		"ownerUserId":        place.owner,
-		"storeId":            storeID,
-		"applicationsOpen":   open,
-		"entitlementAdapter": adapter,
-		"introText":          asString(args["introText"]),
-		// EVERY FIELD EXPLICIT: the row's organization and site are kept,
-		// or, for a new row, taken from the one site bound to the store.
-		"accountId": place.accountID,
-		"siteId":    place.siteID,
-	}); err != nil {
-		return nil, err
-	}
-	return confirm("wholesale:settings:written", map[string]any{
-		"storeId":            storeID,
-		"applicationsOpen":   open,
-		"entitlementAdapter": adapter,
-	})
-}
-
-// mayConfigureStores admits internal origin or a cluster operator.
-func mayConfigureStores(ctx context.Context) error {
-	if auth.OriginFromContext(ctx).IsInternal() {
-		return nil
-	}
-	if ac, ok := auth.AccessFromContext(ctx); ok && auth.IsClusterOperator(ac.Role) {
-		return nil
-	}
-	return fmt.Errorf("wholesale: a store's wholesale settings are set by the cluster's operators")
-}
-
-// storeLookupActor is the system actor that resolves whose a store's
-// settings are: it reads the existing row and the sites bound to the store.
-const storeLookupActor = "wholesale-store-lookup"
-
-// settingsPlace is whose a store's settings row is after a write: its owner,
-// and the organization and site it is tied to.
-type settingsPlace struct {
-	owner, accountID, siteID string
-}
-
-// settingsOwner is who owns a store's settings row after this write.
-//
-// AND WHAT IT IS TIED TO: an existing row keeps its organization and site
-// (empty on a row from before this version, until the backfill ties it); a
-// new row takes them from the store's site when exactly one is bound to it.
-//
-// THE EXISTING OWNER IS KEPT. Otherwise the operator who changed a setting
-// would become the row's owner, and the merchant's own reads -- the shopper
-// path's applicationsOpen among them -- would stop seeing it.
-//
-// A NEW ROW IS THE STORE'S MERCHANT'S: the one owner of the deployables whose
-// serving or preview binding names the store (sitesBoundToStore). Two owners
-// are refused rather than chosen between. With no bound site, trusted server
-// code acting as a real person names that person; an operator's call is
-// refused, because the operator is not the merchant and a row they owned
-// would be readable by nobody on the store's side.
-func (p *Provider) settingsOwner(ctx context.Context, storeID string) (settingsPlace, error) {
-	sys := auth.ContextWithSystemActor(ctx, storeLookupActor)
-	existing, err := p.settingsRow(sys, storeID)
-	if err != nil {
-		return settingsPlace{}, err
-	}
-	if existing != nil {
-		if owner := trimmed(existing["ownerUserId"]); owner != "" {
-			return settingsPlace{owner: userRef(owner), accountID: trimmed(existing["accountId"]),
-				siteID: trimmed(existing["siteId"])}, nil
-		}
-	}
-	sites, err := p.sitesForStore(sys, storeID)
-	if err != nil {
-		return settingsPlace{}, err
-	}
-	owners := map[string]bool{}
-	for _, site := range sites {
-		if owner := userRef(trimmed(site["ownerUserId"])); owner != "" {
-			owners[owner] = true
-		}
-	}
-	switch len(owners) {
-	case 1:
-		place := settingsPlace{}
-		for owner := range owners {
-			place.owner = owner
-		}
-		if len(sites) == 1 {
-			place.accountID = trimmed(sites[0]["accountId"])
-			place.siteID = bareID(trimmed(sites[0]["id"]))
-		}
-		return place, nil
-	case 0:
-		if auth.OriginFromContext(ctx).IsInternal() {
-			if ac, ok := auth.AccessFromContext(ctx); ok && !ac.Synthetic && strings.TrimSpace(ac.UserId) != "" {
-				return settingsPlace{owner: userRef(ac.UserId)}, nil
-			}
-		}
-		return settingsPlace{}, fmt.Errorf("wholesale: no deployable owned by a person is bound to store %q, so "+
-			"there is no merchant to own its wholesale settings; bind the store to its storefront first", storeID)
-	}
-	return settingsPlace{}, fmt.Errorf("wholesale: the deployables bound to store %q belong to more than one "+
-		"owner, so whose wholesale settings these are cannot be told from the store alone", storeID)
-}
-
-// sitesForStore reads every site whose serving or preview binding names the
-// store, in any of the forms a store id is stored in.
-func (p *Provider) sitesForStore(ctx context.Context, storeID string) ([]map[string]any, error) {
-	if p.reader == nil {
-		return nil, fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
-	}
-	bare := bareID(storeID)
-	return p.reader.RowsWithList(ctx, "sitesBoundToStore", map[string]string{},
-		"storeIds", []string{storeID, bare, "v1:shopify:store:" + bare})
 }
 
 // bareID is an id without its concept prefix: the part after the last colon.
@@ -642,33 +546,4 @@ func (p *Provider) stateOf(ctx context.Context, applicationID string) (string, e
 		return "", err
 	}
 	return FoldState(rows), nil
-}
-
-// applicationsOpen reads this store's gate.
-//
-// ABSENT IS CLOSED. A store whose merchant has never touched the setting
-// has not asked for applications, and a missing row must not open a public
-// write endpoint that collects somebody's business contact details.
-func (p *Provider) applicationsOpen(ctx context.Context, storeID string) (bool, error) {
-	settings, err := p.settingsRow(ctx, storeID)
-	if err != nil {
-		return false, err
-	}
-	if settings == nil {
-		return false, nil
-	}
-	open, _ := settings["applicationsOpen"].(bool)
-	return open, nil
-}
-
-// settingsRow reads one store's settings, or nil when there are none.
-func (p *Provider) settingsRow(ctx context.Context, storeID string) (map[string]any, error) {
-	rows, err := p.rowsFor(ctx, "wholesaleSettingsForStore", map[string]string{"storeId": storeID})
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0], nil
 }

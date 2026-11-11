@@ -132,6 +132,12 @@ func liveWholesaleEngine(t *testing.T, disabled ...string) *memql.MemQLEngine {
 	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine.Init: %v", err)
 	}
+	// GRANTS ARE READ ONLY THROUGH AN INSTALLED SOURCE, which an engine that
+	// never Starts must install itself -- or the wholesale part a store's
+	// person is granted would be held by nobody (packs/reviewspack's live
+	// harness does the same).
+	eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(nil); auth.SetMembershipSource(nil) })
 
 	// MATERIALIZE THE GO HALF, which app.materializePlugins does at boot and
 	// which reviewspack's own live harness never needed: that pack's live
@@ -179,6 +185,27 @@ func userRef(userID string) string {
 }
 
 func wsQuote(s string) string { return `"` + s + `"` }
+
+// asDecider is the store's own person deciding: the merchant, signed in as
+// themselves and granted the wholesale part the way a store's person is granted
+// it. A decision is gated by the part, and the cluster's operators decide none.
+func asDecider(t *testing.T, eng *memql.MemQLEngine, userID string) context.Context {
+	t.Helper()
+	grantWholesalePart(t, eng, userID)
+	return signedIn(userID)
+}
+
+// grantWholesalePart gives one person the wholesale part, at the id the grant
+// writer derives.
+func grantWholesalePart(t *testing.T, eng *memql.MemQLEngine, userID string) {
+	t.Helper()
+	call := `writeGrant(grantId: ` + quote(auth.GrantRowID(auth.SubjectKindUser, userRef(userID), "execute", "app:deployables/wholesale")) +
+		`, subjectKind: "user", subjectId: ` + quote(userRef(userID)) +
+		`, verb: "execute", resourceType: "app:deployables/wholesale", effect: "allow", grantedBy: "wholesale-e2e-seeder")`
+	if _, err := eng.Execute(seedCtx(), call); err != nil {
+		t.Fatalf("grant the wholesale part: %v", err)
+	}
+}
 
 func wsRows(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, q string) []map[string]any {
 	t.Helper()
@@ -296,7 +323,8 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	if state != wholesalepack.StateSubmitted {
 		t.Fatalf("a fresh application is %q, want %q", state, wholesalepack.StateSubmitted)
 	}
-	decide(t, eng, ctx, appID, wholesalepack.TransitionReject, merchant, "no trading history")
+	decider := asDecider(t, eng, merchant)
+	decide(t, eng, decider, appID, wholesalepack.TransitionReject, merchant, "no trading history")
 	if state = stateOf(t, eng, ctx, appID); state != wholesalepack.StateRejected {
 		t.Fatalf("after a reject the state is %q, want %q", state, wholesalepack.StateRejected)
 	}
@@ -305,7 +333,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	//
 	// Nothing leads out of rejected. A caller that could say what state it
 	// believed the application was in would be the one deciding.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRecordDecision(applicationId: `+
+	if _, err := eng.Execute(decider, `builtin wholesaleRecordDecision(applicationId: `+
 		wsQuote(appID)+`, decidedBy: `+wsQuote(merchant)+
 		`, principalKind: "client", transition: "approve")`); err == nil {
 		t.Fatal("approving a REJECTED application was allowed; nothing leads out of " +
@@ -313,12 +341,12 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 			"decision was made")
 	}
 
-	// A PROVIDER OPERATOR IS INEXPRESSIBLE on this path, through the real
-	// engine and not just the Go guard.
-	if _, err := eng.Execute(ctx, `builtin wholesaleRecordDecision(applicationId: `+
-		wsQuote(appID)+`, decidedBy: `+wsQuote(merchant)+
-		`, principalKind: "provider", transition: "approve")`); err == nil {
-		t.Fatal("a Provider principal recorded a decision")
+	// THE CLUSTER'S OPERATORS DECIDE NONE (X4), through the real engine and
+	// not just the Go guard -- whatever principalKind the call names.
+	if _, err := eng.Execute(asOperator("operator-"+merchant), `builtin wholesaleRecordDecision(applicationId: `+
+		wsQuote(appID)+`, principalKind: "client", transition: "reject")`); err == nil ||
+		!strings.Contains(err.Error(), "do not decide them") {
+		t.Fatalf("a cluster operator's decision was not refused as one: %v", err)
 	}
 
 	// The reason for the refusal is STILL READABLE, which is the property
@@ -367,7 +395,8 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 		t.Fatal("an application nobody approved was provisioned")
 	}
 
-	decide(t, eng, ctx, appID, wholesalepack.TransitionApprove, merchant, "vouched for")
+	decider := asDecider(t, eng, merchant)
+	decide(t, eng, decider, appID, wholesalepack.TransitionApprove, merchant, "vouched for")
 	if got := stateOf(t, eng, ctx, appID); got != wholesalepack.StateApproved {
 		t.Fatalf("state = %q, want %q", got, wholesalepack.StateApproved)
 	}
@@ -412,7 +441,7 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 		wsQuote(appID)+`)`); err == nil {
 		t.Fatal("an entitlement was revoked with no revoke decision behind it")
 	}
-	decide(t, eng, ctx, appID, wholesalepack.TransitionRevoke, merchant, "account closed")
+	decide(t, eng, decider, appID, wholesalepack.TransitionRevoke, merchant, "account closed")
 	if got := stateOf(t, eng, ctx, appID); got != wholesalepack.StateRevoked {
 		t.Fatalf("state = %q, want %q", got, wholesalepack.StateRevoked)
 	}

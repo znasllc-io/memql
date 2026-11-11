@@ -141,10 +141,23 @@ func trimmed(v any) string { return strings.TrimSpace(asString(v)) }
 //     accountId refused unless it is the named site's, then the id
 //     established absent (read as the system) and the write fenced on "row
 //     absent", so no application is ever written over;
-//   - wholesaleRecordDecision: the application read under the CALLER, so a
-//     caller who cannot read it cannot decide it, then the legality fold;
+//   - wholesaleRecordDecision: the wholesale part, judged by the organization
+//     gate against the APPLICATION's organization; then a signed-in person
+//     who is not one of the cluster's operators (deciderOf -- the decider is
+//     always the caller); then the application read under the CALLER, so a
+//     caller who cannot read it cannot decide it; then the legality fold;
+//   - wholesaleRetryAccess: the part against the application's organization,
+//     the application read under the caller, then the decision log and the
+//     entitlement row decide whether there is access to retry;
+//   - wholesaleUpdateSettings: the part against the SITE's organization, the
+//     site checked to serve the store (siteForStore), and a store with no
+//     settings row refused; it merges into the row the operators set up and
+//     keeps the row's owner, organization and site;
 //   - wholesaleSetSettings: internal origin or a cluster operator only,
-//     and an existing row keeps its owner;
+//     never the part. An existing row keeps its owner. A NEW ROW'S OWNER is
+//     the named site's owner (siteForStore: the site serves the store), or
+//     else the one owner of the deployables bound to the store; two owners,
+//     or none, are refused;
 //   - wholesaleProvisionEntitlement / wholesaleRevokeEntitlement: internal
 //     origin only (the store's automation), then the decision log.
 //   - wholesaleBackfillAccounts: internal origin or a cluster operator
@@ -257,12 +270,18 @@ const userIDPrefix = "v1:identity:user:"
 // engine keeps canonical. So every owner this pack copies from another row --
 // a site's, an application's, a settings row's -- is written in that form,
 // whatever form the source row used, or its merchant could not read it.
+//
+// ONLY A PERSON'S ID IS CANONICALIZED. A bare id is a person's, and gains the
+// prefix; a canonical one is kept; an id already prefixed for another kind --
+// `system:x`, or another concept's canonical id -- is left exactly as it is,
+// because turning it into a user id would name a person who does not exist.
 func userRef(id string) string {
-	bare := bareID(strings.TrimSpace(id))
-	if bare == "" {
-		return ""
+	id = strings.TrimSpace(id)
+	switch {
+	case id == "", strings.HasPrefix(id, userIDPrefix), strings.Contains(id, ":"):
+		return id
 	}
-	return userIDPrefix + bare
+	return userIDPrefix + id
 }
 
 // write runs one of the pack's own mutations through the seam.

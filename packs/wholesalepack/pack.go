@@ -89,15 +89,49 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name: "recordDecision",
-			Description: "Append one decision to an application's log. Client principal only; " +
+			Description: "Append one decision to an application's log. A person on the store's side " +
+				"decides -- the cluster's operators are refused -- and is recorded as the decider; " +
 				"refuses an illegal transition by name; copies storeId off the application.",
 			Handler: p.recordDecision,
 			ArgsSchema: map[string]string{
 				"applicationId": "string (required) - the application being decided",
 				"transition":    "string (required) - approve, reject or revoke",
-				"principalKind": "string (required) - must be client",
-				"decidedBy":     "string (required) - client user id",
+				"principalKind": "string (optional) - ignored",
+				"decidedBy":     "string (optional) - ignored; the decider is the caller",
 				"note":          "string (optional) - the reason, which survives the next decision",
+			},
+		},
+		{
+			Name: "retryAccess",
+			Description: "Try a buyer's access again: provision an approved application again, or " +
+				"revoke again a revoked one whose access is still on. Anything else is refused by name.",
+			Handler: p.retryAccess,
+			ArgsSchema: map[string]string{
+				"applicationId": "string (required) - the application whose access to retry",
+			},
+		},
+		{
+			Name: "storeSettings",
+			Description: "One store's wholesale settings, the routes this engine has, and whether the " +
+				"caller may set the store up or update it.",
+			Handler: p.storeSettings,
+			ArgsSchema: map[string]string{
+				"siteId":  "string (required) - the store's site; it must serve the store",
+				"storeId": "string (required) - the store whose settings to read",
+			},
+		},
+		{
+			Name: "updateSettings",
+			Description: "Merge a change into a store's wholesale settings once the operators have " +
+				"set it up; a store with none is refused.",
+			Handler: p.updateSettings,
+			ArgsSchema: map[string]string{
+				"siteId":             "string (required) - the store's site; it must serve the store",
+				"storeId":            "string (required) - the store whose settings change",
+				"applicationsOpen":   "bool (optional) - whether the shopper form accepts posts",
+				"entitlementAdapter": "string (optional) - the route; empty or none means none",
+				"introText":          "string (optional) - client-authored storefront copy",
+				"staffEmail":         "string (optional) - the store's people's address, or empty",
 			},
 		},
 		{
@@ -111,10 +145,11 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "setWholesaleSettings",
-			Description: "Write one store's wholesale settings. Data, not source -- no rebuild.",
+			Description: "Set a store up: write one store's wholesale settings. Cluster operators and internal origin only. Data, not source -- no rebuild.",
 			Handler:     p.setWholesaleSettings,
 			ArgsSchema: map[string]string{
 				"storeId":            "string (required) - the store these settings govern",
+				"siteId":             "string (optional) - the store's site; the row takes its organization and id",
 				"applicationsOpen":   "bool (required) - whether the shopper form accepts posts",
 				"entitlementAdapter": "string (optional) - the named adapter; refused when unknown",
 				"introText":          "string (optional) - client-authored storefront copy",

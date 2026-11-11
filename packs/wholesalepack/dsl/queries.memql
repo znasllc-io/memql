@@ -99,6 +99,17 @@ query wholesaleSettings wholesaleSettingsForStore {
   shape   wholesaleSettingsFull
 }
 
+@description("One store's wholesale settings by their derived id (SettingsRowID). The read that decides whose a settings row is before a write at that id: two store ids that slug alike share the id, so a read by the storeId field could miss the very row the write then replaces.")
+@unbounded("settings by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query wholesaleSettings wholesaleSettingsById {
+  args {
+    settingsId  string!
+  }
+  filter  row => row.id == args.settingsId
+  shape   wholesaleSettingsFull
+}
+
 @description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is readable by a cluster owner or a developer only (its read floor is developer), so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
 @unbounded("store by id -- bounded to a single row (id is the row's own primary key)")
 @actor

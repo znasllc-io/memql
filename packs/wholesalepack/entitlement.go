@@ -261,11 +261,58 @@ func (p *Provider) revokeEntitlement(ctx context.Context, args map[string]any, _
 	return p.applyEntitlement(ctx, args, true)
 }
 
+// retryAccess tries a buyer's access again after it did not land.
+//
+// FOR A PERSON OF THE STORE, NOT THE AUTOMATION. The organization gate admitted
+// the caller (the wholesale part, in the application's organization), and the
+// application is read under the caller's own actor, so a caller who cannot read
+// it retries nothing. What is retried is the decision log's, not the caller's:
+// an approved application is provisioned again, and a revoked one whose access
+// is still on (its entitlement row exists and is not revoked) is revoked again.
+// Anything else is refused by name before any route is called.
+//
+// It runs applyEntitlement under the same identities the automation's call
+// does -- read as the deployment, the route called and the row written as the
+// application's merchant -- and stamps no internal origin of its own.
+func (p *Provider) retryAccess(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	applicationID := trimmed(args["applicationId"])
+	if applicationID == "" {
+		return nil, fmt.Errorf("wholesale: applicationId is required")
+	}
+	rows, err := p.rowsFor(ctx, "applicationById", map[string]string{"applicationId": applicationID})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: application %q is not readable by this caller, so its access "+
+			"cannot be retried", applicationID)
+	}
+	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	state, err := p.stateOf(sys, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	switch state {
+	case StateApproved:
+		return p.applyEntitlement(ctx, args, false)
+	case StateRevoked:
+		ent, err := p.entitlementRow(sys, applicationID)
+		if err != nil {
+			return nil, err
+		}
+		if ent != nil && trimmed(ent["state"]) != EntitlementRevoked {
+			return p.applyEntitlement(ctx, args, true)
+		}
+	}
+	return nil, fmt.Errorf("wholesale: there is no access to retry for an application that is %s", state)
+}
+
 // applyEntitlement is both directions, because they differ in three lines
 // and sharing them keeps the state machine in one place.
 //
-// IT CHECKS NO ORIGIN, and that is deliberate: the two capabilities above
-// decide who may reach it. It reads the application, its decisions, the
+// IT CHECKS NO ORIGIN, and that is deliberate: the three capabilities above
+// decide who may reach it -- the automation's two at internal origin, and
+// wholesaleRetryAccess for a person of the store past the organization gate. It reads the application, its decisions, the
 // settings and the store's plan as the deployment, and calls the adapter and
 // writes the entitlement as the application's merchant.
 func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, revoking bool) ([]memorynodes.MemoryNode, error) {

@@ -8752,6 +8752,7 @@
         "introText",
         "ownerUserId",
         "siteId",
+        "staffEmail",
         "storeId"
       ],
       "required": [
