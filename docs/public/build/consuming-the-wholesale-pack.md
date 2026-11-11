@@ -101,6 +101,9 @@ automation grantOnApproval {
 }
 ```
 
+The automation runs as the system, but the entitlement it writes belongs to the
+application's owner, so the merchant lists and revokes it like any of their rows.
+
 A process with a review step, a threshold and somebody to tell looks different
 and needs nothing new from the pack — open your own review row on
 `v1:wholesale:application`, route it through

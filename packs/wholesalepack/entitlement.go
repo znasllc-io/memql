@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -344,7 +345,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		errText = applyErr.Error()
 	}
 
-	node, err := p.writeEntitlement(ctx, applicationID, storeID, grant, adapterName, entState, result, errText)
+	node, err := p.writeEntitlement(ctx, trimmed(app["ownerUserId"]), applicationID, storeID, grant, adapterName, entState, result, errText)
 	if err != nil {
 		return nil, err
 	}
@@ -412,8 +413,19 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 // persisted, and the mutation is also what stamps ownerUserId from the
 // actor. A row written any other way is owned by nobody and invisible to
 // the merchant who granted it.
-func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID string, g Grant,
+func (p *Provider) writeEntitlement(ctx context.Context, ownerUserID, applicationID, storeID string, g Grant,
 	adapterName, state string, result Outcome, errText string) ([]memorynodes.MemoryNode, error) {
+	// THE ROW IS THE MERCHANT'S, NOT THE AUTOMATION'S. An approval automation
+	// runs as a synthetic system actor, and the engine blanks an owner stamped
+	// from one (memql#4817), which left the row readable by the cluster owner
+	// only: the merchant who granted it could neither list nor revoke it.
+	// Write it as the application's owner, who is the one it belongs to,
+	// spelled exactly as the application stores it: this concept's owner is
+	// not canonicalized on write, so a bared id would be a different owner
+	// from the canonical one a signed-in merchant reads as.
+	if ac, _ := auth.AccessFromContext(ctx); ac != nil && ac.Synthetic && ownerUserID != "" {
+		ctx = auth.ContextWithUserActor(ctx, ownerUserID)
+	}
 	reference := result.Reference
 	if reference == "" {
 		// KEEP THE PRIOR REFERENCE ON A FAILURE. An adapter that errored
