@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/envregistry
 
 go 1.26.8
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require gopkg.in/yaml.v3 v3.0.1
 

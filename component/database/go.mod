@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/database
 
 go 1.26.8
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/lib/pq v1.12.3

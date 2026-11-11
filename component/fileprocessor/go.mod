@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/fileprocessor
 
 go 1.26.8
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728

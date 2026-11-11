@@ -15,7 +15,7 @@ module github.com/znasllc-io/memql/component/compose
 
 go 1.26.8
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/go-pdf/fpdf v0.9.0

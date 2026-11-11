@@ -10,7 +10,7 @@
 # published digest after its native build and verified publication. It carries what
 # this repository's CI steps reach for:
 #
-#   Go        1.27.3   go.work's `toolchain` line, which overrides every go.mod
+#   Go        1.27.4   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
 #   Tailwind  4.1.11   scripts/identity/build-css.sh's TAILWIND_VERSION
@@ -65,10 +65,10 @@
 # operator machine (CLAUDE.md, "Image builds"); the local build proves the
 # Dockerfile and goes nowhere.
 
-# Go: the official 1.27.3 distribution. Only /usr/local/go is taken; its
+# Go: the official 1.27.4 distribution. Only /usr/local/go is taken; its
 # binaries are statically linked, so they run on the bookworm base below
 # whatever Debian release the golang image itself is built on.
-FROM golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS go-dist
+FROM golang:1.27.4@sha256:08bcb99a38f85a265f9a93d1d3323e2440eec333380f3ea26ee0dec9264bb41c AS go-dist
 
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.

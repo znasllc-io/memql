@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/core
 
 go 1.26.8
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/google/uuid v1.6.0
