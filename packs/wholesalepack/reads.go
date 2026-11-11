@@ -131,17 +131,26 @@ type staged struct {
 	at           time.Time
 }
 
-// storeApplications reads the store's applications under ctx, at most
-// maxStorePages pages, and says whether it stopped short.
-func (p *Provider) storeApplications(ctx context.Context, storeID string) ([]map[string]any, bool, error) {
+// storeApplications reads the store's applications under ctx, newest first,
+// in every form a store id is held in, at most maxStorePages pages, and says
+// whether it stopped short -- in which case the OLDEST are left out. limited
+// false reads every page.
+func (p *Provider) storeApplications(ctx context.Context, storeID string, limited bool) ([]map[string]any, bool, error) {
 	var out []map[string]any
+	seen := map[string]bool{}
 	cursor := ""
-	for page := 0; page < maxStorePages; page++ {
-		rows, next, err := p.rowsPage(ctx, "applicationsForStore", map[string]string{"storeId": storeID}, cursor)
+	for page := 0; !limited || page < maxStorePages; page++ {
+		rows, next, err := p.rowsPageWithList(ctx, "applicationsForStore", map[string]string{"storeId": storeID},
+			"storeIds", storeIDForms(storeID), cursor)
 		if err != nil {
 			return nil, false, err
 		}
-		out = append(out, rows...)
+		for _, row := range rows {
+			if id := trimmed(row["id"]); id != "" && !seen[id] {
+				seen[id] = true
+				out = append(out, row)
+			}
+		}
 		if next == "" {
 			return out, false, nil
 		}
@@ -150,36 +159,42 @@ func (p *Provider) storeApplications(ctx context.Context, storeID string) ([]map
 	return out, true, nil
 }
 
+// storeIDForms is every form a store id is held in, each once.
+func storeIDForms(storeID string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, f := range storeForms(strings.TrimSpace(storeID)) {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // stagedApplications is the store's applications the caller reads, each staged
 // by its whole log, read as the deployment (X27).
 func (p *Provider) stagedApplications(ctx context.Context, storeID string) ([]staged, bool, error) {
-	apps, truncated, err := p.storeApplications(ctx, storeID)
+	apps, truncated, err := p.storeApplications(ctx, storeID, true)
 	if err != nil {
 		return nil, false, err
 	}
-	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	ids := make([]string, 0, len(apps))
+	for _, app := range apps {
+		ids = append(ids, trimmed(app["id"]))
+	}
+	logs, err := p.rowsForApplications(auth.ContextWithSystemActor(ctx, provisionActor), "decisionsForApplicationIds", ids)
+	if err != nil {
+		return nil, false, err
+	}
 	out := make([]staged, 0, len(apps))
-	for from := 0; from < len(apps); from += 50 {
-		to := from + 50
-		if to > len(apps) {
-			to = len(apps)
+	for _, app := range apps {
+		id := trimmed(app["id"])
+		if id == "" {
+			continue
 		}
-		ids := make([]string, 0, to-from)
-		for _, app := range apps[from:to] {
-			ids = append(ids, trimmed(app["id"]))
-		}
-		logs, err := p.rowsForApplications(sys, storeID, ids)
-		if err != nil {
-			return nil, false, err
-		}
-		for _, app := range apps[from:to] {
-			id := trimmed(app["id"])
-			if id == "" {
-				continue
-			}
-			state := FoldState(logs[bareID(id)])
-			out = append(out, staged{row: app, id: id, state: state, stage: StageOf(state, false, false), at: rowTime(app["createdAt"])})
-		}
+		state := FoldState(logs[bareID(id)])
+		out = append(out, staged{row: app, id: id, state: state, stage: StageOf(state, false, false), at: rowTime(app["createdAt"])})
 	}
 	return out, truncated, nil
 }
@@ -380,7 +395,8 @@ func (p *Provider) decisionLog(ctx context.Context, args map[string]any, _ int) 
 			next = encodeLogCursor(at)
 			break
 		}
-		decisions, following, err := p.rowsPage(ctx, "decisionsForStore", map[string]string{"storeId": storeID}, at.Page)
+		decisions, following, err := p.rowsPageWithList(ctx, "decisionsForStore", map[string]string{"storeId": storeID},
+			"storeIds", storeIDForms(storeID), at.Page)
 		if err != nil {
 			return nil, err
 		}
@@ -616,30 +632,33 @@ func searchMatches(search string, values ...any) bool {
 	return false
 }
 
-// limitOf is a page size: defaultReadLimit when absent, at most maxReadLimit.
+// limitOf is a page size: defaultReadLimit when absent or not positive, and
+// maxReadLimit for anything larger, however large.
 func limitOf(args map[string]any) int {
-	n := 0
+	var n float64
 	switch v := args["limit"].(type) {
 	case int:
-		n = v
+		n = float64(v)
 	case int64:
-		n = int(v)
+		n = float64(v)
 	case float64:
-		if v < math.MaxInt32 {
-			n = int(v)
-		}
+		n = v
 	case json.Number:
-		if i, err := v.Int64(); err == nil && i < math.MaxInt32 {
-			n = int(i)
+		f, err := v.Float64()
+		if err != nil {
+			return defaultReadLimit
 		}
-	}
-	if n <= 0 {
+		n = f
+	default:
 		return defaultReadLimit
 	}
-	if n > maxReadLimit {
+	switch {
+	case math.IsNaN(n) || n < 1:
+		return defaultReadLimit
+	case n > maxReadLimit:
 		return maxReadLimit
 	}
-	return n
+	return int(n)
 }
 
 // timeText is a row time as RFC 3339 text, or empty.

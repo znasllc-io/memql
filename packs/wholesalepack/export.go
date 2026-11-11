@@ -37,22 +37,28 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 	if err != nil {
 		return nil, err
 	}
-	// THE WHOLE STORE, page after page: an export that stopped at a thousand
-	// would be a record that silently lost its oldest applications.
-	var apps []map[string]any
-	cursor := ""
-	for {
-		rows, next, err := p.rowsPage(ctx, "applicationsForStore", map[string]string{"storeId": storeID}, cursor)
-		if err != nil {
-			return nil, err
-		}
-		apps = append(apps, rows...)
-		if next == "" {
-			break
-		}
-		cursor = next
+	// THE WHOLE STORE, page after page, in every form its id is held in: an
+	// export that stopped at a thousand would be a record that silently lost
+	// its oldest applications.
+	apps, _, err := p.storeApplications(ctx, storeID, false)
+	if err != nil {
+		return nil, err
 	}
+	ids := make([]string, 0, len(apps))
+	for _, app := range apps {
+		ids = append(ids, trimmed(app["id"]))
+	}
+	// Each application's whole log and entitlement, as the deployment, in
+	// batches read to their end.
 	sys := auth.ContextWithSystemActor(ctx, provisionActor)
+	logs, err := p.rowsForApplications(sys, "decisionsForApplicationIds", ids)
+	if err != nil {
+		return nil, err
+	}
+	ents, err := p.rowsForApplications(sys, "entitlementsForApplicationIds", ids)
+	if err != nil {
+		return nil, err
+	}
 	applications := make([]map[string]any, 0, len(apps))
 	decisions := []map[string]any{}
 	entitlements := []map[string]any{}
@@ -61,10 +67,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		if id == "" {
 			continue
 		}
-		log, err := p.rowsForApplication(sys, "decisionsForApplication", id)
-		if err != nil {
-			return nil, err
-		}
+		log := logs[bareID(id)]
 		details, err := p.details(ctx, app)
 		if err != nil {
 			return nil, err
@@ -74,18 +77,20 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		out["state"] = FoldState(log)
 		out["stage"] = StageOf(FoldState(log), false, false)
 		applications = append(applications, out)
+		// ONE FORM OF THE APPLICATION'S ID throughout the file: the row's own,
+		// whichever form an older decision or entitlement was written under.
 		for _, d := range log {
-			decisions = append(decisions, withoutTokenHash(d))
+			row := withoutTokenHash(d)
+			row["applicationId"] = id
+			decisions = append(decisions, row)
 		}
-		ent, err := p.entitlementRow(sys, id)
-		if err != nil {
-			return nil, err
-		}
-		if ent != nil {
-			entitlements = append(entitlements, withoutTokenHash(ent))
+		if versions := ents[bareID(id)]; len(versions) > 0 {
+			row := withoutTokenHash(versions[0])
+			row["applicationId"] = id
+			entitlements = append(entitlements, row)
 		}
 	}
-	settings, err := p.settingsRowAt(sys, storeID)
+	settings, err := p.storeSettingsRow(sys, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +118,18 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"fileName": "wholesale-" + slugOf(storeID) + "-" + now.Format("20060102") + ".json",
 		"json":     string(doc),
 	})
+}
+
+// storeSettingsRow is the store's settings row at the id a write for any form
+// of its id goes to, the given form first; nil when there is none.
+func (p *Provider) storeSettingsRow(ctx context.Context, storeID string) (map[string]any, error) {
+	for _, form := range storeIDForms(storeID) {
+		row, err := p.settingsRowAt(ctx, form)
+		if err != nil || row != nil {
+			return row, err
+		}
+	}
+	return nil, nil
 }
 
 // withoutTokenHash is a copy of row with every token hash removed, at any depth.

@@ -41,6 +41,9 @@ type rowReader interface {
 	// RowsPage is one page of a paginated query from cursor ("" is the first
 	// page), with the cursor of the next ("" when this page was the last).
 	RowsPage(ctx context.Context, query string, args map[string]string, cursor string) (rows []map[string]any, next string, err error)
+	// RowsPageWithList is RowsPage plus ONE list-valued argument.
+	RowsPageWithList(ctx context.Context, query string, args map[string]string, listName string, list []string,
+		cursor string) (rows []map[string]any, next string, err error)
 }
 
 // engineRowReader is the production implementation.
@@ -58,7 +61,12 @@ func (e *engineRowReader) RowsWithList(ctx context.Context, query string, args m
 }
 
 func (e *engineRowReader) RowsPage(ctx context.Context, query string, args map[string]string, cursor string) ([]map[string]any, string, error) {
-	result, err := e.execute(memql.ContextWithCursor(ctx, cursor), query, args, "", nil)
+	return e.RowsPageWithList(ctx, query, args, "", nil, cursor)
+}
+
+func (e *engineRowReader) RowsPageWithList(ctx context.Context, query string, args map[string]string,
+	listName string, list []string, cursor string) ([]map[string]any, string, error) {
+	result, err := e.execute(memql.ContextWithCursor(ctx, cursor), query, args, listName, list)
 	if err != nil {
 		return nil, "", err
 	}
@@ -359,44 +367,76 @@ func (p *Provider) rowsForApplication(ctx context.Context, query, applicationID 
 	return out, nil
 }
 
-// rowsForApplications is rowsForApplication for many applications of one store
-// at once: one read of decisionsForApplications naming BOTH forms of every id,
-// its rows grouped by the application's bare id, without repeats, each group
-// newest first. The batch form, for a read over a store's applications, where
-// two reads per application would be two thousand reads for one list.
-func (p *Provider) rowsForApplications(ctx context.Context, storeID string, applicationIDs []string) (map[string][]map[string]any, error) {
+// rowsForApplications is rowsForApplication for many applications at once:
+// query (decisionsForApplicationIds or entitlementsForApplicationIds) asked
+// with BOTH forms of every id and PAGED TO ITS END -- a fold over a short
+// answer would show an application as submitted after somebody decided it --
+// its rows without repeats, grouped by the application's bare id, each group
+// newest first. Fifty applications per read, so a store's list is a read per
+// fifty applications rather than two per application.
+func (p *Provider) rowsForApplications(ctx context.Context, query string, applicationIDs []string) (map[string][]map[string]any, error) {
 	out := map[string][]map[string]any{}
-	if len(applicationIDs) == 0 {
-		return out, nil
-	}
-	if p.reader == nil {
-		return nil, fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
-	}
-	var forms []string
-	for _, id := range applicationIDs {
-		forms = append(forms, uniqueForms(bareID(strings.TrimSpace(id)), applicationRef(id))...)
-	}
-	rows, err := p.reader.RowsWithList(ctx, "decisionsForApplications", map[string]string{"storeId": storeID},
-		"applicationIds", forms)
-	if err != nil {
-		return nil, err
-	}
 	seen := map[string]bool{}
-	for _, row := range rows {
-		if id := trimmed(row["id"]); id != "" {
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
+	for from := 0; from < len(applicationIDs); from += batchSize {
+		to := from + batchSize
+		if to > len(applicationIDs) {
+			to = len(applicationIDs)
 		}
-		key := bareID(trimmed(row["applicationId"]))
-		out[key] = append(out[key], row)
+		var forms []string
+		for _, id := range applicationIDs[from:to] {
+			forms = append(forms, uniqueForms(bareID(strings.TrimSpace(id)), applicationRef(id))...)
+		}
+		err := p.eachPage(ctx, query, map[string]string{}, "applicationIds", forms, func(row map[string]any) {
+			if id := trimmed(row["id"]); id != "" {
+				if seen[id] {
+					return
+				}
+				seen[id] = true
+			}
+			key := bareID(trimmed(row["applicationId"]))
+			out[key] = append(out[key], row)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	for key := range out {
 		group := out[key]
 		sort.SliceStable(group, func(i, j int) bool { return rowTime(group[i]["createdAt"]).After(rowTime(group[j]["createdAt"])) })
 	}
 	return out, nil
+}
+
+// batchSize is how many applications one batch read names.
+const batchSize = 50
+
+// eachPage reads every page of a paginated query with one list argument, in
+// order, handing each row to visit.
+func (p *Provider) eachPage(ctx context.Context, query string, args map[string]string, listName string, list []string,
+	visit func(map[string]any)) error {
+	cursor := ""
+	for {
+		rows, next, err := p.rowsPageWithList(ctx, query, args, listName, list, cursor)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			visit(row)
+		}
+		if next == "" {
+			return nil
+		}
+		cursor = next
+	}
+}
+
+// rowsPageWithList runs one page of a paginated query with one list argument.
+func (p *Provider) rowsPageWithList(ctx context.Context, query string, args map[string]string, listName string,
+	list []string, cursor string) ([]map[string]any, string, error) {
+	if p.reader == nil {
+		return nil, "", fmt.Errorf("wholesale: the pack has no reader; this capability cannot run")
+	}
+	return p.reader.RowsPageWithList(ctx, query, args, listName, list, cursor)
 }
 
 // uniqueForms drops an empty or repeated form.

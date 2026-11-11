@@ -537,6 +537,11 @@ func (r refusingReader) RowsWithList(_ context.Context, query string, _ map[stri
 	return nil, nil
 }
 
+func (r refusingReader) RowsPageWithList(_ context.Context, query string, _ map[string]string, _ string, _ []string, _ string) ([]map[string]any, string, error) {
+	r.t.Fatalf("a call refused for its origin still read %s", query)
+	return nil, "", nil
+}
+
 func (r refusingReader) RowsPage(_ context.Context, query string, _ map[string]string, _ string) ([]map[string]any, string, error) {
 	r.t.Fatalf("a call refused for its origin still read %s", query)
 	return nil, "", nil

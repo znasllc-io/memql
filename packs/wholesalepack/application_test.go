@@ -87,6 +87,11 @@ func (f *fixtureReader) RowsWithList(ctx context.Context, query string, _ map[st
 	return nil, nil
 }
 
+func (f *fixtureReader) RowsPageWithList(ctx context.Context, query string, args map[string]string, _ string, _ []string, _ string) ([]map[string]any, string, error) {
+	rows, err := f.Rows(ctx, query, args)
+	return rows, "", err
+}
+
 func (f *fixtureReader) RowsPage(ctx context.Context, query string, args map[string]string, _ string) ([]map[string]any, string, error) {
 	rows, err := f.Rows(ctx, query, args)
 	return rows, "", err

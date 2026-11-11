@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,42 +106,94 @@ func (f *storeFake) byApplication(ctx context.Context, rows []map[string]any, ap
 	return out
 }
 
+// engineCap is the most rows the engine answers a sorted query that declares
+// no page size, saying nothing about the rest.
+const engineCap = 500
+
+func newestFirst(rows []map[string]any) []map[string]any {
+	sort.SliceStable(rows, func(i, j int) bool { return rowTime(rows[i]["createdAt"]).After(rowTime(rows[j]["createdAt"])) })
+	return rows
+}
+
 func (f *storeFake) RowsWithList(ctx context.Context, query string, args map[string]string,
 	_ string, list []string) ([]map[string]any, error) {
-	if query != "decisionsForApplications" || args["storeId"] != readsStore {
+	if query != "decisionsForApplications" {
 		return nil, nil
 	}
 	var out []map[string]any
 	for _, id := range list {
-		out = append(out, f.byApplication(ctx, f.decisions, id)...)
+		for _, d := range f.byApplication(ctx, f.decisions, id) {
+			if trimmed(d["storeId"]) == args["storeId"] {
+				out = append(out, d)
+			}
+		}
+	}
+	out = newestFirst(out)
+	if len(out) > engineCap {
+		out = out[:engineCap]
 	}
 	return out, nil
 }
 
+// inStore is whether a row's storeId is the one asked or one of the forms.
+func inStore(row map[string]any, storeID string, forms []string) bool {
+	held := trimmed(row["storeId"])
+	if held == storeID {
+		return true
+	}
+	for _, f := range forms {
+		if held == f {
+			return true
+		}
+	}
+	return false
+}
+
 // RowsPage pages fifty at a time; the cursor is the offset.
 func (f *storeFake) RowsPage(ctx context.Context, query string, args map[string]string, cursor string) ([]map[string]any, string, error) {
+	return f.RowsPageWithList(ctx, query, args, "", nil, cursor)
+}
+
+func (f *storeFake) RowsPageWithList(ctx context.Context, query string, args map[string]string, _ string, list []string,
+	cursor string) ([]map[string]any, string, error) {
 	f.pages[query]++
+	size := 50
 	var all []map[string]any
 	switch query {
 	case "applicationsForStore":
-		if args["storeId"] == readsStore {
-			all = f.apps
+		rows := f.apps
+		if isSystem(ctx) {
+			rows = append(append([]map[string]any{}, f.apps...), f.hidden...)
 		}
-	case "decisionsForStore":
-		if args["storeId"] == readsStore {
-			for _, d := range f.decisions {
-				if visible(ctx, d) {
-					all = append(all, d)
-				}
+		for _, app := range rows {
+			if inStore(app, args["storeId"], list) {
+				all = append(all, app)
 			}
-			sort.SliceStable(all, func(i, j int) bool { return rowTime(all[i]["createdAt"]).After(rowTime(all[j]["createdAt"])) })
 		}
+		all = newestFirst(all)
+	case "decisionsForStore":
+		for _, d := range f.decisions {
+			if visible(ctx, d) && inStore(d, args["storeId"], list) {
+				all = append(all, d)
+			}
+		}
+		all = newestFirst(all)
+	case "decisionsForApplicationIds", "entitlementsForApplicationIds":
+		size = 200
+		rows := f.decisions
+		if query == "entitlementsForApplicationIds" {
+			rows = f.ents
+		}
+		for _, id := range list {
+			all = append(all, f.byApplication(ctx, rows, id)...)
+		}
+		all = newestFirst(all)
 	}
 	from, _ := strconv.Atoi(cursor)
 	if from > len(all) {
 		from = len(all)
 	}
-	to := from + 50
+	to := from + size
 	if to > len(all) {
 		to = len(all)
 	}
@@ -337,6 +390,11 @@ func TestTheListReadsPastTheFirstPageAndStopsAtAThousand(t *testing.T) {
 		t.Fatalf("read %d pages, want 20", f.pages["applicationsForStore"])
 	}
 	first := rowsOf(t, got)
+	// THE NEWEST THOUSAND ARE KEPT: the twenty oldest (0 to 19) are left out,
+	// so the queue, oldest first, opens on the twenty-first.
+	if len(first) == 0 || first[0]["companyName"] != "Company 20" {
+		t.Fatalf("the queue opens on %v, want Company 20 (the oldest twenty are past the cap)", companies(first))
+	}
 	if len(first) != 10 || asString(got["next"]) == "" {
 		t.Fatalf("the first page has %d rows and next %q", len(first), got["next"])
 	}
@@ -546,5 +604,125 @@ func TestAStoreWideReadRefusesASiteThatDoesNotServeTheStore(t *testing.T) {
 	}
 	if f.pages["applicationsForStore"] != 0 || f.pages["decisionsForStore"] != 0 {
 		t.Fatalf("a refused read still read the store: %v", f.pages)
+	}
+}
+
+// hide adds an application of the SAME store that only the system reads, with
+// a decision and an entitlement of its own.
+func (f *storeFake) hide(id, company string) {
+	f.hidden = append(f.hidden, map[string]any{"id": applicationConcept + ":" + id, "storeId": readsStore, "siteId": readsSite,
+		"ownerUserId": "v1:identity:user:someone-else", "companyName": company, "applicantName": "H", "applicantEmail": "h@hidden.example.com",
+		"createdAt": readsClock.Add(time.Hour)})
+	f.decide(applicationRef(id), TransitionApprove, 70, true)
+	f.ents = append(f.ents, map[string]any{"applicationId": applicationRef(id), "state": EntitlementGranted,
+		"ownerUserId": "v1:identity:user:someone-else", "createdAt": readsClock.Add(71 * time.Minute)})
+}
+
+// AN APPLICATION OF THE STORE THE CALLER CANNOT READ IS IN NONE OF THE READS:
+// no row, no count, no buyer, no line in the log, nothing in the export.
+func TestAHiddenApplicationOfTheStoreIsLeftOutOfEveryRead(t *testing.T) {
+	f := newStoreFake()
+	seen := f.app(1, "Seen Trading", "A", "a@example.com", 1)
+	f.decide(applicationRef(seen), TransitionApprove, 5, true)
+	f.hide("app-hidden", "Hidden Trading")
+	store := map[string]any{"siteId": readsSite, "storeId": readsStore}
+	list := listOf(t, f.provider(), map[string]any{"stage": "all"})
+	if rows := rowsOf(t, list); len(rows) != 1 || rows[0]["companyName"] != "Seen Trading" {
+		t.Errorf("the list shows %v", companies(rows))
+	}
+	counts, _ := list["counts"].(map[string]any)
+	for stage, n := range counts {
+		if want := map[bool]float64{true: 1, false: 0}[stage == StateApproved]; n != want {
+			t.Errorf("counts[%s] = %v, want %v (counts %v)", stage, n, want, counts)
+		}
+	}
+	if rows := rowsOf(t, decodedBy(t)(f.provider().buyers(staffReads(), store, 0))); len(rows) != 1 || rows[0]["companyName"] != "Seen Trading" {
+		t.Errorf("the buyers are %v", companies(rows))
+	}
+	if rows := rowsOf(t, decodedBy(t)(f.provider().decisionLog(staffReads(), store, 0))); len(rows) != 1 || rows[0]["companyName"] != "Seen Trading" {
+		t.Errorf("the decision log is %+v", rows)
+	}
+	doc := asString(decodedBy(t)(f.provider().exportStore(staffReads(), store, 0))["json"])
+	if strings.Contains(doc, "app-hidden") || strings.Contains(doc, "Hidden Trading") || strings.Contains(doc, "someone-else") {
+		t.Errorf("the export carries the hidden application: %s", doc)
+	}
+}
+
+// THE EXPORT NAMES EACH APPLICATION IN ONE FORM: an old decision and an old
+// entitlement stored under the bare id are exported under the row's own id.
+func TestTheExportNamesEachApplicationInOneForm(t *testing.T) {
+	f := newStoreFake()
+	id := f.app(1, "Old Rows Trading", "A", "a@example.com", 1)
+	f.decide(bareID(id), TransitionApprove, 5, false)
+	f.ents = append(f.ents, map[string]any{"applicationId": bareID(id), "state": EntitlementGranted, "createdAt": readsClock.Add(6 * time.Minute)})
+	doc := asString(decodedBy(t)(f.provider().exportStore(staffReads(), map[string]any{"siteId": readsSite, "storeId": readsStore}, 0))["json"])
+	var parsed struct {
+		Applications []map[string]any `json:"applications"`
+		Decisions    []map[string]any `json:"decisions"`
+		Entitlements []map[string]any `json:"entitlements"`
+	}
+	if err := json.Unmarshal([]byte(doc), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	want := applicationConcept + ":" + id
+	if len(parsed.Applications) != 1 || parsed.Applications[0]["id"] != want || len(parsed.Decisions) != 1 || len(parsed.Entitlements) != 1 {
+		t.Fatalf("the export is %s", doc)
+	}
+	if parsed.Decisions[0]["applicationId"] != want || parsed.Entitlements[0]["applicationId"] != want {
+		t.Fatalf("the decision names %v and the entitlement %v, want both %s", parsed.Decisions[0]["applicationId"],
+			parsed.Entitlements[0]["applicationId"], want)
+	}
+}
+
+// A STORE IS READ UNDER EITHER FORM OF ITS ID (ruling 31): an application held
+// under each form is listed, counted and exported whichever form is asked.
+func TestAStoreIsReadUnderEitherFormOfItsId(t *testing.T) {
+	f := newStoreFake()
+	f.app(1, "Bare Store Trading", "A", "a@example.com", 1)
+	f.app(2, "Canonical Store Trading", "B", "b@example.com", 2)
+	for _, app := range f.apps {
+		if app["companyName"] == "Canonical Store Trading" {
+			app["storeId"] = "v1:shopify:store:" + readsStore
+		}
+	}
+	for _, asked := range []string{readsStore, "v1:shopify:store:" + readsStore} {
+		store := map[string]any{"siteId": readsSite, "storeId": asked}
+		list := decodedBy(t)(f.provider().list(staffReads(), store, 0))
+		counts, _ := list["counts"].(map[string]any)
+		if rows := rowsOf(t, list); len(rows) != 2 || counts[StageReadyToReview] != float64(2) {
+			t.Errorf("asked as %q the list shows %v, counts %v", asked, companies(rows), counts)
+		}
+		doc := asString(decodedBy(t)(f.provider().exportStore(staffReads(), store, 0))["json"])
+		if !strings.Contains(doc, "Bare Store Trading") || !strings.Contains(doc, "Canonical Store Trading") {
+			t.Errorf("asked as %q the export lacks one: %s", asked, doc)
+		}
+	}
+}
+
+// THE FOLD READS A BATCH TO ITS END (ruling 32): fifty applications with more
+// decisions than the engine answers unpaged, one of them decided only by the
+// OLDEST, still folds that one as decided.
+func TestTheFoldReadsABatchToItsEnd(t *testing.T) {
+	f := newStoreFake()
+	oldest := f.app(0, "Oldest Decision", "A", "a@example.com", 0)
+	f.decide(applicationRef(oldest), TransitionApprove, 1, true)
+	for i := 1; i < 50; i++ {
+		id := f.app(i, "Busy "+strconv.Itoa(i), "B", "b@example.com", i)
+		for k := 0; k < 12; k++ {
+			f.decide(applicationRef(id), TransitionApprove, 100+i*20+k, true)
+		}
+	}
+	got := listOf(t, f.provider(), map[string]any{"stage": "all", "search": "oldest decision"})
+	if rows := rowsOf(t, got); len(rows) != 1 || rows[0]["stage"] != StateApproved {
+		t.Fatalf("the application decided only by the oldest of %d decisions shows %+v, want approved", len(f.decisions), rows)
+	}
+}
+
+func TestALimitIsClampedWhateverItsSize(t *testing.T) {
+	for v, want := range map[any]int{nil: 50, 0: 50, -3: 50, 7: 7, float64(7): 7, float64(1e20): 200, int64(math.MaxInt64): 200,
+		json.Number("99999999999999999999"): 200, 500: 200} {
+		if got := limitOf(map[string]any{"limit": v}); got != want {
+			t.Errorf("limitOf(%v) = %d, want %d", v, got, want)
+		}
 	}
 }

@@ -8,6 +8,8 @@ package wholesalepack_test
 // Postgres-gated like every *_db_test.go.
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -188,5 +190,73 @@ func TestAClusterOperatorReadsTheListTheApplicationAndTheDecisionLog(t *testing.
 	if acts, _ := got["acts"].([]any); len(acts) != 1 || acts[0] != "retryAccess" {
 		// Approved with no access granted yet: the one act an operator has.
 		t.Fatalf("the operator is offered %v on an approved application with no access, want retryAccess", got["acts"])
+	}
+}
+
+// A STORE IS READ UNDER EITHER FORM OF ITS ID (ruling 31): the shopper path
+// holds the bare id; an application held under the canonical one is listed
+// and counted beside it, whichever form the store is asked for in.
+func TestAStoreWideReadAnswersForEitherFormOfTheStoreId(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "forms")
+	canonicalStore := "v1:shopify:store:" + s.store
+	held := "canon-held-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	raw, _ := json.Marshal(map[string]any{"ownerUserId": userRef(s.merchant), "storeId": canonicalStore, "accountId": s.account,
+		"companyName": "Canonical Held Trading", "applicantName": "Lee Form", "applicantEmail": "lee@forms.example.com"})
+	wsExec(t, eng, seedCtx(), `insert("v1:wholesale:application", id=`+quote(held)+`, payload=`+string(raw)+`)`)
+	for _, asked := range []string{s.store, canonicalStore} {
+		list := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleList(siteId: `+quote(s.site)+`, storeId: `+quote(asked)+`)`)
+		ids := map[string]bool{}
+		for _, row := range listRows(list["rows"]) {
+			ids[bareID(asString(row["applicationId"]))] = true
+		}
+		counts, _ := list["counts"].(map[string]any)
+		if !ids[s.appID] || !ids[held] || len(ids) != 2 || counts[wholesalepack.StageReadyToReview] != float64(2) {
+			t.Fatalf("asked as %q the list holds %v with counts %v, want both forms' applications", asked, ids, counts)
+		}
+	}
+}
+
+// AN EXTENSION ROW THE CALLER'S ROW GATE REFUSES IS UNREADABLE (minor 1): the
+// caller is admitted to the application, the client's row is not theirs to
+// read, and they are told it exists and shown none of it. An operator, who
+// reads every row, is shown it.
+func TestAnExtensionRowTheRowGateRefusesIsUnreadable(t *testing.T) {
+	memqldsl.RegisterTree("northwind", os.DirFS(filepath.Join("testdata", "clients", "northwind")))
+	t.Cleanup(func() { memqldsl.UnregisterTree("northwind") })
+	eng := liveWholesaleEngine(t)
+	s := newAccessStoreWith(t, eng, "unreadable", url.Values{"ein": {"98-7654321"}})
+	// The client's row, untied from the organization: the store's person no
+	// longer reads it through the account arm.
+	raw, _ := json.Marshal(map[string]any{"accountId": ""})
+	wsExec(t, eng, seedCtx(), `insert("v1:northwind:northwindTaxDetail", id=`+quote(s.appID)+`, payload=`+string(raw)+`)`)
+	if detail := latestPayload(t, "v1:northwind:northwindTaxDetail", s.appID); detail["ein"] != "98-7654321" || asString(detail["accountId"]) != "" {
+		t.Fatalf("the client's row is %+v, want the EIN kept and no organization", detail)
+	}
+	call := `builtin wholesaleGet(applicationId: ` + quote(s.appID) + `)`
+	details, _ := answerOf(t, eng, signedIn(s.staff), call)["details"].(map[string]any)
+	if details["state"] != "unreadable" || len(listRows(details["fields"])) != 0 {
+		t.Fatalf("the store's person is shown %+v, want unreadable with no field", details)
+	}
+	if strings.Contains(fmt.Sprint(details), "98-7654321") {
+		t.Fatalf("the unreadable details carry the EIN: %+v", details)
+	}
+	shown, _ := answerOf(t, eng, asOperator("operator-"+s.staff), call)["details"].(map[string]any)
+	if shown["state"] != "shown" || !strings.Contains(fmt.Sprint(shown["fields"]), "98-7654321") {
+		t.Fatalf("an operator is shown %+v, want the EIN", shown)
+	}
+}
+
+// A PERSON OF THE SAME ORGANIZATION WHO DOES NOT HOLD THE PART is refused by
+// every one of the five reads (minor 2).
+func TestAPersonOfTheOrganizationWithoutThePartIsRefusedEveryRead(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "reads-nopart")
+	calls := storeWide(s.site, s.store)
+	calls["wholesaleGet"] = `builtin wholesaleGet(applicationId: ` + quote(s.appID) + `)`
+	for name, call := range calls {
+		if _, err := eng.Execute(signedIn(s.merchant), call); err == nil || !strings.Contains(err.Error(), memql.CodeCapabilityNotHeld) {
+			t.Errorf("%s by a person of the organization without the part: %v, want %s", name, err, memql.CodeCapabilityNotHeld)
+		}
 	}
 }

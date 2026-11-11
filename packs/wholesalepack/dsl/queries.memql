@@ -30,13 +30,14 @@ query application applicationById {
   shape   applicationFull
 }
 
-@description("This store's applications, newest first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit.")
+@description("This store's applications, newest first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit. A store id is held in more than one form (bare, or v1:shopify:store:<id>): storeIds, when given, names every form to match beside storeId, so one stream answers the store whichever form each row holds.")
 @actor
 query application applicationsForStore {
   args {
-    storeId  string!
+    storeId   string!
+    storeIds  array
   }
-  filter  row => row.storeId == args.storeId
+  filter  row => row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds)
   sort    "row.createdAt", "desc"
   paginate 50
   shape   applicationFull
@@ -65,16 +66,41 @@ query applicationDecision decisionsForApplications {
   shape   applicationDecisionFull
 }
 
-@description("This store's decisions, newest first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads.")
+@description("This store's decisions, newest first -- the Wholesale section's decision log. A bounded page with a keyset cursor, because a log is append-only and only grows. A decision names its application in whichever form its writer used (bare or v1:wholesale:application:<id>), so a reader joins it to its application by the bare id; storeIds, when given, names every form of the store id to match beside storeId. Read under the caller's own actor: wholesaleDecisionLog shows a line only for an application the caller reads.")
 @actor
 query applicationDecision decisionsForStore {
   args {
-    storeId  string!
+    storeId   string!
+    storeIds  array
   }
-  filter  row => row.storeId == args.storeId
+  filter  row => row.storeId == args.storeId || (args.storeIds != nil && row.storeId in args.storeIds)
   sort    "row.createdAt", "desc"
   paginate 50
   shape   applicationDecisionFull
+}
+
+@description("Every decision on a list of applications, newest first, paged to its end by the caller. THE STATE FOLD READS THIS, so a reader pages it to its last page rather than folding the first: a short answer is an application shown as submitted after somebody decided it. Matched as written, so the list names every form of each application id; not narrowed by store, because the ids name their applications already.")
+@actor
+query applicationDecision decisionsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   applicationDecisionFull
+}
+
+@description("Every entitlement row on a list of applications, newest version first, paged to its end by the caller -- the export's batch read. Matched as written, so the list names every form of each application id.")
+@actor
+query entitlement entitlementsForApplicationIds {
+  args {
+    applicationIds  []string!
+  }
+  filter  row => row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  paginate 200
+  shape   entitlementFull
 }
 
 @description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state. An entitlement row holds the CANONICAL application id (v1:wholesale:application:<id>) and this query matches the id as written, so ask it with the canonical id.")
