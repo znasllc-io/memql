@@ -56,3 +56,22 @@ func NotRequested(connector string) error {
 // IsNotRequested reports whether a refusal is of a domain the connection
 // never asked for. It is never IsNotGranted.
 func IsNotRequested(err error) bool { return errors.Is(err, ErrNotRequested) }
+
+// ErrBusy marks an origin that cannot take the request NOW because it is
+// doing the same kind of work already -- Shopify runs one bulk query per shop
+// at a time. Unlike a refusal it says nothing about the domain: the same
+// request succeeds once the other work finishes, so the runtime records no
+// error and asks again on its next tick.
+var ErrBusy = errors.New("connector: busy")
+
+// Busy says the origin is busy with other work of the same kind, and why.
+func Busy(connector, reason string) error {
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("%w: %s is busy with another operation", ErrBusy, connector)
+	}
+	return fmt.Errorf("%w: %s: %s", ErrBusy, connector, reason)
+}
+
+// IsBusy reports whether a failure is the origin being busy, which a later
+// attempt can change.
+func IsBusy(err error) bool { return errors.Is(err, ErrBusy) }

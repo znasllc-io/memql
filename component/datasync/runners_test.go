@@ -1027,3 +1027,140 @@ func TestQueueAndContinueRefuseACallWithoutInternalOrigin(t *testing.T) {
 		t.Errorf("the engine's own calls left the row %q, want complete", st.BackfillStatus)
 	}
 }
+
+// ---- a busy origin, and a refusal the sweep contradicts ----
+
+func TestABusyOriginLeavesAQueuedBackfillQueuedUntilItAccepts(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector(memqlsync.BackfillPage{Done: true})
+	c.backfillErr = memqlsync.Busy("shopify", "a bulk query is already running for this shop")
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if res := continueOnce(t, r); res != (ContinueResult{}) {
+		t.Errorf("a busy answer counted %+v, want nothing", res)
+	}
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "queued" || st.LastError != "" {
+		t.Fatalf("after a busy answer: %s, lastError %q; want still queued with no error", st.BackfillStatus, st.LastError)
+	}
+
+	c.backfillErr = nil
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("once the origin accepts: %+v, want started and completed", res)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
+		t.Errorf("status = %q, want complete", st.BackfillStatus)
+	}
+}
+
+func TestARunningBackfillThatIsToldBusyKeepsItsCursor(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	c.backfillErr = memqlsync.Busy("shopify", "a bulk query is already running for this shop")
+	r := stateRunner(engine, c)
+	writeKept(t, engine, SyncState{BackfillStatus: "running", BackfillCursor: "c-4"})
+
+	if res := continueOnce(t, r); res != (ContinueResult{}) {
+		t.Errorf("a busy answer counted %+v, want nothing", res)
+	}
+	st := keptState(t, engine, testMirrorConcept, "")
+	if st.BackfillStatus != "running" || st.BackfillCursor != "c-4" || st.LastError != "" {
+		t.Errorf("row = %s at %q, lastError %q; want running at c-4 with no error", st.BackfillStatus, st.BackfillCursor, st.LastError)
+	}
+}
+
+func TestAnOperatorStartOnABusyStoreEndsQueuedNotFailed(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	c.backfillErr = memqlsync.Busy("shopify", "a bulk query is already running for this shop")
+	r := stateRunner(engine, c)
+	i := &Integration{runner: r, logger: discardLogger()}
+
+	nodes, err := i.handleStartBackfill(context.Background(), map[string]any{"connector": "shopify", "conceptId": testMirrorConcept}, 0)
+	if err != nil {
+		t.Fatalf("a busy store failed the operator's start: %v", err)
+	}
+	if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), "waiting behind another export") {
+		t.Errorf("the answer does not say the backfill is waiting: %v", nodes)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" || st.LastError != "" {
+		t.Errorf("row = %s, lastError %q; want queued, so the continuing pass starts it", st.BackfillStatus, st.LastError)
+	}
+}
+
+// sweepAndContinue is one round of the two scheduled passes.
+func sweepAndContinue(t *testing.T, r *Runner) {
+	t.Helper()
+	if _, err := r.ContinueBackfills(context.Background()); err != nil && !strings.Contains(err.Error(), "backfill refused") {
+		t.Fatalf("ContinueBackfills: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+func TestARefusedBackfillOfADomainTheSweepReadsIsQueuedOnceMoreThenFails(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	c.backfillErr = memqlsync.NotRequested("shopify")
+	c.reconcileReport = memqlsync.ReconcileReport{Checked: 4}
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	for round := 1; round <= 6; round++ {
+		sweepAndContinue(t, r)
+		if round == 2 {
+			st := keptState(t, engine, testMirrorConcept, "")
+			if !strings.HasPrefix(st.LastError, "backfill refused: ") || standingRefusal(st.LastError) {
+				t.Errorf("the second refusal reads %q, want a failure no refusal check reads as a standing answer", st.LastError)
+			}
+		}
+	}
+	if n := len(c.backfillSeen); n != 2 {
+		t.Errorf("the connector was asked %d times over six rounds, want 2: queued once more by the clean sweep, then left failed", n)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "failed" || !strings.HasPrefix(st.LastError, "backfill refused: ") {
+		t.Errorf("final row = %s, %q; want failed, the refusal kept as its reason", st.BackfillStatus, st.LastError)
+	}
+}
+
+func TestARefusedDomainThatIsThenGrantedIsQueuedByItsFirstCleanSweep(t *testing.T) {
+	engine := newStateEngine()
+	c := mirrorConnector()
+	refusal := memqlsync.NotGranted("shopify", "read_customers")
+	c.backfillErr, c.reconcileErr = refusal, refusal
+	r := stateRunner(engine, c)
+	if err := r.QueueBackfill(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 3; round++ {
+		sweepAndContinue(t, r)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "none" || !standingRefusal(st.LastError) {
+		t.Fatalf("while refused by both: %s, %q; want the standing answer", st.BackfillStatus, st.LastError)
+	}
+	if n := len(c.backfillSeen); n != 1 {
+		t.Fatalf("a standing answer was asked again: %d calls", n)
+	}
+
+	// Granted.
+	c.backfillErr, c.reconcileErr = nil, nil
+	c.reconcileReport = memqlsync.ReconcileReport{Checked: 2}
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatal(err)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "queued" {
+		t.Fatalf("the first clean sweep left %q, want queued", st.BackfillStatus)
+	}
+	if res := continueOnce(t, r); res != (ContinueResult{Started: 1, Completed: 1}) {
+		t.Errorf("after the grant: %+v, want started and completed", res)
+	}
+	if st := keptState(t, engine, testMirrorConcept, ""); st.BackfillStatus != "complete" {
+		t.Errorf("status = %q, want complete", st.BackfillStatus)
+	}
+}

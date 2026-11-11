@@ -67,12 +67,20 @@ func decodeBackfillCursor(s string) backfillCursor {
 // that the round trip is not the cost.
 const backfillBatchLines = 500
 
+// bulkRunMutation selects the user error's code: bulkOperationRunQuery's
+// userErrors are BulkOperationUserError (Admin API 2026-07), whose code
+// OPERATION_IN_PROGRESS is the one refusal that says the shop is busy rather
+// than that anything is wrong.
 const bulkRunMutation = `mutation ShopifyBulkRun($query: String!) {
   bulkOperationRunQuery(query: $query) {
     bulkOperation { id status }
-    userErrors { field message }
+    userErrors { field message code }
   }
 }`
+
+// bulkOperationInProgress is BulkOperationUserErrorCode's answer for a shop
+// already running a bulk query: Shopify runs one at a time per shop and app.
+const bulkOperationInProgress = "OPERATION_IN_PROGRESS"
 
 const bulkStatusQuery = `query ShopifyBulkStatus($id: ID!) {
   node(id: $id) {
@@ -217,16 +225,28 @@ func (c *Connector) startBulkOperation(ctx context.Context, store Store, spec *g
 	if err != nil {
 		return bulkOperation{}, err
 	}
-	if ueErr := userErrorsFrom(resp, "bulkOperationRunQuery"); ueErr != nil {
-		return bulkOperation{}, ueErr
-	}
 	var decoded struct {
 		BulkOperationRunQuery struct {
 			BulkOperation bulkOperation `json:"bulkOperation"`
+			UserErrors    []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"userErrors"`
 		} `json:"bulkOperationRunQuery"`
 	}
 	if err := resp.DecodeInto(&decoded); err != nil {
 		return bulkOperation{}, err
+	}
+	for _, ue := range decoded.BulkOperationRunQuery.UserErrors {
+		if ue.Code == bulkOperationInProgress {
+			// Another export of this shop is running -- another domain's,
+			// one a paused domain left behind, or one started elsewhere.
+			// Busy, not failed: the runtime asks again on its next tick.
+			return bulkOperation{}, memqlsync.Busy(ConnectorName, ue.Message)
+		}
+	}
+	if ueErr := userErrorsFrom(resp, "bulkOperationRunQuery"); ueErr != nil {
+		return bulkOperation{}, ueErr
 	}
 	if decoded.BulkOperationRunQuery.BulkOperation.ID == "" {
 		return bulkOperation{}, fmt.Errorf("shopify: bulkOperationRunQuery returned no operation for %s", spec.Concept)

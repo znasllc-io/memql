@@ -444,3 +444,38 @@ func TestABulkBackfillShopifyRefusesIsAStandingAnswer(t *testing.T) {
 		}
 	})
 }
+
+// Shopify refuses a second bulk query for a shop while one runs, with a
+// BulkOperationUserError whose code is OPERATION_IN_PROGRESS (Admin API
+// 2026-07: bulkOperationRunQuery.userErrors is [BulkOperationUserError!]!,
+// and the type carries code). That is the origin being busy, not a failure.
+func TestABulkRunRefusedAsInProgressIsBusy(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyBulkRun", map[string]any{"bulkOperationRunQuery": map[string]any{
+		"bulkOperation": nil,
+		"userErrors": []any{map[string]any{
+			"field":   nil,
+			"message": "A bulk query operation for this app and shop is already in progress: gid://shopify/BulkOperation/1.",
+			"code":    "OPERATION_IN_PROGRESS",
+		}},
+	}})
+	_, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("product"), "")
+	if !memqlsync.IsBusy(err) {
+		t.Fatalf("err = %v, want busy", err)
+	}
+	for _, r := range h.admin.seen() {
+		if r.Operation == "ShopifyBulkRun" && !regexp.MustCompile(`userErrors \{[^}]*\bcode\b`).MatchString(r.Query) {
+			t.Errorf("the bulk run does not select the user error's code: %s", r.Query)
+		}
+	}
+
+	// Another code is not busy: INVALID is the query itself.
+	h = newHarness(t)
+	h.admin.reply("ShopifyBulkRun", map[string]any{"bulkOperationRunQuery": map[string]any{
+		"bulkOperation": nil,
+		"userErrors":    []any{map[string]any{"field": []any{"query"}, "message": "Invalid bulk query", "code": "INVALID"}},
+	}})
+	if _, err := h.conn.BackfillPartition(context.Background(), testStoreID, generated.ConceptID("product"), ""); err == nil || memqlsync.IsBusy(err) {
+		t.Errorf("an INVALID refusal = %v, want a failure that is not busy", err)
+	}
+}

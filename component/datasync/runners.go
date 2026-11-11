@@ -78,6 +78,10 @@ type BackfillResult struct {
 	Stale   int
 	Done    bool
 	Cursor  string
+	// Waiting says the origin was busy with another operation of the same
+	// kind and took none of this one. The row is left queued (or running,
+	// when it already was) with no error, and the continuing pass asks again.
+	Waiting bool
 }
 
 // StartBackfill drives Connector.Backfill for one domain, resuming from
@@ -110,6 +114,9 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, pa
 		out.Stale += res.Stale
 		if !res.Done || err != nil {
 			out.Done = false
+		}
+		if res.Waiting {
+			out.Waiting = true
 		}
 		if err != nil {
 			errs = append(errs, err)
@@ -192,6 +199,7 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 	}
 
 	st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connectorName, string(memqlsync.DirectionInbound), partition
+	priorStatus, priorError := st.BackfillStatus, st.LastError
 	st.BackfillStatus = "running"
 	st.LastError = ""
 	r.writeState(opCtx, st)
@@ -219,6 +227,41 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 		}
 
 		page, pageErr := fetch(cursor)
+		if pageErr != nil && memqlsync.IsBusy(pageErr) {
+			// The origin is busy with another operation of the same kind
+			// (Shopify runs one bulk query per shop at a time). Nothing is
+			// wrong with this domain and nothing is recorded as an error: a
+			// backfill that had not begun goes back to queued, one already
+			// under way stays running at its cursor, and the continuing pass
+			// asks again on its next tick. Marking it failed would end it,
+			// because nothing retries a failed backfill.
+			if priorStatus != "running" && out.Pages == 0 {
+				st.BackfillStatus = "queued"
+			}
+			st.LastError = ""
+			st.BackfillCursor = cursor
+			r.writeState(opCtx, st)
+			r.logger.Info("datasync backfill: the origin is busy with another operation; waiting for the next tick",
+				"connector", connectorName, "concept", conceptID, "partition", partition, "reason", pageErr.Error())
+			out.Cursor, out.Waiting = cursor, true
+			return out, nil
+		}
+		if pageErr != nil && (memqlsync.IsNotGranted(pageErr) || memqlsync.IsNotRequested(pageErr)) &&
+			!st.LastReconcileAt.IsZero() && !standingRefusal(priorError) {
+			// The same refusal from a domain whose row shows the sweep READS
+			// it: lastReconcileAt is set and the row's error is no refusal.
+			// That is not a standing answer about the domain but a failure
+			// of the backfill alone, and recording it as a refusal would let
+			// the next clean sweep queue it again, refusal after refusal,
+			// forever. It is failed, worded so that neither the refusal
+			// checks nor the clean-sweep rule read it as a refusal.
+			st.BackfillStatus = "failed"
+			st.LastError = truncateError(backfillRefusedPrefix + pageErr.Error())
+			st.LastAttemptAt = r.now().UTC()
+			st.BackfillCursor = cursor
+			r.writeState(opCtx, st)
+			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %s%v", conceptID, connectorName, partitionSuffix(partition), backfillRefusedPrefix, pageErr)
+		}
 		if pageErr != nil && (memqlsync.IsNotGranted(pageErr) || memqlsync.IsNotRequested(pageErr)) {
 			// The origin's standing answer -- a domain the grant does not
 			// reach, or one outside the connection -- is not a failure. It
@@ -226,6 +269,7 @@ func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector,
 			// leaves queued/running for `none`, so a continuing pass does
 			// not ask the same question on every tick. A clean sweep of the
 			// domain (reconcileOne) queues it again once the answer changes.
+			// That holds only while the row shows no clean sweep; see above.
 			st.BackfillStatus = "none"
 			st.LastError = truncateError(pageErr.Error())
 			st.LastAttemptAt = r.now().UTC()
@@ -461,7 +505,12 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 		st.BackfillStatus = "queued"
 		st.BackfillCursor = ""
 	}
-	st.LastError = ""
+	if st.BackfillStatus != "failed" || !strings.HasPrefix(st.LastError, backfillRefusedPrefix) {
+		// A clean sweep clears the sweep's own error. A backfill the origin
+		// refused while the sweep reads the domain keeps its reason: the
+		// sweep being clean is what made that refusal a failure.
+		st.LastError = ""
+	}
 	r.writeState(opCtx, st)
 
 	// Logged at Warn when drift was found even though it was healed:
@@ -614,6 +663,11 @@ func (r *Runner) setPausedOne(ctx context.Context, connectorName, conceptID, par
 	return r.store.SetPaused(opCtx, st.ID, paused)
 }
 
+// backfillRefusedPrefix opens the lastError of a backfill the origin refused
+// although the sweep reads the domain: a failure, which standingRefusal and
+// the connector's phase reading must not take for a standing answer.
+const backfillRefusedPrefix = "backfill refused: "
+
 // standingRefusal reports whether a stored lastError is the origin's standing
 // answer -- not granted, or not requested -- rather than a failure. The row
 // keeps the reason's text, so it is read by the sentinels' own prefixes, as
@@ -765,6 +819,10 @@ func (r *Runner) continueOne(ctx context.Context, connector memqlsync.Connector,
 	}
 
 	res, err := r.backfillOne(ctx, connector, specs, pick.ConceptID, partition)
+	if res.Waiting {
+		// The origin is busy: nothing moved, so nothing is counted.
+		return out, nil
+	}
 	if pick == queued {
 		out.Started++
 	}
