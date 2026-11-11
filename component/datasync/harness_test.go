@@ -120,6 +120,9 @@ type fakeConnector struct {
 	reconcileReport memqlsync.ReconcileReport
 	reconcileErr    error
 	reconcileSince  []time.Time
+	// duringReconcile runs inside Reconcile, so a test can move its clock
+	// forward while a sweep is in flight.
+	duringReconcile func()
 
 	mu sync.Mutex
 }
@@ -160,6 +163,9 @@ func (c *fakeConnector) Reconcile(_ context.Context, _ string, since time.Time) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.reconcileSince = append(c.reconcileSince, since)
+	if c.duringReconcile != nil {
+		c.duringReconcile()
+	}
 	return c.reconcileReport, c.reconcileErr
 }
 

@@ -356,6 +356,9 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 		return out, nil
 	}
 
+	// The watermark is when the sweep STARTED, less the overlap, so a row
+	// that changed during the sweep is read by the next one.
+	sweepStart := r.now().UTC()
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	var report memqlsync.ReconcileReport
 	var reconcileErr error
@@ -417,8 +420,8 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 	}
 
 	out.Checked, out.Drifted, out.Healed = report.Checked, report.Drifted, report.Healed
-	st.LastReconcileAt = r.now().UTC()
-	st.LastAttemptAt = st.LastReconcileAt
+	st.LastReconcileAt = sweepStart.Add(-reconcileOverlap)
+	st.LastAttemptAt = r.now().UTC()
 	st.DriftCount = report.Drifted
 	st.LastError = ""
 	r.writeState(opCtx, st)
@@ -516,6 +519,13 @@ func (r *Runner) dueOne(ctx context.Context, connectorName string, spec memqlsyn
 	}
 	return r.now().UTC().Sub(last) >= spec.ReconcileInterval
 }
+
+// reconcileOverlap is how far before a sweep's start the next sweep's
+// `since` reaches. A row that changed while the sweep ran, behind the page
+// it had already read, is older than the sweep's end; reading from the
+// start less this margin picks it up. Applying a row twice is harmless:
+// the apply is version-guarded.
+const reconcileOverlap = 2 * time.Minute
 
 // notGrantedRecheck bounds how often a not-granted domain re-writes its
 // unchanged reason: a standing fact restated a few times a day, not on

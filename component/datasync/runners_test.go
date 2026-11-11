@@ -3,6 +3,7 @@ package datasync
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +545,98 @@ func TestReconcileDueWithNoPartitionAsksEveryPartition(t *testing.T) {
 	}
 	if n := engine.countContaining(`stateId: "` + SyncStateID(testMirrorConcept, "shopify", "inbound", "") + `"`); n != 0 {
 		t.Errorf("the shared row was read %d times for a partitioned connector", n)
+	}
+}
+
+// sweepOnATickingClock runs one clean sweep whose connector takes ten
+// minutes, then returns the state row the sweep wrote and the moment it
+// started and ended.
+func sweepOnATickingClock(t *testing.T) (engine *fakeEngine, r *Runner, c *fakeConnector, start, end time.Time, lastReconcile, lastAttempt time.Time) {
+	t.Helper()
+	engine = newFakeEngine()
+	c = mirrorConnector()
+	r = testRunner(engine, newFakeWriter(), c)
+	clock := testNow
+	r.now = func() time.Time { return clock }
+	c.duringReconcile = func() { clock = clock.Add(10 * time.Minute) }
+	start = clock
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	end = clock
+	writes := engine.callsContaining("upsertSyncState")
+	if len(writes) == 0 {
+		t.Fatal("the sweep recorded nothing")
+	}
+	last := writes[len(writes)-1]
+	parse := func(field string) time.Time {
+		m := regexp.MustCompile(field + `: "([^"]+)"`).FindStringSubmatch(last)
+		if m == nil {
+			t.Fatalf("%s was not written: %q", field, last)
+		}
+		ts, err := time.Parse(time.RFC3339, m[1])
+		if err != nil {
+			t.Fatalf("%s = %q: %v", field, m[1], err)
+		}
+		return ts
+	}
+	return engine, r, c, start, end, parse("lastReconcileAt"), parse("lastAttemptAt")
+}
+
+// The next sweep asks the origin for everything since the moment this
+// sweep STARTED, less two minutes: a row that changed behind the page
+// the sweep had already read is older than its end.
+func TestTheWatermarkIsWhenTheSweepStartedLessTwoMinutes(t *testing.T) {
+	engine, r, c, start, end, lastReconcile, lastAttempt := sweepOnATickingClock(t)
+	if !end.Equal(start.Add(10 * time.Minute)) {
+		t.Fatalf("the clock did not move inside the sweep: %v to %v", start, end)
+	}
+	if want := start.Add(-reconcileOverlap); !lastReconcile.Equal(want) {
+		t.Errorf("lastReconcileAt = %v, want the start less two minutes, %v", lastReconcile, want)
+	}
+	if !lastAttempt.Equal(end) {
+		t.Errorf("lastAttemptAt = %v, want when the sweep ended, %v", lastAttempt, end)
+	}
+
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id": SyncStateID(testMirrorConcept, "shopify", "inbound", ""), "conceptId": testMirrorConcept,
+		"connector": "shopify", "direction": "inbound",
+		"lastReconcileAt": lastReconcile.Format(time.RFC3339), "lastAttemptAt": lastAttempt.Format(time.RFC3339),
+	}})
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if len(c.reconcileSince) != 2 || !c.reconcileSince[1].Equal(start.Add(-2*time.Minute)) {
+		t.Errorf("the next since = %v, want %v", c.reconcileSince, start.Add(-2*time.Minute))
+	}
+}
+
+// A row stamped three minutes after the sweep began, behind the page it
+// had read, is at or after the next sweep's since.
+func TestARowChangedDuringASweepIsReadByTheNext(t *testing.T) {
+	_, _, _, start, _, lastReconcile, _ := sweepOnATickingClock(t)
+	changed := start.Add(3 * time.Minute)
+	if changed.Before(lastReconcile) {
+		t.Errorf("a row changed at %v is before the next since %v and would never be read", changed, lastReconcile)
+	}
+}
+
+// The schedule still runs from when the sweep ended, not from the
+// earlier watermark.
+func TestTheCadenceStillRunsFromWhenTheSweepEnded(t *testing.T) {
+	engine, r, c, _, end, lastReconcile, lastAttempt := sweepOnATickingClock(t)
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id": SyncStateID(testMirrorConcept, "shopify", "inbound", ""), "conceptId": testMirrorConcept,
+		"connector": "shopify", "direction": "inbound",
+		"lastReconcileAt": lastReconcile.Format(time.RFC3339), "lastAttemptAt": lastAttempt.Format(time.RFC3339),
+	}})
+	interval := c.domains[0].ReconcileInterval
+	r.now = func() time.Time { return end.Add(interval - time.Minute) }
+	if r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
+		t.Error("due before an interval had passed since the sweep ENDED")
+	}
+	r.now = func() time.Time { return end.Add(interval) }
+	if !r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
+		t.Error("not due an interval after the sweep ended")
 	}
 }
