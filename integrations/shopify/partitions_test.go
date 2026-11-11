@@ -3,8 +3,11 @@ package shopify
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	stdsync "sync"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -153,49 +156,93 @@ func TestOneStoresRefusalIsItsOwn(t *testing.T) {
 	}
 }
 
-// pagedStatesEngine answers syncStatesAll a page at a time, by the cursor the
-// context carries, so a read that stops at the first page is caught.
-type pagedStatesEngine struct {
+// stateRowEngine answers the health reads: syncStateById from a table of tip
+// rows keyed by state id, and syncStatesAll with the whole history, which a
+// reader of current state must never walk. It counts both.
+type stateRowEngine struct {
 	*fakeEngine
-	pages map[string]*memql.ExecuteResult
+	tips    map[string]map[string]any
+	history []map[string]any
+	mu      stdsync.Mutex
+	byID    map[string]int // state id -> reads
+	listed  int
 }
 
-func (e *pagedStatesEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
-	if callName(query) != "syncStatesAll" {
-		return e.fakeEngine.Execute(ctx, query)
-	}
-	page, ok := e.pages[memql.CursorFromContext(ctx)]
-	if !ok {
+var stateIDArg = regexp.MustCompile(`stateId: "([^"]*)"`)
+
+func (e *stateRowEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	switch callName(query) {
+	case "syncStatesAll":
+		e.mu.Lock()
+		e.listed++
+		e.mu.Unlock()
+		return resultWithRows(e.history), nil
+	case "syncStateById":
+		m := stateIDArg.FindStringSubmatch(query)
+		if m == nil {
+			return nil, fmt.Errorf("syncStateById without a stateId: %s", query)
+		}
+		e.mu.Lock()
+		e.byID[m[1]]++
+		e.mu.Unlock()
+		if row, ok := e.tips[m[1]]; ok {
+			return resultWithRows([]map[string]any{row}), nil
+		}
 		return resultWithRows(nil), nil
 	}
-	return page, nil
+	return e.fakeEngine.Execute(ctx, query)
+}
+
+func (e *stateRowEngine) readsFor(store string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := 0
+	for _, concept := range generated.ApplyOrder {
+		n += e.byID[memqlsync.StateID(generated.ConceptID(concept), ConnectorName, "inbound", store)]
+	}
+	return n
 }
 
 func TestStoreHealthShowsEachStoreItsOwnDomains(t *testing.T) {
 	h := newHarness(t)
 	withTwoStores(t, h)
-	paged := &pagedStatesEngine{fakeEngine: h.engine}
-	h.conn.engine = paged
-
-	// Newest first, as the query sorts. The shared row -- written before
-	// partitions -- belongs to no store. Store B's rows are on the second
-	// page.
-	first := resultWithRows([]map[string]any{
-		{"id": "s1", "conceptId": "v1:shopify:product", "partitionKey": testStoreID, "connector": ConnectorName, "lastError": "store A failed", "driftCount": 3},
-		{"id": "s2", "conceptId": "v1:shopify:product", "partitionKey": testStoreID, "connector": ConnectorName, "lastError": "an older row of A", "driftCount": 9},
-		{"id": "s3", "conceptId": "v1:shopify:order", "connector": ConnectorName, "lastError": "the shared row", "driftCount": 50},
-	})
-	first.Meta = &memql.ResultMeta{Cursor: "page-2", HasMore: true}
-	second := resultWithRows([]map[string]any{
-		{"id": "s4", "conceptId": "v1:shopify:product", "partitionKey": secondStoreID, "connector": ConnectorName, "backfillStatus": "queued", "driftCount": 1},
-		{"id": "s5", "conceptId": "v1:shopify:order", "partitionKey": secondStoreID, "connector": ConnectorName, "backfillStatus": "running"},
-	})
-	paged.pages = map[string]*memql.ExecuteResult{"": first, "page-2": second}
+	product, order := generated.ConceptID("product"), generated.ConceptID("order")
+	id := func(concept, store string) string {
+		return memqlsync.StateID(concept, ConnectorName, "inbound", store)
+	}
+	tip := func(concept, store string, fields map[string]any) map[string]any {
+		row := map[string]any{"id": id(concept, store), "conceptId": concept, "connector": ConnectorName, "direction": "inbound", "partitionKey": store}
+		for k, v := range fields {
+			row[k] = v
+		}
+		return row
+	}
+	engine := &stateRowEngine{fakeEngine: h.engine, byID: map[string]int{}, tips: map[string]map[string]any{
+		id(product, testStoreID):   tip(product, testStoreID, map[string]any{"lastError": "store A failed", "driftCount": 3}),
+		id(product, secondStoreID): tip(product, secondStoreID, map[string]any{"backfillStatus": "queued", "driftCount": 1}),
+		id(order, secondStoreID):   tip(order, secondStoreID, map[string]any{"backfillStatus": "running"}),
+		// The shared row written before partitions belongs to no store.
+		id(order, ""): tip(order, "", map[string]any{"lastError": "the shared row", "driftCount": 50}),
+	}}
+	// Store A has a long history behind its tip; store B has none.
+	for i := 0; i < 250; i++ {
+		engine.history = append(engine.history, tip(product, testStoreID, map[string]any{"lastError": "an older row of A", "driftCount": 9}))
+	}
+	h.conn.engine = engine
 
 	nodes, err := NewIntegration(h.conn).handleStoreHealth(context.Background(), map[string]any{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if engine.listed != 0 {
+		t.Fatalf("store health walked the history in syncStatesAll %d times; current state is read by id", engine.listed)
+	}
+	for _, store := range []string{testStoreID, secondStoreID} {
+		if got, want := engine.readsFor(store), len(generated.ApplyOrder); got != want {
+			t.Errorf("store %s cost %d by-id reads, want one for each of its %d domains", store, got, want)
+		}
+	}
+
 	type domain struct {
 		Concept   string `json:"concept"`
 		Phase     string `json:"phase"`
@@ -220,7 +267,7 @@ func TestStoreHealthShowsEachStoreItsOwnDomains(t *testing.T) {
 	}
 
 	a := byStore[testStoreID]
-	if len(a) != 1 || a[0].Concept != "v1:shopify:product" || a[0].LastError != "store A failed" || a[0].Phase != "error" {
+	if len(a) != 1 || a[0].Concept != product || a[0].LastError != "store A failed" || a[0].Phase != "error" {
 		t.Errorf("store A's domains = %+v, want only its own product row, at its tip", a)
 	}
 	if drift[testStoreID] != 3 {
@@ -229,7 +276,7 @@ func TestStoreHealthShowsEachStoreItsOwnDomains(t *testing.T) {
 
 	b := byStore[secondStoreID]
 	if len(b) != 2 {
-		t.Fatalf("store B's domains = %+v, want its two rows from the second page", b)
+		t.Fatalf("store B's domains = %+v, want its own two rows", b)
 	}
 	for _, d := range b {
 		if d.LastError != "" {

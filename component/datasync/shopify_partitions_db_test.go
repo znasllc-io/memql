@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	stdsync "sync"
 	"testing"
@@ -34,7 +35,8 @@ const partitionsConcept = "v1:shopify:product"
 
 // scopedStoreEngine lets the connector see only this test's stores. The
 // database is shared with other packages, and every store it holds would
-// otherwise be a partition this test sweeps.
+// otherwise be a partition this test sweeps. The registry renders the read
+// bare, as renderCall does, with no `query` keyword.
 type scopedStoreEngine struct {
 	memql.IntegrationEngineAccess
 	stores map[string]bool
@@ -42,7 +44,7 @@ type scopedStoreEngine struct {
 
 func (e scopedStoreEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	res, err := e.IntegrationEngineAccess.Execute(ctx, query)
-	if err != nil || !strings.HasPrefix(query, "query storesForConnector(") {
+	if err != nil || !strings.HasPrefix(query, "storesForConnector(") {
 		return res, err
 	}
 	var nodes []*memqlv1.MemoryNode
@@ -51,12 +53,17 @@ func (e scopedStoreEngine) Execute(ctx context.Context, query string) (*memql.Ex
 		if !e.stores[memql.BareShortId(id)] {
 			continue
 		}
-		payload := map[string]any{}
-		for k, v := range row {
-			if k != "id" {
-				payload[k] = v
-			}
+		// Through JSON, so a time the engine hands back as time.Time
+		// becomes the string a struct can carry.
+		raw, err := json.Marshal(row)
+		if err != nil {
+			return nil, err
 		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, err
+		}
+		delete(payload, "id")
 		pb, err := structpb.NewStruct(payload)
 		if err != nil {
 			return nil, err
@@ -137,6 +144,7 @@ type partitionsFixture struct {
 	runner   *Runner
 	store    *Store
 	storeIDs []string
+	conn     *shopify.Connector
 }
 
 func newPartitionsFixture(t *testing.T) *partitionsFixture {
@@ -152,8 +160,9 @@ func newPartitionsFixture(t *testing.T) *partitionsFixture {
 		shopify: &fakeShopify{tokens: map[string]string{}, requests: map[string][]fakeShopifyRequest{}},
 	}
 	f.storeIDs = []string{run + "-a", run + "-b"}
+	foreign := run + "-foreign"
 	t.Cleanup(func() {
-		for _, id := range f.storeIDs {
+		for _, id := range append([]string{foreign}, f.storeIDs...) {
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:shopify:store' AND id = $1`, "v1:shopify:store:"+id)
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept = 'v1:platform:syncState' AND payload->>'partitionKey' = $1`, id)
 		}
@@ -162,6 +171,12 @@ func newPartitionsFixture(t *testing.T) *partitionsFixture {
 	owner := auth.ContextWithClaims(context.Background(), claims)
 	owner = auth.ContextWithToken(owner, auth.BuildTokenInfo(claims))
 	f.owner = auth.ContextWithAccess(owner, &auth.AccessContext{UserId: "dbtest-owner", Role: auth.RoleOwner})
+	// A store that is not this test's, as the shared database may hold: the
+	// scoped registry must keep it from being a partition.
+	if _, err := eng.Execute(f.owner, fmt.Sprintf(`mutation createStore(storeId: %s, domain: "acme-widgets.myshopify.com", adminTokenRef: "foreign-admin", apiVersion: "2026-07")`,
+		languageparser.QuoteString(foreign))); err != nil {
+		t.Fatalf("write the foreign store: %v", err)
+	}
 
 	previous := http.DefaultTransport
 	http.DefaultTransport = f.shopify
@@ -172,6 +187,7 @@ func newPartitionsFixture(t *testing.T) *partitionsFixture {
 	})
 	logger := slog.New(slog.DiscardHandler)
 	connector := shopify.NewConnector(eng, logger, f.stores, shopify.NewAdminClient())
+	f.conn = connector
 	f.store = NewStore(engineSeam{eng})
 	f.runner = NewRunner(f.store, NewApplier(f.store, NewEngineMirrorWriter(engineSeam{eng})), logger)
 	f.runner.lookup = func(name string) (memqlsync.Connector, bool) {
@@ -193,6 +209,19 @@ func (f *partitionsFixture) connect(t *testing.T, id string) {
 	f.shopify.mu.Unlock()
 	f.scope[id] = true
 	f.stores.Invalidate()
+}
+
+// assertPartitions holds the connector to exactly this test's stores, so a
+// store filter that does nothing cannot pass.
+func (f *partitionsFixture) assertPartitions(t *testing.T, want ...string) {
+	t.Helper()
+	got, err := f.conn.Partitions(context.Background())
+	if err != nil {
+		t.Fatalf("Partitions: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Partitions = %v, want exactly this test's stores %v", got, want)
+	}
 }
 
 func (f *partitionsFixture) state(t *testing.T, partition string) SyncState {
@@ -228,12 +257,14 @@ func TestTheSecondStoreBackfillsAfterTheFirstIsComplete(t *testing.T) {
 	a, b := f.storeIDs[0], f.storeIDs[1]
 
 	f.connect(t, a)
+	f.assertPartitions(t, a)
 	f.backfillUntilDone(t)
 	if st := f.state(t, a); st.BackfillStatus != "complete" {
 		t.Fatalf("store A's backfill = %q, want complete", st.BackfillStatus)
 	}
 
 	f.connect(t, b)
+	f.assertPartitions(t, a, b)
 	if st := f.state(t, b); st.Stored {
 		t.Fatalf("store B has a row before it was ever backfilled: %+v", st)
 	}
@@ -264,6 +295,7 @@ func TestAPausedStoreIsSweptFromWhereItStopped(t *testing.T) {
 	a, b := f.storeIDs[0], f.storeIDs[1]
 	f.connect(t, a)
 	f.connect(t, b)
+	f.assertPartitions(t, a, b)
 
 	clock := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
 	f.runner.now = func() time.Time { return clock }

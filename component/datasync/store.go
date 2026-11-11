@@ -3,13 +3,13 @@ package datasync
 import (
 	"context"
 	"fmt"
-	"github.com/znasllc-io/memql/core/id"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // store.go -- the engine seam for the sync runtime.
@@ -110,10 +110,6 @@ type SyncState struct {
 	Stored bool
 }
 
-// syncIDs derives the health row ids. Untracked: a hash-only caller keeps
-// no generation history.
-var syncIDs = id.NewUntracked()
-
 // SyncStateID is the deterministic row id for one domain.
 //
 // Deterministic so the append-only history of that id IS the health
@@ -132,12 +128,11 @@ var syncIDs = id.NewUntracked()
 // A partition (memqlsync.Partitioned) is appended as a FOURTH part, and an
 // empty one appends nothing: every row written before partitions existed
 // keeps the id it always had, and its history stays one timeline.
+//
+// It is memqlsync.StateID, which a connector reading its own health by id
+// derives the same way.
 func SyncStateID(conceptID, connector, direction, partition string) string {
-	key := strings.TrimSpace(conceptID) + "|" + strings.TrimSpace(connector) + "|" + strings.TrimSpace(direction)
-	if p := strings.TrimSpace(partition); p != "" {
-		key += "|" + p
-	}
-	return string(syncIDs.FromString(key))
+	return memqlsync.StateID(conceptID, connector, direction, partition)
 }
 
 // PendingOutbox returns the entries one connector still owes delivery

@@ -294,10 +294,6 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	statesByStore, err := c.syncStates(ctx)
-	if err != nil {
-		return nil, err
-	}
 	only := argString(args, "storeId")
 	out := make([]any, 0, len(stores))
 	for _, store := range stores {
@@ -306,7 +302,10 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 		}
 		// Each store is a partition of the mirror: its domains are the rows
 		// of its own partition, and no other store's.
-		states := statesByStore[store.ID]
+		states, err := c.storeSyncStates(ctx, store.ID)
+		if err != nil {
+			return nil, err
+		}
 		domains := make([]any, 0, len(states))
 		drift := 0
 		for _, st := range states {
@@ -388,46 +387,36 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 	return resultNode("shopify", map[string]any{"status": "ok", "stores": out})
 }
 
-// syncStates reads the runtime's health rows for this connector, every page
-// of them, grouped by the store whose partition each row is.
+// storeSyncStates reads one store's current health: the row of each
+// mirrored domain on the store's own partition, BY ID, and only the domains
+// that have one.
+//
+// By id, never by walking syncStatesAll: those rows are the append-only
+// history, and every sweep and delivery adds to it, so a reader that walked
+// it to find each tip would cost more with every passing day and every store
+// connected. Read by id, the cost is the domains times the stores, and exact.
+// The id is the runtime's own derivation (memqlsync.StateID), so the row read
+// is the one the runtime wrote. The shared row written before stores were
+// partitions has an id no store derives, and belongs to no store.
 //
 // Read through the runtime's own declared query rather than a second one
 // of this connector's: v1:platform:syncState belongs to
 // component/datasync, and a connector that declared a parallel read of
 // it would be a second answer to a question the runtime already answers.
-//
-// A row with no partition -- the shared row written before stores were
-// partitions -- belongs to no store and is left out.
-func (c *Connector) syncStates(ctx context.Context) (map[string][]map[string]any, error) {
-	query := renderCall("syncStatesAll", map[string]any{"connector": ConnectorName})
-	// The rows are the append-only history, newest first, and the row id
-	// is deterministic per (domain, store) -- so the TIP of each is that
-	// store's current health for the domain and everything behind it is
-	// timeline.
-	seen := map[[2]string]bool{}
-	out := map[string][]map[string]any{}
-	err := memql.WalkQueryPages(operatorContext(ctx), c.engine.Execute, query, syncStatePageBudget, func(res *memql.ExecuteResult) error {
-		for _, r := range memql.MaterializeRows(res) {
-			concept := mapString(r, "conceptId")
-			partition := strings.TrimSpace(mapString(r, "partitionKey"))
-			key := [2]string{partition, concept}
-			if concept == "" || partition == "" || seen[key] {
-				continue
-			}
-			seen[key] = true
-			out[partition] = append(out[partition], r)
+func (c *Connector) storeSyncStates(ctx context.Context, storeID string) ([]map[string]any, error) {
+	out := []map[string]any{}
+	for _, concept := range generated.ApplyOrder {
+		stateID := memqlsync.StateID(generated.ConceptID(concept), ConnectorName, string(memqlsync.DirectionInbound), storeID)
+		res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStateById", map[string]any{"stateId": stateID}))
+		if err != nil {
+			return nil, fmt.Errorf("shopify: read sync state: %w", err)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("shopify: read sync state: %w", err)
+		if rows := memql.MaterializeRows(res); len(rows) > 0 && mapString(rows[0], "conceptId") != "" {
+			out = append(out, rows[0])
+		}
 	}
 	return out, nil
 }
-
-// syncStatePageBudget bounds the health read: a hundred rows a page, with
-// the history behind each tip, across every store.
-const syncStatePageBudget = 10000
 
 // phaseOf renders the runtime's syncState fields as the one word the
 // Stores page shows.

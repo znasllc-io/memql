@@ -310,9 +310,9 @@ func TestTheConnectorsOwnConceptsAreReadableAndWritable(t *testing.T) {
 			connector: refused,
 		},
 		{
-			what:      "the deployment's sync health -- what the capability surface reports on",
+			what:      "the deployment's sync health, read by id -- what the capability surface reports on",
 			concept:   "v1:platform:syncState",
-			call:      renderCall("syncStatesAll", map[string]any{"connector": ConnectorName}),
+			call:      renderCall("syncStateById", map[string]any{"stateId": "dbtest-authority-syncstate"}),
 			connector: refused,
 		},
 		{

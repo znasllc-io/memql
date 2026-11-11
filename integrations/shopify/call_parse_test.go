@@ -116,7 +116,7 @@ func connectorCallSites() []struct {
 		{"creditLimitsForCompany", map[string]any{"storeId": "acme", "companyGid": "gid://shopify/Company/1"}},
 		// capabilities.go -- the runtime's health read, which the Stores
 		// page renders through this connector.
-		{"syncStatesAll", map[string]any{"connector": "shopify"}},
+		{"syncStateById", map[string]any{"stateId": "s1"}},
 		// propagate.go -- current source rows under the connector actor.
 		{"productContentForPropagation", map[string]any{"rowId": "pc1"}},
 		{"customerNoteForPropagation", map[string]any{"rowId": "cn1"}},
