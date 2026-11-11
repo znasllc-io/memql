@@ -110,9 +110,10 @@ takes too long.
 Fields are added. None is removed or renamed (removing a field bricks stored rows,
 memql#5199).
 
-- **`v1:platform:syncState`** gains `partition` (string, empty for a connector that has
-  none). The row id is derived from the concept, the connector, the direction and the
-  partition, and is unchanged when the partition is empty. `backfillStatus` gains the
+- **`v1:platform:syncState`** gains `partitionKey` (string, empty for a connector that has
+  none; the engine reserves the name `partition`). The row id is derived from the concept,
+  the connector, the direction and the partition, and is unchanged when the partition is
+  empty. `backfillStatus` gains the
   value `queued`, the state a backfill waits in until the continuing pass picks it up.
 - **`v1:platform:inboundRequest`** gains `attempts` (int) and `nextAttemptAt`
   (datetime). `status` keeps its four values.

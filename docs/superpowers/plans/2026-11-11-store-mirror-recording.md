@@ -16,7 +16,8 @@
 - Every task's tests fail first (record the command and the failing output), then pass.
 - Every `go test` carries `MEMQL_DATABASE_DSN="$MIRROR_DSN"`, where Task 1 exports `MIRROR_DSN='postgres://memql:memql_dev@127.0.0.1:55432/memql_mirror_a?sslmode=disable'`. Database lanes add `MEMQL_REQUIRE_DB=1` and `-p 1`. Never port 5432. Name packages; a bare `go test ./...` at the root misses the engine and is not a verification. The whole tree is `make test`.
 - Generated files are regenerated, never hand-edited (`sdk/go/client/generated_*`, `sdk/ts/src/client/generated_*`, `integrations/shopify/generated/*`, `dsl/shopify/generated/*`, the concept snapshot, the platform graph). After any `.memql` change: `make sdk-gen`; `make concept-snapshot` when a concept gained a field or an enum value; `make platform-graph` when a concept or an automation changed. Then `make sdk-gen-check`, `MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -count=1 -run 'TestConceptFieldSnapshotIsNotStale|TestPlatformGraph' .` and `MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -count=1 ./test/dslconformance/...`. If a root gate names another stale file, run the make target its message names.
-- Fields are added, never removed or renamed (memql#5199): `syncState.partition`, the `backfillStatus` value `queued`, `inboundRequest.attempts`, `inboundRequest.nextAttemptAt`.
+- The DSL and JSON spelling of a partition is `partitionKey`: the engine reserves `partition` as a payload field and as an args name (`component/database/memory-nodes/constants.go`, `component/language/parser/args_block_parser.go`), so a concept field, a mutation, query or builtin argument and a row key read by the OS are all `partitionKey`. Go identifiers keep `Partition` and `partition`. Wherever a task below writes the DSL or JSON name `partition`, read `partitionKey`.
+- Fields are added, never removed or renamed (memql#5199): `syncState.partitionKey`, the `backfillStatus` value `queued`, `inboundRequest.attempts`, `inboundRequest.nextAttemptAt`.
 - The commerce scope set, in this order: `unauthenticated_read_product_listings`, `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`, `unauthenticated_read_customers`, `write_products`, `read_inventory`, `read_locations`, `read_orders`, `read_customers`, `write_customers`, `read_discounts`, `read_returns`. `read_all_orders` is not requested.
 - A delivery has four tries at most: the first, then retries 1 minute, 5 minutes and 30 minutes after the try before.
 - The reconcile watermark is the sweep's start less two minutes.
@@ -115,11 +116,11 @@ type Partitioned interface {
 
   and `Partition string` on `MirrorWrite`.
 - Produces, in `component/datasync`: `Partition string` on `SyncState`; `func SyncStateID(conceptID, connector, direction, partition string) string`; `func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction, partition string) (SyncState, error)`; `func (s *Store) SyncStates(ctx context.Context, connector string) ([]SyncState, error)` (every page); and on `Runner`: `StartBackfill(ctx, connectorName, conceptID, partition string)`, `Reconcile(ctx, connectorName, conceptID, partition string)`, `ReconcileDue(ctx, connectorName string, spec memqlsync.DomainSpec, partition string) bool`, `SetPaused(ctx, connectorName, conceptID, partition string, paused bool) error`.
-- Produces, in the DSL: `syncState.partition string`; the `backfillStatus` value `queued`; `partition` in `syncStateFull`; `upsertSyncState` takes and accepts `partition string`; `query syncState syncStateById { args { stateId string! } }` (cluster owner, `@unbounded`, one row); `syncStatesAll` takes `partition string` and filters on it when given; `datasyncStartBackfill` and `datasyncSetSyncPaused` take `partition string`.
+- Produces, in the DSL: `syncState.partitionKey string`; the `backfillStatus` value `queued`; `partitionKey` in `syncStateFull`; `upsertSyncState` takes and accepts `partition string`; `query syncState syncStateById { args { stateId string! } }` (cluster owner, `@unbounded`, one row); `syncStatesAll` takes `partition string` and filters on it when given; `datasyncStartBackfill` and `datasyncSetSyncPaused` take `partition string`.
 
 Decisions:
 - An empty partition derives the id from the same three-part string as today, so every existing row keeps its id; a partition is appended as a fourth part.
-- The runtime reads one state by its id (`syncStateById`), not by its fields: a row written before this version has no `partition` field, and matching an absent field against "" is not a rule to rely on. `syncStateFor` stays in the DSL, unused by the runtime.
+- The runtime reads one state by its id (`syncStateById`), not by its fields: a row written before this version has no `partitionKey` field, and matching an absent field against "" is not a rule to rely on. `syncStateFor` stays in the DSL, unused by the runtime.
 - `SyncStates` pages with `memql.ContextWithCursor` and `memql.ResultPageCursor`, as `component/campaigns` does.
 - `handleReconcileDomains`: a connector implementing `Partitioned` is swept one partition at a time, through `ReconcilePartition`; a partition's failure is logged and the next partition still runs. Any other connector is swept with partition "". With a partition, `Runner` calls `BackfillPartition` and `ReconcilePartition`, and refuses a connector that does not implement the interface.
 - `recordInboundHealth` writes the row of each write's own concept and partition.
@@ -210,7 +211,7 @@ func TestTheCadenceStillRunsFromWhenTheSweepEnded(t *testing.T)          // Reco
 **Interfaces:**
 - Consumes: Task 3's partitioned runner and the `queued` status; Task 4's partitions; Task 2's `domainInConnection` and `scopesMissingFor`.
 - Produces, in `component/datasync`: `func (r *Runner) QueueBackfill(ctx context.Context, connectorName, conceptID, partition string) error`; `type ContinueResult struct{ Started, Advanced, Completed int }`; `func (r *Runner) ContinueBackfills(ctx context.Context) (ContinueResult, error)`; capabilities `queueBackfill` and `continueBackfills`.
-- Produces, in the DSL: `builtin datasyncQueueBackfill { connector string!, conceptId string!, partition string }` and `builtin datasyncContinueBackfills { }`, both refusing a call without internal origin; `query syncState syncStatesBackfilling { args { connector string! } }` (status `queued` or `running`, oldest first, paginated); `automation continueQueuedBackfills` on `0 */5 * * * *`.
+- Produces, in the DSL: `builtin datasyncQueueBackfill { connector string!, conceptId string!, partitionKey string }` and `builtin datasyncContinueBackfills { }`, both refusing a call without internal origin; `query syncState syncStatesBackfilling { args { connector string! } }` (status `queued` or `running`, oldest first, paginated); `automation continueQueuedBackfills` on `0 */5 * * * *`.
 - Produces, in `integrations/shopify`: `func (c *Connector) queueConnectBackfills(ctx context.Context, prior Store, found bool, now Store)`, called by `writeConnect` once the store row is written and before the webhook pass; `func (c *Connector) queueUnstartedBackfills(ctx context.Context)`, called by `Bootstrap` after the subscription pass; the store health key `ordersFrom`.
 
 Decisions:
@@ -477,7 +478,7 @@ it("shows the engine's refusal for a wait of zero")
 - Test: `clients/os/test/cluster/origins.test.tsx`, `clients/os/test/cluster/harness.tsx`
 
 **Interfaces:**
-- Consumes: `syncStatesAll` rows carrying `partition`; `inboundRequestsGivenUp`; `datasyncRequeueInbound`; `datasyncStartBackfill` and `datasyncSetSyncPaused` with `partition`.
+- Consumes: `syncStatesAll` rows carrying `partitionKey`; `inboundRequestsGivenUp`; `datasyncRequeueInbound`; `datasyncStartBackfill` and `datasyncSetSyncPaused` with `partition`.
 - Produces, in `rows.ts`: `partition: string` and `notRequested: boolean` on `OriginRow`; the row key gains the partition; `function groupByPartition(rows: readonly OriginRow[]): { partition: string; rows: OriginRow[]; outside: OriginRow[] }[]`; `function givenUpBySource(rows: readonly Row[]): { source: string; count: number; lastError: string }[]`.
 
 Decisions:
