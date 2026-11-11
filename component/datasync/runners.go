@@ -436,12 +436,54 @@ func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector
 // is then operator-driven only, which is the right default for a domain
 // whose comparison is expensive at the origin.
 //
-// It reads the one row the partition names ("" for a connector without
-// partitions); the sweep asks it once per partition.
+// It reads the one row the partition names. A partitioned connector asked
+// for no partition is due when ANY of its partitions is, and its shared row
+// -- which nothing writes -- is never read; the sweep itself asks once per
+// partition.
 func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec memqlsync.DomainSpec, partition string) bool {
 	if spec.ReconcileInterval <= 0 {
 		return false
 	}
+	partition = strings.TrimSpace(partition)
+	parts, fanOut, err := r.fanOut(ctx, connectorName, partition)
+	if err != nil {
+		return false
+	}
+	if !fanOut {
+		return r.dueOne(ctx, connectorName, spec, partition)
+	}
+	for _, part := range parts {
+		if r.dueOne(ctx, connectorName, spec, part) {
+			return true
+		}
+	}
+	return false
+}
+
+// fanOut reports whether a call naming this partition fans out -- a
+// partitioned connector asked for none -- and over which partitions. A
+// connector that is not bound, or has no partitions, does not fan out.
+func (r *Runner) fanOut(ctx context.Context, connectorName, partition string) ([]string, bool, error) {
+	if partition != "" {
+		return nil, false, nil
+	}
+	connector, ok := r.lookup(connectorName)
+	if !ok || connector == nil {
+		return nil, false, nil
+	}
+	p, partitioned := connector.(memqlsync.Partitioned)
+	if !partitioned {
+		return nil, false, nil
+	}
+	parts, err := p.Partitions(auth.ContextWithConnectorActor(ctx, connectorName))
+	if err != nil {
+		return nil, true, fmt.Errorf("datasync: listing the partitions of %q: %w", connectorName, err)
+	}
+	return cleanPartitions(parts), true, nil
+}
+
+// dueOne is ReconcileDue for one row.
+func (r *Runner) dueOne(ctx context.Context, connectorName string, spec memqlsync.DomainSpec, partition string) bool {
 	st, err := r.store.SyncStateFor(OperatorContext(ctx), spec.Concept, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil || st.Paused {
 		return false
@@ -467,10 +509,30 @@ const notGrantedRecheck = 6 * time.Hour
 
 // SetPaused flips a domain's pause switch, stopping both runners and the
 // drain for it. A partition's pause is its own: it names that partition's
-// row and no other.
+// row and no other. A partitioned connector asked for no partition is
+// paused on every partition's row, and never on the shared row, which
+// nothing reads.
 func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID, partition string, paused bool) error {
-	opCtx := OperatorContext(ctx)
 	partition = strings.TrimSpace(partition)
+	parts, fanOut, err := r.fanOut(ctx, connectorName, partition)
+	if err != nil {
+		return err
+	}
+	if !fanOut {
+		return r.setPausedOne(ctx, connectorName, conceptID, partition, paused)
+	}
+	var errs []error
+	for _, part := range parts {
+		if err := r.setPausedOne(ctx, connectorName, conceptID, part, paused); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// setPausedOne flips one row's pause switch.
+func (r *Runner) setPausedOne(ctx context.Context, connectorName, conceptID, partition string, paused bool) error {
+	opCtx := OperatorContext(ctx)
 	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil {
 		return err

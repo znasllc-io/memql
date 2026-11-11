@@ -477,3 +477,52 @@ func TestAPauseIsOnePartitionsOwn(t *testing.T) {
 		t.Errorf("partition b was not swept while a was paused: %v", got)
 	}
 }
+
+func TestAPauseWithNoPartitionHoldsForEveryPartition(t *testing.T) {
+	engine := newFakeEngine()
+	p := newFakePartitioned("a", "b")
+	r := testPartitionedRunner(engine, p)
+
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, "", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"a", "b"} {
+		w := upsertsFor(engine, part)
+		if len(w) != 1 || !strings.Contains(w[0], "paused: true") || !strings.Contains(w[0], `partitionKey: "`+part+`"`) {
+			t.Errorf("a pause naming no partition did not land on partition %s's row: %v", part, w)
+		}
+	}
+	if n := engine.countContaining(`stateId: "` + SyncStateID(testMirrorConcept, "shopify", "inbound", "") + `"`); n != 0 {
+		t.Errorf("the shared row was read or written %d times: a partitioned connector's pause would not hold", n)
+	}
+
+	seedPartitionState(engine, "a", map[string]any{"paused": true})
+	seedPartitionState(engine, "b", map[string]any{"paused": true})
+	sweepOnce(t, testSweep(r, p))
+	if len(p.partOrder) != 0 || len(p.reconcileSince) != 0 {
+		t.Errorf("a paused connector was swept anyway: partitions %v, shared %d", p.partOrder, len(p.reconcileSince))
+	}
+}
+
+func TestReconcileDueWithNoPartitionAsksEveryPartition(t *testing.T) {
+	engine := newFakeEngine()
+	p := newFakePartitioned("a", "b")
+	r := testPartitionedRunner(engine, p)
+	spec := p.domains[0]
+	recent := testNow.Add(-time.Hour).Format(time.RFC3339)
+	old := testNow.Add(-7 * time.Hour).Format(time.RFC3339)
+
+	seedPartitionState(engine, "a", map[string]any{"lastReconcileAt": recent})
+	seedPartitionState(engine, "b", map[string]any{"lastReconcileAt": old})
+	if !r.ReconcileDue(context.Background(), "shopify", spec, "") {
+		t.Error("not due with no partition while partition b is due")
+	}
+
+	seedPartitionState(engine, "b", map[string]any{"lastReconcileAt": recent})
+	if r.ReconcileDue(context.Background(), "shopify", spec, "") {
+		t.Error("due with no partition while neither partition is")
+	}
+	if n := engine.countContaining(`stateId: "` + SyncStateID(testMirrorConcept, "shopify", "inbound", "") + `"`); n != 0 {
+		t.Errorf("the shared row was read %d times for a partitioned connector", n)
+	}
+}
