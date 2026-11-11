@@ -184,6 +184,7 @@ shape syncState syncStateFull {
   conceptId
   connector
   direction
+  partitionKey
   backfillCursor
   backfillStatus
   lastInboundAt

@@ -182,6 +182,66 @@ func (c *fakeConnector) propagateCount() int {
 	return len(c.propagateCalls)
 }
 
+// fakePartitioned is a fakeConnector that serves many tenants. It embeds
+// fakeConnector, so its SHARED Backfill and Reconcile still record into
+// backfillSeen and reconcileSince -- which is what lets a test say the
+// runtime never reached them. Each partition scripts its own report, error
+// and backfill pages, and records the `since` and cursors it was handed.
+type fakePartitioned struct {
+	*fakeConnector
+
+	partitions    []string
+	partitionsErr error
+
+	partReports map[string]memqlsync.ReconcileReport
+	partErrs    map[string]error
+	partSince   map[string][]time.Time
+	partPages   map[string][]memqlsync.BackfillPage
+	partCursors map[string][]string
+	partOrder   []string
+}
+
+func newFakePartitioned(partitions ...string) *fakePartitioned {
+	return &fakePartitioned{
+		fakeConnector: mirrorConnector(),
+		partitions:    partitions,
+		partReports:   map[string]memqlsync.ReconcileReport{},
+		partErrs:      map[string]error{},
+		partSince:     map[string][]time.Time{},
+		partPages:     map[string][]memqlsync.BackfillPage{},
+		partCursors:   map[string][]string{},
+	}
+}
+
+func (p *fakePartitioned) Partitions(context.Context) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.partitions, p.partitionsErr
+}
+
+func (p *fakePartitioned) BackfillPartition(_ context.Context, partition, _ string, cursor string) (memqlsync.BackfillPage, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.partCursors[partition] = append(p.partCursors[partition], cursor)
+	if err := p.partErrs[partition]; err != nil {
+		return memqlsync.BackfillPage{}, err
+	}
+	pages := p.partPages[partition]
+	if len(pages) == 0 {
+		return memqlsync.BackfillPage{Done: true}, nil
+	}
+	p.partPages[partition] = pages[1:]
+	return pages[0], nil
+}
+
+func (p *fakePartitioned) ReconcilePartition(_ context.Context, partition, _ string, since time.Time) (memqlsync.ReconcileReport, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.partSince[partition] = append(p.partSince[partition], since)
+	p.partOrder = append(p.partOrder, partition)
+	return p.partReports[partition], p.partErrs[partition]
+}
+
 // fakeWriter records mirror writes and answers stored versions from a
 // table, so the version guard is testable without a database.
 type fakeWriter struct {

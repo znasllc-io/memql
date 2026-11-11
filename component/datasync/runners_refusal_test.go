@@ -26,7 +26,7 @@ func TestANotGrantedDomainIsSkippedAndSaysWhyOnce(t *testing.T) {
 	c.reconcileErr = memqlsync.NotGranted("shopify", "read_content")
 	r := testRunner(engine, newFakeWriter(), c)
 
-	res, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept)
+	res, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, "")
 	if err != nil {
 		t.Fatalf("a domain the store did not grant surfaced as a sweep failure: %v", err)
 	}
@@ -50,8 +50,8 @@ func TestANotGrantedDomainIsSkippedAndSaysWhyOnce(t *testing.T) {
 	// The next tick, with the same refusal already on the row, writes
 	// nothing: the health timeline is append-only and 22 domains writing
 	// an unchanged reason every ten minutes is a table nobody asked for.
-	stored := SyncStateID(testMirrorConcept, "shopify", "inbound")
-	engine.seed(`query syncStateFor`, []map[string]any{{
+	stored := SyncStateID(testMirrorConcept, "shopify", "inbound", "")
+	engine.seed(`query syncStateById`, []map[string]any{{
 		"id":            stored,
 		"conceptId":     testMirrorConcept,
 		"connector":     "shopify",
@@ -59,7 +59,7 @@ func TestANotGrantedDomainIsSkippedAndSaysWhyOnce(t *testing.T) {
 		"lastError":     c.reconcileErr.Error(),
 		"lastAttemptAt": testNow.Add(-time.Minute).Format(time.RFC3339),
 	}})
-	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err != nil {
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := engine.countContaining("mutation upsertSyncState"); n != 1 {
@@ -67,7 +67,7 @@ func TestANotGrantedDomainIsSkippedAndSaysWhyOnce(t *testing.T) {
 	}
 	// ...and the domain is not due again until its own interval has run,
 	// even though nothing was swept.
-	if r.ReconcileDue(context.Background(), "shopify", c.domains[0]) {
+	if r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
 		t.Error("a not-granted domain attempted a minute ago is due again")
 	}
 }
@@ -78,7 +78,7 @@ func TestAPermanentSweepFailureWaitsForTheDomainsOwnCadence(t *testing.T) {
 	c.reconcileErr = memqlsync.Permanent(errors.New("shopify admin: undefinedField: Field 'id' doesn't exist on type 'ResourcePublication'"))
 	r := testRunner(engine, newFakeWriter(), c)
 
-	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err == nil {
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err == nil {
 		t.Fatal("a permanent failure must still be reported: somebody has to fix the query")
 	}
 	writes := engine.callsContaining("mutation upsertSyncState")
@@ -97,8 +97,8 @@ func TestAPermanentSweepFailureWaitsForTheDomainsOwnCadence(t *testing.T) {
 
 	// ReconcileDue reads the attempt back: the domain waits its own interval,
 	// while `since` keeps pointing at the last sweep that ran.
-	engine.seed(`query syncStateFor`, []map[string]any{{
-		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound"),
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
 		"conceptId":       testMirrorConcept,
 		"connector":       "shopify",
 		"direction":       "inbound",
@@ -106,7 +106,7 @@ func TestAPermanentSweepFailureWaitsForTheDomainsOwnCadence(t *testing.T) {
 		"lastAttemptAt":   testNow.Format(time.RFC3339),
 		"lastError":       c.reconcileErr.Error(),
 	}})
-	if r.ReconcileDue(context.Background(), "shopify", c.domains[0]) {
+	if r.ReconcileDue(context.Background(), "shopify", c.domains[0], "") {
 		t.Error("due again immediately after a permanent refusal")
 	}
 }
@@ -117,7 +117,7 @@ func TestATransientSweepFailureStaysDue(t *testing.T) {
 	c.reconcileErr = errors.New("shopify admin: HTTP 502")
 	r := testRunner(engine, newFakeWriter(), c)
 
-	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err == nil {
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err == nil {
 		t.Fatal("a transient failure must be reported")
 	}
 	writes := engine.callsContaining("mutation upsertSyncState")
@@ -138,7 +138,7 @@ func TestPausingADomainWithNoHealthRowWritesOneCarryingThePause(t *testing.T) {
 	c := mirrorConnector()
 	r := testRunner(engine, newFakeWriter(), c)
 
-	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, true); err != nil {
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if n := engine.countContaining("mutation setSyncPaused"); n != 0 {
@@ -150,14 +150,14 @@ func TestPausingADomainWithNoHealthRowWritesOneCarryingThePause(t *testing.T) {
 	}
 
 	// With a stored row, the pause is the update it always was.
-	engine.seed(`query syncStateFor`, []map[string]any{{
-		"id":        SyncStateID(testMirrorConcept, "shopify", "inbound"),
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":        SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
 		"conceptId": testMirrorConcept,
 		"connector": "shopify",
 		"direction": "inbound",
 		"createdAt": testNow.Format(time.RFC3339),
 	}})
-	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, false); err != nil {
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if n := engine.countContaining("mutation setSyncPaused"); n != 1 {
@@ -173,8 +173,8 @@ func TestASweepAfterARefusalStillNarrowsOnTheLastSweepThatRan(t *testing.T) {
 	c := mirrorConnector()
 	r := testRunner(engine, newFakeWriter(), c)
 	ranAt := testNow.Add(-5 * time.Hour)
-	engine.seed(`query syncStateFor`, []map[string]any{{
-		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound"),
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
 		"conceptId":       testMirrorConcept,
 		"connector":       "shopify",
 		"direction":       "inbound",
@@ -182,7 +182,7 @@ func TestASweepAfterARefusalStillNarrowsOnTheLastSweepThatRan(t *testing.T) {
 		"lastAttemptAt":   testNow.Add(-time.Hour).Format(time.RFC3339),
 		"lastError":       "connector: permanent failure: refused last hour",
 	}})
-	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err != nil {
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.reconcileSince) != 1 || !c.reconcileSince[0].Equal(ranAt) {
@@ -196,7 +196,7 @@ func TestANotRequestedDomainIsRecordedOnceAndIsNotAFailure(t *testing.T) {
 	c.reconcileErr = memqlsync.NotRequested("shopify")
 	r := testRunner(engine, newFakeWriter(), c)
 
-	res, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept)
+	res, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, "")
 	if err != nil {
 		t.Fatalf("a domain outside the store's connection surfaced as a sweep failure: %v", err)
 	}
@@ -214,15 +214,15 @@ func TestANotRequestedDomainIsRecordedOnceAndIsNotAFailure(t *testing.T) {
 		t.Errorf("a skipped domain must not claim a finished sweep: %s", writes[0])
 	}
 
-	engine.seed(`query syncStateFor`, []map[string]any{{
-		"id":            SyncStateID(testMirrorConcept, "shopify", "inbound"),
+	engine.seed(`query syncStateById`, []map[string]any{{
+		"id":            SyncStateID(testMirrorConcept, "shopify", "inbound", ""),
 		"conceptId":     testMirrorConcept,
 		"connector":     "shopify",
 		"direction":     "inbound",
 		"lastError":     c.reconcileErr.Error(),
 		"lastAttemptAt": testNow.Add(-time.Minute).Format(time.RFC3339),
 	}})
-	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err != nil {
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
 		t.Fatal(err)
 	}
 	if n := engine.countContaining("mutation upsertSyncState"); n != 1 {

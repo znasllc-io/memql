@@ -2331,7 +2331,9 @@ func DatasyncRetryOutboxEntryBuild(args DatasyncRetryOutboxEntryArgs) string {
 type DatasyncSetSyncPausedArgs struct {
 	Connector string
 	ConceptId string
-	Paused    bool
+	// The one partition of a partitioned connector (one store) to pause or resume; its pause is its own.
+	PartitionKey string
+	Paused       bool
 }
 
 // DatasyncSetSyncPaused calls the engine builtin datasyncSetSyncPaused.
@@ -2350,6 +2352,13 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 	}
 	b.WriteString("conceptId: ")
 	b.WriteString(quoteMemQL(args.ConceptId))
+	if args.PartitionKey != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
+	}
 	if b.Len() > 30 {
 		b.WriteString(", ")
 	}
@@ -2363,6 +2372,8 @@ func DatasyncSetSyncPausedBuild(args DatasyncSetSyncPausedArgs) string {
 type DatasyncStartBackfillArgs struct {
 	Connector string
 	ConceptId string
+	// One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor.
+	PartitionKey string
 }
 
 // DatasyncStartBackfill calls the engine builtin datasyncStartBackfill.
@@ -2381,6 +2392,13 @@ func DatasyncStartBackfillBuild(args DatasyncStartBackfillArgs) string {
 	}
 	b.WriteString("conceptId: ")
 	b.WriteString(quoteMemQL(args.ConceptId))
+	if args.PartitionKey != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
+	}
 	b.WriteString(")")
 	return b.String()
 }

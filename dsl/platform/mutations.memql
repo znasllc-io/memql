@@ -2140,8 +2140,8 @@ mutation outboxEntry discardOutboxEntry {
   }
 }
 
-/// Write one domain's health. Deterministic id per (concept, connector, direction), so this is an
-/// append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
+/// Write one domain's health. Deterministic id per (concept, connector, direction) and partition, so
+/// this is an append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
 /// sync runtime, acting for no user.
 @serverOnly
 mutation syncState upsertSyncState {
@@ -2150,6 +2150,7 @@ mutation syncState upsertSyncState {
     conceptId        string!
     connector        string!
     direction        string!
+    partitionKey     string
     backfillCursor   string
     backfillStatus   string
     lastInboundAt    datetime
@@ -2163,7 +2164,7 @@ mutation syncState upsertSyncState {
     lastError        string
   }
   insert {
-    accept { conceptId, connector, direction, lastInboundAt, lastReconcileAt, lastAttemptAt }
+    accept { conceptId, connector, direction, partitionKey, lastInboundAt, lastReconcileAt, lastAttemptAt }
     stamp {
       id:               args.stateId
       backfillCursor:   args.backfillCursor ?? ""

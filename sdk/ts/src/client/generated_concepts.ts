@@ -1075,6 +1075,7 @@ export const BoundConcepts = {
   suppressionByDigest: "v1:campaigns:suppression",
   suppressionForOrganization: "v1:campaigns:suppression",
   surfacesForOwner: "v1:actions:surface",
+  syncStateById: "v1:platform:syncState",
   syncStateFor: "v1:platform:syncState",
   syncStatesAll: "v1:platform:syncState",
   systemActiveAuthoringBundles: "v1:authoring:bundle",

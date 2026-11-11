@@ -175,6 +175,10 @@ type MirrorWrite struct {
 	// it already had; it never invents one, which is why this is a flag
 	// on a write rather than a separate delete verb.
 	Retire bool
+	// Partition names the tenant this row belongs to, for a connector
+	// that implements Partitioned; empty for one that does not. The
+	// runtime records the delivery's health on that tenant's own row.
+	Partition string
 }
 
 // BackfillPage is one resumable page of a connector's current state.

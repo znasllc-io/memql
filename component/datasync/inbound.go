@@ -398,7 +398,9 @@ func (d *Dispatcher) stamp(ctx context.Context, requestID, status, lastError str
 }
 
 // recordInboundHealth updates lastInboundAt and lagSeconds for every
-// domain this delivery touched.
+// domain this delivery touched -- the row of each write's own concept and
+// partition, so a delivery for one store of a partitioned connector moves
+// that store's row and no other.
 //
 // Lag is measured from the ORIGIN's version to now, not from when the
 // row was staged: staging latency is MemQL's own and is small, while the
@@ -411,16 +413,18 @@ func (d *Dispatcher) recordInboundHealth(
 	receivedAt time.Time,
 ) {
 	now := d.now().UTC()
-	seen := map[string]struct{}{}
+	seen := map[[2]string]struct{}{}
 	for _, w := range writes {
 		conceptID := strings.TrimSpace(w.Concept)
 		if conceptID == "" {
 			continue
 		}
-		if _, done := seen[conceptID]; done {
+		partition := strings.TrimSpace(w.Partition)
+		key := [2]string{conceptID, partition}
+		if _, done := seen[key]; done {
 			continue
 		}
-		seen[conceptID] = struct{}{}
+		seen[key] = struct{}{}
 
 		origin := receivedAt
 		if t, ok := parseVersionTime(w.Version); ok {
@@ -431,17 +435,17 @@ func (d *Dispatcher) recordInboundHealth(
 			lag = int(now.Sub(origin).Seconds())
 		}
 
-		st, err := d.store.SyncStateFor(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound))
+		st, err := d.store.SyncStateFor(ctx, conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition)
 		if err != nil {
 			continue
 		}
-		st.ConceptID, st.Connector, st.Direction = conceptID, connector.Name(), string(memqlsync.DirectionInbound)
+		st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition
 		st.LastInboundAt = now
 		st.LagSeconds = lag
 		st.LastError = ""
 		if err := d.store.WriteSyncState(ctx, st); err != nil && d.logger != nil {
 			d.logger.Warn("datasync: could not record a domain's inbound health",
-				"connector", connector.Name(), "concept", conceptID, "error", err)
+				"connector", connector.Name(), "concept", conceptID, "partition", partition, "error", err)
 		}
 	}
 }

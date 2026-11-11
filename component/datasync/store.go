@@ -85,10 +85,14 @@ func (e OutboxEntry) Due(now time.Time) bool {
 
 // SyncState is one row of v1:platform:syncState.
 type SyncState struct {
-	ID              string
-	ConceptID       string
-	Connector       string
-	Direction       string
+	ID        string
+	ConceptID string
+	Connector string
+	Direction string
+	// Partition is the tenant of a memqlsync.Partitioned connector this
+	// row reports on, "" for a connector without partitions. Stored as
+	// partitionKey: the engine reserves `partition` as a payload field.
+	Partition       string
 	BackfillCursor  string
 	BackfillStatus  string
 	LastInboundAt   time.Time
@@ -124,8 +128,16 @@ var syncIDs = id.NewUntracked()
 // and a cluster ran for weeks with no health row at all: every domain due
 // on every tick, no cadence honoured, no sweep failure ever shown. The tuple
 // stays readable on the row's own fields.
-func SyncStateID(conceptID, connector, direction string) string {
-	return string(syncIDs.FromString(strings.TrimSpace(conceptID) + "|" + strings.TrimSpace(connector) + "|" + strings.TrimSpace(direction)))
+//
+// A partition (memqlsync.Partitioned) is appended as a FOURTH part, and an
+// empty one appends nothing: every row written before partitions existed
+// keeps the id it always had, and its history stays one timeline.
+func SyncStateID(conceptID, connector, direction, partition string) string {
+	key := strings.TrimSpace(conceptID) + "|" + strings.TrimSpace(connector) + "|" + strings.TrimSpace(direction)
+	if p := strings.TrimSpace(partition); p != "" {
+		key += "|" + p
+	}
+	return string(syncIDs.FromString(key))
 }
 
 // PendingOutbox returns the entries one connector still owes delivery
@@ -207,38 +219,87 @@ func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (Sta
 	}, true, nil
 }
 
-// SyncStateFor reads one domain's health, or the zero value when the
-// domain has never been written.
-func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction string) (SyncState, error) {
-	rows, err := s.rows(ctx, call("query", "syncStateFor",
-		arg{"conceptId", conceptID}, arg{"connector", connector}, arg{"direction", direction}))
+// SyncStateFor reads one domain's health -- one partition's, for a
+// partitioned connector -- or the zero value when it has never been written.
+//
+// It reads the row BY ITS ID (syncStateById), not by its fields: a row
+// written before partitions has no partitionKey at all, and whether an
+// absent field matches "" is not a rule to rely on. The id is what the
+// partition derives, so the partition read back is the one asked for.
+func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction, partition string) (SyncState, error) {
+	partition = strings.TrimSpace(partition)
+	stateID := SyncStateID(conceptID, connector, direction, partition)
+	rows, err := s.rows(ctx, call("query", "syncStateById", arg{"stateId", stateID}))
 	if err != nil {
 		return SyncState{}, err
 	}
 	if len(rows) == 0 {
 		return SyncState{
-			ID:        SyncStateID(conceptID, connector, direction),
+			ID:        stateID,
 			ConceptID: conceptID,
 			Connector: connector,
 			Direction: direction,
+			Partition: partition,
 		}, nil
 	}
 	st := syncStateFromRow(rows[0])
+	st.Partition = partition
 	st.Stored = true
 	return st, nil
+}
+
+// SyncStates reads every health row of one connector, every partition's,
+// across every page of syncStatesAll.
+//
+// The page rides the context, as component/campaigns walks an audience: a
+// read that stopped at the first page would silently drop the stores past
+// the hundredth domain row.
+func (s *Store) SyncStates(ctx context.Context, connector string) ([]SyncState, error) {
+	var args []arg
+	if c := strings.TrimSpace(connector); c != "" {
+		args = append(args, arg{"connector", c})
+	}
+	q := call("query", "syncStatesAll", args...)
+	var out []SyncState
+	cursor := ""
+	seen := map[string]bool{}
+	for {
+		res, err := s.exec(memql.ContextWithCursor(ctx, cursor), q)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range memql.MaterializeRows(res) {
+			st := syncStateFromRow(r)
+			st.Stored = true
+			out = append(out, st)
+		}
+		next, err := memql.ResultPageCursor(res)
+		if err != nil {
+			return nil, fmt.Errorf("datasync: syncStatesAll: %w", err)
+		}
+		if next == "" {
+			return out, nil
+		}
+		if seen[next] {
+			return nil, fmt.Errorf("datasync: syncStatesAll: the engine handed back a cursor it had already given")
+		}
+		seen[next] = true
+		cursor = next
+	}
 }
 
 // WriteSyncState persists one domain's health.
 func (s *Store) WriteSyncState(ctx context.Context, st SyncState) error {
 	id := strings.TrimSpace(st.ID)
 	if id == "" {
-		id = SyncStateID(st.ConceptID, st.Connector, st.Direction)
+		id = SyncStateID(st.ConceptID, st.Connector, st.Direction, st.Partition)
 	}
 	args := []arg{
 		{"stateId", id},
 		{"conceptId", st.ConceptID},
 		{"connector", st.Connector},
 		{"direction", st.Direction},
+		{"partitionKey", strings.TrimSpace(st.Partition)},
 		{"backfillCursor", st.BackfillCursor},
 		{"backfillStatus", st.BackfillStatus},
 		{"lagSeconds", st.LagSeconds},
@@ -347,6 +408,7 @@ func syncStateFromRow(r map[string]any) SyncState {
 		ConceptID:       stringField(r, "conceptId"),
 		Connector:       stringField(r, "connector"),
 		Direction:       stringField(r, "direction"),
+		Partition:       stringField(r, "partitionKey"),
 		BackfillCursor:  stringField(r, "backfillCursor"),
 		BackfillStatus:  stringField(r, "backfillStatus"),
 		LastInboundAt:   timeField(r, "lastInboundAt"),

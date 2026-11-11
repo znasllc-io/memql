@@ -40,6 +40,10 @@ type Integration struct {
 	dispatcher *Dispatcher
 	runner     *Runner
 	logger     *slog.Logger
+	// bound and lookup default to the connector registry; a test sets
+	// them to sweep one connector without the process-global registry.
+	bound  func() []string
+	lookup func(name string) (memqlsync.Connector, bool)
 }
 
 // NewIntegration wires the runtime over an engine.
@@ -72,7 +76,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "reconcileDomains",
-			Description: "Sweep every mirrored domain whose DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. Skips paused domains and connectors that do not implement Reconcile.",
+			Description: "Sweep every mirrored domain whose DomainSpec interval says it is due, healing drift through the same version-guarded apply path inbound uses. A partitioned connector is swept one partition at a time, each from its own watermark. Skips paused domains and connectors that do not implement Reconcile.",
 			Handler:     i.handleReconcileDomains,
 		},
 		{
@@ -80,8 +84,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Drive one domain's backfill page by page from its stored cursor, persisting progress after every page so a restart resumes. Operator-driven; nothing schedules it.",
 			Handler:     i.handleStartBackfill,
 			ArgsSchema: map[string]string{
-				"connector": "string - connector name",
-				"conceptId": "string - canonical id of the concept to backfill",
+				"connector":    "string - connector name",
+				"conceptId":    "string - canonical id of the concept to backfill",
+				"partitionKey": "string (optional) - one partition of a partitioned connector; absent backfills every partition it names",
 			},
 		},
 		{
@@ -104,9 +109,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Pause or resume one domain: stops its backfill, its reconciliation and its drain without unregistering the connector or changing any declaration.",
 			Handler:     i.handleSetPaused,
 			ArgsSchema: map[string]string{
-				"connector": "string - connector name",
-				"conceptId": "string - canonical id of the concept",
-				"paused":    "boolean - true to pause",
+				"connector":    "string - connector name",
+				"conceptId":    "string - canonical id of the concept",
+				"partitionKey": "string (optional) - the one partition of a partitioned connector to pause",
+				"paused":       "boolean - true to pause",
 			},
 		},
 	}
@@ -172,16 +178,17 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	return resultNode("processed", fmt.Sprintf("applied=%d stale=%d", res.Applied, res.Stale))
 }
 
+// handleReconcileDomains is the scheduled sweep. A connector that
+// implements memqlsync.Partitioned is swept one partition at a time, each
+// through ReconcilePartition from its own watermark, and one partition's
+// failure is logged while the next still runs. Any other connector is swept
+// with partition "", as it always was.
 func (i *Integration) handleReconcileDomains(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := requireInternalOrigin(ctx, "reconcileDomains"); err != nil {
 		return nil, err
 	}
 	var swept, drifted int
-	for _, name := range memqlsync.BoundNames() {
-		connector, ok := memqlsync.Lookup(name)
-		if !ok || connector == nil {
-			continue
-		}
+	sweep := func(name string, connector memqlsync.Connector, partition string) {
 		for _, spec := range connector.Domains() {
 			if spec.Direction == memqlsync.DirectionOutbound {
 				// Reconciliation compares an ORIGIN against a MIRROR.
@@ -190,13 +197,13 @@ func (i *Integration) handleReconcileDomains(ctx context.Context, _ map[string]a
 				// be MemQL auditing a system it does not read.
 				continue
 			}
-			if !i.runner.ReconcileDue(ctx, name, spec) {
+			if !i.runner.ReconcileDue(ctx, name, spec, partition) {
 				continue
 			}
-			report, err := i.runner.Reconcile(ctx, name, spec.Concept)
+			report, err := i.runner.Reconcile(ctx, name, spec.Concept, partition)
 			if err != nil {
 				i.logger.Warn("datasync: a reconciliation sweep failed; the others still run",
-					"connector", name, "concept", spec.Concept, "error", err)
+					"connector", name, "concept", spec.Concept, "partition", partition, "error", err)
 				continue
 			}
 			if report.Skipped {
@@ -206,16 +213,53 @@ func (i *Integration) handleReconcileDomains(ctx context.Context, _ map[string]a
 			drifted += report.Drifted
 		}
 	}
+	for _, name := range i.boundNames() {
+		connector, ok := i.lookupConnector(name)
+		if !ok || connector == nil {
+			continue
+		}
+		p, partitioned := connector.(memqlsync.Partitioned)
+		if !partitioned {
+			sweep(name, connector, "")
+			continue
+		}
+		parts, err := p.Partitions(auth.ContextWithConnectorActor(ctx, name))
+		if err != nil {
+			i.logger.Warn("datasync: could not list a connector's partitions; its sweep waits for the next tick",
+				"connector", name, "error", err)
+			continue
+		}
+		for _, part := range cleanPartitions(parts) {
+			sweep(name, connector, part)
+		}
+	}
 	return resultNode("swept", fmt.Sprintf("domains=%d drifted=%d", swept, drifted))
+}
+
+// boundNames and lookupConnector are the registry, unless a test set the
+// seams -- the drain worker's precedent.
+func (i *Integration) boundNames() []string {
+	if i.bound != nil {
+		return i.bound()
+	}
+	return memqlsync.BoundNames()
+}
+
+func (i *Integration) lookupConnector(name string) (memqlsync.Connector, bool) {
+	if i.lookup != nil {
+		return i.lookup(name)
+	}
+	return memqlsync.Lookup(name)
 }
 
 func (i *Integration) handleStartBackfill(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	connector := strings.TrimSpace(argString(args, "connector"))
 	conceptID := strings.TrimSpace(argString(args, "conceptId"))
+	partition := strings.TrimSpace(argString(args, "partitionKey"))
 	if connector == "" || conceptID == "" {
 		return nil, fmt.Errorf("datasync: startBackfill needs both connector and conceptId")
 	}
-	res, err := i.runner.StartBackfill(ctx, connector, conceptID)
+	res, err := i.runner.StartBackfill(ctx, connector, conceptID, partition)
 	if err != nil {
 		return nil, err
 	}
@@ -297,9 +341,13 @@ func (i *Integration) handleSetPaused(ctx context.Context, args map[string]any, 
 	if connector == "" || conceptID == "" {
 		return nil, fmt.Errorf("datasync: setSyncPaused needs both connector and conceptId")
 	}
+	partition := strings.TrimSpace(argString(args, "partitionKey"))
 	paused := argBool(args, "paused")
-	if err := i.runner.SetPaused(ctx, connector, conceptID, paused); err != nil {
+	if err := i.runner.SetPaused(ctx, connector, conceptID, partition, paused); err != nil {
 		return nil, err
+	}
+	if partition != "" {
+		return resultNode("paused", fmt.Sprintf("%s/%s/%s paused=%t", connector, conceptID, partition, paused))
 	}
 	return resultNode("paused", fmt.Sprintf("%s/%s paused=%t", connector, conceptID, paused))
 }

@@ -717,17 +717,19 @@ builtin datasyncReconcileDomains { }
 @executor("integration.datasync.startBackfill")
 @description("Drive one domain's backfill page by page from its stored cursor, persisting progress on v1:platform:syncState after every page so a restart resumes rather than restarts. Operator-driven; nothing schedules it.")
 builtin datasyncStartBackfill {
-  connector  string!
-  conceptId  string!
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor.")
 }
 
 @sdk
 @executor("integration.datasync.setSyncPaused")
 @description("Pause or resume one domain: stops its backfill, its reconciliation and its outbox drain, without unregistering the connector or changing any declaration.")
 builtin datasyncSetSyncPaused {
-  connector  string!
-  conceptId  string!
-  paused     boolean!
+  connector     string!
+  conceptId     string!
+  partitionKey  string  @description("The one partition of a partitioned connector (one store) to pause or resume; its pause is its own.")
+  paused        boolean!
 }
 
 @sdk

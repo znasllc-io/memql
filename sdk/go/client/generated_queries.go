@@ -14350,6 +14350,28 @@ func SurfacesForOwnerBuild(args SurfacesForOwnerArgs) string {
 	return "query surfacesForOwner()"
 }
 
+// SyncStateById -- One domain's health by its row id -- what the runtime reads. By id, not by its fields: the id is derived from (concept, connector, direction) and the partition, and a row written before partitions has no partitionKey, so matching an absent field against "" is not a rule to rely on.
+//
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateById"] in generated_concepts.go).
+type SyncStateByIdArgs struct {
+	StateId string
+}
+
+// SyncStateById calls the engine query syncStateById.
+func (qc *QueryClient) SyncStateById(ctx context.Context, args SyncStateByIdArgs) (*Result, error) {
+	call := SyncStateByIdBuild(args)
+	return qc.executeNamed(ctx, "syncStateById", call)
+}
+
+func SyncStateByIdBuild(args SyncStateByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query syncStateById(")
+	b.WriteString("stateId: ")
+	b.WriteString(quoteMemQL(args.StateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SyncStateFor -- Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip.
 //
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.go).
@@ -14384,11 +14406,12 @@ func SyncStateForBuild(args SyncStateForArgs) string {
 	return b.String()
 }
 
-// SyncStatesAll -- Every domain's health -- the Data origins page's health half.
+// SyncStatesAll -- Every domain's health -- the Data origins page's health half. `partitionKey` narrows to one tenant of a partitioned connector when given.
 //
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.go).
 type SyncStatesAllArgs struct {
-	Connector string
+	Connector    string
+	PartitionKey string
 }
 
 // SyncStatesAll calls the engine query syncStatesAll.
@@ -14403,6 +14426,13 @@ func SyncStatesAllBuild(args SyncStatesAllArgs) string {
 	if args.Connector != "" {
 		b.WriteString("connector: ")
 		b.WriteString(quoteMemQL(args.Connector))
+	}
+	if args.PartitionKey != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("partitionKey: ")
+		b.WriteString(quoteMemQL(args.PartitionKey))
 	}
 	b.WriteString(")")
 	return b.String()

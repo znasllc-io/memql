@@ -608,3 +608,32 @@ func stageInbound(engine *fakeEngine, row map[string]any) {
 func dispatchByID(i *Integration, requestID string) ([]memorynodes.MemoryNode, error) {
 	return i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), map[string]any{"inboundRequestId": requestID}, 0)
 }
+
+// A delivery's writes land on the health row of their OWN partition: two
+// stores of one connector delivering the same concept are two rows.
+func TestInboundHealthLandsOnTheWritesOwnPartition(t *testing.T) {
+	engine := newFakeEngine()
+	c := &fakeConnector{
+		name:    "shopify",
+		domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept, Direction: memqlsync.DirectionInbound}},
+		applyWrites: []memqlsync.MirrorWrite{
+			{Concept: testMirrorConcept, RowId: "p1", Partition: "a", Version: testNow.Add(-10 * time.Second).Format(time.RFC3339)},
+			{Concept: testMirrorConcept, RowId: "p2", Partition: "b", Version: testNow.Add(-20 * time.Second).Format(time.RFC3339)},
+			{Concept: testMirrorConcept, RowId: "p3", Partition: "a", Version: testNow.Add(-30 * time.Second).Format(time.RFC3339)},
+		},
+	}
+	d := testDispatcher(engine, newFakeWriter(), c)
+	if _, err := d.Dispatch(context.Background(), memqlsync.InboundRequest{RequestId: "r", Source: "shopify", ReceivedAt: testNow}); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	writes := engine.callsContaining("mutation upsertSyncState")
+	if len(writes) != 2 {
+		t.Fatalf("health writes = %d, want one per (concept, partition): %v", len(writes), writes)
+	}
+	for i, pair := range [][3]string{{"a", "lagSeconds: 10"}, {"b", "lagSeconds: 20"}} {
+		id := SyncStateID(testMirrorConcept, "shopify", "inbound", pair[0])
+		if !strings.Contains(writes[i], `stateId: "`+id+`"`) || !strings.Contains(writes[i], `partitionKey: "`+pair[0]+`"`) || !strings.Contains(writes[i], pair[1]) {
+			t.Errorf("write %d did not land on partition %s's own row: %s", i, pair[0], writes[i])
+		}
+	}
+}

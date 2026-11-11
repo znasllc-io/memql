@@ -870,8 +870,9 @@ concept outboxEntry {
 /// be read from a page, not a grep over one replica's stdout.
 ///
 /// Written ONLY by the sync runtime -- the inbound dispatcher, the backfill and reconciliation
-/// runners, and the outbox drain worker. Deterministic id per (concept, connector, direction), so
-/// the append-only version history IS the health timeline.
+/// runners, and the outbox drain worker. Deterministic id per (concept, connector, direction), and
+/// per partition for a connector that serves many tenants, so the append-only version history IS
+/// the health timeline.
 ///
 /// clusterOwner for the same reason outboxEntry is: this is the deployment's operational state.
 @rowAuthz(clusterOwner)
@@ -880,8 +881,9 @@ concept syncState {
   conceptId        string!  @description("Canonical id of the concept this row reports on.")
   connector        string!  @description("Connector name on the other side.")
   direction        enum("inbound", "outbound")!  @description("inbound: MemQL mirrors this concept and the connector fills it. outbound: MemQL originates it and the connector drains the outbox. A concept can have a row in each direction.")
+  partitionKey     string   @description("The tenant this row reports on, for a connector that serves many (one store of the Shopify connector): each keeps its own cursor, watermark and error. Empty, or absent on a row written before partitions, for a connector with one.")
   backfillCursor   string   @description("Opaque connector cursor for a resumable backfill. Persisted after EVERY page, so a restart resumes rather than restarts.")
-  backfillStatus   enum("none", "running", "complete", "failed")  @description("Where the backfill stands. `none` is the default -- never run -- and is distinct from `complete`.")
+  backfillStatus   enum("none", "running", "complete", "failed", "queued")  @description("Where the backfill stands. `none` is the default -- never run -- and is distinct from `complete`. `queued`: asked for and not yet started.")
   lastInboundAt    datetime @description("When the last inbound delivery for this domain was applied.")
   lagSeconds       int      @description("Seconds between the origin's version of the last applied write and when MemQL applied it. A mirror's staleness, in the only unit an operator can act on.")
   lastReconcileAt  datetime @description("When the last reconciliation sweep finished. The updated_at watermark the next sweep narrows on, so only a sweep that RAN moves it.")

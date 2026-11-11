@@ -957,13 +957,30 @@ query syncState syncStateFor {
   shape   syncStateFull
 }
 
-/// Every domain's health -- the Data origins page's health half.
+/// One domain's health by its row id -- what the runtime reads. By id, not by its fields: the id is
+/// derived from (concept, connector, direction) and the partition, and a row written before
+/// partitions has no partitionKey, so matching an absent field against "" is not a rule to rely on.
+@unbounded("sync health by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query syncState syncStateById {
+  args {
+    stateId  string!
+  }
+  filter  row => row.id == args.stateId && actor.isClusterOwner == true
+  shape   syncStateFull
+}
+
+/// Every domain's health -- the Data origins page's health half. `partitionKey` narrows to one
+/// tenant of a partitioned connector when given.
 @actor
 query syncState syncStatesAll {
   args {
-    connector  string
+    connector     string
+    partitionKey  string
   }
-  filter    row => actor.isClusterOwner == true && (args.connector == nil || row.connector == args.connector)
+  filter    row => actor.isClusterOwner == true
+                && (args.connector == nil || row.connector == args.connector)
+                && (args.partitionKey == nil || row.partitionKey == args.partitionKey)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     syncStateFull

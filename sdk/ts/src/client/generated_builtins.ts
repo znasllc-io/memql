@@ -1730,6 +1730,8 @@ QueryClient.prototype.datasyncRetryOutboxEntry = function (this: QueryClient, ar
 export interface DatasyncSetSyncPausedArgs {
   connector: string;
   conceptId: string;
+  /** The one partition of a partitioned connector (one store) to pause or resume; its pause is its own. */
+  partitionKey?: string;
   paused: boolean;
 }
 
@@ -1737,6 +1739,7 @@ export function buildDatasyncSetSyncPaused(args: DatasyncSetSyncPausedArgs): str
   const parts: string[] = [];
   parts.push("connector: " + renderMemQLValue(args.connector));
   parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
   parts.push("paused: " + renderMemQLValue(args.paused));
   return "builtin datasyncSetSyncPaused(" + parts.join(", ") + ")";
 }
@@ -1755,12 +1758,15 @@ QueryClient.prototype.datasyncSetSyncPaused = function (this: QueryClient, args:
 export interface DatasyncStartBackfillArgs {
   connector: string;
   conceptId: string;
+  /** One partition of a partitioned connector (one store). Absent backfills every partition the connector names, each from its own cursor. */
+  partitionKey?: string;
 }
 
 export function buildDatasyncStartBackfill(args: DatasyncStartBackfillArgs): string {
   const parts: string[] = [];
   parts.push("connector: " + renderMemQLValue(args.connector));
   parts.push("conceptId: " + renderMemQLValue(args.conceptId));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
   return "builtin datasyncStartBackfill(" + parts.join(", ") + ")";
 }
 

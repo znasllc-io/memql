@@ -13140,6 +13140,28 @@ QueryClient.prototype.surfacesForOwner = function (this: QueryClient, args: Surf
   return this.executeNamed("surfacesForOwner", buildSurfacesForOwner(args), opts);
 };
 
+/** One domain's health by its row id -- what the runtime reads. By id, not by its fields: the id is derived from (concept, connector, direction) and the partition, and a row written before partitions has no partitionKey, so matching an absent field against "" is not a rule to rely on. */
+// Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateById"] in generated_concepts.ts).
+export interface SyncStateByIdArgs {
+  stateId: string;
+}
+
+export function buildSyncStateById(args: SyncStateByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("stateId: " + renderMemQLValue(args.stateId));
+  return "query syncStateById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    syncStateById(args: SyncStateByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.syncStateById = function (this: QueryClient, args: SyncStateByIdArgs = {} as SyncStateByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("syncStateById", buildSyncStateById(args), opts);
+};
+
 /** Health for one (concept, connector, direction). Sorted newest-first because the row id is deterministic per domain, so the append-only history IS the health timeline and the caller wants its tip. */
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStateFor"] in generated_concepts.ts).
 export interface SyncStateForArgs {
@@ -13166,15 +13188,17 @@ QueryClient.prototype.syncStateFor = function (this: QueryClient, args: SyncStat
   return this.executeNamed("syncStateFor", buildSyncStateFor(args), opts);
 };
 
-/** Every domain's health -- the Data origins page's health half. */
+/** Every domain's health -- the Data origins page's health half. `partitionKey` narrows to one tenant of a partitioned connector when given. */
 // Bound concept: v1:platform:syncState (machine-readable: BoundConcepts["syncStatesAll"] in generated_concepts.ts).
 export interface SyncStatesAllArgs {
   connector?: string;
+  partitionKey?: string;
 }
 
 export function buildSyncStatesAll(args: SyncStatesAllArgs): string {
   const parts: string[] = [];
   if (args.connector !== undefined) parts.push("connector: " + renderMemQLValue(args.connector));
+  if (args.partitionKey !== undefined) parts.push("partitionKey: " + renderMemQLValue(args.partitionKey));
   return "query syncStatesAll(" + parts.join(", ") + ")";
 }
 

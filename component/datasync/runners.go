@@ -2,6 +2,7 @@ package datasync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -81,19 +82,90 @@ type BackfillResult struct {
 // Idempotent by construction: the cursor is the resume point, so calling
 // this again after a completed backfill starts from the stored cursor
 // and the connector reports Done immediately.
-func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID string) (BackfillResult, error) {
-	var out BackfillResult
+//
+// With a partition, the connector must implement memqlsync.Partitioned and
+// is asked through BackfillPartition, from that partition's own cursor. A
+// partitioned connector asked for no partition is backfilled once per
+// partition it names, and the result is their sum: its shared Backfill is
+// never called, because walking one shared cursor across tenants is the
+// defect partitions remove.
+func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID, partition string) (BackfillResult, error) {
+	connector, parts, specs, err := r.resolve(ctx, connectorName, conceptID, partition)
+	if err != nil {
+		return BackfillResult{}, err
+	}
+	if _, ok := connector.(memqlsync.Partitioned); !ok || strings.TrimSpace(partition) != "" {
+		return r.backfillOne(ctx, connector, specs, conceptID, strings.TrimSpace(partition))
+	}
+	out := BackfillResult{Done: true}
+	var errs []error
+	for _, part := range parts {
+		res, err := r.backfillOne(ctx, connector, specs, conceptID, part)
+		out.Pages += res.Pages
+		out.Applied += res.Applied
+		out.Stale += res.Stale
+		if !res.Done || err != nil {
+			out.Done = false
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// resolve finds the connector, checks it serves the concept and the
+// partition named, and -- for a partitioned connector asked for no
+// partition -- lists the partitions a call fans out over.
+func (r *Runner) resolve(ctx context.Context, connectorName, conceptID, partition string) (memqlsync.Connector, []string, map[string]memqlsync.DomainSpec, error) {
 	connector, ok := r.lookup(connectorName)
 	if !ok || connector == nil {
-		return out, fmt.Errorf("datasync: no connector bound for %q; a backfill needs an implementation, not just a declaration", connectorName)
+		return nil, nil, nil, fmt.Errorf("datasync: no connector bound for %q; a backfill or a sweep needs an implementation, not just a declaration", connectorName)
 	}
 	specs := domainSpecsByConcept(connector)
 	if _, known := specs[strings.TrimSpace(conceptID)]; !known {
-		return out, fmt.Errorf("datasync: connector %q does not serve concept %q -- a backfill of a domain the connector does not declare has nothing to page through", connectorName, conceptID)
+		return nil, nil, nil, fmt.Errorf("datasync: connector %q does not serve concept %q -- a backfill of a domain the connector does not declare has nothing to page through", connectorName, conceptID)
 	}
+	p, partitioned := connector.(memqlsync.Partitioned)
+	if strings.TrimSpace(partition) != "" {
+		if !partitioned {
+			return nil, nil, nil, fmt.Errorf("datasync: connector %q has no partitions, so partition %q names nothing it serves", connectorName, strings.TrimSpace(partition))
+		}
+		return connector, nil, specs, nil
+	}
+	if !partitioned {
+		return connector, nil, specs, nil
+	}
+	parts, err := p.Partitions(auth.ContextWithConnectorActor(ctx, connectorName))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("datasync: listing the partitions of %q: %w", connectorName, err)
+	}
+	return connector, cleanPartitions(parts), specs, nil
+}
 
+// cleanPartitions drops blank and repeated partitions: a blank one would
+// address the shared row, which a partitioned connector does not have.
+func cleanPartitions(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// backfillOne backfills one domain of one partition ("" for a connector
+// without partitions).
+func (r *Runner) backfillOne(ctx context.Context, connector memqlsync.Connector, specs map[string]memqlsync.DomainSpec, conceptID, partition string) (BackfillResult, error) {
+	var out BackfillResult
+	connectorName := connector.Name()
 	opCtx := OperatorContext(ctx)
-	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound))
+	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil {
 		return out, err
 	}
@@ -103,18 +175,24 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 		// state, not a fault, and a caller polling this must not see a
 		// stream of errors for a switch somebody flipped on purpose.
 		r.logger.Info("datasync backfill: domain is paused; not running",
-			"connector", connectorName, "concept", conceptID)
+			"connector", connectorName, "concept", conceptID, "partition", partition)
 		out.Cursor = st.BackfillCursor
 		return out, nil
 	}
 
-	st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
+	st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connectorName, string(memqlsync.DirectionInbound), partition
 	st.BackfillStatus = "running"
 	st.LastError = ""
 	r.writeState(opCtx, st)
 
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	cursor := st.BackfillCursor
+	fetch := func(cursor string) (memqlsync.BackfillPage, error) {
+		if partition != "" {
+			return connector.(memqlsync.Partitioned).BackfillPartition(connCtx, partition, conceptID, cursor)
+		}
+		return connector.Backfill(connCtx, conceptID, cursor)
+	}
 
 	for out.Pages < r.maxPages {
 		select {
@@ -128,13 +206,13 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 		default:
 		}
 
-		page, pageErr := connector.Backfill(connCtx, conceptID, cursor)
+		page, pageErr := fetch(cursor)
 		if pageErr != nil {
 			st.BackfillStatus = "failed"
 			st.LastError = pageErr.Error()
 			st.BackfillCursor = cursor
 			r.writeState(opCtx, st)
-			return out, fmt.Errorf("datasync: backfilling %s from %q: %w", conceptID, connectorName, pageErr)
+			return out, fmt.Errorf("datasync: backfilling %s from %q%s: %w", conceptID, connectorName, partitionSuffix(partition), pageErr)
 		}
 		out.Pages++
 
@@ -169,15 +247,23 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 		// the work is not finished and the next invocation continues.
 		st.BackfillStatus = "running"
 		r.logger.Info("datasync backfill: page budget reached; resuming on the next run",
-			"connector", connectorName, "concept", conceptID, "pages", out.Pages)
+			"connector", connectorName, "concept", conceptID, "partition", partition, "pages", out.Pages)
 	}
 	st.BackfillCursor = cursor
 	r.writeState(opCtx, st)
 
 	r.logger.Info("datasync backfill: pass complete",
-		"connector", connectorName, "concept", conceptID,
+		"connector", connectorName, "concept", conceptID, "partition", partition,
 		"pages", out.Pages, "applied", out.Applied, "stale", out.Stale, "done", out.Done)
 	return out, nil
+}
+
+// partitionSuffix names a partition in an error, and nothing for none.
+func partitionSuffix(partition string) string {
+	if partition == "" {
+		return ""
+	}
+	return " (partition " + partition + ")"
 }
 
 // writeState persists a domain's health and SAYS SO when it cannot.
@@ -189,7 +275,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 func (r *Runner) writeState(ctx context.Context, st SyncState) {
 	if err := r.store.WriteSyncState(ctx, st); err != nil && r.logger != nil {
 		r.logger.Warn("datasync: could not record a domain's health",
-			"connector", st.Connector, "concept", st.ConceptID, "error", err)
+			"connector", st.Connector, "concept", st.ConceptID, "partition", st.Partition, "error", err)
 	}
 }
 
@@ -206,15 +292,55 @@ type ReconcileResult struct {
 // `since` is the previous lastReconcileAt, so a connector that can
 // narrow its comparison does; one that cannot ignores it and sweeps
 // everything, which is what the Shopify thin index does and says so.
-func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string) (ReconcileResult, error) {
-	var out ReconcileResult
+//
+// With a partition, the connector must implement memqlsync.Partitioned and
+// is swept through ReconcilePartition from that partition's own watermark.
+// A partitioned connector asked for no partition is swept once per
+// partition it names and reports the sum; its shared Reconcile is never
+// called.
+func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID, partition string) (ReconcileResult, error) {
 	connector, ok := r.lookup(connectorName)
 	if !ok || connector == nil {
-		return out, fmt.Errorf("datasync: no connector bound for %q", connectorName)
+		return ReconcileResult{}, fmt.Errorf("datasync: no connector bound for %q", connectorName)
 	}
+	_, partitioned := connector.(memqlsync.Partitioned)
+	partition = strings.TrimSpace(partition)
+	if partition != "" && !partitioned {
+		return ReconcileResult{}, fmt.Errorf("datasync: connector %q has no partitions, so partition %q names nothing it serves", connectorName, partition)
+	}
+	if !partitioned || partition != "" {
+		return r.reconcileOne(ctx, connector, conceptID, partition)
+	}
+	parts, err := connector.(memqlsync.Partitioned).Partitions(auth.ContextWithConnectorActor(ctx, connectorName))
+	if err != nil {
+		return ReconcileResult{}, fmt.Errorf("datasync: listing the partitions of %q: %w", connectorName, err)
+	}
+	out := ReconcileResult{Skipped: true}
+	var errs []error
+	for _, part := range cleanPartitions(parts) {
+		res, err := r.reconcileOne(ctx, connector, conceptID, part)
+		if err != nil {
+			errs = append(errs, err)
+			out.Skipped = false
+			continue
+		}
+		out.Checked += res.Checked
+		out.Drifted += res.Drifted
+		out.Healed += res.Healed
+		if !res.Skipped {
+			out.Skipped = false
+		}
+	}
+	return out, errors.Join(errs...)
+}
 
+// reconcileOne sweeps one domain of one partition ("" for a connector
+// without partitions).
+func (r *Runner) reconcileOne(ctx context.Context, connector memqlsync.Connector, conceptID, partition string) (ReconcileResult, error) {
+	var out ReconcileResult
+	connectorName := connector.Name()
 	opCtx := OperatorContext(ctx)
-	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound))
+	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil {
 		return out, err
 	}
@@ -224,9 +350,15 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 	}
 
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
-	report, reconcileErr := connector.Reconcile(connCtx, conceptID, st.LastReconcileAt)
+	var report memqlsync.ReconcileReport
+	var reconcileErr error
+	if partition != "" {
+		report, reconcileErr = connector.(memqlsync.Partitioned).ReconcilePartition(connCtx, partition, conceptID, st.LastReconcileAt)
+	} else {
+		report, reconcileErr = connector.Reconcile(connCtx, conceptID, st.LastReconcileAt)
+	}
 
-	st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
+	st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connectorName, string(memqlsync.DirectionInbound), partition
 	if reconcileErr != nil {
 		switch {
 		case memqlsync.IsNotImplemented(reconcileErr):
@@ -270,11 +402,11 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 			st.LastError = reconcileErr.Error()
 			st.LastAttemptAt = r.now().UTC()
 			r.writeState(opCtx, st)
-			return out, fmt.Errorf("datasync: reconciling %s against %q: %w", conceptID, connectorName, reconcileErr)
+			return out, fmt.Errorf("datasync: reconciling %s against %q%s: %w", conceptID, connectorName, partitionSuffix(partition), reconcileErr)
 		}
 		st.LastError = reconcileErr.Error()
 		r.writeState(opCtx, st)
-		return out, fmt.Errorf("datasync: reconciling %s against %q: %w", conceptID, connectorName, reconcileErr)
+		return out, fmt.Errorf("datasync: reconciling %s against %q%s: %w", conceptID, connectorName, partitionSuffix(partition), reconcileErr)
 	}
 
 	out.Checked, out.Drifted, out.Healed = report.Checked, report.Drifted, report.Healed
@@ -289,11 +421,11 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 	// heal hides the symptom while leaving the cause.
 	if report.Drifted > 0 {
 		r.logger.Warn("datasync reconcile: drift found",
-			"connector", connectorName, "concept", conceptID,
+			"connector", connectorName, "concept", conceptID, "partition", partition,
 			"checked", report.Checked, "drifted", report.Drifted, "healed", report.Healed)
 	} else {
 		r.logger.Info("datasync reconcile: clean",
-			"connector", connectorName, "concept", conceptID, "checked", report.Checked)
+			"connector", connectorName, "concept", conceptID, "partition", partition, "checked", report.Checked)
 	}
 	return out, nil
 }
@@ -303,11 +435,14 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 // A DomainSpec with a zero ReconcileInterval is never due: reconciliation
 // is then operator-driven only, which is the right default for a domain
 // whose comparison is expensive at the origin.
-func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec memqlsync.DomainSpec) bool {
+//
+// It reads the one row the partition names ("" for a connector without
+// partitions); the sweep asks it once per partition.
+func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec memqlsync.DomainSpec, partition string) bool {
 	if spec.ReconcileInterval <= 0 {
 		return false
 	}
-	st, err := r.store.SyncStateFor(OperatorContext(ctx), spec.Concept, connectorName, string(memqlsync.DirectionInbound))
+	st, err := r.store.SyncStateFor(OperatorContext(ctx), spec.Concept, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil || st.Paused {
 		return false
 	}
@@ -331,10 +466,12 @@ func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec me
 const notGrantedRecheck = 6 * time.Hour
 
 // SetPaused flips a domain's pause switch, stopping both runners and the
-// drain for it.
-func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID string, paused bool) error {
+// drain for it. A partition's pause is its own: it names that partition's
+// row and no other.
+func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID, partition string, paused bool) error {
 	opCtx := OperatorContext(ctx)
-	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound))
+	partition = strings.TrimSpace(partition)
+	st, err := r.store.SyncStateFor(opCtx, conceptID, connectorName, string(memqlsync.DirectionInbound), partition)
 	if err != nil {
 		return err
 	}
@@ -345,7 +482,7 @@ func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID string,
 		// than failing: pausing a domain before its first delivery is a
 		// legitimate thing to want. (The empty state already carries the
 		// id it would have, so an empty-id check here never fired.)
-		st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
+		st.ConceptID, st.Connector, st.Direction, st.Partition = conceptID, connectorName, string(memqlsync.DirectionInbound), partition
 		st.Paused = paused
 		return r.store.WriteSyncState(opCtx, st)
 	}
