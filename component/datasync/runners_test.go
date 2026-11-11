@@ -1683,7 +1683,7 @@ func TestStartingFromTheStartNamesOnePartition(t *testing.T) {
 	p := newFakePartitioned("a", "b")
 	r := stateRunner(engine, p)
 	_, err := r.StartBackfillFromTheStart(context.Background(), "shopify", testMirrorConcept, "")
-	if err == nil || !strings.Contains(err.Error(), "one partition at a time") {
+	if err == nil || err.Error() != `datasync: "shopify" keeps each store's backfill apart; name the store to start it again from the start` {
 		t.Fatalf("err = %v, want a refusal naming one partition", err)
 	}
 	if n := engine.countContaining("mutation "); n != 0 {
@@ -1728,5 +1728,36 @@ func TestAnOrdinaryStartStillContinuesFromTheCursor(t *testing.T) {
 	}
 	if len(c.backfillSeen) != 2 || c.backfillSeen[1] != "c-9" {
 		t.Errorf("restart false was asked from %q, want the stored cursor c-9", c.backfillSeen)
+	}
+}
+
+// Starting again from the start clears the failure of the backfill it
+// replaces, so a backfill running again is not drawn beside its old failure;
+// an error that is not the backfill's own (a sweep's) is kept.
+func TestStartingFromTheStartClearsTheReplacedBackfillsOwnError(t *testing.T) {
+	cases := map[string]struct{ held, want string }{
+		"its own failure": {"backfill failed: shopify: bulk download HTTP 403 (a signed URL expires after one week; restart the operation)", ""},
+		"its own refusal": {"backfill refused: shopify: not granted", ""},
+		"a sweep's error": {"shopify admin: HTTP 502", "shopify admin: HTTP 502"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			engine := newStateEngine()
+			c := mirrorConnector(memqlsync.BackfillPage{Done: true})
+			r := stateRunner(engine, c)
+			writeKept(t, engine, SyncState{BackfillStatus: "failed", BackfillCursor: "c-9", LastError: tc.held})
+			seen := "unread"
+			c.duringBackfill = func(string) { seen = keptState(t, engine, testMirrorConcept, "").LastError }
+
+			if _, err := r.StartBackfillFromTheStart(context.Background(), "shopify", testMirrorConcept, ""); err != nil {
+				t.Fatal(err)
+			}
+			if seen != tc.want {
+				t.Errorf("while the backfill ran again, lastError = %q, want %q", seen, tc.want)
+			}
+			if st := keptState(t, engine, testMirrorConcept, ""); st.LastError != tc.want {
+				t.Errorf("after it, lastError = %q, want %q", st.LastError, tc.want)
+			}
+		})
 	}
 }

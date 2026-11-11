@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -44,16 +46,18 @@ type backfillCursor struct {
 	// re-poll a completed operation.
 	URL string `json:"url,omitempty"`
 	// Restarts counts the operations this backfill started again because the
-	// origin refused a download as gone (bulkDownloadGone). It is the
-	// backfill's, not one operation's: it is carried across the parts of a
-	// multi-part domain and bounded by maxDownloadRestarts.
+	// origin refused a download as gone (bulkDownloadGone) or ended the
+	// operation (EXPIRED, CANCELED, FAILED). It is the backfill's, not one
+	// operation's: it is carried across the parts of a multi-part domain and
+	// bounded by maxDownloadRestarts.
 	Restarts int `json:"r,omitempty"`
 }
 
-// maxDownloadRestarts is how many times one backfill starts an operation again
-// after its download was refused as gone. The next refusal fails the backfill:
-// a link that is refused on a fresh operation too is not an expired link, and
-// starting again forever would hide it.
+// maxDownloadRestarts is how many times one backfill starts an operation again,
+// in all: after its download was refused as gone, or after the origin reported
+// the operation EXPIRED, CANCELED or FAILED. The next of either fails the
+// backfill: a fault that survives fresh operations is not a passing one, and
+// starting again for ever would hide it.
 const maxDownloadRestarts = 2
 
 // bulkDownloadGone is a bulk download the origin refused as no longer there
@@ -203,9 +207,19 @@ func (c *Connector) BackfillStore(ctx context.Context, store Store, concept, cur
 		case "EXPIRED", "CANCELED", "FAILED":
 			// A bulk operation must finish within ten days and its file
 			// expires a week after that. Restarting is the only recovery,
-			// and it is safe: every write is idempotent on the row id.
-			c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode)
-			return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts}.encode()}, nil
+			// and it is safe: every write is idempotent on the row id. It
+			// counts toward the same bound as a gone download: an origin
+			// that fails the export every time is not asked for ever.
+			if cur.Restarts >= maxDownloadRestarts {
+				code := op.ErrorCode
+				if code == "" {
+					code = "none"
+				}
+				return memqlsync.BackfillPage{}, fmt.Errorf("shopify: the bulk operation of %s for store %s ended %s (errorCode %s) after %d restarts of this backfill; it is not started again",
+					spec.Concept, store.ID, op.Status, code, cur.Restarts)
+			}
+			c.logger.Warn("shopify: restarting bulk operation", "store", store.ID, "concept", spec.Concept, "status", op.Status, "errorCode", op.ErrorCode, "restart", cur.Restarts+1)
+			return memqlsync.BackfillPage{NextCursor: backfillCursor{OpIndex: cur.OpIndex, Restarts: cur.Restarts + 1}.encode()}, nil
 		default:
 			return memqlsync.BackfillPage{NextCursor: cur.encode()}, nil
 		}
@@ -350,11 +364,11 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, downloadFailed(store, spec, url, err)
 	}
 	resp, err := bulkDownloadClient(c.admin.http, c.admin.checkDownloadURL).Do(req)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("shopify: download bulk result: %w", err)
+		return nil, 0, false, downloadFailed(store, spec, url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -399,9 +413,68 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 		writes = append(writes, c.mapBulkLine(store, spec, obj)...)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, consumed, false, fmt.Errorf("shopify: read bulk stream: %w", err)
+		return nil, consumed, false, downloadFailed(store, spec, url, err)
 	}
 	return writes, consumed, true, nil
+}
+
+// downloadFailed says that a bulk download failed and why, and never where
+// from.
+//
+// The link opens a store's whole export for a week, and this error is the
+// backfill's: the runner keeps it on the domain's health row, which the Store
+// page and Cluster > Data draw, and logs it. net/http's *url.Error quotes the
+// whole link, query string and all, and a dial error names the host and port,
+// so neither is passed on: what is kept is the cause -- the syscall error under
+// a dial, the resolver's answer under a lookup -- and whether it timed out. Any
+// text that still carries a part of the link is said without its cause.
+func downloadFailed(store Store, spec *generated.TypeSpec, link string, err error) error {
+	timedOut := false
+	var ue *neturl.Error
+	if errors.As(err, &ue) {
+		timedOut = ue.Timeout()
+		err = ue.Err
+	}
+	var dns *net.DNSError
+	var op *net.OpError
+	switch {
+	case errors.As(err, &dns):
+		timedOut = timedOut || dns.IsTimeout
+		err = errors.New("the download host could not be resolved: " + dns.Err)
+	case errors.As(err, &op):
+		timedOut = timedOut || op.Timeout()
+		if op.Err != nil {
+			err = op.Err
+		} else {
+			err = errors.New(op.Op + " failed")
+		}
+	}
+	if err == nil || carriesLink(err.Error(), link) {
+		err = errors.New("the cause named the download link and is not repeated")
+	}
+	how := "failed"
+	if timedOut || errors.Is(err, context.DeadlineExceeded) {
+		how = "timed out"
+	}
+	return fmt.Errorf("shopify: the bulk download of %s for store %s %s: %w", spec.Concept, store.ID, how, err)
+}
+
+// carriesLink reports whether text holds any part of a download link that
+// would identify or open it: the link, its host, its path or its query.
+func carriesLink(text, link string) bool {
+	parts := []string{link}
+	if u, err := neturl.Parse(link); err == nil {
+		parts = append(parts, u.Host, u.Hostname(), u.EscapedPath(), u.Path, u.RawQuery)
+		for _, values := range u.Query() {
+			parts = append(parts, values...)
+		}
+	}
+	for _, part := range parts {
+		if len(part) > 1 && strings.Contains(text, part) {
+			return true
+		}
+	}
+	return false
 }
 
 // mapBulkLine turns one JSONL line into writes.

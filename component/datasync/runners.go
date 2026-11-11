@@ -140,10 +140,11 @@ var errBackfillRunning = errors.New("datasync: this backfill is running; it can 
 
 // StartBackfillFromTheStart starts one domain's backfill again from nothing:
 // it resets the row to `queued` with an empty cursor -- the queue's own patch
-// (queuePatch), behind the same row-version fence -- and then runs it as StartBackfill does. It is the
-// way out of a backfill whose cursor no longer leads anywhere -- a failed one
-// whose download link expired -- and re-reading the origin's history is safe
-// because every mirror write is idempotent on the row id.
+// (queuePatch), behind the same row-version fence, which also clears the
+// replaced backfill's own failure -- and then runs it as StartBackfill does.
+// It is the way out of a backfill whose cursor no longer leads anywhere -- a
+// failed one whose download link expired -- and re-reading the origin's
+// history is safe because every mirror write is idempotent on the row id.
 //
 // It is refused for a backfill that is `running`. It names one partition of a
 // partitioned connector, and is refused without one: StartBackfill and
@@ -157,7 +158,7 @@ func (r *Runner) StartBackfillFromTheStart(ctx context.Context, connectorName, c
 		return BackfillResult{}, err
 	}
 	if _, ok := connector.(memqlsync.Partitioned); ok && partition == "" {
-		return BackfillResult{}, fmt.Errorf("datasync: a backfill of %q is started again from the start one partition at a time; name the partition", connectorName)
+		return BackfillResult{}, fmt.Errorf("datasync: %q keeps each store's backfill apart; name the store to start it again from the start", connectorName)
 	}
 	running := false
 	err = r.store.PatchSyncState(OperatorContext(ctx), conceptID, connector.Name(), string(memqlsync.DirectionInbound), partition,
@@ -166,7 +167,14 @@ func (r *Runner) StartBackfillFromTheStart(ctx context.Context, connectorName, c
 			if running {
 				return nil, false
 			}
-			return queuePatch(cur), true
+			p := queuePatch(cur)
+			if backfillOwnError(cur.LastError) {
+				// The failure of the backfill this one replaces: left on
+				// the row, it would be drawn beside a backfill running
+				// again. A sweep's error is not the backfill's and stays.
+				p["lastError"] = ""
+			}
+			return p, true
 		})
 	if err != nil {
 		return BackfillResult{}, err

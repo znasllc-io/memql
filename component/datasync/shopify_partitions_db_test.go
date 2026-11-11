@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	stdsync "sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -79,6 +82,9 @@ type fakeShopify struct {
 	mu       stdsync.Mutex
 	tokens   map[string]string // admin token -> store id
 	requests map[string][]fakeShopifyRequest
+	// downloadURL, when set, is the file a completed export names. Its host
+	// answers no connection: a fetch of it fails as a refused dial does.
+	downloadURL string
 }
 
 type fakeShopifyRequest struct {
@@ -87,6 +93,13 @@ type fakeShopifyRequest struct {
 }
 
 func (f *fakeShopify) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	download := f.downloadURL
+	f.mu.Unlock()
+	if download != "" && r.URL.Host == downloadHost {
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(203, 0, 113, 9), Port: 443},
+			Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+	}
 	if r.URL.Host != "acme-widgets.myshopify.com" {
 		return nil, fmt.Errorf("unexpected external request: %s", r.URL.Host)
 	}
@@ -112,6 +125,10 @@ func (f *fakeShopify) RoundTrip(r *http.Request) (*http.Response, error) {
 		// Completed with no file: the export matched nothing, which is a
 		// finished domain.
 		data = `{"node":{"id":"gid://shopify/BulkOperation/` + store + `","status":"COMPLETED","url":null}}`
+		if download != "" {
+			raw, _ := json.Marshal(download)
+			data = `{"node":{"id":"gid://shopify/BulkOperation/` + store + `","status":"COMPLETED","url":` + string(raw) + `}}`
+		}
 	case "ShopifyListProduct":
 		data = `{"products":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}`
 	default:
@@ -344,5 +361,46 @@ func TestAPausedStoreIsSweptFromWhereItStopped(t *testing.T) {
 	want := "updated_at:>'" + aStopped.UTC().Format(time.RFC3339) + "'"
 	if filter != want {
 		t.Fatalf("resumed store A swept with %q, want its own last sweep %q (store B's was %s)", filter, want, bLast.UTC().Format(time.RFC3339))
+	}
+}
+
+// downloadHost is where the test's signed download link points.
+const downloadHost = "files.example.test"
+
+// A download that fails in transit is recorded on the store's health row, which
+// the Store page and Cluster > Data draw, and no part of the signed link that
+// opens the export reaches it: not the host, the path, or a query parameter.
+func TestAFailedDownloadIsRecordedWithoutItsLink(t *testing.T) {
+	f := newPartitionsFixture(t)
+	if f == nil {
+		return
+	}
+	a := f.storeIDs[0]
+	f.connect(t, a)
+	link := "https://" + downloadHost + "/exports/bulk-7781-products.jsonl?X-Goog-Credential=signer-credential&X-Goog-Signature=0badc0ffee5eed"
+	f.shopify.mu.Lock()
+	f.shopify.downloadURL = link
+	f.shopify.mu.Unlock()
+
+	var err error
+	for i := 0; i < 3 && err == nil; i++ {
+		_, err = f.runner.StartBackfill(context.Background(), shopify.ConnectorName, partitionsConcept, a)
+	}
+	if err == nil {
+		t.Fatal("the download never failed")
+	}
+	st := f.state(t, a)
+	if st.BackfillStatus != "failed" || !strings.HasPrefix(st.LastError, "backfill failed: ") {
+		t.Fatalf("row = %s, %q; want the backfill failed with its own prefix", st.BackfillStatus, st.LastError)
+	}
+	for _, text := range []string{st.LastError, err.Error()} {
+		for _, part := range []string{link, downloadHost, "/exports/", "bulk-7781-products", "X-Goog", "signer-credential", "0badc0ffee5eed", "203.0.113.9"} {
+			if strings.Contains(text, part) {
+				t.Errorf("%q of the download link reached the text:\n%s", part, text)
+			}
+		}
+	}
+	if !strings.Contains(st.LastError, "download") || !strings.Contains(st.LastError, "connection refused") {
+		t.Errorf("lastError = %q, want it to say the download failed and why", st.LastError)
 	}
 }

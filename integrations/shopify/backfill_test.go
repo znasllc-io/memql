@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
@@ -335,19 +337,213 @@ func TestAThirdGoneDownloadFailsTheBackfill(t *testing.T) {
 }
 
 func TestAServerErrorOnTheDownloadIsNotARestart(t *testing.T) {
-	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
-		t.Run(strconv.Itoa(status), func(t *testing.T) {
+	broken := func(w http.ResponseWriter, _ *http.Request) {
+		// The connection breaks before any answer: no status at all.
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}
+	cases := map[string]http.HandlerFunc{
+		"503":               func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
+		"429":               func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) },
+		"broken connection": broken,
+	}
+	for name, handler := range cases {
+		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
-			down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
-			t.Cleanup(down.Close)
+			var down http.Handler = handler
+			srv := httptest.NewServer(down)
+			t.Cleanup(srv.Close)
 
-			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: down.URL + "/download/file.jsonl", Restarts: 1}
+			cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: srv.URL + "/download/file.jsonl", Restarts: 1}
 			page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
-			if err == nil || !strings.Contains(err.Error(), "HTTP "+strconv.Itoa(status)) {
-				t.Fatalf("err = %v, want the error as today", err)
+			if err == nil {
+				t.Fatal("a failing download returned no error")
+			}
+			if name != "broken connection" && !strings.Contains(err.Error(), "HTTP "+name) {
+				t.Errorf("err = %v, want the error as today, with the status", err)
+			}
+			var gone bulkDownloadGone
+			if errors.As(err, &gone) {
+				t.Errorf("err = %v is a gone download: this failure would be counted as a restart", err)
 			}
 			if page.NextCursor != "" {
-				t.Errorf("a server error moved the cursor to %q; the restart count must stay as it was", page.NextCursor)
+				t.Fatalf("a failure moved the cursor to %q", page.NextCursor)
+			}
+
+			// The runner keeps the stored cursor on a failure. Taken again with
+			// the link now gone, it still has its one restart left: the failure
+			// above counted none.
+			gonePath := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+			t.Cleanup(gonePath.Close)
+			cur.URL = gonePath.URL + "/download/file.jsonl"
+			page, err = h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+			if err != nil {
+				t.Fatalf("the restart left after the failure was not there: %v", err)
+			}
+			if got := decodeBackfillCursor(page.NextCursor).Restarts; got != 2 {
+				t.Errorf("restarts after the failure and one gone link = %d, want 2", got)
+			}
+		})
+	}
+}
+
+// ---- no part of a download link reaches an error (ruling 57) ----
+
+// signedLink is a download link shaped as the origin signs one: a host, a
+// path naming the export, and query parameters that open it for a week.
+const signedLinkPath = "/exports/bulk-7781-products.jsonl"
+const signedLinkQuery = "?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=signer-credential&X-Goog-Signature=0badc0ffee5eed"
+
+func assertNoPartOfTheLink(t *testing.T, text, link string) {
+	t.Helper()
+	// Cut by hand rather than parsed: an unparseable link must be checked too.
+	host := link[strings.Index(link, "://")+3:]
+	host = host[:strings.Index(host, "/")]
+	hostname, port, _ := strings.Cut(host, ":")
+	parts := []string{link, host, hostname, port, signedLinkPath, "bulk-7781-products", "X-Goog-Signature", "0badc0ffee5eed", "signer-credential", "X-Goog-Credential"}
+	for _, part := range parts {
+		if part != "" && strings.Contains(text, part) {
+			t.Errorf("the text carries %q of the download link:\n%s", part, text)
+		}
+	}
+}
+
+func TestATransportFailureOnTheDownloadNeverCarriesTheLink(t *testing.T) {
+	t.Run("connection refused", func(t *testing.T) {
+		h := newHarness(t)
+		srv := httptest.NewServer(http.NotFoundHandler())
+		link := srv.URL + signedLinkPath + signedLinkQuery
+		srv.Close() // nothing listens there now
+
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+		if err == nil {
+			t.Fatal("a refused connection returned no error")
+		}
+		assertNoPartOfTheLink(t, err.Error(), link)
+		if !strings.Contains(err.Error(), "download") || !strings.Contains(err.Error(), "failed") || !strings.Contains(err.Error(), "connection refused") {
+			t.Errorf("err = %v, want it to say the download failed and why", err)
+		}
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			t.Errorf("err = %v, want the cause kept", err)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		h := newHarness(t)
+		release := make(chan struct{})
+		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+		}))
+		t.Cleanup(srv.Close)
+		t.Cleanup(func() { close(release) })
+		h.conn.admin.http = &http.Client{Timeout: 50 * time.Millisecond}
+		link := srv.URL + signedLinkPath + signedLinkQuery
+
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+		if err == nil {
+			t.Fatal("a download that timed out returned no error")
+		}
+		assertNoPartOfTheLink(t, err.Error(), link)
+		if !strings.Contains(err.Error(), "download") || !strings.Contains(err.Error(), "timed out") {
+			t.Errorf("err = %v, want it to say the download timed out", err)
+		}
+	})
+	t.Run("an unparseable link", func(t *testing.T) {
+		h := newHarness(t)
+		link := "https://files.example.test" + signedLinkPath + "%zz" + signedLinkQuery
+		cur := backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: link}
+		_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cur.encode())
+		if err == nil {
+			t.Fatal("an unparseable link returned no error")
+		}
+		assertNoPartOfTheLink(t, err.Error(), link)
+	})
+}
+
+// The guard's own refusals name no part of the link either: it runs before
+// every download and every redirect, and its error is the backfill's.
+func TestTheDownloadGuardNamesNoPartOfTheLink(t *testing.T) {
+	for _, link := range []string{
+		"https://files.example.test" + signedLinkPath + "%zz" + signedLinkQuery,
+		"https://10.0.0.7" + signedLinkPath + signedLinkQuery,
+		"http://files.example.test" + signedLinkPath + signedLinkQuery,
+	} {
+		err := checkBulkDownloadURL(link)
+		if err == nil {
+			t.Fatalf("%s was not refused", link)
+		}
+		assertNoPartOfTheLink(t, err.Error(), link)
+	}
+}
+
+// ---- an operation the origin fails is not started again for ever (ruling 57) ----
+
+func TestAnOperationFailedThreeTimesFailsTheBackfill(t *testing.T) {
+	h := newHarness(t)
+	h.admin.reply("ShopifyBulkStatus", map[string]any{"node": map[string]any{
+		"id": "gid://shopify/BulkOperation/1", "status": "FAILED", "errorCode": "INTERNAL_SERVER_ERROR", "url": nil,
+	}})
+	cursor := backfillCursor{OperationID: "gid://shopify/BulkOperation/1"}.encode()
+	for restart := 1; restart <= maxDownloadRestarts; restart++ {
+		page, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cursor)
+		if err != nil {
+			t.Fatalf("restart %d: %v", restart, err)
+		}
+		next := decodeBackfillCursor(page.NextCursor)
+		if next.OperationID != "" || next.Restarts != restart {
+			t.Fatalf("restart %d: cursor = %+v, want no operation and %d restarts", restart, next, restart)
+		}
+		next.OperationID = "gid://shopify/BulkOperation/1" // the fresh operation, failed again
+		cursor = next.encode()
+	}
+	_, err := h.conn.BackfillStore(context.Background(), h.store(t), "v1:shopify:product", cursor)
+	if err == nil {
+		t.Fatal("a third failed operation was started again: the restarts would never end")
+	}
+	if !strings.Contains(err.Error(), "FAILED") || !strings.Contains(err.Error(), "INTERNAL_SERVER_ERROR") {
+		t.Errorf("err = %v, want the status and the origin's errorCode", err)
+	}
+}
+
+func TestAGoneLinkAndAFailedOperationShareTheRestarts(t *testing.T) {
+	for _, last := range []string{"gone link", "failed operation"} {
+		t.Run(last, func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+			t.Cleanup(gone.Close)
+			h.admin.reply("ShopifyBulkStatus", operationStatus("gid://shopify/BulkOperation/2", "CANCELED", ""))
+
+			// One gone link: the first restart.
+			page, err := h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product",
+				backfillCursor{OperationID: "gid://shopify/BulkOperation/1", URL: gone.URL + "/download/a.jsonl"}.encode())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// One failed operation: the second.
+			next := decodeBackfillCursor(page.NextCursor)
+			next.OperationID = "gid://shopify/BulkOperation/2"
+			page, err = h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product", next.encode())
+			if err != nil {
+				t.Fatal(err)
+			}
+			next = decodeBackfillCursor(page.NextCursor)
+			if next.Restarts != 2 {
+				t.Fatalf("restarts = %d after one of each, want 2", next.Restarts)
+			}
+			// The next of either kind fails the backfill.
+			next.OperationID = "gid://shopify/BulkOperation/2"
+			if last == "gone link" {
+				next.URL = gone.URL + "/download/b.jsonl"
+			}
+			if _, err := h.conn.BackfillStore(ctx, h.store(t), "v1:shopify:product", next.encode()); err == nil {
+				t.Fatalf("a third restart (%s) was allowed", last)
 			}
 		})
 	}
