@@ -526,6 +526,37 @@ it("shows the engine's refusal when a pause is refused")
 - [ ] **Step 4:** Run the same commands, `./integrations/shopify/` whole in the database lane, `npm run typecheck` and `npx vitest run test/deployables`, and the generated-file gates. Expected: PASS.
 - [ ] **Step 5: Commit** `shopify: a store's acts and reads are for its owner or a cluster owner`.
 
+### Task 10c: The operator's sync acts are for a cluster owner or the engine itself
+
+Added at the documentation task's third round (2026-11-11). The builtins behind Cluster > Data's buttons are declared `@sdk` with no capability, and an ungated builtin is callable by every signed-in role. `datasyncRequeueInbound` checks its caller; the others do not, so any signed-in caller could start or restart a store's backfill, pause a domain, or retry or discard an outbox entry. The page's part only hides the buttons.
+
+**Files:**
+- Modify: `component/datasync/capabilities.go`, `dsl/common/builtins.memql` (descriptions), then the generated files `make sdk-gen` names
+- Test: `component/datasync/capabilities_test.go` (or the file that holds the handlers' tests), the datasync database-lane test file
+
+**Interfaces:**
+- Produces: `func requireOperator(ctx context.Context, name string) error` in `component/datasync` (a call with internal origin, or a cluster owner; anybody else is refused with "datasync: <name> is for a cluster owner"), called first in the handlers of `datasyncStartBackfill`, `datasyncSetSyncPaused`, `datasyncRetryOutboxEntry`, `datasyncDiscardOutboxEntry` and `datasyncRequeueInbound` (which keeps its rule and takes the shared function).
+
+Decisions:
+- The rule is the one `datasyncRequeueInbound` already has: internal origin (a connector acting as the operator, an automation) or a cluster owner. It runs before anything is read or written.
+- The builtins that already refuse a call without internal origin (`datasyncDispatchInbound`, `datasyncRetryInbound`, `datasyncReconcileDomains`, `datasyncQueueBackfill`, `datasyncContinueBackfills`) are unchanged.
+- Every internal caller keeps working: the Shopify connector's requeue and any pause it makes through these builtins run as the operator with internal origin.
+- Each builtin's description says who may call it.
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestTheOperatorsSyncActsRefuseACallerWhoIsNotAClusterOwner(t *testing.T) // all five, a writer with client origin: refused, nothing read, nothing written
+func TestTheOperatorsSyncActsAdmitAClusterOwnerAndInternalOrigin(t *testing.T)
+// database lane
+func TestAStoresRequeueStillRunsThroughTheConnector(t *testing.T)             // the Shopify act reaches datasyncRequeueInbound as the operator
+```
+
+- [ ] **Step 2:** Run `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN="$MIRROR_DSN" go test -p 1 -count=1 ./component/datasync/ ./integrations/shopify/ -run 'OperatorsSyncActs|RequeueStillRuns'`. Expected: FAIL.
+- [ ] **Step 3:** Implement, then `make sdk-gen`.
+- [ ] **Step 4:** Run the same command, both packages whole in the database lane, and the generated-file gates. Expected: PASS.
+- [ ] **Step 5: Commit** `datasync: the operator's sync acts are for a cluster owner or the engine itself`.
+
 ### Task 11: Cluster > Data, by store (U7)
 
 **Files:**
