@@ -61,6 +61,7 @@ shape template templateSummary {
   preheader
   sourceArtifactId
   composition
+  purpose
   row.createdAt
 }
 
@@ -90,6 +91,7 @@ shape template templateFull {
   preheader
   sourceArtifactId
   composition
+  purpose
   row.createdAt
 }
 

@@ -247,6 +247,7 @@ builtin campaignSaveTemplate {
   sourceArtifactId string @description("The Library file the email is written in. Keeps one template per organization and file; see above.")
   expectedRevision string! @description("Exact createdAt from templateById or templateForSource; empty only when creating.")
   action string @description("save (default), publish, archive or restore. Publishing is an explicit human action.")
+  purpose string @description("marketing or transactional, for a save or a publish; empty keeps the template's purpose (none is marketing). A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it. Archive and restore ignore it. Anything else is refused.")
 }
 
 @description("Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.")

@@ -1,6 +1,6 @@
 import type { Figure } from "../../../kit/measure";
 import type { ActSpec } from "../acts";
-import { isPublished, templateName, type TemplateRow } from "../rows";
+import { isPublished, isTransactional, templateIsArchived, templateName, type TemplateRow } from "../rows";
 import { localToInstant, momentWords, whenWords } from "../when";
 import { WORDS } from "../words";
 
@@ -211,6 +211,19 @@ export function campaignSentence(
   const count = subscriberWords(names.subscribers);
   const audience = count === "" ? names.audience : `${names.audience} (${count})`;
   return `Send “${names.template}”${whose} to ${audience} as ${names.sender} ${at}.`;
+}
+
+/**
+ * The templates a campaign may be given: the organization's own, published
+ * first. Put-away ones are left out, and so are transactional ones -- a message
+ * about one person's own request has no unsubscribe and is never a list's --
+ * except `keep`, the one a campaign already names, which an edit must never
+ * silently re-point.
+ */
+export function campaignTemplates(all: readonly TemplateRow[], accountId: string, keep = ""): TemplateRow[] {
+  return all
+    .filter((t) => t.accountId === accountId && ((!templateIsArchived(t) && !isTransactional(t)) || (keep !== "" && t.id === keep)))
+    .sort((a, b) => Number(isPublished(b)) - Number(isPublished(a)));
 }
 
 /** The name the campaign is created with: what was typed, else its template's. */

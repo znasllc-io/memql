@@ -396,14 +396,14 @@ func TestTemplateSaveRendersDocumentsAndPublishesBySource(t *testing.T) {
 	// 8. The builtin runs the whole way through the engine, as a client calls it:
 	// no template id, the file, the document, and the revision it holds. The
 	// answer is the receipt, with its list of issues.
-	call, err := langparser.RenderCall("campaignSaveTemplate", map[string]any{
+	rendered, err := langparser.RenderCall("campaignSaveTemplate", map[string]any{
 		"accountId": account, "name": "Welcome email", "content": document, "sourceArtifactId": source,
 		"expectedRevision": back.Revision, "action": "save",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows := memql.MaterializeRows(w.run(t, w.owner, "builtin "+call))
+	rows := memql.MaterializeRows(w.run(t, w.owner, "builtin "+rendered))
 	if len(rows) != 1 || rows[0]["templateId"] != derived || rows[0]["saved"] != true || rows[0]["status"] != "draft" {
 		t.Fatalf("campaignSaveTemplate through the engine answered %v", rows)
 	}
@@ -750,7 +750,8 @@ func TestTemplateListsAreLight(t *testing.T) {
 	if listed == nil {
 		t.Fatal("templates does not list the template")
 	}
-	const listKeys = "accountId,composition,createdAt,id,layoutId,name,ownerUserId,preheader,sourceArtifactId,status,subject"
+	// purpose is the template's (X10): the pickers leave a transactional one out.
+	const listKeys = "accountId,composition,createdAt,id,layoutId,name,ownerUserId,preheader,purpose,sourceArtifactId,status,subject"
 	if got := asKeys(listed); got != listKeys {
 		t.Errorf("a templates row has %s, want %s", got, listKeys)
 	}
@@ -965,5 +966,82 @@ func TestASaveKeepsTheCompositionAndAStaleRevisionIsRefused(t *testing.T) {
 	got, ok := compositionFromRow(row)
 	if !ok || got.State != "done" || got.GoalID != composed.GoalID || len(got.Notes) != 1 || len(got.Request.FileIDs) != 1 {
 		t.Errorf("composition after the save = %+v %v", got, ok)
+	}
+}
+
+// A template saved as transactional stays so: through the builtin as a client
+// calls it, in the store a send reads, in the list and the whole read, through
+// a later save that names no purpose (an editor's), and through an archive; a
+// save that names marketing makes it marketing again.
+func TestSaveTemplateKeepsTheTransactionalPurpose(t *testing.T) {
+	w := newLayoutWorld(t)
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Purpose client")
+	id := w.suffix + "-purpose"
+	fresh := memql.ContextWithFreshRead(w.owner)
+	content := map[string]any{"subject": "Your application", "textBody": "We have it.", "htmlBody": "<p>We have it.</p>"}
+
+	rendered, err := langparser.RenderCall("campaignSaveTemplate", map[string]any{
+		"templateId": id, "accountId": account, "name": "Application received", "content": content,
+		"expectedRevision": "", "action": "save", "purpose": "transactional",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var revision string
+	for _, row := range memql.MaterializeRows(w.run(t, w.owner, "builtin "+rendered)) {
+		revision = str(row, "revision")
+	}
+	if revision == "" {
+		t.Fatal("the builtin answered no revision")
+	}
+	purposeNow := func() string {
+		t.Helper()
+		tmpl, found, err := w.workers[1].store.TemplateByID(fresh, id)
+		if err != nil || !found {
+			t.Fatalf("TemplateByID: %v %v", found, err)
+		}
+		if tmpl.Transactional() != (tmpl.Purpose == "transactional") {
+			t.Fatalf("Transactional() = %v for purpose %q", tmpl.Transactional(), tmpl.Purpose)
+		}
+		return tmpl.Purpose
+	}
+	if got := purposeNow(); got != "transactional" {
+		t.Fatalf("after the save the purpose is %q", got)
+	}
+	var listed string
+	for _, row := range memql.MaterializeRows(w.run(t, fresh, "query templates()")) {
+		if bare(str(row, "id")) == id {
+			listed = str(row, "purpose")
+		}
+	}
+	if listed != "transactional" {
+		t.Errorf("the templates list says purpose %q", listed)
+	}
+
+	save := func(revision, subject, action string, purpose any) string {
+		t.Helper()
+		args := map[string]any{"templateId": id, "accountId": account, "name": "Application received", "content": map[string]any{"subject": subject, "textBody": "We have it.", "htmlBody": "<p>We have it.</p>"}, "expectedRevision": revision, "action": action}
+		if purpose != nil {
+			args["purpose"] = purpose
+		}
+		nodes, err := w.workers[0].handleSaveTemplate(w.owner, args, 0)
+		if err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+		return decodeSaved(t, nodes).Revision
+	}
+	revision = save(revision, "Your application, received", "save", nil)
+	if got := purposeNow(); got != "transactional" {
+		t.Fatalf("a save that named no purpose left it %q", got)
+	}
+	revision = save(revision, "Your application, received", "archive", nil)
+	if got := purposeNow(); got != "transactional" {
+		t.Fatalf("an archive left the purpose %q", got)
+	}
+	revision = save(revision, "Your application, received", "restore", nil)
+	save(revision, "Your application, received", "save", "marketing")
+	if got := purposeNow(); got != "marketing" {
+		t.Fatalf("a save that named marketing left the purpose %q", got)
 	}
 }

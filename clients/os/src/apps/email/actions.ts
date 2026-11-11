@@ -11,6 +11,7 @@ import {
   type AudienceRow,
   type CampaignRow,
   type RecipientMode,
+  type TemplatePurpose,
   type TemplateRow,
 } from "./rows";
 
@@ -862,6 +863,11 @@ export interface TemplateLifecycle extends LifecycleState {
   archive: (template: TemplateRow) => Promise<boolean>;
   /** Bring an archived template back, as a draft. */
   restore: (template: TemplateRow) => Promise<boolean>;
+  /**
+   * Say what the template is for, saving the email it holds unchanged (the
+   * document read whole, by id). A save, so the template is a draft after it.
+   */
+  setPurpose: (template: TemplateRow, content: Record<string, unknown>, purpose: TemplatePurpose) => Promise<boolean>;
 }
 
 /**
@@ -871,7 +877,7 @@ export interface TemplateLifecycle extends LifecycleState {
  * content is empty, as the engine reads none for these two.
  */
 export function useTemplateLifecycle(): TemplateLifecycle {
-  const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore") => {
+  const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore" | "purpose", change?: { content: Record<string, unknown>; purpose: TemplatePurpose }) => {
     const base = {
       templateId: template.id,
       name: template.name,
@@ -882,7 +888,9 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     const result =
       action === "archive"
         ? await query.campaignSaveTemplate({ ...base, action: "archive" })
-        : await query.campaignSaveTemplate({ ...base, action: "restore" });
+        : action === "restore"
+          ? await query.campaignSaveTemplate({ ...base, action: "restore" })
+          : await query.campaignSaveTemplate({ ...base, content: change?.content ?? {}, action: "save", purpose: change?.purpose ?? "marketing" });
     if (!result.rows().map(flatten).some((row) => row.saved === true && typeof row.revision === "string" && row.revision !== "")) {
       throw new Error("The cluster did not confirm the template change.");
     }
@@ -895,6 +903,7 @@ export function useTemplateLifecycle(): TemplateLifecycle {
     reset: write.reset,
     archive: (template) => write.call(template, "archive"),
     restore: (template) => write.call(template, "restore"),
+    setPurpose: (template, content, purpose) => write.call(template, "purpose", { content, purpose }),
   };
 }
 

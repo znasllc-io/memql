@@ -1351,6 +1351,7 @@
         "name",
         "ownerUserId",
         "preheader",
+        "purpose",
         "sourceArtifactId",
         "status",
         "subject",
@@ -1363,6 +1364,10 @@
         "textBody"
       ],
       "enums": {
+        "purpose": [
+          "marketing",
+          "transactional"
+        ],
         "status": [
           "archived",
           "draft",

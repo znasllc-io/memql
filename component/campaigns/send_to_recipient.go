@@ -168,11 +168,20 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
 	}
+	// Every send to a list's member comes through here (a journey's step, an
+	// event rule's marketing lane, a signup's welcome, an order message and the
+	// replay of each), so a template about one person's own request is held
+	// here, as it is now and as it was captured (X10). Held: the automation
+	// keeps the step until the template is changed, and nothing is attempted.
+	transactional := tmpl.Transactional()
 	if opts.snapshot != nil {
 		if bare(opts.snapshot.ID) != bare(tmpl.ID) || !sameOrganization(opts.snapshot.AccountID, tmpl.AccountID) || opts.snapshot.Status != "ready" {
 			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
 		}
 		tmpl = *opts.snapshot
+	}
+	if transactional || tmpl.Transactional() {
+		return nil, sendHeld{reason: errTransactionalTemplate.Error()}
 	}
 	if tmpl.Status != "ready" {
 		return nil, templateHeld(tmpl)

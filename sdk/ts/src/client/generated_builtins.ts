@@ -915,6 +915,8 @@ export interface CampaignSaveTemplateArgs {
   expectedRevision: string;
   /** save (default), publish, archive or restore. Publishing is an explicit human action. */
   action?: string;
+  /** marketing or transactional, for a save or a publish; empty keeps the template's purpose (none is marketing). A transactional template is about one person's own request and has no unsubscribe: no campaign, journey step or event email rule may send it. Archive and restore ignore it. Anything else is refused. */
+  purpose?: string;
 }
 
 export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
@@ -926,6 +928,7 @@ export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): strin
   if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  if (args.purpose !== undefined) parts.push("purpose: " + renderMemQLValue(args.purpose));
   return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
 }
 

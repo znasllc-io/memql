@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -235,5 +236,22 @@ func TestRateLimitedRequestIsDurablyDeferred(t *testing.T) {
 	}
 	if len(callsWithPrefix(e, "mutation recordCampaignSingleSend")) > 0 {
 		t.Fatal("deferred send claimed provider attempt")
+	}
+}
+
+// TestAnOperationalEmailRefusesATransactionalTemplate: the operational lane of
+// an event rule stages a template for a cluster's own people. The builtin is
+// directly callable, so it refuses a transactional template itself, whatever
+// the rule's arming said (X10).
+func TestAnOperationalEmailRefusesATransactionalTemplate(t *testing.T) {
+	base := &fakeEngine{template: map[string]any{"id": "t1", "accountId": "org", "status": "ready", "purpose": "transactional", "subject": "Hello", "textBody": "Plain"}}
+	e := &operationalEngine{fakeEngine: base, rule: map[string]any{"id": "r1", "accountId": "org", "ownerUserId": "u1", "status": "active", "templateId": "t1", "recipientMode": "cluster_roles"}, users: []map[string]any{{"role": "owner", "primaryEmail": "owner@example.test"}}}
+	w := newTestWorker(t, e, &recordingSender{})
+	_, err := w.handleStageOperationalEmail(importCtx(), map[string]any{"requestId": "operational-one", "templateId": "t1", "to": "owner@example.test", "emailRuleId": "r1", "dedupeKey": "dedupe"}, 0)
+	if !errors.Is(err, errTransactionalTemplate) {
+		t.Fatalf("err = %v, want the transactional refusal", err)
+	}
+	if calls := callsWithPrefix(base, "mutation stageServerOutboundRequest"); len(calls) != 0 {
+		t.Fatalf("a transactional template was staged: %v", calls)
 	}
 }

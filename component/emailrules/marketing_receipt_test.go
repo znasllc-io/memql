@@ -16,6 +16,9 @@ func (e *marketingReceiptEngine) Execute(_ context.Context, q string) (any, erro
 	switch {
 	case strings.HasPrefix(q, "query emailRuleById"):
 		return rowsEnvelope([]map[string]any{e.rule}), nil
+	case strings.HasPrefix(q, "query templateById"):
+		// A firing reads its template first: a transactional one is never a rule's (X10).
+		return rowsEnvelope([]map[string]any{{"id": "v1:campaigns:template:t1", "status": "ready"}}), nil
 	case strings.HasPrefix(q, "query sendableRecipientsForAudience"):
 		return rowsEnvelope([]map[string]any{{"id": "recipient1", "email": "reader@example.com"}}), nil
 	case strings.HasPrefix(q, "query recipientInAudienceByDigest"):

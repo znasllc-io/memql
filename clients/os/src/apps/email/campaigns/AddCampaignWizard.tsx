@@ -40,7 +40,6 @@ import {
   senderLabel,
   senderProjection,
   seriesFor,
-  templateIsArchived,
   templateName,
   templateProjection,
   testSettingFor,
@@ -66,6 +65,7 @@ import {
   askingActs,
   campaignNameFor,
   campaignSentence,
+  campaignTemplates,
   firstOpen,
   reviewActs,
   reviewQuestion,
@@ -203,9 +203,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   const allTemplates = useProjected(feeds.templates.snapshot.rows, templateProjection);
   const audiences = allAudiences.filter((a) => a.accountId === accountId && !audienceIsArchived(a));
   // Published first: a draft can be chosen, and Review says what it still needs.
-  const templates = allTemplates
-    .filter((t) => t.accountId === accountId && !templateIsArchived(t))
-    .sort((a, b) => Number(isPublished(b)) - Number(isPublished(a)));
+  const templates = campaignTemplates(allTemplates, accountId);
   const senders = allSenders.filter((s) => s.accountId === accountId && !senderIsRetired(s));
   const audience = allAudiences.find((a) => a.id === draft.audienceId);
   const template = allTemplates.find((t) => t.id === draft.templateId);

@@ -137,6 +137,19 @@ var (
 	errUnsavedTemplate    = errors.New("save and review this revision before publishing")
 	errTemplateOrgMoved   = errors.New("a template cannot move between organizations; create a copy instead")
 	errTemplateNoRevision = errors.New("template has no readable revision")
+	errTemplatePurpose    = errors.New("choose the template's purpose: marketing or transactional")
+
+	// errTransactionalTemplate refuses a template about one person's own request
+	// wherever a send could reach more than that one person: a campaign started
+	// or scheduled (and again at its time), a journey step saved or turned on, a
+	// single send to a list's member, an event rule's operational email.
+	errTransactionalTemplate = errors.New("This template is about one person's own request and has no unsubscribe, so it cannot be sent to a list.")
+)
+
+// The two purposes a template has; none at all is marketing.
+const (
+	purposeMarketing     = "marketing"
+	purposeTransactional = "transactional"
 )
 
 // templateStatus is the status each action leaves a template in: editing always
@@ -152,6 +165,7 @@ type templateRequest struct {
 	name       string
 	expected   string // the revision the caller read, or empty when creating
 	action     string
+	purpose    string            // marketing, transactional, or empty to keep the template's
 	document   emaildoc.Document // the parsed content; read only for save and publish
 }
 
@@ -159,6 +173,9 @@ type templateRequest struct {
 // a send uses and the document it was made from.
 type templateContent struct {
 	name, subject, textBody, htmlBody, preheader, layoutID, sourceArtifactID string
+	// purpose is marketing or transactional, or empty for none: a write that
+	// leaves it empty does not name it, so the stored one stays.
+	purpose string
 	// document is the email document as a JSON object, or nil for a template
 	// saved before documents existed, which is written back without one.
 	document map[string]any
@@ -178,6 +195,7 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 		name:       strings.TrimSpace(argString(args, "name")),
 		expected:   argString(args, "expectedRevision"),
 		action:     argString(args, "action"),
+		purpose:    argString(args, "purpose"),
 	}
 	if req.action == "" {
 		req.action = "save"
@@ -197,6 +215,11 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	}
 	if _, known := templateStatus[req.action]; !known {
 		return nil, errUnknownAction
+	}
+	// A purpose is one of the two or none. Archive and restore do not read it,
+	// as they do not read the content.
+	if writing && req.purpose != "" && req.purpose != purposeMarketing && req.purpose != purposeTransactional {
+		return nil, errTemplatePurpose
 	}
 	if writing {
 		// Measured as the file it is, as a preview measures it: an email that is
@@ -396,9 +419,13 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 				return nil, unknownTagRefusal(unknown)
 			}
 		}
-		// A call that names no file keeps the one the template has.
+		// A call that names no file keeps the one the template has, and one that
+		// names no purpose keeps its purpose (an editor's save names none).
 		if content.sourceArtifactID == "" {
 			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
+		}
+		if content.purpose == "" {
+			content.purpose = str(row, "purpose")
 		}
 		// A save does not touch the composition: the stored one is written back
 		// explicitly, not left to an omitted argument. Except that a person's
@@ -483,7 +510,7 @@ func (w *Worker) renderInSlot(ctx context.Context, req templateRequest) (*render
 	content := templateContent{
 		name: req.name, subject: req.document.Subject, textBody: result.Text, htmlBody: result.HTML,
 		preheader: req.document.Preheader, layoutID: req.document.Layout, sourceArtifactID: req.sourceID,
-		document: document,
+		document: document, purpose: req.purpose,
 	}
 	// An email past what a send takes can never be sent, and its HTML can be 8 MiB:
 	// the row, and every answer that carries it, would weigh that for nothing. Such
@@ -504,6 +531,7 @@ func storedTemplate(row map[string]any) templateContent {
 	content := templateContent{
 		name: str(row, "name"), subject: str(row, "subject"), textBody: str(row, "textBody"), htmlBody: str(row, "htmlBody"),
 		preheader: str(row, "preheader"), layoutID: str(row, "layoutId"), sourceArtifactID: bare(str(row, "sourceArtifactId")),
+		purpose: str(row, "purpose"),
 	}
 	if document, ok := row["document"].(map[string]any); ok && len(document) > 0 {
 		content.document = document
@@ -530,14 +558,25 @@ func (c templateContent) values(templateID string, revision time.Time) map[strin
 	if c.composition != nil {
 		values["composition"] = c.composition
 	}
+	if c.purpose != "" {
+		values["purpose"] = c.purpose
+	}
 	return values
 }
 
+// purposeOf is the purpose a template has: none is marketing.
+func purposeOf(purpose string) string {
+	if purpose == "" {
+		return purposeMarketing
+	}
+	return purpose
+}
+
 // sameTemplate reports whether saving the content would write what is already
-// stored: the name, the three parts, the preheader, the layout, the file and the
-// document. The documents are compared as the JSON they are, which sorts object
-// keys and reads numbers the same whichever way they came (from a client, or
-// back out of the database). The file counts, so that saving a template from
+// stored: the name, the three parts, the preheader, the layout, the file, the
+// purpose and the document. The documents are compared as the JSON they are,
+// which sorts object keys and reads numbers the same whichever way they came
+// (from a client, or back out of the database). The file counts, so that saving a template from
 // another file moves it there instead of answering that nothing changed.
 //
 // A template saved before documents existed has no document. It is a custom
@@ -550,6 +589,11 @@ func sameTemplate(row map[string]any, c templateContent) bool {
 		return false
 	}
 	if c.sourceArtifactID != bare(str(row, "sourceArtifactId")) {
+		return false
+	}
+	// None is marketing, so naming marketing over a template that has no
+	// purpose changes nothing.
+	if purposeOf(c.purpose) != purposeOf(str(row, "purpose")) {
 		return false
 	}
 	stored := storedTemplate(row).document

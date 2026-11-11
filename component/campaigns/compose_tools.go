@@ -311,6 +311,7 @@ func (w *Worker) saveComposed(ctx context.Context, t composingTemplate, rendered
 		content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
 	}
 	content.composition = object
+	content.purpose = str(row, "purpose")
 	revision := w.templateRevision(prior)
 	values := content.values(t.id, revision)
 	values["status"] = templateStatus["save"] // a draft, whatever its issues
@@ -349,6 +350,7 @@ func (w *Worker) saveComposedCopy(ctx context.Context, t composingTemplate, row 
 	copied := renderedTemplate{content: rendered.content, issues: rendered.issues}
 	// A copy is no Library file's template: one file has one template.
 	copied.content.name, copied.content.sourceArtifactID, copied.content.composition = name, "", object
+	copied.content.purpose = str(row, "purpose")
 	revision, err := w.insertTemplate(ctx, templateRequest{templateID: copyID, accountID: t.accountID, name: name, action: "save"}, &copied)
 	if err != nil {
 		return "", time.Time{}, err

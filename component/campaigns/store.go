@@ -216,6 +216,11 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+	// Purpose is "transactional" for a template about one person's own
+	// request, which carries no unsubscribe and is never sent to a list;
+	// "marketing", or nothing at all (every template saved before purposes
+	// existed), is marketing (X10).
+	Purpose string `json:"purpose,omitempty"`
 
 	// ExpectsHTML says the template was written to have an HTML part: it is a
 	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
@@ -463,9 +468,17 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+		Purpose:   str(r, "purpose"),
 
 		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// Transactional says the template is about one person's own request: it has no
+// unsubscribe, so nothing that sends to a list or fires from a rule may use it.
+// A template with no purpose is marketing.
+func (t Template) Transactional() bool {
+	return t.Purpose == purposeTransactional
 }
 
 // lacksItsHTML says that the template was written to have an HTML part and has

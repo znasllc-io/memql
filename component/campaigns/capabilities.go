@@ -450,6 +450,12 @@ func (w *Worker) preflightAudienceWith(ctx context.Context, op string, campaign 
 	if err := w.validateCampaignOrganization(ctx, campaign, tmpl); err != nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
+	// A template about one person's own request has no unsubscribe, so no list
+	// is sent it, whatever its status: publishing it would not make the send
+	// legal, so this is said before "not ready" (X10).
+	if tmpl.Transactional() {
+		return 0, Template{}, errTransactionalTemplate
+	}
 	// `ready` is an operator asserting the copy is finished. Refusing a
 	// draft is the cheapest guard there is against the single most
 	// expensive mistake in this domain -- half-written copy delivered to

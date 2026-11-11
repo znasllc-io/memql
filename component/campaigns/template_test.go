@@ -142,7 +142,7 @@ func (e *templateEngine) keep(q string) {
 		row["accountId"] = "v1:accounts:account:" + fmt.Sprint(args["accountId"])
 		row["status"] = "draft"
 	}
-	for _, field := range []string{"name", "subject", "textBody", "htmlBody", "preheader", "layoutId", "sourceArtifactId", "document", "composition", "status"} {
+	for _, field := range []string{"name", "subject", "textBody", "htmlBody", "preheader", "layoutId", "sourceArtifactId", "document", "composition", "status", "purpose"} {
 		if value, named := args[field]; named {
 			row[field] = value
 		}
@@ -2279,5 +2279,63 @@ func TestPublishAcceptsKnownTagsAndFieldTags(t *testing.T) {
 	saved := tw.saved(saveTemplateArgs(content))
 	if published := tw.saved(saveTemplateArgs(content, revised(saved.Revision, "publish"))); published.Status != "ready" {
 		t.Errorf("publication = %+v", published)
+	}
+}
+
+// A template says whether it is about one person's own request (X10, G8). Every
+// template saved before purposes existed has none, and none is marketing: it
+// reads so through the store a send uses, and a save that names no purpose
+// writes none, so nothing that exists today changes.
+func TestATemplateWithNoPurposeIsMarketing(t *testing.T) {
+	for _, c := range []struct {
+		purpose       string
+		transactional bool
+	}{{"", false}, {"marketing", false}, {"transactional", true}} {
+		if got := (Template{Purpose: c.purpose}).Transactional(); got != c.transactional {
+			t.Errorf("a template whose purpose is %q: transactional = %v, want %v", c.purpose, got, c.transactional)
+		}
+	}
+
+	w := newTestWorker(t, &fakeEngine{template: templateRow()}, &recordingSender{})
+	tmpl, found, err := w.store.TemplateByID(importCtx(), testTemplate)
+	if err != nil || !found {
+		t.Fatalf("TemplateByID: %v %v", found, err)
+	}
+	if tmpl.Purpose != "" || tmpl.Transactional() {
+		t.Errorf("a stored template with no purpose reads as %q (transactional %v), want marketing", tmpl.Purpose, tmpl.Transactional())
+	}
+
+	tw := newTemplateWorld(t)
+	tw.saved(saveTemplateArgs(map[string]any{"subject": "Hello", "textBody": "Plain.", "htmlBody": "<p>Plain.</p>"}))
+	writes := tw.engine.writes()
+	if len(writes) != 1 {
+		t.Fatalf("expected one write, got %v", writes)
+	}
+	if _, args := parseRenderedCall(writes[0].query); args["purpose"] != nil {
+		t.Errorf("a save that names no purpose wrote purpose %v", args["purpose"])
+	}
+}
+
+// A purpose is one of the two, or none: anything else is refused before
+// anything is rendered or written.
+func TestSaveTemplateRefusesAPurposeOutsideTheTwo(t *testing.T) {
+	tw := newTemplateWorld(t)
+	content := map[string]any{"subject": "Hello", "textBody": "Plain.", "htmlBody": "<p>Plain.</p>"}
+	for _, purpose := range []string{"newsletter", "Transactional", " marketing"} {
+		_, err := tw.save(saveTemplateArgs(content, func(a map[string]any) { a["purpose"] = purpose }))
+		if !errors.Is(err, errTemplatePurpose) {
+			t.Errorf("purpose %q: err = %v, want %v", purpose, err, errTemplatePurpose)
+		}
+	}
+	if writes := tw.engine.writes(); len(writes) != 0 {
+		t.Fatalf("a refused purpose was written: %v", writes)
+	}
+	for _, purpose := range []string{"", "marketing", "transactional"} {
+		tw := newTemplateWorld(t)
+		tw.saved(saveTemplateArgs(content, func(a map[string]any) { a["purpose"] = purpose }))
+		_, args := parseRenderedCall(tw.engine.writes()[0].query)
+		if want := map[string]any{"": nil, "marketing": "marketing", "transactional": "transactional"}[purpose]; args["purpose"] != want {
+			t.Errorf("purpose %q was written as %v, want %v", purpose, args["purpose"], want)
+		}
 	}
 }

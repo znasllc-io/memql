@@ -33,6 +33,11 @@ func (w *Worker) handleStageOperationalEmail(ctx context.Context, args map[strin
 	if !found || !sameOrganization(tmpl.AccountID, str(rule, "accountId")) {
 		return nil, fmt.Errorf("choose the rule's template in its organization")
 	}
+	// The builtin is directly callable, so it refuses a template about one
+	// person's own request itself, whatever the rule's arming said (X10).
+	if tmpl.Transactional() {
+		return nil, errTransactionalTemplate
+	}
 	if tmpl.Status != "ready" {
 		return nil, fmt.Errorf("publish the rule's template before it can send")
 	}

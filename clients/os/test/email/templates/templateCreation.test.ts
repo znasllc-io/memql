@@ -9,7 +9,10 @@ import { describe, expect, it } from "vitest";
 // saved from a finished email in the editor. The OS reads templates, previews
 // them, and puts them away or brings them back -- and that is all. So the
 // template save appears in exactly one place, the lifecycle hook in
-// apps/email/actions.ts, and every action it passes is archive or restore. The
+// apps/email/actions.ts, and every action it passes is archive or restore --
+// or a save that names the template's purpose (X10), which sends back the
+// document read whole, by id, at the revision on screen, and writes no content
+// of the OS's own. A save that names no purpose is still an offence. The
 // layout save appears nowhere: the OS has no layout lifecycle at all (the
 // Layouts view is gone, and a layout is only ever read, to name the one a
 // template was made from). A placeholder draft ("Your subject", "Your message")
@@ -95,7 +98,8 @@ function offences(files: readonly Source[]): string[] {
       if (match[1] === undefined) continue;
       const args = argumentsFrom(file.text, file.text.indexOf("(", at));
       const actions = [...args.matchAll(/\baction\s*:\s*([^,}\n]+)/g)].map((found) => found[1]!.trim());
-      if (actions.length !== 1 || !/^["'](archive|restore)["']$/.test(actions[0]!)) {
+      const purposeSave = actions.length === 1 && actions[0] === '"save"' && /\bpurpose\s*:/.test(args);
+      if (!purposeSave && (actions.length !== 1 || !/^["'](archive|restore)["']$/.test(actions[0]!))) {
         out.push(`${where}: ${name} with action ${actions.join(", ") || "(none)"}`);
       }
     }
@@ -108,14 +112,14 @@ describe("templates and layouts are made in the editor", () => {
     const tree = sources();
     expect(offences(tree)).toEqual([]);
 
-    // The scan reaches the hook's own calls: one archive and one restore.
+    // The scan reaches the hook's own calls: one archive, one restore and the purpose's save.
     const actions = tree.find((file) => file.path === "apps/email/actions.ts")!.text;
     for (const [name, { hook }] of Object.entries(ALLOWED)) {
       const span = hookSpan(actions, hook);
       expect(span, hook).not.toBeNull();
       const body = actions.slice(span![0], span![1]);
       const calls = [...body.matchAll(new RegExp(`\\b${name}\\s*\\(`, "g"))].map((found) => argumentsFrom(body, body.indexOf("(", found.index ?? 0)));
-      expect(calls.map((args) => /action\s*:\s*["'](\w+)["']/.exec(args)?.[1])).toEqual(["archive", "restore"]);
+      expect(calls.map((args) => /action\s*:\s*["'](\w+)["']/.exec(args)?.[1])).toEqual(["archive", "restore", "save"]);
     }
   });
 

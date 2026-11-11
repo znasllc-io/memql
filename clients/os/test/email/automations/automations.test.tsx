@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
-import { chooseOption } from "../../selectControl";
+import { chooseOption, openSelect } from "../../selectControl";
 import { audienceRow, fakeConnection, recipientRow, rowsResult, ruleRow, senderRow, templateRow, withSession, type FakeSeed } from "../harness";
 import { installSeededAccess } from "../../seededAccess";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -257,6 +257,23 @@ describe("Adding and describing", () => {
     expect(await screen.findByText("Can't turn on yet: The sender news@acme.com is not registered with Azure. Add it on the sending domain before turning this on.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
     expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ accountId: "self", senderIdentityId: "s1" }, expect.anything());
+  });
+  it("leaves transactional templates out of an automation step's picker", async () => {
+    // A journey and an event rule both mail more than the one person a transactional template is about (X10).
+    const templates = [templateRow({ id: "t1", accountId: "self", name: "Welcome" }), templateRow({ id: "t-own", accountId: "self", name: "Application received", purpose: "transactional" })];
+    const listed = () => [...openSelect(screen.getByLabelText("Template")).querySelectorAll('[role="option"]')].map(option => option.textContent);
+    const conn = setup({ templates, concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }] }); mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Someone joins an audience" })); fireEvent.click(await screen.findByRole("radio", { name: "Newsletter" }));
+    fireEvent.click(screen.getByRole("button", { name: /Send an email: choose a template/ }));
+    expect(listed()).toEqual(["Choose a template", "Welcome"]);
+    cleanup();
+    mount(setup({ templates, concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }] }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Something happens in MemQL" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "user (identity)" }));
+    await press("Next"); await press("Next"); await press("Next"); await press("Next");
+    expect(listed()).toEqual(["Choose a template", "Welcome"]);
   });
   it("keeps one event-rule draft after activation refusal and saves later edits before retrying", async () => {
     const conn = setup({ concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }] });

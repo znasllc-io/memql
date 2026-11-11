@@ -14,7 +14,7 @@ import { flatten } from "../../../kit/rows";
 import type { LiveCollectionHandle } from "../../../live/useLiveCollection";
 import { useConfigureNewsletter, useRetryNewsletterWelcome } from "../actions";
 import { type ActSpec, toKitActs } from "../acts";
-import { isPublished, templateFromRow, type AudienceRow } from "../rows";
+import { isPublished, isTransactional, templateFromRow, type AudienceRow } from "../rows";
 import { knowledgeOf, listKnowledge, useNewsletterWelcomes, type EmailFeeds, type EmailRecordFeeds } from "../useEmail";
 
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
@@ -54,7 +54,7 @@ export function SignupFormPage({ audience, feeds, signupForms, sites, binding, o
   const retry = useRetryNewsletterWelcome();
   const welcomes = useNewsletterWelcomes(audience.id);
   const working = useRef(false);
-  const templates = feeds.templates.snapshot.rows.map(templateFromRow).filter(t => t.accountId === audience.accountId && isPublished(t));
+  const templates = feeds.templates.snapshot.rows.map(templateFromRow).filter(t => t.accountId === audience.accountId && isPublished(t) && !isTransactional(t));
   const senders = feeds.senders.snapshot.rows.map(flatten).filter(s => s.accountId === audience.accountId && s.status !== "disabled");
   const known = [feeds.templates, feeds.senders].every(f => listKnowledge(f) === "known");
   const name = siteTitle(sites, text(row, "siteId"));
@@ -96,7 +96,7 @@ export function ConnectSignupFormWizard({ audience, feeds, signupForms, sites, o
   const [consentText, setConsent] = useState("Email me your newsletter.");
   const write = useConfigureNewsletter();
   const working = useRef(false);
-  const templates = feeds.templates.snapshot.rows.map(templateFromRow).filter(t => t.accountId === audience.accountId && isPublished(t));
+  const templates = feeds.templates.snapshot.rows.map(templateFromRow).filter(t => t.accountId === audience.accountId && isPublished(t) && !isTransactional(t));
   const senders = feeds.senders.snapshot.rows.map(flatten).filter(s => s.accountId === audience.accountId && s.status !== "disabled");
   const bound = signupForms.snapshot.rows.map(flatten).map(r => r.siteId);
   const available = sites.snapshot.rows.map(flatten).filter(s => s.accountId === audience.accountId && !s.systemOwned && s.status !== "disabled" && !bound.includes(s.id));

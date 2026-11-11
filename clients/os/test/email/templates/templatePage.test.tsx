@@ -257,6 +257,50 @@ describe("a template's page", () => {
     expect(deadButtons()).toEqual([]);
   });
 
+  it("offers the purpose as a choice and saves transactional", async () => {
+    const welcome = templateRow({ id: "t1", name: "Welcome 2", createdAt: "2026-10-01T08:00:00Z" });
+    const conn = fakeConnection({ templates: [welcome], templateContent: { t1: { document: DOCUMENT } }, render: RENDERED });
+    mount(conn);
+    await openPage("Welcome 2");
+
+    // A template that says nothing is marketing, and the page says whose judgment the choice is.
+    const details = screen.getByRole("region", { name: "Template details" });
+    const purpose = within(details).getByRole("radiogroup", { name: "Purpose" });
+    expect(within(purpose).getAllByRole("radio").map((radio) => [radio.textContent, radio.getAttribute("aria-checked")])).toEqual([
+      ["Marketing", "true"],
+      ["About one person's own request: no unsubscribe", "false"],
+    ]);
+    expect(within(details).getByText("Whether a message counts as transactional where you trade is your judgment of its words.")).toBeTruthy();
+    await waitFor(() => expect(conn.query.templateById).toHaveBeenCalled());
+
+    // Choosing is a change to save, on the one bar.
+    fireEvent.click(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }));
+    expect(barActs()).toEqual([["Discard", "text"], ["Save", "primary"]]);
+    await readTheBar();
+    press("Discard");
+    expect(within(purpose).getByRole("radio", { name: "Marketing" }).getAttribute("aria-checked")).toBe("true");
+    expect(barActs()).toEqual([["Archive", "text"], ["Open in editor", "primary"]]);
+
+    fireEvent.click(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }));
+    await readTheBar();
+    press("Save");
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
+    // The email as it is stored, at the revision on screen: only the purpose changes.
+    expect(conn.query.campaignSaveTemplate.mock.calls[0]![0]).toEqual({
+      templateId: "t1",
+      name: "Welcome 2",
+      accountId: "self",
+      expectedRevision: "2026-10-01T08:00:00Z",
+      content: DOCUMENT,
+      action: "save",
+      purpose: "transactional",
+    });
+    act(() => conn.subscriptions.emit(TEMPLATE, { ...welcome, status: "draft", purpose: "transactional", createdAt: "2026-10-02T08:00:00Z" }));
+    await waitFor(() => expect(barActs()).toEqual([["Archive", "text"], ["Open in editor", "primary"]]));
+    expect(within(purpose).getByRole("radio", { name: "About one person's own request: no unsubscribe" }).getAttribute("aria-checked")).toBe("true");
+    expect(deadButtons()).toEqual([]);
+  });
+
   it("archives a published template after asking, and restores", async () => {
     const welcome = templateRow({ id: "t1", name: "Welcome 2", createdAt: "2026-10-01T08:00:00Z" });
     const conn = fakeConnection({ templates: [welcome], templateContent: { t1: { document: DOCUMENT } } });
