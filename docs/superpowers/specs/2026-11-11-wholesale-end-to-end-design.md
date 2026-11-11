@@ -433,8 +433,8 @@ builtin campaignSendRowMessage {
 
 **One person, never an address.** No argument names a recipient or carries the
 message's fields. A pack registers, from Go, a resolver for its row concept:
-`campaigns.RegisterRowAddress(RowAddress{Concept: "v1:wholesale:application",
-Resolve: ...})`. A DSL file cannot register one. The lane calls the resolver only
+`RegisterRowAddress(RowAddress{Concept: "v1:wholesale:application", Resolve: ...})`,
+in the `campaigns` package (unit U7 adds it). A DSL file cannot register one. The lane calls the resolver only
 when it is about to hand a message to the provider, with the concept, the row id,
 the account, the `kind` and the request id; the resolver answers the recipient's
 address, the row's account and the `{{fields.<key>}}` values for that kind, or
