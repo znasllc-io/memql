@@ -1466,25 +1466,76 @@ func TestASetUpKeepsTheStaffAddress(t *testing.T) {
 // settings are tied to one: not to update them, read them, or set them up.
 func TestASiteOfAnotherOrganizationIsRefusedOnTheStoresSettings(t *testing.T) {
 	registerShippedAdapters()
-	south := map[string]any{"id": "site-s", "ownerUserId": "merchant-2", "accountId": "acct-south",
-		"binding": map[string]any{"storeId": "store-live"}}
-	reader := &fixtureReader{sites: []map[string]any{settingsSite(), south},
-		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
-			"applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1"}}}}
-	writer := &fakeWriter{}
-	p := &Provider{reader: reader, writer: writer}
-	args := map[string]any{"siteId": "site-s", "storeId": "store-live", "applicationsOpen": false}
-	for name, call := range map[string]func() error{
-		"wholesaleUpdateSettings": func() error { _, err := p.updateSettings(staffCtx("staff-s"), args, 0); return err },
-		"wholesaleStoreSettings":  func() error { _, err := p.storeSettings(staffCtx("staff-s"), args, 0); return err },
-		"wholesaleSetSettings":    func() error { _, err := p.setWholesaleSettings(operatorCtx("operator-1"), args, 0); return err },
-	} {
-		if err := call(); err == nil || !strings.Contains(err.Error(), "another organization") {
-			t.Errorf("%s through a site of another organization: %v", name, err)
+	// THE CHECK DOES NOT DEPEND ON HOW THE STORE IS SPELLED (ruling 34): the
+	// row is at the bare id's settings id, and the store is named both ways.
+	for _, store := range []string{"store-live", "v1:shopify:store:store-live"} {
+		south := map[string]any{"id": "site-s", "ownerUserId": "merchant-2", "accountId": "acct-south",
+			"binding": map[string]any{"storeId": "store-live"}}
+		reader := &fixtureReader{sites: []map[string]any{settingsSite(), south},
+			settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
+				"applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1"}}}}
+		writer := &fakeWriter{}
+		p := &Provider{reader: reader, writer: writer}
+		args := map[string]any{"siteId": "site-s", "storeId": store, "applicationsOpen": false}
+		for name, call := range map[string]func() error{
+			"wholesaleUpdateSettings": func() error { _, err := p.updateSettings(staffCtx("staff-s"), args, 0); return err },
+			"wholesaleStoreSettings":  func() error { _, err := p.storeSettings(staffCtx("staff-s"), args, 0); return err },
+			"wholesaleSetSettings":    func() error { _, err := p.setWholesaleSettings(operatorCtx("operator-1"), args, 0); return err },
+		} {
+			if err := call(); err == nil || !strings.Contains(err.Error(), "another organization") {
+				t.Errorf("store named %q: %s through a site of another organization: %v", store, name, err)
+			}
+		}
+		if len(writer.writes) != 0 {
+			t.Fatalf("store named %q: a refused call wrote: %+v", store, writer.writes)
+		}
+		// Nothing but the site and the store's settings is read to refuse.
+		for _, q := range reader.asked {
+			if q != "siteById" && q != "wholesaleSettingsById" && q != "wholesaleSettingsForStore" {
+				t.Errorf("store named %q: a refused call read %s", store, q)
+			}
 		}
 	}
-	if len(writer.writes) != 0 {
-		t.Fatalf("a refused call wrote: %+v", writer.writes)
+}
+
+// A STORE'S OWN STAFF NAMING THEIR STORE IN THE CANONICAL FORM read and save
+// their settings, and the save lands on the row a bare-id save would (ruling
+// 34). A store set up under the canonical form is set up at the bare id's row.
+func TestTheCanonicalFormOfAStoreIdReachesItsOneSettingsRow(t *testing.T) {
+	registerShippedAdapters()
+	canonical := "v1:shopify:store:store-live"
+	reader := &fixtureReader{sites: []map[string]any{settingsSite()},
+		settings: map[string][]map[string]any{"store-live": {{"storeId": "store-live", "ownerUserId": "merchant-1",
+			"applicationsOpen": true, "accountId": "acct-north", "siteId": "site-1",
+			"createdAt": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}}}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, writer: writer}
+	got := decodedBy(t)(p.storeSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": canonical}, 0))
+	if got["exists"] != true || got["applicationsOpen"] != true {
+		t.Fatalf("named canonically, the settings read %+v", got)
+	}
+	if _, err := p.updateSettings(staffCtx("staff-1"), map[string]any{"siteId": "site-1", "storeId": canonical,
+		"introText": "Hello."}, 0); err != nil {
+		t.Fatalf("named canonically, the save: %v", err)
+	}
+	wrote := writer.only(t, "putWholesaleSettingsRow")
+	if wrote["settingsId"] != SettingsRowID("store-live") || wrote["storeId"] != "store-live" {
+		t.Fatalf("the canonical save wrote %+v, want the bare id's row", wrote)
+	}
+	if !memql.HasRowVersionFence(writer.writes[0].ctx, settingsConcept, SettingsRowID("store-live")) {
+		t.Fatal("the canonical save is not fenced on the row it read")
+	}
+
+	fresh := &fixtureReader{sites: []map[string]any{settingsSite()}}
+	freshWriter := &fakeWriter{}
+	p = &Provider{reader: fresh, writer: freshWriter}
+	if _, err := p.setWholesaleSettings(operatorCtx("operator-1"), map[string]any{"siteId": "site-1", "storeId": canonical,
+		"applicationsOpen": false}, 0); err != nil {
+		t.Fatalf("a set-up named canonically: %v", err)
+	}
+	set := freshWriter.only(t, "setWholesaleSettingsRow")
+	if set["settingsId"] != SettingsRowID("store-live") || set["storeId"] != "store-live" {
+		t.Fatalf("a new row named canonically was written as %+v, want the bare id's row and form", set)
 	}
 }
 

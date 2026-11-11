@@ -48,8 +48,79 @@ const maxStaffEmail = 320
 // second write is a new VERSION of one logical row rather than a second row
 // the read would have to choose between. reviewspack.SettingsRowID is the
 // same decision for the same reason.
+//
+// IT SLUGS THE ID AS GIVEN, so the two forms of one store id -- bare, and
+// v1:shopify:store:<id> -- derive two ids. Every read and write here resolves
+// the store's ONE row whichever form the caller named (storeSettingsRows), and
+// a new row is written at the BARE id's (newSettingsRowID).
 func SettingsRowID(storeID string) string {
 	return "wholesale-settings-" + slugOf(storeID)
+}
+
+// newSettingsRowID is where a store's first settings row is written: at the
+// bare store id's settings id, the form the shopper path, the OS's binding and
+// every row set up from them hold.
+func newSettingsRowID(storeID string) string {
+	return SettingsRowID(bareID(strings.TrimSpace(storeID)))
+}
+
+// settingsRowIDOf is the id a settings row is held at: its own, else the id
+// its storeId derives, else where a new row for storeID goes.
+func settingsRowIDOf(row map[string]any, storeID string) string {
+	if id := bareID(trimmed(row["id"])); id != "" {
+		return id
+	}
+	if held := trimmed(row["storeId"]); held != "" {
+		return SettingsRowID(held)
+	}
+	return newSettingsRowID(storeID)
+}
+
+// settingsStoreForms is every form of a store id a settings row may be held
+// under, the bare form first.
+func settingsStoreForms(storeID string) []string {
+	bare := bareID(strings.TrimSpace(storeID))
+	var out []string
+	seen := map[string]bool{}
+	for _, f := range []string{bare, "v1:shopify:store:" + bare, strings.TrimSpace(storeID)} {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// storeSettingsRows is every settings row of a store, whichever form of its id
+// it was written under: at each form's derived id, the bare form's first, then
+// any held under another id whose storeId field names a form. Each row once.
+func (p *Provider) storeSettingsRows(ctx context.Context, storeID string) ([]map[string]any, error) {
+	var out []map[string]any
+	seen := map[string]bool{}
+	add := func(rows []map[string]any) {
+		for _, row := range rows {
+			if id := settingsRowIDOf(row, storeID); !seen[id] {
+				seen[id] = true
+				out = append(out, row)
+			}
+		}
+	}
+	forms := settingsStoreForms(storeID)
+	for _, form := range forms {
+		rows, err := p.rowsFor(ctx, "wholesaleSettingsById", map[string]string{"settingsId": SettingsRowID(form)})
+		if err != nil {
+			return nil, err
+		}
+		add(rows)
+	}
+	for _, form := range forms {
+		rows, err := p.rowsFor(ctx, "wholesaleSettingsForStore", map[string]string{"storeId": form})
+		if err != nil {
+			return nil, err
+		}
+		add(rows)
+	}
+	return out, nil
 }
 
 // Settings is one store's settings as every reader here takes them: absent
@@ -116,11 +187,11 @@ func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any
 	// FENCED ON WHAT IT READ: an existing row on its version, an absent row on
 	// "absent". A staff save that lands between the read and this write is not
 	// overwritten; the set-up is refused and the operator reloads.
-	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, SettingsRowID(storeID), place.version)
+	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, place.rowID, place.version)
 	if err := p.write(fenced, "setWholesaleSettingsRow", map[string]any{
-		"settingsId":         SettingsRowID(storeID),
+		"settingsId":         place.rowID,
 		"ownerUserId":        place.owner,
-		"storeId":            storeID,
+		"storeId":            place.storeID,
 		"applicationsOpen":   open,
 		"entitlementAdapter": adapter,
 		"introText":          asString(args["introText"]),
@@ -179,13 +250,18 @@ type settingsPlace struct {
 	// version is the createdAt of the row read, zero when there was none: the
 	// write is fenced on it.
 	version time.Time
+	// rowID is the row the write goes to -- the store's one row, read whichever
+	// form of its id the caller named, or the bare id's for a new row -- and
+	// storeID the store id it holds: the existing row's, or the bare form.
+	rowID, storeID string
 }
 
 // settingsOwner is who owns a store's settings row after this write.
 //
-// THE EXISTING ROW IS READ AT THE ID THE WRITE GOES TO (SettingsRowID), never
-// by its storeId field: two store ids that slug alike share the id, and a read
-// by the field could miss the very row the write then replaces.
+// THE EXISTING ROW IS THE STORE'S ONE ROW (storeSettingsRows), read at the id
+// each form of the store id derives before any read by its storeId field, and
+// the write goes to that row's own id: two store ids that slug alike share the
+// id, and a write at an id it did not read could replace a row it never saw.
 //
 // AND WHAT IT IS TIED TO: with a siteId, the named site's organization and id
 // (the site checked to serve the store); otherwise an existing row keeps its
@@ -208,6 +284,26 @@ func (p *Provider) settingsOwner(ctx context.Context, storeID, siteID string) (s
 	if err != nil {
 		return settingsPlace{}, err
 	}
+	place, err := p.settingsPlaceFrom(ctx, sys, existing, storeID, siteID)
+	if err != nil {
+		return settingsPlace{}, err
+	}
+	if existing != nil {
+		place.rowID, place.storeID = settingsRowIDOf(existing, storeID), trimmed(existing["storeId"])
+	}
+	if place.rowID == "" {
+		place.rowID = newSettingsRowID(storeID)
+	}
+	if place.storeID == "" {
+		place.storeID = bareID(storeID)
+	}
+	return place, nil
+}
+
+// settingsPlaceFrom is whose the row is and what it is tied to after the write
+// (settingsOwner's rule), given the existing row read.
+func (p *Provider) settingsPlaceFrom(ctx, sys context.Context, existing map[string]any, storeID, siteID string) (settingsPlace, error) {
+	var err error
 	var named map[string]any
 	if siteID != "" {
 		// Read as the system: the caller is an operator or trusted code, already
@@ -361,9 +457,12 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 		}
 		next.StaffEmail = email
 	}
+	// THE ROW READ IS THE ROW WRITTEN, at its own id with its own storeId,
+	// whichever form of the store id the caller named.
+	rowID := settingsRowIDOf(row, storeID)
 	rowStore := trimmed(row["storeId"])
 	if rowStore == "" {
-		rowStore = storeID
+		rowStore = bareID(storeID)
 	}
 	// FENCED ON THE VERSION READ: a change merged into a row that another save
 	// replaced meanwhile would put back what that save changed. The loser is
@@ -372,11 +471,11 @@ func (p *Provider) updateSettings(ctx context.Context, args map[string]any, _ in
 	if read.IsZero() {
 		return nil, fmt.Errorf("wholesale: store %q's settings carry no version to save against; reload and try again", storeID)
 	}
-	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, SettingsRowID(storeID), read)
+	fenced := memql.ContextWithRowVersionFence(ctx, settingsConcept, rowID, read)
 	// EVERY FIELD, the empty and false ones included: a write at an existing id
 	// merges into the row's current version, and this one means the whole row.
 	if err := p.write(fenced, "putWholesaleSettingsRow", map[string]any{
-		"settingsId":         SettingsRowID(storeID),
+		"settingsId":         rowID,
 		"ownerUserId":        owner,
 		"storeId":            rowStore,
 		"applicationsOpen":   next.ApplicationsOpen,
@@ -450,12 +549,16 @@ func (p *Provider) siteForStore(ctx context.Context, siteID, storeID string) (ma
 	if !servesStore(site, bareID(storeID)) {
 		return nil, fmt.Errorf("wholesale: site %q is not bound to store %q", siteID, storeID)
 	}
-	settings, err := p.settingsRowAt(auth.ContextWithSystemActor(ctx, storeLookupActor), storeID)
+	// EVERY SETTINGS ROW OF THE STORE, under every form of its id: the check
+	// must not depend on how the caller spelled the store.
+	settingsRows, err := p.storeSettingsRows(auth.ContextWithSystemActor(ctx, storeLookupActor), storeID)
 	if err != nil {
 		return nil, err
 	}
-	if want := bareID(trimmed(settings["accountId"])); want != "" && bareID(trimmed(site["accountId"])) != want {
-		return nil, fmt.Errorf("wholesale: site %q belongs to another organization than store %q's wholesale settings", siteID, storeID)
+	for _, settings := range settingsRows {
+		if want := bareID(trimmed(settings["accountId"])); want != "" && bareID(trimmed(site["accountId"])) != want {
+			return nil, fmt.Errorf("wholesale: site %q belongs to another organization than store %q's wholesale settings", siteID, storeID)
+		}
 	}
 	return site, nil
 }
@@ -477,29 +580,21 @@ func (p *Provider) sitesForStore(ctx context.Context, storeID string) ([]map[str
 // has not asked for applications, and a missing row must not open a public
 // write endpoint that collects somebody's business contact details.
 func (p *Provider) applicationsOpen(ctx context.Context, storeID string) (bool, error) {
-	settings, err := p.settingsRow(ctx, storeID)
+	settings, err := p.settingsRowAt(ctx, storeID)
 	if err != nil {
 		return false, err
 	}
 	return EffectiveSettings(settings).ApplicationsOpen, nil
 }
 
-// settingsRow reads one store's settings by its storeId field, or nil when
-// there are none.
-func (p *Provider) settingsRow(ctx context.Context, storeID string) (map[string]any, error) {
-	rows, err := p.rowsFor(ctx, "wholesaleSettingsForStore", map[string]string{"storeId": storeID})
-	if err != nil {
+// settingsRowAt is the store's ONE settings row, whichever form of its id the
+// caller named (storeSettingsRows' first), or nil when there is none.
+func (p *Provider) settingsRowAt(ctx context.Context, storeID string) (map[string]any, error) {
+	rows, err := p.storeSettingsRows(ctx, storeID)
+	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
 	return rows[0], nil
-}
-
-// settingsRowAt reads the settings row at the id a write for storeID goes to.
-func (p *Provider) settingsRowAt(ctx context.Context, storeID string) (map[string]any, error) {
-	return p.settingsRowByID(ctx, SettingsRowID(storeID))
 }
 
 // settingsRowByID reads one settings row by its id, or nil.

@@ -370,3 +370,70 @@ func TestASetUpOvertakenByAStaffSaveIsRefused(t *testing.T) {
 		t.Fatalf("the settings read %+v, want the staff change kept and the set-up not applied", row)
 	}
 }
+
+// THE FENCE HOLDS WHEN THE TWO CALLERS SPELL THE STORE DIFFERENTLY (ruling
+// 34): a save naming the store canonically and one naming it bare reach the
+// one row, so the second of two saves from one read is refused.
+func TestTheFenceHoldsAcrossTheTwoFormsOfAStoreId(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	merchant, store, site, _ := tiedStore(t, eng, "fence-forms")
+	operator := asOperator("operator-" + merchant)
+	canonical := "v1:shopify:store:" + store
+	wsExec(t, eng, operator, `builtin wholesaleSetSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+		`, applicationsOpen: true, entitlementAdapter: "customerTag")`)
+	fired := false
+	_, err := wholesalepack.UpdateSettingsForTest(operator, eng,
+		map[string]any{"siteId": site, "storeId": canonical, "introText": "the canonical save"},
+		func(context.Context, string, map[string]any) {
+			if fired {
+				return
+			}
+			fired = true
+			wsExec(t, eng, operator, `builtin wholesaleUpdateSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+				`, introText: "the bare save")`)
+		})
+	if !fired || err == nil || !strings.Contains(err.Error(), wholesalepack.ChangedWhileEditingSentence) {
+		t.Fatalf("the canonical save that lost its fence answered %v (concurrent save ran: %v)", err, fired)
+	}
+	fired = false
+	_, err = wholesalepack.SetSettingsForTest(operator, eng,
+		map[string]any{"siteId": site, "storeId": canonical, "applicationsOpen": false},
+		func(context.Context, string, map[string]any) {
+			if fired {
+				return
+			}
+			fired = true
+			wsExec(t, eng, operator, `builtin wholesaleUpdateSettings(siteId: `+quote(site)+`, storeId: `+quote(store)+
+				`, introText: "the second bare save")`)
+		})
+	if !fired || err == nil || !strings.Contains(err.Error(), wholesalepack.ChangedWhileEditingSentence) {
+		t.Fatalf("the canonical set-up overtaken by a bare save answered %v (concurrent save ran: %v)", err, fired)
+	}
+	if got := settingsOf(t, eng, operator, store); got["introText"] != "the second bare save" || got["applicationsOpen"] != true {
+		t.Fatalf("the settings read %+v, want the bare saves kept", got)
+	}
+}
+
+// THE STORE'S STAFF NAMING THEIR STORE CANONICALLY read and save the one row.
+func TestAStoresStaffNamingTheCanonicalFormSaveTheOneRow(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	s := newAccessStore(t, eng, "canon-save")
+	canonical := "v1:shopify:store:" + s.store
+	bareRow, canonRow := wholesalepack.SettingsRowID(s.store), wholesalepack.SettingsRowID(canonical)
+	before := versionCount(t, "v1:wholesale:wholesaleSettings", bareRow)
+	got := answerOf(t, eng, signedIn(s.staff), `builtin wholesaleStoreSettings(siteId: `+quote(s.site)+`, storeId: `+quote(canonical)+`)`)
+	if got["exists"] != true {
+		t.Fatalf("named canonically, the store's person reads %+v", got)
+	}
+	wsExec(t, eng, signedIn(s.staff), `builtin wholesaleUpdateSettings(siteId: `+quote(s.site)+`, storeId: `+quote(canonical)+
+		`, introText: "saved canonically")`)
+	if after := versionCount(t, "v1:wholesale:wholesaleSettings", bareRow); after != before+1 {
+		t.Fatalf("the bare id's row has %d versions after the canonical save, want %d", after, before+1)
+	}
+	if n := versionCount(t, "v1:wholesale:wholesaleSettings", canonRow); n != 0 {
+		t.Fatalf("the canonical save wrote a second row (%d versions at %s)", n, canonRow)
+	}
+	if row := settingsOf(t, eng, signedIn(s.staff), s.store); row["introText"] != "saved canonically" {
+		t.Fatalf("the settings read %+v", row)
+	}
+}

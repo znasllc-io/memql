@@ -65,6 +65,11 @@ func (f *storeFake) Rows(ctx context.Context, query string, args map[string]stri
 			return []map[string]any{{"id": "v1:platform:site:" + readsSite, "accountId": "acct-reads",
 				"binding": map[string]any{"storeId": readsStore}}}, nil
 		}
+		// A site of ANOTHER organization that binds the same store.
+		if bareID(args["siteId"]) == "site-other-org" {
+			return []map[string]any{{"id": "v1:platform:site:site-other-org", "accountId": "acct-other",
+				"binding": map[string]any{"storeId": readsStore}}}, nil
+		}
 	case "wholesaleSettingsById":
 		if args["settingsId"] == SettingsRowID(readsStore) && isSystem(ctx) {
 			return []map[string]any{f.settings}, nil
@@ -723,6 +728,29 @@ func TestALimitIsClampedWhateverItsSize(t *testing.T) {
 		json.Number("99999999999999999999"): 200, 500: 200} {
 		if got := limitOf(map[string]any{"limit": v}); got != want {
 			t.Errorf("limitOf(%v) = %d, want %d", v, got, want)
+		}
+	}
+}
+
+// A SITE OF ANOTHER ORGANIZATION THAT BINDS THE STORE is refused by every
+// store-wide read before a page is read, however the store is spelled (ruling
+// 34): the store's settings are tied to its own organization.
+func TestAStoreWideReadRefusesASiteOfAnotherOrganizationUnderEitherForm(t *testing.T) {
+	for _, store := range []string{readsStore, "v1:shopify:store:" + readsStore} {
+		f := newStoreFake()
+		f.settings["accountId"] = "acct-reads"
+		f.app(1, "Alpha", "A", "a@example.com", 1)
+		p := f.provider()
+		for name, call := range map[string]func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error){
+			"list": p.list, "decisionLog": p.decisionLog, "buyers": p.buyers, "exportStore": p.exportStore,
+		} {
+			_, err := call(staffReads(), map[string]any{"siteId": "site-other-org", "storeId": store}, 0)
+			if err == nil || !strings.Contains(err.Error(), "another organization") {
+				t.Errorf("store named %q: %s through a site of another organization: %v", store, name, err)
+			}
+		}
+		if len(f.pages) != 0 {
+			t.Fatalf("store named %q: a refused read still read pages: %v", store, f.pages)
 		}
 	}
 }

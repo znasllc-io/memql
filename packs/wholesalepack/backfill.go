@@ -403,7 +403,7 @@ func (r *backfillRun) tieSettings(merchant context.Context, storeID, account, si
 	if r.settings[storeID] {
 		return nil
 	}
-	settings, err := r.p.settingsRow(r.sys, storeID)
+	settings, err := r.p.settingsRowAt(r.sys, storeID)
 	if err != nil || settings == nil {
 		return err
 	}
@@ -414,10 +414,7 @@ func (r *backfillRun) tieSettings(merchant context.Context, storeID, account, si
 	}
 	// THE ROW IT READ IS THE ROW IT TIES: at that row's own id, with that row's
 	// own storeId, never an id rebuilt from the application's store id.
-	rowID := bareID(trimmed(settings["id"]))
-	if rowID == "" {
-		rowID = SettingsRowID(storeID)
-	}
+	rowID := settingsRowIDOf(settings, storeID)
 	_, err = r.tieRow(merchant, settingsConcept, rowID, settings, account,
 		func() (map[string]any, error) { return r.p.settingsRowByID(r.sys, rowID) },
 		func(row map[string]any) (string, map[string]any) {

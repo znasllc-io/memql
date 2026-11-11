@@ -260,3 +260,19 @@ func TestAPersonOfTheOrganizationWithoutThePartIsRefusedEveryRead(t *testing.T) 
 		}
 	}
 }
+
+// A HOLDER IN ORGANIZATION B WHOSE SITE BINDS A'S STORE, naming the store in
+// its canonical form, is refused by every store-wide read (ruling 34).
+func TestAStoreWideReadRefusesAnotherOrganizationsSiteUnderTheCanonicalForm(t *testing.T) {
+	eng := liveWholesaleEngine(t)
+	a, b := newAccessStore(t, eng, "canon-a"), newAccessStore(t, eng, "canon-b")
+	bound := "site-canon-b-on-a-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	seedSiteIn(t, eng, bound, b.merchant, a.store, b.account)
+	for _, store := range []string{a.store, "v1:shopify:store:" + a.store} {
+		for name, call := range storeWide(bound, store) {
+			if _, err := eng.Execute(signedIn(b.staff), call); err == nil || !strings.Contains(err.Error(), "another organization") {
+				t.Errorf("store named %q: %s by B's person through B's site on A's store: %v", store, name, err)
+			}
+		}
+	}
+}

@@ -531,7 +531,7 @@ type routeFailure struct{ code, text string }
 // does not have is a failure the caller writes as a row on adapter "none"
 // and answers with a nil error. The merchant's screen reads the row.
 func (p *Provider) routeFor(ctx context.Context, storeID string) (Adapter, string, *routeFailure, error) {
-	settings, err := p.settingsRow(ctx, storeID)
+	settings, err := p.settingsRowAt(ctx, storeID)
 	if err != nil {
 		return nil, "", nil, err
 	}

@@ -90,7 +90,7 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 			entitlements = append(entitlements, row)
 		}
 	}
-	settings, err := p.storeSettingsRow(sys, storeID)
+	settings, err := p.settingsRowAt(sys, storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,18 +118,6 @@ func (p *Provider) exportStore(ctx context.Context, args map[string]any, _ int) 
 		"fileName": "wholesale-" + slugOf(storeID) + "-" + now.Format("20060102") + ".json",
 		"json":     string(doc),
 	})
-}
-
-// storeSettingsRow is the store's settings row at the id a write for any form
-// of its id goes to, the given form first; nil when there is none.
-func (p *Provider) storeSettingsRow(ctx context.Context, storeID string) (map[string]any, error) {
-	for _, form := range storeIDForms(storeID) {
-		row, err := p.settingsRowAt(ctx, form)
-		if err != nil || row != nil {
-			return row, err
-		}
-	}
-	return nil, nil
 }
 
 // withoutTokenHash is a copy of row with every token hash removed, at any depth.
