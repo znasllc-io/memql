@@ -1,7 +1,7 @@
 ---
 title: A connected store's purchases are recorded, and its Store page says when they are not
 audience: internal
-status: draft
+status: approved
 area: operate
 sinceVersion: 0.31.33
 owner: znas
@@ -20,8 +20,10 @@ A statistics screen for a storefront's purchases is a separate record. It reads 
 this one records, so this one comes first.
 
 **Approvals.** The owner, in chat, on 2026-11-11: chose "the settings first, then one
-engine release" over settings alone and over a private app for each store; and approved
-this design ("Yes, write it up").
+engine release" over settings alone and over a private app for each store; approved
+this design ("Yes, write it up"); and approved this record ("Yes"), asking in the same
+breath that any wait in the way of a test can be shortened to minutes, which is why the
+alert wait of D10 is a value and not a constant.
 
 ## 1. What the owner asked for
 
@@ -70,7 +72,8 @@ done. A failed delivery is tried again. The hourly sweep stays as the net under 
 **One verdict for each store, shown where the storefront is managed.** The engine
 answers one question for a store: is it recording, and if not, why and what fixes it.
 The deployable's Store slot and Store page show that answer. When the answer has been
-bad for 30 minutes the store's owner gets an email, and one more when it is good again.
+bad for 30 minutes (a wait the operator can change) the store's owner gets an email,
+and one more when it is good again.
 
 Nothing here decides anything about a shopper or an order, and no model is involved.
 Every step is a fixed rule.
@@ -88,7 +91,7 @@ Every step is a fixed rule.
 | D7 | The watermark is the time the sweep started, less two minutes. | F8. Apply is version-guarded, so reading a row twice writes nothing. |
 | D8 | The verdict is computed in the engine, by one builtin, from the store row, its sync state and its deliveries. A reason is a code with one sentence and at most one act. | M3. The shell keeps no copy of the rules, as with `storeHasStorefrontToken`. |
 | D9 | The storefront's Store slot and Store page show the verdict. Cluster > Data keeps the per-domain detail, now grouped by store. | F4. The person managing a storefront looks at the storefront. |
-| D10 | When a store's verdict has needed attention for 30 minutes, one email goes to the store's owner through the transactional outbox, and one more when it recovers. The request id is derived from the store and the episode, so nothing is sent twice. | M4. No new delivery lane: the address is a cluster user's and must be on the outbound allowlist, like every operational email. |
+| D10 | When a store's verdict has needed attention for the alert wait, one email goes to the store's owner through the transactional outbox, and one more when it recovers. The alert wait is 30 minutes unless the operator sets another, from 1 minute to 24 hours. The request id is derived from the store and the episode, so nothing is sent twice. | M4. No new delivery lane: the address is a cluster user's and must be on the outbound allowlist, like every operational email. A tester sets five minutes to walk it and puts it back, as with a campaign's wait (the owner's direction, 2026-11-10). |
 | D11 | `read_all_orders` is not requested. A store's history begins 60 days before it connects, and the Store page says since when. | It needs Shopify's approval. Whether a merchant's full history is wanted is decided with that merchant. |
 | D12 | The mirror stores what Shopify returns. A field Shopify withholds is `null` and is named on the Store page as withheld, which is not an error. | `fieldsDenied` already tracks it. |
 
@@ -111,6 +114,9 @@ memql#5199).
   (datetime). `status` keeps its four values.
 - **`v1:shopify:store`** keeps its `health` object, which gains `verdict`: the state,
   the reason codes, `since`, and the episode the owner was last mailed for.
+- **The alert wait** is one operator value for the cluster, a `v1:platform:globalVariable`
+  row read on every pass of the watch, as the managed app's own configuration is. Absent
+  means 30 minutes; a value outside 1 minute to 24 hours is refused when it is saved.
 
 **The existing rows.** A Shopify sync-state row written before this version has no
 partition. It is left as history. Each store's own rows start empty: the first sweep
@@ -201,7 +207,7 @@ U2 comes first: U3 and U6 are wrong without it as soon as a cluster holds two st
 | A wider grant is stolen | `write_customers` adds what the connection can change. The connector uses it only for the wholesale tag and for creating a customer; this is stated in the connector's doc beside the scope. |
 | More personal data is held | Declaring name, email and address is Shopify's Level 2. Its requirements (encryption, retention, test data kept apart, an incident procedure) are the operator's, and the privacy topics already redact on request. |
 | Two nodes run the same pass | The continuing pass, the retry pass and the watch run under the cron leader, which is one node. The connect callback can run on any node, and it only queues. |
-| An engine release widens the list | Every managed store reads `approval_outdated` until its owner approves again, and its owner is mailed after 30 minutes. That is the intended signal, once for each store. |
+| An engine release widens the list | Every managed store reads `approval_outdated` until its owner approves again, and its owner is mailed after the alert wait. That is the intended signal, once for each store. |
 
 ## 10. Testing
 
@@ -220,7 +226,9 @@ U2 comes first: U3 and U6 are wrong without it as soon as a cluster holds two st
 - **U5.** A row changed during a sweep, behind the page already read, is healed by
   the next sweep.
 - **U6.** Each reason from a fixture of store, sync state and deliveries. The alert
-  is staged once after 30 minutes, not again in the same episode, and once on recovery.
+  is staged once after the alert wait, not again in the same episode, and once on
+  recovery. With no value set the wait is 30 minutes; a value of five is honoured; zero
+  and 25 hours are refused.
 - **U7.** The Store page for each state and reason, in both themes and at both
   widths; "not part of this connection" never draws as an error; a person without the
   store part sees none of it.
@@ -240,8 +248,8 @@ U2 comes first: U3 and U6 are wrong without it as soon as a cluster holds two st
 | W3 | Place a test order. | It is in the mirror within a minute, with its lines, prices, discount, tax, shipping, payment and buyer. |
 | W4 | Edit it, refund one line, then cancel it. | Each change follows within a minute. |
 | W5 | Pause recording for the store, place an order, resume. | Paused while it lasts; the first sweep after the resume records the order. |
-| W6 | On a development store that no public address serves: uninstall the app. | Not connected at once; an email after 30 minutes. |
-| W7 | Reinstall it from that store's admin. | Starting, then Recording, with the past brought in; the recovery email arrives. |
+| W6 | Set the alert wait to five minutes. On a development store that no public address serves: uninstall the app. | Not connected at once; an email after five minutes. |
+| W7 | Reinstall it from that store's admin, then put the alert wait back. | Starting, then Recording, with the past brought in; the recovery email arrives. |
 | W8 | Read Cluster > Data. | Grouped by store; nothing outside the connection shown as an error; no dead letters. |
 
 W6 and W7 cut a store off, so they never run against a store a public address serves.
